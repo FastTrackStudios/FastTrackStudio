@@ -24,6 +24,7 @@ edition.workspace = true
 example-proto.workspace = true
 example-db = { workspace = true, optional = true }
 example-memory = { workspace = true, optional = true }
+example-crdt = { workspace = true, optional = true }
 # Optional so consumers who don't need `server-axum` don't pull
 # architect's axum + tokio + futures + tracing + vox-core + vox-types.
 architect = { workspace = true, optional = true }
@@ -39,6 +40,9 @@ server-axum = ["dep:architect", "architect/server-axum"]
 # ── Backend selection ──
 backend-db = ["dep:example-db", "example-proto/server"]
 backend-memory = ["dep:example-memory"]
+# Loro-backed source-of-truth. Pairs with `backend-db` for snapshot
+# persistence in production; usable alone for tests/demos.
+backend-crdt = ["dep:example-crdt"]
 
 # Adds fake-rs Dummy derives to every wire + emitted struct.
 fake = ["example-proto/fake"]
@@ -55,6 +59,7 @@ full = [
     "server-axum",
     "backend-db",
     "backend-memory",
+    "backend-crdt",
     "fake",
     "diagnostics",
 ]

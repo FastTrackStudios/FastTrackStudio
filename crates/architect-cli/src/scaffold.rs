@@ -1,13 +1,20 @@
 //! `architect feature new <name>` — scaffold a feature crate family.
 //!
-//! Writes the canonical layout:
+//! Writes the canonical local-first layout:
 //!
 //!     features/<name>/
-//!       <name>-proto/        contract (architect::Entity + a placeholder type)
-//!       <name>-memory/       in-tree in-memory backend
-//!       <name>/              facade (vox + server-* + backend-* features)
+//!       <name>-proto/        wire contract (architect::Entity + placeholder)
+//!       <name>-crdt/         Loro-backed source of truth (marker +
+//!                              EntityCrdt impl + <Name>RepoLoro newtype)
+//!       <name>-db/           SeaORM persistence + optional projections
+//!                              (the snapshot/update tables live in
+//!                              libs/crdt-seaorm; this crate re-exports
+//!                              the Migrator + holds any feature-specific
+//!                              projection tables)
+//!       <name>/              facade (vox + server + server-axum)
 //!       spec/<name>.md       tracey rule stub
-//!       tests/native/        cargo test against the memory backend
+//!       tests/native/        cargo test against the CRDT backend
+//!                              (ephemeral CrdtDoc, no DB needed)
 //!
 //! Then updates:
 //!
@@ -46,7 +53,8 @@ pub fn feature_new(repo_root: &Path, name: &str, force: bool) -> eyre::Result<()
     }
 
     write_proto(&feature_dir, &names)?;
-    write_memory(&feature_dir, &names)?;
+    write_crdt(&feature_dir, &names)?;
+    write_db(&feature_dir, &names)?;
     write_facade(&feature_dir, &names)?;
     write_spec(&feature_dir, &names)?;
     write_tests_native(&feature_dir, &names)?;
@@ -58,23 +66,19 @@ pub fn feature_new(repo_root: &Path, name: &str, force: bool) -> eyre::Result<()
         "{} feature {} scaffolded.
 
 Next steps:
-  1. Rename the placeholder `{}` entity in features/{}/{}-proto/src/lib.rs
-     to fit your domain (e.g. `Channel`, `Track`, `Clip`).
-  2. Flesh out the memory backend at features/{}/{}-memory/src/lib.rs.
-  3. Write rules at features/{}/spec/{}.md and verify with
+  1. Rename the placeholder `{pascal}` entity in features/{kebab}/{kebab}-proto/src/lib.rs
+     to fit your domain (e.g. `Channel`, `Track`, `Clip`). Update the
+     EntityCrdt impl in features/{kebab}/{kebab}-crdt/src/lib.rs to match.
+  2. If this feature needs SQL-shaped queries, add projection tables
+     under features/{kebab}/{kebab}-db/src/migrations.rs.
+  3. Write rules at features/{kebab}/spec/{kebab}.md and verify with
      `cargo xtask tracey-validate`.
-  4. Add a binary that depends on `{}` with the features you need.
+  4. Add a binary that depends on `{kebab}` with the features you need.
 ",
         "✓".green().bold(),
         names.kebab.bold(),
-        names.pascal,
-        names.kebab,
-        names.kebab,
-        names.kebab,
-        names.kebab,
-        names.kebab,
-        names.kebab,
-        names.kebab,
+        pascal = names.pascal,
+        kebab = names.kebab,
     );
 
     Ok(())
@@ -217,141 +221,278 @@ pub trait {pascal}Service {{
     Ok(())
 }
 
-fn write_memory(feature_dir: &Path, n: &Names) -> eyre::Result<()> {
-    let dir = feature_dir.join(format!("{}-memory", n.kebab));
+fn write_crdt(feature_dir: &Path, n: &Names) -> eyre::Result<()> {
+    let dir = feature_dir.join(format!("{}-crdt", n.kebab));
     fs::create_dir_all(dir.join("src"))?;
 
     write(
         dir.join("Cargo.toml"),
         format!(
             r#"[package]
-name = "{kebab}-memory"
+name = "{kebab}-crdt"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-# In-memory implementation of `{kebab}-proto`'s repository trait. Useful
-# for tests and ephemeral single-process deployments. Depends only on
-# the contract crate — no sea-orm, no architect/server.
+# Loro-backed source-of-truth for the `{kebab}` feature.
+#
+# Owns the marker type that makes Rust's orphan rules cooperate
+# (foreign trait + foreign type), the `EntityCrdt` impl (codec +
+# id/timestamp policy + sort lookup), and the `{pascal}RepoLoro`
+# newtype that implements the architect-emitted `{pascal}Repo`.
+#
+# All real work happens inside `LoroRepo<{pascal}Entity>` from
+# `libs/crdt`; this crate is intentionally thin so the architect
+# derive can emit it from field attributes in a future revision.
 
 [dependencies]
 {kebab}-proto.workspace = true
+crdt.workspace = true
 architect.workspace = true
-uuid.workspace = true
+loro.workspace = true
 chrono.workspace = true
-tokio = {{ workspace = true, features = ["sync"] }}
+uuid.workspace = true
 "#,
             kebab = n.kebab,
+            pascal = n.pascal,
         ),
     )?;
 
     write(
         dir.join("src").join("lib.rs"),
         format!(
-            r#"//! In-memory `{pascal}Repo` implementation.
+            r#"//! Loro-backed `{pascal}Repo`. Source of truth lives in a LoroDoc;
+//! persistence is the concern of `{kebab}-db`.
 
-use std::sync::Arc;
-
-use architect::{{Filter, Page, RepoError, Sort, SortOrder}};
+use architect::{{Page, RepoError, SortOrder}};
 use chrono::Utc;
+use crdt::EntityCrdt;
+use crdt::codec::{{read_dt, read_str, read_uuid, write_dt, write_str, write_uuid}};
 use {snake}_proto::{{
     {pascal}, {pascal}Create, {pascal}List, {pascal}Repo, {pascal}Update,
 }};
-use tokio::sync::RwLock;
+use loro::LoroMap;
 use uuid::Uuid;
 
-#[derive(Clone, Default)]
-pub struct {pascal}RepoMemory {{
-    inner: Arc<RwLock<Vec<{pascal}>>>,
+pub use crdt::{{CrdtDoc, LoroRepo}};
+
+/// Zero-sized marker for the `EntityCrdt` impl. Lets us implement
+/// the foreign `EntityCrdt` trait without owning the wire struct.
+pub struct {pascal}Entity;
+
+/// Newtype-wrapped repo, implements `{pascal}Repo`. Construct from a
+/// `CrdtDoc` — multiple repos over different entity types can share
+/// one doc, mutations commit together, exports cover the whole doc.
+#[derive(Clone)]
+pub struct {pascal}RepoLoro {{
+    inner: LoroRepo<{pascal}Entity>,
 }}
 
-impl {pascal}RepoMemory {{
-    pub fn new() -> Self {{
-        Self::default()
+impl {pascal}RepoLoro {{
+    pub fn new(doc: &CrdtDoc) -> Self {{
+        Self {{ inner: doc.repo() }}
+    }}
+
+    pub fn inner(&self) -> &LoroRepo<{pascal}Entity> {{
+        &self.inner
+    }}
+
+    pub fn doc(&self) -> &loro::LoroDoc {{
+        self.inner.doc()
     }}
 }}
 
-impl {pascal}Repo for {pascal}RepoMemory {{
-    async fn get(&self, id: Uuid) -> Result<{pascal}, RepoError> {{
-        self.inner
-            .read()
-            .await
-            .iter()
-            .find(|e| e.id == id)
-            .cloned()
-            .ok_or(RepoError::NotFound)
+// ── EntityCrdt impl ───────────────────────────────────────────────────
+//
+// Container layout: a top-level "{snake}_items" LoroMap keyed by
+// uuid string; each entry is a sub-LoroMap with the wire fields.
+// For features with hierarchy or ordering, swap this for a LoroTree
+// or LoroMovableList — the trait surface stays the same.
+
+impl EntityCrdt for {pascal}Entity {{
+    type Wire = {pascal};
+    type Create = {pascal}Create;
+    type Update = {pascal}Update;
+    type List = {pascal}List;
+
+    const ROOT: &'static str = "{snake}_items";
+
+    fn id(wire: &{pascal}) -> Uuid {{
+        wire.id
     }}
 
-    async fn list(
-        &self,
-        page: Page,
-        sort: Option<Sort>,
-        _filter: Option<Filter>,
-    ) -> Result<{pascal}List, RepoError> {{
-        let mut items: Vec<{pascal}> = self.inner.read().await.iter().cloned().collect();
-
-        if let Some(s) = sort {{
-            match s.field.as_str() {{
-                "name" => {{
-                    items.sort_by(|a, b| a.name.cmp(&b.name));
-                    if matches!(s.order, SortOrder::Desc) {{
-                        items.reverse();
-                    }}
-                }}
-                other => {{
-                    return Err(RepoError::InvalidInput(format!(
-                        "unsortable field: {{other}}"
-                    )));
-                }}
-            }}
-        }}
-
-        let total = items.len() as u32;
-        let size = page.size.max(1) as usize;
-        let start = (page.index as usize).saturating_mul(size);
-        let items = items.into_iter().skip(start).take(size).collect();
-        Ok({pascal}List {{ items, total, page }})
-    }}
-
-    async fn create(&self, input: {pascal}Create) -> Result<{pascal}, RepoError> {{
+    fn from_create(input: {pascal}Create) -> {pascal} {{
         let now = Utc::now();
-        let row = {pascal} {{
+        {pascal} {{
             id: Uuid::new_v4(),
             name: input.name,
             created_at: now,
             updated_at: now,
-        }};
-        self.inner.write().await.push(row.clone());
-        Ok(row)
-    }}
-
-    async fn update(&self, id: Uuid, input: {pascal}Update) -> Result<{pascal}, RepoError> {{
-        let mut guard = self.inner.write().await;
-        let row = guard
-            .iter_mut()
-            .find(|e| e.id == id)
-            .ok_or(RepoError::NotFound)?;
-        if let Some(v) = input.name {{
-            row.name = v;
         }}
-        row.updated_at = Utc::now();
-        Ok(row.clone())
     }}
 
-    async fn delete(&self, id: Uuid) -> Result<(), RepoError> {{
-        let mut guard = self.inner.write().await;
-        let before = guard.len();
-        guard.retain(|e| e.id != id);
-        if guard.len() == before {{
-            return Err(RepoError::NotFound);
+    fn encode_into(m: &LoroMap, e: &{pascal}) -> Result<(), RepoError> {{
+        write_uuid(m, "id", e.id)?;
+        write_str(m, "name", &e.name)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
+        Ok(())
+    }}
+
+    fn decode_from(m: &LoroMap) -> Result<{pascal}, RepoError> {{
+        Ok({pascal} {{
+            id: read_uuid(m, "id")?,
+            name: read_str(m, "name")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
+        }})
+    }}
+
+    fn apply_update(m: &LoroMap, input: {pascal}Update) -> Result<(), RepoError> {{
+        if let Some(name) = input.name {{
+            write_str(m, "name", &name)?;
+        }}
+        write_dt(m, "updated_at", Utc::now())?;
+        Ok(())
+    }}
+
+    fn sort_items(items: &mut [{pascal}], field: &str, order: SortOrder) -> Result<(), RepoError> {{
+        match field {{
+            "name" => items.sort_by(|a, b| a.name.cmp(&b.name)),
+            "created_at" => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
+            other => {{
+                return Err(RepoError::InvalidInput(format!(
+                    "unsortable field: {{other}}"
+                )));
+            }}
+        }}
+        if matches!(order, SortOrder::Desc) {{
+            items.reverse();
         }}
         Ok(())
     }}
+
+    fn build_list(items: Vec<{pascal}>, total: u32, page: Page) -> {pascal}List {{
+        {pascal}List {{ items, total, page }}
+    }}
+}}
+
+// ── {pascal}Repo forwarders ────────────────────────────────────────────
+
+impl {pascal}Repo for {pascal}RepoLoro {{
+    async fn get(&self, id: Uuid) -> Result<{pascal}, RepoError> {{
+        self.inner.get(id).await
+    }}
+
+    async fn list(
+        &self,
+        page: architect::Page,
+        sort: Option<architect::Sort>,
+        filter: Option<architect::Filter>,
+    ) -> Result<{pascal}List, RepoError> {{
+        self.inner.list(page, sort, filter).await
+    }}
+
+    async fn create(&self, input: {pascal}Create) -> Result<{pascal}, RepoError> {{
+        self.inner.create(input).await
+    }}
+
+    async fn update(&self, id: Uuid, input: {pascal}Update) -> Result<{pascal}, RepoError> {{
+        self.inner.update(id, input).await
+    }}
+
+    async fn delete(&self, id: Uuid) -> Result<(), RepoError> {{
+        self.inner.delete(id).await
+    }}
+}}
+
+"#,
+            kebab = n.kebab,
+            snake = n.snake,
+            pascal = n.pascal,
+        ),
+    )?;
+    Ok(())
+}
+
+fn write_db(feature_dir: &Path, n: &Names) -> eyre::Result<()> {
+    let dir = feature_dir.join(format!("{}-db", n.kebab));
+    fs::create_dir_all(dir.join("src"))?;
+
+    write(
+        dir.join("Cargo.toml"),
+        format!(
+            r#"[package]
+name = "{kebab}-db"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# SeaORM-side concerns for the `{kebab}` feature.
+#
+# The CRDT snapshot/update tables live in `libs/crdt-seaorm` and are
+# generic across every feature. This crate owns just the feature-
+# specific persistence bits:
+#
+# - Re-exports `SeaOrmPersistence` so the app wires one type per
+#   feature for readability.
+# - Provides a `{pascal}Migrator` that delegates to crdt-seaorm's
+#   migrator by default. Add projection tables here when this feature
+#   needs SQL-shaped queries.
+
+[dependencies]
+{kebab}-proto.workspace = true
+crdt-seaorm.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+async-trait = "0.1"
+"#,
+            kebab = n.kebab,
+            pascal = n.pascal,
+        ),
+    )?;
+
+    write(
+        dir.join("src").join("lib.rs"),
+        format!(
+            r#"//! SeaORM persistence for the `{kebab}` feature.
+
+pub use crdt_seaorm::SeaOrmPersistence;
+
+pub mod migrations;
+
+pub use migrations::{pascal}Migrator;
+"#,
+            kebab = n.kebab,
+            pascal = n.pascal,
+        ),
+    )?;
+
+    write(
+        dir.join("src").join("migrations.rs"),
+        format!(
+            r#"//! Migrator for the `{kebab}` feature. Runs crdt-seaorm's generic
+//! migrations (the `crdt_doc` + `crdt_update` tables) by default;
+//! add projection tables below when SQL-shaped queries are needed.
+
+use sea_orm_migration::prelude::*;
+
+pub struct {pascal}Migrator;
+
+#[async_trait::async_trait]
+impl MigratorTrait for {pascal}Migrator {{
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {{
+        // Start with the generic CRDT-persistence migrations; append
+        // feature-specific projection migrations after them when the
+        // feature needs SQL-shaped queries.
+        crdt_seaorm::Migrator::migrations()
+    }}
 }}
 "#,
+            kebab = n.kebab,
             pascal = n.pascal,
-            snake = n.snake,
         ),
     )?;
     Ok(())
@@ -370,24 +511,32 @@ version.workspace = true
 edition.workspace = true
 
 # Facade — single import root for the `{kebab}` feature.
+#
+#   default        wire types only (wasm-clean client baseline)
+#   vox            #[vox::service] surface + dispatcher/client
+#   server         CRDT source of truth + SeaORM persistence (pulls
+#                  {kebab}-crdt + {kebab}-db together — they're paired)
+#   server-axum    architect::axum_ws helpers, re-exported here
+#   fake           #[derive(Dummy)] on every emitted wire struct
+#   full           everything above
 
 [dependencies]
 {kebab}-proto.workspace = true
-{kebab}-memory = {{ workspace = true, optional = true }}
+{kebab}-crdt = {{ workspace = true, optional = true }}
+{kebab}-db = {{ workspace = true, optional = true }}
+crdt = {{ workspace = true, optional = true }}
 architect = {{ workspace = true, optional = true }}
 
 [features]
 default = []
 vox = ["{kebab}-proto/vox"]
-server-seaorm = ["{kebab}-proto/server"]
+server = ["dep:{kebab}-crdt", "dep:{kebab}-db", "dep:crdt"]
 server-axum = ["dep:architect", "architect/server-axum"]
-backend-memory = ["dep:{kebab}-memory"]
 fake = ["{kebab}-proto/fake"]
 full = [
     "vox",
-    "server-seaorm",
+    "server",
     "server-axum",
-    "backend-memory",
     "fake",
 ]
 "#,
@@ -398,13 +547,19 @@ full = [
     write(
         dir.join("src").join("lib.rs"),
         format!(
-            r#"//! Facade for the `{kebab}` feature.
+            r#"//! Facade for the `{kebab}` feature. Wire types are always
+//! re-exported; backends + transport adapters are feature-gated.
 
 pub use {snake}_proto::*;
 
-#[cfg(feature = "backend-memory")]
-pub mod backend_memory {{
-    pub use {snake}_memory::{pascal}RepoMemory;
+/// CRDT source of truth + SeaORM persistence. Construct one
+/// `CrdtDoc` per collaboration boundary and hand a `{pascal}RepoLoro`
+/// to the vox dispatcher.
+#[cfg(feature = "server")]
+pub mod server {{
+    pub use crdt::{{CrdtDoc, Persistence}};
+    pub use {snake}_crdt::{{{pascal}Entity, {pascal}RepoLoro}};
+    pub use {snake}_db::{{{pascal}Migrator, SeaOrmPersistence}};
 }}
 
 #[cfg(feature = "server-axum")]
@@ -461,10 +616,18 @@ authors.workspace = true
 license.workspace = true
 publish = false
 
+# Drives the `{kebab}-proto` contract against the Loro-backed
+# `{kebab}-crdt` using an ephemeral `CrdtDoc` (no persistence). Fast,
+# no DB, no WebSocket. Use fake-rs Dummy derives via the `fake`
+# feature on `{kebab}-proto` to seed repositories deterministically.
+
 [dependencies]
-{kebab}-proto.workspace = true
-{kebab}-memory.workspace = true
-architect.workspace = true
+{kebab}-proto = {{ workspace = true, features = ["fake"] }}
+{kebab}-crdt.workspace = true
+crdt.workspace = true
+loro.workspace = true
+architect = {{ workspace = true, features = ["fake"] }}
+fake.workspace = true
 uuid.workspace = true
 tokio = {{ workspace = true, features = ["macros", "rt"] }}
 "#,
@@ -475,16 +638,22 @@ tokio = {{ workspace = true, features = ["macros", "rt"] }}
     write(
         dir.join("src").join("lib.rs"),
         format!(
-            r#"//! Native integration tests for the `{kebab}` feature.
+            r#"//! Native integration tests for the `{kebab}` feature. Drives
+//! the wire contract against the Loro-backed implementation through
+//! an ephemeral `CrdtDoc`.
 
 #![cfg(test)]
 
-use {snake}_memory::{pascal}RepoMemory;
+use {snake}_crdt::{{CrdtDoc, {pascal}RepoLoro}};
 use {snake}_proto::{{{pascal}Create, {pascal}Repo}};
+
+fn repo() -> {pascal}RepoLoro {{
+    {pascal}RepoLoro::new(&CrdtDoc::ephemeral())
+}}
 
 #[tokio::test]
 async fn create_then_get_round_trip() {{
-    let r = {pascal}RepoMemory::new();
+    let r = repo();
     let created = r
         .create({pascal}Create {{ name: "alpha".into() }})
         .await
@@ -492,6 +661,26 @@ async fn create_then_get_round_trip() {{
     let got = r.get(created.id).await.unwrap();
     assert_eq!(got.id, created.id);
     assert_eq!(got.name, "alpha");
+}}
+
+// Concurrent-replica merge — two repos backed by independent docs
+// exchange their bytes and converge. This is the test that says
+// "yes, this is actually a CRDT."
+#[tokio::test]
+async fn two_replicas_converge_after_sync() {{
+    use loro::ExportMode;
+    let a = repo();
+    let b = repo();
+    a.create({pascal}Create {{ name: "from-a".into() }}).await.unwrap();
+    b.create({pascal}Create {{ name: "from-b".into() }}).await.unwrap();
+    let ab = a.doc().export(ExportMode::all_updates()).unwrap();
+    let bb = b.doc().export(ExportMode::all_updates()).unwrap();
+    b.doc().import(&ab).unwrap();
+    a.doc().import(&bb).unwrap();
+    let a_list = a.list(architect::Page {{ index: 0, size: 100 }}, None, None).await.unwrap();
+    let b_list = b.list(architect::Page {{ index: 0, size: 100 }}, None, None).await.unwrap();
+    assert_eq!(a_list.total, 2);
+    assert_eq!(b_list.total, 2);
 }}
 "#,
             kebab = n.kebab,
@@ -513,7 +702,8 @@ fn update_workspace_cargo(repo_root: &Path, n: &Names) -> eyre::Result<()> {
     let members_to_add = [
         format!("features/{}/{}", n.kebab, n.kebab),
         format!("features/{}/{}-proto", n.kebab, n.kebab),
-        format!("features/{}/{}-memory", n.kebab, n.kebab),
+        format!("features/{}/{}-crdt", n.kebab, n.kebab),
+        format!("features/{}/{}-db", n.kebab, n.kebab),
         format!("features/{}/tests/native", n.kebab),
     ];
 
@@ -533,17 +723,18 @@ fn update_workspace_cargo(repo_root: &Path, n: &Names) -> eyre::Result<()> {
 
     // workspace.dependencies entries.
     let deps_to_add = [
-        (
-            n.kebab.clone(),
-            format!("features/{}/{}", n.kebab, n.kebab),
-        ),
+        (n.kebab.clone(), format!("features/{}/{}", n.kebab, n.kebab)),
         (
             format!("{}-proto", n.kebab),
             format!("features/{}/{}-proto", n.kebab, n.kebab),
         ),
         (
-            format!("{}-memory", n.kebab),
-            format!("features/{}/{}-memory", n.kebab, n.kebab),
+            format!("{}-crdt", n.kebab),
+            format!("features/{}/{}-crdt", n.kebab, n.kebab),
+        ),
+        (
+            format!("{}-db", n.kebab),
+            format!("features/{}/{}-db", n.kebab, n.kebab),
         ),
     ];
 
@@ -557,9 +748,10 @@ fn update_workspace_cargo(repo_root: &Path, n: &Names) -> eyre::Result<()> {
                 let mut t = Table::new();
                 t.set_implicit(false);
                 t["path"] = value(path_rel);
-                deps_table.insert(name, Item::Value(toml_edit::Value::InlineTable(
-                    t.into_inline_table(),
-                )));
+                deps_table.insert(
+                    name,
+                    Item::Value(toml_edit::Value::InlineTable(t.into_inline_table())),
+                );
             }
         }
     }
@@ -570,9 +762,7 @@ fn update_workspace_cargo(repo_root: &Path, n: &Names) -> eyre::Result<()> {
 }
 
 fn array_contains_str(arr: &Array, needle: &str) -> bool {
-    arr.iter()
-        .filter_map(|v| v.as_str())
-        .any(|s| s == needle)
+    arr.iter().filter_map(|v| v.as_str()).any(|s| s == needle)
 }
 
 fn update_tracey_config(repo_root: &Path, n: &Names) -> eyre::Result<()> {
@@ -599,7 +789,7 @@ fn update_tracey_config(repo_root: &Path, n: &Names) -> eyre::Result<()> {
     // Append before the LAST closing `)` on its own line, indented or
     // not. Cheap heuristic: replace the final `\n)\n` with our block + `\n)\n`.
     // Default new features to a single `live` impl, scoped to the
-    // memory backend that the scaffold just created. Adding more
+    // db backend that the scaffold just created. Adding more
     // backends later means adding more impl blocks (e.g. `mock`,
     // `reaper`, `protools`) under the same spec.
     let block = format!(
@@ -611,7 +801,7 @@ fn update_tracey_config(repo_root: &Path, n: &Names) -> eyre::Result<()> {
             {{
                 name live
                 include (
-                    features/{kebab}/{kebab}-memory/**/*.rs
+                    features/{kebab}/{kebab}-crdt/**/*.rs
                 )
                 exclude (
                     features/{kebab}/**/target/**

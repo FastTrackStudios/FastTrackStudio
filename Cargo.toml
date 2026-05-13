@@ -8,13 +8,16 @@ members = [
     "features/example/example-proto",
     "features/example/example-db",
     "features/example/example-memory",
+    "features/example/example-crdt",
     "features/example/example-ui",
     "features/example/tests/native",
     "macros/architect",
     "macros/architect-derive",
     "examples/external-stub",
     "examples/custom-server",
-    "crates/architect-cli", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-memory", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-memory", "features/bar/tests/native",
+    "crates/architect-cli",
+    "libs/crdt",
+    "libs/crdt-seaorm", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-crdt", "features/foo/foo-db", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-crdt", "features/bar/bar-db", "features/bar/tests/native",
 ]
 # Build the production graph by default; xtask is opt-in via `cargo xtask`.
 default-members = [
@@ -26,12 +29,15 @@ default-members = [
     "features/example/example-proto",
     "features/example/example-db",
     "features/example/example-memory",
+    "features/example/example-crdt",
     "features/example/example-ui",
     "features/example/tests/native",
     "macros/architect",
     "macros/architect-derive",
     "examples/external-stub",
-    "examples/custom-server", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-memory", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-memory", "features/bar/tests/native",
+    "examples/custom-server",
+    "libs/crdt",
+    "libs/crdt-seaorm", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-crdt", "features/foo/foo-db", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-crdt", "features/bar/bar-db", "features/bar/tests/native",
 ]
 # Crates with wasm32 / Dioxus target deps that don't survive a workspace
 # host build sit outside; each invokes cargo directly.
@@ -97,6 +103,11 @@ vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd
 vox-types = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 
+# Loro — CRDT engine. Local-first state lives inside a LoroDoc;
+# SeaORM stores the doc's snapshot + update log as opaque bytes.
+# Wasm-clean: Loro ships first-class WASM.
+loro = { version = "1.12", default-features = false }
+
 # Moiré — runtime graph instrumentation. Pinned to our fork at
 # codywright/moire which layers (a) forge's NixOS frame-pointer
 # termination fix and (b) a flake.nix that builds moire-web with
@@ -137,13 +148,28 @@ example = { path = "features/example/example" }
 example-proto = { path = "features/example/example-proto" }
 example-db = { path = "features/example/example-db" }
 example-memory = { path = "features/example/example-memory" }
+example-crdt = { path = "features/example/example-crdt" }
 example-stub-backend = { path = "examples/external-stub" }
+
+# Local-first CRDT layer — generic LoroDoc wrapper, EntityCrdt trait,
+# Persistence trait. Backend-agnostic: pair with crdt-seaorm on the
+# server, with crdt-indexeddb (future) in the browser, or run with the
+# bundled in-memory persistence for tests.
+crdt = { path = "libs/crdt" }
+crdt-seaorm = { path = "libs/crdt-seaorm" }
+
+# Object-safe async traits (Persistence). Hot-path traits in this
+# workspace use Rust 2024 async-fn-in-trait via #[vox::service]; we
+# only reach for async-trait where dyn-dispatch is needed.
+async-trait = "0.1"
 foo = { path = "features/foo/foo" }
 foo-proto = { path = "features/foo/foo-proto" }
-foo-memory = { path = "features/foo/foo-memory" }
+foo-crdt = { path = "features/foo/foo-crdt" }
+foo-db = { path = "features/foo/foo-db" }
 bar = { path = "features/bar/bar" }
 bar-proto = { path = "features/bar/bar-proto" }
-bar-memory = { path = "features/bar/bar-memory" }
+bar-crdt = { path = "features/bar/bar-crdt" }
+bar-db = { path = "features/bar/bar-db" }
 
 # Redirect every transitive bearcove/moire reference (e.g. vox's
 # moire-runtime / moire-tokio / moire-types) to our fork at the same

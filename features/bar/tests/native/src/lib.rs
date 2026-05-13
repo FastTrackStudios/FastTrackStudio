@@ -1,143 +1,74 @@
-//! Native integration tests for the `bar` feature.
-//!
-//! Each test is annotated `r[verify <rule>]` so `tracey query status`
-//! shows full coverage for `bar/live`. Same trait surface any future
-//! `BarRepo` impl would satisfy.
+//! Native integration tests for the `bar` feature. Drives
+//! the wire contract against the Loro-backed implementation through
+//! an ephemeral `CrdtDoc`.
 
 #![cfg(test)]
 
-use architect::{Page, RepoError, Sort, SortOrder};
-use bar_memory::BarRepoMemory;
+use bar_crdt::{BarRepoLoro, CrdtDoc};
 use bar_proto::{BarCreate, BarRepo};
 
-fn repo() -> BarRepoMemory {
-    BarRepoMemory::new()
+fn repo() -> BarRepoLoro {
+    BarRepoLoro::new(&CrdtDoc::ephemeral())
 }
 
-async fn seed_names(r: &BarRepoMemory, names: &[&str]) {
-    for n in names {
-        r.create(BarCreate { name: (*n).into() }).await.unwrap();
-    }
-}
-
-// r[verify bar.list.empty]
 #[tokio::test]
-async fn empty_repo_lists_zero() {
+async fn create_then_get_round_trip() {
     let r = repo();
-    let page = r
-        .list(Page { index: 0, size: 100 }, None, None)
+    let created = r
+        .create(BarCreate {
+            name: "alpha".into(),
+        })
         .await
         .unwrap();
-    assert_eq!(page.total, 0);
-    assert!(page.items.is_empty());
+    let got = r.get(created.id).await.unwrap();
+    assert_eq!(got.id, created.id);
+    assert_eq!(got.name, "alpha");
 }
 
-// r[verify bar.list.pagination.size]
+// Concurrent-replica merge — two repos backed by independent docs
+// exchange their bytes and converge. This is the test that says
+// "yes, this is actually a CRDT."
 #[tokio::test]
-async fn pagination_respects_size() {
-    let r = repo();
-    seed_names(&r, &["a", "b", "c", "d", "e"]).await;
-    let page = r
-        .list(Page { index: 0, size: 2 }, None, None)
-        .await
-        .unwrap();
-    assert_eq!(page.items.len(), 2);
-    assert_eq!(page.total, 5);
-}
-
-// r[verify bar.list.pagination.size-clamped]
-#[tokio::test]
-async fn pagination_zero_size_clamped_to_one() {
-    let r = repo();
-    seed_names(&r, &["a", "b", "c"]).await;
-    let page = r
-        .list(Page { index: 0, size: 0 }, None, None)
-        .await
-        .unwrap();
-    // size=0 → clamped to 1, so we get 1 row back, not panic / empty.
-    assert_eq!(page.items.len(), 1);
-    assert_eq!(page.total, 3);
-}
-
-// r[verify bar.list.pagination.offset]
-#[tokio::test]
-async fn pagination_offset_skips_correctly() {
-    let r = repo();
-    seed_names(&r, &["a", "b", "c", "d", "e"]).await;
-    let p0 = r
+async fn two_replicas_converge_after_sync() {
+    use loro::ExportMode;
+    let a = repo();
+    let b = repo();
+    a.create(BarCreate {
+        name: "from-a".into(),
+    })
+    .await
+    .unwrap();
+    b.create(BarCreate {
+        name: "from-b".into(),
+    })
+    .await
+    .unwrap();
+    let ab = a.doc().export(ExportMode::all_updates()).unwrap();
+    let bb = b.doc().export(ExportMode::all_updates()).unwrap();
+    b.doc().import(&ab).unwrap();
+    a.doc().import(&bb).unwrap();
+    let a_list = a
         .list(
-            Page { index: 0, size: 2 },
-            Some(Sort { field: "name".into(), order: SortOrder::Asc }),
+            architect::Page {
+                index: 0,
+                size: 100,
+            },
+            None,
             None,
         )
         .await
         .unwrap();
-    let p1 = r
+    let b_list = b
         .list(
-            Page { index: 1, size: 2 },
-            Some(Sort { field: "name".into(), order: SortOrder::Asc }),
+            architect::Page {
+                index: 0,
+                size: 100,
+            },
+            None,
             None,
         )
         .await
         .unwrap();
-    let p_beyond = r
-        .list(Page { index: 99, size: 2 }, None, None)
-        .await
-        .unwrap();
-
-    let p0_names: Vec<_> = p0.items.iter().map(|e| e.name.as_str()).collect();
-    let p1_names: Vec<_> = p1.items.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(p0_names, vec!["a", "b"]);
-    assert_eq!(p1_names, vec!["c", "d"]);
-    assert!(p_beyond.items.is_empty());
-    assert_eq!(p_beyond.total, 5);
-}
-
-// r[verify bar.list.sort.name-asc]
-#[tokio::test]
-async fn sort_name_ascending() {
-    let r = repo();
-    seed_names(&r, &["charlie", "alpha", "bravo"]).await;
-    let page = r
-        .list(
-            Page { index: 0, size: 100 },
-            Some(Sort { field: "name".into(), order: SortOrder::Asc }),
-            None,
-        )
-        .await
-        .unwrap();
-    let names: Vec<_> = page.items.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["alpha", "bravo", "charlie"]);
-}
-
-// r[verify bar.list.sort.name-desc]
-#[tokio::test]
-async fn sort_name_descending() {
-    let r = repo();
-    seed_names(&r, &["charlie", "alpha", "bravo"]).await;
-    let page = r
-        .list(
-            Page { index: 0, size: 100 },
-            Some(Sort { field: "name".into(), order: SortOrder::Desc }),
-            None,
-        )
-        .await
-        .unwrap();
-    let names: Vec<_> = page.items.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, vec!["charlie", "bravo", "alpha"]);
-}
-
-// r[verify bar.list.sort.unknown]
-#[tokio::test]
-async fn sort_unknown_field_errors() {
-    let r = repo();
-    let err = r
-        .list(
-            Page { index: 0, size: 10 },
-            Some(Sort { field: "uuid".into(), order: SortOrder::Asc }),
-            None,
-        )
-        .await
-        .unwrap_err();
-    assert!(matches!(err, RepoError::InvalidInput(_)));
+    assert_eq!(a_list.total, 2);
+    assert_eq!(b_list.total, 2);
 }

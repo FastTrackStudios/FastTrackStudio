@@ -9,6 +9,7 @@ use architect::Entity;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
 #[architect(table_name = "bar_items", repo)]
 pub struct Bar {

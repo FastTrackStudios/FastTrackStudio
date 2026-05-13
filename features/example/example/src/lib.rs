@@ -35,6 +35,13 @@ pub mod backend_memory {
     pub use example_memory::ExampleRepoMemory;
 }
 
+/// Loro-backed CRDT implementation. Source of truth lives in a
+/// LoroDoc; persistence + sync are layered on top.
+#[cfg(feature = "backend-crdt")]
+pub mod backend_crdt {
+    pub use example_crdt::ExampleRepoLoro;
+}
+
 /// axum WebSocket adapter — `AxumWsLink`, `serve`, `acceptor_fn`,
 /// `acceptor_on`. Re-exported from `architect::axum_ws` so consumers
 /// only ever need to import from `example::*`.

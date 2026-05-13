@@ -5,6 +5,11 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 # Wire contract for the `bar` feature. Pull this crate (or the
 # `bar` facade) from any consumer — wasm-clean by default.
 
@@ -17,9 +22,11 @@ thiserror.workspace = true
 
 vox = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
+fake = { workspace = true, optional = true }
 
 [features]
 default = ["vox"]
 vox = ["dep:vox", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
-full = ["vox", "server"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
