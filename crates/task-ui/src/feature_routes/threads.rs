@@ -46,8 +46,8 @@ pub fn CommentView() -> Element {
     let _session: Rc<Option<sync::SyncSession>> = use_hook({
         let doc = doc.clone();
         let tx_for_sync = refresh_tx.clone();
-        let _ = tx_for_sync.unbounded_send(());
         move || {
+            let _ = tx_for_sync.unbounded_send(());
             let ws_url = sync::sync_url(&format!("/sync/{}", sync::WORKSPACE_DOC_ID));
             let tx = tx_for_sync.clone();
             match sync::connect(&ws_url, &doc, move || {

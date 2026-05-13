@@ -98,11 +98,13 @@ pub fn TimerDemo() -> Element {
     let _session: Rc<Option<sync::SyncSession>> = use_hook({
         let doc = doc.clone();
         let tx_for_sync = refresh_tx.clone();
-        // Trigger an initial refresh as soon as the component mounts
-        // — covers the case where the snapshot from the server lands
-        // before our subscription fires.
-        let _ = tx_for_sync.unbounded_send(());
         move || {
+            // Initial refresh — runs once on mount. Moving this out
+            // of the closure body caused it to fire on every render,
+            // queueing a refresh that called items.set, which
+            // re-rendered, which queued another refresh — infinite
+            // loop that froze the page.
+            let _ = tx_for_sync.unbounded_send(());
             let ws_url = sync::sync_url(&format!("/sync/{DEMO_DOC_ID}"));
             let tx = tx_for_sync.clone();
             match sync::connect(&ws_url, &doc, move || {

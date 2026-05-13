@@ -27,6 +27,9 @@ pub enum Route {
         #[route("/timer-demo")]
         TimerDemoRoute {},
 
+        #[route("/test")]
+        TestRoute {},
+
         // Per-feature multiplayer routes. Each one shares the same
         // workspace doc id via `sync::WORKSPACE_DOC_ID`, so edits in
         // any tab on any feature land on the same authoritative
@@ -83,6 +86,31 @@ fn InboxRoute() -> Element {
 #[component]
 fn TimerDemoRoute() -> Element {
     rsx! { crate::timer_demo::TimerDemo {} }
+}
+
+/// Minimal sanity-check route — no signals, no async, no Loro, no
+/// WebSocket. If `/test` renders, the app shell + router are fine
+/// and the issue is in a feature wiring; if it doesn't, the problem
+/// is upstream (wasm bundle bootstrap, JS runtime, etc.).
+#[component]
+fn TestRoute() -> Element {
+    let mut counter = use_signal(|| 0i32);
+    rsx! {
+        div { class: "mx-auto flex max-w-md flex-col gap-4 p-8",
+            h1 { class: "text-3xl font-bold text-cyan-300", "Hello from /test" }
+            p { class: "text-sm text-slate-400",
+                "If you can see this and the counter increments, Dioxus + the router + wasm are all healthy."
+            }
+            div { class: "flex items-center gap-3",
+                button {
+                    class: "rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400",
+                    onclick: move |_| counter += 1,
+                    "Click me"
+                }
+                span { class: "text-2xl font-mono text-slate-100", "{counter}" }
+            }
+        }
+    }
 }
 
 #[component]
@@ -289,11 +317,29 @@ struct NavTab {
 
 fn nav_tabs() -> Vec<NavTab> {
     vec![
-        NavTab { label: "Home", icon: "▦", route: Route::DashboardRoute {} },
-        NavTab { label: "Projects", icon: "▤", route: Route::ProjectsRoute {} },
-        NavTab { label: "Inbox", icon: "✉", route: Route::InboxRoute {} },
-        NavTab { label: "Timer demo", icon: "⏱", route: Route::TimerDemoRoute {} },
-        NavTab { label: "Settings", icon: "⚙", route: Route::SettingsRoute {} },
+        NavTab { label: "Home",      icon: "▦", route: Route::DashboardRoute {} },
+        NavTab { label: "Inbox",     icon: "✉", route: Route::InboxRoute {} },
+        NavTab { label: "Test",      icon: "✓", route: Route::TestRoute {} },
+        // Per-feature multiplayer routes — alphabetized for easy
+        // scanning across the demo surface.
+        NavTab { label: "Agent",     icon: "✸", route: Route::AgentRoute {} },
+        NavTab { label: "Assets",    icon: "▢", route: Route::AssetsRoute {} },
+        NavTab { label: "Calendar",  icon: "▦", route: Route::CalendarRoute {} },
+        NavTab { label: "Chat",      icon: "✎", route: Route::ChatRoute {} },
+        NavTab { label: "Conference",icon: "◉", route: Route::ConferenceRoute {} },
+        NavTab { label: "Cookbook",  icon: "✦", route: Route::CookbookRoute {} },
+        NavTab { label: "Email",     icon: "✉", route: Route::EmailRoute {} },
+        NavTab { label: "Finance",   icon: "$", route: Route::FinanceRoute {} },
+        NavTab { label: "Fitness",   icon: "♥", route: Route::FitnessRoute {} },
+        NavTab { label: "Inventory", icon: "▣", route: Route::InventoryRoute {} },
+        NavTab { label: "Invoice",   icon: "▤", route: Route::InvoiceRoute {} },
+        NavTab { label: "Locations", icon: "◇", route: Route::LocationsRoute {} },
+        NavTab { label: "People",    icon: "☺", route: Route::PeopleRoute {} },
+        NavTab { label: "Projects",  icon: "▤", route: Route::ProjectsLiveRoute {} },
+        NavTab { label: "Threads",   icon: "❝", route: Route::ThreadsRoute {} },
+        NavTab { label: "Timer",     icon: "⏱", route: Route::TimerRoute {} },
+        NavTab { label: "Timer demo",icon: "⏲", route: Route::TimerDemoRoute {} },
+        NavTab { label: "Settings",  icon: "⚙", route: Route::SettingsRoute {} },
     ]
 }
 
@@ -322,6 +368,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::InboxRoute {} => "Inbox",
         Route::SettingsRoute {} => "Settings",
         Route::TimerDemoRoute {} => "Timer demo",
+        Route::TestRoute {} => "Test",
         Route::AgentRoute {} => "Agent",
         Route::AssetsRoute {} => "Assets",
         Route::CalendarRoute {} => "Calendar",

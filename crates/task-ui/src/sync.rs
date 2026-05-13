@@ -17,6 +17,18 @@
 //! changed so the UI re-renders. That callback fires on both local
 //! and remote changes.
 
+/// Emit a single line into the browser devtools console. The
+/// `tracing` crate is no-op on wasm without a subscriber wired up,
+/// and the feature routes are small enough that a one-liner per
+/// log site is fine. Set RUST_LOG-style filtering aside until we
+/// have a real reason to.
+#[macro_export]
+macro_rules! ui_log {
+    ($($arg:tt)*) => {
+        ::web_sys::console::log_1(&::wasm_bindgen::JsValue::from_str(&format!($($arg)*)))
+    };
+}
+
 use std::sync::Arc;
 
 use crdt::CrdtDoc;
@@ -66,8 +78,19 @@ pub fn connect(
     doc: &CrdtDoc,
     on_change: impl Fn() + Send + Sync + 'static,
 ) -> Result<SyncSession, JsValue> {
-    let ws = WebSocket::new(ws_url)?;
+    crate::ui_log!("sync::connect: opening {ws_url}");
+    let ws = match WebSocket::new(ws_url) {
+        Ok(w) => {
+            crate::ui_log!("sync::connect: WebSocket::new ok");
+            w
+        }
+        Err(e) => {
+            crate::ui_log!("sync::connect: WebSocket::new FAILED: {e:?}");
+            return Err(e);
+        }
+    };
     ws.set_binary_type(BinaryType::Arraybuffer);
+    crate::ui_log!("sync::connect: binary type set, wiring subscriptions");
 
     // ── Outbound: every local commit produces bytes; send them.
     //
@@ -76,6 +99,7 @@ pub fn connect(
     // single-threaded interior mutability is enough.
     let ws_for_local = ws.clone();
     let loro = doc.loro();
+    crate::ui_log!("sync::connect: about to call subscribe_local_update");
     let local_update_sub = loro.subscribe_local_update(Box::new(move |bytes| {
         // Loro hands us `&[u8]`; `WebSocket::send_with_u8_array`
         // takes the same slice. Errors here just mean the socket is
@@ -89,11 +113,13 @@ pub fn connect(
     // Loro's `subscribe_root` requires `Arc<dyn Fn(_) + Send + Sync>`
     // — so the caller's closure must be `Send + Sync` too. Dioxus
     // signals satisfy that, so the typical pattern works.
+    crate::ui_log!("sync::connect: subscribe_local_update done, about to subscribe_root");
     let on_change_rc: Arc<dyn Fn() + Send + Sync> = Arc::new(on_change);
     let on_change_for_root = on_change_rc.clone();
     let root_sub = loro.subscribe_root(Arc::new(move |_diff| {
         on_change_for_root();
     }));
+    crate::ui_log!("sync::connect: subscribe_root done, wiring onmessage/onopen/onerror");
 
     // ── Inbound: import the bytes the server sends.
     let doc_for_msg = doc.clone();
@@ -131,6 +157,7 @@ pub fn connect(
     }) as Box<dyn FnMut(JsValue)>);
     ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
+    crate::ui_log!("sync::connect: all wiring done, returning SyncSession");
     Ok(SyncSession {
         ws,
         _local_update_sub: local_update_sub,
