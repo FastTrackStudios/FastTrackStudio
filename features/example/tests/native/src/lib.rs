@@ -86,6 +86,7 @@ async fn update_changes_fields() {
 }
 
 // r[verify repo.delete.missing]
+// r[verify repo.get.missing]
 #[tokio::test]
 async fn delete_removes_row() {
     let r = repo();

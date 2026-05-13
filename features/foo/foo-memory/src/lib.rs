@@ -22,6 +22,7 @@ impl FooRepoMemory {
 }
 
 impl FooRepo for FooRepoMemory {
+    // r[impl foo.get.missing]
     async fn get(&self, id: Uuid) -> Result<Foo, RepoError> {
         self.inner
             .read()
@@ -63,6 +64,8 @@ impl FooRepo for FooRepoMemory {
         Ok(FooList { items, total, page })
     }
 
+    // r[impl foo.create.id-generated]
+    // r[impl foo.create.timestamps]
     async fn create(&self, input: FooCreate) -> Result<Foo, RepoError> {
         let now = Utc::now();
         let row = Foo {
@@ -75,6 +78,8 @@ impl FooRepo for FooRepoMemory {
         Ok(row)
     }
 
+    // r[impl foo.update.partial]
+    // r[impl foo.update.touches-updated-at]
     async fn update(&self, id: Uuid, input: FooUpdate) -> Result<Foo, RepoError> {
         let mut guard = self.inner.write().await;
         let row = guard
@@ -88,6 +93,7 @@ impl FooRepo for FooRepoMemory {
         Ok(row.clone())
     }
 
+    // r[impl foo.delete.missing]
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         let mut guard = self.inner.write().await;
         let before = guard.len();

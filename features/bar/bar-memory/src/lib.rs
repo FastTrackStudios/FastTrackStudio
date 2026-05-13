@@ -32,6 +32,13 @@ impl BarRepo for BarRepoMemory {
             .ok_or(RepoError::NotFound)
     }
 
+    // r[impl bar.list.empty]
+    // r[impl bar.list.pagination.size]
+    // r[impl bar.list.pagination.size-clamped]
+    // r[impl bar.list.pagination.offset]
+    // r[impl bar.list.sort.name-asc]
+    // r[impl bar.list.sort.name-desc]
+    // r[impl bar.list.sort.unknown]
     async fn list(
         &self,
         page: Page,

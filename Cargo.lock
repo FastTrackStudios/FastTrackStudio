@@ -1827,6 +1827,7 @@ name = "foo-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "foo-memory",
  "foo-proto",
  "tokio",

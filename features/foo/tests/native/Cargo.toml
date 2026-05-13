@@ -11,4 +11,5 @@ foo-proto.workspace = true
 foo-memory.workspace = true
 architect.workspace = true
 uuid.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+chrono.workspace = true
