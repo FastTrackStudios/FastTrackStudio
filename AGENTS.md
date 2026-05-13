@@ -11,9 +11,8 @@ This project is **Local-first, Realtime, Collaborative, Multiplayer, Extensible*
 1. **Read `README.md`** for the project's identity and UI rules.
 2. **Skim `plans/`** — any open plans here are the next-arc roadmap. Don't duplicate work.
 3. **Survey `features/`** to see what already exists before adding anything.
-4. **Check `bd ready --json`** for issues claimed-and-ready.
-5. **Run `just check`** (or `cargo check --workspace`) to confirm a clean baseline before making changes.
-6. **Match patterns**. Every feature trio is shaped identically; copy from the most recent one (currently `features/knowledge/`).
+4. **Run `just check`** (or `cargo check --workspace`) to confirm a clean baseline before making changes.
+5. **Match patterns**. Every feature trio is shaped identically; copy from the most recent one (currently `features/knowledge/`).
 
 ---
 
@@ -187,79 +186,19 @@ The workspace dep is `path = "../FastTrackStudio/fts-ui/crates/fts-ui"`. Edits p
 
 ---
 
-## Issue Tracking with bd (beads)
+## Tracking
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+This project does NOT use bd/beads or any external ticket tracker. The conventions we actually rely on:
 
-### Why bd?
+- **`plans/<topic>.md`** — open architectural follow-ups. Each plan carries status, scope, background, what changes, sequenced phases, acceptance criteria, risk register. See `plans/loro-text-editor-upgrade.md` for the canonical shape. When you spot work that's bigger than a one-file fix, write the plan first.
 
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: local issue data can be committed with the repo when needed
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
+- **Commit messages** — the activity log. Heredoc-style, descriptive subject + phase-grouped body. `git log --oneline` is your worklog. Past arcs (see commits `e749ec8` ui adoption, `c2974b8` agent+git, `66fe21d` chat+Hermes-webui, `b527715` knowledge) follow this shape — copy them.
 
-### Quick Start
+- **In-line FUTURE comments** in code for narrow follow-ups too small to be a plan. Pattern: `// FUTURE: <one-line description of what's missing>`. Visible via `rg -t rust 'FUTURE:'`.
 
-**Check for ready work:**
+- **README.md / AGENTS.md** — slowly-changing canonical guidance. Update when conventions shift.
 
-```bash
-bd ready --json
-```
-
-**Create new issues:**
-
-```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
-```
-
-**Claim and update:**
-
-```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
-```
-
-**Complete work:**
-
-```bash
-bd close bd-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
-
-### Important Rules
-
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
+Don't introduce new tracking systems (markdown TODO files, scratchpads, GitHub Issues without explicit user request). The combination above has handled every multi-phase arc cleanly.
 
 ---
 
@@ -267,7 +206,9 @@ bd close bd-42 --reason "Completed" --json
 
 **When ending a work session**, complete ALL steps below.
 
-1. **File issues for remaining work** — create bd issues for follow-ups discovered along the way.
+1. **Write up loose ends**:
+   - Big architectural follow-ups → new file in `plans/<topic>.md`
+   - Narrow gaps → `// FUTURE:` comment at the call site
 2. **Run quality gates** if code changed:
    - `cargo check -p task-ui` clean
    - `cargo check -p task-app-web --target wasm32-unknown-unknown` clean
