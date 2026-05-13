@@ -145,12 +145,14 @@ thiserror.workspace = true
 
 vox = {{ workspace = true, optional = true }}
 sea-orm = {{ workspace = true, optional = true }}
+fake = {{ workspace = true, optional = true }}
 
 [features]
 default = ["vox"]
 vox = ["dep:vox", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
-full = ["vox", "server"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
 "#,
             kebab = n.kebab,
         ),
@@ -170,6 +172,7 @@ use architect::Entity;
 use chrono::{{DateTime, Utc}};
 use uuid::Uuid;
 
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
 #[architect(table_name = "{snake}_items", repo)]
 pub struct {pascal} {{
@@ -379,11 +382,13 @@ vox = ["{kebab}-proto/vox"]
 server-seaorm = ["{kebab}-proto/server"]
 server-axum = ["dep:architect", "architect/server-axum"]
 backend-memory = ["dep:{kebab}-memory"]
+fake = ["{kebab}-proto/fake"]
 full = [
     "vox",
     "server-seaorm",
     "server-axum",
     "backend-memory",
+    "fake",
 ]
 "#,
             kebab = n.kebab,

@@ -40,12 +40,16 @@ server-axum = ["dep:architect", "architect/server-axum"]
 backend-db = ["dep:example-db", "example-proto/server"]
 backend-memory = ["dep:example-memory"]
 
-# Everything — every axis + every in-tree backend. Matches tokio's
-# `full` convention.
+# Adds fake-rs Dummy derives to every wire + emitted struct.
+fake = ["example-proto/fake"]
+
+# Everything — every axis + every in-tree backend + fake. Matches
+# tokio's `full` convention.
 full = [
     "vox",
     "server-seaorm",
     "server-axum",
     "backend-db",
     "backend-memory",
+    "fake",
 ]

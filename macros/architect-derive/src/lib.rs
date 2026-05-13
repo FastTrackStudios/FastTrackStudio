@@ -180,6 +180,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         quote! { pub #id: #ty }
     });
     let create_struct = quote! {
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
         #vis struct #create_ident {
             #(#create_field_defs,)*
@@ -197,6 +198,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         quote! { pub #id: ::core::option::Option<#ty> }
     });
     let update_struct = quote! {
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet, Default)]
         #vis struct #update_ident {
             #(#update_field_defs,)*
@@ -205,6 +207,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
 
     // ── List payload ──
     let list_struct = quote! {
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
         #vis struct #list_ident {
             pub items: ::std::vec::Vec<#ident>,
@@ -386,6 +389,7 @@ fn build_server_block(
                 QueryOrder, Set,
             };
 
+            #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
             #[derive(Clone, Debug, PartialEq, ::sea_orm::DeriveEntityModel)]
             #[sea_orm(table_name = #table_name)]
             pub struct Model {

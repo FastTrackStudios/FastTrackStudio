@@ -100,6 +100,40 @@ async fn delete_removes_row() {
     assert!(matches!(r.get(created.id).await, Err(RepoError::NotFound)));
 }
 
+// ── Fake-rs seeding ───────────────────────────────────────────────────
+//
+// `example/full` (or `example-proto/fake`) adds `#[derive(Dummy)]` to
+// every emitted struct. Two patterns the same machinery enables:
+// random data each run via `Faker.fake()`, deterministic data via a
+// seeded `StdRng`.
+
+#[tokio::test]
+async fn seed_with_faker_random() {
+    use fake::{Fake, Faker};
+    let r = repo();
+    for _ in 0..5 {
+        let create: ExampleCreate = Faker.fake();
+        r.create(create).await.unwrap();
+    }
+    let page = r
+        .list(Page { index: 0, size: 100 }, None, None)
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 5);
+}
+
+#[tokio::test]
+async fn seed_with_seeded_rng_is_deterministic() {
+    use fake::Fake;
+    use fake::rand::SeedableRng;
+    let mut rng_a = fake::rand::rngs::StdRng::seed_from_u64(42);
+    let mut rng_b = fake::rand::rngs::StdRng::seed_from_u64(42);
+    let a: ExampleCreate = fake::Faker.fake_with_rng(&mut rng_a);
+    let b: ExampleCreate = fake::Faker.fake_with_rng(&mut rng_b);
+    assert_eq!(a.name, b.name);
+    assert_eq!(a.description, b.description);
+}
+
 // r[verify repo.list.sort.unknown]
 #[tokio::test]
 async fn unsortable_field_errors() {

@@ -27,10 +27,15 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 default = []
 vox = ["dep:vox"]
 
+# Adds #[derive(fake::Dummy)] to every architect-emitted struct
+# (Create/Update/List/Model). Pure test-data scaffolding; enable it
+# in your proto crate and the wire structs become trivially seedable.
+fake = ["dep:fake"]
+
 # `full` enables every architect optional — vox, SeaORM bridge, axum
-# adapter. Matches tokio's `full` convention: when you just want
+# adapter, fake. Matches tokio's `full` convention: when you just want
 # everything turned on for development or a single-binary build.
-full = ["vox", "server-seaorm", "server-axum"]
+full = ["vox", "server-seaorm", "server-axum", "fake"]
 
 # Two server-side features, deliberately independent so a binary can
 # pick storage and transport à la carte:
@@ -71,6 +76,7 @@ thiserror.workspace = true
 # emits a plain async trait instead of a `#[vox::service]`-decorated one,
 # and the dispatcher/client types simply don't exist.
 vox = { workspace = true, optional = true }
+fake = { workspace = true, optional = true }
 
 # Server-side only — sea-orm + async-trait are gated.
 sea-orm = { workspace = true, optional = true }

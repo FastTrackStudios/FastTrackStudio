@@ -69,6 +69,12 @@ uuid = { version = "1", features = ["v4"] }
 facet = { version = "0.46", features = ["reflect", "chrono", "uuid"] }
 facet-pretty = "0.46"
 
+# Test-data + db-seed generation. Architect emits #[derive(Dummy)] on
+# every Create/Update/List/Model struct when the `fake` feature is on,
+# letting tests + seeding loops generate values deterministically (via
+# a seeded RNG) or randomly (default Faker distribution).
+fake = { version = "4", features = ["derive", "uuid", "chrono"] }
+
 # CLI argument + config parser. Same shape across xtask, apps/app/cli,
 # and any future user-facing binary so flags / env / config files all
 # work consistently.

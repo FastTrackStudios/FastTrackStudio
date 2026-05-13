@@ -26,6 +26,10 @@ vox = { workspace = true, optional = true }
 # (and consumers picking a non-SeaORM backend) never see it.
 sea-orm = { workspace = true, optional = true }
 
+# Test-data generation. Adds Dummy derives to all the wire + emitted
+# structs when the `fake` feature is on.
+fake = { workspace = true, optional = true }
+
 [features]
 default = ["vox"]
 
@@ -38,6 +42,10 @@ vox = ["dep:vox", "architect/vox"]
 # (SeaORM Model, RepoStorage, From impls) compile in.
 server = ["architect/server-seaorm", "dep:sea-orm"]
 
-# Convenience bundle — vox + SeaORM emission together. Matches tokio's
-# `full` convention.
-full = ["vox", "server"]
+# Adds Dummy derives to Example + Create/Update/List/Model so the
+# struct family is fakeable for tests + db seeding.
+fake = ["dep:fake", "architect/fake"]
+
+# Convenience bundle — vox + SeaORM emission + fake-rs together.
+# Matches tokio's `full` convention.
+full = ["vox", "server", "fake"]

@@ -17,12 +17,13 @@ publish = false
 #   cargo test -p example-tests-native
 
 [dependencies]
-example-proto.workspace = true
+example-proto = { workspace = true, features = ["fake"] }
 example-memory.workspace = true
 # Pulled in to demonstrate that an external (third-party-shaped)
 # backend is interchangeable with the in-tree ones at the trait level.
 # See examples/external-stub/.
 example-stub-backend.workspace = true
-architect.workspace = true
+architect = { workspace = true, features = ["fake"] }
+fake.workspace = true
 uuid.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }

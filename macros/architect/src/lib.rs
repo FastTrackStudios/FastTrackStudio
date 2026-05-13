@@ -41,6 +41,11 @@ pub use facet;
 #[cfg(feature = "vox")]
 pub use vox;
 
+// fake-rs re-export, gated on the `fake` feature. Lets consumers reach
+// `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
+#[cfg(feature = "fake")]
+pub use fake;
+
 // ── Repository error envelope ──────────────────────────────────────────
 
 /// Error returned by every architect-generated repo method. Tight on
@@ -61,6 +66,7 @@ pub enum RepoError {
 
 // ── Pagination + sort + filter primitives (wire-safe) ──────────────────
 
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Eq, facet::Facet, Default)]
 pub struct Page {
     /// Zero-indexed page number.
@@ -69,6 +75,7 @@ pub struct Page {
     pub size: u32,
 }
 
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, facet::Facet)]
 #[repr(u8)]
 pub enum SortOrder {
@@ -76,6 +83,7 @@ pub enum SortOrder {
     Desc,
 }
 
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Eq, facet::Facet)]
 pub struct Sort {
     /// Field name (matches the API struct's snake_case identifier).
@@ -86,6 +94,7 @@ pub struct Sort {
 /// Free-form filter expression. Parsed server-side from a JSON-shaped
 /// string for now; an evolving structured form lands as the macro
 /// grows.
+#[cfg_attr(feature = "fake", derive(fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Eq, facet::Facet, Default)]
 pub struct Filter {
     pub raw: String,

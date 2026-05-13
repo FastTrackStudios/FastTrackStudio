@@ -22,6 +22,7 @@ pub use architect;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq)]
 #[architect(
     // SeaORM table this entity persists to. Architect emits the
