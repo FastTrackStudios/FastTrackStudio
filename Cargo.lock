@@ -1328,6 +1328,7 @@ dependencies = [
  "chrono",
  "crdt",
  "fast-dav-rs",
+ "icalendar",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

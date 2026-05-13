@@ -38,4 +38,5 @@ tracing.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 
 fast-dav-rs.workspace = true
+icalendar.workspace = true
 url = "2"

@@ -194,6 +194,13 @@ default-features = false
 [workspace.dependencies.fast-dav-rs]
 version = "0.4"
 
+# iCalendar parser / builder. Used by `caldav-sync` to map between
+# raw `BEGIN:VEVENT…` text and `calendar_proto::CalendarEvent`
+# (and the inverse for push). Active maintenance, dual-licensed,
+# uses the same `rrule` crate we have at the workspace level.
+[workspace.dependencies.icalendar]
+version = "0.17"
+
 # Dioxus — UI lib. Single workspace dep; per-crate `[features]`
 # enable the platform target. Pattern lifted from dioxus-flake's
 # packages/web/desktop/mobile setup so `cargo check --workspace`

@@ -23,17 +23,13 @@
 //!   sync-token in our [`caldav_proto::CalDavCalendar`]) for
 //!   incremental updates.
 //!
-//! ## What's stubbed
+//! ## iCal mapping
 //!
-//! - **iCal → `CalendarEvent` mapping**. fast-dav-rs hands us
-//!   `calendar_data: Option<String>` per object — the raw iCal
-//!   text. We need an iCal parser (`ical` or `vobject`) to map
-//!   VEVENT → `CalendarEventCreate`. Returned as the raw string in
-//!   the [`SyncedObject`] for now so the caller can wire its own
-//!   parser without us forcing one.
-//! - **Push** (`PUT` of locally-changed events). fast-dav-rs's
-//!   `put_if_match` / `put_if_none_match` are ready; we just need
-//!   the same iCal *writer* on top.
+//! The [`ical`] module bridges `BEGIN:VEVENT…` text and
+//! `calendar_proto::CalendarEvent`. Pull-side: parsed VEVENTs land
+//! as `CalendarEventCreate` payloads with deterministic local
+//! `Uuid`s (uuid v5 over the iCal UID), so the same remote event
+//! always reconciles back to the same local row.
 
 use std::sync::Arc;
 
@@ -43,6 +39,9 @@ use thiserror::Error;
 use tracing::info;
 use url::Url;
 use uuid::Uuid;
+
+pub mod ical;
+pub use ical::{ParsedEvent, event_to_ical, local_id_for_uid, parse_calendar_data};
 
 /// Internal error type. Public so callers can match on variants; the
 /// architect `CalDavServiceError` is the wire form on the service trait.
