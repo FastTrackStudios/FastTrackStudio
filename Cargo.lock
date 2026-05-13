@@ -1076,6 +1076,7 @@ dependencies = [
  "architect",
  "calendar-crdt",
  "calendar-proto",
+ "chrono",
  "crdt",
  "fake",
  "loro",
@@ -1168,6 +1169,7 @@ dependencies = [
  "architect",
  "chat-crdt",
  "chat-proto",
+ "chrono",
  "crdt",
  "fake",
  "loro",
@@ -1519,6 +1521,7 @@ name = "cookbook-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "cookbook-crdt",
  "cookbook-proto",
  "crdt",
@@ -2903,6 +2906,7 @@ name = "finance-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "finance-crdt",
@@ -2971,6 +2975,7 @@ name = "fitness-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "fitness-crdt",
@@ -3984,6 +3989,7 @@ name = "inventory-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "inventory-crdt",
@@ -4046,6 +4052,7 @@ name = "invoice-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "invoice-crdt",
@@ -5299,6 +5306,7 @@ name = "person-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "loro",
@@ -7515,6 +7523,7 @@ name = "threads-tests-native"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "fake",
  "loro",

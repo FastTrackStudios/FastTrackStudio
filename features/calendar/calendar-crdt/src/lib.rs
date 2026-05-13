@@ -1,101 +1,169 @@
-//! Loro-backed `CalendarRepo`. Source of truth lives in a LoroDoc;
+//! Loro-backed `CalendarEventRepo`. Source of truth in a LoroDoc;
 //! persistence is the concern of `calendar-db`.
 
 use architect::{Page, RepoError, SortOrder};
-use calendar_proto::{Calendar, CalendarCreate, CalendarList, CalendarRepo, CalendarUpdate};
-use chrono::{DateTime, Utc};
+use calendar_proto::{
+    CalendarEvent, CalendarEventCreate, CalendarEventList, CalendarEventRepo, CalendarEventUpdate,
+};
+use chrono::Utc;
 use crdt::EntityCrdt;
-use loro::{LoroMap, LoroValue};
+use crdt::codec::{
+    read_bool, read_dt, read_opt_str, read_opt_uuid, read_str, read_string_list, read_uuid,
+    write_bool, write_dt, write_opt_str, write_opt_string_list, write_opt_uuid, write_str,
+    write_string_list, write_uuid,
+};
+use loro::LoroMap;
 use uuid::Uuid;
 
 pub use crdt::{CrdtDoc, LoroRepo};
 
-/// Zero-sized marker for the `EntityCrdt` impl. Lets us implement
-/// the foreign `EntityCrdt` trait without owning the wire struct.
-pub struct CalendarEntity;
+pub struct CalendarEventEntity;
 
-/// Newtype-wrapped repo, implements `CalendarRepo`. Construct from a
-/// `CrdtDoc` — multiple repos over different entity types can share
-/// one doc, mutations commit together, exports cover the whole doc.
 #[derive(Clone)]
-pub struct CalendarRepoLoro {
-    inner: LoroRepo<CalendarEntity>,
+pub struct CalendarEventRepoLoro {
+    inner: LoroRepo<CalendarEventEntity>,
 }
 
-impl CalendarRepoLoro {
+impl CalendarEventRepoLoro {
     pub fn new(doc: &CrdtDoc) -> Self {
         Self { inner: doc.repo() }
     }
-
-    pub fn inner(&self) -> &LoroRepo<CalendarEntity> {
+    pub fn inner(&self) -> &LoroRepo<CalendarEventEntity> {
         &self.inner
     }
-
     pub fn doc(&self) -> &loro::LoroDoc {
         self.inner.doc()
     }
 }
 
-// ── EntityCrdt impl ───────────────────────────────────────────────────
-//
-// Container layout: a top-level "calendar_items" LoroMap keyed by
-// uuid string; each entry is a sub-LoroMap with the wire fields.
-// For features with hierarchy or ordering, swap this for a LoroTree
-// or LoroMovableList — the trait surface stays the same.
+impl EntityCrdt for CalendarEventEntity {
+    type Wire = CalendarEvent;
+    type Create = CalendarEventCreate;
+    type Update = CalendarEventUpdate;
+    type List = CalendarEventList;
 
-impl EntityCrdt for CalendarEntity {
-    type Wire = Calendar;
-    type Create = CalendarCreate;
-    type Update = CalendarUpdate;
-    type List = CalendarList;
+    const ROOT: &'static str = "calendar_events";
 
-    const ROOT: &'static str = "calendar_items";
-
-    fn id(wire: &Calendar) -> Uuid {
-        wire.id
+    fn id(w: &CalendarEvent) -> Uuid {
+        w.id
     }
 
-    fn from_create(input: CalendarCreate) -> Calendar {
+    fn from_create(input: CalendarEventCreate) -> CalendarEvent {
         let now = Utc::now();
-        Calendar {
+        CalendarEvent {
             id: Uuid::new_v4(),
-            name: input.name,
+            title: input.title,
+            description: input.description,
+            start_at: input.start_at,
+            end_at: input.end_at,
+            all_day: input.all_day,
+            location_id: input.location_id,
+            location_text: input.location_text,
+            rrule: input.rrule,
+            organizer: input.organizer,
+            attendees: input.attendees,
+            calendar_id: input.calendar_id,
+            status: input.status,
+            tags: input.tags,
             created_at: now,
             updated_at: now,
         }
     }
 
-    fn encode_into(map: &LoroMap, e: &Calendar) -> Result<(), RepoError> {
-        map.insert("id", e.id.to_string()).map_err(loro_err)?;
-        map.insert("name", e.name.as_str()).map_err(loro_err)?;
-        map.insert("created_at", e.created_at.to_rfc3339())
-            .map_err(loro_err)?;
-        map.insert("updated_at", e.updated_at.to_rfc3339())
-            .map_err(loro_err)?;
+    fn encode_into(m: &LoroMap, e: &CalendarEvent) -> Result<(), RepoError> {
+        write_uuid(m, "id", e.id)?;
+        write_str(m, "title", &e.title)?;
+        write_opt_str(m, "description", e.description.as_deref())?;
+        write_dt(m, "start_at", e.start_at)?;
+        write_dt(m, "end_at", e.end_at)?;
+        write_bool(m, "all_day", e.all_day)?;
+        write_opt_uuid(m, "location_id", e.location_id)?;
+        write_opt_str(m, "location_text", e.location_text.as_deref())?;
+        write_opt_str(m, "rrule", e.rrule.as_deref())?;
+        write_opt_str(m, "organizer", e.organizer.as_deref())?;
+        write_string_list(m, "attendees", &e.attendees)?;
+        write_opt_str(m, "calendar_id", e.calendar_id.as_deref())?;
+        write_str(m, "status", &e.status)?;
+        write_string_list(m, "tags", &e.tags)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
         Ok(())
     }
 
-    fn decode_from(m: &LoroMap) -> Result<Calendar, RepoError> {
-        Ok(Calendar {
-            id: parse_uuid(read_str(m, "id")?)?,
-            name: read_str(m, "name")?,
-            created_at: parse_dt(read_str(m, "created_at")?)?,
-            updated_at: parse_dt(read_str(m, "updated_at")?)?,
+    fn decode_from(m: &LoroMap) -> Result<CalendarEvent, RepoError> {
+        Ok(CalendarEvent {
+            id: read_uuid(m, "id")?,
+            title: read_str(m, "title")?,
+            description: read_opt_str(m, "description")?,
+            start_at: read_dt(m, "start_at")?,
+            end_at: read_dt(m, "end_at")?,
+            all_day: read_bool(m, "all_day")?,
+            location_id: read_opt_uuid(m, "location_id")?,
+            location_text: read_opt_str(m, "location_text")?,
+            rrule: read_opt_str(m, "rrule")?,
+            organizer: read_opt_str(m, "organizer")?,
+            attendees: read_string_list(m, "attendees")?,
+            calendar_id: read_opt_str(m, "calendar_id")?,
+            status: read_str(m, "status")?,
+            tags: read_string_list(m, "tags")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
         })
     }
 
-    fn apply_update(m: &LoroMap, input: CalendarUpdate) -> Result<(), RepoError> {
-        if let Some(name) = input.name {
-            m.insert("name", name.as_str()).map_err(loro_err)?;
+    fn apply_update(m: &LoroMap, u: CalendarEventUpdate) -> Result<(), RepoError> {
+        if let Some(v) = u.title {
+            write_str(m, "title", &v)?;
         }
-        m.insert("updated_at", Utc::now().to_rfc3339())
-            .map_err(loro_err)?;
+        if let Some(v) = u.description {
+            write_opt_str(m, "description", v.as_deref())?;
+        }
+        if let Some(v) = u.start_at {
+            write_dt(m, "start_at", v)?;
+        }
+        if let Some(v) = u.end_at {
+            write_dt(m, "end_at", v)?;
+        }
+        if let Some(v) = u.all_day {
+            write_bool(m, "all_day", v)?;
+        }
+        if let Some(v) = u.location_id {
+            write_opt_uuid(m, "location_id", v)?;
+        }
+        if let Some(v) = u.location_text {
+            write_opt_str(m, "location_text", v.as_deref())?;
+        }
+        if let Some(v) = u.rrule {
+            write_opt_str(m, "rrule", v.as_deref())?;
+        }
+        if let Some(v) = u.organizer {
+            write_opt_str(m, "organizer", v.as_deref())?;
+        }
+        if let Some(v) = u.attendees {
+            write_opt_string_list(m, "attendees", Some(&v))?;
+        }
+        if let Some(v) = u.calendar_id {
+            write_opt_str(m, "calendar_id", v.as_deref())?;
+        }
+        if let Some(v) = u.status {
+            write_str(m, "status", &v)?;
+        }
+        if let Some(v) = u.tags {
+            write_opt_string_list(m, "tags", Some(&v))?;
+        }
+        write_dt(m, "updated_at", Utc::now())?;
         Ok(())
     }
 
-    fn sort_items(items: &mut [Calendar], field: &str, order: SortOrder) -> Result<(), RepoError> {
+    fn sort_items(
+        items: &mut [CalendarEvent],
+        field: &str,
+        order: SortOrder,
+    ) -> Result<(), RepoError> {
         match field {
-            "name" => items.sort_by(|a, b| a.name.cmp(&b.name)),
+            "title" => items.sort_by(|a, b| a.title.cmp(&b.title)),
+            "start_at" => items.sort_by(|a, b| a.start_at.cmp(&b.start_at)),
+            "end_at" => items.sort_by(|a, b| a.end_at.cmp(&b.end_at)),
             "created_at" => items.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
             other => {
                 return Err(RepoError::InvalidInput(format!(
@@ -109,62 +177,34 @@ impl EntityCrdt for CalendarEntity {
         Ok(())
     }
 
-    fn build_list(items: Vec<Calendar>, total: u32, page: Page) -> CalendarList {
-        CalendarList { items, total, page }
+    fn build_list(items: Vec<CalendarEvent>, total: u32, page: Page) -> CalendarEventList {
+        CalendarEventList { items, total, page }
     }
 }
 
-// ── CalendarRepo forwarders ────────────────────────────────────────────
-
-impl CalendarRepo for CalendarRepoLoro {
-    async fn get(&self, id: Uuid) -> Result<Calendar, RepoError> {
+impl CalendarEventRepo for CalendarEventRepoLoro {
+    async fn get(&self, id: Uuid) -> Result<CalendarEvent, RepoError> {
         self.inner.get(id).await
     }
-
     async fn list(
         &self,
         page: architect::Page,
         sort: Option<architect::Sort>,
         filter: Option<architect::Filter>,
-    ) -> Result<CalendarList, RepoError> {
+    ) -> Result<CalendarEventList, RepoError> {
         self.inner.list(page, sort, filter).await
     }
-
-    async fn create(&self, input: CalendarCreate) -> Result<Calendar, RepoError> {
+    async fn create(&self, input: CalendarEventCreate) -> Result<CalendarEvent, RepoError> {
         self.inner.create(input).await
     }
-
-    async fn update(&self, id: Uuid, input: CalendarUpdate) -> Result<Calendar, RepoError> {
+    async fn update(
+        &self,
+        id: Uuid,
+        input: CalendarEventUpdate,
+    ) -> Result<CalendarEvent, RepoError> {
         self.inner.update(id, input).await
     }
-
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
         self.inner.delete(id).await
     }
-}
-
-// ── codec helpers ─────────────────────────────────────────────────────
-
-fn read_str(m: &LoroMap, k: &str) -> Result<String, RepoError> {
-    match m.get(k) {
-        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok((*s).to_string()),
-        Some(other) => Err(RepoError::Internal(format!(
-            "expected string at key `{k}`, got {other:?}"
-        ))),
-        None => Err(RepoError::Internal(format!("missing key `{k}`"))),
-    }
-}
-
-fn parse_uuid(s: String) -> Result<Uuid, RepoError> {
-    Uuid::parse_str(&s).map_err(|e| RepoError::Internal(format!("bad uuid: {e}")))
-}
-
-fn parse_dt(s: String) -> Result<DateTime<Utc>, RepoError> {
-    DateTime::parse_from_rfc3339(&s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| RepoError::Internal(format!("bad timestamp: {e}")))
-}
-
-fn loro_err<E: std::fmt::Display>(e: E) -> RepoError {
-    RepoError::Internal(format!("loro: {e}"))
 }
