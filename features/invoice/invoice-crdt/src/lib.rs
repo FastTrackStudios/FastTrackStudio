@@ -31,7 +31,9 @@ use invoice_proto::{
     Client, ClientCreate, ClientList, ClientRepo, ClientUpdate, Invoice, InvoiceCreate,
     InvoiceLine, InvoiceLineCreate, InvoiceLineList, InvoiceLineRepo, InvoiceLineUpdate,
     InvoiceList, InvoiceRepo, InvoiceUpdate, Payment, PaymentCreate, PaymentList, PaymentRepo,
-    PaymentUpdate,
+    PaymentUpdate, RecurringInvoice, RecurringInvoiceCreate, RecurringInvoiceLine,
+    RecurringInvoiceLineCreate, RecurringInvoiceLineList, RecurringInvoiceLineRepo,
+    RecurringInvoiceLineUpdate, RecurringInvoiceList, RecurringInvoiceRepo, RecurringInvoiceUpdate,
 };
 use loro::LoroMap;
 use uuid::Uuid;
@@ -740,6 +742,371 @@ impl PaymentRepo for PaymentRepoLoro {
         self.inner.create(input).await
     }
     async fn update(&self, id: Uuid, input: PaymentUpdate) -> Result<Payment, RepoError> {
+        self.inner.update(id, input).await
+    }
+    async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
+        self.inner.delete(id).await
+    }
+}
+
+// ── RecurringInvoice ──────────────────────────────────────────────────
+
+pub struct RecurringInvoiceEntity;
+
+#[derive(Clone)]
+pub struct RecurringInvoiceRepoLoro {
+    inner: LoroRepo<RecurringInvoiceEntity>,
+}
+
+impl RecurringInvoiceRepoLoro {
+    pub fn new(doc: &CrdtDoc) -> Self {
+        Self { inner: doc.repo() }
+    }
+    pub fn inner(&self) -> &LoroRepo<RecurringInvoiceEntity> {
+        &self.inner
+    }
+    pub fn doc(&self) -> &loro::LoroDoc {
+        self.inner.doc()
+    }
+}
+
+impl EntityCrdt for RecurringInvoiceEntity {
+    type Wire = RecurringInvoice;
+    type Create = RecurringInvoiceCreate;
+    type Update = RecurringInvoiceUpdate;
+    type List = RecurringInvoiceList;
+
+    const ROOT: &'static str = "recurring_invoices";
+
+    fn id(w: &RecurringInvoice) -> Uuid {
+        w.id
+    }
+
+    fn from_create(input: RecurringInvoiceCreate) -> RecurringInvoice {
+        let now = Utc::now();
+        RecurringInvoice {
+            id: Uuid::new_v4(),
+            client_id: input.client_id,
+            status: input.status,
+            frequency: input.frequency,
+            next_issue_date: input.next_issue_date,
+            end_date: input.end_date,
+            last_generated_at: input.last_generated_at,
+            generated_count: input.generated_count,
+            currency: input.currency,
+            subtotal_cents: input.subtotal_cents,
+            tax_rate_bps: input.tax_rate_bps,
+            tax_inclusive: input.tax_inclusive,
+            discount_cents: input.discount_cents,
+            notes: input.notes,
+            tags: input.tags,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn encode_into(m: &LoroMap, e: &RecurringInvoice) -> Result<(), RepoError> {
+        write_uuid(m, "id", e.id)?;
+        write_uuid(m, "client_id", e.client_id)?;
+        write_str(m, "status", &e.status)?;
+        write_str(m, "frequency", &e.frequency)?;
+        write_dt(m, "next_issue_date", e.next_issue_date)?;
+        write_opt_dt(m, "end_date", e.end_date)?;
+        write_opt_dt(m, "last_generated_at", e.last_generated_at)?;
+        write_i64(m, "generated_count", e.generated_count)?;
+        write_str(m, "currency", &e.currency)?;
+        write_i64(m, "subtotal_cents", e.subtotal_cents)?;
+        write_i32(m, "tax_rate_bps", e.tax_rate_bps)?;
+        write_bool(m, "tax_inclusive", e.tax_inclusive)?;
+        write_i64(m, "discount_cents", e.discount_cents)?;
+        write_opt_str(m, "notes", e.notes.as_deref())?;
+        write_string_list(m, "tags", &e.tags)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
+        Ok(())
+    }
+
+    fn decode_from(m: &LoroMap) -> Result<RecurringInvoice, RepoError> {
+        Ok(RecurringInvoice {
+            id: read_uuid(m, "id")?,
+            client_id: read_uuid(m, "client_id")?,
+            status: read_str(m, "status")?,
+            frequency: read_str(m, "frequency")?,
+            next_issue_date: read_dt(m, "next_issue_date")?,
+            end_date: read_opt_dt(m, "end_date")?,
+            last_generated_at: read_opt_dt(m, "last_generated_at")?,
+            generated_count: read_i64(m, "generated_count")?,
+            currency: read_str(m, "currency")?,
+            subtotal_cents: read_i64(m, "subtotal_cents")?,
+            tax_rate_bps: read_i32(m, "tax_rate_bps")?,
+            tax_inclusive: read_bool(m, "tax_inclusive")?,
+            discount_cents: read_i64(m, "discount_cents")?,
+            notes: read_opt_str(m, "notes")?,
+            tags: read_string_list(m, "tags")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
+        })
+    }
+
+    fn apply_update(m: &LoroMap, u: RecurringInvoiceUpdate) -> Result<(), RepoError> {
+        if let Some(v) = u.client_id {
+            write_uuid(m, "client_id", v)?;
+        }
+        if let Some(v) = u.status {
+            write_str(m, "status", &v)?;
+        }
+        if let Some(v) = u.frequency {
+            write_str(m, "frequency", &v)?;
+        }
+        if let Some(v) = u.next_issue_date {
+            write_dt(m, "next_issue_date", v)?;
+        }
+        if let Some(v) = u.end_date {
+            write_opt_dt(m, "end_date", v)?;
+        }
+        if let Some(v) = u.last_generated_at {
+            write_opt_dt(m, "last_generated_at", v)?;
+        }
+        if let Some(v) = u.generated_count {
+            write_i64(m, "generated_count", v)?;
+        }
+        if let Some(v) = u.currency {
+            write_str(m, "currency", &v)?;
+        }
+        if let Some(v) = u.subtotal_cents {
+            write_i64(m, "subtotal_cents", v)?;
+        }
+        if let Some(v) = u.tax_rate_bps {
+            write_i32(m, "tax_rate_bps", v)?;
+        }
+        if let Some(v) = u.tax_inclusive {
+            write_bool(m, "tax_inclusive", v)?;
+        }
+        if let Some(v) = u.discount_cents {
+            write_i64(m, "discount_cents", v)?;
+        }
+        if let Some(v) = u.notes {
+            write_opt_str(m, "notes", v.as_deref())?;
+        }
+        if let Some(v) = u.tags {
+            write_opt_string_list(m, "tags", Some(&v))?;
+        }
+        write_dt(m, "updated_at", Utc::now())?;
+        Ok(())
+    }
+
+    fn sort_items(
+        items: &mut [RecurringInvoice],
+        field: &str,
+        order: SortOrder,
+    ) -> Result<(), RepoError> {
+        match field {
+            "next_issue_date" => items.sort_by(|a, b| a.next_issue_date.cmp(&b.next_issue_date)),
+            "status" => items.sort_by(|a, b| a.status.cmp(&b.status)),
+            "frequency" => items.sort_by(|a, b| a.frequency.cmp(&b.frequency)),
+            other => {
+                return Err(RepoError::InvalidInput(format!(
+                    "unsortable field: {other}"
+                )));
+            }
+        }
+        if matches!(order, SortOrder::Desc) {
+            items.reverse();
+        }
+        Ok(())
+    }
+
+    fn build_list(items: Vec<RecurringInvoice>, total: u32, page: Page) -> RecurringInvoiceList {
+        RecurringInvoiceList { items, total, page }
+    }
+}
+
+impl RecurringInvoiceRepo for RecurringInvoiceRepoLoro {
+    async fn get(&self, id: Uuid) -> Result<RecurringInvoice, RepoError> {
+        self.inner.get(id).await
+    }
+    async fn list(
+        &self,
+        page: architect::Page,
+        sort: Option<architect::Sort>,
+        filter: Option<architect::Filter>,
+    ) -> Result<RecurringInvoiceList, RepoError> {
+        self.inner.list(page, sort, filter).await
+    }
+    async fn create(&self, input: RecurringInvoiceCreate) -> Result<RecurringInvoice, RepoError> {
+        self.inner.create(input).await
+    }
+    async fn update(
+        &self,
+        id: Uuid,
+        input: RecurringInvoiceUpdate,
+    ) -> Result<RecurringInvoice, RepoError> {
+        self.inner.update(id, input).await
+    }
+    async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
+        self.inner.delete(id).await
+    }
+}
+
+// ── RecurringInvoiceLine ──────────────────────────────────────────────
+
+pub struct RecurringInvoiceLineEntity;
+
+#[derive(Clone)]
+pub struct RecurringInvoiceLineRepoLoro {
+    inner: LoroRepo<RecurringInvoiceLineEntity>,
+}
+
+impl RecurringInvoiceLineRepoLoro {
+    pub fn new(doc: &CrdtDoc) -> Self {
+        Self { inner: doc.repo() }
+    }
+    pub fn inner(&self) -> &LoroRepo<RecurringInvoiceLineEntity> {
+        &self.inner
+    }
+    pub fn doc(&self) -> &loro::LoroDoc {
+        self.inner.doc()
+    }
+}
+
+impl EntityCrdt for RecurringInvoiceLineEntity {
+    type Wire = RecurringInvoiceLine;
+    type Create = RecurringInvoiceLineCreate;
+    type Update = RecurringInvoiceLineUpdate;
+    type List = RecurringInvoiceLineList;
+
+    const ROOT: &'static str = "recurring_invoice_lines";
+
+    fn id(w: &RecurringInvoiceLine) -> Uuid {
+        w.id
+    }
+
+    fn from_create(input: RecurringInvoiceLineCreate) -> RecurringInvoiceLine {
+        let now = Utc::now();
+        RecurringInvoiceLine {
+            id: Uuid::new_v4(),
+            recurring_invoice_id: input.recurring_invoice_id,
+            project_id: input.project_id,
+            description: input.description,
+            quantity_thousandths: input.quantity_thousandths,
+            unit_price_cents: input.unit_price_cents,
+            amount_cents: input.amount_cents,
+            sort_index: input.sort_index,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn encode_into(m: &LoroMap, e: &RecurringInvoiceLine) -> Result<(), RepoError> {
+        write_uuid(m, "id", e.id)?;
+        write_uuid(m, "recurring_invoice_id", e.recurring_invoice_id)?;
+        write_opt_uuid(m, "project_id", e.project_id)?;
+        write_str(m, "description", &e.description)?;
+        write_i64(m, "quantity_thousandths", e.quantity_thousandths)?;
+        write_i64(m, "unit_price_cents", e.unit_price_cents)?;
+        write_i64(m, "amount_cents", e.amount_cents)?;
+        write_i64(m, "sort_index", e.sort_index)?;
+        write_dt(m, "created_at", e.created_at)?;
+        write_dt(m, "updated_at", e.updated_at)?;
+        Ok(())
+    }
+
+    fn decode_from(m: &LoroMap) -> Result<RecurringInvoiceLine, RepoError> {
+        Ok(RecurringInvoiceLine {
+            id: read_uuid(m, "id")?,
+            recurring_invoice_id: read_uuid(m, "recurring_invoice_id")?,
+            project_id: read_opt_uuid(m, "project_id")?,
+            description: read_str(m, "description")?,
+            quantity_thousandths: read_i64(m, "quantity_thousandths")?,
+            unit_price_cents: read_i64(m, "unit_price_cents")?,
+            amount_cents: read_i64(m, "amount_cents")?,
+            sort_index: read_i64(m, "sort_index")?,
+            created_at: read_dt(m, "created_at")?,
+            updated_at: read_dt(m, "updated_at")?,
+        })
+    }
+
+    fn apply_update(m: &LoroMap, u: RecurringInvoiceLineUpdate) -> Result<(), RepoError> {
+        if let Some(v) = u.recurring_invoice_id {
+            write_uuid(m, "recurring_invoice_id", v)?;
+        }
+        if let Some(v) = u.project_id {
+            write_opt_uuid(m, "project_id", v)?;
+        }
+        if let Some(v) = u.description {
+            write_str(m, "description", &v)?;
+        }
+        if let Some(v) = u.quantity_thousandths {
+            write_i64(m, "quantity_thousandths", v)?;
+        }
+        if let Some(v) = u.unit_price_cents {
+            write_i64(m, "unit_price_cents", v)?;
+        }
+        if let Some(v) = u.amount_cents {
+            write_i64(m, "amount_cents", v)?;
+        }
+        if let Some(v) = u.sort_index {
+            write_i64(m, "sort_index", v)?;
+        }
+        write_dt(m, "updated_at", Utc::now())?;
+        Ok(())
+    }
+
+    fn sort_items(
+        items: &mut [RecurringInvoiceLine],
+        field: &str,
+        order: SortOrder,
+    ) -> Result<(), RepoError> {
+        match field {
+            "recurring_invoice_id" => {
+                items.sort_by(|a, b| a.recurring_invoice_id.cmp(&b.recurring_invoice_id))
+            }
+            "amount_cents" => items.sort_by(|a, b| a.amount_cents.cmp(&b.amount_cents)),
+            "sort_index" => items.sort_by(|a, b| a.sort_index.cmp(&b.sort_index)),
+            other => {
+                return Err(RepoError::InvalidInput(format!(
+                    "unsortable field: {other}"
+                )));
+            }
+        }
+        if matches!(order, SortOrder::Desc) {
+            items.reverse();
+        }
+        Ok(())
+    }
+
+    fn build_list(
+        items: Vec<RecurringInvoiceLine>,
+        total: u32,
+        page: Page,
+    ) -> RecurringInvoiceLineList {
+        RecurringInvoiceLineList { items, total, page }
+    }
+}
+
+impl RecurringInvoiceLineRepo for RecurringInvoiceLineRepoLoro {
+    async fn get(&self, id: Uuid) -> Result<RecurringInvoiceLine, RepoError> {
+        self.inner.get(id).await
+    }
+    async fn list(
+        &self,
+        page: architect::Page,
+        sort: Option<architect::Sort>,
+        filter: Option<architect::Filter>,
+    ) -> Result<RecurringInvoiceLineList, RepoError> {
+        self.inner.list(page, sort, filter).await
+    }
+    async fn create(
+        &self,
+        input: RecurringInvoiceLineCreate,
+    ) -> Result<RecurringInvoiceLine, RepoError> {
+        self.inner.create(input).await
+    }
+    async fn update(
+        &self,
+        id: Uuid,
+        input: RecurringInvoiceLineUpdate,
+    ) -> Result<RecurringInvoiceLine, RepoError> {
         self.inner.update(id, input).await
     }
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {

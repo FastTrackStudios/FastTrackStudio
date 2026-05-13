@@ -23,8 +23,15 @@ architect = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
+# PDF rendering only on native targets — printpdf 0.7 pulls a `time`
+# crate version that fails on wasm32. Web build falls back to
+# `window.print()` from the InvoicePreview component.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+printpdf = { workspace = true, optional = true }
+
 [features]
 default = []
+pdf = ["dep:printpdf"]
 vox = ["invoice-proto/vox"]
 server = [
     "dep:invoice-crdt",

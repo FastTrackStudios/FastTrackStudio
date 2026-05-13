@@ -26,3 +26,15 @@ uuid = { workspace = true, features = ["v4", "js"] }
 gloo-timers.workspace = true
 
 fts-ui.workspace = true
+
+# Web-only — used to attach a `visibilitychange` listener for the
+# tab-idle detector. Gated with `#[cfg(target_arch = "wasm32")]` at
+# the source level so native builds skip the call sites.
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+    "Window",
+    "Document",
+    "Event",
+    "EventTarget",
+    "VisibilityState",
+] }

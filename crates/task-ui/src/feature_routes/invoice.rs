@@ -13,14 +13,18 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use invoice_crdt::{
     ClientRepoLoro, CrdtDoc, InvoiceLineRepoLoro, InvoiceRepoLoro, PaymentRepoLoro,
+    RecurringInvoiceLineRepoLoro, RecurringInvoiceRepoLoro,
 };
 use invoice_proto::{
     Client, ClientCreate, ClientRepo, Invoice, InvoiceCreate, InvoiceLine, InvoiceLineCreate,
     InvoiceLineRepo, InvoiceRepo, InvoiceUpdate, Payment, PaymentCreate, PaymentInput, PaymentRepo,
+    RecurringInvoice, RecurringInvoiceCreate, RecurringInvoiceLine, RecurringInvoiceLineCreate,
+    RecurringInvoiceLineRepo, RecurringInvoiceRepo, RecurringInvoiceUpdate, next_date_after,
 };
 use invoice_ui::{
     BillingProposal, ClientCreateDialog, InvoiceDraft, InvoiceEditor, InvoiceNinjaDashboard,
-    PaymentRecordDialog, TimeEntriesToInvoiceDialog,
+    PaymentRecordDialog, RecurringInvoiceDraft, RecurringInvoiceEditor, RecurringInvoiceList,
+    TimeEntriesToInvoiceDialog,
 };
 use project_proto::Project;
 use timer_proto::TimeEntry;
@@ -40,13 +44,21 @@ pub fn InvoiceView() -> Element {
     let lines_repo: Rc<InvoiceLineRepoLoro> = use_hook(|| Rc::new(InvoiceLineRepoLoro::new(&doc)));
     let clients_repo: Rc<ClientRepoLoro> = use_hook(|| Rc::new(ClientRepoLoro::new(&doc)));
     let payments_repo: Rc<PaymentRepoLoro> = use_hook(|| Rc::new(PaymentRepoLoro::new(&doc)));
+    let recurring_repo: Rc<RecurringInvoiceRepoLoro> =
+        use_hook(|| Rc::new(RecurringInvoiceRepoLoro::new(&doc)));
+    let recurring_lines_repo: Rc<RecurringInvoiceLineRepoLoro> =
+        use_hook(|| Rc::new(RecurringInvoiceLineRepoLoro::new(&doc)));
 
     // ── Reactive state ────────────────────────────────────────────
     let mut invoices = use_signal::<Vec<Invoice>>(Vec::new);
     let mut lines = use_signal::<Vec<InvoiceLine>>(Vec::new);
     let mut clients = use_signal::<Vec<Client>>(Vec::new);
     let mut payments = use_signal::<Vec<Payment>>(Vec::new);
+    let mut recurring = use_signal::<Vec<RecurringInvoice>>(Vec::new);
+    let mut recurring_lines = use_signal::<Vec<RecurringInvoiceLine>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
+    let mut current_tab = use_signal(|| "invoices".to_string());
+    let selected_recurring = use_signal::<Option<Uuid>>(|| None);
 
     let selected_invoice = use_signal::<Option<Uuid>>(|| None);
     let bridge_open = use_signal(|| false);
@@ -74,6 +86,8 @@ pub fn InvoiceView() -> Element {
         let lines_repo = lines_repo.clone();
         let clients_repo = clients_repo.clone();
         let payments_repo = payments_repo.clone();
+        let recurring_repo = recurring_repo.clone();
+        let recurring_lines_repo = recurring_lines_repo.clone();
         spawn_local(async move {
             while rx.next().await.is_some() {
                 let page = || Page {
@@ -92,6 +106,12 @@ pub fn InvoiceView() -> Element {
                 if let Ok(list) = payments_repo.list(page(), None, None).await {
                     payments.set(list.items);
                 }
+                if let Ok(list) = recurring_repo.list(page(), None, None).await {
+                    recurring.set(list.items);
+                }
+                if let Ok(list) = recurring_lines_repo.list(page(), None, None).await {
+                    recurring_lines.set(list.items);
+                }
             }
         });
         tx
@@ -103,6 +123,8 @@ pub fn InvoiceView() -> Element {
         let lines_repo = lines_repo.clone();
         let clients_repo = clients_repo.clone();
         let payments_repo = payments_repo.clone();
+        let recurring_repo = recurring_repo.clone();
+        let recurring_lines_repo = recurring_lines_repo.clone();
         let projects = projects_seed.clone();
         let tx = refresh_tx.clone();
         let mut unbilled_signal = unbilled_time_entries;
@@ -111,10 +133,13 @@ pub fn InvoiceView() -> Element {
             let lines_repo = lines_repo.clone();
             let clients_repo = clients_repo.clone();
             let payments_repo = payments_repo.clone();
+            let recurring_repo = recurring_repo.clone();
+            let recurring_lines_repo = recurring_lines_repo.clone();
             let projects_for_entries = projects.clone();
             let tx = tx.clone();
             spawn_local(async move {
                 seed_all(&invoices_repo, &lines_repo, &clients_repo, &payments_repo).await;
+                seed_recurring(&recurring_repo, &recurring_lines_repo, &clients_repo).await;
                 let _ = tx.unbounded_send(());
             });
             // Local unbilled-entries pool for the Bridge dialog.
@@ -532,28 +557,342 @@ pub fn InvoiceView() -> Element {
                 let total_paid = prior_paid + input.amount_cents;
                 if let Some(inv) = invoices_vec_for_pay.iter().find(|i| i.id == invoice_id) {
                     let balance = inv.total_cents - total_paid;
-                    let next_status = if balance <= 0 {
-                        "paid"
-                    } else if total_paid > 0 {
-                        "partial"
-                    } else {
-                        inv.status.as_str()
-                    };
+                    let current = inv.status.as_str();
+                    // Auto-status transitions. Idempotent: never undo
+                    // a manual "paid" or "cancelled".
+                    let mut next_status: Option<String> = None;
+                    let mut set_paid_at: Option<Option<chrono::DateTime<Utc>>> = None;
+
+                    if balance < 0 {
+                        // Overpayment — log and leave status alone.
+                        tracing::warn!(
+                            invoice = %invoice_id,
+                            balance,
+                            "payment results in negative balance (overpayment); leaving status unchanged"
+                        );
+                    } else if balance == 0 {
+                        if matches!(current, "sent" | "viewed" | "partial" | "overdue") {
+                            tracing::info!(
+                                invoice = %invoice_id,
+                                from = current,
+                                to = "paid",
+                                "auto-status: balance == 0 → paid"
+                            );
+                            next_status = Some("paid".into());
+                            set_paid_at = Some(Some(Utc::now()));
+                        }
+                    } else if balance < inv.total_cents {
+                        // Partial: 0 < balance < total.
+                        if matches!(current, "sent" | "viewed" | "overdue") {
+                            tracing::info!(
+                                invoice = %invoice_id,
+                                from = current,
+                                to = "partial",
+                                "auto-status: 0 < balance < total → partial"
+                            );
+                            next_status = Some("partial".into());
+                        }
+                    }
+
                     let _ = invoices_repo
                         .update(
                             invoice_id,
                             InvoiceUpdate {
                                 balance_cents: Some(balance.max(0)),
-                                status: Some(next_status.to_string()),
-                                paid_at: if balance <= 0 {
-                                    Some(Some(Utc::now()))
-                                } else {
-                                    Default::default()
-                                },
+                                status: next_status,
+                                paid_at: set_paid_at,
                                 ..Default::default()
                             },
                         )
                         .await;
+                }
+                // FUTURE: payments are append-only in v1. When a
+                // payment-delete path lands, mirror this same
+                // balance/status reconciliation: balance > 0 from a
+                // previously-paid invoice should flip "paid" back to
+                // "partial" (or "sent" if the new balance == total).
+                let _ = tx.unbounded_send(());
+            });
+        }
+    };
+
+    // ── Recurring derived state + handlers ────────────────────────
+    let recurring_vec = recurring.read().clone();
+    let recurring_lines_vec = recurring_lines.read().clone();
+    let mut recurring_lines_by_id: HashMap<Uuid, Vec<RecurringInvoiceLine>> = HashMap::new();
+    for l in &recurring_lines_vec {
+        recurring_lines_by_id
+            .entry(l.recurring_invoice_id)
+            .or_default()
+            .push(l.clone());
+    }
+    for v in recurring_lines_by_id.values_mut() {
+        v.sort_by_key(|l| l.sort_index);
+    }
+
+    let recurring_draft = selected_recurring.read().and_then(|id| {
+        recurring_vec.iter().find(|r| r.id == id).map(|r| {
+            let lines = recurring_lines_by_id
+                .get(&r.id)
+                .cloned()
+                .unwrap_or_default();
+            RecurringInvoiceDraft {
+                recurring: r.clone(),
+                lines,
+            }
+        })
+    });
+    let recurring_editor_open = recurring_draft.is_some();
+
+    let on_recurring_new = {
+        let recurring_repo = recurring_repo.clone();
+        let tx = refresh_tx.clone();
+        let clients_for_default = clients_vec.clone();
+        let mut selected_recurring = selected_recurring;
+        move |_: ()| {
+            let recurring_repo = recurring_repo.clone();
+            let tx = tx.clone();
+            let default_client_id = clients_for_default
+                .first()
+                .map(|c| c.id)
+                .unwrap_or(Uuid::nil());
+            spawn_local(async move {
+                let payload = RecurringInvoiceCreate {
+                    client_id: default_client_id,
+                    status: "active".into(),
+                    frequency: "monthly".into(),
+                    next_issue_date: Utc::now() + Duration::days(7),
+                    end_date: None,
+                    last_generated_at: None,
+                    generated_count: 0,
+                    currency: "USD".into(),
+                    subtotal_cents: 0,
+                    tax_rate_bps: 0,
+                    tax_inclusive: false,
+                    discount_cents: 0,
+                    notes: None,
+                    tags: Vec::new(),
+                };
+                if let Ok(r) = recurring_repo.create(payload).await {
+                    selected_recurring.set(Some(r.id));
+                }
+                let _ = tx.unbounded_send(());
+            });
+        }
+    };
+
+    let on_recurring_open = {
+        let mut selected_recurring = selected_recurring;
+        move |id: Uuid| selected_recurring.set(Some(id))
+    };
+    let on_recurring_close = {
+        let mut selected_recurring = selected_recurring;
+        move |_| selected_recurring.set(None)
+    };
+
+    let on_recurring_toggle_status = {
+        let recurring_repo = recurring_repo.clone();
+        let recurring_vec = recurring_vec.clone();
+        let tx = refresh_tx.clone();
+        move |id: Uuid| {
+            let recurring_repo = recurring_repo.clone();
+            let recurring_vec = recurring_vec.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let cur = recurring_vec
+                    .iter()
+                    .find(|r| r.id == id)
+                    .map(|r| r.status.clone())
+                    .unwrap_or_else(|| "active".into());
+                let next = if cur == "paused" { "active" } else { "paused" };
+                let _ = recurring_repo
+                    .update(
+                        id,
+                        RecurringInvoiceUpdate {
+                            status: Some(next.into()),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                let _ = tx.unbounded_send(());
+            });
+        }
+    };
+
+    let on_recurring_delete = {
+        let recurring_repo = recurring_repo.clone();
+        let tx = refresh_tx.clone();
+        move |id: Uuid| {
+            let recurring_repo = recurring_repo.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let _ = recurring_repo.delete(id).await;
+                let _ = tx.unbounded_send(());
+            });
+        }
+    };
+
+    // Generate-now: mirror `InvoiceService::generate_from_recurring`
+    // logic in the route so the web build doesn't need a server hop.
+    let on_recurring_generate = {
+        let recurring_repo = recurring_repo.clone();
+        let recurring_lines_repo = recurring_lines_repo.clone();
+        let invoices_repo = invoices_repo.clone();
+        let lines_repo = lines_repo.clone();
+        let recurring_vec_g = recurring_vec.clone();
+        let recurring_lines_by_id_g = recurring_lines_by_id.clone();
+        let tx = refresh_tx.clone();
+        move |id: Uuid| {
+            let recurring_repo = recurring_repo.clone();
+            let _ = &recurring_lines_repo;
+            let invoices_repo = invoices_repo.clone();
+            let lines_repo = lines_repo.clone();
+            let recurring_vec_g = recurring_vec_g.clone();
+            let recurring_lines_by_id_g = recurring_lines_by_id_g.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let Some(tmpl) = recurring_vec_g.iter().find(|r| r.id == id).cloned() else {
+                    return;
+                };
+                let tmpl_lines = recurring_lines_by_id_g
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_default();
+                let subtotal: i64 = tmpl_lines.iter().map(|l| l.amount_cents).sum();
+                let discounted = (subtotal - tmpl.discount_cents).max(0);
+                let (tax, total) = if tmpl.tax_inclusive {
+                    let t = discounted * tmpl.tax_rate_bps as i64
+                        / (10_000 + tmpl.tax_rate_bps as i64).max(1);
+                    (t, discounted)
+                } else {
+                    let t = discounted * tmpl.tax_rate_bps as i64 / 10_000;
+                    (t, discounted + t)
+                };
+                let issue = tmpl.next_issue_date;
+                let number = format!(
+                    "INV-R{}-{}",
+                    tmpl.generated_count + 1,
+                    issue.format("%Y%m%d")
+                );
+                let new_inv = invoices_repo
+                    .create(InvoiceCreate {
+                        number,
+                        client_id: tmpl.client_id,
+                        status: "draft".into(),
+                        issue_date: issue,
+                        due_date: Some(issue + Duration::days(30)),
+                        paid_at: None,
+                        currency: tmpl.currency.clone(),
+                        subtotal_cents: subtotal,
+                        discount_cents: tmpl.discount_cents,
+                        tax_rate_bps: tmpl.tax_rate_bps,
+                        tax_inclusive: tmpl.tax_inclusive,
+                        tax_cents: tax,
+                        total_cents: total,
+                        balance_cents: total,
+                        notes: tmpl.notes.clone(),
+                        tags: {
+                            let mut t = tmpl.tags.clone();
+                            t.push("from-recurring".into());
+                            t
+                        },
+                    })
+                    .await
+                    .ok();
+                if let Some(inv) = new_inv {
+                    for l in &tmpl_lines {
+                        let _ = lines_repo
+                            .create(InvoiceLineCreate {
+                                invoice_id: inv.id,
+                                project_id: l.project_id,
+                                time_entry_id: None,
+                                description: l.description.clone(),
+                                quantity_thousandths: l.quantity_thousandths,
+                                unit_price_cents: l.unit_price_cents,
+                                amount_cents: l.amount_cents,
+                                tax_rate_bps: None,
+                                sort_index: l.sort_index,
+                            })
+                            .await;
+                    }
+                }
+                let next = next_date_after(issue, &tmpl.frequency);
+                let _ = recurring_repo
+                    .update(
+                        id,
+                        RecurringInvoiceUpdate {
+                            next_issue_date: Some(next),
+                            last_generated_at: Some(Some(Utc::now())),
+                            generated_count: Some(tmpl.generated_count + 1),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                let _ = tx.unbounded_send(());
+            });
+        }
+    };
+
+    // Recurring editor on_change: write template + diff lines.
+    let on_recurring_change = {
+        let recurring_repo = recurring_repo.clone();
+        let recurring_lines_repo = recurring_lines_repo.clone();
+        let recurring_lines_by_id_ec = recurring_lines_by_id.clone();
+        let tx = refresh_tx.clone();
+        move |draft: RecurringInvoiceDraft| {
+            let r = draft.recurring.clone();
+            let new_lines = draft.lines.clone();
+            let recurring_repo = recurring_repo.clone();
+            let recurring_lines_repo = recurring_lines_repo.clone();
+            let old_lines = recurring_lines_by_id_ec
+                .get(&r.id)
+                .cloned()
+                .unwrap_or_default();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let _ = recurring_repo
+                    .update(
+                        r.id,
+                        RecurringInvoiceUpdate {
+                            client_id: Some(r.client_id),
+                            status: Some(r.status.clone()),
+                            frequency: Some(r.frequency.clone()),
+                            next_issue_date: Some(r.next_issue_date),
+                            end_date: Some(r.end_date),
+                            currency: Some(r.currency.clone()),
+                            subtotal_cents: Some(r.subtotal_cents),
+                            tax_rate_bps: Some(r.tax_rate_bps),
+                            tax_inclusive: Some(r.tax_inclusive),
+                            discount_cents: Some(r.discount_cents),
+                            notes: Some(r.notes.clone()),
+                            tags: Some(r.tags.clone()),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+                let new_ids: std::collections::HashSet<Uuid> =
+                    new_lines.iter().map(|l| l.id).collect();
+                for old in &old_lines {
+                    if !new_ids.contains(&old.id) {
+                        let _ = recurring_lines_repo.delete(old.id).await;
+                    }
+                }
+                let old_ids: std::collections::HashSet<Uuid> =
+                    old_lines.iter().map(|l| l.id).collect();
+                for l in &new_lines {
+                    if !old_ids.contains(&l.id) {
+                        let _ = recurring_lines_repo
+                            .create(RecurringInvoiceLineCreate {
+                                recurring_invoice_id: r.id,
+                                project_id: l.project_id,
+                                description: l.description.clone(),
+                                quantity_thousandths: l.quantity_thousandths,
+                                unit_price_cents: l.unit_price_cents,
+                                amount_cents: l.amount_cents,
+                                sort_index: l.sort_index,
+                            })
+                            .await;
+                    }
                 }
                 let _ = tx.unbounded_send(());
             });
@@ -575,21 +914,82 @@ pub fn InvoiceView() -> Element {
     rsx! {
         div { class: "mx-auto flex w-full max-w-7xl flex-col gap-4 p-4 lg:p-8",
 
-            InvoiceNinjaDashboard {
-                invoices: invoices_vec.clone(),
-                lines_by_invoice: lines_by_invoice.clone(),
-                clients: clients_vec.clone(),
-                payments_by_invoice: payments_by_invoice.clone(),
-                on_open,
-                on_new,
-                on_open_bridge: {
-                    let mut bridge_open = bridge_open;
-                    move |_| bridge_open.set(true)
-                },
-                on_duplicate,
-                on_delete,
-                on_mark_sent,
-                on_record_payment: on_record_payment_request,
+            Tabs {
+                value: Some(current_tab.read().clone()),
+                on_change: move |v: String| current_tab.set(v),
+                TabList {
+                    TabTrigger { value: "invoices".to_string(), index: 0usize, "Invoices" }
+                    TabTrigger { value: "recurring".to_string(), index: 1usize, "Recurring" }
+                    TabTrigger { value: "clients".to_string(), index: 2usize, "Clients" }
+                }
+                TabContent { value: "invoices".to_string(), index: 0usize,
+                    InvoiceNinjaDashboard {
+                        invoices: invoices_vec.clone(),
+                        lines_by_invoice: lines_by_invoice.clone(),
+                        clients: clients_vec.clone(),
+                        payments_by_invoice: payments_by_invoice.clone(),
+                        on_open,
+                        on_new,
+                        on_open_bridge: {
+                            let mut bridge_open = bridge_open;
+                            move |_| bridge_open.set(true)
+                        },
+                        on_duplicate,
+                        on_delete,
+                        on_mark_sent,
+                        on_record_payment: on_record_payment_request,
+                    }
+                }
+                TabContent { value: "recurring".to_string(), index: 1usize,
+                    RecurringInvoiceList {
+                        items: recurring_vec.clone(),
+                        clients: clients_vec.clone(),
+                        on_open: on_recurring_open,
+                        on_toggle_status: on_recurring_toggle_status,
+                        on_generate_now: on_recurring_generate,
+                        on_delete: on_recurring_delete,
+                        on_new: on_recurring_new,
+                    }
+                }
+                TabContent { value: "clients".to_string(), index: 2usize,
+                    VStack { class: "gap-2",
+                        Heading { level: HeadingLevel::H2, "Clients" }
+                        if clients_vec.is_empty() {
+                            Text { variant: TextVariant::Muted, "No clients yet." }
+                        }
+                        for c in clients_vec.iter().cloned() {
+                            Card {
+                                CardContent { class: "flex flex-col gap-1 p-3",
+                                    div { class: "font-medium", "{c.name}" }
+                                    if let Some(e) = c.email.as_deref() {
+                                        Text { variant: TextVariant::Muted, "{e}" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Recurring editor sheet
+            Sheet {
+                open: recurring_editor_open,
+                side: SheetSide::Right,
+                on_close: on_recurring_close,
+                class: "sm:max-w-[60rem] w-[60rem] flex flex-col h-full overflow-auto".to_string(),
+                if let Some(rdraft) = recurring_draft.clone() {
+                    SheetHeader {
+                        SheetTitle { "Recurring template" }
+                    }
+                    div { class: "flex-1 overflow-auto p-1",
+                        RecurringInvoiceEditor {
+                            draft: rdraft,
+                            clients: clients_vec.clone(),
+                            on_change: on_recurring_change,
+                            on_save: move |_| {},
+                        }
+                    }
+                }
             }
 
             Sheet {
@@ -1060,6 +1460,84 @@ async fn seed_all(
                     method: method.to_string(),
                     reference: Some(format!("seed-{}", idx)),
                     notes: None,
+                })
+                .await;
+        }
+    }
+}
+
+/// Seed 3 sample recurring templates with varied frequencies. Skips if any
+/// recurring template already exists in the doc.
+async fn seed_recurring(
+    recurring: &RecurringInvoiceRepoLoro,
+    recurring_lines: &RecurringInvoiceLineRepoLoro,
+    clients_r: &ClientRepoLoro,
+) {
+    if let Ok(p) = recurring.list(Page { index: 0, size: 1 }, None, None).await {
+        if !p.items.is_empty() {
+            return;
+        }
+    }
+    // Find some clients to attach to. If none, bail; the seed_all
+    // helper already runs first and populates ~4 clients.
+    let listed = clients_r
+        .list(
+            Page {
+                index: 0,
+                size: 100,
+            },
+            None,
+            None,
+        )
+        .await
+        .map(|p| p.items)
+        .unwrap_or_default();
+    if listed.is_empty() {
+        return;
+    }
+    let now = Utc::now();
+    let specs: &[(&str, i64, i64, i32, i64)] = &[
+        // (frequency, days_until_next, unit_price_cents per line, tax_bps, qty_thou)
+        ("monthly", 5, 250_000, 0, 1000),
+        ("weekly", 2, 15_000, 825, 8_000),
+        ("quarterly", 20, 750_000, 0, 1000),
+    ];
+    for (i, (freq, days_off, price, tax_bps, qty_thou)) in specs.iter().enumerate() {
+        let client_id = listed[i % listed.len()].id;
+        let amount = qty_thou.saturating_mul(*price) / 1000;
+        if let Ok(r) = recurring
+            .create(RecurringInvoiceCreate {
+                client_id,
+                status: "active".into(),
+                frequency: (*freq).into(),
+                next_issue_date: now + Duration::days(*days_off),
+                end_date: None,
+                last_generated_at: None,
+                generated_count: 0,
+                currency: "USD".into(),
+                subtotal_cents: amount,
+                tax_rate_bps: *tax_bps,
+                tax_inclusive: false,
+                discount_cents: 0,
+                notes: Some(format!("Auto-generated {} retainer.", freq)),
+                tags: vec!["seeded".into(), "recurring".into()],
+            })
+            .await
+        {
+            let desc = match *freq {
+                "weekly" => "Hourly retainer (weekly)",
+                "quarterly" => "Quarterly engagement",
+                _ => "Monthly retainer",
+            };
+            let _ = recurring_lines
+                .create(RecurringInvoiceLineCreate {
+                    recurring_invoice_id: r.id,
+                    project_id: None,
+                    description: desc.into(),
+                    quantity_thousandths: *qty_thou,
+                    unit_price_cents: *price,
+                    amount_cents: amount,
+                    sort_index: 0,
                 })
                 .await;
         }

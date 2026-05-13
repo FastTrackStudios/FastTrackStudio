@@ -51,6 +51,46 @@ pub const INVOICE_STATUSES: &[&str] = &[
 
 pub const PAYMENT_METHODS: &[&str] = &["stripe", "cash", "check", "bank-transfer", "other"];
 
+pub const RECURRING_INVOICE_STATUSES: &[&str] = &["active", "paused", "ended"];
+pub const RECURRING_INVOICE_FREQUENCIES: &[&str] =
+    &["weekly", "biweekly", "monthly", "quarterly", "yearly"];
+
+/// Advance `d` by one recurrence step of `freq`. Unknown frequencies
+/// fall through to a monthly step.
+pub fn next_date_after(d: DateTime<Utc>, freq: &str) -> DateTime<Utc> {
+    use chrono::Duration;
+    match freq {
+        "weekly" => d + Duration::weeks(1),
+        "biweekly" => d + Duration::weeks(2),
+        "quarterly" => add_months(d, 3),
+        "yearly" => add_months(d, 12),
+        _ => add_months(d, 1),
+    }
+}
+
+fn add_months(d: DateTime<Utc>, months: u32) -> DateTime<Utc> {
+    use chrono::{Datelike, TimeZone, Timelike};
+    let total = d.year() as i64 * 12 + (d.month() as i64 - 1) + months as i64;
+    let year = total.div_euclid(12) as i32;
+    let month = (total.rem_euclid(12) + 1) as u32;
+    let day = d.day().min(last_day_of_month(year, month));
+    Utc.with_ymd_and_hms(year, month, day, d.hour(), d.minute(), d.second())
+        .single()
+        .unwrap_or(d)
+}
+
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    use chrono::{Datelike, NaiveDate};
+    let (ny, nm) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let first_next = NaiveDate::from_ymd_opt(ny, nm, 1).unwrap();
+    let last = first_next.pred_opt().unwrap();
+    last.day()
+}
+
 // ── Invoice ───────────────────────────────────────────────────────────
 
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
@@ -303,6 +343,112 @@ pub struct Payment {
     pub updated_at: DateTime<Utc>,
 }
 
+// ── RecurringInvoice ──────────────────────────────────────────────────
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "recurring_invoices", repo)]
+pub struct RecurringInvoice {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable)]
+    pub client_id: Uuid,
+
+    /// "active" | "paused" | "ended" — see [`RECURRING_INVOICE_STATUSES`].
+    #[architect(filterable)]
+    pub status: String,
+
+    /// "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly" —
+    /// see [`RECURRING_INVOICE_FREQUENCIES`].
+    #[architect(filterable)]
+    pub frequency: String,
+
+    #[architect(sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FutureDateTime"))]
+    pub next_issue_date: DateTime<Utc>,
+
+    /// `None` = forever; otherwise generation stops once
+    /// `next_issue_date > end_date`.
+    pub end_date: Option<DateTime<Utc>>,
+
+    pub last_generated_at: Option<DateTime<Utc>>,
+
+    /// Number of invoices issued so far from this template.
+    pub generated_count: i64,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::Currency"))]
+    pub currency: String,
+
+    /// Template totals — copied to each generated invoice.
+    #[cfg_attr(feature = "fake", dummy(faker = "5_000i64..2_000_000"))]
+    pub subtotal_cents: i64,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "0i32..3000"))]
+    pub tax_rate_bps: i32,
+
+    pub tax_inclusive: bool,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "0i64..10_000"))]
+    pub discount_cents: i64,
+
+    #[architect(fulltext)]
+    #[cfg_attr(
+        feature = "fake",
+        dummy(faker = "fake::faker::lorem::en::Sentence(3..10)")
+    )]
+    pub notes: Option<String>,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FinanceTags"))]
+    pub tags: Vec<String>,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
+// ── RecurringInvoiceLine ──────────────────────────────────────────────
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "recurring_invoice_lines", repo)]
+pub struct RecurringInvoiceLine {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable, sortable)]
+    pub recurring_invoice_id: Uuid,
+
+    #[architect(filterable)]
+    pub project_id: Option<Uuid>,
+
+    #[architect(fulltext)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::LineDescription"))]
+    pub description: String,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "1_000i64..50_000"))]
+    pub quantity_thousandths: i64,
+
+    #[cfg_attr(feature = "fake", dummy(faker = "1_000i64..50_000"))]
+    pub unit_price_cents: i64,
+
+    #[architect(sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "1_000i64..200_000"))]
+    pub amount_cents: i64,
+
+    #[architect(sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "0i64..20"))]
+    pub sort_index: i64,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
 // ── InvoiceService ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, ::facet::Facet, thiserror::Error)]
@@ -345,6 +491,16 @@ pub trait InvoiceService {
         invoice_id: Uuid,
         payment: PaymentInput,
     ) -> Result<Payment, InvoiceServiceError>;
+
+    /// Generate a new `Invoice` (plus lines) from a `RecurringInvoice`
+    /// template. Advances `next_issue_date` by one period, increments
+    /// `generated_count`, and stamps `last_generated_at`. Returns the
+    /// freshly created invoice. Stops (returns `InvalidInput`) when
+    /// `next_issue_date > end_date`.
+    async fn generate_from_recurring(
+        &self,
+        recurring_id: Uuid,
+    ) -> Result<Invoice, InvoiceServiceError>;
 }
 
 // ── Fake-data fakers ──────────────────────────────────────────────────

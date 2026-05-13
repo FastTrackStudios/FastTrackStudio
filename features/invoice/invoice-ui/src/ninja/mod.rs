@@ -8,6 +8,7 @@ pub mod editor;
 pub mod list;
 pub mod payment;
 pub mod preview;
+pub mod recurring;
 pub mod status;
 
 pub use bridge::{
@@ -26,4 +27,8 @@ pub use editor::{InvoiceDraft, InvoiceEditor, InvoiceEditorProps};
 pub use list::{InvoiceListFilter, InvoiceListView, InvoiceListViewProps, apply_invoice_filter};
 pub use payment::{PaymentRecordDialog, PaymentRecordDialogProps};
 pub use preview::{InvoicePreview, InvoicePreviewProps};
+pub use recurring::{
+    RecurringInvoiceDraft, RecurringInvoiceEditor, RecurringInvoiceEditorProps,
+    RecurringInvoiceList, RecurringInvoiceListProps,
+};
 pub use status::{InvoiceStatusPipeline, InvoiceStatusPipelineProps};

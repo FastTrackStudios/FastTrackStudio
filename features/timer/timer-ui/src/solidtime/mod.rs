@@ -4,6 +4,8 @@ pub mod bar;
 pub mod common;
 pub mod dashboard;
 pub mod filter;
+pub mod idle;
+pub mod idle_detector;
 pub mod manual;
 pub mod report;
 pub mod stats;
@@ -18,6 +20,8 @@ pub use dashboard::{SolidtimeDashboard, SolidtimeDashboardProps};
 pub use filter::{
     TimerBillableFilter, TimerFilterBar, TimerFilterBarProps, TimerFilterState, apply_filter,
 };
+pub use idle::{IdleWindow, TimerIdleDialog, TimerIdleDialogProps};
+pub use idle_detector::use_idle_detector;
 pub use manual::{ManualTimeEntryDialog, ManualTimeEntryDialogProps};
 pub use report::{TimerWeekReport, TimerWeekReportProps};
 pub use stats::{TimerSummaryStats, TimerSummaryStatsProps};

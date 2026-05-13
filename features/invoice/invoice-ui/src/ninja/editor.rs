@@ -37,6 +37,17 @@ pub struct InvoiceEditorProps {
     pub show_client_create: bool,
     #[props(default)]
     pub on_client_create_open: Option<EventHandler<bool>>,
+    /// Optional handler for "Download PDF".
+    ///
+    /// **Web build:** the route wires this to open `InvoicePreview` in
+    /// a new window and trigger `window.print()` — printpdf doesn't
+    /// compile for wasm32.
+    ///
+    /// **Native build:** the route wires this to
+    /// `invoice::pdf::render_invoice_pdf` and writes the resulting
+    /// bytes to disk.
+    #[props(default)]
+    pub on_download_pdf: Option<EventHandler<()>>,
 }
 
 #[component]
@@ -298,6 +309,13 @@ pub fn InvoiceEditor(props: InvoiceEditorProps) -> Element {
                                         on_click: move |_| props.on_save_draft.call(()),
                                         Save { size: 14 }
                                         " Save"
+                                    }
+                                }
+                                if let Some(handler) = props.on_download_pdf.as_ref().cloned() {
+                                    Button {
+                                        variant: ButtonVariant::Outline,
+                                        on_click: move |_| handler.call(()),
+                                        " Download PDF"
                                     }
                                 }
                                 if matches!(status.as_str(), "sent" | "viewed" | "partial" | "overdue") {

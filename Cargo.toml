@@ -495,6 +495,10 @@ moire-wire        = { git = "https://git.starcommand.live/codywright/moire", rev
 [workspace.dependencies.architect]
 path = "../architect/macros/architect"
 
+[workspace.dependencies.printpdf]
+version = "0.7"
+default-features = false
+
 [workspace.dependencies.fake]
 version = "4"
 features = ["derive", "uuid", "chrono"]
