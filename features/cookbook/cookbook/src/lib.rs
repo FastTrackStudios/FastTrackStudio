@@ -8,7 +8,10 @@ pub use cookbook_proto::*;
 /// to the vox dispatcher.
 #[cfg(feature = "server")]
 pub mod server {
-    pub use cookbook_crdt::{CookbookEntity, CookbookRepoLoro};
+    pub use cookbook_crdt::{
+        CookbookEntity, CookbookRepoLoro, FoodProductEntity, FoodProductRepoLoro, PantryItemEntity,
+        PantryItemRepoLoro, ShoppingListItemEntity, ShoppingListItemRepoLoro,
+    };
     pub use cookbook_db::{CookbookMigrator, SeaOrmPersistence};
     pub use crdt::{CrdtDoc, Persistence};
 }

@@ -1,19 +1,164 @@
 //! Project feature route. Holds a local `CrdtDoc` + `ProjectRepoLoro`,
 //! syncs over WebSocket, drives `project-ui` dumb components.
+//!
+//! v1 layout:
+//!   1. `ProjectHeaderCard` banner for the first loaded project.
+//!   2. `TaskListView` / `TaskKanbanBoard` switcher driven by the
+//!      header's view toggle.
+//!   3. `TaskDetailSheet` slide-over for the selected task.
+//!   4. Cmd/Ctrl+K opens `TaskCommandPalette`.
+//!
+//! FUTURE: real Task wiring requires a per-project `TaskRepoLoro` —
+//! out of scope for this pass. We populate an in-memory `Vec<Task>` of
+//! 12 sample tasks scoped to the first project so the UI is fully
+//! exercised end-to-end (rendering, edits, palette, board interaction).
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use architect::Page;
+use chrono::{Duration, Utc};
 use dioxus::prelude::*;
+use fts_ui::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
 use project_crdt::{CrdtDoc, ProjectRepoLoro};
-use project_proto::{Project, ProjectCreate, ProjectRepo};
-use project_ui::{ProjectCreateForm, ProjectList};
+use project_proto::{Project, ProjectCreate, ProjectRepo, Task, TaskUpdate};
+use project_ui::{
+    BulkAction, PaletteIntent, ProjectDashboard, ProjectHeaderCard, ProjectOverviewGrid,
+    ProjectTab, TaskCommandPalette, TaskDetailSheet, TaskGroupBy, TaskKanbanBoard, TaskListView,
+    TaskStats, TaskView,
+};
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::sync;
+use crate::theming::{ProjectThemeScope, use_project_theme_overrides};
+
+fn fake_tasks_for(project: &Project) -> Vec<Task> {
+    let now = Utc::now();
+    let statuses = [
+        "todo",
+        "in-progress",
+        "in-review",
+        "blocked",
+        "done",
+        "in-progress",
+        "todo",
+        "done",
+        "in-progress",
+        "todo",
+        "in-review",
+        "todo",
+    ];
+    let priorities = [
+        "urgent", "high", "medium", "low", "none", "high", "medium", "low", "urgent", "medium",
+        "low", "high",
+    ];
+    let titles = [
+        "Wire up the new dashboard route",
+        "Audit feature flags & remove stale ones",
+        "Refactor the queue worker",
+        "Investigate flaky CI run",
+        "Ship customer onboarding emails",
+        "Migrate users table to new schema",
+        "Design the empty-state illustrations",
+        "Cut the v1.4 release notes",
+        "Add retries to the webhook delivery",
+        "Performance pass on the search page",
+        "Document the new payments flow",
+        "Triage open issues from the weekend",
+    ];
+    let assignees = ["Ada", "Linus", "Grace", "Margaret", "Alan", "Barbara"];
+    let tag_pools: [&[&str]; 4] = [
+        &["frontend", "feature"],
+        &["backend", "tech-debt"],
+        &["docs"],
+        &["bug", "urgent"],
+    ];
+
+    titles
+        .iter()
+        .enumerate()
+        .map(|(i, title)| Task {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            parent_id: None,
+            cycle_id: None,
+            title: (*title).to_string(),
+            description: Some(format!(
+                "Sample task #{} on {}. Replace with real Task CRDT wiring.",
+                i + 1,
+                project.name
+            )),
+            status: statuses[i % statuses.len()].to_string(),
+            priority: priorities[i % priorities.len()].to_string(),
+            assignee: Some(assignees[i % assignees.len()].to_string()),
+            estimate_minutes: Some(((i as i64) % 8 + 1) * 30),
+            due_date: Some(now + Duration::days((i as i64) - 4)),
+            tags: tag_pools[i % tag_pools.len()]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            sort_index: i as i64,
+            completed_at: None,
+            created_at: now - Duration::hours((24 - i) as i64),
+            updated_at: now - Duration::minutes((i as i64) * 7),
+        })
+        .collect()
+}
+
+fn task_stats(tasks: &[Task]) -> TaskStats {
+    let total = tasks.len() as u32;
+    let mut done = 0u32;
+    let mut in_progress = 0u32;
+    let mut blocked = 0u32;
+    for t in tasks {
+        match t.status.as_str() {
+            "done" | "completed" => done += 1,
+            "in-progress" | "in-review" => in_progress += 1,
+            "blocked" => blocked += 1,
+            _ => {}
+        }
+    }
+    TaskStats {
+        total,
+        done,
+        in_progress,
+        blocked,
+    }
+}
+
+fn apply_patch(task: &mut Task, patch: &TaskUpdate) {
+    if let Some(v) = patch.title.clone() {
+        task.title = v;
+    }
+    if let Some(v) = patch.description.clone() {
+        task.description = v;
+    }
+    if let Some(v) = patch.status.clone() {
+        task.status = v;
+    }
+    if let Some(v) = patch.priority.clone() {
+        task.priority = v;
+    }
+    if let Some(v) = patch.assignee.clone() {
+        task.assignee = v;
+    }
+    if let Some(v) = patch.estimate_minutes {
+        task.estimate_minutes = v;
+    }
+    if let Some(v) = patch.due_date {
+        task.due_date = v;
+    }
+    if let Some(v) = patch.tags.clone() {
+        task.tags = v;
+    }
+    if let Some(v) = patch.cycle_id {
+        task.cycle_id = v;
+    }
+    task.updated_at = Utc::now();
+}
 
 #[component]
 pub fn ProjectView() -> Element {
@@ -25,6 +170,9 @@ pub fn ProjectView() -> Element {
 
     let mut items = use_signal::<Vec<Project>>(Vec::new);
     let mut status_msg = use_signal(|| "starting…".to_string());
+
+    // In-memory tasks. Seeded lazily on first project load (see effect below).
+    let mut tasks = use_signal::<Vec<Task>>(Vec::new);
 
     let refresh_tx: mpsc::UnboundedSender<()> = use_hook(|| {
         let (tx, mut rx) = mpsc::unbounded::<()>();
@@ -71,7 +219,26 @@ pub fn ProjectView() -> Element {
         }
     });
 
-    let on_submit = {
+    // Seed sample tasks once the first project lands.
+    use_effect(move || {
+        let cur_items = items.read().clone();
+        if tasks.read().is_empty() {
+            if let Some(p) = cur_items.first() {
+                tasks.set(fake_tasks_for(p));
+            }
+        }
+    });
+
+    // ── Page-level UI state ───────────────────────────────────────────
+    let mut active_tab = use_signal(|| ProjectTab::Tasks);
+    let mut active_view = use_signal(|| TaskView::List);
+    let mut selected_task = use_signal::<Option<Uuid>>(|| None);
+    let mut selected_set = use_signal::<HashSet<Uuid>>(HashSet::new);
+    let mut palette_open = use_signal(|| false);
+    let mut shell_tab = use_signal(|| "pm".to_string());
+
+    // ── Callbacks: project ────────────────────────────────────────────
+    let on_create_project = {
         let repo = repo.clone();
         let tx = refresh_tx.clone();
         move |payload: ProjectCreate| {
@@ -83,8 +250,7 @@ pub fn ProjectView() -> Element {
             });
         }
     };
-
-    let on_delete = {
+    let on_delete_project = {
         let repo = repo.clone();
         let tx = refresh_tx.clone();
         move |id: Uuid| {
@@ -97,13 +263,331 @@ pub fn ProjectView() -> Element {
         }
     };
 
-    rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Projects (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
+    // ── Callbacks: task (in-memory) ───────────────────────────────────
+    let mut patch_task = move |(id, patch): (Uuid, TaskUpdate)| {
+        let mut next = tasks.read().clone();
+        if let Some(t) = next.iter_mut().find(|t| t.id == id) {
+            apply_patch(t, &patch);
+        }
+        tasks.set(next);
+    };
 
-            ProjectCreateForm { on_submit }
-            ProjectList { items: items(), on_delete }
+    let mut delete_task = move |id: Uuid| {
+        let next: Vec<Task> = tasks
+            .read()
+            .iter()
+            .filter(|t| t.id != id)
+            .cloned()
+            .collect();
+        tasks.set(next);
+        if *selected_task.read() == Some(id) {
+            selected_task.set(None);
+        }
+    };
+
+    let mut duplicate_task = move |id: Uuid| {
+        let mut next = tasks.read().clone();
+        if let Some(orig) = next.iter().find(|t| t.id == id).cloned() {
+            let mut copy = orig.clone();
+            copy.id = Uuid::new_v4();
+            copy.title = format!("{} (copy)", copy.title);
+            copy.created_at = Utc::now();
+            copy.updated_at = Utc::now();
+            next.push(copy);
+            tasks.set(next);
+        }
+    };
+
+    let mut quick_create = move |(column_key, title): (String, String)| {
+        if title.trim().is_empty() {
+            return;
+        }
+        let project_id = items.read().first().map(|p| p.id).unwrap_or_else(Uuid::nil);
+        let now = Utc::now();
+        let mut next = tasks.read().clone();
+        let sort_index = next.len() as i64;
+        next.push(Task {
+            id: Uuid::new_v4(),
+            project_id,
+            parent_id: None,
+            cycle_id: None,
+            title,
+            description: None,
+            status: column_key,
+            priority: "none".into(),
+            assignee: None,
+            estimate_minutes: None,
+            due_date: None,
+            tags: vec![],
+            sort_index,
+            completed_at: None,
+            created_at: now,
+            updated_at: now,
+        });
+        tasks.set(next);
+    };
+
+    let mut bulk_action = move |action: BulkAction| {
+        let ids = selected_set.read().clone();
+        let mut next = tasks.read().clone();
+        match action {
+            BulkAction::Delete => {
+                next.retain(|t| !ids.contains(&t.id));
+            }
+            BulkAction::SetStatus(s) => {
+                for t in next.iter_mut() {
+                    if ids.contains(&t.id) {
+                        t.status = s.clone();
+                        t.updated_at = Utc::now();
+                    }
+                }
+            }
+            BulkAction::SetPriority(p) => {
+                for t in next.iter_mut() {
+                    if ids.contains(&t.id) {
+                        t.priority = p.clone();
+                        t.updated_at = Utc::now();
+                    }
+                }
+            }
+            BulkAction::SetAssignee(a) => {
+                for t in next.iter_mut() {
+                    if ids.contains(&t.id) {
+                        t.assignee = a.clone();
+                        t.updated_at = Utc::now();
+                    }
+                }
+            }
+        }
+        tasks.set(next);
+        selected_set.set(HashSet::new());
+    };
+
+    let on_run_palette = move |intent: PaletteIntent| {
+        palette_open.set(false);
+        match intent {
+            PaletteIntent::CreateTask => {
+                quick_create(("todo".into(), "Untitled task".into()));
+            }
+            PaletteIntent::SwitchView(v) => active_view.set(v),
+            PaletteIntent::OpenTask(id) => selected_task.set(Some(id)),
+            PaletteIntent::SetActiveTab(t) => active_tab.set(t),
+            PaletteIntent::FilterByPriority(_) | PaletteIntent::FilterByAssignee(_) => {
+                // Filter wiring lands with the real Task repo. For v1
+                // we just acknowledge the intent (no-op).
+            }
+        }
+    };
+
+    let cur_items = items();
+    let first_project = cur_items.first().cloned();
+
+    // Tasks for the overview grid: the in-memory `tasks` signal currently
+    // only seeds the first project. For other loaded projects we synthesise
+    // a per-project task list so the grid card has something real to show
+    // its "next up" row. FUTURE: replace with per-project repos.
+    let overview_tasks: Vec<Task> = {
+        let mut out: Vec<Task> = tasks.read().clone();
+        for p in cur_items.iter().skip(1) {
+            out.extend(fake_tasks_for(p));
+        }
+        out
+    };
+
+    // Resolve the currently-open task and its subtasks.
+    let selected_id = *selected_task.read();
+    let task_for_sheet =
+        selected_id.and_then(|id| tasks.read().iter().find(|t| t.id == id).cloned());
+    let subtasks: Vec<Task> = if let Some(id) = selected_id {
+        tasks
+            .read()
+            .iter()
+            .filter(|t| t.parent_id == Some(id))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let stats = task_stats(&tasks.read());
+
+    let available_assignees: Vec<String> = {
+        let mut v: Vec<String> = tasks
+            .read()
+            .iter()
+            .filter_map(|t| t.assignee.clone())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+
+    let column_order: Vec<String> = vec![
+        "todo".into(),
+        "in-progress".into(),
+        "in-review".into(),
+        "blocked".into(),
+        "done".into(),
+    ];
+
+    let key_handler = move |e: KeyboardEvent| {
+        let modifier = e.modifiers().ctrl() || e.modifiers().meta();
+        if modifier && e.key().to_string() == "k" {
+            palette_open.set(true);
+        }
+        if e.key() == Key::Escape {
+            palette_open.set(false);
+            selected_task.set(None);
+        }
+    };
+
+    let pm_create = on_create_project.clone();
+    let pm_delete = on_delete_project.clone();
+    let dashboard_create = on_create_project;
+    let dashboard_delete = on_delete_project;
+
+    // Project-local theme override. Lives in App-level context as a
+    // shared `Signal<HashMap<Uuid, String>>`; we read/write the entry
+    // keyed by the active project's id. FUTURE: persist to localStorage
+    // or to a project-scoped setting on the Project entity.
+    let mut project_overrides = use_project_theme_overrides();
+    let active_project_id: Option<Uuid> = first_project.as_ref().map(|p| p.id);
+    let current_project_theme: Option<String> =
+        active_project_id.and_then(|id| project_overrides.map.read().get(&id).cloned());
+
+    let on_theme_change = move |next: Option<String>| {
+        if let Some(id) = active_project_id {
+            let mut m = project_overrides.map.write();
+            match next {
+                Some(name) => {
+                    m.insert(id, name);
+                }
+                None => {
+                    m.remove(&id);
+                }
+            }
+        }
+    };
+
+    rsx! {
+        div {
+            class: "mx-auto flex max-w-7xl flex-col gap-4 p-6 lg:p-10 outline-none",
+            tabindex: "0",
+            onkeydown: key_handler,
+
+            Tabs {
+                value: Some(shell_tab.read().clone()),
+                on_change: move |v: String| shell_tab.set(v),
+                TabList {
+                    TabTrigger { value: "overview".to_string(), index: 0usize, "Overview" }
+                    TabTrigger { value: "pm".to_string(), index: 1usize, "Project" }
+                    TabTrigger { value: "dashboard".to_string(), index: 2usize, "Dashboard" }
+                }
+
+                TabContent { value: "overview".to_string(), index: 0usize,
+                    ProjectOverviewGrid {
+                        projects: cur_items.clone(),
+                        tasks: overview_tasks.clone(),
+                        on_open: move |_id: Uuid| {
+                            // FUTURE: route to /projects-live/<id>. For now,
+                            // dropping the user into the Project tab is the
+                            // closest behaviour without a per-project route.
+                            shell_tab.set("pm".into());
+                        },
+                    }
+                }
+
+                TabContent { value: "pm".to_string(), index: 1usize,
+                    if let Some(project) = first_project.clone() {
+                        ProjectThemeScope { project_id: project.id,
+                            ProjectHeaderCard {
+                                project: project.clone(),
+                                task_stats: stats,
+                                active_tab: *active_tab.read(),
+                                active_view: *active_view.read(),
+                                project_theme: current_project_theme.clone(),
+                                on_tab_change: move |t| active_tab.set(t),
+                                on_view_change: move |v| active_view.set(v),
+                                on_edit: move |_u| {
+                                    // FUTURE: wire ProjectUpdate through repo.update once
+                                    // the in-memory edit needs to round-trip.
+                                },
+                                on_new_task: move |_| {
+                                    quick_create(("todo".into(), "Untitled task".into()));
+                                },
+                                on_theme_change: on_theme_change,
+                            }
+
+                            div { class: "mt-4",
+                                match *active_view.read() {
+                                    TaskView::List => rsx! {
+                                        TaskListView {
+                                            tasks: tasks(),
+                                            group_by: Some(TaskGroupBy::Status),
+                                            selected: selected_set.read().clone(),
+                                            on_select_change: move |s: HashSet<Uuid>| selected_set.set(s),
+                                            on_open: move |id| selected_task.set(Some(id)),
+                                            on_inline_edit: move |(id, u)| patch_task((id, u)),
+                                            on_bulk_action: move |a| bulk_action(a),
+                                        }
+                                    },
+                                    TaskView::Board => rsx! {
+                                        TaskKanbanBoard {
+                                            tasks: tasks(),
+                                            group_by: TaskGroupBy::Status,
+                                            column_order: column_order.clone(),
+                                            on_card_open: move |id| selected_task.set(Some(id)),
+                                            on_card_patch: move |(id, u)| patch_task((id, u)),
+                                            on_quick_create: move |t| quick_create(t),
+                                            on_card_delete: move |id| delete_task(id),
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    } else {
+                        ProjectDashboard {
+                            items: cur_items.clone(),
+                            status: status_msg(),
+                            on_create: pm_create,
+                            on_delete: pm_delete,
+                        }
+                    }
+                }
+
+                TabContent { value: "dashboard".to_string(), index: 2usize,
+                    ProjectDashboard {
+                        items: cur_items.clone(),
+                        status: status_msg(),
+                        on_create: dashboard_create,
+                        on_delete: dashboard_delete,
+                    }
+                }
+            }
+
+            // Slide-over inspector.
+            TaskDetailSheet {
+                task: task_for_sheet,
+                subtasks,
+                available_cycles: Vec::new(),
+                available_milestones: Vec::new(),
+                available_assignees,
+                on_close: move |_| selected_task.set(None),
+                on_patch: move |(id, u)| patch_task((id, u)),
+                on_subtask_add: move |_title| {
+                    // FUTURE: real subtask creation against TaskRepoLoro.
+                },
+                on_delete: move |id| delete_task(id),
+                on_duplicate: move |id| duplicate_task(id),
+            }
+
+            // Cmd-K palette.
+            TaskCommandPalette {
+                open: *palette_open.read(),
+                tasks: tasks(),
+                on_open_change: move |o: bool| palette_open.set(o),
+                on_run: on_run_palette,
+            }
         }
     }
 }

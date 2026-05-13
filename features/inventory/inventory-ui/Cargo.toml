@@ -14,5 +14,10 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true }
 inventory-proto.workspace = true
+person-proto.workspace = true
+location-proto.workspace = true
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
+tracing.workspace = true
+
+fts-ui.workspace = true

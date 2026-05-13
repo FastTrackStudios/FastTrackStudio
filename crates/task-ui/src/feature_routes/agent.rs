@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use agent_crdt::{AgentRunRepoLoro, CrdtDoc};
 use agent_proto::{AgentRun, AgentRunCreate, AgentRunRepo};
-use agent_ui::{AgentRunCreateForm, AgentRunList};
+use agent_ui::AgentRunDashboard;
 use architect::Page;
 use dioxus::prelude::*;
 use futures_channel::mpsc;
@@ -98,12 +98,13 @@ pub fn AgentRunView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Agent runs (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            AgentRunCreateForm { on_submit }
-            AgentRunList { items: items(), on_delete }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            AgentRunDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+            }
         }
     }
 }

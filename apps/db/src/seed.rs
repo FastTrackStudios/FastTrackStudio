@@ -58,10 +58,6 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
     location_proto::seed_fake_location(&location_repo, 12usize).await?;
     info!("  location: 12 locations");
 
-    let asset_repo = asset_crdt::AssetRepoLoro::new(cdoc);
-    asset_proto::seed_fake_asset(&asset_repo, 30usize).await?;
-    info!("  asset: 30 assets");
-
     // ── Project domain ────────────────────────────────────────
     let project_repo = project_crdt::ProjectRepoLoro::new(cdoc);
     let task_repo = project_crdt::TaskRepoLoro::new(cdoc);
@@ -104,9 +100,11 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
 
     let revenue_repo = finance_crdt::RevenueRepoLoro::new(cdoc);
     let expense_repo = finance_crdt::ExpenseRepoLoro::new(cdoc);
+    let asset_repo = finance_crdt::FinancialAssetRepoLoro::new(cdoc);
     finance_proto::seed_fake_revenue(&revenue_repo, 30usize).await?;
     finance_proto::seed_fake_expense(&expense_repo, 50usize).await?;
-    info!("  finance: 30 revenue, 50 expense");
+    finance_proto::seed_fake_financial_asset(&asset_repo, 10usize).await?;
+    info!("  finance: 30 revenue, 50 expense, 10 financial assets");
 
     // ── Calendar + meetings ───────────────────────────────────
     let event_repo = calendar_crdt::CalendarEventRepoLoro::new(cdoc);
@@ -117,26 +115,33 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
     conference_proto::seed_fake_meeting(&meeting_repo, 10usize).await?;
     info!("  conference: 10 meetings");
 
-    // ── Inventory + cooking ───────────────────────────────────
-    let product_repo = inventory_crdt::FoodProductRepoLoro::new(cdoc);
-    let pantry_repo = inventory_crdt::PantryItemRepoLoro::new(cdoc);
-    let shopping_repo = inventory_crdt::ShoppingListItemRepoLoro::new(cdoc);
-    inventory_proto::seed_fake_food_product(&product_repo, 30usize).await?;
-    inventory_proto::seed_fake_pantry_item(&pantry_repo, 50usize).await?;
-    inventory_proto::seed_fake_shopping_list_item(&shopping_repo, 25usize).await?;
-    info!("  inventory: 30 products, 50 pantry, 25 shopping");
-
+    // ── Cookbook (recipes + pantry + shopping + products) ─────
     let cookbook_repo = cookbook_crdt::CookbookRepoLoro::new(cdoc);
     let recipe_repo = cookbook_crdt::RecipeRepoLoro::new(cdoc);
     let ingredient_repo = cookbook_crdt::RecipeIngredientRepoLoro::new(cdoc);
     let step_repo = cookbook_crdt::RecipeStepRepoLoro::new(cdoc);
     let meal_plan_repo = cookbook_crdt::MealPlanRepoLoro::new(cdoc);
+    let product_repo = cookbook_crdt::FoodProductRepoLoro::new(cdoc);
+    let pantry_repo = cookbook_crdt::PantryItemRepoLoro::new(cdoc);
+    let shopping_repo = cookbook_crdt::ShoppingListItemRepoLoro::new(cdoc);
     cookbook_proto::seed_fake_cookbook(&cookbook_repo, 3usize).await?;
     cookbook_proto::seed_fake_recipe(&recipe_repo, 20usize).await?;
     cookbook_proto::seed_fake_recipe_ingredient(&ingredient_repo, 100usize).await?;
     cookbook_proto::seed_fake_recipe_step(&step_repo, 80usize).await?;
     cookbook_proto::seed_fake_meal_plan(&meal_plan_repo, 14usize).await?;
-    info!("  cookbook: 3 cookbooks, 20 recipes, 100 ingredients, 80 steps, 14 meal plans");
+    cookbook_proto::seed_fake_food_product(&product_repo, 30usize).await?;
+    cookbook_proto::seed_fake_pantry_item(&pantry_repo, 50usize).await?;
+    cookbook_proto::seed_fake_shopping_list_item(&shopping_repo, 25usize).await?;
+    info!(
+        "  cookbook: 3 cookbooks, 20 recipes, 100 ingredients, 80 steps, 14 meal plans, 30 products, 50 pantry, 25 shopping"
+    );
+
+    // ── Inventory (gear / hardware / software cataloging) ─────
+    let inventory_items = inventory_crdt::InventoryItemRepoLoro::new(cdoc);
+    let checkout_events = inventory_crdt::CheckoutEventRepoLoro::new(cdoc);
+    inventory_proto::seed_fake_inventory_item(&inventory_items, 18usize).await?;
+    inventory_proto::seed_fake_checkout_event(&checkout_events, 6usize).await?;
+    info!("  inventory: 18 items, 6 checkout events");
 
     // ── Fitness ───────────────────────────────────────────────
     let exercise_repo = fitness_crdt::ExerciseRepoLoro::new(cdoc);

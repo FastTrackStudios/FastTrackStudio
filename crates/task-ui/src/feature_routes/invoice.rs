@@ -9,7 +9,7 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use invoice_crdt::{CrdtDoc, InvoiceRepoLoro};
 use invoice_proto::{Invoice, InvoiceCreate, InvoiceRepo};
-use invoice_ui::{InvoiceCreateForm, InvoiceList};
+use invoice_ui::InvoiceDashboard;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -98,12 +98,13 @@ pub fn InvoiceView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Invoices (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            InvoiceCreateForm { on_submit }
-            InvoiceList { items: items(), on_delete }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            InvoiceDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+            }
         }
     }
 }

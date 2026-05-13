@@ -1,13 +1,13 @@
 //! Timer feature UI. Dumb components — data + callbacks in, RSX out.
 //!
-//! The component split mirrors the timer domain:
-//!
 //! - [`TimeEntryList`]       — full collection view, dispatches `on_delete` / `on_stop`
 //! - [`TimeEntryRow`]        — single-row presentation (composable into other lists)
 //! - [`TimeEntryCreateForm`] — minimal "start a timer" form, emits the create payload
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use dioxus::prelude::*;
+use fts_ui::lucide_dioxus::{Clock, DollarSign, Pause, Play, Plus, Timer, Trash2};
+use fts_ui::prelude::*;
 use timer_proto::{TimeEntry, TimeEntryCreate};
 use uuid::Uuid;
 
@@ -19,8 +19,9 @@ pub fn TimeEntryList(
 ) -> Element {
     if items.is_empty() {
         return rsx! {
-            div { class: "text-sm text-slate-500",
-                "No time entries yet. Start a timer above."
+            EmptyState {
+                message: "No time entries yet. Start a timer above.",
+                icon: rsx! { Play { size: 32 } },
             }
         };
     }
@@ -52,29 +53,32 @@ pub fn TimeEntryRow(
         .unwrap_or_else(|| "(no description)".into());
     let user = entry.user.clone().unwrap_or_else(|| "unknown".into());
     let duration = duration_string(entry.start_time, entry.end_time);
+    let meta = format!("{user} · {duration}");
     rsx! {
-        div { class: "flex items-center justify-between rounded-md border border-slate-800 bg-slate-900 px-4 py-3",
-            div { class: "flex flex-col",
-                span { class: "text-sm font-medium text-slate-100", "{description}" }
-                span { class: "text-xs text-slate-500",
-                    "{user} · {duration}"
-                    if running {
-                        span { class: "text-yellow-300", " · running" }
-                    }
-                }
+        Item {
+            ItemContent {
+                ItemTitle { "{description}" }
+                ItemDescription { "{meta}" }
             }
-            div { class: "flex items-center gap-3",
+            ItemActions { class: "gap-2",
+                if entry.billable {
+                    Badge { variant: BadgeVariant::Secondary, "Billable" }
+                }
                 if running {
-                    button {
-                        class: "text-xs text-slate-400 hover:text-yellow-300",
-                        onclick: move |_| on_stop.call(id),
-                        "Stop"
+                    StatusBadge { variant: StatusBadgeVariant::Warning, label: "Running" }
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Small,
+                        on_click: move |_| on_stop.call(id),
+                        Pause { size: 14 }
+                        " Stop"
                     }
                 }
-                button {
-                    class: "text-xs text-slate-500 hover:text-rose-400",
-                    onclick: move |_| on_delete.call(id),
-                    "Delete"
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: move |_| on_delete.call(id),
+                    Trash2 { size: 14 }
                 }
             }
         }
@@ -85,42 +89,52 @@ pub fn TimeEntryRow(
 pub fn TimeEntryCreateForm(on_submit: EventHandler<TimeEntryCreate>) -> Element {
     let mut description = use_signal(String::new);
     let mut user = use_signal(String::new);
+    let mut billable = use_signal(|| false);
+
     rsx! {
-        form {
-            class: "flex flex-wrap gap-2",
-            onsubmit: move |evt| {
-                evt.prevent_default();
-                let payload = TimeEntryCreate {
-                    task_id: None,
-                    user: trim_to_option(user.read().clone()),
-                    start_time: Utc::now(),
-                    end_time: None,
-                    description: trim_to_option(description.read().clone()),
-                    billable: false,
-                    billable_rate_cents: None,
-                    tags: Vec::new(),
-                    invoiced_at: None,
-                };
-                on_submit.call(payload);
-                description.set(String::new());
-                user.set(String::new());
-            },
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Description",
-                value: "{description}",
-                oninput: move |evt| description.set(evt.value()),
+        Card {
+            CardHeader {
+                CardTitle { "Start a timer" }
             }
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "User (e.g. cody)",
-                value: "{user}",
-                oninput: move |evt| user.set(evt.value()),
-            }
-            button {
-                r#type: "submit",
-                class: "rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400",
-                "Start timer"
+            CardContent { class: "flex flex-col gap-3",
+                div { class: "flex flex-wrap gap-2",
+                    Input {
+                        value: description,
+                        placeholder: "Description",
+                        class: "flex-1 min-w-40",
+                    }
+                    Input {
+                        value: user,
+                        placeholder: "User (e.g. cody)",
+                        class: "flex-1 min-w-40",
+                    }
+                }
+                div { class: "flex items-center gap-3",
+                    Switch { checked: billable }
+                    span { class: "text-sm text-muted-foreground", "Billable" }
+                    div { class: "flex-1" }
+                    Button {
+                        on_click: move |_| {
+                            let payload = TimeEntryCreate {
+                                task_id: None,
+                                user: trim_to_option(user.read().clone()),
+                                start_time: Utc::now(),
+                                end_time: None,
+                                description: trim_to_option(description.read().clone()),
+                                billable: *billable.read(),
+                                billable_rate_cents: None,
+                                tags: Vec::new(),
+                                invoiced_at: None,
+                            };
+                            on_submit.call(payload);
+                            description.set(String::new());
+                            user.set(String::new());
+                            billable.set(false);
+                        },
+                        Plus { size: 14 }
+                        " Start timer"
+                    }
+                }
             }
         }
     }
@@ -144,5 +158,192 @@ fn trim_to_option(s: String) -> Option<String> {
         None
     } else {
         Some(t.to_string())
+    }
+}
+
+fn format_hms(total_secs: i64) -> String {
+    let s = total_secs.max(0);
+    let h = s / 3600;
+    let m = (s % 3600) / 60;
+    let sec = s % 60;
+    if h > 0 {
+        format!("{}h {:02}m", h, m)
+    } else if m > 0 {
+        format!("{}m {:02}s", m, sec)
+    } else {
+        format!("{}s", sec)
+    }
+}
+
+/// Purpose-built time-entry dashboard. Page header + running/today/billable
+/// stats + billable filter + create form + list.
+#[component]
+pub fn TimeEntryDashboard(
+    items: Vec<TimeEntry>,
+    status: String,
+    on_create: EventHandler<TimeEntryCreate>,
+    on_delete: EventHandler<Uuid>,
+    on_stop: EventHandler<Uuid>,
+) -> Element {
+    let mut filter = use_signal(|| "all".to_string());
+
+    let now = Utc::now();
+    let today_start = now - Duration::hours(24);
+
+    let running = items.iter().filter(|e| e.end_time.is_none()).count();
+    let billable_count = items.iter().filter(|e| e.billable).count();
+    let non_billable_count = items.len() - billable_count;
+
+    let today_secs: i64 = items
+        .iter()
+        .filter(|e| e.start_time >= today_start)
+        .map(|e| {
+            let end = e.end_time.unwrap_or(now);
+            (end - e.start_time).num_seconds().max(0)
+        })
+        .sum();
+    let billable_secs: i64 = items
+        .iter()
+        .filter(|e| e.billable)
+        .map(|e| {
+            let end = e.end_time.unwrap_or(now);
+            (end - e.start_time).num_seconds().max(0)
+        })
+        .sum();
+
+    let current = filter.read().clone();
+    let filtered: Vec<TimeEntry> = match current.as_str() {
+        "billable" => items.iter().filter(|e| e.billable).cloned().collect(),
+        "non-billable" => items.iter().filter(|e| !e.billable).cloned().collect(),
+        "running" => items
+            .iter()
+            .filter(|e| e.end_time.is_none())
+            .cloned()
+            .collect(),
+        _ => items.clone(),
+    };
+
+    rsx! {
+        VStack { class: "gap-6",
+            SectionHeader {
+                label: "Time tracking",
+                trailing: rsx! {
+                    HStack { class: "gap-2 items-center",
+                        StatusDot {
+                            color: StatusDotColor::Success,
+                            size: StatusDotSize::Small,
+                        }
+                        Text { variant: TextVariant::Muted, "{status}" }
+                    }
+                },
+            }
+
+            HStack { class: "gap-3 items-start",
+                div { class: "rounded-md bg-amber-500/10 p-2 text-amber-500",
+                    Timer { size: 24 }
+                }
+                VStack { class: "gap-1",
+                    Heading { level: HeadingLevel::H1, "Time entries dashboard" }
+                    Text { variant: TextVariant::Muted,
+                        "Live timers, billable hours, and what's been tracked in the last 24h."
+                    }
+                }
+            }
+
+            div { class: "grid grid-cols-1 sm:grid-cols-4 gap-3",
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Running" }
+                            Play { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{running}" }
+                        Text { variant: TextVariant::Muted, "active timers" }
+                    }
+                }
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Last 24h" }
+                            Clock { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{format_hms(today_secs)}" }
+                        Text { variant: TextVariant::Muted, "tracked" }
+                    }
+                }
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Billable" }
+                            DollarSign { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{format_hms(billable_secs)}" }
+                        Text { variant: TextVariant::Muted, "{billable_count} entries" }
+                    }
+                }
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Internal" }
+                            Timer { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{non_billable_count}" }
+                        Text { variant: TextVariant::Muted, "non-billable" }
+                    }
+                }
+            }
+
+            HStack { class: "gap-2 flex-wrap items-center",
+                Text { variant: TextVariant::Muted, "Filter:" }
+                Button {
+                    variant: if current == "all" { ButtonVariant::Primary } else { ButtonVariant::Outline },
+                    size: ButtonSize::Small,
+                    on_click: move |_| filter.set("all".into()),
+                    "All"
+                }
+                Button {
+                    variant: if current == "running" { ButtonVariant::Primary } else { ButtonVariant::Outline },
+                    size: ButtonSize::Small,
+                    on_click: move |_| filter.set("running".into()),
+                    "Running"
+                }
+                Button {
+                    variant: if current == "billable" { ButtonVariant::Primary } else { ButtonVariant::Outline },
+                    size: ButtonSize::Small,
+                    on_click: move |_| filter.set("billable".into()),
+                    "Billable"
+                }
+                Button {
+                    variant: if current == "non-billable" { ButtonVariant::Primary } else { ButtonVariant::Outline },
+                    size: ButtonSize::Small,
+                    on_click: move |_| filter.set("non-billable".into()),
+                    "Internal"
+                }
+            }
+
+            TimeEntryCreateForm { on_submit: move |p| on_create.call(p) }
+
+            Divider {}
+
+            SectionHeader {
+                label: "Entries",
+                trailing: rsx! {
+                    Badge { variant: BadgeVariant::Secondary, "{filtered.len()}" }
+                },
+            }
+            TimeEntryList {
+                items: filtered,
+                on_delete: move |id| on_delete.call(id),
+                on_stop: move |id| on_stop.call(id),
+            }
+        }
     }
 }

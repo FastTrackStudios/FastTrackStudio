@@ -31,7 +31,7 @@ pub(crate) enum PropertyCommands {
     Set {
         reference: String,
         assignment: String,
-        /// Owner kind: task (default), project, person, asset, calendar_event,
+        /// Owner kind: task (default), project, person, calendar_event,
         /// comment, location.
         #[arg(long, default_value = "task")]
         r#type: String,

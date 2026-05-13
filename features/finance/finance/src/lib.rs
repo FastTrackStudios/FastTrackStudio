@@ -9,7 +9,10 @@ pub use finance_proto::*;
 #[cfg(feature = "server")]
 pub mod server {
     pub use crdt::{CrdtDoc, Persistence};
-    pub use finance_crdt::{FinanceEntity, FinanceRepoLoro};
+    pub use finance_crdt::{
+        ExpenseEntity, ExpenseRepoLoro, FinancialAssetEntity, FinancialAssetRepoLoro,
+        RevenueEntity, RevenueRepoLoro,
+    };
     pub use finance_db::{FinanceMigrator, SeaOrmPersistence};
 }
 

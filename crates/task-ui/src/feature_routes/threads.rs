@@ -9,7 +9,7 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use threads_crdt::{CommentRepoLoro, CrdtDoc};
 use threads_proto::{Comment, CommentCreate, CommentRepo};
-use threads_ui::{CommentCreateForm, CommentList};
+use threads_ui::ThreadDashboard;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -98,12 +98,13 @@ pub fn CommentView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Comments (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            CommentCreateForm { on_submit }
-            CommentList { items: items(), on_delete }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            ThreadDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+            }
         }
     }
 }

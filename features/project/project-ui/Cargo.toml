@@ -23,3 +23,5 @@ dioxus = { workspace = true }
 project-proto.workspace = true
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
+
+fts-ui.workspace = true

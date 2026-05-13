@@ -258,6 +258,10 @@ pub struct Organization {
     pub monogram: &'static str,
     /// Free-form role copy ("Owner", "Member", etc).
     pub role: &'static str,
+    /// Default fts-ui theme preset name for this organization.
+    /// The user can override it at runtime through the in-app theme picker
+    /// (see `task_ui::theming::OrgThemeOverrides`).
+    pub theme_preset: &'static str,
 }
 
 pub fn organizations() -> Vec<Organization> {
@@ -267,18 +271,21 @@ pub fn organizations() -> Vec<Organization> {
             name: "Personal",
             monogram: "C",
             role: "Owner",
+            theme_preset: "default",
         },
         Organization {
             id: "fasttrack",
             name: "FastTrack Studios",
             monogram: "FT",
             role: "Owner",
+            theme_preset: "violet-bloom",
         },
         Organization {
             id: "starcommand",
             name: "Starcommand",
             monogram: "★",
             role: "Admin",
+            theme_preset: "supabase",
         },
     ]
 }

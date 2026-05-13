@@ -9,7 +9,7 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use person_crdt::{CrdtDoc, PersonRepoLoro};
 use person_proto::{Person, PersonCreate, PersonRepo};
-use person_ui::{PersonCreateForm, PersonList};
+use person_ui::PersonDashboard;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -98,12 +98,13 @@ pub fn PersonView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "People (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            PersonCreateForm { on_submit }
-            PersonList { items: items(), on_delete }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            PersonDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+            }
         }
     }
 }

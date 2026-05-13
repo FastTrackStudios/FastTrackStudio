@@ -9,7 +9,7 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use location_crdt::{CrdtDoc, LocationRepoLoro};
 use location_proto::{Location, LocationCreate, LocationRepo};
-use location_ui::{LocationCreateForm, LocationList};
+use location_ui::LocationDashboard;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -98,12 +98,13 @@ pub fn LocationView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Locations (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            LocationCreateForm { on_submit }
-            LocationList { items: items(), on_delete }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            LocationDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+            }
         }
     }
 }

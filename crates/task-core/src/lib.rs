@@ -1,6 +1,5 @@
 pub mod activity;
 pub mod agent;
-pub mod asset;
 pub mod attachment;
 pub mod body_measurement;
 pub mod calendar_event;
@@ -71,12 +70,6 @@ pub use activity::Activity;
 pub use agent::{
     AgentPlan, AgentPlanEdge, AgentPlanNode, AgentPlanNodeKind, AgentPlanNodeStatus,
     build_agent_plan,
-};
-pub use asset::{
-    Asset, AssetBucket, AssetConflict, AssetCreateRequest, AssetFilter, AssetMaintenanceRecord,
-    AssetMaintenanceRequest, AssetPatch, AssetRepairRequest, AssetRepairResponse, AssetReport,
-    AssetReservationRecord, AssetReservationResponse, AssetReserveRequest, AssetStatus,
-    format_asset_id,
 };
 pub use attachment::{Attachment, DEFAULT_ATTACHMENT_SOURCE, default_remote_path, label_from_path};
 pub use body_measurement::{BodyMeasurement, BodyMeasurementApi};

@@ -9,7 +9,7 @@ use futures_channel::mpsc;
 use futures_util::StreamExt;
 use timer_crdt::{CrdtDoc, TimeEntryRepoLoro};
 use timer_proto::{TimeEntry, TimeEntryCreate, TimeEntryRepo};
-use timer_ui::{TimeEntryCreateForm, TimeEntryList};
+use timer_ui::TimeEntryDashboard;
 use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
@@ -120,12 +120,14 @@ pub fn TimeEntryView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Time entries (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            TimeEntryCreateForm { on_submit }
-            TimeEntryList { items: items(), on_delete, on_stop }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            TimeEntryDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+                on_stop,
+            }
         }
     }
 }

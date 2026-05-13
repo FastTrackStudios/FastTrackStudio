@@ -49,7 +49,6 @@ fn resolve_owner(owner_type: &str) -> Result<(&'static str, &'static str), Vault
         "calendar_event" => Ok(("calendar_events", "uuid")),
         "person" | "people" => Ok(("people", "uuid")),
         "comment" => Ok(("comments", "id")),
-        "asset" => Ok(("assets", "uuid")),
         "location" => Ok(("locations", "uuid")),
         other => Err(VaultError::ParseError(format!(
             "unknown property owner_type: {other}"

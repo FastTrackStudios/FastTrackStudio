@@ -15,6 +15,7 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 dioxus-router.workspace = true
+fts-ui = { workspace = true, features = ["router"] }
 
 # Local-first source-of-truth in the browser.
 loro.workspace = true
@@ -22,9 +23,6 @@ architect = { path = "../../../architect/macros/architect" }
 crdt = { path = "../../../architect/libs/crdt" }
 
 # Per-feature trios.
-asset-proto = { workspace = true, features = ["fake"] }
-asset-crdt.workspace = true
-asset-ui.workspace = true
 agent-proto = { workspace = true, features = ["fake"] }
 agent-crdt.workspace = true
 agent-ui.workspace = true
@@ -76,6 +74,8 @@ timer-ui.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
+fake.workspace = true
+tracing.workspace = true
 
 # Browser glue. Compiles cleanly on native too; the source uses
 # them only inside `cfg(target_arch = "wasm32")` blocks.

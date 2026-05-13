@@ -19,11 +19,13 @@ inventory-crdt = { workspace = true, optional = true }
 inventory-db = { workspace = true, optional = true }
 crdt = { workspace = true, optional = true }
 architect = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [features]
 default = []
 vox = ["inventory-proto/vox"]
-server = ["dep:inventory-crdt", "dep:inventory-db", "dep:crdt"]
+server = ["dep:inventory-crdt", "dep:inventory-db", "dep:crdt", "dep:architect", "dep:chrono", "dep:uuid"]
 server-axum = ["dep:architect", "architect/server-axum"]
 fake = ["inventory-proto/fake"]
 full = [

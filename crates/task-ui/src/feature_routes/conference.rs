@@ -6,7 +6,7 @@ use std::rc::Rc;
 use architect::Page;
 use conference_crdt::{CrdtDoc, MeetingRepoLoro};
 use conference_proto::{Meeting, MeetingCreate, MeetingRepo};
-use conference_ui::{MeetingCreateForm, MeetingList};
+use conference_ui::MeetingDashboard;
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
@@ -98,12 +98,11 @@ pub fn MeetingView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Meetings (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            MeetingCreateForm { on_submit }
-            MeetingList { items: items(), on_delete }
+        MeetingDashboard {
+            items: items(),
+            status: status_msg(),
+            on_create: on_submit,
+            on_delete,
         }
     }
 }

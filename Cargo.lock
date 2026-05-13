@@ -81,6 +81,7 @@ dependencies = [
  "agent-proto",
  "chrono",
  "dioxus",
+ "fts-ui",
  "uuid",
 ]
 
@@ -338,64 +339,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "516b6b4f0e40d50dcda9365d53964ec74560ad4284da2e7fc97122cd83174516"
 dependencies = [
  "stable_deref_trait",
-]
-
-[[package]]
-name = "asset"
-version = "0.1.0"
-dependencies = [
- "architect",
- "asset-crdt",
- "asset-db",
- "asset-proto",
- "crdt",
-]
-
-[[package]]
-name = "asset-crdt"
-version = "0.1.0"
-dependencies = [
- "architect",
- "asset-proto",
- "chrono",
- "crdt",
- "loro",
- "uuid",
-]
-
-[[package]]
-name = "asset-db"
-version = "0.1.0"
-dependencies = [
- "asset-proto",
- "async-trait",
- "crdt-seaorm",
- "sea-orm",
- "sea-orm-migration",
-]
-
-[[package]]
-name = "asset-proto"
-version = "0.1.0"
-dependencies = [
- "architect",
- "chrono",
- "facet 0.46.0",
- "fake",
- "sea-orm",
- "thiserror 2.0.18",
- "uuid",
- "vox 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
-]
-
-[[package]]
-name = "asset-ui"
-version = "0.1.0"
-dependencies = [
- "asset-proto",
- "chrono",
- "dioxus",
- "uuid",
 ]
 
 [[package]]
@@ -1208,6 +1151,7 @@ dependencies = [
  "caldav-proto",
  "chrono",
  "dioxus",
+ "fts-ui",
  "uuid",
 ]
 
@@ -1266,6 +1210,7 @@ dependencies = [
  "calendar-proto",
  "chrono",
  "dioxus",
+ "fts-ui",
  "uuid",
 ]
 
@@ -1391,6 +1336,7 @@ dependencies = [
  "chat-proto",
  "chrono",
  "dioxus",
+ "fts-ui",
  "uuid",
 ]
 
@@ -1496,6 +1442,12 @@ name = "clap_lex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
+
+[[package]]
+name = "clsx"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff38296f8950787939e66efc249283b2b0dbd221fccc0b44de0509db54c5fdb"
 
 [[package]]
 name = "cmake"
@@ -1695,6 +1647,7 @@ dependencies = [
  "chrono",
  "conference-proto",
  "dioxus",
+ "fts-ui",
  "uuid",
 ]
 
@@ -1882,6 +1835,7 @@ dependencies = [
  "chrono",
  "cookbook-proto",
  "dioxus",
+ "fts-ui",
  "uuid",
 ]
 
@@ -2653,11 +2607,13 @@ dependencies = [
  "dioxus-core",
  "dioxus-core-macro",
  "dioxus-desktop",
+ "dioxus-devtools",
  "dioxus-document",
  "dioxus-fullstack",
  "dioxus-history",
  "dioxus-hooks",
  "dioxus-html",
+ "dioxus-logger",
  "dioxus-router",
  "dioxus-signals",
  "dioxus-stores",
@@ -2686,6 +2642,17 @@ dependencies = [
  "tokio",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "dioxus-attributes"
+version = "0.1.0"
+source = "git+https://github.com/DioxusLabs/components?rev=733874bb35ab8a360813d841dde8353997246f09#733874bb35ab8a360813d841dde8353997246f09"
+dependencies = [
+ "dioxus-rsx",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2784,7 +2751,7 @@ dependencies = [
  "image",
  "infer",
  "jni 0.21.1",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.9",
  "libc",
  "muda",
  "ndk",
@@ -2853,7 +2820,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "generational-box",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.9",
  "serde",
  "serde_json",
  "tracing",
@@ -3003,7 +2970,7 @@ dependencies = [
  "futures-util",
  "generational-box",
  "keyboard-types",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.9",
  "rustversion",
  "serde",
  "serde_json",
@@ -3033,7 +3000,7 @@ dependencies = [
  "dioxus-core-types",
  "dioxus-html",
  "js-sys",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.9",
  "rustc-hash 2.1.2",
  "serde",
  "sledgehammer_bindgen",
@@ -3041,6 +3008,33 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "dioxus-logger"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a28ccdfe36d2cb830a2784e40f7e6f7199805a2c6da99bd65b1ca308f11aed28"
+dependencies = [
+ "dioxus-cli-config",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-wasm",
+]
+
+[[package]]
+name = "dioxus-primitives"
+version = "0.0.1"
+source = "git+https://github.com/DioxusLabs/components?rev=733874bb35ab8a360813d841dde8353997246f09#733874bb35ab8a360813d841dde8353997246f09"
+dependencies = [
+ "dioxus",
+ "dioxus-attributes",
+ "dioxus-sdk-time",
+ "lazy-js-bundle 0.6.2",
+ "num-integer",
+ "serde",
+ "time",
+ "tracing",
 ]
 
 [[package]]
@@ -3089,6 +3083,18 @@ dependencies = [
  "quote",
  "rustversion",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "dioxus-sdk-time"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80c25ae93a3f72e734873b97fbd09d9b1b6adff97205fb0ffd8543e3564fb78e"
+dependencies = [
+ "dioxus",
+ "futures",
+ "gloo-timers",
+ "tokio",
 ]
 
 [[package]]
@@ -3149,8 +3155,9 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "generational-box",
+ "gloo-timers",
  "js-sys",
- "lazy-js-bundle",
+ "lazy-js-bundle 0.7.9",
  "rustc-hash 2.1.2",
  "send_wrapper",
  "serde",
@@ -3398,6 +3405,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "email-proto",
+ "fts-ui",
  "uuid",
 ]
 
@@ -4082,6 +4090,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "finance-proto",
+ "fts-ui",
  "uuid",
 ]
 
@@ -4146,6 +4155,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "fitness-proto",
+ "fts-ui",
  "uuid",
 ]
 
@@ -4244,6 +4254,50 @@ name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+
+[[package]]
+name = "fts-story-core"
+version = "0.1.0"
+dependencies = [
+ "linkme",
+]
+
+[[package]]
+name = "fts-story-macros"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "fts-story-runtime"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "fts-story-core",
+ "fts-story-macros",
+ "linkme",
+]
+
+[[package]]
+name = "fts-ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clsx",
+ "dioxus",
+ "dioxus-primitives",
+ "fts-story-runtime",
+ "linkme",
+ "lucide-dioxus",
+ "nucleo-matcher",
+ "time",
+ "tracing",
+ "tw_merge",
+]
 
 [[package]]
 name = "funty"
@@ -5515,10 +5569,12 @@ name = "inventory"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "chrono",
  "crdt",
  "inventory-crdt",
  "inventory-db",
  "inventory-proto",
+ "uuid",
 ]
 
 [[package]]
@@ -5573,7 +5629,11 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "inventory-proto",
+ "location-proto",
+ "person-proto",
+ "tracing",
  "uuid",
 ]
 
@@ -5631,6 +5691,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "invoice-proto",
  "uuid",
 ]
@@ -5938,6 +5999,12 @@ dependencies = [
 
 [[package]]
 name = "lazy-js-bundle"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e49596223b9d9d4947a14a25c142a6e7d8ab3f27eb3ade269d238bb8b5c267e2"
+
+[[package]]
+name = "lazy-js-bundle"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccafada6c9541db44db758619236f2748f6e1bdaa84d04ded858567cd1e89321"
@@ -6095,6 +6162,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "linkme"
+version = "0.3.36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e83272d46373fb8decca684579ac3e7c8f3d71d4cc3aa693df8759e260ae41cf"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32d59e20403c7d08fe62b4376edfe5c7fb2ef1e6b1465379686d0f21c8df444b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6166,6 +6253,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "location-proto",
  "uuid",
 ]
@@ -6358,6 +6446,14 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "lucide-dioxus"
+version = "2.26.0"
+source = "git+https://github.com/Leaf-Computer/lucide.git?rev=e3e509d5855324e893aef838747cccb2d115dc15#e3e509d5855324e893aef838747cccb2d115dc15"
+dependencies = [
+ "dioxus",
+]
 
 [[package]]
 name = "lz4_flex"
@@ -7029,6 +7125,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nucleo-matcher"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
+dependencies = [
+ "memchr",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "num"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7175,6 +7281,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "num_threads"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c7398b9c8b70908f6371f47ed36737907c87c52af34c268fed0bf0ceb92ead9"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -7580,6 +7695,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "person-proto",
  "uuid",
 ]
@@ -8147,6 +8263,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "project-proto",
  "uuid",
 ]
@@ -10269,8 +10386,6 @@ version = "0.1.0"
 dependencies = [
  "agent-crdt",
  "agent-proto",
- "asset-crdt",
- "asset-proto",
  "caldav-crdt",
  "caldav-proto",
  "calendar-crdt",
@@ -10345,9 +10460,6 @@ dependencies = [
  "agent-proto",
  "agent-ui",
  "architect",
- "asset-crdt",
- "asset-proto",
- "asset-ui",
  "caldav-crdt",
  "caldav-proto",
  "caldav-ui",
@@ -10370,12 +10482,14 @@ dependencies = [
  "email-crdt",
  "email-proto",
  "email-ui",
+ "fake",
  "finance-crdt",
  "finance-proto",
  "finance-ui",
  "fitness-crdt",
  "fitness-proto",
  "fitness-ui",
+ "fts-ui",
  "futures-channel",
  "futures-util",
  "inventory-crdt",
@@ -10401,6 +10515,7 @@ dependencies = [
  "timer-crdt",
  "timer-proto",
  "timer-ui",
+ "tracing",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -10534,6 +10649,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "threads-proto",
  "uuid",
 ]
@@ -10560,7 +10676,9 @@ checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
+ "libc",
  "num-conv",
+ "num_threads",
  "powerfmt",
  "serde_core",
  "time-core",
@@ -10637,6 +10755,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dioxus",
+ "fts-ui",
  "timer-proto",
  "uuid",
 ]
@@ -10960,6 +11079,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-wasm"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4575c663a174420fa2d78f4108ff68f65bf2fbb7dd89f33749b6e826b3626e07"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "tray-icon"
 version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11053,6 +11183,15 @@ dependencies = [
  "rand 0.9.4",
  "sha1",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tw_merge"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19b094572cbc1a5c8d82590da2aea5acfe671924ac221fc205a7276f0755f6fa"
+dependencies = [
+ "nom 7.1.3",
 ]
 
 [[package]]

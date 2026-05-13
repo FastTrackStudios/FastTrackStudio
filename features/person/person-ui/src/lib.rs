@@ -7,15 +7,19 @@
 //! - [`PersonCreateForm`] — minimal new-person form, emits the create payload
 
 use dioxus::prelude::*;
+use fts_ui::lucide_dioxus::{Mail, Plus, Trash2, User};
+use fts_ui::prelude::*;
 use person_proto::{Person, PersonCreate};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[component]
 pub fn PersonList(items: Vec<Person>, on_delete: EventHandler<Uuid>) -> Element {
     if items.is_empty() {
         return rsx! {
-            div { class: "text-sm text-slate-500",
-                "No people yet. Add one above."
+            EmptyState {
+                message: "No people yet. Add one above.",
+                icon: rsx! { User { size: 32 } },
             }
         };
     }
@@ -41,17 +45,20 @@ pub fn PersonRow(person: Person, on_delete: EventHandler<Uuid>) -> Element {
         .collect::<Vec<_>>()
         .join(" · ");
     rsx! {
-        div { class: "flex items-center justify-between rounded-md border border-slate-800 bg-slate-900 px-4 py-3",
-            div { class: "flex flex-col",
-                span { class: "text-sm font-medium text-slate-100", "{person.name}" }
+        Item {
+            ItemContent {
+                ItemTitle { "{person.name}" }
                 if !meta.is_empty() {
-                    span { class: "text-xs text-slate-500", "{meta}" }
+                    ItemDescription { "{meta}" }
                 }
             }
-            button {
-                class: "text-xs text-slate-500 hover:text-rose-400",
-                onclick: move |_| on_delete.call(id),
-                "Delete"
+            ItemActions { class: "gap-2",
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: move |_| on_delete.call(id),
+                    Trash2 { size: 14 }
+                }
             }
         }
     }
@@ -63,59 +70,63 @@ pub fn PersonCreateForm(on_submit: EventHandler<PersonCreate>) -> Element {
     let mut email = use_signal(String::new);
     let mut phone = use_signal(String::new);
     let mut role = use_signal(String::new);
+
     rsx! {
-        form {
-            class: "flex flex-wrap gap-2",
-            onsubmit: move |evt| {
-                evt.prevent_default();
-                let n = name.read().clone();
-                if n.trim().is_empty() {
-                    return;
+        Card {
+            CardHeader {
+                CardTitle { "Add a person" }
+            }
+            CardContent { class: "flex flex-col gap-3",
+                div { class: "flex flex-wrap gap-2",
+                    Input {
+                        value: name,
+                        placeholder: "Name (required)",
+                        class: "flex-1 min-w-40",
+                    }
+                    Input {
+                        value: email,
+                        placeholder: "Email",
+                        class: "flex-1 min-w-40",
+                    }
+                    Input {
+                        value: phone,
+                        placeholder: "Phone",
+                        class: "flex-1 min-w-40",
+                    }
+                    Input {
+                        value: role,
+                        placeholder: "Role",
+                        class: "flex-1 min-w-40",
+                    }
                 }
-                let payload = PersonCreate {
-                    name: n,
-                    email: trim_to_option(email.read().clone()),
-                    phone: trim_to_option(phone.read().clone()),
-                    role: trim_to_option(role.read().clone()),
-                    client_id: None,
-                    team_id: None,
-                    notes: None,
-                    tags: Vec::new(),
-                };
-                on_submit.call(payload);
-                name.set(String::new());
-                email.set(String::new());
-                phone.set(String::new());
-                role.set(String::new());
-            },
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Name (required)",
-                value: "{name}",
-                oninput: move |evt| name.set(evt.value()),
-            }
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Email",
-                value: "{email}",
-                oninput: move |evt| email.set(evt.value()),
-            }
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Phone",
-                value: "{phone}",
-                oninput: move |evt| phone.set(evt.value()),
-            }
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Role",
-                value: "{role}",
-                oninput: move |evt| role.set(evt.value()),
-            }
-            button {
-                r#type: "submit",
-                class: "rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400",
-                "Add person"
+                div { class: "flex items-center gap-3",
+                    div { class: "flex-1" }
+                    Button {
+                        on_click: move |_| {
+                            let n = name.read().clone();
+                            if n.trim().is_empty() {
+                                return;
+                            }
+                            let payload = PersonCreate {
+                                name: n,
+                                email: trim_to_option(email.read().clone()),
+                                phone: trim_to_option(phone.read().clone()),
+                                role: trim_to_option(role.read().clone()),
+                                client_id: None,
+                                team_id: None,
+                                notes: None,
+                                tags: Vec::new(),
+                            };
+                            on_submit.call(payload);
+                            name.set(String::new());
+                            email.set(String::new());
+                            phone.set(String::new());
+                            role.set(String::new());
+                        },
+                        Plus { size: 14 }
+                        " Add person"
+                    }
+                }
             }
         }
     }
@@ -127,5 +138,141 @@ fn trim_to_option(s: String) -> Option<String> {
         None
     } else {
         Some(t.to_string())
+    }
+}
+
+/// Purpose-built people dashboard. Page header + headcount stats + role
+/// filter + create form + list.
+#[component]
+pub fn PersonDashboard(
+    items: Vec<Person>,
+    status: String,
+    on_create: EventHandler<PersonCreate>,
+    on_delete: EventHandler<Uuid>,
+) -> Element {
+    let mut role_filter = use_signal(|| "all".to_string());
+
+    let count = items.len();
+    let with_email = items.iter().filter(|p| p.email.is_some()).count();
+    let on_team = items.iter().filter(|p| p.team_id.is_some()).count();
+    let mut by_role: BTreeMap<String, usize> = BTreeMap::new();
+    for p in &items {
+        let r = p.role.clone().unwrap_or_else(|| "unassigned".into());
+        *by_role.entry(r).or_insert(0) += 1;
+    }
+    let roles: Vec<String> = by_role.keys().cloned().collect();
+    let current = role_filter.read().clone();
+    let filtered: Vec<Person> = if current == "all" {
+        items.clone()
+    } else {
+        items
+            .iter()
+            .filter(|p| p.role.clone().unwrap_or_else(|| "unassigned".into()) == current)
+            .cloned()
+            .collect()
+    };
+
+    rsx! {
+        VStack { class: "gap-6",
+            SectionHeader {
+                label: "People",
+                trailing: rsx! {
+                    HStack { class: "gap-2 items-center",
+                        StatusDot {
+                            color: StatusDotColor::Success,
+                            size: StatusDotSize::Small,
+                        }
+                        Text { variant: TextVariant::Muted, "{status}" }
+                    }
+                },
+            }
+
+            HStack { class: "gap-3 items-start",
+                div { class: "rounded-md bg-violet-500/10 p-2 text-violet-500",
+                    User { size: 24 }
+                }
+                VStack { class: "gap-1",
+                    Heading { level: HeadingLevel::H1, "People dashboard" }
+                    Text { variant: TextVariant::Muted,
+                        "Engineers, producers, clients, collaborators — everyone you work with."
+                    }
+                }
+            }
+
+            div { class: "grid grid-cols-1 sm:grid-cols-3 gap-3",
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Headcount" }
+                            User { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{count}" }
+                        Text { variant: TextVariant::Muted, "{on_team} on a team" }
+                    }
+                }
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Reachable" }
+                            Mail { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{with_email}" }
+                        Text { variant: TextVariant::Muted, "have email" }
+                    }
+                }
+                Card {
+                    CardHeader {
+                        HStack { class: "items-center justify-between",
+                            CardDescription { "Roles" }
+                            User { size: 16 }
+                        }
+                    }
+                    CardContent {
+                        Heading { level: HeadingLevel::H2, "{by_role.len()}" }
+                        Text { variant: TextVariant::Muted, "distinct" }
+                    }
+                }
+            }
+
+            if roles.len() > 1 {
+                HStack { class: "gap-2 flex-wrap items-center",
+                    Text { variant: TextVariant::Muted, "Role:" }
+                    Button {
+                        variant: if current == "all" { ButtonVariant::Primary } else { ButtonVariant::Outline },
+                        size: ButtonSize::Small,
+                        on_click: move |_| role_filter.set("all".into()),
+                        "All"
+                    }
+                    for r in roles.iter().cloned() {
+                        Button {
+                            key: "{r}",
+                            variant: if current == r { ButtonVariant::Primary } else { ButtonVariant::Outline },
+                            size: ButtonSize::Small,
+                            on_click: {
+                                let r = r.clone();
+                                move |_| role_filter.set(r.clone())
+                            },
+                            "{r}"
+                        }
+                    }
+                }
+            }
+
+            PersonCreateForm { on_submit: move |p| on_create.call(p) }
+
+            Divider {}
+
+            SectionHeader {
+                label: "Directory",
+                trailing: rsx! {
+                    Badge { variant: BadgeVariant::Secondary, "{filtered.len()}" }
+                },
+            }
+            PersonList { items: filtered, on_delete: move |id| on_delete.call(id) }
+        }
     }
 }

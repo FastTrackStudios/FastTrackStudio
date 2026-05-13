@@ -8,14 +8,18 @@
 
 use dioxus::prelude::*;
 use email_proto::{Email, EmailCreate};
+use fts_ui::lucide_dioxus::{Inbox, Mail, MailOpen, Plus, Star, Trash2};
+use fts_ui::prelude::*;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[component]
 pub fn EmailList(items: Vec<Email>, on_delete: EventHandler<Uuid>) -> Element {
     if items.is_empty() {
         return rsx! {
-            div { class: "text-sm text-slate-500",
-                "No emails yet. Add one above."
+            EmptyState {
+                message: "No emails yet. Add one above.",
+                icon: rsx! { Mail { size: 32 } },
             }
         };
     }
@@ -36,24 +40,141 @@ pub fn EmailList(items: Vec<Email>, on_delete: EventHandler<Uuid>) -> Element {
 pub fn EmailRow(email: Email, on_delete: EventHandler<Uuid>) -> Element {
     let id = email.id;
     let folder = email.folder.clone().unwrap_or_else(|| "inbox".into());
-    let subject_class = if email.read {
-        "text-sm font-bold text-slate-300"
-    } else {
-        "text-sm font-bold text-slate-100"
-    };
+    let read = email.read;
+    let meta = format!("{} · {}", email.from_addr, folder);
     rsx! {
-        div { class: "flex items-center justify-between rounded-md border border-slate-800 bg-slate-900 px-4 py-3",
-            div { class: "flex flex-col",
-                span { class: "{subject_class}", "{email.subject}" }
-                span { class: "text-xs text-slate-500",
-                    "{email.from_addr} · {folder}"
+        Item {
+            ItemContent {
+                ItemTitle { "{email.subject}" }
+                ItemDescription { "{meta}" }
+            }
+            ItemActions { class: "gap-2",
+                if !read {
+                    Badge { variant: BadgeVariant::Default, "Unread" }
+                }
+                if email.starred {
+                    Badge { variant: BadgeVariant::Secondary, "Starred" }
+                }
+                Button {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Small,
+                    on_click: move |_| on_delete.call(id),
+                    Trash2 { size: 14 }
                 }
             }
-            button {
-                class: "text-xs text-slate-500 hover:text-rose-400",
-                onclick: move |_| on_delete.call(id),
-                "Delete"
+        }
+    }
+}
+
+#[component]
+pub fn EmailDashboard(
+    items: Vec<Email>,
+    status: String,
+    on_create: EventHandler<EmailCreate>,
+    on_delete: EventHandler<Uuid>,
+) -> Element {
+    let total = items.len();
+    let unread = items.iter().filter(|e| !e.read).count();
+    let starred = items.iter().filter(|e| e.starred).count();
+    let mut by_folder: BTreeMap<String, usize> = BTreeMap::new();
+    for e in &items {
+        let f = e.folder.clone().unwrap_or_else(|| "inbox".into());
+        *by_folder.entry(f).or_insert(0) += 1;
+    }
+    let folder_count = by_folder.len();
+    let mut tab = use_signal(|| "inbox".to_string());
+
+    let filtered: Vec<Email> = match tab.read().as_str() {
+        "unread" => items.iter().filter(|e| !e.read).cloned().collect(),
+        "starred" => items.iter().filter(|e| e.starred).cloned().collect(),
+        "all" => items.clone(),
+        other => items
+            .iter()
+            .filter(|e| e.folder.as_deref().unwrap_or("inbox") == other)
+            .cloned()
+            .collect(),
+    };
+
+    rsx! {
+        div { class: "mx-auto flex max-w-5xl flex-col gap-6 p-6 lg:p-10",
+            SectionHeader {
+                label: "Email".to_string(),
+                trailing: rsx! {
+                    StatusBadge { variant: StatusBadgeVariant::Neutral, label: status.clone() }
+                },
             }
+            HStack { class: "items-center gap-3",
+                div { class: "rounded-md bg-sky-500/10 p-2 text-sky-600",
+                    Inbox { size: 24 }
+                }
+                VStack { class: "gap-1",
+                    Heading { level: HeadingLevel::H1, "Inbox" }
+                    Text { variant: TextVariant::Muted,
+                        "Triage messages across folders — unread, starred, and everything else."
+                    }
+                }
+            }
+            div { class: "grid gap-3 sm:grid-cols-2 lg:grid-cols-4",
+                Card {
+                    CardHeader { class: "flex flex-row items-center justify-between space-y-0 pb-2",
+                        CardTitle { class: "text-sm font-medium", "Total" }
+                        Mail { size: 16 }
+                    }
+                    CardContent {
+                        div { class: "text-2xl font-bold", "{total}" }
+                        Text { variant: TextVariant::Muted, class: "text-xs", "across {folder_count} folders" }
+                    }
+                }
+                Card {
+                    CardHeader { class: "flex flex-row items-center justify-between space-y-0 pb-2",
+                        CardTitle { class: "text-sm font-medium", "Unread" }
+                        MailOpen { size: 16 }
+                    }
+                    CardContent {
+                        div { class: "text-2xl font-bold", "{unread}" }
+                        Text { variant: TextVariant::Muted, class: "text-xs", "awaiting reply" }
+                    }
+                }
+                Card {
+                    CardHeader { class: "flex flex-row items-center justify-between space-y-0 pb-2",
+                        CardTitle { class: "text-sm font-medium", "Starred" }
+                        Star { size: 16 }
+                    }
+                    CardContent {
+                        div { class: "text-2xl font-bold", "{starred}" }
+                        Text { variant: TextVariant::Muted, class: "text-xs", "flagged for follow-up" }
+                    }
+                }
+                Card {
+                    CardHeader { class: "flex flex-row items-center justify-between space-y-0 pb-2",
+                        CardTitle { class: "text-sm font-medium", "Folders" }
+                        Inbox { size: 16 }
+                    }
+                    CardContent {
+                        div { class: "text-2xl font-bold", "{folder_count}" }
+                        Text { variant: TextVariant::Muted, class: "text-xs", "in use" }
+                    }
+                }
+            }
+
+            EmailCreateForm { on_submit: move |p| on_create.call(p) }
+
+            Divider {}
+
+            HStack { class: "items-center justify-between",
+                Heading { level: HeadingLevel::H3, "Messages" }
+                SegmentedControl {
+                    value: tab.read().clone(),
+                    on_change: move |v: String| tab.set(v),
+                    options: vec![
+                        ("inbox".to_string(), "Inbox".to_string()),
+                        ("unread".to_string(), "Unread".to_string()),
+                        ("starred".to_string(), "Starred".to_string()),
+                        ("all".to_string(), "All".to_string()),
+                    ],
+                }
+            }
+            EmailList { items: filtered, on_delete: move |id| on_delete.call(id) }
         }
     }
 }
@@ -63,58 +184,62 @@ pub fn EmailCreateForm(on_submit: EventHandler<EmailCreate>) -> Element {
     let mut subject = use_signal(String::new);
     let mut from_addr = use_signal(String::new);
     let mut body = use_signal(String::new);
+
     rsx! {
-        form {
-            class: "flex flex-wrap gap-2",
-            onsubmit: move |evt| {
-                evt.prevent_default();
-                let s = subject.read().clone();
-                let f = from_addr.read().clone();
-                if s.trim().is_empty() || f.trim().is_empty() {
-                    return;
+        Card {
+            CardHeader {
+                CardTitle { "Add an email" }
+            }
+            CardContent { class: "flex flex-col gap-3",
+                div { class: "flex flex-wrap gap-2",
+                    Input {
+                        value: subject,
+                        placeholder: "Subject (required)",
+                        class: "flex-1 min-w-40",
+                    }
+                    Input {
+                        value: from_addr,
+                        placeholder: "From (required)",
+                        class: "flex-1 min-w-40",
+                    }
                 }
-                let payload = EmailCreate {
-                    message_id: format!("<{}@local>", Uuid::new_v4()),
-                    subject: s,
-                    from_addr: f,
-                    to_addrs: Vec::new(),
-                    cc_addrs: Vec::new(),
-                    bcc_addrs: Vec::new(),
-                    body: trim_to_option(body.read().clone()),
-                    received_at: chrono::Utc::now(),
-                    read: false,
-                    starred: false,
-                    folder: Some("inbox".into()),
-                    thread_id: None,
-                    tags: Vec::new(),
-                };
-                on_submit.call(payload);
-                subject.set(String::new());
-                from_addr.set(String::new());
-                body.set(String::new());
-            },
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Subject (required)",
-                value: "{subject}",
-                oninput: move |evt| subject.set(evt.value()),
-            }
-            input {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "From (required)",
-                value: "{from_addr}",
-                oninput: move |evt| from_addr.set(evt.value()),
-            }
-            textarea {
-                class: "flex-1 min-w-40 rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500",
-                placeholder: "Body",
-                value: "{body}",
-                oninput: move |evt| body.set(evt.value()),
-            }
-            button {
-                r#type: "submit",
-                class: "rounded-md bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400",
-                "Add email"
+                Textarea {
+                    value: body,
+                    placeholder: "Body",
+                }
+                div { class: "flex items-center gap-3",
+                    div { class: "flex-1" }
+                    Button {
+                        on_click: move |_| {
+                            let s = subject.read().clone();
+                            let f = from_addr.read().clone();
+                            if s.trim().is_empty() || f.trim().is_empty() {
+                                return;
+                            }
+                            let payload = EmailCreate {
+                                message_id: format!("<{}@local>", Uuid::new_v4()),
+                                subject: s,
+                                from_addr: f,
+                                to_addrs: Vec::new(),
+                                cc_addrs: Vec::new(),
+                                bcc_addrs: Vec::new(),
+                                body: trim_to_option(body.read().clone()),
+                                received_at: chrono::Utc::now(),
+                                read: false,
+                                starred: false,
+                                folder: Some("inbox".into()),
+                                thread_id: None,
+                                tags: Vec::new(),
+                            };
+                            on_submit.call(payload);
+                            subject.set(String::new());
+                            from_addr.set(String::new());
+                            body.set(String::new());
+                        },
+                        Plus { size: 14 }
+                        " Add email"
+                    }
+                }
             }
         }
     }

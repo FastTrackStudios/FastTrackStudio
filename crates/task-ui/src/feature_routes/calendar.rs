@@ -5,9 +5,10 @@ use std::rc::Rc;
 
 use architect::Page;
 use calendar_crdt::{CalendarEventRepoLoro, CrdtDoc};
-use calendar_proto::{CalendarEvent, CalendarEventCreate, CalendarEventRepo};
-use calendar_ui::{CalendarEventCreateForm, CalendarEventList};
+use calendar_proto::{CalendarEvent, CalendarEventCreate, CalendarEventRepo, CalendarEventUpdate};
+use calendar_ui::{CalendarEventDashboard, InteractiveCalendar};
 use dioxus::prelude::*;
+use fts_ui::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
 use uuid::Uuid;
@@ -97,13 +98,50 @@ pub fn CalendarEventView() -> Element {
         }
     };
 
-    rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Calendar events (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
+    let on_update = {
+        let repo = repo.clone();
+        let tx = refresh_tx.clone();
+        move |(id, update): (Uuid, CalendarEventUpdate)| {
+            let repo = repo.clone();
+            let tx = tx.clone();
+            spawn_local(async move {
+                let _ = repo.update(id, update).await;
+                let _ = tx.unbounded_send(());
+            });
+        }
+    };
 
-            CalendarEventCreateForm { on_submit }
-            CalendarEventList { items: items(), on_delete }
+    let dashboard_create = on_submit.clone();
+    let dashboard_delete = on_delete.clone();
+
+    rsx! {
+        div { class: "mx-auto flex max-w-6xl flex-col gap-4 p-6 lg:p-10",
+            Tabs {
+                default_value: "calendar".to_string(),
+                TabList {
+                    TabTrigger { value: "calendar".to_string(), index: 0usize, "Calendar" }
+                    TabTrigger { value: "dashboard".to_string(), index: 1usize, "Dashboard" }
+                }
+                TabContent { value: "calendar".to_string(), index: 0usize,
+                    InteractiveCalendar {
+                        events: items(),
+                        initial_view: None,
+                        initial_date: None,
+                        editable: true,
+                        on_create: on_submit,
+                        on_update,
+                        on_delete,
+                    }
+                }
+                TabContent { value: "dashboard".to_string(), index: 1usize,
+                    CalendarEventDashboard {
+                        items: items(),
+                        status: status_msg(),
+                        on_create: dashboard_create,
+                        on_delete: dashboard_delete,
+                    }
+                }
+            }
         }
     }
 }

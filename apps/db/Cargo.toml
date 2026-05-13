@@ -35,8 +35,6 @@ sea-orm-migration.workspace = true
 # crdt for the matching RepoLoro newtype that wraps a shared CrdtDoc.
 agent-proto = { workspace = true, features = ["fake"] }
 agent-crdt.workspace = true
-asset-proto = { workspace = true, features = ["fake"] }
-asset-crdt.workspace = true
 caldav-proto = { workspace = true, features = ["fake"] }
 caldav-crdt.workspace = true
 calendar-proto = { workspace = true, features = ["fake"] }

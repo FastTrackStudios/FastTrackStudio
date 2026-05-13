@@ -6,7 +6,7 @@ use std::rc::Rc;
 use architect::Page;
 use chat_crdt::{CrdtDoc, MessageRepoLoro};
 use chat_proto::{Message, MessageCreate, MessageRepo};
-use chat_ui::{MessageCreateForm, MessageList};
+use chat_ui::MessageDashboard;
 use dioxus::prelude::*;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
@@ -98,12 +98,11 @@ pub fn MessageView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Chat (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            MessageCreateForm { on_submit }
-            MessageList { items: items(), on_delete }
+        MessageDashboard {
+            items: items(),
+            status: status_msg(),
+            on_create: on_submit,
+            on_delete,
         }
     }
 }

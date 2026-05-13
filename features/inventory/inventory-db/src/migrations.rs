@@ -9,9 +9,6 @@ pub struct InventoryMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for InventoryMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        // Start with the generic CRDT-persistence migrations; append
-        // feature-specific projection migrations after them when the
-        // feature needs SQL-shaped queries.
         crdt_seaorm::Migrator::migrations()
     }
 }

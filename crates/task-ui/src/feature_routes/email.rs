@@ -7,7 +7,7 @@ use architect::Page;
 use dioxus::prelude::*;
 use email_crdt::{CrdtDoc, EmailRepoLoro};
 use email_proto::{Email, EmailCreate, EmailRepo};
-use email_ui::{EmailCreateForm, EmailList};
+use email_ui::EmailDashboard;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
 use uuid::Uuid;
@@ -98,12 +98,11 @@ pub fn EmailView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Emails (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            EmailCreateForm { on_submit }
-            EmailList { items: items(), on_delete }
+        EmailDashboard {
+            items: items(),
+            status: status_msg(),
+            on_create: on_submit,
+            on_delete,
         }
     }
 }

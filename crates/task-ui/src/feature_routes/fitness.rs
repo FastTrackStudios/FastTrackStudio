@@ -7,7 +7,7 @@ use architect::Page;
 use dioxus::prelude::*;
 use fitness_crdt::{CrdtDoc, WorkoutSessionRepoLoro};
 use fitness_proto::{WorkoutSession, WorkoutSessionCreate, WorkoutSessionRepo};
-use fitness_ui::{WorkoutSessionCreateForm, WorkoutSessionList};
+use fitness_ui::WorkoutSessionDashboard;
 use futures_channel::mpsc;
 use futures_util::StreamExt;
 use uuid::Uuid;
@@ -98,12 +98,13 @@ pub fn WorkoutSessionView() -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
-            h1 { class: "text-3xl font-bold", "Workouts (multiplayer)" }
-            p { class: "text-xs text-slate-500", "{status_msg}" }
-
-            WorkoutSessionCreateForm { on_submit }
-            WorkoutSessionList { items: items(), on_delete }
+        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+            WorkoutSessionDashboard {
+                items: items(),
+                status: status_msg(),
+                on_create: on_submit,
+                on_delete,
+            }
         }
     }
 }

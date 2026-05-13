@@ -15,7 +15,6 @@ members = [
 # grows glob-exclude support.
 exclude = [
     "features/agent/spec",      "features/agent/tests",
-    "features/asset/spec",      "features/asset/tests",
     "features/caldav/spec",     "features/caldav/tests",
     "features/calendar/spec",   "features/calendar/tests",
     "features/chat/spec",       "features/chat/tests",
@@ -65,10 +64,6 @@ conference = { path = "features/conference/conference" }
 conference-proto = { path = "features/conference/conference-proto" }
 conference-crdt = { path = "features/conference/conference-crdt" }
 conference-db = { path = "features/conference/conference-db" }
-asset = { path = "features/asset/asset" }
-asset-proto = { path = "features/asset/asset-proto" }
-asset-crdt = { path = "features/asset/asset-crdt" }
-asset-db = { path = "features/asset/asset-db" }
 person = { path = "features/person/person" }
 person-proto = { path = "features/person/person-proto" }
 person-crdt = { path = "features/person/person-crdt" }
@@ -124,7 +119,6 @@ caldav-db = { path = "features/caldav/caldav-db" }
 caldav-sync = { path = "features/caldav/caldav-sync" }
 caldav-ui = { path = "features/caldav/caldav-ui" }
 agent-ui = { path = "features/agent/agent-ui" }
-asset-ui = { path = "features/asset/asset-ui" }
 calendar-ui = { path = "features/calendar/calendar-ui" }
 chat-ui = { path = "features/chat/chat-ui" }
 conference-ui = { path = "features/conference/conference-ui" }
@@ -139,6 +133,7 @@ person-ui = { path = "features/person/person-ui" }
 project-ui = { path = "features/project/project-ui" }
 threads-ui = { path = "features/threads/threads-ui" }
 timer-ui = { path = "features/timer/timer-ui" }
+fts-ui = { path = "../FastTrackStudio/fts-ui/crates/fts-ui", default-features = false }
 
 [workspace.dependencies.facet]
 version = "0.46"

@@ -2,7 +2,6 @@ mod commands;
 mod shared;
 
 use commands::agent::AgentCommands;
-use commands::asset::AssetCommands;
 use commands::attachment::AttachmentCommands;
 use commands::audio::AudioCommands;
 use commands::calendar::CalendarCommands;
@@ -24,7 +23,7 @@ use commands::server::ServerCommands;
 use commands::talk::TalkCommands;
 use commands::time::TimeCommands;
 
-use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use clap::{Args, Parser, Subcommand};
 use shared::{
     RemoteVoxConfig, ServerProfile, ServerProfiles, api_to_model, find_task_in,
@@ -44,8 +43,6 @@ use task_core::expense::{
 use task_core::index::{ChangeRow, ConflictRow};
 use task_core::workflows::{Comment, parse_comments, render_comments};
 use task_core::{
-    Asset, AssetConflict, AssetCreateRequest, AssetFilter, AssetMaintenanceRecord, AssetPatch,
-    AssetReservationRecord, AssetReservationResponse, AssetReserveRequest, AssetStatus,
     BusinessFinanceReport, CalendarEvent, CalendarEventPatch, CalendarEventStatus,
     CardDavSyncCollectionRequest, ChannelConversation, ChannelMessage, ChannelSendMessageRequest,
     Client, Filter, InboxCaptureRequest, InboxItem, InboxPromoteRequest, Invoice,
@@ -323,11 +320,6 @@ pub(crate) enum Commands {
     Prop {
         #[command(subcommand)]
         command: commands::property::PropertyCommands,
-    },
-    /// Asset inventory and maintenance tracking
-    Asset {
-        #[command(subcommand)]
-        command: AssetCommands,
     },
     /// File attachments — upload/list/download/delete files hung off entities
     Attachment {
@@ -1263,9 +1255,6 @@ pub(crate) async fn run_remote_command(
         Commands::Revenue { .. } => {
             eyre::bail!("revenue commands are currently supported only in local vault mode")
         }
-        Commands::Asset { command } => {
-            commands::asset::run_remote_asset_command(remote, actor, command).await?
-        }
         Commands::Attachment { command } => {
             commands::attachment::run_remote_attachment_command(remote, actor, command).await?
         }
@@ -1732,83 +1721,6 @@ pub(crate) fn print_channel_rooms(rooms: &[ChannelConversation], json: bool) {
         print_channel_rooms_json(rooms);
     } else {
         print_channel_rooms_table(rooms);
-    }
-}
-
-pub(crate) fn print_asset_result(asset: &Asset, json: bool) {
-    if json {
-        println!("{}", facet_json::to_string(asset).unwrap_or_default());
-    } else {
-        println!("{}  {}  {:?}", asset.id, asset.name, asset.status);
-        if let Some(location) = &asset.location {
-            println!("  location: {}", location.0);
-        }
-        if let Some(space) = &asset.space {
-            println!("  space: {}", space.0);
-        }
-        if !asset.reservations.is_empty() {
-            println!("  reservations: {}", asset.reservations.len());
-        }
-    }
-}
-
-pub(crate) fn print_assets(assets: &[Asset], json: bool) {
-    if json {
-        println!("{}", facet_json::to_string(assets).unwrap_or_default());
-        return;
-    }
-    if assets.is_empty() {
-        println!("No assets.");
-        return;
-    }
-    println!(
-        "{:<16}  {:<28}  {:<16}  {:<18}  LOCATION",
-        "ID", "NAME", "STATUS", "CATEGORY"
-    );
-    println!("{}", "-".repeat(94));
-    for asset in assets {
-        println!(
-            "{:<16}  {:<28}  {:<16}  {:<18}  {}",
-            truncate(&asset.id, 16),
-            truncate(&asset.name, 28),
-            truncate(&format!("{:?}", asset.status), 16),
-            truncate(asset.category.as_deref().unwrap_or("-"), 18),
-            asset
-                .location
-                .as_ref()
-                .map(|link| link.0.as_str())
-                .unwrap_or("-")
-        );
-    }
-}
-
-pub(crate) fn print_asset_conflicts(conflicts: &[AssetConflict], json: bool) {
-    if json {
-        println!("{}", facet_json::to_string(conflicts).unwrap_or_default());
-        return;
-    }
-    if conflicts.is_empty() {
-        println!("No asset conflicts.");
-        return;
-    }
-    println!(
-        "{:<16}  {:<28}  {:<36}  REFERENCE",
-        "ASSET", "NAME", "REASON"
-    );
-    println!("{}", "-".repeat(102));
-    for conflict in conflicts {
-        let reference = conflict
-            .reservation
-            .as_ref()
-            .map(|reservation| reservation.reference.0.as_str())
-            .unwrap_or("-");
-        println!(
-            "{:<16}  {:<28}  {:<36}  {}",
-            truncate(&conflict.asset_id, 16),
-            truncate(&conflict.asset_name, 28),
-            truncate(&conflict.reason, 36),
-            reference
-        );
     }
 }
 
