@@ -97,6 +97,13 @@ vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd
 vox-types = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 
+# Moiré — runtime graph instrumentation. Already pulled in transitively
+# by vox; declared explicitly here so architect's axum_ws adapter can
+# use named mpsc/oneshot/spawn primitives. Compiles to passthroughs
+# when the `diagnostics` cargo feature is off (zero runtime cost).
+# Pinned to the same rev vox uses for graph consistency.
+moire = { git = "https://github.com/bearcove/moire", rev = "13eac79c1b128282dd792a611319d0a1016ad15d" }
+
 # Database — SeaORM with SQLite for the reference. Real projects pick
 # their own backend without changing the crudcrate-generated traits.
 sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }

@@ -35,7 +35,7 @@ fake = ["dep:fake"]
 # `full` enables every architect optional — vox, SeaORM bridge, axum
 # adapter, fake. Matches tokio's `full` convention: when you just want
 # everything turned on for development or a single-binary build.
-full = ["vox", "server-seaorm", "server-axum", "fake"]
+full = ["vox", "server-seaorm", "server-axum", "fake", "diagnostics"]
 
 # Two server-side features, deliberately independent so a binary can
 # pick storage and transport à la carte:
@@ -59,7 +59,14 @@ server-axum = [
     "dep:tracing",
     "dep:vox-core",
     "dep:vox-types",
+    "dep:moire",
 ]
+
+# Enables moiré's instrumentation — named mpsc/oneshot/spawn primitives
+# in axum_ws light up the moire-web dashboard at MOIRE_DASHBOARD.
+# Without this, the same primitives compile to plain tokio passthroughs
+# with zero runtime cost. Off by default.
+diagnostics = ["moire/diagnostics"]
 # Back-compat alias — older consumers that wrote `features = ["server"]`
 # get the SeaORM bridge for free. Drop after one release cycle.
 server = ["server-seaorm"]
@@ -89,3 +96,4 @@ futures = { version = "0.3", optional = true }
 tracing = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+moire = { workspace = true, optional = true }

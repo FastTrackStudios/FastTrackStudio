@@ -172,6 +172,7 @@ dependencies = [
  "facet-core",
  "fake",
  "futures",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
  "sea-orm",
  "thiserror 2.0.18",
  "tokio",
@@ -2744,15 +2745,41 @@ name = "moire"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-macros-noop",
- "moire-tokio",
- "moire-wasm",
+ "moire-macros-noop 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-tokio 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-wasm 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+]
+
+[[package]]
+name = "moire"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "moire-macros",
+ "moire-macros-noop 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-tokio 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-wasm 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+]
+
+[[package]]
+name = "moire-macros"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unsynn",
 ]
 
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+
+[[package]]
+name = "moire-macros-noop"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
 
 [[package]]
 name = "moire-runtime"
@@ -2763,10 +2790,26 @@ dependencies = [
  "facet",
  "facet-json",
  "facet-value",
- "moire-trace-capture",
- "moire-trace-types",
- "moire-types",
- "moire-wire",
+ "moire-trace-capture 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-wire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "tokio",
+]
+
+[[package]]
+name = "moire-runtime"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "ctor",
+ "facet",
+ "facet-json",
+ "facet-value",
+ "moire-trace-capture 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-wire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
  "tokio",
 ]
 
@@ -2775,8 +2818,19 @@ name = "moire-tokio"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-runtime",
- "moire-types",
+ "moire-runtime 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "parking_lot",
+ "tokio",
+]
+
+[[package]]
+name = "moire-tokio"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "moire-runtime 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
  "parking_lot",
  "tokio",
 ]
@@ -2787,7 +2841,16 @@ version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "libc",
- "moire-trace-types",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+]
+
+[[package]]
+name = "moire-trace-capture"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "libc",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
 ]
 
 [[package]]
@@ -2799,13 +2862,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "moire-trace-types"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "facet",
+]
+
+[[package]]
 name = "moire-types"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
  "facet",
  "facet-value",
- "moire-trace-types",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+]
+
+[[package]]
+name = "moire-types"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "facet",
+ "facet-value",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
 ]
 
 [[package]]
@@ -2819,7 +2900,22 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-timers",
- "moire-types",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "moire-wasm"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "async-channel",
+ "async-lock",
+ "event-listener",
+ "futures-channel",
+ "futures-util",
+ "gloo-timers",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
  "wasm-bindgen-futures",
 ]
 
@@ -2830,8 +2926,19 @@ source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd79
 dependencies = [
  "facet",
  "facet-json",
- "moire-trace-types",
- "moire-types",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+]
+
+[[package]]
+name = "moire-wire"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "facet",
+ "facet-json",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79c1b128282dd792a611319d0a1016ad15d)",
 ]
 
 [[package]]
@@ -4900,7 +5007,7 @@ dependencies = [
  "facet",
  "facet-pretty",
  "facet-reflect",
- "moire",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "tokio",
  "tracing",
  "vox-core",
@@ -4920,7 +5027,7 @@ dependencies = [
  "facet-error",
  "facet-reflect",
  "getrandom 0.3.4",
- "moire",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -5000,7 +5107,7 @@ dependencies = [
  "futures-channel",
  "heck 0.5.0",
  "indexmap",
- "moire",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",

@@ -43,8 +43,12 @@ backend-memory = ["dep:example-memory"]
 # Adds fake-rs Dummy derives to every wire + emitted struct.
 fake = ["example-proto/fake"]
 
-# Everything — every axis + every in-tree backend + fake. Matches
-# tokio's `full` convention.
+# Forwards to architect/diagnostics — turns moire-web instrumentation
+# on for the axum_ws transport adapter. Off by default.
+diagnostics = ["dep:architect", "architect/diagnostics"]
+
+# Everything — every axis + every in-tree backend + fake + diagnostics.
+# Matches tokio's `full` convention.
 full = [
     "vox",
     "server-seaorm",
@@ -52,4 +56,5 @@ full = [
     "backend-db",
     "backend-memory",
     "fake",
+    "diagnostics",
 ]

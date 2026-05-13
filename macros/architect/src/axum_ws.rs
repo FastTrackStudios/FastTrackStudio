@@ -31,9 +31,19 @@
 //!
 //! Gated behind `--features server-axum`; the wasm side of an architect
 //! project never sees it.
+//!
+//! ## Instrumentation
+//!
+//! Every primitive in this module is allocated through
+//! [`moire`](https://github.com/bearcove/moire) with a stable name —
+//! the inbound queue, the outbound queue, the closed-notify oneshot,
+//! and the IO loop task. With architect's `diagnostics` feature off,
+//! those names are inert (compile to tokio passthroughs); with it on,
+//! the moire-web dashboard surfaces each one for stall investigation.
 
 use axum::extract::ws::{Message as AxumWsMessage, WebSocket};
-use tokio::sync::{mpsc, oneshot};
+use moire::sync::{mpsc, oneshot};
+use moire::task;
 use tracing::warn;
 
 // Re-export so the user's match arms can write `architect::axum_ws::acceptor_fn`
@@ -49,7 +59,7 @@ pub async fn serve<A>(socket: WebSocket, acceptor: A)
 where
     A: vox_core::ConnectionAcceptor,
 {
-    let (closed_tx, closed_rx) = oneshot::channel();
+    let (closed_tx, closed_rx) = oneshot::channel("vox.session.closed");
     let root = match acceptor_on(AxumWsLink::new(socket, closed_tx))
         .on_connection(acceptor)
         .establish::<vox_core::NoopClient>()
@@ -83,9 +93,10 @@ impl vox_types::Link for AxumWsLink {
     type Rx = AxumWsRx;
 
     fn split(self) -> (Self::Tx, Self::Rx) {
-        let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>(1);
-        let (tx_in, rx_in) = mpsc::channel::<Result<AxumWsMessage, AxumWsError>>(1);
-        let io_task = tokio::spawn(io_loop(self.socket, rx_out, tx_in, self.closed));
+        let (tx_out, rx_out) = mpsc::channel::<Vec<u8>>("vox.ws.outbound", 1);
+        let (tx_in, rx_in) =
+            mpsc::channel::<Result<AxumWsMessage, AxumWsError>>("vox.ws.inbound", 1);
+        let io_task = task::spawn(io_loop(self.socket, rx_out, tx_in, self.closed));
         (
             AxumWsTx {
                 tx: tx_out,
@@ -141,7 +152,7 @@ impl Drop for NotifyOnDrop {
 
 pub struct AxumWsTx {
     tx: mpsc::Sender<Vec<u8>>,
-    io_task: tokio::task::JoinHandle<()>,
+    io_task: task::JoinHandle<()>,
 }
 
 impl vox_types::LinkTx for AxumWsTx {
