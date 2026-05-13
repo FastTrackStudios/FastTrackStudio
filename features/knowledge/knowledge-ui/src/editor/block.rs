@@ -145,17 +145,26 @@ pub fn BlockEditor(
         _ => "",
     };
 
+    // CRITICAL: the prefix (`- [x] `, `# `, `> `, etc.) MUST NOT be a
+    // child of the contenteditable div — otherwise the browser merges
+    // it into textContent and every `oninput` writes the prefix back
+    // into block.content, causing exponential duplication on every
+    // keystroke. Render the prefix as a non-editable flex sibling.
     rsx! {
-        div {
-            class: "outline-none {wrap_class}",
-            contenteditable: "true",
-            onfocus: move |_| focused.set(true),
-            onblur: move |_| focused.set(false),
-            oninput: on_input,
-            onkeydown: on_keydown,
-            {prefix_node}
-            for (sp, dec) in spans().iter().zip(decos.iter()) {
-                {render_span(sp, *dec, &on_click_ref, &on_hover_ref)}
+        div { class: "flex items-baseline gap-1 {wrap_class}",
+            if let Some(p) = prefix_node {
+                span { contenteditable: "false", class: "select-none flex-shrink-0", {p} }
+            }
+            div {
+                class: "outline-none flex-1 min-w-0",
+                contenteditable: "true",
+                onfocus: move |_| focused.set(true),
+                onblur: move |_| focused.set(false),
+                oninput: on_input,
+                onkeydown: on_keydown,
+                for (sp, dec) in spans().iter().zip(decos.iter()) {
+                    {render_span(sp, *dec, &on_click_ref, &on_hover_ref)}
+                }
             }
         }
     }
