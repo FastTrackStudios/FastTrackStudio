@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod data;
+pub mod timer_demo;
 pub mod views;
 
 pub use app::App;

@@ -10,6 +10,16 @@ dioxus = { version = "0.7.9", default-features = false, features = ["lib", "web"
 web-sys = { version = "0.3.98", features = ["Window", "Location", "History"] }
 task-ui = { path = "../../crates/task-ui" }
 
+# Loro CRDT — local-first source of truth in the browser.
+loro = { version = "1.12", default-features = false }
+# Demo feature's wire types + Repo trait. No vox (no RPC) — the UI
+# drives the local LoroRepo directly, syncing bytes via WebSocket.
+timer-proto = { path = "../../features/timer/timer-proto" }
+timer-crdt = { path = "../../features/timer/timer-crdt" }
+crdt = { path = "../../../architect/libs/crdt" }
+uuid = { version = "1", features = ["v4", "js"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+
 [features]
 default = []
 # Bundle-split the wasm binary along route variants. Requires running

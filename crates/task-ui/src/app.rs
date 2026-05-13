@@ -23,6 +23,9 @@ pub enum Route {
 
         #[route("/settings")]
         SettingsRoute {},
+
+        #[route("/timer-demo")]
+        TimerDemoRoute {},
 }
 
 #[component]
@@ -38,6 +41,11 @@ fn ProjectsRoute() -> Element {
 #[component]
 fn InboxRoute() -> Element {
     rsx! { Inbox {} }
+}
+
+#[component]
+fn TimerDemoRoute() -> Element {
+    rsx! { crate::timer_demo::TimerDemo {} }
 }
 
 #[component]
@@ -211,6 +219,7 @@ fn nav_tabs() -> Vec<NavTab> {
         NavTab { label: "Home", icon: "▦", route: Route::DashboardRoute {} },
         NavTab { label: "Projects", icon: "▤", route: Route::ProjectsRoute {} },
         NavTab { label: "Inbox", icon: "✉", route: Route::InboxRoute {} },
+        NavTab { label: "Timer demo", icon: "⏱", route: Route::TimerDemoRoute {} },
         NavTab { label: "Settings", icon: "⚙", route: Route::SettingsRoute {} },
     ]
 }
@@ -239,6 +248,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::ProjectsRoute {} => "Projects",
         Route::InboxRoute {} => "Inbox",
         Route::SettingsRoute {} => "Settings",
+        Route::TimerDemoRoute {} => "Timer demo",
     }
 }
 

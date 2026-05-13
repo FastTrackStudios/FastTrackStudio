@@ -21,7 +21,7 @@ tower-http = { version = "0.6", features = ["cors"] }
 slug = "0.1"
 task-db = { path = "../../crates/task-db" }
 task-core = { workspace = true, features = ["realtime"] }
-vox.workspace = true
+vox = { workspace = true, features = ["transport-websocket"] }
 better-auth = { workspace = true, features = ["axum"] }
 better-auth-core = { workspace = true }
 better-auth-api = { workspace = true, features = ["rustls"] }

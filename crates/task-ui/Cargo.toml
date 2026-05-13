@@ -15,6 +15,43 @@ dioxus = { version = "0.7.9", default-features = false, features = ["lib", "rout
 # `wasm-split` feature in apps/web/Cargo.toml.
 dioxus-router = { version = "0.7.9", default-features = false }
 
+# Local-first source-of-truth in the browser. The Timer demo route
+# holds a `CrdtDoc` + `TimeEntryRepoLoro` and syncs Loro bytes over a
+# raw WebSocket against the standalone `sync-demo` server. No vox in
+# the UI — RPC is reserved for the few mutations that must round-trip
+# (the demo doesn't need any).
+loro = { version = "1.12", default-features = false }
+architect = { path = "../../../architect/macros/architect" }
+crdt = { path = "../../../architect/libs/crdt" }
+timer-proto = { path = "../../features/timer/timer-proto" }
+timer-crdt = { path = "../../features/timer/timer-crdt" }
+
+# Wire types touched by the UI.
+uuid = { version = "1", features = ["v4", "js"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+
+# Browser glue. We bind to web-sys directly for WebSocket so the demo
+# stays free of opinionated wasm-bindgen wrappers.
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3.98", features = [
+    "Window",
+    "Location",
+    "History",
+    "Navigator",
+    "WebSocket",
+    "MessageEvent",
+    "BinaryType",
+    "Blob",
+    "Event",
+    "CloseEvent",
+    "ErrorEvent",
+    "console",
+] }
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
 [features]
 default = []
 # Opt-in WASM bundle splitting along route variants. Apps consuming this

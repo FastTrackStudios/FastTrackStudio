@@ -1,0 +1,48 @@
+[package]
+name = "sync-demo"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# Standalone sync-relay server for the Loro CRDT demo.
+#
+# Per-doc room: each connected WebSocket joins the room for its
+# `/sync/:doc_id` URL. The server holds an authoritative LoroDoc per
+# room; on join it sends a Snapshot to bring the new client up to
+# date, then forwards every incoming update into the doc + persists
+# it + broadcasts to every other peer in the room. Imports do NOT
+# trigger `subscribe_local_update` (per Loro's docs), so there's no
+# echo loop.
+#
+# Persistence: SeaORM via `crdt-seaorm`. Snapshot + update-log tables.
+# On cold start of the server, the room rehydrates from persistence
+# the first time anyone joins that doc_id.
+#
+# No auth, no rate-limiting, no presence — strictly the byte-relay
+# minimum. Hardcoded doc_id at the client side keeps both browsers
+# pointed at the same room.
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors"] }
+futures.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eyre.workspace = true
+uuid.workspace = true
+
+loro.workspace = true
+crdt.workspace = true
+crdt-seaorm.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+
+[dev-dependencies]
+# Integration tests spawn the server in-process and drive it with
+# raw WebSocket clients to verify the realtime byte-relay end-to-end.
+tokio-tungstenite = "0.27"
+timer-proto = { workspace = true, default-features = false }
+timer-crdt.workspace = true
+architect.workspace = true
+chrono.workspace = true

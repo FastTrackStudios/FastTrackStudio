@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "apps/server",
+    "apps/sync-demo",
     "crates/fasttrackaudio",
     "crates/task-core",
     "crates/task-cli",
@@ -184,9 +185,15 @@ features = [
 path = "crates/task-core"
 
 [workspace.dependencies.vox]
+# Wasm-clean baseline: just `runtime` (vox-core, gives #[vox::service]
+# + generated <Trait>Client). Server crates that own a vox server
+# add `features = ["transport-websocket"]` explicitly on their dep
+# line. Pattern lifted from architect's workspace + vox's own
+# rust/wasm-browser-tests crate.
 git = "https://github.com/Codys-Wright/vox"
 rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
-features = ["transport-websocket"]
+default-features = false
+features = ["runtime"]
 
 [workspace.dependencies.vox-core]
 git = "https://github.com/Codys-Wright/vox"
