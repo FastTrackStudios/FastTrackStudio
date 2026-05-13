@@ -2,11 +2,9 @@
 
 use std::net::SocketAddr;
 
-use crdt_seaorm::SeaOrmPersistence;
 use eyre::WrapErr;
-use sea_orm::Database;
-use sea_orm_migration::MigratorTrait;
 use sync_demo::{AppState, router};
+use task_db::{WORKSPACE_DOC_ID, default_database_url, open_and_migrate, seed};
 use tracing::info;
 
 #[tokio::main]
@@ -14,21 +12,24 @@ async fn main() -> eyre::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "sync_demo=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "sync_demo=info,task_db=info,tower_http=info".into()),
         )
         .init();
 
-    let database_url = std::env::var("SYNC_DEMO_DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite://./sync-demo.db?mode=rwc".into());
+    let database_url = default_database_url();
     let bind: SocketAddr = std::env::var("SYNC_DEMO_BIND")
         .unwrap_or_else(|_| "0.0.0.0:9090".into())
         .parse()
         .wrap_err("invalid SYNC_DEMO_BIND")?;
+    let seed_on_start = env_truthy("SYNC_DEMO_SEED");
 
     info!(%database_url, "connecting");
-    let db = Database::connect(&database_url).await?;
-    crdt_seaorm::Migrator::up(&db, None).await?;
-    let persistence = SeaOrmPersistence::new(db);
+    let persistence = open_and_migrate(&database_url).await?;
+
+    if seed_on_start {
+        info!("SYNC_DEMO_SEED=1 — seeding workspace doc before listening");
+        seed::run(persistence.clone(), WORKSPACE_DOC_ID).await?;
+    }
 
     let state = AppState::new(persistence);
     let app = router(state);
@@ -37,4 +38,11 @@ async fn main() -> eyre::Result<()> {
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn env_truthy(key: &str) -> bool {
+    matches!(
+        std::env::var(key).ok().as_deref(),
+        Some("1") | Some("true") | Some("TRUE") | Some("yes")
+    )
 }

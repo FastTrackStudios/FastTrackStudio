@@ -22,55 +22,55 @@ architect = { path = "../../../architect/macros/architect" }
 crdt = { path = "../../../architect/libs/crdt" }
 
 # Per-feature trios.
-asset-proto.workspace = true
+asset-proto = { workspace = true, features = ["fake"] }
 asset-crdt.workspace = true
 asset-ui.workspace = true
-agent-proto.workspace = true
+agent-proto = { workspace = true, features = ["fake"] }
 agent-crdt.workspace = true
 agent-ui.workspace = true
-caldav-proto.workspace = true
+caldav-proto = { workspace = true, features = ["fake"] }
 caldav-crdt.workspace = true
 caldav-ui.workspace = true
-calendar-proto.workspace = true
+calendar-proto = { workspace = true, features = ["fake"] }
 calendar-crdt.workspace = true
 calendar-ui.workspace = true
-chat-proto.workspace = true
+chat-proto = { workspace = true, features = ["fake"] }
 chat-crdt.workspace = true
 chat-ui.workspace = true
-conference-proto.workspace = true
+conference-proto = { workspace = true, features = ["fake"] }
 conference-crdt.workspace = true
 conference-ui.workspace = true
-cookbook-proto.workspace = true
+cookbook-proto = { workspace = true, features = ["fake"] }
 cookbook-crdt.workspace = true
 cookbook-ui.workspace = true
-email-proto.workspace = true
+email-proto = { workspace = true, features = ["fake"] }
 email-crdt.workspace = true
 email-ui.workspace = true
-finance-proto.workspace = true
+finance-proto = { workspace = true, features = ["fake"] }
 finance-crdt.workspace = true
 finance-ui.workspace = true
-fitness-proto.workspace = true
+fitness-proto = { workspace = true, features = ["fake"] }
 fitness-crdt.workspace = true
 fitness-ui.workspace = true
-inventory-proto.workspace = true
+inventory-proto = { workspace = true, features = ["fake"] }
 inventory-crdt.workspace = true
 inventory-ui.workspace = true
-invoice-proto.workspace = true
+invoice-proto = { workspace = true, features = ["fake"] }
 invoice-crdt.workspace = true
 invoice-ui.workspace = true
-location-proto.workspace = true
+location-proto = { workspace = true, features = ["fake"] }
 location-crdt.workspace = true
 location-ui.workspace = true
-person-proto.workspace = true
+person-proto = { workspace = true, features = ["fake"] }
 person-crdt.workspace = true
 person-ui.workspace = true
-project-proto.workspace = true
+project-proto = { workspace = true, features = ["fake"] }
 project-crdt.workspace = true
 project-ui.workspace = true
-threads-proto.workspace = true
+threads-proto = { workspace = true, features = ["fake"] }
 threads-crdt.workspace = true
 threads-ui.workspace = true
-timer-proto.workspace = true
+timer-proto = { workspace = true, features = ["fake"] }
 timer-crdt.workspace = true
 timer-ui.workspace = true
 

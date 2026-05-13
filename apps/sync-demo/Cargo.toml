@@ -38,6 +38,11 @@ crdt-seaorm.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 
+# Optional seed-on-startup. With `SYNC_DEMO_SEED=1` and the default
+# in-memory sqlite, every server start hydrates the workspace doc
+# with fake data — UI design loops without manual setup.
+task-db = { path = "../db" }
+
 [dev-dependencies]
 # Integration tests spawn the server in-process and drive it with
 # raw WebSocket clients to verify the realtime byte-relay end-to-end.
