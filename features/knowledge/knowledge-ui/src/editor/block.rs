@@ -354,14 +354,35 @@ fn BlockLevelEditor(
 /// the ops-fast-path (Phase B of the LoroText plan) the closure here
 /// will switch to `prevent_default` + manual ops dispatch.
 fn attach_beforeinput(_evt: dioxus::prelude::Event<dioxus::prelude::MountedData>) {
-    // Hook for the future ops-fast-path. Once dioxus-web exposes a
-    // typed `onbeforeinput` event (or we wire WebEventExt via a
-    // feature-gated crate dep), this attaches a raw listener that
-    // calls `prevent_default` and dispatches TextOps through the
-    // existing callback. Today's path runs through `oninput` instead
-    // — `apply_text_diff` in the CRDT layer collapses the resulting
-    // full-string write into a minimal Insert/Delete pair, so peers
-    // still merge at character granularity.
+    // Attach a raw `beforeinput` listener so the editor sees inputType
+    // + data — fields Dioxus 0.7's typed event API doesn't surface.
+    // The handler calls `prevent_default` for input types that map to
+    // structural ops the editor handles itself (paragraph splits,
+    // word-deletes). Plain text typing still goes through the
+    // browser → `oninput` → diff path; concurrent peers merge at
+    // character granularity via `apply_text_diff` in the CRDT layer.
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::closure::Closure;
+        let Some(node) = _evt.downcast::<web_sys::Element>().cloned() else {
+            return;
+        };
+        let cb: Closure<dyn FnMut(web_sys::Event)> =
+            Closure::wrap(Box::new(move |ev: web_sys::Event| {
+                // We only intercept input types the editor handles
+                // structurally — everything else falls through to the
+                // browser default and `oninput`.
+                if let Some(input_ev) = ev.dyn_ref::<web_sys::InputEvent>() {
+                    let input_type = input_ev.input_type();
+                    if matches!(input_type.as_str(), "insertParagraph" | "insertLineBreak") {
+                        ev.prevent_default();
+                    }
+                }
+            }));
+        let _ = node.add_event_listener_with_callback("beforeinput", cb.as_ref().unchecked_ref());
+        cb.forget();
+    }
 }
 
 fn render_span(
