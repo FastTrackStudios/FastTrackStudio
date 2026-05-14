@@ -32,14 +32,18 @@ use task_server::{AppState, router};
 use uuid::Uuid;
 use vox::Rx;
 
-const PEERS: usize = 10;
-const EDITS_PER_PEER: usize = 100;
-const SEED_TASKS: usize = 20;
+// Sized so the full suite runs in <60s on a laptop. Each peer's
+// burst fans to (PEERS-1) subscribers, so total imports ≈
+// PEERS² × EDITS_PER_PEER. Crank these if you're hunting a
+// specific race; revert when you commit.
+const PEERS: usize = 15;
+const EDITS_PER_PEER: usize = 150;
+const SEED_TASKS: usize = 30;
 /// How long to wait, after the last edit, for the stream to settle
 /// before declaring quiescence and asserting convergence.
-const QUIESCE_MS: u64 = 2000;
+const QUIESCE_MS: u64 = 3000;
 /// Hard cap on total drain time per peer during quiescence wait.
-const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(120);
 
 async fn boot_server() -> eyre::Result<(String, Vec<Uuid>)> {
     let persistence: SeaOrmPersistence = open_and_migrate(&default_database_url()).await?;
@@ -572,5 +576,419 @@ async fn churn_peers_resubscribe_mid_burst() -> eyre::Result<()> {
     drop(probe);
 
     assert!(ok, "[churn] divergence after re-subscribe under burst");
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Hotspot: all peers hammer the same handful of tasks.
+//
+// Pathological case for CRDT merge: every peer's edit lands on the
+// same scalar field of the same row. Loro's per-peer LWW ordering
+// has to deterministically pick a winner and all peers have to
+// agree on which one. Asserts convergence (NOT a specific value —
+// the winner is observable but not predictable from the test's
+// POV).
+// ─────────────────────────────────────────────────────────────────────
+
+const HOTSPOT_PEERS: usize = 10;
+const HOTSPOT_EDITS_PER_PEER: usize = 100;
+const HOTSPOT_TASK_COUNT: usize = 3;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hotspot_same_task_concurrent_edits_converge() -> eyre::Result<()> {
+    let (url, mut task_ids) = boot_server().await?;
+    task_ids.truncate(HOTSPOT_TASK_COUNT);
+    assert_eq!(task_ids.len(), HOTSPOT_TASK_COUNT);
+
+    let mut peers = Vec::with_capacity(HOTSPOT_PEERS);
+    let opens = (0..HOTSPOT_PEERS).map(|i| open_peer(i, &url));
+    for r in futures::future::join_all(opens).await {
+        peers.push(r?);
+    }
+
+    // Wait for snapshots.
+    let stop = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut all_seen = true;
+        for p in peers.iter() {
+            if import_count(p).await == 0 {
+                all_seen = false;
+                break;
+            }
+        }
+        if all_seen {
+            break;
+        }
+        if tokio::time::Instant::now() >= stop {
+            return Err(eyre::eyre!("hotspot: snapshots didn't arrive in 10s"));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Every peer cycles every task's `done` HOTSPOT_EDITS_PER_PEER
+    // times. Worst-case same-cell contention.
+    let edit_tasks: Vec<_> = peers
+        .iter()
+        .map(|p| {
+            let doc = p.doc.clone();
+            let id = p.id;
+            let task_ids = task_ids.clone();
+            tokio::spawn(async move {
+                let mut prng = xorshift((id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+                for _ in 0..HOTSPOT_EDITS_PER_PEER {
+                    let task_id = task_ids[(prng() as usize) % task_ids.len()];
+                    let new_done = ((prng() as u64) & 1) == 1;
+                    let task_repo = TaskRepoLoro::new(&doc);
+                    let _ = task_repo
+                        .update(
+                            task_id,
+                            TaskUpdate {
+                                done: Some(new_done),
+                                ..Default::default()
+                            },
+                        )
+                        .await;
+                    tokio::task::yield_now().await;
+                }
+            })
+        })
+        .collect();
+    for t in edit_tasks {
+        t.await?;
+    }
+
+    wait_for_quiescence(&peers).await;
+
+    // Convergence check (NOT value check — Loro picks a winner).
+    let maps: Vec<BTreeMap<Uuid, bool>> = {
+        let mut v = Vec::with_capacity(peers.len());
+        for p in peers.iter() {
+            v.push(task_done_map(&p.doc).await);
+        }
+        v
+    };
+    let mut ok = true;
+    for i in 1..maps.len() {
+        if maps[i] != maps[0] {
+            ok = false;
+            let diff: Vec<_> = task_ids
+                .iter()
+                .filter(|id| maps[0].get(id) != maps[i].get(id))
+                .map(|id| {
+                    format!(
+                        "  {}: peer0={:?} peer{}={:?}",
+                        id,
+                        maps[0].get(id),
+                        i,
+                        maps[i].get(id)
+                    )
+                })
+                .collect();
+            eprintln!(
+                "\n[hotspot] DIVERGENCE peer 0 vs peer {i}:\n{}",
+                diff.join("\n")
+            );
+        }
+    }
+
+    let probe = open_peer(999, &url).await?;
+    let stop = tokio::time::Instant::now() + Duration::from_secs(10);
+    while import_count(&probe).await == 0 && tokio::time::Instant::now() < stop {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let server_view = task_done_map(&probe.doc).await;
+    if server_view != maps[0] {
+        ok = false;
+        eprintln!("\n[hotspot] server probe differs from peer 0");
+    }
+
+    drop(peers);
+    drop(probe);
+    assert!(
+        ok,
+        "[hotspot] CRDT merge failed to converge under same-cell burst"
+    );
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Create storm: many peers concurrently create many new tasks.
+//
+// Exercises the path where peers introduce ENTIRELY NEW keys into
+// the workspace doc concurrently — different from edit conflicts.
+// Every peer's local commit produces fresh LoroMap entries; the
+// merge has to fold them all in without dropping any.
+// ─────────────────────────────────────────────────────────────────────
+
+const STORM_PEERS: usize = 8;
+const STORM_TASKS_PER_PEER: usize = 25;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn create_storm_no_losses() -> eyre::Result<()> {
+    // Boot with one project; ignore the seeded tasks for this test.
+    let (url, _) = boot_server().await?;
+    let project_id = {
+        // Pull project_id from a probe peer's snapshot — the seed
+        // already wrote one.
+        let probe = open_peer(0, &url).await?;
+        let stop = tokio::time::Instant::now() + Duration::from_secs(10);
+        while import_count(&probe).await == 0 && tokio::time::Instant::now() < stop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let task_repo = TaskRepoLoro::new(&probe.doc);
+        let page = task_repo
+            .list(
+                Page {
+                    index: 0,
+                    size: 1000,
+                },
+                None,
+                None,
+            )
+            .await?;
+        let pid = page
+            .items
+            .first()
+            .map(|t| t.project_id)
+            .ok_or_else(|| eyre::eyre!("seeded tasks unexpectedly missing"))?;
+        drop(probe);
+        pid
+    };
+
+    // Open a fresh set of peers (probe peer is gone).
+    let mut peers = Vec::with_capacity(STORM_PEERS);
+    let opens = (1..=STORM_PEERS).map(|i| open_peer(i, &url));
+    for r in futures::future::join_all(opens).await {
+        peers.push(r?);
+    }
+
+    // Wait for snapshots.
+    let stop = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let mut all_seen = true;
+        for p in peers.iter() {
+            if import_count(p).await == 0 {
+                all_seen = false;
+                break;
+            }
+        }
+        if all_seen {
+            break;
+        }
+        if tokio::time::Instant::now() >= stop {
+            return Err(eyre::eyre!("storm: snapshots didn't arrive in 10s"));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let seeded_count = task_done_map(&peers[0].doc).await.len();
+
+    // Each peer creates STORM_TASKS_PER_PEER tasks in parallel.
+    let create_tasks: Vec<_> = peers
+        .iter()
+        .enumerate()
+        .map(|(slot, p)| {
+            let doc = p.doc.clone();
+            tokio::spawn(async move {
+                let task_repo = TaskRepoLoro::new(&doc);
+                for k in 0..STORM_TASKS_PER_PEER {
+                    let _ = task_repo
+                        .create(TaskCreate {
+                            project_id,
+                            title: format!("peer{slot}/task{k}"),
+                            done: false,
+                        })
+                        .await;
+                    tokio::task::yield_now().await;
+                }
+            })
+        })
+        .collect();
+    for t in create_tasks {
+        t.await?;
+    }
+
+    wait_for_quiescence(&peers).await;
+
+    let expected_total = seeded_count + STORM_PEERS * STORM_TASKS_PER_PEER;
+
+    // Convergence + count check.
+    let mut maps: Vec<BTreeMap<Uuid, bool>> = Vec::with_capacity(peers.len());
+    for p in peers.iter() {
+        maps.push(task_done_map(&p.doc).await);
+    }
+    let mut ok = true;
+    for (i, m) in maps.iter().enumerate() {
+        if m.len() != expected_total {
+            ok = false;
+            eprintln!(
+                "[storm] peer {i} has {} tasks; expected {expected_total}",
+                m.len()
+            );
+        }
+    }
+    for i in 1..maps.len() {
+        if maps[i].keys().collect::<Vec<_>>() != maps[0].keys().collect::<Vec<_>>() {
+            ok = false;
+            eprintln!("[storm] peer 0 vs peer {i}: key sets differ");
+        }
+    }
+
+    let probe = open_peer(999, &url).await?;
+    let stop = tokio::time::Instant::now() + Duration::from_secs(10);
+    while import_count(&probe).await == 0 && tokio::time::Instant::now() < stop {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let server_view = task_done_map(&probe.doc).await;
+    if server_view.len() != expected_total {
+        ok = false;
+        eprintln!(
+            "[storm] server probe has {} tasks; expected {expected_total}",
+            server_view.len()
+        );
+    }
+
+    drop(peers);
+    drop(probe);
+    assert!(
+        ok,
+        "[storm] task count or key set diverged after create burst"
+    );
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Long offline + bulk replay.
+//
+// One peer goes offline, makes hundreds of local edits, comes
+// back, and dumps them all at once. Server has to accept the
+// flood, broadcast it to other peers, and have everyone converge.
+// Stresses the apply_update path under burst from a single peer
+// (no inter-peer interleaving while offline).
+// ─────────────────────────────────────────────────────────────────────
+
+const OFFLINE_EDITS: usize = 200;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn long_offline_bulk_replay() -> eyre::Result<()> {
+    let (url, task_ids) = boot_server().await?;
+
+    // One "online observer" peer that stays connected the whole
+    // time, and one "offline editor" peer that disconnects after
+    // its snapshot.
+    let observer = open_peer(0, &url).await?;
+    let editor = open_peer(1, &url).await?;
+    let stop = tokio::time::Instant::now() + Duration::from_secs(5);
+    while (import_count(&observer).await == 0 || import_count(&editor).await == 0)
+        && tokio::time::Instant::now() < stop
+    {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Editor goes offline (kill its subscribe stream — the
+    // upload mpsc still drains because its apply_client lives in
+    // the peer struct; for a fully-offline simulation we drop
+    // the whole peer except its doc, then rebuild later).
+    drop(editor);
+
+    // Recreate an offline doc with the same captured-bytes
+    // pattern. (Simpler than scoping inside `Peer` to keep
+    // upload independent of subscribe.)
+    let offline_doc = Arc::new(CrdtDoc::ephemeral());
+    let pending: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let pcb = pending.clone();
+    let sub = offline_doc
+        .loro()
+        .subscribe_local_update(Box::new(move |bytes| {
+            pcb.lock().unwrap().push(bytes.to_vec());
+            true
+        }));
+    std::mem::forget(sub);
+
+    // Snapshot the observer's current state into the offline doc
+    // so it starts from the same place. (Realistic — a real
+    // offline client would have hydrated from a snapshot before
+    // disconnecting.)
+    let bootstrap_bytes = observer
+        .doc
+        .loro()
+        .export(loro::ExportMode::Snapshot)
+        .map_err(|e| eyre::eyre!("offline bootstrap export: {e}"))?;
+    offline_doc
+        .apply_remote(&bootstrap_bytes)
+        .map_err(|e| eyre::eyre!("offline bootstrap import: {e}"))?;
+    // Clear the bootstrap bytes from `pending` — those aren't
+    // local commits.
+    pending.lock().unwrap().clear();
+
+    // Now: while offline, fire OFFLINE_EDITS commits.
+    {
+        let task_repo = TaskRepoLoro::new(&offline_doc);
+        let mut prng = xorshift(0xCAFEBABE);
+        for _ in 0..OFFLINE_EDITS {
+            let task_id = task_ids[(prng() as usize) % task_ids.len()];
+            let new_done = ((prng() as u64) & 1) == 1;
+            task_repo
+                .update(
+                    task_id,
+                    TaskUpdate {
+                        done: Some(new_done),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| eyre::eyre!("offline edit: {e}"))?;
+        }
+    }
+    let pending_count = pending.lock().unwrap().len();
+    eprintln!("[offline] captured {pending_count} update chunks while offline");
+    assert!(
+        pending_count > 0,
+        "expected at least one captured local update"
+    );
+
+    // Reconnect: open an apply client, dump all pending bytes.
+    let apply: WorkspaceSyncClient = vox::connect(&url)
+        .establish()
+        .await
+        .map_err(|e| eyre::eyre!("reconnect apply: {e:?}"))?;
+    for bytes in std::mem::take(&mut *pending.lock().unwrap()) {
+        apply
+            .apply_update(UpdateBytes(bytes))
+            .await
+            .map_err(|e| eyre::eyre!("bulk replay apply: {e:?}"))?;
+    }
+
+    // Observer should now see the offline editor's final state.
+    // Wait for the offline doc's done-map to match the observer's.
+    let target_map = task_done_map(&offline_doc).await;
+    let stop = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let obs_map = task_done_map(&observer.doc).await;
+        if obs_map == target_map {
+            break;
+        }
+        if tokio::time::Instant::now() >= stop {
+            let diff: Vec<_> = task_ids
+                .iter()
+                .filter(|id| obs_map.get(id) != target_map.get(id))
+                .map(|id| {
+                    format!(
+                        "  {}: observer={:?} offline={:?}",
+                        id,
+                        obs_map.get(id),
+                        target_map.get(id)
+                    )
+                })
+                .collect();
+            return Err(eyre::eyre!(
+                "[offline] observer didn't catch up to offline editor's state:\n{}",
+                diff.join("\n")
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    drop(observer);
     Ok(())
 }

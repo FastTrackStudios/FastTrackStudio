@@ -82,7 +82,13 @@ pub struct WorkspaceSyncImpl {
 
 impl WorkspaceSyncImpl {
     pub fn new(doc: Arc<CrdtDoc>) -> Self {
-        let (update_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        // 4096 slot headroom: under a 20-peer × 500-edit burst the
+        // broadcast queue can briefly hold ~10k chunks before slow
+        // subscribers drain. Beyond capacity, peers get
+        // `RecvError::Lagged` and recover via the snapshot
+        // resync path (which works but is slow). Set high enough
+        // that the happy path stays in the live-update lane.
+        let (update_tx, _) = broadcast::channel::<Vec<u8>>(4096);
         let tx_for_cb = update_tx.clone();
         let subscription = doc.loro().subscribe_local_update(Box::new(move |bytes| {
             // `send` errors when there are no active subscribers —
