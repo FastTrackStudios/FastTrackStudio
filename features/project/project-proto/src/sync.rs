@@ -97,6 +97,20 @@ unsafe impl vox_types::Reborrow for ListDocsRequest {
     type Ref<'a> = ListDocsRequest;
 }
 
+/// Phase 10 — `subscribe_kinds` arg. `kinds` is the set of root
+/// container names the subscriber cares about. Empty list = all
+/// kinds (back-compat path, same as the legacy `subscribe`).
+#[derive(Debug, Clone, Facet)]
+pub struct KindFilter {
+    pub doc_id: DocId,
+    pub kinds: Vec<String>,
+}
+
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for KindFilter {
+    type Ref<'a> = KindFilter;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Error)]
 #[repr(u8)]
 pub enum SyncError {
@@ -133,4 +147,14 @@ pub trait WorkspaceSync {
     /// currently-open docs are returned. Newly-created docs that
     /// haven't been opened yet on the server may not appear.
     async fn list_docs(&self, _req: ListDocsRequest) -> Result<DocList, SyncError>;
+
+    /// Phase 10 — same shape as `subscribe`, but the server only
+    /// forwards updates whose touched root containers intersect
+    /// the subscriber's `kinds` filter. Empty `kinds` = forward
+    /// every update (back-compat path).
+    ///
+    /// Useful when a client only renders one entity kind — e.g.
+    /// a kanban viewing only `tasks` can avoid receiving the
+    /// `knowledge_blocks` byte stream from a busy editor.
+    async fn subscribe_kinds(&self, filter: KindFilter, output: Tx<UpdateBytes>);
 }

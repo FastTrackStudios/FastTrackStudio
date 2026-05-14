@@ -69,32 +69,75 @@ pub fn workspace_doc_id() -> DocId {
     DocId::new("workspace")
 }
 
+/// Phase 10 — broadcast frame carries the bytes plus the set of
+/// root container names touched by the commit. Subscribers that
+/// declared a `kinds` filter check the intersection on the
+/// server side before forwarding.
+#[derive(Debug, Clone)]
+pub struct UpdateFrame {
+    pub bytes: Vec<u8>,
+    /// Root container names touched. Empty = unknown (legacy /
+    /// initial snapshot; filtered subscribers treat it as
+    /// "everything" so they don't silently miss state).
+    pub roots: Vec<String>,
+}
+
 /// One open doc + its broadcast channel + the local-update sub
 /// that bridges Loro into the broadcast. Held by the registry.
 pub struct OpenDoc {
     pub doc: Arc<CrdtDoc>,
-    pub update_tx: broadcast::Sender<Vec<u8>>,
-    /// Subscription handle must outlive the doc for the broadcast
-    /// callback to keep firing. Held here; dropped when the doc is
-    /// evicted (which currently never happens — see LRU TODO).
-    _subscription: loro::Subscription,
+    pub update_tx: broadcast::Sender<UpdateFrame>,
+    /// The set of root container names touched by the *most recent*
+    /// commit. Filled by the `subscribe_root` callback before
+    /// `subscribe_local_update` fires, so the local-update path
+    /// can read it. Phase 10 — drives per-kind filtering.
+    pub last_touched_roots: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Subscription handles must outlive the doc for the broadcast
+    /// callbacks to keep firing. Held here; dropped when the doc is
+    /// evicted.
+    _local_update_subscription: loro::Subscription,
+    _root_subscription: loro::Subscription,
 }
 
 impl OpenDoc {
     pub fn new(doc: Arc<CrdtDoc>) -> Self {
-        // Same 4096-slot capacity as the previous single-doc impl;
-        // each doc gets its own channel so a busy doc doesn't lag
-        // out subscribers to other docs.
-        let (update_tx, _) = broadcast::channel::<Vec<u8>>(4096);
-        let tx_for_cb = update_tx.clone();
-        let _subscription = doc.loro().subscribe_local_update(Box::new(move |bytes| {
-            let _ = tx_for_cb.send(bytes.to_vec());
-            true
+        let (update_tx, _) = broadcast::channel::<UpdateFrame>(4096);
+        let last_touched_roots = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+
+        // Subscribe to the root — fires BEFORE local-update for any
+        // commit. We stash the touched roots so the local-update
+        // callback can attach them to the broadcast frame.
+        let roots_for_diff = last_touched_roots.clone();
+        let _root_subscription = doc.loro().subscribe_root(Arc::new(move |event| {
+            let mut names: Vec<String> = Vec::new();
+            for diff in event.events.iter() {
+                if let loro::ContainerID::Root { name, .. } = diff.target {
+                    let s = name.to_string();
+                    if !names.contains(&s) {
+                        names.push(s);
+                    }
+                }
+            }
+            *roots_for_diff.lock().unwrap() = names;
         }));
+
+        let tx_for_cb = update_tx.clone();
+        let roots_for_local = last_touched_roots.clone();
+        let _local_update_subscription =
+            doc.loro().subscribe_local_update(Box::new(move |bytes| {
+                let roots = roots_for_local.lock().unwrap().clone();
+                let _ = tx_for_cb.send(UpdateFrame {
+                    bytes: bytes.to_vec(),
+                    roots,
+                });
+                true
+            }));
         Self {
             doc,
             update_tx,
-            _subscription,
+            last_touched_roots,
+            _local_update_subscription,
+            _root_subscription,
         }
     }
 }
@@ -549,12 +592,18 @@ impl WorkspaceSync for WorkspaceSyncImpl {
         // Loro's `subscribe_local_update` only fires for local
         // mutations — imports (this `apply_remote` call) don't
         // trigger it. So we broadcast manually after a successful
-        // import. Result: every subscriber on this doc sees the
-        // same chunk the caller pushed.
+        // import. Phase 10: the touched-roots set comes from the
+        // `subscribe_root` callback that fires *during* apply, so
+        // by the time we get here `last_touched_roots` is up to
+        // date.
         open.doc
             .apply_remote(&update.0)
             .map_err(|e| SyncError::InvalidUpdate(e.to_string()))?;
-        let _ = open.update_tx.send(update.0);
+        let roots = open.last_touched_roots.lock().unwrap().clone();
+        let _ = open.update_tx.send(UpdateFrame {
+            bytes: update.0,
+            roots,
+        });
         Ok(())
     }
 
@@ -595,8 +644,8 @@ impl WorkspaceSync for WorkspaceSyncImpl {
 
         loop {
             match rx.recv().await {
-                Ok(bytes) => {
-                    if output.send(UpdateBytes(bytes)).await.is_err() {
+                Ok(frame) => {
+                    if output.send(UpdateBytes(frame.bytes)).await.is_err() {
                         return;
                     }
                 }
@@ -606,6 +655,78 @@ impl WorkspaceSync for WorkspaceSyncImpl {
                         doc = %doc_id.as_str(),
                         skipped = n,
                         "subscriber lagged; resending snapshot"
+                    );
+                    let snap = open
+                        .doc
+                        .loro()
+                        .export(ExportMode::Snapshot)
+                        .unwrap_or_default();
+                    if output.send(UpdateBytes(snap)).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn subscribe_kinds(
+        &self,
+        filter: project_proto::KindFilter,
+        output: vox::Tx<UpdateBytes>,
+    ) {
+        if self.check_read(&filter.doc_id).is_err() {
+            tracing::info!(
+                doc = %filter.doc_id.as_str(),
+                "subscribe_kinds: forbidden by capability"
+            );
+            let _ = output.close(Default::default()).await;
+            return;
+        }
+        let open = match self.registry.get_or_open(&filter.doc_id).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::warn!(doc = %filter.doc_id.as_str(), ?e, "subscribe_kinds: open failed");
+                let _ = output.close(Default::default()).await;
+                return;
+            }
+        };
+
+        let mut rx = open.update_tx.subscribe();
+        // Always send the snapshot — clients need full state up
+        // front, regardless of which kinds they later care about.
+        let snapshot = match open.doc.loro().export(ExportMode::Snapshot) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(doc = %filter.doc_id.as_str(), ?e, "snapshot export failed");
+                let _ = output.close(Default::default()).await;
+                return;
+            }
+        };
+        if output.send(UpdateBytes(snapshot)).await.is_err() {
+            return;
+        }
+
+        let kinds_set: std::collections::HashSet<String> = filter.kinds.iter().cloned().collect();
+        let forward_all = kinds_set.is_empty();
+        loop {
+            match rx.recv().await {
+                Ok(frame) => {
+                    let should_forward = forward_all
+                        || frame.roots.is_empty()
+                        || frame.roots.iter().any(|r| kinds_set.contains(r));
+                    if !should_forward {
+                        continue;
+                    }
+                    if output.send(UpdateBytes(frame.bytes)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(
+                        doc = %filter.doc_id.as_str(),
+                        skipped = n,
+                        "subscribe_kinds lagged; resending snapshot"
                     );
                     let snap = open
                         .doc
