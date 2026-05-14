@@ -522,6 +522,19 @@ strip = "debuginfo"
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
+# Redirect every transitive bearcove/vox reference (architect pulls
+# vox from bearcove; this workspace pulls from Codys-Wright/vox at
+# the same rev). Without this, architect's `axum_ws::serve` builds a
+# Handler bound against bearcove's `vox_types::Handler` and the
+# Dispatchers we instantiate here implement Codys-Wright's — same
+# code, different SourceId, no impl found. Same trick as the moire
+# patch below.
+[patch."https://github.com/bearcove/vox"]
+vox           = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-core      = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-types     = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
 # fork at the same rev as the workspace dep above. Without this,

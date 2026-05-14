@@ -29,6 +29,7 @@ async fn main() -> eyre::Result<()> {
 
     info!(%database_url, "connecting");
     let persistence = open_and_migrate(&database_url).await?;
+    let db = persistence.db().clone();
 
     if seed_on_start {
         info!("TASK_SERVER_SEED=1 — seeding workspace doc before listening");
@@ -36,6 +37,11 @@ async fn main() -> eyre::Result<()> {
     }
 
     let mut state = AppState::new(persistence).await?;
+
+    // Wire the vox RPC service impls against the same sea-orm DB the
+    // CRDT persistence uses. Phase 1 enables `TaskService` +
+    // `InboxService`; the rest land in Phase 2 / Phase 3.
+    state.wire_vox(db);
 
     // Sealing for at-rest webhook secrets. Reads
     // TASK_SERVER_SEALING_KEY when set; falls back to a

@@ -59,6 +59,13 @@ use agent_proto::integration::{EventSink, EventSinkImpl, IntegrationRegistry, Sh
 use chat_crdt::MessageRepoLoro;
 use crdt::CrdtDoc;
 use project_crdt::TaskRepoLoro;
+use sea_orm::DatabaseConnection;
+use task_core::service::TaskOp;
+use task_core::service_impl::{
+    InboxServiceDeps, InboxServiceImpl, TaskServiceDeps, TaskServiceImpl,
+};
+use task_core::task::TaskRepoStorage;
+use task_core::{InboxServiceDispatcher, TaskServiceDispatcher};
 
 pub mod chat;
 pub mod integration_sink;
@@ -104,6 +111,29 @@ pub struct AppState {
 
     pub workspace_doc: Arc<CrdtDoc>,
     pub shutdown: ShutdownSignal,
+
+    // ── Vox RPC ──────────────────────────────────────────────────────
+    //
+    // `None` for tests / sync constructors that don't have a sea-orm
+    // backend; populated by `wire_vox(db)` from the production main.
+    // The vox WS handler returns `Err(vec![])` per service when this
+    // is `None`, matching the pre-Phase-1 behavior.
+    pub vox: Option<VoxState>,
+}
+
+/// Bundle of the per-process vox service impls. Built once and
+/// cloned per WebSocket session inside [`vox_ws_handler`].
+///
+/// Service impls share `task_op_tx` so subscribers across services
+/// (TaskService today, TimeService in Phase 3) see one op stream.
+/// `task_repo_storage` is the canonical CRUD-over-vox backend used
+/// by every service whose `Deps` reference the `task_repo` trait.
+#[derive(Clone)]
+pub struct VoxState {
+    pub db: DatabaseConnection,
+    pub task_op_tx: broadcast::Sender<TaskOp>,
+    pub task_service_impl: TaskServiceImpl<TaskRepoStorage<DatabaseConnection>>,
+    pub inbox_service_impl: InboxServiceImpl<TaskRepoStorage<DatabaseConnection>>,
 }
 
 impl AppState {
@@ -157,6 +187,7 @@ impl AppState {
             chat_sessions: Arc::new(chat::ChatStreamSessions::new()),
             workspace_doc: crdt_doc,
             shutdown: ShutdownSignal::new(),
+            vox: None,
         })
     }
 
@@ -204,7 +235,16 @@ impl AppState {
             chat_sessions: Arc::new(chat::ChatStreamSessions::new()),
             workspace_doc: crdt_doc,
             shutdown: ShutdownSignal::new(),
+            vox: None,
         }
+    }
+
+    /// Wire the vox RPC service impls against a sea-orm
+    /// `DatabaseConnection`. Call from production main; tests may
+    /// skip and leave `vox = None` (the `/vox` route then returns
+    /// "no handler" for every service).
+    pub fn wire_vox(&mut self, db: DatabaseConnection) {
+        self.vox = Some(VoxState::new(db));
     }
 
     /// Construct + wire the event sink from the in-state repos. Call
@@ -257,34 +297,76 @@ pub fn router(state: AppState) -> Router {
 }
 
 /// Mount point for vox RPC over WebSocket. Each incoming connection
-/// gets its own vox session; the acceptor below matches the inbound
-/// `service` name to the appropriate Dispatcher.
+/// gets its own vox session; the acceptor matches the inbound
+/// `service` name to a per-session Dispatcher built from the shared
+/// `*ServiceImpl` on AppState.
 ///
-/// MVP scope: the route is live but the per-service dispatchers
-/// aren't yet wired — the acceptor logs the requested service and
-/// returns an empty handler stub. Wire individual services
-/// (`ChatService`, `AgentService`, `NotificationService`) by adding
-/// their Dispatchers in the match arms.
+/// **Phase 1 scope**: `TaskService` and `InboxService` are wired (they
+/// run off the existing `task_repo`). Every other service trait still
+/// returns `Err(vec![])` — its dispatcher needs deps (DB connection,
+/// extra repos, optional providers) that AppState doesn't carry yet.
+/// Tracking the remaining services in the Phase 2 / Phase 3 GitHub
+/// issues.
 async fn vox_ws_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    ws.on_upgrade(|socket| async move {
-        let acceptor = architect::axum_ws::acceptor_fn(|req, _connection| {
-            tracing::info!(
-                service = %req.service(),
-                "vox session: dispatcher not yet wired"
-            );
-            // Returning Err with an empty list signals "no handler" —
-            // the peer's establish() will surface the failure. Once
-            // ChatServiceDispatcher / AgentServiceDispatcher are
-            // mounted, add match arms here.
-            Err(Vec::new())
+    ws.on_upgrade(move |socket| async move {
+        let vox = state.vox.clone();
+        let acceptor = architect::axum_ws::acceptor_fn(move |req, connection| {
+            let Some(vox) = vox.as_ref() else {
+                tracing::warn!(
+                    service = %req.service(),
+                    "vox session rejected: AppState::wire_vox not called"
+                );
+                return Err(Vec::new());
+            };
+            match req.service() {
+                "TaskService" => {
+                    connection
+                        .handle_with(TaskServiceDispatcher::new(vox.task_service_impl.clone()));
+                    Ok(())
+                }
+                "InboxService" => {
+                    connection
+                        .handle_with(InboxServiceDispatcher::new(vox.inbox_service_impl.clone()));
+                    Ok(())
+                }
+                other => {
+                    tracing::info!(
+                        service = %other,
+                        "vox session: dispatcher not yet wired (phase 2/3)"
+                    );
+                    Err(Vec::new())
+                }
+            }
         });
         architect::axum_ws::serve(socket, acceptor).await;
     })
     .into_response()
+}
+
+impl VoxState {
+    /// Build the per-process service impls from a sea-orm DB. The
+    /// broadcast sender is held on `task_op_tx` so future services
+    /// (e.g. `TimeService` in Phase 3) can fan ops into the same
+    /// subscriber stream.
+    pub fn new(db: DatabaseConnection) -> Self {
+        let task_repo = TaskRepoStorage::new(db.clone());
+        let task_service_impl = TaskServiceImpl::new(TaskServiceDeps {
+            task_repo: task_repo.clone(),
+            op_tx: None,
+        });
+        let task_op_tx = task_service_impl.op_sender().clone();
+        let inbox_service_impl = InboxServiceImpl::new(InboxServiceDeps { task_repo });
+        Self {
+            db,
+            task_op_tx,
+            task_service_impl,
+            inbox_service_impl,
+        }
+    }
 }
 
 // ── Internal: rooms ───────────────────────────────────────────────────
