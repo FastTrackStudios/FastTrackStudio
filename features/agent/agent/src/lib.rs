@@ -19,6 +19,11 @@ pub mod server {
 }
 
 #[cfg(feature = "server")]
+pub mod live_update;
+#[cfg(feature = "server")]
+pub use live_update::{LiveUpdateBus, RunSubscription, WorkspaceSubscription};
+
+#[cfg(feature = "server")]
 pub mod service;
 #[cfg(feature = "server")]
 pub use service::{AgentServiceImpl, HermesOnlyRouter, PluginRouter};

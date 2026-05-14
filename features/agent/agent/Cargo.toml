@@ -22,7 +22,7 @@ architect = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true, features = ["v4"] }
-tokio = { workspace = true, optional = true, features = ["sync"] }
+tokio = { workspace = true, optional = true, features = ["sync", "time", "macros", "rt"] }
 
 [dev-dependencies]
 agent-hermes = { workspace = true }

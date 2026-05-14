@@ -17,9 +17,7 @@ use agent::server::{AgentRunRepoLoro, ToolCallRepoLoro};
 use agent::{AgentServiceImpl, PluginRouter};
 use agent_hermes::mock::MockIntegration;
 use agent_proto::integration::IntegrationRegistry;
-use agent_proto::{
-    AgentRunRepo, AgentService, RunStatus, ToolCallCreate, ToolCallRepo,
-};
+use agent_proto::{AgentRunRepo, AgentService, RunStatus, ToolCallCreate, ToolCallRepo};
 use chrono::Utc;
 use crdt::CrdtDoc;
 use uuid::Uuid;
