@@ -12,6 +12,7 @@
 //! Phases 5+ land they migrate to Knowledge-vault-backed reads.
 
 pub mod acl;
+pub mod anonymous_claim;
 pub mod attachments;
 pub mod basename_index;
 pub mod capability;
@@ -23,6 +24,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::anonymous_claim::{AnonymousClaimServiceImpl, InstallSessionMiddleware};
 use crate::basename_index::MemoryBasenameIndex;
 use crate::capability::{CapabilityScope, ServerKeypair, default_keypair_path};
 use crate::knowledge_index::KnowledgeIndexer;
@@ -198,6 +200,13 @@ impl DocRegistry {
     pub async fn open_count(&self) -> usize {
         self.inner.lock().await.docs.len()
     }
+
+    /// Snapshot of every open doc id. Phase 8 — used by the
+    /// federation UI's `list_docs` RPC to enumerate per-server
+    /// state without exposing the full `OpenDoc` arc.
+    pub async fn open_doc_ids(&self) -> Vec<DocId> {
+        self.inner.lock().await.docs.keys().cloned().collect()
+    }
 }
 
 fn touch_order(order: &mut VecDeque<DocId>, id: &DocId) {
@@ -286,6 +295,7 @@ pub struct AppState {
     pub base_repo: Arc<knowledge_crdt::BaseRepoLoro>,
     pub indexer: KnowledgeIndexer,
     pub attachments: Arc<attachments::AttachmentServiceImpl>,
+    pub anonymous_claim: AnonymousClaimServiceImpl<AuthSeaOrmStorage>,
 }
 
 impl AppState {
@@ -410,6 +420,13 @@ impl AppState {
             public_base_url,
         ));
 
+        // Phase 8 — anonymous claim service. Holds the in-memory
+        // (peer_id -> user_id) table; the dispatcher's
+        // `InstallSessionMiddleware` copies the caller's session
+        // token into it before each method runs.
+        let anonymous_claim_service =
+            AnonymousClaimServiceImpl::new(auth.auth.clone(), share_service.clone());
+
         Ok(Self {
             registry,
             workspace_doc,
@@ -431,6 +448,7 @@ impl AppState {
             base_repo,
             indexer,
             attachments: attachment_service,
+            anonymous_claim: anonymous_claim_service,
         })
     }
 }
@@ -601,6 +619,23 @@ impl WorkspaceSync for WorkspaceSyncImpl {
             }
         }
     }
+
+    async fn list_docs(
+        &self,
+        _req: project_proto::ListDocsRequest,
+    ) -> Result<project_proto::DocList, SyncError> {
+        // Returns every currently-open doc id. Filtered by scope
+        // when one is set — the federation UI can only see docs
+        // the connection's capability allows. With no scope (dev
+        // mode), every open doc is visible.
+        let all = self.registry.open_doc_ids().await;
+        let filtered: Vec<DocId> = match &self.scope {
+            Some(scope) if scope.attachments_only => Vec::new(),
+            Some(scope) => all.into_iter().filter(|d| scope.allows_doc(d)).collect(),
+            None => all,
+        };
+        Ok(project_proto::DocList { doc_ids: filtered })
+    }
 }
 
 /// Erase a `Arc<dyn Persistence>` into a concrete type that
@@ -697,6 +732,7 @@ async fn vox_ws_handler(
         let auth = state.auth.auth.clone();
         let share_service = state.share_service.clone();
         let attachment_service = state.attachments.clone();
+        let anonymous_claim = state.anonymous_claim.clone();
         let vault_repo = (*state.vault_repo).clone();
         let folder_repo = (*state.folder_repo).clone();
         let page_repo = (*state.page_repo).clone();
@@ -733,6 +769,22 @@ async fn vox_ws_handler(
                     connection.handle_with(AttachmentServiceDispatcher::new(
                         (*attachment_service).clone(),
                     ));
+                    Ok(())
+                }
+                "AnonymousClaim" => {
+                    use project_proto::AnonymousClaimDispatcher;
+                    // Wrap with both AuthServerMiddleware (loads
+                    // token into request extensions) AND our own
+                    // InstallSessionMiddleware (copies it into the
+                    // service's session_token slot).
+                    let middleware = InstallSessionMiddleware {
+                        service: anonymous_claim.clone(),
+                    };
+                    connection.handle_with(
+                        AnonymousClaimDispatcher::new(anonymous_claim.clone())
+                            .with_middleware(AuthServerMiddleware)
+                            .with_middleware(middleware),
+                    );
                     Ok(())
                 }
                 "VaultRepo" => {

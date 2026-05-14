@@ -29,6 +29,12 @@ pub enum Route {
         #[route("/tasks-kanban")]
         TasksKanbanRoute {},
 
+        #[route("/servers")]
+        ServersRoute {},
+
+        #[route("/federated-tasks")]
+        FederatedTasksRoute {},
+
         #[route("/inbox")]
         InboxRoute {},
 
@@ -64,6 +70,16 @@ fn KnowledgeRoute() -> Element {
 #[component]
 fn TasksKanbanRoute() -> Element {
     rsx! { crate::feature_routes::tasks_kanban::TasksKanbanView {} }
+}
+
+#[component]
+fn ServersRoute() -> Element {
+    rsx! { crate::feature_routes::servers::ServersView {} }
+}
+
+#[component]
+fn FederatedTasksRoute() -> Element {
+    rsx! { crate::feature_routes::federated_tasks::FederatedTasksView {} }
 }
 
 #[component]
@@ -410,6 +426,16 @@ fn nav_tabs() -> Vec<NavTab> {
             route: Route::TasksKanbanRoute {},
         },
         NavTab {
+            label: "Servers",
+            icon: icon_settings,
+            route: Route::ServersRoute {},
+        },
+        NavTab {
+            label: "Federated",
+            icon: icon_folder_kanban,
+            route: Route::FederatedTasksRoute {},
+        },
+        NavTab {
             label: "Vox test",
             icon: icon_settings,
             route: Route::VoxTestRoute {},
@@ -462,6 +488,8 @@ fn route_title(route: &Route) -> &'static str {
         Route::ProjectsRoute {} => "Projects",
         Route::KnowledgeRoute {} => "Knowledge",
         Route::TasksKanbanRoute {} => "Tasks kanban",
+        Route::ServersRoute {} => "Servers",
+        Route::FederatedTasksRoute {} => "Federated",
         Route::InboxRoute {} => "Inbox",
         Route::SettingsRoute {} => "Settings",
         Route::VoxTestRoute {} => "Vox test",

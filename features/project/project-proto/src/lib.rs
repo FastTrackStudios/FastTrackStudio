@@ -17,11 +17,13 @@
 
 pub use architect;
 
+mod anonymous_claim;
 mod project;
 mod share;
 mod sync;
 mod task;
 
+pub use anonymous_claim::*;
 pub use project::*;
 pub use share::*;
 pub use sync::*;

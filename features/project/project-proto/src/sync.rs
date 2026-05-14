@@ -75,6 +75,28 @@ unsafe impl vox_types::Reborrow for DocId {
     type Ref<'a> = DocId;
 }
 
+/// Listing response — wrapper around `Vec<DocId>` so vox's wire
+/// codec has a named type to bind to.
+#[derive(Debug, Clone, Facet)]
+pub struct DocList {
+    pub doc_ids: Vec<DocId>,
+}
+
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for DocList {
+    type Ref<'a> = DocList;
+}
+
+/// Trivial unit-arg wrapper. `list_docs` takes no inputs but vox
+/// methods need at least one typed argument.
+#[derive(Debug, Clone, Facet)]
+pub struct ListDocsRequest;
+
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for ListDocsRequest {
+    type Ref<'a> = ListDocsRequest;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Error)]
 #[repr(u8)]
 pub enum SyncError {
@@ -103,4 +125,12 @@ pub trait WorkspaceSync {
     /// to a doc the caller has no capability for returns
     /// `SyncError::Forbidden` immediately (without sending anything).
     async fn subscribe(&self, doc_id: DocId, output: Tx<UpdateBytes>);
+
+    /// Enumerate every doc id this server is currently hosting.
+    /// Phase 8 — used by the federation UI to discover what's on
+    /// each connected server. Returns docs the caller's
+    /// capability scope can read; when no scope is enforced, all
+    /// currently-open docs are returned. Newly-created docs that
+    /// haven't been opened yet on the server may not appear.
+    async fn list_docs(&self, _req: ListDocsRequest) -> Result<DocList, SyncError>;
 }

@@ -2,6 +2,8 @@
 //! `RepoLoro` against a shared `CrdtDoc` synced over WebSocket and
 //! drives the dumb components from the matching `<name>-ui` crate.
 
+pub mod federated_tasks;
 pub mod knowledge;
 pub mod project;
+pub mod servers;
 pub mod tasks_kanban;

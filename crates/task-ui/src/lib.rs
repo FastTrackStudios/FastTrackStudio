@@ -7,6 +7,7 @@
 pub mod app;
 pub mod data;
 pub mod feature_routes;
+pub mod server_registry;
 pub mod theming;
 pub mod vox_session;
 
