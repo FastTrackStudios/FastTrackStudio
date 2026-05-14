@@ -110,7 +110,7 @@ pub fn ThreadComposer(props: ThreadComposerProps) -> Element {
                     Button {
                         variant: ButtonVariant::Ghost,
                         size: ButtonSize::Small,
-                        
+
                         on_click: move |_| {},
                         Paperclip { size: 14 }
                     }
@@ -174,11 +174,7 @@ mod tests {
 
     #[test]
     fn mention_suggestions_picks_prefix_matches() {
-        let pool = vec![
-            "alice".to_string(),
-            "alan".to_string(),
-            "bob".to_string(),
-        ];
+        let pool = vec!["alice".to_string(), "alan".to_string(), "bob".to_string()];
         let s = mention_suggestions("Hello @al", &pool);
         assert_eq!(s, vec!["alice", "alan"]);
     }

@@ -628,6 +628,20 @@ pub fn ProjectView() -> Element {
                 external_id: None,
                 external_url: None,
                 log_cursor: None,
+                parent_run_id: None,
+                worktree_path: None,
+                git_repo_connection_id: None,
+                spawned_from_message_id: None,
+                input_tokens: None,
+                output_tokens: None,
+                cache_read_tokens: None,
+                cache_creation_tokens: None,
+                cost_cents_estimate: None,
+                tool_call_count: 0,
+                assistant_message_count: 0,
+                max_tokens: None,
+                max_tool_calls: None,
+                max_wall_seconds: None,
             };
             // Patch the task locally — agent_run_id + branch_name.
             let mut next = current_tasks;

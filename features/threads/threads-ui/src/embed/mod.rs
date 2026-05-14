@@ -69,7 +69,9 @@ pub fn ThreadEmbed(props: ThreadEmbedProps) -> Element {
         .collect();
 
     let container_class = match props.mode {
-        EmbedMode::Sidebar => "flex flex-col gap-3 p-3 border-l border-border bg-background h-full overflow-y-auto",
+        EmbedMode::Sidebar => {
+            "flex flex-col gap-3 p-3 border-l border-border bg-background h-full overflow-y-auto"
+        }
         EmbedMode::Inline => "flex flex-col gap-2 p-2 border rounded-md bg-muted/30",
         EmbedMode::Margin => "flex flex-col gap-2 p-2 text-sm",
     };
