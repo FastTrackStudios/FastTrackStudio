@@ -25,8 +25,13 @@ use crdt_seaorm::SeaOrmPersistence;
 use project_crdt::TaskRepoLoro;
 use project_proto::architect::Page;
 use project_proto::{
-    ProjectCreate, ProjectRepo, TaskCreate, TaskRepo, TaskUpdate, UpdateBytes, WorkspaceSyncClient,
+    DocId, ProjectCreate, ProjectRepo, TaskCreate, TaskRepo, TaskUpdate, UpdateBytes,
+    WorkspaceSyncClient,
 };
+
+fn workspace_doc() -> DocId {
+    DocId::new("workspace")
+}
 use task_db::{default_database_url, open_and_migrate};
 use task_server::{AppState, router};
 use uuid::Uuid;
@@ -115,7 +120,10 @@ async fn open_peer(id: usize, url: &str) -> eyre::Result<Peer> {
     let upload_handle = tokio::spawn(async move {
         use futures::StreamExt;
         while let Some(bytes) = upload_rx.next().await {
-            if let Err(e) = apply_for_uploader.apply_update(UpdateBytes(bytes)).await {
+            if let Err(e) = apply_for_uploader
+                .apply_update(workspace_doc(), UpdateBytes(bytes))
+                .await
+            {
                 tracing::warn!(peer = id, ?e, "apply_update failed");
             }
         }
@@ -127,7 +135,7 @@ async fn open_peer(id: usize, url: &str) -> eyre::Result<Peer> {
         .map_err(|e| eyre::eyre!("sub connect: {e:?}"))?;
     let (tx, mut rx) = vox::channel::<UpdateBytes>();
     tokio::spawn(async move {
-        let _ = sub_client.subscribe(tx).await;
+        let _ = sub_client.subscribe(workspace_doc(), tx).await;
     });
 
     let imports = Arc::new(Mutex::new(0u64));
@@ -458,7 +466,7 @@ async fn churn_peers_resubscribe_mid_burst() -> eyre::Result<()> {
                         };
                     let (tx, mut rx) = vox::channel::<UpdateBytes>();
                     tokio::spawn(async move {
-                        let _ = sub_client.subscribe(tx).await;
+                        let _ = sub_client.subscribe(workspace_doc(), tx).await;
                     });
                     let new_sub = tokio::spawn(async move {
                         while let Ok(Some(msg)) = rx.recv().await {
@@ -954,7 +962,7 @@ async fn long_offline_bulk_replay() -> eyre::Result<()> {
         .map_err(|e| eyre::eyre!("reconnect apply: {e:?}"))?;
     for bytes in std::mem::take(&mut *pending.lock().unwrap()) {
         apply
-            .apply_update(UpdateBytes(bytes))
+            .apply_update(workspace_doc(), UpdateBytes(bytes))
             .await
             .map_err(|e| eyre::eyre!("bulk replay apply: {e:?}"))?;
     }

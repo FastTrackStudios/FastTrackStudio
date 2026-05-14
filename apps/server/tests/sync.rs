@@ -15,8 +15,13 @@ use crdt_seaorm::SeaOrmPersistence;
 use project_crdt::TaskRepoLoro;
 use project_proto::architect::Page;
 use project_proto::{
-    ProjectCreate, ProjectRepo, TaskCreate, TaskRepo, TaskUpdate, UpdateBytes, WorkspaceSyncClient,
+    DocId, ProjectCreate, ProjectRepo, TaskCreate, TaskRepo, TaskUpdate, UpdateBytes,
+    WorkspaceSyncClient,
 };
+
+fn workspace_doc() -> DocId {
+    DocId::new("workspace")
+}
 use task_db::{default_database_url, open_and_migrate};
 use task_server::{AppState, router};
 use uuid::Uuid;
@@ -101,7 +106,7 @@ async fn open_subscribe(url: &str) -> eyre::Result<(tokio::task::JoinHandle<()>,
         .map_err(|e| eyre::eyre!("subscribe connect: {e:?}"))?;
     let (tx, rx) = vox::channel::<UpdateBytes>();
     let handle = tokio::spawn(async move {
-        let _ = client.subscribe(tx).await;
+        let _ = client.subscribe(workspace_doc(), tx).await;
     });
     Ok((handle, rx))
 }
@@ -243,13 +248,13 @@ async fn offline_divergent_edits_converge() -> eyre::Result<()> {
 
     for bytes in peer_a.drain_pending() {
         apply_a
-            .apply_update(UpdateBytes(bytes))
+            .apply_update(workspace_doc(), UpdateBytes(bytes))
             .await
             .map_err(|e| eyre::eyre!("apply A: {e:?}"))?;
     }
     for bytes in peer_b.drain_pending() {
         apply_b
-            .apply_update(UpdateBytes(bytes))
+            .apply_update(workspace_doc(), UpdateBytes(bytes))
             .await
             .map_err(|e| eyre::eyre!("apply B: {e:?}"))?;
     }

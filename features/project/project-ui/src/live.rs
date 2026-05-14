@@ -288,13 +288,22 @@ async fn run_sync_loop(
     }));
     std::mem::forget(upload_sub);
 
+    // Doc-id for the legacy `workspace` doc. Once routes grow
+    // per-resource doc selectors, the route component will accept
+    // the doc id as a prop instead.
+    let doc_id = project_proto::DocId::new("workspace");
+
     // Background uploader: drains the mpsc, ships each chunk via
     // `apply_update`. Holds `apply_client` for the lifetime of the
     // page (component teardown drops it implicitly when the spawn
     // task is canceled).
+    let upload_doc_id = doc_id.clone();
     spawn(async move {
         while let Some(bytes) = upload_rx.next().await {
-            if let Err(e) = apply_client.apply_update(UpdateBytes(bytes)).await {
+            if let Err(e) = apply_client
+                .apply_update(upload_doc_id.clone(), UpdateBytes(bytes))
+                .await
+            {
                 tracing::warn!(?e, "apply_update failed");
             }
         }
@@ -302,8 +311,9 @@ async fn run_sync_loop(
 
     // Subscribe stream — pumps remote bytes into the local doc.
     let (tx, mut rx) = vox::channel::<UpdateBytes>();
+    let sub_doc_id = doc_id.clone();
     spawn(async move {
-        if let Err(e) = sub_client.subscribe(tx).await {
+        if let Err(e) = sub_client.subscribe(sub_doc_id, tx).await {
             tracing::warn!(error = ?e, "WorkspaceSync::subscribe ended with error");
         }
     });

@@ -61,12 +61,24 @@ impl RemoteVoxConfig {
 /// [`LiveSession::flush`] to push pending local updates before exit.
 pub(crate) struct LiveSession {
     pub doc: Arc<CrdtDoc>,
+    doc_id: project_proto::DocId,
     apply_client: WorkspaceSyncClient,
     upload_rx: UnboundedReceiver<Vec<u8>>,
 }
 
 impl LiveSession {
+    /// Open a synced session for one doc on the remote server.
+    /// Defaults to the legacy `workspace` doc id; pass an explicit
+    /// `DocId::project(uuid)` etc. for per-resource sessions once
+    /// commands grow doc selectors.
     pub(crate) async fn open(remote: &RemoteVoxConfig) -> eyre::Result<Self> {
+        Self::open_doc(remote, project_proto::DocId::new("workspace")).await
+    }
+
+    pub(crate) async fn open_doc(
+        remote: &RemoteVoxConfig,
+        doc_id: project_proto::DocId,
+    ) -> eyre::Result<Self> {
         let doc = Arc::new(CrdtDoc::ephemeral());
 
         // Wire local-update capture before anything can mutate.
@@ -85,8 +97,9 @@ impl LiveSession {
         let sub_client: WorkspaceSyncClient = remote.connect().await?;
 
         let (tx, mut rx) = vox::channel::<UpdateBytes>();
+        let sub_doc_id = doc_id.clone();
         tokio::spawn(async move {
-            if let Err(e) = sub_client.subscribe(tx).await {
+            if let Err(e) = sub_client.subscribe(sub_doc_id, tx).await {
                 tracing::debug!(?e, "subscribe stream ended");
             }
         });
@@ -104,6 +117,7 @@ impl LiveSession {
 
         Ok(Self {
             doc,
+            doc_id,
             apply_client,
             upload_rx,
         })
@@ -119,7 +133,7 @@ impl LiveSession {
             match self.upload_rx.try_recv() {
                 Ok(bytes) => {
                     self.apply_client
-                        .apply_update(UpdateBytes(bytes))
+                        .apply_update(self.doc_id.clone(), UpdateBytes(bytes))
                         .await
                         .map_err(|e| eyre::eyre!("apply_update: {e}"))?;
                 }
