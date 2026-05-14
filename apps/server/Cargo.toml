@@ -42,6 +42,7 @@ project-crdt = { workspace = true }
 knowledge-proto = { workspace = true }
 knowledge-crdt = { workspace = true }
 attachments-proto = { workspace = true }
+chrono.workspace = true
 architect = { workspace = true, features = ["server-axum"] }
 architect-auth = { workspace = true, features = ["full"] }
 

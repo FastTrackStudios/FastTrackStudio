@@ -1,43 +1,25 @@
-//! Live wrappers — the real-time, offline-first half of the project
-//! feature.
+//! `TasksByProjectLive` — Knowledge-backed task list grouped by
+//! project page.
 //!
-//! Architecture:
+//! Phase 8.5 (post-Phase-10) unification: this used to read the
+//! legacy `project_proto::Task` entity off the `workspace` doc.
+//! Now it reads `kind: task` Knowledge pages off `vault/org` and
+//! groups them by the *first* entry in their `projects:
+//! [[Project Name]]` frontmatter list.
 //!
-//! ```text
-//!   server CrdtDoc ─┐
-//!                   │  subscribe_local_update → broadcast → Tx<UpdateBytes>
-//!                   ▼
-//!         WorkspaceSync vox session
-//!                   │ (typed RPC over WebSocket)
-//!                   ▼
-//!   client CrdtDoc (this module's `local_doc`)
-//!                   │
-//!                   ├── *RepoLoro::list — synchronous reads (renders)
-//!                   │
-//!                   └── *RepoLoro::update — local commit
-//!                          │
-//!                          └── subscribe_local_update fires
-//!                                 │
-//!                                 └── mpsc → apply_update → server
-//! ```
+//! Two improvements come from the switch:
+//! 1. Tasks are full Knowledge pages — they can carry frontmatter
+//!    (status / priority / due / contexts / blocked_by …), block
+//!    body content, attachments. The legacy Task entity capped at
+//!    four fields.
+//! 2. The inline expand opens a properties pane (the same
+//!    `knowledge_ui::PropertiesPane` used on `/knowledge`) so
+//!    every Phase 6.5b type-specific editor works here too —
+//!    status dropdown, priority enum, tag chips, etc.
 //!
-//! On mount the `TasksByProjectLive` component:
-//! 1. Builds an empty in-memory `CrdtDoc` (no persistence; ephemeral).
-//! 2. Opens two `WorkspaceSyncClient` sessions over fresh
-//!    WebSockets — one for the long-lived `subscribe` stream, one
-//!    for short-lived `apply_update` calls.
-//! 3. Wires `local_doc.subscribe_local_update(callback)` so every
-//!    locally-committed change pushes its bytes into a futures
-//!    mpsc that a background task drains by calling
-//!    `apply_update`. Loro's `import` (used for remote bytes)
-//!    does NOT trigger this callback — no echo loop.
-//! 4. Bumps a `version` `Signal` after every imported chunk so the
-//!    render `use_resource` re-runs and pulls fresh data from the
-//!    local doc.
-//!
-//! Reads always hit the local doc — works offline once the
-//! snapshot is in. Writes commit locally first (instant render)
-//! and propagate to peers via the upload pipeline.
+//! Toggle-done flips `status` between `todo` and `done`. The
+//! Phase 6.5a `task` schema declares those as the canonical enum
+//! values; the kanban demo uses the same set.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,11 +29,11 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use futures::StreamExt;
 use futures::channel::mpsc::unbounded;
-use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
-use project_proto::architect::Page;
-use project_proto::{
-    Project, ProjectRepo, Task, TaskRepo, TaskUpdate, UpdateBytes, WorkspaceSyncClient,
-};
+use knowledge_crdt::PageRepoLoro;
+use knowledge_proto::property_schema::PropertySchemaRegistry;
+use knowledge_proto::{Page, PageRepo, PageUpdate};
+use project_proto::architect::Page as PageWindow;
+use project_proto::{UpdateBytes, WorkspaceSyncClient};
 use uuid::Uuid;
 
 /// The full route entry. Spawns the sync loop and renders from the
@@ -59,11 +41,13 @@ use uuid::Uuid;
 #[component]
 pub fn TasksByProjectLive(vox_url: String) -> Element {
     let local_doc: Signal<Arc<CrdtDoc>> = use_signal(|| Arc::new(CrdtDoc::ephemeral()));
-    let mut version: Signal<u64> = use_signal(|| 0u64);
-    let mut last_error: Signal<Option<String>> = use_signal(|| None::<String>);
+    let version: Signal<u64> = use_signal(|| 0u64);
+    let last_error: Signal<Option<String>> = use_signal(|| None::<String>);
+    let mut expanded: Signal<Option<Uuid>> = use_signal(|| None);
 
-    // Spawn the sync loop once. Captures clones of the doc + signals;
-    // when the WS dies the task ends and `last_error` reflects it.
+    // Spawn the sync loop once. Subscribes to `vault/org` (the
+    // org-wide reference vault) so tasks + projects are visible
+    // to every client on the same server.
     let url_for_hook = vox_url.clone();
     let doc_for_hook = local_doc.read().clone();
     use_hook(move || {
@@ -83,29 +67,45 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
         async move { build_snapshot(doc).await }
     });
 
-    // Mutation handler — commits to the LOCAL doc; the
-    // subscribe_local_update callback in run_sync_loop picks up
-    // the bytes and ships them to the server.
-    let on_toggle_done = use_callback(move |(task_id, done): (Uuid, bool)| {
-        let doc = local_doc.read().clone();
+    // Mutation handler — toggles `status` between todo and done
+    // on the matching Knowledge page.
+    let toggle_doc = local_doc.read().clone();
+    let on_toggle_done = use_callback(move |(page_id, currently_done): (Uuid, bool)| {
+        let doc = toggle_doc.clone();
         spawn(async move {
-            let task_repo = TaskRepoLoro::new(&doc);
-            if let Err(e) = task_repo
-                .update(
-                    task_id,
-                    TaskUpdate {
-                        done: Some(done),
-                        ..Default::default()
-                    },
-                )
-                .await
-            {
-                tracing::warn!(?e, %task_id, "local task update failed");
+            let next_status = if currently_done { "todo" } else { "done" };
+            if let Err(e) = update_page_property(&doc, page_id, "status", next_status).await {
+                tracing::warn!(?e, %page_id, "toggle status failed");
             }
         });
     });
 
+    let on_toggle_expand = use_callback(move |page_id: Uuid| {
+        let current = *expanded.read();
+        expanded.set(if current == Some(page_id) {
+            None
+        } else {
+            Some(page_id)
+        });
+    });
+
+    // Inline property edits go through PageRepo::update on the
+    // local doc, then upload to the server via the same sync
+    // pipeline as toggle_done.
+    let edit_doc = local_doc.read().clone();
+    let on_edit_property = use_callback(
+        move |(page_id, key, value): (Uuid, String, serde_json::Value)| {
+            let doc = edit_doc.clone();
+            spawn(async move {
+                if let Err(e) = update_page_property_json(&doc, page_id, &key, value).await {
+                    tracing::warn!(?e, %page_id, %key, "property update failed");
+                }
+            });
+        },
+    );
+
     let version_label = format!("v{}", version.read());
+    let expanded_id = *expanded.read();
     rsx! {
         div {
             id: "projects-route",
@@ -129,30 +129,41 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                 Some(Err(err)) => rsx! { Text { variant: TextVariant::Muted, "Decode failed: {err}" } },
                 Some(Ok(snap)) => rsx! { TasksByProjectView {
                     snapshot: snap.clone(),
-                    on_toggle_done: on_toggle_done,
+                    expanded: expanded_id,
+                    on_toggle_done,
+                    on_toggle_expand,
+                    on_edit_property,
                 } },
             }
         }
     }
 }
 
-/// Render half — feed it a `Snapshot` and a done-toggle callback.
+/// Render half — feed it a `Snapshot` + callbacks.
 #[component]
-pub fn TasksByProjectView(snapshot: Snapshot, on_toggle_done: Callback<(Uuid, bool)>) -> Element {
-    if snapshot.ordered_projects.is_empty() {
+pub fn TasksByProjectView(
+    snapshot: Snapshot,
+    expanded: Option<Uuid>,
+    on_toggle_done: Callback<(Uuid, bool)>,
+    on_toggle_expand: Callback<Uuid>,
+    on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
+) -> Element {
+    if snapshot.ordered_projects.is_empty() && snapshot.tasks_by_project.is_empty() {
         return rsx! {
-            Text { variant: TextVariant::Muted, "No projects with tasks (waiting on snapshot…)." }
+            Text { variant: TextVariant::Muted, "No tasks yet — try `task-server` with TASK_SERVER_SEED=1." }
         };
     }
     rsx! {
         div { class: "flex flex-col gap-6",
-            for (project_id, name) in snapshot.ordered_projects.iter() {
+            for (project_name, _project_page_id) in snapshot.ordered_projects.iter() {
                 ProjectBlock {
-                    key: "{project_id}",
-                    project_id: *project_id,
-                    name: name.clone(),
-                    tasks: snapshot.tasks_by_project.get(project_id).cloned().unwrap_or_default(),
+                    key: "{project_name}",
+                    name: project_name.clone(),
+                    tasks: snapshot.tasks_by_project.get(project_name).cloned().unwrap_or_default(),
+                    expanded,
                     on_toggle_done,
+                    on_toggle_expand,
+                    on_edit_property,
                 }
             }
         }
@@ -161,10 +172,12 @@ pub fn TasksByProjectView(snapshot: Snapshot, on_toggle_done: Callback<(Uuid, bo
 
 #[component]
 fn ProjectBlock(
-    project_id: Uuid,
     name: String,
-    tasks: Vec<Task>,
+    tasks: Vec<TaskRow>,
+    expanded: Option<Uuid>,
     on_toggle_done: Callback<(Uuid, bool)>,
+    on_toggle_expand: Callback<Uuid>,
+    on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
 ) -> Element {
     rsx! {
         section { class: "rounded-md border border-border bg-card p-4",
@@ -174,7 +187,14 @@ fn ProjectBlock(
             }
             ul { class: "flex flex-col gap-1.5",
                 for task in tasks.iter() {
-                    TaskRow { key: "{task.id}", task: task.clone(), on_toggle_done }
+                    TaskRowEl {
+                        key: "{task.page_id}",
+                        row: task.clone(),
+                        is_expanded: expanded == Some(task.page_id),
+                        on_toggle_done,
+                        on_toggle_expand,
+                        on_edit_property,
+                    }
                 }
             }
         }
@@ -182,74 +202,269 @@ fn ProjectBlock(
 }
 
 #[component]
-fn TaskRow(task: Task, on_toggle_done: Callback<(Uuid, bool)>) -> Element {
-    let task_id = task.id;
-    let current_done = task.done;
-    let row_testid = format!("task-row-{task_id}");
-    let checkbox_testid = format!("task-checkbox-{task_id}");
+fn TaskRowEl(
+    row: TaskRow,
+    is_expanded: bool,
+    on_toggle_done: Callback<(Uuid, bool)>,
+    on_toggle_expand: Callback<Uuid>,
+    on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
+) -> Element {
+    let page_id = row.page_id;
+    let current_done = row.done;
+    let row_testid = format!("task-row-{page_id}");
+    let checkbox_testid = format!("task-checkbox-{page_id}");
+    let expand_testid = format!("task-expand-{page_id}");
+    let registry = PropertySchemaRegistry::with_builtins();
+    let task_schema = registry.get("task");
     rsx! {
         li {
-            class: "flex items-center gap-3 text-sm",
-            "data-testid": row_testid,
-            "data-task-done": if current_done { "true" } else { "false" },
-            input {
-                r#type: "checkbox",
-                "data-testid": checkbox_testid,
-                checked: current_done,
-                onchange: move |_| on_toggle_done.call((task_id, !current_done)),
+            class: "flex flex-col gap-1",
+            div {
+                class: "flex items-center gap-3 text-sm",
+                "data-testid": row_testid,
+                "data-task-done": if current_done { "true" } else { "false" },
+                input {
+                    r#type: "checkbox",
+                    "data-testid": checkbox_testid,
+                    checked: current_done,
+                    onchange: move |_| on_toggle_done.call((page_id, current_done)),
+                }
+                span {
+                    class: if current_done { "text-muted-foreground line-through flex-1 cursor-pointer" } else { "text-foreground flex-1 cursor-pointer" },
+                    onclick: move |_| on_toggle_expand.call(page_id),
+                    "{row.title}"
+                }
+                StatusPill { status: row.status.clone() }
+                PriorityPill { priority: row.priority.clone() }
+                span { "data-testid": expand_testid,
+                    Button {
+                        on_click: move |_| on_toggle_expand.call(page_id),
+                        if is_expanded { "▾" } else { "▸" }
+                    }
+                }
             }
-            span {
-                class: if current_done { "text-muted-foreground line-through" } else { "text-foreground" },
-                "{task.title}"
+            // Inline expansion — full properties pane for the
+            // page, edits ride the same sync pipeline.
+            if is_expanded {
+                if let Some(schema) = task_schema {
+                    div {
+                        "data-testid": format!("task-properties-{page_id}"),
+                        class: "ml-7 mb-2",
+                        knowledge_ui::PropertiesPane {
+                            schema: schema.clone(),
+                            frontmatter_json: row.frontmatter_json.clone(),
+                            on_change: {
+                                let on_edit = on_edit_property;
+                                Callback::new(move |(key, value): (String, serde_json::Value)| {
+                                    on_edit.call((page_id, key, value));
+                                })
+                            },
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+#[component]
+fn StatusPill(status: String) -> Element {
+    let (variant, label) = match status.as_str() {
+        "todo" => (StatusBadgeVariant::Neutral, "To do"),
+        "in_progress" => (StatusBadgeVariant::Warning, "In progress"),
+        "blocked" => (StatusBadgeVariant::Danger, "Blocked"),
+        "done" => (StatusBadgeVariant::Success, "Done"),
+        other => (StatusBadgeVariant::Neutral, other),
+    };
+    rsx! {
+        StatusBadge { variant, label: label.to_string() }
+    }
+}
+
+#[component]
+fn PriorityPill(priority: String) -> Element {
+    if priority.is_empty() || priority == "normal" {
+        return rsx! {};
+    }
+    let (variant, label) = match priority.as_str() {
+        "low" => (StatusBadgeVariant::Neutral, "low"),
+        "high" => (StatusBadgeVariant::Warning, "high"),
+        "urgent" => (StatusBadgeVariant::Danger, "urgent"),
+        other => (StatusBadgeVariant::Neutral, other),
+    };
+    rsx! {
+        StatusBadge { variant, label: label.to_string() }
+    }
+}
+
+/// One task row in the rendered view.
+#[derive(Clone, PartialEq)]
+pub struct TaskRow {
+    pub page_id: Uuid,
+    pub title: String,
+    pub done: bool,
+    pub status: String,
+    pub priority: String,
+    pub frontmatter_json: String,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct Snapshot {
-    pub project_names: HashMap<Uuid, String>,
-    pub tasks_by_project: HashMap<Uuid, Vec<Task>>,
-    pub ordered_projects: Vec<(Uuid, String)>,
+    /// `(project_name, page_id)` — page_id is `None` when the
+    /// project is a synthetic bucket like `(no project)` or a
+    /// link to a page that doesn't exist yet.
+    pub ordered_projects: Vec<(String, Option<Uuid>)>,
+    pub tasks_by_project: HashMap<String, Vec<TaskRow>>,
 }
 
 async fn build_snapshot(doc: Arc<CrdtDoc>) -> Result<Snapshot, String> {
-    let project_repo = ProjectRepoLoro::new(&doc);
-    let task_repo = TaskRepoLoro::new(&doc);
-    let big_page = Page {
+    let page_repo = PageRepoLoro::new(&doc);
+    let big_page = PageWindow {
         index: 0,
-        size: 1000,
+        size: 5000,
     };
-    let project_page = project_repo
-        .list(big_page.clone(), None, None)
-        .await
-        .map_err(|e| format!("project list: {e}"))?;
-    let task_page = task_repo
+    let pages = page_repo
         .list(big_page, None, None)
         .await
-        .map_err(|e| format!("task list: {e}"))?;
+        .map_err(|e| format!("page list: {e}"))?;
 
-    let mut project_names: HashMap<Uuid, String> = HashMap::new();
-    for p in project_page.items.iter() {
-        project_names.insert(p.id, p.name.clone());
+    // Index project pages by name so we can decorate the
+    // groupings with project page ids.
+    let mut project_page_id: HashMap<String, Uuid> = HashMap::new();
+    let mut tasks_by_project: HashMap<String, Vec<TaskRow>> = HashMap::new();
+    let mut task_pages: Vec<&Page> = Vec::new();
+    for page in &pages.items {
+        let kind = page
+            .frontmatter_json
+            .parse::<serde_json::Value>()
+            .ok()
+            .as_ref()
+            .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(String::from))
+            .unwrap_or_default();
+        match kind.as_str() {
+            "project" => {
+                project_page_id.insert(page.basename.clone(), page.id);
+            }
+            "task" => task_pages.push(page),
+            _ => {}
+        }
     }
-    let mut tasks_by_project: HashMap<Uuid, Vec<Task>> = HashMap::new();
-    for t in task_page.items.into_iter() {
-        tasks_by_project.entry(t.project_id).or_default().push(t);
+
+    for page in task_pages {
+        let row = page_to_task_row(page);
+        let project_name = first_project_link(page).unwrap_or_else(|| "(no project)".into());
+        tasks_by_project.entry(project_name).or_default().push(row);
     }
-    let mut ordered_projects: Vec<(Uuid, String)> = project_page
-        .items
-        .into_iter()
-        .filter(|p: &Project| tasks_by_project.contains_key(&p.id))
-        .map(|p| (p.id, p.name))
+    for v in tasks_by_project.values_mut() {
+        v.sort_by(|a, b| a.title.cmp(&b.title));
+    }
+
+    // Project ordering: kind:project pages alphabetical, then the
+    // `(no project)` synthetic bucket at the end if it has any.
+    let mut ordered_projects: Vec<(String, Option<Uuid>)> = tasks_by_project
+        .keys()
+        .filter(|n| *n != "(no project)")
+        .cloned()
+        .map(|n| {
+            let pid = project_page_id.get(&n).copied();
+            (n, pid)
+        })
         .collect();
-    ordered_projects.sort_by(|a, b| a.1.cmp(&b.1));
+    ordered_projects.sort_by(|a, b| a.0.cmp(&b.0));
+    if tasks_by_project.contains_key("(no project)") {
+        ordered_projects.push(("(no project)".into(), None));
+    }
 
     Ok(Snapshot {
-        project_names,
-        tasks_by_project,
         ordered_projects,
+        tasks_by_project,
     })
+}
+
+fn page_to_task_row(page: &Page) -> TaskRow {
+    let fm = page
+        .frontmatter_json
+        .parse::<serde_json::Value>()
+        .unwrap_or(serde_json::Value::Null);
+    let status = fm
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("todo")
+        .to_string();
+    let priority = fm
+        .get("priority")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let title = fm
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| page.basename.clone());
+    let done = status == "done";
+    TaskRow {
+        page_id: page.id,
+        title,
+        done,
+        status,
+        priority,
+        frontmatter_json: page.frontmatter_json.clone(),
+    }
+}
+
+/// Extract the first project link from a task page's `projects:`
+/// frontmatter field. Strips `[[ ]]` wrappers if present.
+fn first_project_link(page: &Page) -> Option<String> {
+    let fm: serde_json::Value = page.frontmatter_json.parse().ok()?;
+    let arr = fm.get("projects")?.as_array()?;
+    let first = arr.first()?.as_str()?.trim().to_string();
+    let unwrapped = first
+        .strip_prefix("[[")
+        .and_then(|s| s.strip_suffix("]]"))
+        .map(|s| s.to_string())
+        .unwrap_or(first);
+    Some(unwrapped)
+}
+
+async fn update_page_property(
+    doc: &Arc<CrdtDoc>,
+    page_id: Uuid,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    update_page_property_json(doc, page_id, key, serde_json::Value::String(value.into())).await
+}
+
+async fn update_page_property_json(
+    doc: &Arc<CrdtDoc>,
+    page_id: Uuid,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let page_repo = PageRepoLoro::new(doc);
+    let page = page_repo
+        .get(page_id)
+        .await
+        .map_err(|e| format!("get: {e}"))?;
+    let mut fm: indexmap::IndexMap<String, serde_json::Value> =
+        serde_json::from_str(&page.frontmatter_json).unwrap_or_default();
+    if matches!(value, serde_json::Value::Null) {
+        fm.shift_remove(key);
+    } else {
+        fm.insert(key.to_string(), value);
+    }
+    let new_json = serde_json::to_string(&fm).map_err(|e| format!("encode: {e}"))?;
+    page_repo
+        .update(
+            page_id,
+            PageUpdate {
+                frontmatter_json: Some(new_json),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| format!("update: {e}"))?;
+    Ok(())
 }
 
 async fn run_sync_loop(
@@ -258,9 +473,6 @@ async fn run_sync_loop(
     mut version: Signal<u64>,
     mut last_error: Signal<Option<String>>,
 ) {
-    // One vox session per direction — `subscribe` holds its session
-    // for the lifetime of the stream, so `apply_update` needs its
-    // own.
     let sub_client: WorkspaceSyncClient = match connect_client(&url).await {
         Ok(c) => c,
         Err(e) => {
@@ -278,9 +490,6 @@ async fn run_sync_loop(
         }
     };
 
-    // Wire local commits → mpsc → apply_update. The Subscription
-    // handle returned by `subscribe_local_update` must outlive the
-    // doc; leak it (the doc itself outlives the page).
     let (upload_tx, mut upload_rx) = unbounded::<Vec<u8>>();
     let upload_sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
         let _ = upload_tx.unbounded_send(bytes.to_vec());
@@ -288,15 +497,10 @@ async fn run_sync_loop(
     }));
     std::mem::forget(upload_sub);
 
-    // Doc-id for the legacy `workspace` doc. Once routes grow
-    // per-resource doc selectors, the route component will accept
-    // the doc id as a prop instead.
-    let doc_id = project_proto::DocId::new("workspace");
-
-    // Background uploader: drains the mpsc, ships each chunk via
-    // `apply_update`. Holds `apply_client` for the lifetime of the
-    // page (component teardown drops it implicitly when the spawn
-    // task is canceled).
+    // Projects route now reads the ORG VAULT, not the legacy
+    // `workspace` doc. Knowledge pages + their frontmatter are
+    // the data model.
+    let doc_id = project_proto::DocId::org_vault();
     let upload_doc_id = doc_id.clone();
     spawn(async move {
         while let Some(bytes) = upload_rx.next().await {
@@ -309,7 +513,6 @@ async fn run_sync_loop(
         }
     });
 
-    // Subscribe stream — pumps remote bytes into the local doc.
     let (tx, mut rx) = vox::channel::<UpdateBytes>();
     let sub_doc_id = doc_id.clone();
     spawn(async move {
@@ -343,7 +546,6 @@ async fn run_sync_loop(
     }
 }
 
-/// Open a typed vox client over a fresh WebSocket. Wasm-only.
 #[cfg(target_arch = "wasm32")]
 async fn connect_client<C>(url: &str) -> Result<C, String>
 where

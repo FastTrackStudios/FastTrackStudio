@@ -50,7 +50,8 @@ async fn main() -> eyre::Result<()> {
 /// Phase 5c demo seeding so the Knowledge route renders something
 /// on first paint without needing the CLI.
 async fn seed_knowledge_org_vault(state: &AppState) -> eyre::Result<()> {
-    use knowledge_proto::{VaultCreate, VaultRepo};
+    use chrono::Utc;
+    use knowledge_proto::{PageCreate, PageRepo, VaultCreate, VaultRepo};
     let big = project_proto::architect::Page {
         index: 0,
         size: 1000,
@@ -78,6 +79,96 @@ async fn seed_knowledge_org_vault(state: &AppState) -> eyre::Result<()> {
         .await
         .map_err(|e| eyre::eyre!("seed vault create: {e}"))?;
     info!(vault_id = %v.id, "seeded Org vault");
+
+    // Seed two `kind: project` pages + a handful of `kind: task`
+    // pages linked to them. Powers the new /projects route which
+    // reads from the Knowledge layer (the legacy `Task` entity in
+    // project-proto is still seeded for back-compat by
+    // task_db::seed).
+    let now = Utc::now();
+    let projects = [
+        ("Website Redesign", "active"),
+        ("Album Release", "planning"),
+    ];
+    for (name, state_val) in projects {
+        let fm = serde_json::json!({
+            "kind": "project",
+            "state": state_val,
+        });
+        let _ = state
+            .page_repo
+            .create(PageCreate {
+                vault_id: v.id,
+                folder_id: None,
+                path: format!("{name}.md"),
+                basename: name.into(),
+                ext: "md".into(),
+                aliases: Vec::new(),
+                frontmatter_json: fm.to_string(),
+                stat_ctime: now,
+                stat_mtime: now,
+                stat_size: 0,
+                is_journal: false,
+                journal_day: None,
+                shadow_for_kind: None,
+                shadow_for_id: None,
+            })
+            .await
+            .map_err(|e| eyre::eyre!("seed project page {name}: {e}"))?;
+    }
+
+    let tasks = [
+        (
+            "Design new color palette",
+            "done",
+            "high",
+            "Website Redesign",
+        ),
+        (
+            "Build component library",
+            "in_progress",
+            "high",
+            "Website Redesign",
+        ),
+        ("Deploy to staging", "todo", "low", "Website Redesign"),
+        ("Master all tracks", "todo", "high", "Album Release"),
+        (
+            "Design album artwork",
+            "in_progress",
+            "normal",
+            "Album Release",
+        ),
+    ];
+    for (title, status, priority, project) in tasks {
+        let fm = serde_json::json!({
+            "kind": "task",
+            "title": title,
+            "status": status,
+            "priority": priority,
+            "projects": [project],
+        });
+        let _ = state
+            .page_repo
+            .create(PageCreate {
+                vault_id: v.id,
+                folder_id: None,
+                path: format!("{title}.md"),
+                basename: title.into(),
+                ext: "md".into(),
+                aliases: Vec::new(),
+                frontmatter_json: fm.to_string(),
+                stat_ctime: now,
+                stat_mtime: now,
+                stat_size: 0,
+                is_journal: false,
+                journal_day: None,
+                shadow_for_kind: None,
+                shadow_for_id: None,
+            })
+            .await
+            .map_err(|e| eyre::eyre!("seed task page {title}: {e}"))?;
+    }
+    info!("seeded 2 kind:project + 5 kind:task pages");
     Ok(())
 }
 

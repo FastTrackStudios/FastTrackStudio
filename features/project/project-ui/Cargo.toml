@@ -20,6 +20,11 @@ license.workspace = true
 [dependencies]
 dioxus = { workspace = true }
 project-proto.workspace = true
+knowledge-proto.workspace = true
+knowledge-crdt.workspace = true
+knowledge-ui.workspace = true
+serde_json.workspace = true
+indexmap = { workspace = true, features = ["serde"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
 

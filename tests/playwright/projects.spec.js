@@ -39,6 +39,45 @@ test("toggle checkbox flips data-task-done locally", async ({ page }) => {
 });
 
 /**
+ * Phase post-10 — inline expand opens a properties pane for the
+ * task page, the same component `/knowledge` uses. Editing the
+ * status dropdown writes to the page's frontmatter and triggers
+ * the row's `data-task-done` to flip on the next render.
+ */
+test("inline expand reveals properties pane + status edit persists", async ({ page }) => {
+  await page.goto("/projects");
+  await expect(
+    page.locator("[data-testid='version-badge']"),
+  ).toContainText(/^v[1-9]/);
+
+  const firstRow = page.locator("[data-testid^='task-row-']").first();
+  await expect(firstRow).toBeVisible();
+  // Pull the page_id out of the row's testid.
+  const rowTestId = await firstRow.getAttribute("data-testid");
+  if (!rowTestId) throw new Error("no row testid");
+  const pageId = rowTestId.replace("task-row-", "");
+
+  // Open the inline expansion.
+  await page
+    .locator(`[data-testid='task-expand-${pageId}'] button`)
+    .click();
+  const pane = page.locator(`[data-testid='task-properties-${pageId}']`);
+  await expect(pane).toBeVisible();
+  // Status editor is the same EnumWithMetadata <select> the
+  // /knowledge properties pane uses.
+  const statusEditor = pane.locator("[data-testid='prop-editor-status']");
+  await expect(statusEditor).toBeVisible();
+
+  // Switching the status to `done` flips the row's data-task-done.
+  await statusEditor.selectOption("done");
+  await expect(firstRow).toHaveAttribute("data-task-done", "true");
+
+  // Reverse: switch to `todo` clears it.
+  await statusEditor.selectOption("todo");
+  await expect(firstRow).toHaveAttribute("data-task-done", "false");
+});
+
+/**
  * Realtime sync across two browser contexts.
  *
  * Each browser context gets its own cookies + storage and behaves
