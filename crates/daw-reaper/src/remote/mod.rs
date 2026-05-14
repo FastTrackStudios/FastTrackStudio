@@ -16,7 +16,7 @@
 
 pub mod daw;
 // ext_state ported to architect::rpc — see `crate::ext_state`.
-pub mod fx_chains;
+// fx_chains ported to architect::rpc — see `crate::fx_chains`.
 pub mod fx_params;
 pub mod items;
 // markers ported to the singleton `Reaper` backend — see
@@ -33,7 +33,6 @@ pub mod routing;
 // transport ported to architect::rpc — see `crate::transport`.
 
 pub use daw::ReaperRemote;
-pub use fx_chains::RemoteFxChains;
 pub use fx_params::RemoteFxParams;
 pub use items::RemoteItems;
 pub use project::RemoteProject;

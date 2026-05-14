@@ -3,9 +3,7 @@
 use daw_proto::sync::{Daw as _, Project as ProjectTrait};
 use daw_proto::{DawResult, ProjectInfo};
 
-use super::{
-    ReaperRemote, RemoteFxChains, RemoteFxParams, RemoteItems, RemoteRouting, dispatch, main_thread,
-};
+use super::{ReaperRemote, RemoteFxParams, RemoteItems, RemoteRouting, dispatch, main_thread};
 
 /// A `Send + Sync` handle scoped to a single REAPER project tab.
 pub struct RemoteProject<'a> {
@@ -20,10 +18,6 @@ impl<'a> RemoteProject<'a> {
 }
 
 impl<'a> ProjectTrait for RemoteProject<'a> {
-    type FxChains<'b>
-        = RemoteFxChains<'b>
-    where
-        Self: 'b;
     type FxParams<'b>
         = RemoteFxParams<'b>
     where
@@ -47,10 +41,6 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
             let mt = main_thread()?;
             mt.project(&guid)?.info()
         })
-    }
-
-    fn fx_chains(&self) -> Self::FxChains<'_> {
-        RemoteFxChains::new(self.remote, &self.guid)
     }
 
     fn fx_params(&self) -> Self::FxParams<'_> {

@@ -1,11 +1,13 @@
-//! Whole-FX-chain operations.
+//! Whole-FX-chain operations (architect::rpc port).
 //!
-//! `FxChainContext` already encodes which chain (Track / Input / Master /
-//! Monitoring), so per-chain ops are flat method calls keyed by context + index.
-//! This matches the underlying REAPER API shape and avoids nested handles.
+//! `FxChainContext` already encodes which chain (Track / Input /
+//! Monitoring) plus the owning track GUID — per-chain ops are flat
+//! method calls keyed by context + fx index. Stateless singleton
+//! backends mount via `fx_chains::serve(Reaper)`.
 
 use crate::{DawResult, Fx, FxChainContext};
 
+#[architect_rpc_derive::rpc]
 pub trait FxChains {
     fn list(&self, ctx: FxChainContext) -> Vec<Fx>;
     fn count(&self, ctx: FxChainContext) -> u32;
@@ -24,3 +26,8 @@ pub trait FxChains {
     fn state_chunk(&self, ctx: FxChainContext, fx_idx: u32) -> Option<String>;
     fn set_state_chunk(&self, ctx: FxChainContext, fx_idx: u32, chunk: &str) -> DawResult<()>;
 }
+
+#[cfg(feature = "vox")]
+pub use FxChainsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use fx_chains_rpc_service_descriptor as descriptor;

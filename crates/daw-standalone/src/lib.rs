@@ -22,6 +22,7 @@ pub mod audio_engine;
 mod automation;
 mod ext_state;
 mod fx;
+mod fx_chains;
 mod item;
 mod live_midi;
 mod marker;

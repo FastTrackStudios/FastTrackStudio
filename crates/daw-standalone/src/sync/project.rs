@@ -4,7 +4,7 @@ use daw_proto::{DawResult, ProjectInfo, sync::Project};
 
 use super::daw::Standalone;
 // `ExtState` ported to architect::rpc — see `crate::ext_state`.
-use super::fx_chains::StandaloneFxChains;
+// `FxChains` ported to architect::rpc — see `crate::fx_chains`.
 use super::fx_params::StandaloneFxParams;
 use super::items::StandaloneItems;
 use super::routing::StandaloneRouting;
@@ -29,10 +29,6 @@ impl<'a> StandaloneProject<'a> {
 }
 
 impl<'a> Project for StandaloneProject<'a> {
-    type FxChains<'b>
-        = StandaloneFxChains<'b>
-    where
-        Self: 'b;
     type FxParams<'b>
         = StandaloneFxParams<'b>
     where
@@ -52,10 +48,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn info(&self) -> DawResult<ProjectInfo> {
         self.daw.with_project(&self.guid, |p| p.info.clone())
-    }
-
-    fn fx_chains(&self) -> Self::FxChains<'_> {
-        StandaloneFxChains::new(self.daw, self.guid.clone())
     }
 
     fn fx_params(&self) -> Self::FxParams<'_> {

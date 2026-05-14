@@ -27,7 +27,7 @@ mod action_registry;
 mod audio_engine;
 mod daw;
 // `ExtState` ported to architect::rpc — see `crate::ext_state`.
-mod fx_chains;
+// `FxChains` ported to architect::rpc — see `crate::fx_chains`.
 mod fx_params;
 mod items;
 // `Markers` lives in `crate::marker::service` now — one canonical
@@ -47,10 +47,12 @@ mod window_geometry;
 pub use crate::ext_state::{ExtState, ExtStateRpc};
 #[cfg(feature = "vox")]
 pub use crate::ext_state::{ExtStateClient, serve as serve_ext_state};
+pub use crate::fx_chains::{FxChains, FxChainsRpc};
+#[cfg(feature = "vox")]
+pub use crate::fx_chains::{FxChainsClient, serve as serve_fx_chains};
 pub use action_registry::ActionRegistry;
 pub use audio_engine::AudioEngine;
 pub use daw::Daw;
-pub use fx_chains::FxChains;
 pub use fx_params::FxParams;
 pub use items::Items;
 // `Markers` and its architect-emitted RPC face (`MarkersRpc`,
