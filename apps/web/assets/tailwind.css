@@ -748,6 +748,9 @@
   .min-w-80 {
     min-width: calc(var(--spacing) * 80);
   }
+  .min-w-\[6rem\] {
+    min-width: 6rem;
+  }
   .min-w-\[14rem\] {
     min-width: 14rem;
   }
@@ -853,6 +856,9 @@
   .cursor-default {
     cursor: default;
   }
+  .cursor-grab {
+    cursor: grab;
+  }
   .cursor-not-allowed {
     cursor: not-allowed;
   }
@@ -891,6 +897,9 @@
   }
   .grid-cols-5 {
     grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .grid-cols-\[10rem_1fr\] {
+    grid-template-columns: 10rem 1fr;
   }
   .flex-col {
     flex-direction: column;
@@ -2131,6 +2140,11 @@
     &:focus-visible {
       --tw-outline-style: none;
       outline-style: none;
+    }
+  }
+  .active\:cursor-grabbing {
+    &:active {
+      cursor: grabbing;
     }
   }
   .active\:text-foreground {

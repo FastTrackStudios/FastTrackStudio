@@ -48,6 +48,43 @@ test("adding a task lands in the todo column", async ({ page }) => {
   await expect(todoCol.getByText(title, { exact: true })).toBeVisible();
 });
 
+test("HTML5 drag-and-drop moves a card across columns", async ({ page }) => {
+  // Phase 6.5b — exercise the dragstart/drop listeners on
+  // `KanbanCard` and `KanbanColumn`. Move-buttons stay as the
+  // fallback / accessibility path; this spec uses real DnD.
+  await page.goto("/tasks-kanban");
+  await expect(
+    page.locator("[data-testid='tasks-kanban-version-badge']"),
+  ).toContainText(/^v[1-9]/);
+
+  const title = `DnD-${Date.now()}`;
+  await page
+    .locator("[data-testid='tasks-kanban-new-task-input']")
+    .fill(title);
+  await page
+    .locator("[data-testid='tasks-kanban-add-button'] button")
+    .click();
+
+  const card = page
+    .locator("[data-testid^='kanban-card-']")
+    .filter({ hasText: title });
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("draggable", "true");
+  await expect(card).toHaveAttribute("data-bucket", "todo");
+
+  // Drag the card into the `done` column.
+  const doneCol = page.locator("[data-testid='kanban-column-done']");
+  await card.dragTo(doneCol);
+
+  // Card is now in done.
+  await expect(doneCol.getByText(title, { exact: true })).toBeVisible();
+  await expect(
+    page
+      .locator("[data-testid='kanban-column-todo']")
+      .getByText(title, { exact: true }),
+  ).toHaveCount(0);
+});
+
 test("two tabs sync kanban: card moves across columns", async ({ browser }) => {
   const ctxA = await browser.newContext();
   const ctxB = await browser.newContext();

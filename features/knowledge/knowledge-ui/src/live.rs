@@ -53,6 +53,39 @@ pub fn KnowledgeLive(vox_url: String) -> Element {
 
     // Commit a block content edit locally; the upload pipeline ships
     // it to the server.
+    // Phase 6.5b: property edits round-trip the same way as block
+    // edits — write to the local doc, the upload pipeline ships it
+    // to peers.
+    let prop_doc = local_doc.read().clone();
+    let on_edit_property = use_callback(
+        move |(page_id, key, value): (Uuid, String, serde_json::Value)| {
+            let doc = prop_doc.clone();
+            spawn(async move {
+                let page_repo = PageRepoLoro::new(&doc);
+                let Ok(page) = page_repo.get(page_id).await else {
+                    return;
+                };
+                let mut fm: indexmap::IndexMap<String, serde_json::Value> =
+                    serde_json::from_str(&page.frontmatter_json).unwrap_or_default();
+                if matches!(value, serde_json::Value::Null) {
+                    fm.shift_remove(&key);
+                } else {
+                    fm.insert(key, value);
+                }
+                let new_json = serde_json::to_string(&fm).unwrap_or_else(|_| "{}".into());
+                let _ = page_repo
+                    .update(
+                        page_id,
+                        knowledge_proto::PageUpdate {
+                            frontmatter_json: Some(new_json),
+                            ..Default::default()
+                        },
+                    )
+                    .await;
+            });
+        },
+    );
+
     let block_doc = local_doc.read().clone();
     let on_edit_block = use_callback(move |(block_id, content): (Uuid, String)| {
         let doc = block_doc.clone();
@@ -174,6 +207,7 @@ pub fn KnowledgeLive(vox_url: String) -> Element {
                     on_edit_block,
                     on_add_block,
                     on_add_page,
+                    on_edit_property,
                 } },
             }
         }
@@ -189,6 +223,7 @@ pub fn KnowledgeView(
     on_edit_block: Callback<(Uuid, String)>,
     on_add_block: Callback<(Uuid, Uuid, usize)>,
     on_add_page: Callback<(Uuid, String)>,
+    on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
 ) -> Element {
     if snapshot.vaults.is_empty() {
         return rsx! {
@@ -239,6 +274,7 @@ pub fn KnowledgeView(
                     pages: pages.clone(),
                     on_edit_block,
                     on_add_block,
+                    on_edit_property,
                 }
             }
         }
@@ -253,6 +289,7 @@ fn PageBody(
     pages: Vec<Page>,
     on_edit_block: Callback<(Uuid, String)>,
     on_add_block: Callback<(Uuid, Uuid, usize)>,
+    on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
 ) -> Element {
     let Some(page_id) = active_page else {
         return rsx! { Text { variant: TextVariant::Muted, "Select a page from the list." } };
@@ -262,15 +299,39 @@ fn PageBody(
         .get(&page_id)
         .cloned()
         .unwrap_or_default();
-    let basename = pages
-        .iter()
-        .find(|p| p.id == page_id)
+    let page = pages.iter().find(|p| p.id == page_id).cloned();
+    let basename = page
+        .as_ref()
         .map(|p| p.basename.clone())
         .unwrap_or_default();
+
+    // Phase 6.5b: render the properties pane for whichever `kind:`
+    // the page declares. Schema lookup uses the built-in registry
+    // (server has the same). If the page doesn't carry a `kind:`
+    // we skip the pane entirely — untyped pages still render their
+    // blocks below.
+    let schema = page.as_ref().and_then(|p| {
+        let fm: serde_json::Value =
+            serde_json::from_str(&p.frontmatter_json).unwrap_or(serde_json::Value::Null);
+        let kind = fm.get("kind").and_then(|v| v.as_str())?;
+        knowledge_proto::property_schema::PropertySchemaRegistry::with_builtins().get(kind)
+    });
+
+    let on_prop_change = use_callback(move |(key, value): (String, serde_json::Value)| {
+        on_edit_property.call((page_id, key, value));
+    });
+
     rsx! {
         HStack { class: "items-baseline justify-between mb-2",
             Heading { level: HeadingLevel::H2, "{basename}" }
             Text { variant: TextVariant::Muted, "{blocks.len()} block(s)" }
+        }
+        if let (Some(schema), Some(page)) = (schema, page) {
+            crate::properties_pane::PropertiesPane {
+                schema,
+                frontmatter_json: page.frontmatter_json.clone(),
+                on_change: on_prop_change,
+            }
         }
         div {
             "data-testid": "knowledge-block-list",

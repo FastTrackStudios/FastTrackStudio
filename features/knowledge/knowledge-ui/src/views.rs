@@ -94,11 +94,36 @@ fn KanbanColumn(
     on_move: Callback<(Uuid, String)>,
 ) -> Element {
     let column_testid = format!("kanban-column-{label}");
+    // HTML5 DnD: column accepts drops. The dragged page id is read
+    // out of `text/plain` (set by the card's ondragstart). On drop,
+    // fire `on_move` with the current column label as target.
+    //
+    // Adapted from TaskNotes' KanbanView.ts:1284-1606 / 2689-2920.
+    // Our version is much shorter because:
+    // - we don't need the `suppressRenderUntil` workaround (Loro
+    //   has no file-watcher race that fights optimistic DOM),
+    // - we don't fan-out to swimlanes (Phase 6.6+),
+    // - we delegate sort-order recomputation to the caller.
+    let label_for_drop = label.clone();
     rsx! {
         section {
             "data-testid": column_testid,
             "data-bucket": "{label}",
             class: "min-w-[14rem] flex-1 rounded-md border border-border bg-card p-3 flex flex-col gap-2",
+            ondragover: move |e| {
+                // preventDefault lets the column become a drop target.
+                e.prevent_default();
+            },
+            ondrop: move |e| {
+                e.prevent_default();
+                let dt = e.data().data_transfer();
+                let text = dt.get_data("text/plain").unwrap_or_default();
+                if !text.is_empty() {
+                    if let Ok(page_id) = text.parse::<Uuid>() {
+                        on_move.call((page_id, label_for_drop.clone()));
+                    }
+                }
+            },
             HStack { class: "items-baseline justify-between",
                 Heading { level: HeadingLevel::H4, "{column_label(&label)}" }
                 Text { variant: TextVariant::Muted, "{rows.len()}" }
@@ -137,11 +162,20 @@ fn KanbanCard(
 ) -> Element {
     let id = row.page_id;
     let card_testid = format!("kanban-card-{id}");
+    // HTML5 DnD: write the page id into the drag data on dragstart.
+    // The column's ondrop reads it back. Move buttons stay as the
+    // accessibility fallback + the playwright button-driven path.
     rsx! {
         article {
             "data-testid": card_testid,
             "data-bucket": "{current_bucket}",
-            class: "rounded border border-border bg-background p-2 flex flex-col gap-1",
+            class: "rounded border border-border bg-background p-2 flex flex-col gap-1 cursor-grab active:cursor-grabbing",
+            draggable: true,
+            ondragstart: move |e| {
+                let dt = e.data().data_transfer();
+                let _ = dt.set_data("text/plain", &id.to_string());
+                let _ = dt.set_effect_allowed("move");
+            },
             div {
                 class: "text-sm cursor-pointer",
                 onclick: move |_| on_select.call(id),

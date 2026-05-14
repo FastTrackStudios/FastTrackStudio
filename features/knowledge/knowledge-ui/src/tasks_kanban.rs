@@ -25,6 +25,7 @@ use knowledge_proto::bases::{
     BaseRow, CmpOp, ExecutedView, Expr, FilterNode, ParsedBase, SortDir, SortKey, ViewKind,
     ViewSpec, execute_view,
 };
+use knowledge_proto::lexorank;
 use knowledge_proto::{Page, PageCreate, PageRepo, PageUpdate, VaultRepo};
 use project_proto::architect::Page as PageWindow;
 use project_proto::{UpdateBytes, WorkspaceSyncClient};
@@ -69,13 +70,31 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
                     return;
                 }
             };
-            // Re-encode frontmatter_json with the new status.
+            // Re-encode frontmatter_json with the new status +
+            // a fresh sort_order at the end of the target bucket.
+            // Phase 6.5b: append-only (LexoRank::after of the
+            // tail rank in the target bucket). Phase 6.6+ will
+            // grow drop-position awareness.
             let mut fm: indexmap::IndexMap<String, serde_json::Value> =
                 serde_json::from_str(&page.frontmatter_json).unwrap_or_default();
-            fm.insert("status".into(), serde_json::Value::String(target));
+            fm.insert("status".into(), serde_json::Value::String(target.clone()));
             // Ensure kind:task is preserved (defensive).
             fm.entry("kind".into())
                 .or_insert(serde_json::Value::String("task".into()));
+            // Compute a sort_order that places this card after any
+            // existing card in the target bucket.
+            let tail_rank = match tail_rank_in_bucket(&doc, &target).await {
+                Ok(opt) => opt,
+                Err(e) => {
+                    tracing::warn!(?e, "kanban: tail_rank lookup failed");
+                    None
+                }
+            };
+            let new_rank = match tail_rank {
+                Some(r) => lexorank::after(&r),
+                None => lexorank::first(),
+            };
+            fm.insert("sort_order".into(), serde_json::Value::String(new_rank));
             let new_json = serde_json::to_string(&fm).unwrap_or_else(|_| "{}".into());
             if let Err(e) = page_repo
                 .update(
@@ -276,6 +295,38 @@ async fn build_view(doc: Arc<CrdtDoc>) -> Result<ExecutedView, String> {
 
 fn page_to_row(p: Page) -> BaseRow {
     BaseRow::from_parts(p.id, p.basename, &p.frontmatter_json)
+}
+
+/// Find the largest sort_order rank among task pages currently in
+/// `bucket` (status = `bucket`). Returns None when the bucket is
+/// empty — the caller then picks `lexorank::first()`. Phase 6.5b
+/// MVP: append-only on drop.
+async fn tail_rank_in_bucket(
+    doc: &CrdtDoc,
+    bucket: &str,
+) -> Result<Option<String>, knowledge_proto::architect::RepoError> {
+    let page_repo = PageRepoLoro::new(doc);
+    let pages = page_repo.list(big_page(), None, None).await?;
+    let mut max_rank: Option<String> = None;
+    for p in pages.items {
+        let fm: serde_json::Value =
+            serde_json::from_str(&p.frontmatter_json).unwrap_or(serde_json::Value::Null);
+        let status = fm.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        if status != bucket {
+            continue;
+        }
+        let rank = fm
+            .get("sort_order")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let Some(r) = rank {
+            match &max_rank {
+                Some(cur) if cur.as_str() >= r.as_str() => {}
+                _ => max_rank = Some(r),
+            }
+        }
+    }
+    Ok(max_rank)
 }
 
 async fn run_kanban_sync_loop(
