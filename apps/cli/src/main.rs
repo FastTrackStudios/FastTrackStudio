@@ -17,9 +17,10 @@ mod shared;
 use std::collections::HashMap;
 
 use clap::{Parser, Subcommand};
+use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
 use project_proto::architect::Page;
-use project_proto::{ProjectRepoClient, TaskRepoClient, TaskUpdate};
-use shared::RemoteVoxConfig;
+use project_proto::{ProjectRepo, TaskRepo, TaskUpdate};
+use shared::{LiveSession, RemoteVoxConfig};
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -57,9 +58,9 @@ enum Commands {
     SetDone {
         /// Task UUID (any unambiguous prefix accepted).
         task_id: String,
-        /// `true` (or absent) to mark done; `false` to clear.
-        #[arg(default_value_t = true)]
-        done: bool,
+        /// Mark the task open again instead of done.
+        #[arg(long)]
+        undo: bool,
     },
     /// Probe the configured vox endpoint.
     Doctor,
@@ -75,60 +76,49 @@ async fn main() -> eyre::Result<()> {
         Commands::List => {
             let remote =
                 RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
-            // Two parallel sessions — `vox::connect` is cheap and
-            // each `*RepoClient` owns its own session driver.
-            let projects: ProjectRepoClient = remote.connect().await?;
-            let tasks: TaskRepoClient = remote.connect().await?;
-            let project_page = projects
-                .list(
-                    Page {
-                        index: 0,
-                        size: 1000,
-                    },
-                    None,
-                    None,
-                )
+            let session = LiveSession::open(&remote).await?;
+            let project_repo = ProjectRepoLoro::new(&session.doc);
+            let task_repo = TaskRepoLoro::new(&session.doc);
+            let big_page = Page {
+                index: 0,
+                size: 1000,
+            };
+            let project_page = project_repo
+                .list(big_page.clone(), None, None)
                 .await
                 .map_err(|e| eyre::eyre!("project list: {e}"))?;
-            let task_page = tasks
-                .list(
-                    Page {
-                        index: 0,
-                        size: 1000,
-                    },
-                    None,
-                    None,
-                )
+            let task_page = task_repo
+                .list(big_page, None, None)
                 .await
                 .map_err(|e| eyre::eyre!("task list: {e}"))?;
 
-            let project_names: HashMap<Uuid, String> = project_page
-                .items
-                .into_iter()
-                .map(|p| (p.id, p.name))
-                .collect();
             let mut grouped: HashMap<Uuid, Vec<_>> = HashMap::new();
             for task in task_page.items {
                 grouped.entry(task.project_id).or_default().push(task);
             }
 
-            if grouped.is_empty() {
-                println!("(no tasks)");
+            if project_page.items.is_empty() {
+                println!("(no projects)");
             } else {
-                let mut project_ids: Vec<_> = grouped.keys().copied().collect();
-                project_ids.sort_by_key(|id| {
-                    project_names
-                        .get(id)
-                        .cloned()
-                        .unwrap_or_else(|| "(unknown)".into())
-                });
-                for project_id in project_ids {
-                    let name = project_names
-                        .get(&project_id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("(unknown project {project_id})"));
-                    let tasks = grouped.get(&project_id).expect("inserted above");
-                    println!("\n## {name}  ({} tasks)", tasks.len());
+                let mut projects = project_page.items;
+                projects.sort_by(|a, b| a.name.cmp(&b.name));
+                for project in projects {
+                    let tasks = grouped.remove(&project.id).unwrap_or_default();
+                    println!("\n## {}  ({} tasks)", project.name, tasks.len());
+                    for task in tasks {
+                        let short_id = &task.id.to_string()[..8];
+                        let mark = if task.done { "[x]" } else { "[ ]" };
+                        println!("  [{short_id}] {mark} {}", task.title);
+                    }
+                }
+                // Orphans — tasks pointing at projects we don't have
+                // in the snapshot (would be a data bug, but print
+                // rather than silently drop).
+                for (project_id, tasks) in grouped {
+                    println!(
+                        "\n## (unknown project {project_id})  ({} tasks)",
+                        tasks.len()
+                    );
                     for task in tasks {
                         let short_id = &task.id.to_string()[..8];
                         let mark = if task.done { "[x]" } else { "[ ]" };
@@ -137,25 +127,24 @@ async fn main() -> eyre::Result<()> {
                 }
             }
         }
-        Commands::SetDone { task_id, done } => {
+        Commands::SetDone { task_id, undo } => {
+            let done = !undo;
             let remote =
                 RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
-            let tasks: TaskRepoClient = remote.connect().await?;
-            // Resolve a UUID prefix → full id by listing all tasks.
-            // Cheap at this scale; revisit if/when the corpus grows
-            // past the page size.
+            let session = LiveSession::open(&remote).await?;
+            let task_repo = TaskRepoLoro::new(&session.doc);
+            let big_page = Page {
+                index: 0,
+                size: 1000,
+            };
+            // Resolve a UUID prefix → full id by scanning the local
+            // snapshot. No round-trip needed; the doc is already
+            // loaded.
             let id = if let Ok(id) = Uuid::parse_str(&task_id) {
                 id
             } else {
-                let page = tasks
-                    .list(
-                        Page {
-                            index: 0,
-                            size: 1000,
-                        },
-                        None,
-                        None,
-                    )
+                let page = task_repo
+                    .list(big_page, None, None)
                     .await
                     .map_err(|e| eyre::eyre!("task list (for id resolve): {e}"))?;
                 let prefix = task_id.to_lowercase();
@@ -175,7 +164,7 @@ async fn main() -> eyre::Result<()> {
                     }
                 }
             };
-            let updated = tasks
+            let updated = task_repo
                 .update(
                     id,
                     TaskUpdate {
@@ -187,6 +176,7 @@ async fn main() -> eyre::Result<()> {
                 .map_err(|e| eyre::eyre!("task update: {e}"))?;
             let mark = if updated.done { "done" } else { "open" };
             println!("{} {} → {mark}", updated.id, updated.title);
+            session.flush().await?;
         }
         Commands::Doctor => {
             let remote =

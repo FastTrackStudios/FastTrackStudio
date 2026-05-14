@@ -4,6 +4,6 @@
   "private": true,
   "description": "Browser tests for the Task-architect web app. See README.md for setup + run instructions.",
   "devDependencies": {
-    "@playwright/test": "1.59.1"
+    "@playwright/test": "1.58.0"
   }
 }

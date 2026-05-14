@@ -1,7 +1,13 @@
 //! Minimal cross-cutting helpers for the vertical-slice CLI.
 //!
-//! Holds [`RemoteVoxConfig`] — the connection-bearing handle used by
-//! every command that needs to talk to a vox server.
+//! Holds [`RemoteVoxConfig`] — endpoint resolution — and
+//! [`LiveSession`] — a synced local `CrdtDoc` over `WorkspaceSync`.
+
+use std::sync::Arc;
+
+use crdt::CrdtDoc;
+use futures::channel::mpsc::{UnboundedReceiver, unbounded};
+use project_proto::{UpdateBytes, WorkspaceSyncClient};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RemoteVoxConfig {
@@ -43,6 +49,83 @@ impl RemoteVoxConfig {
             .establish()
             .await
             .map_err(|e| eyre::eyre!("Remote Vox connection failed: {e}"))
+    }
+}
+
+/// A local `CrdtDoc` pre-loaded with the server's current snapshot,
+/// plus an upload pipeline that ships any local mutation back to the
+/// server via `WorkspaceSync::apply_update`.
+///
+/// Mirrors the web client (`project-ui::live`) so the CLI and the
+/// browser route share one transport. After running a command, call
+/// [`LiveSession::flush`] to push pending local updates before exit.
+pub(crate) struct LiveSession {
+    pub doc: Arc<CrdtDoc>,
+    apply_client: WorkspaceSyncClient,
+    upload_rx: UnboundedReceiver<Vec<u8>>,
+}
+
+impl LiveSession {
+    pub(crate) async fn open(remote: &RemoteVoxConfig) -> eyre::Result<Self> {
+        let doc = Arc::new(CrdtDoc::ephemeral());
+
+        // Wire local-update capture before anything can mutate.
+        let (upload_tx, upload_rx) = unbounded::<Vec<u8>>();
+        let sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
+            let _ = upload_tx.unbounded_send(bytes.to_vec());
+            true
+        }));
+        // Subscription handle must outlive the doc. Process exits at
+        // command end, so leaking matches the doc's lifetime.
+        std::mem::forget(sub);
+
+        // Two sessions: `subscribe` holds its session for the stream
+        // lifetime, so `apply_update` needs its own.
+        let apply_client: WorkspaceSyncClient = remote.connect().await?;
+        let sub_client: WorkspaceSyncClient = remote.connect().await?;
+
+        let (tx, mut rx) = vox::channel::<UpdateBytes>();
+        tokio::spawn(async move {
+            if let Err(e) = sub_client.subscribe(tx).await {
+                tracing::debug!(?e, "subscribe stream ended");
+            }
+        });
+
+        // Wait for the snapshot (the first message the server sends).
+        let doc_for_load = doc.clone();
+        match rx.recv().await {
+            Ok(Some(msg)) => doc_for_load
+                .apply_remote(&msg.get().0)
+                .map_err(|e| eyre::eyre!("apply_remote (snapshot): {e}"))?,
+            Ok(None) => return Err(eyre::eyre!("sync stream closed before snapshot")),
+            Err(e) => return Err(eyre::eyre!("snapshot recv: {e:?}")),
+        }
+        // Drop rx — one-shot CLI commands don't follow the live stream.
+
+        Ok(Self {
+            doc,
+            apply_client,
+            upload_rx,
+        })
+    }
+
+    /// Drain any locally-produced update bytes through the server's
+    /// `apply_update` RPC. Loro's local-update callback fires
+    /// synchronously on commit, so by the time the caller's
+    /// mutations have `.await`-ed, every byte chunk is already in
+    /// the queue.
+    pub(crate) async fn flush(mut self) -> eyre::Result<()> {
+        loop {
+            match self.upload_rx.try_recv() {
+                Ok(bytes) => {
+                    self.apply_client
+                        .apply_update(UpdateBytes(bytes))
+                        .await
+                        .map_err(|e| eyre::eyre!("apply_update: {e}"))?;
+                }
+                Err(_) => return Ok(()),
+            }
+        }
     }
 }
 
