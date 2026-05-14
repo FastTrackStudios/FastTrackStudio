@@ -8788,6 +8788,8 @@ dependencies = [
  "dotenvy",
  "eyre",
  "futures",
+ "knowledge-crdt",
+ "knowledge-proto",
  "project-crdt",
  "project-proto",
  "serde",
@@ -8796,6 +8798,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vox 0.3.1",
+ "walkdir",
 ]
 
 [[package]]
@@ -8855,6 +8858,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vox 0.3.1",
+ "walkdir",
 ]
 
 [[package]]

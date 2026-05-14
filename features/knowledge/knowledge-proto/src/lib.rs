@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 pub mod bases;
 pub mod canvas;
+pub mod export;
 pub mod lexorank;
 pub mod obsidian;
 pub mod property_schema;
