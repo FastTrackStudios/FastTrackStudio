@@ -1,11 +1,18 @@
-//! Phase 3 — capability tokens.
+//! Phase 3 — capability tokens. Phase 4 extends the canonical
+//! message with optional `token_id` + `peer_id` fields used by
+//! the share-link service.
 //!
 //! A `CapabilityToken` is `base64url(signature || canonical_message)`,
 //! where `canonical_message` is a deterministic UTF-8 form:
 //!
 //! ```text
-//! v1|<expires_unix>|<RW|RO>|<doc_id_1>,<doc_id_2>,...
+//! v1|<expires_unix>|<RW|RO>|<doc_id_1>,<doc_id_2>,...|<token_id?>|<peer_id?>
 //! ```
+//!
+//! - Trailing `token_id` + `peer_id` may be empty. A token with no
+//!   `token_id` is never revocable through `ShareService::revoke`.
+//! - `peer_id` is currently a logged-only attribution stub. Phase 8
+//!   wires it into the anonymous-claim flow.
 //!
 //! Ed25519 signs the message; the server's keypair is generated on
 //! first boot at `$XDG_DATA_HOME/task-server/server-key.ed25519` (raw
@@ -24,9 +31,10 @@ use ed25519_dalek::{
     SECRET_KEY_LENGTH, SIGNATURE_LENGTH, Signature, Signer, SigningKey, Verifier, VerifyingKey,
 };
 use project_proto::DocId;
+use uuid::Uuid;
 
 /// What a token grants.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CapabilityScope {
     /// Unix seconds. Tokens past this point fail verification.
     pub expires_unix: i64,
@@ -35,6 +43,13 @@ pub struct CapabilityScope {
     pub can_write: bool,
     /// Doc ids the token grants access to. Empty = no access.
     pub doc_ids: Vec<DocId>,
+    /// Token id — set by the share-link service for revocable tokens.
+    /// `None` = the token is not registered for revocation
+    /// (e.g. server-internal capability).
+    pub token_id: Option<Uuid>,
+    /// Anonymous peer attribution. Phase 4 logs this; Phase 8 uses
+    /// it for the anonymous-claim flow.
+    pub peer_id: Option<String>,
 }
 
 impl CapabilityScope {
@@ -55,16 +70,20 @@ impl CapabilityScope {
             }
             joined.push_str(d.as_str());
         }
+        let token_id_str = self.token_id.map(|u| u.to_string()).unwrap_or_default();
+        let peer_id_str = self.peer_id.clone().unwrap_or_default();
         format!(
-            "v1|{}|{}|{}",
+            "v1|{}|{}|{}|{}|{}",
             self.expires_unix,
             if self.can_write { "RW" } else { "RO" },
-            joined
+            joined,
+            token_id_str,
+            peer_id_str,
         )
     }
 
     fn parse_message(s: &str) -> Result<Self, CapabilityError> {
-        let mut parts = s.splitn(4, '|');
+        let mut parts = s.splitn(6, '|');
         let v = parts.next().ok_or(CapabilityError::Malformed)?;
         if v != "v1" {
             return Err(CapabilityError::UnsupportedVersion);
@@ -86,10 +105,25 @@ impl CapabilityScope {
         } else {
             docs.split(',').map(|s| DocId::new(s.to_string())).collect()
         };
+        // token_id and peer_id are optional trailing fields.
+        let token_id_part = parts.next().unwrap_or("");
+        let token_id = if token_id_part.is_empty() {
+            None
+        } else {
+            Some(Uuid::parse_str(token_id_part).map_err(|_| CapabilityError::Malformed)?)
+        };
+        let peer_id_part = parts.next().unwrap_or("");
+        let peer_id = if peer_id_part.is_empty() {
+            None
+        } else {
+            Some(peer_id_part.to_string())
+        };
         Ok(Self {
             expires_unix,
             can_write,
             doc_ids,
+            token_id,
+            peer_id,
         })
     }
 }
@@ -235,6 +269,8 @@ mod tests {
                 DocId::project(Uuid::nil()),
                 DocId::comms_thread(Uuid::from_u128(1)),
             ],
+            token_id: Some(Uuid::from_u128(42)),
+            peer_id: Some("share-link-42".into()),
         };
         let token = kp.issue(&scope);
         let got = kp.verify(&token, 0).expect("verify");
@@ -248,6 +284,7 @@ mod tests {
             expires_unix: future(),
             can_write: false,
             doc_ids: vec![DocId::new("project/x")],
+            ..Default::default()
         };
         let token = kp.issue(&scope);
         let mut bytes = URL_SAFE_NO_PAD.decode(&token).unwrap();
@@ -266,6 +303,7 @@ mod tests {
             expires_unix: 100,
             can_write: true,
             doc_ids: vec![DocId::new("x")],
+            ..Default::default()
         };
         let token = kp.issue(&scope);
         match kp.verify(&token, 200) {
@@ -282,6 +320,7 @@ mod tests {
             expires_unix: future(),
             can_write: false,
             doc_ids: vec![],
+            ..Default::default()
         };
         let token = kp_a.issue(&scope);
         assert!(matches!(
@@ -296,6 +335,7 @@ mod tests {
             expires_unix: future(),
             can_write: true,
             doc_ids: vec![DocId::new("project/a"), DocId::new("project/b")],
+            ..Default::default()
         };
         assert!(scope.allows_doc(&DocId::new("project/a")));
         assert!(scope.allows_doc(&DocId::new("project/b")));

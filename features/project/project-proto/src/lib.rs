@@ -18,9 +18,11 @@
 pub use architect;
 
 mod project;
+mod share;
 mod sync;
 mod task;
 
 pub use project::*;
+pub use share::*;
 pub use sync::*;
 pub use task::*;

@@ -8793,6 +8793,8 @@ dependencies = [
  "rand 0.8.6",
  "sea-orm",
  "sea-orm-migration",
+ "serde",
+ "serde_yaml",
  "sha2",
  "task-db",
  "thiserror 2.0.18",

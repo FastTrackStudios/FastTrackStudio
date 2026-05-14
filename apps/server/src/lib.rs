@@ -11,14 +11,20 @@
 //! for read-side compatibility with the existing UI route. As
 //! Phases 5+ land they migrate to Knowledge-vault-backed reads.
 
+pub mod acl;
+pub mod basename_index;
 pub mod capability;
+pub mod share_link;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::basename_index::MemoryBasenameIndex;
 use crate::capability::{CapabilityScope, ServerKeypair, default_keypair_path};
+use crate::share_link::{RevocationList, ShareServiceImpl};
+use project_proto::ShareServiceDispatcher;
 
 use architect::vox;
 use architect_auth::{
@@ -257,6 +263,9 @@ pub struct AppState {
     /// tests keep working until Phase 4 issues capabilities through
     /// the share-link service. Tests opt in.
     pub enforce_capability: bool,
+    pub share_service: ShareServiceImpl,
+    pub revocations: RevocationList,
+    pub basename_index: MemoryBasenameIndex,
 }
 
 impl AppState {
@@ -315,6 +324,9 @@ impl AppState {
         let project_repo = Arc::new(ProjectRepoLoro::new(&workspace_doc));
         let task_repo = Arc::new(TaskRepoLoro::new(&workspace_doc));
         let sync = WorkspaceSyncImpl::new(registry.clone());
+        let revocations = RevocationList::new();
+        let share_service = ShareServiceImpl::new(keypair.clone(), revocations.clone());
+        let basename_index = MemoryBasenameIndex::new();
 
         Ok(Self {
             registry,
@@ -325,6 +337,9 @@ impl AppState {
             auth,
             keypair,
             enforce_capability,
+            share_service,
+            revocations,
+            basename_index,
         })
     }
 }
@@ -525,27 +540,36 @@ async fn vox_ws_handler(
     // Capability extraction. If enforcement is on, missing/invalid
     // tokens get a `WorkspaceSyncImpl` whose scope rejects every
     // doc — but the auth + repo dispatchers still run, since
-    // capability scoping is sync-only in Phase 3. Phase 4 widens
+    // capability scoping is sync-only in Phase 3+4. Phase 5 widens
     // enforcement to project repos.
+    let empty_scope = CapabilityScope {
+        expires_unix: i64::MAX,
+        can_write: false,
+        doc_ids: Vec::new(),
+        ..Default::default()
+    };
     let connection_scope: Option<CapabilityScope> = if state.enforce_capability {
         match params.get("cap") {
             Some(token) => match state.keypair.verify(token, now_unix()) {
-                Ok(s) => Some(s),
+                Ok(s) => {
+                    // Phase 4: revoked tokens act as empty-scope.
+                    if let Some(tid) = s.token_id {
+                        if state.revocations.is_revoked(&tid) {
+                            tracing::info!(token_id = %tid, "vox: token revoked");
+                            Some(empty_scope.clone())
+                        } else {
+                            Some(s)
+                        }
+                    } else {
+                        Some(s)
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(?e, "vox: capability rejected");
-                    // Empty-scope sentinel — every doc check fails.
-                    Some(CapabilityScope {
-                        expires_unix: i64::MAX,
-                        can_write: false,
-                        doc_ids: Vec::new(),
-                    })
+                    Some(empty_scope.clone())
                 }
             },
-            None => Some(CapabilityScope {
-                expires_unix: i64::MAX,
-                can_write: false,
-                doc_ids: Vec::new(),
-            }),
+            None => Some(empty_scope.clone()),
         }
     } else {
         None
@@ -559,6 +583,7 @@ async fn vox_ws_handler(
             None => state.sync.clone(),
         };
         let auth = state.auth.auth.clone();
+        let share_service = state.share_service.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "ProjectRepo" => {
@@ -578,6 +603,10 @@ async fn vox_ws_handler(
                         AuthServiceDispatcher::new(AuthVoxService::new(auth.clone()))
                             .with_middleware(AuthServerMiddleware),
                     );
+                    Ok(())
+                }
+                "ShareService" => {
+                    connection.handle_with(ShareServiceDispatcher::new(share_service.clone()));
                     Ok(())
                 }
                 other => {

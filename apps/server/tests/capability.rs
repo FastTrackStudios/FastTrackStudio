@@ -51,6 +51,7 @@ async fn scoped_token_only_subscribes_to_its_doc() -> eyre::Result<()> {
         expires_unix: future_expiry(),
         can_write: true,
         doc_ids: vec![doc_a.clone()],
+        ..Default::default()
     });
     let url = url_with_cap(&base, &token);
 
@@ -146,6 +147,7 @@ async fn read_only_token_blocks_apply_allows_subscribe() -> eyre::Result<()> {
         expires_unix: future_expiry(),
         can_write: false,
         doc_ids: vec![doc.clone()],
+        ..Default::default()
     });
     let url = url_with_cap(&base, &token);
 
