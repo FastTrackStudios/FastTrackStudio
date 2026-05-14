@@ -156,21 +156,24 @@ impl VoxSession {
     }
 }
 
-/// Build the `/vox` WS URL. Hardcoded to `127.0.0.1:9090` to match
-/// `sync::sync_url` — `dx serve` runs on `:8765` but the task-server
-/// (with the actual `/vox` route) listens on `:9090`. The dev shell
-/// doesn't proxy WS routes. Production deployments override via the
-/// reverse proxy and same-origin routing; that swap lives in this fn
-/// when we have a real prod target to point at.
-#[cfg(target_arch = "wasm32")]
-pub fn vox_url() -> String {
-    "ws://127.0.0.1:9090/vox".to_string()
-}
+/// Build the `/vox` WS URL.
+///
+/// Resolution order (build time, since wasm can't read process env):
+/// 1. `TASK_VOX_URL_WEB` env var if set at compile time — baked into
+///    the wasm bundle. Set this in CI / Nix / wherever you build for
+///    production:
+///
+///        TASK_VOX_URL_WEB=wss://task.example.com/vox dx build --web --release
+///
+/// 2. Falls back to `ws://127.0.0.1:9090/vox` for local dev (matches
+///    `just dev`'s defaults — `dx serve` on :8765, task-server on
+///    :9090, no reverse-proxy in the dev shell).
+pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:9090/vox";
 
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
 pub fn vox_url() -> String {
-    "ws://localhost:9090/vox".to_string()
+    option_env!("TASK_VOX_URL_WEB")
+        .unwrap_or(DEFAULT_VOX_URL)
+        .to_string()
 }
 
 /// Spawn the session bootstrap. Publishes lifecycle to the

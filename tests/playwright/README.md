@@ -93,3 +93,31 @@ If you change those, update both the UI component and these specs.
    with `npx playwright show-trace test-results/<dir>/trace.zip`.
 3. Server logs from the test run are interleaved into stdout via
    the config's `stdout: "pipe"` setting.
+
+## ⚠️  `dx serve` hot-patch gotcha
+
+`dx serve`'s incremental hot-patch **does not** pick up new RSX
+attribute additions — only function-body changes. If you add an
+`id="…"` or `data-testid="…"` to a component and the playwright
+tests fail with "element not found", the running `dx serve` is
+still serving the wasm bundle from before your change. Fix:
+
+```sh
+nix develop .#playwright --command just test-browser-fresh
+```
+
+That kills any running `dx serve` + `task-server` and reboots
+both fresh (CI=1 so `reuseExistingServer` is off). Costs ~3 min
+extra for the cold rebuild but guarantees the test sees current
+code.
+
+Selector changes that DO survive hot-patch:
+- Text content changes inside an element.
+- Class string additions on an existing element.
+- Function-body logic (which testid resolves to which row, etc.).
+
+Selector changes that DON'T survive hot-patch:
+- Brand-new `id="…"` or `data-testid="…"` attributes.
+- New elements introduced by an `if` branch that didn't fire
+  before.
+- New routes registered in the `Route` enum.

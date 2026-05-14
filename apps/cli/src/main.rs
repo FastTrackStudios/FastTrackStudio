@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use clap::{Parser, Subcommand};
 use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
 use project_proto::architect::Page;
-use project_proto::{ProjectRepo, TaskRepo, TaskUpdate};
+use project_proto::{ProjectCreate, ProjectRepo, TaskCreate, TaskRepo, TaskUpdate};
 use shared::{LiveSession, RemoteVoxConfig};
 use uuid::Uuid;
 
@@ -61,6 +61,18 @@ enum Commands {
         /// Mark the task open again instead of done.
         #[arg(long)]
         undo: bool,
+    },
+    /// Create a new task inside a project (matched by name prefix).
+    NewTask {
+        /// Project name (or unique prefix).
+        project: String,
+        /// Task title.
+        title: String,
+    },
+    /// Create a new project.
+    NewProject {
+        /// Project name.
+        name: String,
     },
     /// Probe the configured vox endpoint.
     Doctor,
@@ -176,6 +188,64 @@ async fn main() -> eyre::Result<()> {
                 .map_err(|e| eyre::eyre!("task update: {e}"))?;
             let mark = if updated.done { "done" } else { "open" };
             println!("{} {} → {mark}", updated.id, updated.title);
+            session.flush().await?;
+        }
+        Commands::NewTask { project, title } => {
+            let remote =
+                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
+            let session = LiveSession::open(&remote).await?;
+            let project_repo = ProjectRepoLoro::new(&session.doc);
+            let task_repo = TaskRepoLoro::new(&session.doc);
+            let big_page = Page {
+                index: 0,
+                size: 1000,
+            };
+            let projects = project_repo
+                .list(big_page, None, None)
+                .await
+                .map_err(|e| eyre::eyre!("project list: {e}"))?;
+            // Exact match first; then case-insensitive prefix.
+            let project_id = if let Some(p) = projects.items.iter().find(|p| p.name == project) {
+                p.id
+            } else {
+                let needle = project.to_lowercase();
+                let matches: Vec<_> = projects
+                    .items
+                    .iter()
+                    .filter(|p| p.name.to_lowercase().starts_with(&needle))
+                    .collect();
+                match matches.as_slice() {
+                    [] => return Err(eyre::eyre!("no project matched {project:?}")),
+                    [p] => p.id,
+                    multi => {
+                        return Err(eyre::eyre!(
+                            "{} projects matched {project:?}; be more specific",
+                            multi.len()
+                        ));
+                    }
+                }
+            };
+            let created = task_repo
+                .create(TaskCreate {
+                    project_id,
+                    title: title.clone(),
+                    done: false,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("task create: {e}"))?;
+            println!("{} {}", created.id, created.title);
+            session.flush().await?;
+        }
+        Commands::NewProject { name } => {
+            let remote =
+                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
+            let session = LiveSession::open(&remote).await?;
+            let project_repo = ProjectRepoLoro::new(&session.doc);
+            let created = project_repo
+                .create(ProjectCreate { name: name.clone() })
+                .await
+                .map_err(|e| eyre::eyre!("project create: {e}"))?;
+            println!("{} {}", created.id, created.name);
             session.flush().await?;
         }
         Commands::Doctor => {
