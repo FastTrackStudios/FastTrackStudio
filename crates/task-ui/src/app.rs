@@ -226,11 +226,12 @@ fn AgentRunDetailRoute(run_id: Uuid) -> Element {
 #[component]
 fn VoxTestRoute() -> Element {
     let vox_status = use_context::<crate::vox_session::VoxStatusCtx>();
-    let mut reconnect_tick = use_signal(|| 0u32);
-    use_effect(move || {
-        let _ = reconnect_tick.read();
+    // App.rs already spawns one bootstrap on mount; this button
+    // re-attempts. We don't spawn from a `use_effect` — that would
+    // fire on every re-render and leak a WebSocket per render.
+    let on_reconnect = move |_| {
         crate::vox_session::spawn_session_bootstrap(vox_status.0);
-    });
+    };
     let status = vox_status.0.read().clone();
     let (label, variant) = match &status {
         crate::vox_session::VoxStatus::Idle => ("Idle", StatusBadgeVariant::Neutral),
@@ -266,10 +267,7 @@ fn VoxTestRoute() -> Element {
                 "{detail}"
             }
             HStack { class: "gap-2",
-                Button {
-                    on_click: move |_| reconnect_tick.with_mut(|v| *v += 1),
-                    "Reconnect"
-                }
+                Button { on_click: on_reconnect, "Reconnect" }
             }
         }
     }

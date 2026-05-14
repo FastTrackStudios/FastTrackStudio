@@ -75,7 +75,30 @@ impl VoxSession {
         status.set(VoxStatus::Connecting {
             url: server_url.clone(),
         });
-        match vox_websocket::WsLink::connect(&server_url).await {
+        // `WsLink::connect` calls `web_sys::WebSocket::new` which
+        // throws (InvalidStateError / SecurityError / etc.) on bad
+        // URLs and certain navigation states. wasm-bindgen surfaces
+        // that as a non-catchable trap, which becomes the
+        // "imported JS function … threw an error" console message
+        // on every retry. Guard with `catch_unwind` so a throw fails
+        // gracefully into VoxStatus::Failed instead of trapping the
+        // whole wasm instance.
+        let connect_fut = std::panic::AssertUnwindSafe(async {
+            vox_websocket::WsLink::connect(&server_url).await
+        });
+        let connect_result = futures_util::FutureExt::catch_unwind(connect_fut).await;
+        let link_result = match connect_result {
+            Ok(r) => r,
+            Err(_) => {
+                tracing::warn!(%server_url, "vox WS connect panicked (likely WebSocket::new threw)");
+                status.set(VoxStatus::Failed {
+                    stage: "connect".into(),
+                    error: "WebSocket::new threw (page not ready or invalid URL)".into(),
+                });
+                return None;
+            }
+        };
+        match link_result {
             Ok(link) => match vox_core::acceptor_on(link)
                 .on_connection(())
                 .establish::<vox_core::NoopClient>()
