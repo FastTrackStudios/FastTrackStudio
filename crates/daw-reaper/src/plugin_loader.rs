@@ -40,6 +40,99 @@ fn loaded_plugins() -> &'static Mutex<Vec<LoadedEntry>> {
     LOADED_PLUGINS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+/// Snapshot of the global loaded-plugins table — used by the sync trait
+/// impl. Returns an empty `Vec` if the lock is poisoned.
+pub(crate) fn snapshot_loaded() -> Vec<daw_proto::LoadedPluginInfo> {
+    loaded_plugins()
+        .lock()
+        .ok()
+        .map(|plugins| {
+            plugins
+                .iter()
+                .map(|p| daw_proto::LoadedPluginInfo {
+                    path: p.path.clone(),
+                    name: p.name.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Native plugin loading — must run on REAPER's main thread.
+///
+/// `dlopen`s the plugin binary, calls its `ReaperPluginEntry` entry point,
+/// and parks the loaded library in `loaded_plugins()` for the rest of the
+/// process. Idempotent: re-loading the same path returns the existing entry.
+///
+/// Both the async [`PluginLoaderService`] and the sync
+/// [`crate::sync::ReaperPluginLoader`] call this. The async path used to
+/// inline the same logic; both now share this single source of truth.
+pub(crate) fn load_plugin_native(plugin_path: &str) -> Result<daw_proto::LoadedPluginInfo, String> {
+    if let Ok(plugins) = loaded_plugins().lock()
+        && let Some(existing) = plugins.iter().find(|p| p.path == plugin_path)
+    {
+        return Ok(daw_proto::LoadedPluginInfo {
+            path: existing.path.clone(),
+            name: existing.name.clone(),
+        });
+    }
+
+    let ctx = PLUGIN_CONTEXT.get().ok_or_else(|| {
+        "Plugin context not initialized — set_plugin_context() not called".to_string()
+    })?;
+
+    let path = std::path::Path::new(plugin_path);
+    if !path.exists() {
+        return Err(format!("Plugin not found: {plugin_path}"));
+    }
+
+    info!("Loading plugin from: {plugin_path}");
+
+    let lib = unsafe { libloading::Library::new(path) }
+        .map_err(|e| format!("Failed to load library: {e}"))?;
+
+    type EntryFn = unsafe extern "C" fn(
+        reaper_low::raw::HINSTANCE,
+        *mut reaper_low::raw::reaper_plugin_info_t,
+    ) -> std::os::raw::c_int;
+
+    let entry_fn = unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") }
+        .map_err(|e| format!("ReaperPluginEntry symbol not found: {e}"))?;
+
+    let mut raw_info = ctx.raw_info;
+    let result = unsafe { entry_fn(ctx.h_instance, &mut raw_info as *mut _) };
+
+    if result == 0 {
+        warn!("Plugin {plugin_path}: ReaperPluginEntry returned 0 (init failed)");
+        return Err("ReaperPluginEntry returned 0".to_string());
+    }
+
+    let name = derive_plugin_name(plugin_path);
+    info!("Plugin loaded successfully: {name} (result={result})");
+
+    let info = daw_proto::LoadedPluginInfo {
+        path: plugin_path.to_string(),
+        name: name.clone(),
+    };
+    if let Ok(mut plugins) = loaded_plugins().lock() {
+        plugins.push(LoadedEntry {
+            path: plugin_path.to_string(),
+            name,
+            library: lib,
+        });
+    }
+    Ok(info)
+}
+
+/// Whether a plugin at `path` is currently loaded.
+pub(crate) fn path_is_loaded(path: &str) -> bool {
+    loaded_plugins()
+        .lock()
+        .ok()
+        .map(|plugins| plugins.iter().any(|p| p.path == path))
+        .unwrap_or(false)
+}
+
 /// Store the REAPER plugin context for later use by the loader.
 ///
 /// Call this from `plugin_main` before any plugin loading can happen.
@@ -200,72 +293,12 @@ pub fn eager_load_fx_plugins() {
 
 impl PluginLoaderService for ReaperPluginLoader {
     async fn load_plugin(&self, plugin_path: String) -> PluginLoadResult {
-        // Check if already loaded
-        if let Ok(plugins) = loaded_plugins().lock()
-            && plugins.iter().any(|p| p.path == plugin_path)
-        {
-            return PluginLoadResult::AlreadyLoaded;
+        let was_loaded = path_is_loaded(&plugin_path);
+        match load_plugin_native(&plugin_path) {
+            Ok(_) if was_loaded => PluginLoadResult::AlreadyLoaded,
+            Ok(_) => PluginLoadResult::Ok,
+            Err(msg) => PluginLoadResult::Error(msg),
         }
-
-        let ctx = match PLUGIN_CONTEXT.get() {
-            Some(ctx) => ctx,
-            None => {
-                return PluginLoadResult::Error(
-                    "Plugin context not initialized — set_plugin_context() not called".to_string(),
-                );
-            }
-        };
-
-        let path = std::path::Path::new(&plugin_path);
-        if !path.exists() {
-            return PluginLoadResult::Error(format!("Plugin not found: {plugin_path}"));
-        }
-
-        info!("Loading plugin from: {plugin_path}");
-
-        // dlopen the plugin binary
-        let lib = match unsafe { libloading::Library::new(path) } {
-            Ok(lib) => lib,
-            Err(e) => {
-                return PluginLoadResult::Error(format!("Failed to load library: {e}"));
-            }
-        };
-
-        // Look up ReaperPluginEntry
-        type EntryFn = unsafe extern "C" fn(
-            reaper_low::raw::HINSTANCE,
-            *mut reaper_low::raw::reaper_plugin_info_t,
-        ) -> std::os::raw::c_int;
-
-        let entry_fn = match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
-            Ok(f) => f,
-            Err(e) => {
-                return PluginLoadResult::Error(format!("ReaperPluginEntry symbol not found: {e}"));
-            }
-        };
-
-        // Call the plugin's entry point with our stored context
-        let mut raw_info = ctx.raw_info;
-        let result = unsafe { entry_fn(ctx.h_instance, &mut raw_info as *mut _) };
-
-        if result == 0 {
-            warn!("Plugin {plugin_path}: ReaperPluginEntry returned 0 (init failed)");
-            return PluginLoadResult::Error("ReaperPluginEntry returned 0".to_string());
-        }
-
-        let name = derive_plugin_name(&plugin_path);
-        info!("Plugin loaded successfully: {name} (result={result})");
-
-        // Keep the library alive
-        if let Ok(mut plugins) = loaded_plugins().lock() {
-            plugins.push(LoadedEntry {
-                path: plugin_path,
-                name,
-                library: lib,
-            });
-        }
-
-        PluginLoadResult::Ok
     }
 
     async fn list_loaded(&self) -> Vec<LoadedPluginInfo> {

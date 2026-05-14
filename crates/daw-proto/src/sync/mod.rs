@@ -23,30 +23,47 @@
 //! - `Project::guid` returns the project identifier; subsequent ops scope
 //!   to that project. `Daw::current_project()` is the typical entry point.
 
+mod action_registry;
+mod audio_engine;
 mod daw;
 mod ext_state;
 mod fx_chains;
 mod fx_params;
 mod items;
 mod markers;
+mod plugin_loader;
 mod project;
 mod regions;
 mod routing;
 mod takes;
 mod tempo_map;
+mod toolbar;
 mod tracks;
 mod transport;
+mod window_geometry;
 
+pub use action_registry::ActionRegistry;
+pub use audio_engine::AudioEngine;
 pub use daw::Daw;
 pub use ext_state::ExtState;
 pub use fx_chains::FxChains;
 pub use fx_params::FxParams;
 pub use items::Items;
 pub use markers::Markers;
+// Re-export the architect-emitted RPC face. `MarkersHost` is the
+// server-side bridge (wraps a backend + Dispatcher); `MarkersRpc` is
+// the hidden async mirror trait the bridge implements; `MarkersClient`
+// is vox's auto-generated caller proxy. See `architect/DESIGN.md`.
+#[cfg(feature = "vox")]
+pub use markers::MarkersClient;
+pub use markers::{MarkersHost, MarkersRpc};
+pub use plugin_loader::PluginLoader;
 pub use project::Project;
 pub use regions::Regions;
 pub use routing::Routing;
 pub use takes::Takes;
 pub use tempo_map::TempoMap;
+pub use toolbar::Toolbar;
 pub use tracks::Tracks;
 pub use transport::Transport;
+pub use window_geometry::WindowGeometry;

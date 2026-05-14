@@ -33,16 +33,19 @@ fn log_result(label: &str, n: u32, elapsed: Duration) {
 
 fn log_comparison(
     native: Duration,
+    sync_trait: Duration,
     in_process: Duration,
     batch_rpc: Duration,
     individual: Duration,
 ) {
+    let sync_vs_native = sync_trait.as_secs_f64() / native.as_secs_f64();
     let inproc_vs_native = in_process.as_secs_f64() / native.as_secs_f64();
     let batch_vs_native = batch_rpc.as_secs_f64() / native.as_secs_f64();
     let ind_vs_native = individual.as_secs_f64() / native.as_secs_f64();
     let batch_vs_inproc = batch_rpc.as_secs_f64() / in_process.as_secs_f64();
     let ind_vs_batch = individual.as_secs_f64() / batch_rpc.as_secs_f64();
     info!("  Ratios (vs native):");
+    info!("    Sync trait / Native:        {sync_vs_native:.2}x");
     info!("    In-process batch / Native:  {inproc_vs_native:.1}x");
     info!("    Batch RPC / Native:         {batch_vs_native:.1}x");
     info!("    Individual RPC / Native:    {ind_vs_native:.1}x");
@@ -121,6 +124,93 @@ async fn connect_to_daw_bridge() -> eyre::Result<Daw> {
     moire::task::spawn(async move { driver.run().await });
 
     Ok(Daw::new(caller))
+}
+
+// ============================================================================
+// Sync trait benchmarks — exercise the new ReaperMainThread sync API.
+// These run inside one main_thread::query so the trait dispatch overhead is
+// the only thing measured against `native_*` (raw reaper-rs).
+// ============================================================================
+
+async fn sync_create_tracks(n: u32) -> Duration {
+    let start = Instant::now();
+    daw::reaper::main_thread::query(move || {
+        use daw_proto::sync::{Daw as _, Project as _, Tracks as _};
+        let mt = daw_reaper::sync::ReaperMainThread::try_new().expect("ReaperMainThread");
+        let project = mt.current_project().expect("current_project");
+        let tracks = project.tracks();
+        for i in 0..n {
+            let name = format!("SyncTrack-{i}");
+            let _ = tracks.add(&name, None);
+        }
+    })
+    .await;
+    start.elapsed()
+}
+
+async fn sync_mutate_tracks(n: u32) -> Duration {
+    let start = Instant::now();
+    daw::reaper::main_thread::query(move || {
+        use daw_proto::sync::{Daw as _, Project as _, Tracks as _};
+        let mt = daw_reaper::sync::ReaperMainThread::try_new().expect("ReaperMainThread");
+        let project = mt.current_project().expect("current_project");
+        let tracks = project.tracks();
+        let all = tracks.all();
+        let count = all.len().min(n as usize);
+        for (i, t) in all.iter().take(count).enumerate() {
+            let name = format!("SyncMutated-{i}");
+            let _ = tracks.rename(&t.guid, &name);
+            let _ = tracks.set_volume(&t.guid, 0.5 + (i as f64) * 0.001);
+            let _ = tracks.set_muted(&t.guid, i % 2 == 0);
+        }
+    })
+    .await;
+    start.elapsed()
+}
+
+async fn sync_create_and_mutate_tracks(n: u32) -> Duration {
+    let start = Instant::now();
+    daw::reaper::main_thread::query(move || {
+        use daw_proto::sync::{Daw as _, Project as _, Tracks as _};
+        let mt = daw_reaper::sync::ReaperMainThread::try_new().expect("ReaperMainThread");
+        let project = mt.current_project().expect("current_project");
+        let tracks = project.tracks();
+        for i in 0..n {
+            let name = format!("SyncCM-{i}");
+            if let Ok(guid) = tracks.add(&name, None) {
+                let _ = tracks.set_volume(&guid, 0.7);
+                let _ = tracks.set_muted(&guid, i % 2 == 0);
+            }
+        }
+    })
+    .await;
+    start.elapsed()
+}
+
+async fn sync_add_markers(n: u32) -> Duration {
+    let start = Instant::now();
+    daw::reaper::main_thread::query(move || {
+        use daw_proto::sync::{Daw as _, Markers as _, Project as _};
+        let mt = daw_reaper::sync::ReaperMainThread::try_new().expect("ReaperMainThread");
+        let project = mt.current_project().expect("current_project");
+        let markers = project.markers();
+        for i in 0..n {
+            let name = format!("SyncMarker-{i}");
+            let _ = markers.add(i as f64 * 0.5, &name);
+        }
+    })
+    .await;
+    start.elapsed()
+}
+
+async fn sync_remove_all_tracks() {
+    daw::reaper::main_thread::query(move || {
+        use daw_proto::sync::{Daw as _, Project as _, Tracks as _};
+        let mt = daw_reaper::sync::ReaperMainThread::try_new().expect("ReaperMainThread");
+        let project = mt.current_project().expect("current_project");
+        let _ = project.tracks().remove_all();
+    })
+    .await;
 }
 
 // ============================================================================
@@ -545,10 +635,10 @@ async fn batch_create_and_mutate(daw: &Daw, n: u32) -> eyre::Result<Duration> {
 // ============================================================================
 
 pub async fn run_all() -> eyre::Result<()> {
-    info!("╔══════════════════════════════════════════════════════════════╗");
-    info!("║      DAW Performance Benchmark Suite (4-way comparison)     ║");
-    info!("║  Native | In-Process Batch | Batch RPC | Individual RPC    ║");
-    info!("╚══════════════════════════════════════════════════════════════╝");
+    info!("╔══════════════════════════════════════════════════════════════════╗");
+    info!("║       DAW Performance Benchmark Suite (5-way comparison)        ║");
+    info!("║ Native | Sync trait | In-Proc Batch | Batch RPC | Individual RPC ║");
+    info!("╚══════════════════════════════════════════════════════════════════╝");
     info!("");
 
     // Connect to daw-bridge over Unix socket (for RPC benchmarks)
@@ -572,6 +662,10 @@ pub async fn run_all() -> eyre::Result<()> {
         log_result("Native reaper-rs", n, native_elapsed);
         native_remove_all_tracks().await;
 
+        let sync_elapsed = sync_create_tracks(n).await;
+        log_result("Sync trait", n, sync_elapsed);
+        sync_remove_all_tracks().await;
+
         let inproc_elapsed = inproc_create_tracks(&executor, n).await;
         log_result("In-process batch", n, inproc_elapsed);
         native_remove_all_tracks().await;
@@ -584,7 +678,13 @@ pub async fn run_all() -> eyre::Result<()> {
         log_result("Individual RPC", n, rpc_elapsed);
         rpc_remove_all_tracks(&daw).await?;
 
-        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, rpc_elapsed);
+        log_comparison(
+            native_elapsed,
+            sync_elapsed,
+            inproc_elapsed,
+            batch_elapsed,
+            rpc_elapsed,
+        );
         info!("");
     }
 
@@ -598,6 +698,9 @@ pub async fn run_all() -> eyre::Result<()> {
         let native_elapsed = native_mutate_tracks(n).await;
         log_result("Native reaper-rs", n * 3, native_elapsed);
 
+        let sync_elapsed = sync_mutate_tracks(n).await;
+        log_result("Sync trait", n * 3, sync_elapsed);
+
         let inproc_elapsed = inproc_mutate_tracks(&executor, &daw, n).await?;
         log_result("In-process batch", n * 3, inproc_elapsed);
 
@@ -607,7 +710,13 @@ pub async fn run_all() -> eyre::Result<()> {
         let rpc_elapsed = rpc_mutate_tracks(&daw, n).await?;
         log_result("Individual RPC", n * 3, rpc_elapsed);
 
-        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, rpc_elapsed);
+        log_comparison(
+            native_elapsed,
+            sync_elapsed,
+            inproc_elapsed,
+            batch_elapsed,
+            rpc_elapsed,
+        );
         info!("");
 
         native_remove_all_tracks().await;
@@ -620,6 +729,10 @@ pub async fn run_all() -> eyre::Result<()> {
         let native_elapsed = native_create_and_mutate_tracks(n).await;
         log_result("Native reaper-rs", n * 3, native_elapsed);
         native_remove_all_tracks().await;
+
+        let sync_elapsed = sync_create_and_mutate_tracks(n).await;
+        log_result("Sync trait", n * 3, sync_elapsed);
+        sync_remove_all_tracks().await;
 
         let inproc_elapsed = inproc_create_and_mutate(&executor, n).await;
         log_result("In-process batch", n * 3, inproc_elapsed);
@@ -646,7 +759,13 @@ pub async fn run_all() -> eyre::Result<()> {
         log_result("Individual RPC", n * 3, seq_elapsed);
         rpc_remove_all_tracks(&daw).await?;
 
-        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, seq_elapsed);
+        log_comparison(
+            native_elapsed,
+            sync_elapsed,
+            inproc_elapsed,
+            batch_elapsed,
+            seq_elapsed,
+        );
         info!("");
     }
 
@@ -656,6 +775,10 @@ pub async fn run_all() -> eyre::Result<()> {
 
         let native_elapsed = native_add_markers(n).await;
         log_result("Native reaper-rs", n, native_elapsed);
+        native_remove_all_markers().await;
+
+        let sync_elapsed = sync_add_markers(n).await;
+        log_result("Sync trait", n, sync_elapsed);
         native_remove_all_markers().await;
 
         let inproc_elapsed = inproc_add_markers(&executor, n).await;
@@ -669,7 +792,13 @@ pub async fn run_all() -> eyre::Result<()> {
         let batch_elapsed = batch_add_markers(&daw, n).await?;
         log_result("Batch RPC", n, batch_elapsed);
 
-        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, rpc_elapsed);
+        log_comparison(
+            native_elapsed,
+            sync_elapsed,
+            inproc_elapsed,
+            batch_elapsed,
+            rpc_elapsed,
+        );
         info!("");
 
         rpc_remove_all_markers(&daw).await?;

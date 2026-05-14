@@ -69,6 +69,13 @@ fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", rev = "d9f012
 facet = { version = "0.46" }
 facet-json = { version = "0.46" }
 
+# architect framework — defines #[architect::rpc] for sync-trait → vox
+# bridge generation plus the Entity derive for CRUD-shaped data.
+# Path dep onto the local checkout; vox refs inside architect get
+# redirected to the Codys-Wright fork via the [patch] section below.
+architect = { path = "../../../Development/architect/macros/architect" }
+architect-rpc-derive = { path = "../../../Development/architect/macros/architect-rpc-derive" }
+
 # VOX service framework (pinned to FastTrackStudios fork)
 vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }

@@ -700,6 +700,171 @@ fn build_extension_menu(hmenu: Hmenu) {
 }
 
 // ============================================================================
+// Native (main-thread) registration helpers
+// ============================================================================
+
+/// Native action registration — must run on REAPER's main thread.
+///
+/// Returns the assigned command id, or 0 on failure / re-registration.
+/// Idempotent: re-registering the same name returns the existing id.
+///
+/// Both the async [`ActionRegistryService`] and the sync
+/// [`crate::sync::ReaperActionRegistry`] call this; the async path wraps it
+/// in `main_thread::query`, the sync path calls it directly because it
+/// already requires running on the main thread.
+pub(crate) fn register_action_main_thread(
+    command_name: &str,
+    description: &str,
+    show_in_menu: bool,
+    toggleable: bool,
+) -> u32 {
+    // Idempotency: bail early if we've registered this name before.
+    {
+        let map = registered_actions().lock_recoverable("action_registry");
+        if let Some(&cmd_id) = map.get(command_name) {
+            return cmd_id;
+        }
+    }
+
+    if toggleable {
+        toggle_states()
+            .lock()
+            .unwrap()
+            .insert(command_name.to_string(), false);
+    }
+
+    let name_owned = command_name.to_string();
+    let desc_owned = description.to_string();
+
+    let reaper = Reaper::get();
+    let desc_static: &'static str = Box::leak(desc_owned.clone().into_boxed_str());
+    let name_static: &'static str = Box::leak(name_owned.clone().into_boxed_str());
+
+    let trigger_name = name_owned.clone();
+    let kind = if toggleable {
+        let state_key = name_owned.clone();
+        reaper_high::ActionKind::Toggleable(Box::new(move || read_toggle_state(&state_key)))
+    } else {
+        reaper_high::ActionKind::NotToggleable
+    };
+
+    let action = reaper.register_action(
+        name_static,
+        desc_static,
+        None,
+        move || {
+            if toggleable {
+                let state = flip_toggle_state(&trigger_name);
+                write_shared_toggle_state(&trigger_name, state);
+                if let Some(cmd_id) = named_command_lookup(&trigger_name) {
+                    write_reaper_toggle_state(0, cmd_id, state);
+                }
+            }
+            info!("Action triggered: {}", trigger_name);
+            notify_action_triggered(trigger_name.clone());
+        },
+        kind,
+    );
+
+    let cmd_id = action.command_id();
+
+    let already_listed = reaper
+        .main_section()
+        .with_raw(|s| {
+            (0..s.action_list_cnt()).any(|i| {
+                s.get_action_by_index(i)
+                    .map(|a| a.cmd() == cmd_id)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false);
+    let gaccel_handle = if already_listed {
+        None
+    } else {
+        let gaccel = OwnedGaccelRegister::without_key_binding(cmd_id, desc_static);
+        let mut session = reaper.medium_session();
+        match session.plugin_register_add_gaccel(gaccel) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                warn!("Failed to register gaccel for '{}': {:?}", name_owned, e);
+                None
+            }
+        }
+    };
+
+    if toggleable {
+        write_shared_toggle_state(&name_owned, false);
+        write_reaper_toggle_state(0, cmd_id, false);
+    }
+
+    let cmd_id_val = cmd_id.get();
+    owned_actions().lock_recoverable("action_registry").insert(
+        name_owned.clone(),
+        OwnedAction {
+            action,
+            gaccel_handle,
+        },
+    );
+
+    if cmd_id_val > 0 {
+        registered_actions()
+            .lock()
+            .unwrap()
+            .insert(name_owned.clone(), cmd_id_val);
+        if show_in_menu {
+            let group = derive_menu_group(&name_owned);
+            menu_actions()
+                .lock_recoverable("action_registry")
+                .push(MenuActionDef {
+                    command_name: name_owned.clone(),
+                    display_name: desc_owned.clone(),
+                    group,
+                });
+        }
+    }
+
+    cmd_id_val
+}
+
+/// Native action unregistration — must run on REAPER's main thread.
+///
+/// Returns true if the action was registered (and is now removed).
+pub(crate) fn unregister_action_main_thread(command_name: &str) -> bool {
+    let removed = registered_actions()
+        .lock()
+        .unwrap()
+        .remove(command_name)
+        .is_some();
+
+    if !removed {
+        return false;
+    }
+
+    let owned = owned_actions()
+        .lock_recoverable("action_registry")
+        .remove(command_name);
+    if let Some(owned) = owned {
+        let reaper = Reaper::get();
+        if let Some(handle) = owned.gaccel_handle {
+            let mut session = reaper.medium_session();
+            session.plugin_register_remove_gaccel(handle);
+        }
+        owned.action.unregister();
+    }
+    toggle_states()
+        .lock_recoverable("action_registry")
+        .remove(command_name);
+    delete_shared_toggle_state(command_name);
+
+    menu_actions()
+        .lock()
+        .unwrap()
+        .retain(|a| a.command_name != command_name);
+
+    true
+}
+
+// ============================================================================
 // Action Registry Service
 // ============================================================================
 
@@ -727,231 +892,17 @@ impl ActionRegistryService for ReaperActionRegistry {
         show_in_menu: bool,
         toggleable: bool,
     ) -> u32 {
-        // Check if already registered by us
-        {
-            let map = registered_actions().lock_recoverable("action_registry");
-            if let Some(&cmd_id) = map.get(&command_name) {
-                debug!(
-                    "Action '{}' already registered (cmd_id={})",
-                    command_name, cmd_id
-                );
-                return cmd_id;
-            }
-        }
-
-        // If toggleable, initialize toggle state to off
-        if toggleable {
-            toggle_states()
-                .lock()
-                .unwrap()
-                .insert(command_name.clone(), false);
-        }
-
-        let name_for_query = command_name.clone();
-        let desc_for_query = description.clone();
-
-        let result = main_thread::query(move || {
-            let reaper = Reaper::get();
-            let desc_static: &'static str = Box::leak(desc_for_query.clone().into_boxed_str());
-
-            // register_action needs 'static string args — leak the strings
-            // since actions live for the process lifetime anyway.
-            let name_static: &'static str = Box::leak(name_for_query.clone().into_boxed_str());
-
-            // Capture command_name for the trigger notification
-            let trigger_name = name_for_query.clone();
-
-            let kind = if toggleable {
-                // For toggleable actions, read state from the shared toggle map.
-                // Guests update this via set_toggle_state().
-                let state_key = name_for_query.clone();
-                reaper_high::ActionKind::Toggleable(Box::new(move || read_toggle_state(&state_key)))
-            } else {
-                reaper_high::ActionKind::NotToggleable
-            };
-
-            let action = reaper.register_action(
-                name_static,
-                desc_static,
-                None, // no default key binding
-                move || {
-                    if toggleable {
-                        let state = flip_toggle_state(&trigger_name);
-                        write_shared_toggle_state(&trigger_name, state);
-                        if let Some(cmd_id) = named_command_lookup(&trigger_name) {
-                            write_reaper_toggle_state(0, cmd_id, state);
-                        }
-                        debug!("Toggle state for '{}' -> {}", trigger_name, state);
-                    }
-
-                    // Notify all subscribers that this action was triggered.
-                    // Consumers handle domain logic; fake-toggle state is
-                    // host-managed so REAPER's UI updates synchronously.
-                    info!("Action triggered: {}", trigger_name);
-                    notify_action_triggered(trigger_name.clone());
-                },
-                kind,
-            );
-
-            let cmd_id = action.command_id();
-
-            // reaper_high::register_action only stores the command in its internal
-            // map and calls plugin_register_add_command_id. It does NOT register the
-            // gaccel (action list entry) when the session is already awake — that
-            // only happens during wake_up(). It also does not deduplicate against
-            // gaccels that REAPER itself preregistered while parsing reaper-menu.ini
-            // toolbar references (REAPER allocates a cmd_id for any `_NAME` token
-            // it sees in a Main toolbar, before our extension's spawned task gets
-            // a chance to run). Skip the manual gaccel if REAPER already lists the
-            // action; otherwise register it and keep the handle for unregister.
-            let already_listed = reaper
-                .main_section()
-                .with_raw(|s| {
-                    (0..s.action_list_cnt()).any(|i| {
-                        s.get_action_by_index(i)
-                            .map(|a| a.cmd() == cmd_id)
-                            .unwrap_or(false)
-                    })
-                })
-                .unwrap_or(false);
-            let gaccel_handle = if already_listed {
-                None
-            } else {
-                let gaccel = OwnedGaccelRegister::without_key_binding(cmd_id, desc_static);
-                let mut session = reaper.medium_session();
-                match session.plugin_register_add_gaccel(gaccel) {
-                    Ok(h) => Some(h),
-                    Err(e) => {
-                        warn!(
-                            "Failed to register gaccel for '{}': {:?}",
-                            name_for_query, e
-                        );
-                        None
-                    }
-                }
-            };
-
-            if toggleable {
-                // REAPER can be slow to surface newly registered toggle actions in the
-                // action list unless their toolbar state is refreshed at least once.
-                write_shared_toggle_state(&name_for_query, false);
-                write_reaper_toggle_state(0, cmd_id, false);
-            }
-
-            let cmd_id_val = cmd_id.get();
-            debug!(
-                "Registered action '{}' → cmd_id={} (\"{}\")",
-                name_for_query, cmd_id_val, desc_for_query
-            );
-
-            // Park the RegisteredAction + (optional) gaccel handle in
-            // OWNED_ACTIONS keyed by command_name so unregister can drop them.
-            owned_actions().lock_recoverable("action_registry").insert(
-                name_for_query.clone(),
-                OwnedAction {
-                    action,
-                    gaccel_handle,
-                },
-            );
-
-            cmd_id_val
+        main_thread::query(move || {
+            register_action_main_thread(&command_name, &description, show_in_menu, toggleable)
         })
-        .await;
-
-        match result {
-            Some(cmd_id) if cmd_id > 0 => {
-                registered_actions()
-                    .lock()
-                    .unwrap()
-                    .insert(command_name.clone(), cmd_id);
-
-                // Store menu metadata if this action should appear in the menu
-                if show_in_menu {
-                    let group = derive_menu_group(&command_name);
-                    menu_actions()
-                        .lock_recoverable("action_registry")
-                        .push(MenuActionDef {
-                            command_name: command_name.clone(),
-                            display_name: description.clone(),
-                            group,
-                        });
-                }
-
-                debug!("Action '{}' registered: cmd_id={}", command_name, cmd_id);
-                cmd_id
-            }
-            _ => {
-                warn!("Failed to register action '{}'", command_name);
-                0
-            }
-        }
+        .await
+        .unwrap_or(0)
     }
 
     async fn unregister_action(&self, command_name: String) -> bool {
-        let removed = registered_actions()
-            .lock()
-            .unwrap()
-            .remove(&command_name)
-            .is_some();
-
-        if removed {
-            // Tear down with REAPER on the main thread: drop the
-            // RegisteredAction (removes the hook entry) AND remove the
-            // gaccel handle (takes the entry out of the action list +
-            // NamedCommandLookup table).
-            let name_for_query = command_name.clone();
-            let _ = main_thread::query(move || {
-                let owned = owned_actions()
-                    .lock_recoverable("action_registry")
-                    .remove(&name_for_query);
-                if let Some(owned) = owned {
-                    let reaper = Reaper::get();
-                    if let Some(handle) = owned.gaccel_handle {
-                        let mut session = reaper.medium_session();
-                        session.plugin_register_remove_gaccel(handle);
-                    }
-                    // Explicit unregister of the action — drops the
-                    // command from reaper_high's command_by_id map. We
-                    // intentionally do NOT call `plugin_register("-command_id", …)`
-                    // here: REAPER's named-command allocations are sticky for
-                    // the lifetime of the process. Freeing the slot creates a
-                    // window where toolbar/menu entries still reference the old
-                    // cmd_id while a re-register would mint a new one, leaving
-                    // the toolbar pointed at a dead id. Letting the cmd_id
-                    // remain in REAPER's table means re-register rebinds the
-                    // closure to the original id (see `register_action` —
-                    // `plugin_register_add_command_id` returns the existing id
-                    // when the name is already known).
-                    owned.action.unregister();
-                }
-                toggle_states()
-                    .lock_recoverable("action_registry")
-                    .remove(&name_for_query);
-                delete_shared_toggle_state(&name_for_query);
-            })
-            .await;
-
-            // Also remove from menu metadata
-            menu_actions()
-                .lock()
-                .unwrap()
-                .retain(|a| a.command_name != command_name);
-
-            // Clear any toggle state recorded for this action so a later
-            // re-register starts fresh (no stale on/off carrying over).
-            toggle_states()
-                .lock_recoverable("action_registry")
-                .remove(&command_name);
-
-            info!("Unregistered action '{}' (full teardown)", command_name);
-        } else {
-            debug!(
-                "Action '{}' not found in our registry (may not have been registered by us)",
-                command_name
-            );
-        }
-
-        removed
+        main_thread::query(move || unregister_action_main_thread(&command_name))
+            .await
+            .unwrap_or(false)
     }
 
     async fn is_registered(&self, command_name: String) -> bool {

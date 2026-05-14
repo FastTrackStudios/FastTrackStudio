@@ -7,6 +7,12 @@ pub trait Tracks {
     fn selected(&self) -> Vec<Track>;
     fn master(&self) -> DawResult<Track>;
 
+    /// Insert a new track. `at_index` of `None` appends at the end.
+    /// Returns the new track's GUID.
+    fn add(&self, name: &str, at_index: Option<u32>) -> DawResult<String>;
+    fn remove(&self, guid: &str) -> DawResult<()>;
+    fn remove_all(&self) -> DawResult<()>;
+
     fn set_muted(&self, guid: &str, muted: bool) -> DawResult<()>;
     fn set_soloed(&self, guid: &str, soloed: bool) -> DawResult<()>;
     fn set_volume(&self, guid: &str, volume: f64) -> DawResult<()>;

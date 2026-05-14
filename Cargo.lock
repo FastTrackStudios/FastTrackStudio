@@ -384,6 +384,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect"
+version = "0.1.0"
+dependencies = [
+ "architect-derive",
+ "architect-rpc-derive",
+ "chrono",
+ "facet",
+ "facet-core",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+]
+
+[[package]]
+name = "architect-derive"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "architect-rpc-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2113,6 +2146,8 @@ name = "daw-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto",
+ "architect",
+ "architect-rpc-derive",
  "facet",
  "thiserror 2.0.18",
  "vox",
@@ -2123,6 +2158,7 @@ dependencies = [
 name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "camino",
  "crossbeam-channel",
  "daw-control",
@@ -3147,6 +3183,7 @@ checksum = "b18251d9fd8e27c85ba879c75cb2f92fdd5f1e43c17fedc3a40faadcc3fa2a99"
 dependencies = [
  "autocfg",
  "camino",
+ "chrono",
  "const-fnv1a-hash",
  "iddqd",
  "impls",
@@ -10800,6 +10837,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
 name = "vox-codegen"
 version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
@@ -10813,7 +10854,3 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110
 name = "vox-websocket"
 version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"

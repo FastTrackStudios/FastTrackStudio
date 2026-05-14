@@ -30,6 +30,7 @@
 //! );
 //! ```
 
+pub mod architect_bridge;
 pub mod batch;
 pub mod bootstrap;
 pub mod local_caller;

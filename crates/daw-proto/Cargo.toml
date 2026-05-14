@@ -9,9 +9,20 @@ vox-types = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 actions-proto = { workspace = true }
+# architect — provides `#[architect::rpc]`. Enabling the `vox` feature
+# wires the macro's emission through to the workspace's vox stack.
+architect = { workspace = true, features = ["vox"] }
+architect-rpc-derive = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
 
 [features]
+# `vox` here is the consumer-crate flag the architect-rpc-derive macro
+# checks via `#[cfg_attr(feature = "vox", ::architect::vox::service)]`.
+# Enabling it activates the macro's `<T>Client` type alias and the
+# vox::service decoration on the hidden mirror trait.
+default = ["vox"]
+vox = []
+
 # Pulls in the MockDockHost in-memory adapter for unit tests that don't
 # need REAPER / GPU. Enable from a consumer's dev-dependencies:
 #   daw-proto = { path = "...", features = ["test-utils"] }

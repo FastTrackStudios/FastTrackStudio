@@ -8,33 +8,43 @@
 //! `&'a ReaperMainThread` and inherit its `!Send + !Sync` discipline via the
 //! borrow.
 
+pub mod action_registry;
+pub mod audio_engine;
 pub mod daw;
 pub mod ext_state;
 pub mod fx_chains;
 pub mod fx_params;
 pub mod items;
 pub mod markers;
+pub mod plugin_loader;
 pub mod project;
 pub mod regions;
 pub mod routing;
 pub mod takes;
 pub mod tempo_map;
+pub mod toolbar;
 pub mod tracks;
 pub mod transport;
+pub mod window_geometry;
 
+pub use action_registry::ReaperActionRegistry;
+pub use audio_engine::ReaperAudioEngine;
 pub use daw::ReaperMainThread;
 pub use ext_state::ReaperExtState;
 pub use fx_chains::ReaperFxChains;
 pub use fx_params::ReaperFxParams;
 pub use items::ReaperItems;
 pub use markers::ReaperMarkers;
+pub use plugin_loader::ReaperPluginLoader;
 pub use project::ReaperProject;
 pub use regions::ReaperRegions;
 pub use routing::ReaperRouting;
 pub use takes::ReaperTakes;
 pub use tempo_map::ReaperTempoMap;
+pub use toolbar::ReaperToolbar;
 pub use tracks::ReaperTracks;
 pub use transport::ReaperTransport;
+pub use window_geometry::ReaperWindowGeometry;
 
 // =============================================================================
 // Internal helpers shared across sync sub-handles

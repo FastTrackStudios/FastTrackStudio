@@ -4,11 +4,17 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use daw_proto::{
-    DawError, DawResult, Fx, FxChainContext, Item, LastTouchedFx, Marker, ProjectInfo, Region,
-    Take, TempoPoint, Track, TrackRoute, Transport as TransportState, sync::Daw,
+    AudioEngineState, AudioInputInfo, AudioLatency, DawError, DawResult, Fx, FxChainContext, Item,
+    LastTouchedFx, LoadedPluginInfo, Marker, ProjectInfo, Region, ScreensetRect, Take, TempoPoint,
+    Track, TrackRoute, Transport as TransportState, sync::Daw,
 };
 
+use super::action_registry::{ActionEntry, StandaloneActionRegistry};
+use super::audio_engine::StandaloneAudioEngine;
+use super::plugin_loader::StandalonePluginLoader;
 use super::project::StandaloneProject;
+use super::toolbar::{StandaloneToolbar, ToolbarEntry, ToolbarTargetKey};
+use super::window_geometry::{StandaloneWindowGeometry, TargetKey as WindowTargetKey, WindowMap};
 
 /// Hashable key derived from `FxChainContext` for use as a HashMap key.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -123,6 +129,24 @@ pub struct StandaloneState {
     pub last_touched_fx: Option<LastTouchedFx>,
     /// Buffered console output (for tests).
     pub console_log: Vec<String>,
+
+    // Phase 3 storage ─────────────────────────────────────────────────────
+    /// Registered actions keyed by command name.
+    pub actions: HashMap<String, ActionEntry>,
+    /// Counter for assigning fresh action ids.
+    pub next_action_id: u32,
+    /// Cached audio engine state.
+    pub audio_engine: AudioEngineState,
+    /// Cached audio latency snapshot.
+    pub audio_latency: AudioLatency,
+    /// Cached audio inputs (one entry per device).
+    pub audio_inputs: Vec<AudioInputInfo>,
+    /// Loaded plugins keyed by path.
+    pub plugins: HashMap<String, LoadedPluginInfo>,
+    /// Toolbar buttons keyed by `(target, command_name)`.
+    pub toolbar_buttons: HashMap<(ToolbarTargetKey, String), ToolbarEntry>,
+    /// Synthetic window geometry keyed by `WindowTarget`.
+    pub windows: WindowMap,
 }
 
 impl StandaloneState {
@@ -133,6 +157,14 @@ impl StandaloneState {
             global_ext_state: HashMap::new(),
             last_touched_fx: None,
             console_log: Vec::new(),
+            actions: HashMap::new(),
+            next_action_id: 1,
+            audio_engine: AudioEngineState::default(),
+            audio_latency: AudioLatency::default(),
+            audio_inputs: Vec::new(),
+            plugins: HashMap::new(),
+            toolbar_buttons: HashMap::new(),
+            windows: HashMap::new(),
         }
     }
 }
@@ -221,10 +253,49 @@ impl Standalone {
         let mut s = self.state.lock().expect("standalone state poisoned");
         s.last_touched_fx = fx;
     }
+
+    /// Seed the cached audio engine state (for tests).
+    pub fn seed_audio_engine_state(
+        &self,
+        engine: AudioEngineState,
+        latency: AudioLatency,
+        inputs: Vec<AudioInputInfo>,
+    ) {
+        let mut s = self.state.lock().expect("standalone state poisoned");
+        s.audio_engine = engine;
+        s.audio_latency = latency;
+        s.audio_inputs = inputs;
+    }
+
+    /// Seed a synthetic window rect for a `WindowTarget` (for tests).
+    pub fn seed_window_target(
+        &self,
+        target: daw_proto::WindowTarget,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) {
+        let mut s = self.state.lock().expect("standalone state poisoned");
+        s.windows.insert(
+            WindowTargetKey::from(target),
+            ScreensetRect {
+                x,
+                y,
+                width,
+                height,
+            },
+        );
+    }
 }
 
 impl Daw for Standalone {
     type Project<'a> = StandaloneProject<'a>;
+    type ActionRegistry<'a> = StandaloneActionRegistry<'a>;
+    type AudioEngine<'a> = StandaloneAudioEngine<'a>;
+    type PluginLoader<'a> = StandalonePluginLoader<'a>;
+    type Toolbar<'a> = StandaloneToolbar<'a>;
+    type WindowGeometry<'a> = StandaloneWindowGeometry<'a>;
 
     fn current_project(&self) -> DawResult<Self::Project<'_>> {
         let guid = {
@@ -256,5 +327,25 @@ impl Daw for Standalone {
     fn last_touched_fx(&self) -> Option<LastTouchedFx> {
         let s = self.state.lock().expect("standalone state poisoned");
         s.last_touched_fx.clone()
+    }
+
+    fn action_registry(&self) -> Self::ActionRegistry<'_> {
+        StandaloneActionRegistry::new(self)
+    }
+
+    fn audio_engine(&self) -> Self::AudioEngine<'_> {
+        StandaloneAudioEngine::new(self)
+    }
+
+    fn plugin_loader(&self) -> Self::PluginLoader<'_> {
+        StandalonePluginLoader::new(self)
+    }
+
+    fn toolbar(&self) -> Self::Toolbar<'_> {
+        StandaloneToolbar::new(self)
+    }
+
+    fn window_geometry(&self) -> Self::WindowGeometry<'_> {
+        StandaloneWindowGeometry::new(self)
     }
 }

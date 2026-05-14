@@ -1,6 +1,6 @@
 use crate::DawResult;
 
-use super::Project;
+use super::{ActionRegistry, AudioEngine, PluginLoader, Project, Toolbar, WindowGeometry};
 
 /// Root sync handle. Entry point for all sync DAW operations.
 ///
@@ -8,6 +8,21 @@ use super::Project;
 /// and exposed via `daw::current()` once the architecture migration lands.
 pub trait Daw {
     type Project<'a>: Project + 'a
+    where
+        Self: 'a;
+    type ActionRegistry<'a>: ActionRegistry + 'a
+    where
+        Self: 'a;
+    type AudioEngine<'a>: AudioEngine + 'a
+    where
+        Self: 'a;
+    type PluginLoader<'a>: PluginLoader + 'a
+    where
+        Self: 'a;
+    type Toolbar<'a>: Toolbar + 'a
+    where
+        Self: 'a;
+    type WindowGeometry<'a>: WindowGeometry + 'a
     where
         Self: 'a;
 
@@ -25,4 +40,10 @@ pub trait Daw {
 
     /// Last-touched FX param across the host (None if nothing touched yet).
     fn last_touched_fx(&self) -> Option<crate::LastTouchedFx>;
+
+    fn action_registry(&self) -> Self::ActionRegistry<'_>;
+    fn audio_engine(&self) -> Self::AudioEngine<'_>;
+    fn plugin_loader(&self) -> Self::PluginLoader<'_>;
+    fn toolbar(&self) -> Self::Toolbar<'_>;
+    fn window_geometry(&self) -> Self::WindowGeometry<'_>;
 }

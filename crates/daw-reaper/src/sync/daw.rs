@@ -10,7 +10,10 @@ use reaper_medium::{ProjectRef, TrackFxLocation};
 use crate::project::project_to_info;
 use crate::project_context::{MAX_PROJECT_TABS, project_guid};
 
-use super::ReaperProject;
+use super::{
+    ReaperActionRegistry, ReaperAudioEngine, ReaperPluginLoader, ReaperProject, ReaperToolbar,
+    ReaperWindowGeometry,
+};
 
 /// Synchronous, zero-overhead root handle for REAPER's main thread.
 ///
@@ -43,6 +46,26 @@ impl ReaperMainThread {
 impl Daw for ReaperMainThread {
     type Project<'a>
         = ReaperProject<'a>
+    where
+        Self: 'a;
+    type ActionRegistry<'a>
+        = ReaperActionRegistry<'a>
+    where
+        Self: 'a;
+    type AudioEngine<'a>
+        = ReaperAudioEngine<'a>
+    where
+        Self: 'a;
+    type PluginLoader<'a>
+        = ReaperPluginLoader<'a>
+    where
+        Self: 'a;
+    type Toolbar<'a>
+        = ReaperToolbar<'a>
+    where
+        Self: 'a;
+    type WindowGeometry<'a>
+        = ReaperWindowGeometry<'a>
     where
         Self: 'a;
 
@@ -109,6 +132,22 @@ impl Daw for ReaperMainThread {
             }
             _ => None,
         }
+    }
+
+    fn action_registry(&self) -> ReaperActionRegistry<'_> {
+        ReaperActionRegistry::new(self)
+    }
+    fn audio_engine(&self) -> ReaperAudioEngine<'_> {
+        ReaperAudioEngine::new(self)
+    }
+    fn plugin_loader(&self) -> ReaperPluginLoader<'_> {
+        ReaperPluginLoader::new(self)
+    }
+    fn toolbar(&self) -> ReaperToolbar<'_> {
+        ReaperToolbar::new(self)
+    }
+    fn window_geometry(&self) -> ReaperWindowGeometry<'_> {
+        ReaperWindowGeometry::new(self)
     }
 }
 
