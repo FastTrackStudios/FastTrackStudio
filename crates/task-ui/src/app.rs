@@ -287,6 +287,12 @@ pub fn App() -> Element {
     // `notifications_ctx::diff_runs_for_notifications`).
     let _notifications_ctx = use_context_provider(crate::notifications_ctx::NotificationsCtx::new);
 
+    // Open the vox RPC session to /vox once per app load. Best-effort
+    // — failures degrade to local-sim chat. Service-specific clients
+    // (ChatServiceClient, AgentServiceClient) are constructed when
+    // their RPC methods exist; this just establishes the rail.
+    use_hook(crate::vox_session::spawn_session_bootstrap);
+
     // Derive the initial theme state from the active org's static
     // default. Default mode is Dark — flip to Light via the popover.
     let mut theme_state = use_signal(|| {

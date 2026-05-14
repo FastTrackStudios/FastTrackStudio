@@ -12,5 +12,6 @@ pub mod sync;
 pub mod theming;
 pub mod timer_demo;
 pub mod views;
+pub mod vox_session;
 
 pub use app::App;

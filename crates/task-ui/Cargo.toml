@@ -34,7 +34,7 @@ caldav-ui.workspace = true
 calendar-proto = { workspace = true, features = ["fake"] }
 calendar-crdt.workspace = true
 calendar-ui.workspace = true
-chat-proto = { workspace = true, features = ["fake"] }
+chat-proto = { workspace = true, features = ["fake", "vox"] }
 chat-crdt.workspace = true
 chat-ui.workspace = true
 conference-proto = { workspace = true, features = ["fake"] }
@@ -104,6 +104,13 @@ web-sys = { workspace = true, features = [
 ] }
 futures-channel.workspace = true
 futures-util.workspace = true
+
+# Vox runtime (gives `#[vox::service]` clients + acceptor_on / NoopClient).
+# `transport-websocket` is enabled separately via `vox-websocket` so the
+# wasm build sidesteps `vox::highlevel::ws::WsListener` which always
+# wires `tokio::net::TcpListener`.
+vox-core.workspace = true
+vox-websocket.workspace = true
 
 [features]
 default = []

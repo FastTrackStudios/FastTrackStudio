@@ -248,11 +248,43 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/sync/{doc_id}", get(ws_handler))
+        .route("/vox", get(vox_ws_handler))
         .nest("/webhooks/github", webhooks::github::router())
         .nest("/webhooks/hermes", webhooks::hermes::router())
         .nest("/api/agent-chat", chat::router())
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
+}
+
+/// Mount point for vox RPC over WebSocket. Each incoming connection
+/// gets its own vox session; the acceptor below matches the inbound
+/// `service` name to the appropriate Dispatcher.
+///
+/// MVP scope: the route is live but the per-service dispatchers
+/// aren't yet wired — the acceptor logs the requested service and
+/// returns an empty handler stub. Wire individual services
+/// (`ChatService`, `AgentService`, `NotificationService`) by adding
+/// their Dispatchers in the match arms.
+async fn vox_ws_handler(
+    State(_state): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    ws.on_upgrade(|socket| async move {
+        let acceptor = architect::axum_ws::acceptor_fn(|req, _connection| {
+            tracing::info!(
+                service = %req.service(),
+                "vox session: dispatcher not yet wired"
+            );
+            // Returning Err with an empty list signals "no handler" —
+            // the peer's establish() will surface the failure. Once
+            // ChatServiceDispatcher / AgentServiceDispatcher are
+            // mounted, add match arms here.
+            Err(Vec::new())
+        });
+        architect::axum_ws::serve(socket, acceptor).await;
+    })
+    .into_response()
 }
 
 // ── Internal: rooms ───────────────────────────────────────────────────

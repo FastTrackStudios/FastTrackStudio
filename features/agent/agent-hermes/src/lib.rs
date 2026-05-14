@@ -26,10 +26,12 @@
 pub mod client;
 pub mod config;
 pub mod hermes;
+pub mod hermes_chat;
 pub mod mock;
 pub mod mock_chat;
 
 pub use config::HermesConfig;
 pub use hermes::HermesIntegration;
+pub use hermes_chat::HermesChatModel;
 pub use mock::MockIntegration;
 pub use mock_chat::MockChatModel;

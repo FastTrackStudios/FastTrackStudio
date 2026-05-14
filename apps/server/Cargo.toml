@@ -56,7 +56,7 @@ chat-proto = { workspace = true }
 chat-crdt = { workspace = true }
 project-proto = { workspace = true }
 project-crdt = { workspace = true }
-architect = { workspace = true }
+architect = { workspace = true, features = ["server-axum"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 async-trait = { workspace = true }

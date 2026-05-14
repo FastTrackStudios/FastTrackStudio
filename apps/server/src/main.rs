@@ -68,10 +68,18 @@ async fn main() -> eyre::Result<()> {
     }
     state.registry = Arc::new(registry);
 
-    // ChatModelRegistry — at least the MockChatModel so the agent-chat
-    // route works out of the box. Real providers register here too.
+    // ChatModelRegistry — MockChatModel always; HermesChatModel when
+    // HERMES_BASE_URL is configured. Hermes registers a profile per
+    // known Hermes assignee (commander / architect / curator / …) so
+    // the chat model picker lists them.
     let mut chat_registry = ChatModelRegistry::new();
     chat_registry.register(Arc::new(MockChatModel));
+    if let Ok(hermes_base_url) = std::env::var("HERMES_BASE_URL") {
+        match build_hermes_chat(&hermes_base_url) {
+            Ok(m) => chat_registry.register(m),
+            Err(e) => tracing::warn!(?e, "skipping hermes chat model"),
+        }
+    }
     state.chat_model_registry = Arc::new(chat_registry);
 
     // Spawn the per-plugin event loops. They keep running until
@@ -98,18 +106,30 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-fn build_hermes(
-    base_url: &str,
-) -> eyre::Result<Arc<dyn agent_proto::integration::AgentIntegration>> {
-    use agent_hermes::{HermesConfig, HermesIntegration};
-    let config = HermesConfig {
+fn hermes_config_from_env(base_url: &str) -> eyre::Result<agent_hermes::HermesConfig> {
+    use agent_hermes::HermesConfig;
+    Ok(HermesConfig {
         base_url: url::Url::parse(base_url).wrap_err("invalid HERMES_BASE_URL")?,
         session_token: std::env::var("HERMES_SESSION_TOKEN").unwrap_or_default(),
         default_board: std::env::var("HERMES_DEFAULT_BOARD").ok(),
         default_profile: std::env::var("HERMES_DEFAULT_PROFILE")
             .unwrap_or_else(|_| "engineer".to_string()),
         webhook_secret: std::env::var("HERMES_WEBHOOK_SECRET").ok(),
-    };
+    })
+}
+
+fn build_hermes_chat(base_url: &str) -> eyre::Result<Arc<dyn agent_proto::chat_model::ChatModel>> {
+    use agent_hermes::HermesChatModel;
+    Ok(Arc::new(HermesChatModel::new(hermes_config_from_env(
+        base_url,
+    )?)))
+}
+
+fn build_hermes(
+    base_url: &str,
+) -> eyre::Result<Arc<dyn agent_proto::integration::AgentIntegration>> {
+    use agent_hermes::HermesIntegration;
+    let config = hermes_config_from_env(base_url)?;
     Ok(Arc::new(HermesIntegration::new(config)))
 }
 
