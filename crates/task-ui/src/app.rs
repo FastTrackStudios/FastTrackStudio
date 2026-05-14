@@ -86,6 +86,8 @@ pub enum Route {
         AgentDashboardRoute {},
         #[route("/agent/dashboard/:run_id")]
         AgentRunDetailRoute { run_id: Uuid },
+        #[route("/notifications")]
+        NotificationsRoute {},
         #[route("/settings/integrations")]
         IntegrationsSettingsRoute {},
         #[route("/settings/webhooks")]
@@ -218,6 +220,22 @@ fn AgentDashboardRoute() -> Element {
 fn AgentRunDetailRoute(run_id: Uuid) -> Element {
     rsx! { crate::feature_routes::agent::AgentRunDetailRouteView { run_id } }
 }
+
+#[component]
+fn NotificationsRoute() -> Element {
+    let mut ctx = use_context::<crate::notifications_ctx::NotificationsCtx>();
+    rsx! {
+        div { class: "mx-auto max-w-3xl flex flex-col gap-4 p-6 lg:p-10",
+            notifications_ui::NotificationInbox {
+                items: ctx.inbox.read().iter().filter(|n| n.dismissed_at.is_none()).cloned().collect::<Vec<_>>(),
+                on_mark_read: move |id| ctx.mark_read(id),
+                on_dismiss: move |id| ctx.dismiss_inbox(id),
+                on_mark_all_read: move |_| ctx.mark_all_read(),
+                on_open: move |_| {},
+            }
+        }
+    }
+}
 #[component]
 fn IntegrationsSettingsRoute() -> Element {
     rsx! { crate::feature_routes::agent::IntegrationSettingsView {} }
@@ -262,6 +280,13 @@ pub fn App() -> Element {
             map: Signal::new(HashMap::<Uuid, String>::new()),
         });
 
+    // Notifications context — shared by the bell badge, the
+    // `/notifications` inbox route, and the global `ToastStack` mount.
+    // The agent dashboard route diffs `AgentRun.status` on each WS
+    // refresh and pushes Notifications into this context (see
+    // `notifications_ctx::diff_runs_for_notifications`).
+    let _notifications_ctx = use_context_provider(crate::notifications_ctx::NotificationsCtx::new);
+
     // Derive the initial theme state from the active org's static
     // default. Default mode is Dark — flip to Light via the popover.
     let mut theme_state = use_signal(|| {
@@ -300,7 +325,31 @@ pub fn App() -> Element {
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",
                 Router::<Route> {}
+                // Global toast stack — fixed top-right, always
+                // mounted regardless of route. Reads from the shared
+                // NotificationsCtx so any route that pushes a toast
+                // surfaces it immediately.
+                GlobalToastStack {}
             }
+        }
+    }
+}
+
+/// Renders the active toast list from `NotificationsCtx`. Kept as a
+/// component (rather than inlined in `App`) so the signal reads
+/// register a separate subscription scope.
+#[component]
+fn GlobalToastStack() -> Element {
+    let mut ctx = use_context::<crate::notifications_ctx::NotificationsCtx>();
+    let toasts = ctx.toasts.read().clone();
+    rsx! {
+        notifications_ui::ToastStack {
+            items: toasts,
+            on_dismiss: move |id| ctx.dismiss_toast(id),
+            on_open: move |_id| {
+                // Navigation by action_url lives at the route layer;
+                // for MVP the toast click is just a dismiss hint.
+            },
         }
     }
 }
@@ -821,6 +870,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::AgentRunsRoute {} => "Agent runs",
         Route::AgentDashboardRoute {} => "Agent dashboard",
         Route::AgentRunDetailRoute { .. } => "Agent run",
+        Route::NotificationsRoute {} => "Notifications",
         Route::IntegrationsSettingsRoute {} => "Integrations",
         Route::WebhooksRoute {} => "Webhooks",
     }
