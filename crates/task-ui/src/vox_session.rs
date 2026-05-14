@@ -163,14 +163,45 @@ impl VoxSession {
 /// reverse proxy and same-origin routing; that swap lives in this fn
 /// when we have a real prod target to point at.
 #[cfg(target_arch = "wasm32")]
-fn vox_url() -> String {
+pub fn vox_url() -> String {
     "ws://127.0.0.1:9090/vox".to_string()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
-fn vox_url() -> String {
+pub fn vox_url() -> String {
     "ws://localhost:9090/vox".to_string()
+}
+
+/// Open a typed vox client over a fresh WebSocket. Each call opens
+/// its own session — for the simplest possible client wiring we
+/// don't multiplex services over one WS. If a route needs N
+/// clients, it opens N sockets. (Virtual connections via
+/// `SessionHandle::open` would consolidate; deferred until cost
+/// matters.)
+#[cfg(target_arch = "wasm32")]
+pub async fn connect_client<C>() -> Result<C, String>
+where
+    C: vox_core::FromVoxSession,
+{
+    use vox_core::{TransportMode, initiator_on};
+    let url = vox_url();
+    let link = vox_websocket::WsLink::connect(&url)
+        .await
+        .map_err(|e| format!("ws connect: {e:?}"))?;
+    initiator_on(link, TransportMode::Bare)
+        .establish::<C>()
+        .await
+        .map_err(|e| format!("vox establish: {e:?}"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
+pub async fn connect_client<C>() -> Result<C, String>
+where
+    C: vox_core::FromVoxSession,
+{
+    Err("connect_client only implemented for wasm32".into())
 }
 
 /// Spawn the session bootstrap. Publishes lifecycle to the
