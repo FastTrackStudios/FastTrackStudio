@@ -12,6 +12,7 @@
 //! Phases 5+ land they migrate to Knowledge-vault-backed reads.
 
 pub mod acl;
+pub mod attachments;
 pub mod basename_index;
 pub mod capability;
 pub mod knowledge_index;
@@ -284,6 +285,7 @@ pub struct AppState {
     pub knowledge_tag_repo: Arc<knowledge_crdt::KnowledgeTagRepoLoro>,
     pub base_repo: Arc<knowledge_crdt::BaseRepoLoro>,
     pub indexer: KnowledgeIndexer,
+    pub attachments: Arc<attachments::AttachmentServiceImpl>,
 }
 
 impl AppState {
@@ -393,6 +395,21 @@ impl AppState {
             std::mem::forget(sub);
         }
 
+        // Phase 7 — attachments. Blob store lives at the standard
+        // XDG path by default. Tests override via `with_capability`
+        // / `new_with_auth` constructors only; the blob root is
+        // computed inside `new_inner` so it's always created.
+        let blob_root =
+            attachments::default_blob_root().map_err(|e| eyre::eyre!("blob root: {e}"))?;
+        let object_store: Arc<dyn attachments::ObjectStore> =
+            Arc::new(attachments::LocalFsStore::new(blob_root));
+        let public_base_url = std::env::var("TASK_SERVER_PUBLIC_URL").unwrap_or_default();
+        let attachment_service = Arc::new(attachments::AttachmentServiceImpl::new(
+            keypair.clone(),
+            object_store,
+            public_base_url,
+        ));
+
         Ok(Self {
             registry,
             workspace_doc,
@@ -413,6 +430,7 @@ impl AppState {
             knowledge_tag_repo,
             base_repo,
             indexer,
+            attachments: attachment_service,
         })
     }
 }
@@ -480,6 +498,12 @@ impl WorkspaceSyncImpl {
 
     fn check_read(&self, doc_id: &DocId) -> Result<(), SyncError> {
         if let Some(scope) = &self.scope {
+            // Phase 7 — attachments-only tokens explicitly forbid
+            // sync (subscribe + apply_update), even when the doc
+            // is in scope.
+            if scope.attachments_only {
+                return Err(SyncError::Forbidden);
+            }
             if !scope.allows_doc(doc_id) {
                 return Err(SyncError::Forbidden);
             }
@@ -489,6 +513,9 @@ impl WorkspaceSyncImpl {
 
     fn check_write(&self, doc_id: &DocId) -> Result<(), SyncError> {
         if let Some(scope) = &self.scope {
+            if scope.attachments_only {
+                return Err(SyncError::Forbidden);
+            }
             if !scope.allows_doc(doc_id) || !scope.can_write {
                 return Err(SyncError::Forbidden);
             }
@@ -598,9 +625,21 @@ impl Persistence for ErasedPersistence {
 }
 
 pub fn router(state: AppState) -> Router {
+    use attachments::routes::AttachmentRouteState;
+
+    // Mount the /blobs/* HTTP routes under their own sub-router so
+    // they pass an `AttachmentRouteState` (sliver of `AppState`)
+    // and don't drag the full `AppState` into the attachment
+    // handlers' generic bound.
+    let blob_state = AttachmentRouteState {
+        service: state.attachments.clone(),
+    };
+    let blob_router = attachments::attachment_router().with_state(blob_state);
+
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/vox", get(vox_ws_handler))
+        .merge(blob_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
@@ -657,6 +696,7 @@ async fn vox_ws_handler(
         };
         let auth = state.auth.auth.clone();
         let share_service = state.share_service.clone();
+        let attachment_service = state.attachments.clone();
         let vault_repo = (*state.vault_repo).clone();
         let folder_repo = (*state.folder_repo).clone();
         let page_repo = (*state.page_repo).clone();
@@ -686,6 +726,13 @@ async fn vox_ws_handler(
                 }
                 "ShareService" => {
                     connection.handle_with(ShareServiceDispatcher::new(share_service.clone()));
+                    Ok(())
+                }
+                "AttachmentService" => {
+                    use attachments_proto::AttachmentServiceDispatcher;
+                    connection.handle_with(AttachmentServiceDispatcher::new(
+                        (*attachment_service).clone(),
+                    ));
                     Ok(())
                 }
                 "VaultRepo" => {

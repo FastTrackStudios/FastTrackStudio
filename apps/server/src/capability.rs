@@ -50,6 +50,11 @@ pub struct CapabilityScope {
     /// Anonymous peer attribution. Phase 4 logs this; Phase 8 uses
     /// it for the anonymous-claim flow.
     pub peer_id: Option<String>,
+    /// Phase 7 — when `true`, the connection is allowed to obtain
+    /// + redeem attachment URLs for `doc_ids` but is NOT allowed
+    /// to `subscribe` or `apply_update` on those docs. Default
+    /// `false` (sync allowed).
+    pub attachments_only: bool,
 }
 
 impl CapabilityScope {
@@ -72,18 +77,20 @@ impl CapabilityScope {
         }
         let token_id_str = self.token_id.map(|u| u.to_string()).unwrap_or_default();
         let peer_id_str = self.peer_id.clone().unwrap_or_default();
+        let attachments_only_str = if self.attachments_only { "1" } else { "0" };
         format!(
-            "v1|{}|{}|{}|{}|{}",
+            "v1|{}|{}|{}|{}|{}|{}",
             self.expires_unix,
             if self.can_write { "RW" } else { "RO" },
             joined,
             token_id_str,
             peer_id_str,
+            attachments_only_str,
         )
     }
 
     fn parse_message(s: &str) -> Result<Self, CapabilityError> {
-        let mut parts = s.splitn(6, '|');
+        let mut parts = s.splitn(7, '|');
         let v = parts.next().ok_or(CapabilityError::Malformed)?;
         if v != "v1" {
             return Err(CapabilityError::UnsupportedVersion);
@@ -105,7 +112,8 @@ impl CapabilityScope {
         } else {
             docs.split(',').map(|s| DocId::new(s.to_string())).collect()
         };
-        // token_id and peer_id are optional trailing fields.
+        // Trailing fields are all optional — pre-Phase-7 tokens
+        // have 5 parts, Phase 4 has 7, Phase 7 has 8.
         let token_id_part = parts.next().unwrap_or("");
         let token_id = if token_id_part.is_empty() {
             None
@@ -118,12 +126,15 @@ impl CapabilityScope {
         } else {
             Some(peer_id_part.to_string())
         };
+        let attachments_only_part = parts.next().unwrap_or("0");
+        let attachments_only = matches!(attachments_only_part, "1");
         Ok(Self {
             expires_unix,
             can_write,
             doc_ids,
             token_id,
             peer_id,
+            attachments_only,
         })
     }
 }
@@ -204,6 +215,13 @@ impl ServerKeypair {
         self.signing.verifying_key()
     }
 
+    /// Crate-internal accessor for the signing key. Used by
+    /// sibling modules (attachments/signed_url) that need to sign
+    /// non-capability messages with the same identity.
+    pub(crate) fn signing_key(&self) -> &SigningKey {
+        &self.signing
+    }
+
     pub fn issue(&self, scope: &CapabilityScope) -> String {
         let msg = scope.canonical_message();
         let sig: Signature = self.signing.sign(msg.as_bytes());
@@ -271,6 +289,7 @@ mod tests {
             ],
             token_id: Some(Uuid::from_u128(42)),
             peer_id: Some("share-link-42".into()),
+            attachments_only: false,
         };
         let token = kp.issue(&scope);
         let got = kp.verify(&token, 0).expect("verify");

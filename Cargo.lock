@@ -419,6 +419,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "attachments-proto"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox 0.3.1",
+ "vox-types 0.3.1",
+]
+
+[[package]]
 name = "auth"
 version = "0.1.0"
 dependencies = [
@@ -8813,6 +8824,7 @@ dependencies = [
  "architect",
  "architect-auth",
  "async-trait",
+ "attachments-proto",
  "axum",
  "base64",
  "chrono",
@@ -8827,6 +8839,7 @@ dependencies = [
  "project-crdt",
  "project-proto",
  "rand 0.8.6",
+ "reqwest",
  "sea-orm",
  "sea-orm-migration",
  "serde",
@@ -8834,6 +8847,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "task-db",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tower-http",

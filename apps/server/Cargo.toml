@@ -41,6 +41,7 @@ project-proto = { workspace = true }
 project-crdt = { workspace = true }
 knowledge-proto = { workspace = true }
 knowledge-crdt = { workspace = true }
+attachments-proto = { workspace = true }
 architect = { workspace = true, features = ["server-axum"] }
 architect-auth = { workspace = true, features = ["full"] }
 
@@ -53,5 +54,8 @@ crdt = { workspace = true }
 project-crdt = { workspace = true }
 project-proto = { workspace = true, features = ["fake"] }
 knowledge-proto = { workspace = true }
+attachments-proto = { workspace = true }
 architect = { workspace = true }
 chrono = { workspace = true }
+tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

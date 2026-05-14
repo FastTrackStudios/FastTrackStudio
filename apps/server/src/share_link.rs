@@ -88,6 +88,7 @@ impl ShareService for ShareServiceImpl {
             doc_ids: vec![project_proto::DocId::new(scope.doc_id.clone())],
             token_id: Some(token_id),
             peer_id: Some(format!("share-link-{token_id}")),
+            attachments_only: false,
         };
         let token = self.keypair.issue(&cap_scope);
         let meta = ShareLinkMeta {
