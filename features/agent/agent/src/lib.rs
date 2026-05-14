@@ -10,12 +10,18 @@ pub use agent_proto::*;
 pub mod server {
     pub use agent_crdt::{
         AgentConversationEntity, AgentConversationRepoLoro, AgentLogLineEntity,
-        AgentLogLineRepoLoro, AgentRunEntity, AgentRunRepoLoro, GitRepoConnectionEntity,
-        GitRepoConnectionRepoLoro,
+        AgentLogLineRepoLoro, AgentRunEntity, AgentRunRepoLoro, ConversationMessageEntity,
+        ConversationMessageRepoLoro, GitRepoConnectionEntity, GitRepoConnectionRepoLoro,
+        ToolCallEntity, ToolCallRepoLoro,
     };
     pub use agent_db::{AgentMigrator, SeaOrmPersistence};
     pub use crdt::{CrdtDoc, Persistence};
 }
+
+#[cfg(feature = "server")]
+pub mod service;
+#[cfg(feature = "server")]
+pub use service::{AgentServiceImpl, HermesOnlyRouter, PluginRouter};
 
 #[cfg(feature = "server-axum")]
 pub use architect::axum_ws;

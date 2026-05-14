@@ -696,43 +696,13 @@ pub enum AgentEvent {
     },
 }
 
-// ── AgentAdapter trait ────────────────────────────────────────────────
-//
-// Per spec r[agent.adapter.contract]. Provider crates (agent-claude-
-// code, agent-codex, agent-hermes, …) implement this trait against
-// their backend's native transport and normalize events into the
-// shared shapes.
-
-/// Opaque handle returned by an adapter's `start` so callers can later
-/// `cancel` the run. Adapters define what's inside.
-pub struct RunHandle {
-    pub run_id: Uuid,
-    pub backend: String,
-    pub state: std::sync::Arc<dyn std::any::Any + Send + Sync>,
-}
-
-/// Provider adapter contract. Object-safe so the service can hold
-/// `Box<dyn AgentAdapter>` regardless of which backend is wired.
-#[async_trait::async_trait]
-pub trait AgentAdapter: Send + Sync {
-    /// Identifier for this adapter (`claude-code`, `codex`, `hermes`).
-    fn kind(&self) -> &'static str;
-
-    /// Start a new run. Returns a handle the service can later cancel.
-    /// The implementation publishes events via the channel registered
-    /// at construction time — not via this fn's return.
-    async fn start(
-        &self,
-        run_id: Uuid,
-        prompt: &str,
-        worktree_path: Option<&str>,
-    ) -> Result<RunHandle, AgentServiceError>;
-
-    /// Cancel a running handle. Should propagate to the underlying
-    /// process within `agent.service.cancel`'s 10-second grace
-    /// window.
-    async fn cancel(&self, handle: &RunHandle) -> Result<(), AgentServiceError>;
-}
+// Provider backend trait: see `agent_proto::integration::AgentIntegration`.
+// Hermes is the canonical backend — model selection (claude-code, codex,
+// gemini, custom) happens inside Hermes itself, so the Task side talks
+// only to Hermes through `AgentIntegration` (dispatch / cancel /
+// fetch_run / fetch_logs / run_event_loop). Older adapter sketches
+// (claude-code / codex direct subprocess) are deferred — Hermes covers
+// them via its model registry.
 
 #[derive(Debug, Clone, PartialEq, Eq, ::facet::Facet, thiserror::Error)]
 #[repr(u8)]
