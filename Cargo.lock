@@ -1608,11 +1608,21 @@ dependencies = [
  "architect",
  "async-trait",
  "chrono",
+ "crdt-derive",
  "loro",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "crdt-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
