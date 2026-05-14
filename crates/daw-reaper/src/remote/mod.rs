@@ -24,7 +24,7 @@ pub mod items;
 // longer needed; mounting via `marker::serve(Reaper)` handles
 // threading through `HasDispatcher`.
 pub mod project;
-pub mod regions;
+// regions ported to architect::rpc — see `crate::region`.
 pub mod routing;
 pub mod takes;
 pub mod tempo_map;
@@ -38,7 +38,6 @@ pub use fx_chains::RemoteFxChains;
 pub use fx_params::RemoteFxParams;
 pub use items::RemoteItems;
 pub use project::RemoteProject;
-pub use regions::RemoteRegions;
 pub use routing::RemoteRouting;
 pub use takes::RemoteTakes;
 pub use tempo_map::RemoteTempoMap;

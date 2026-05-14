@@ -56,7 +56,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::plugin_loader_service_service_descriptor(),
         daw::service::position_conversion_service_service_descriptor(),
         daw::service::project_service_service_descriptor(),
-        daw::service::region_service_service_descriptor(),
+        daw::service::region::descriptor(),
         daw::service::resource_service_service_descriptor(),
         daw::service::routing_service_service_descriptor(),
         daw::service::screenset_service_service_descriptor(),
@@ -587,16 +587,14 @@ pub async fn region_add(
     name: &str,
     lane: Option<u32>,
 ) -> Result<Value> {
+    // Lane placement retired with the architect::rpc port — the CLI
+    // continues to accept `--lane` for forward compat; log and fall
+    // through to plain `add` until a lane-aware sibling trait lands.
+    if lane.is_some() {
+        tracing::debug!("region_add: --lane ignored (no longer supported on the sync trait)");
+    }
     let project = daw.current_project().await?;
-    let id = match lane {
-        Some(lane) => {
-            project
-                .regions()
-                .add_in_lane(start, end, name, lane)
-                .await?
-        }
-        None => project.regions().add(start, end, name).await?,
-    };
+    let id = project.regions().add(start, end, name).await?;
     Ok(json!({ "id": id, "start_seconds": start, "end_seconds": end, "name": name }))
 }
 

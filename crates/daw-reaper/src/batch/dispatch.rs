@@ -20,7 +20,7 @@ pub async fn dispatch_op(
     item_svc: &crate::ReaperItem,
     take_svc: &crate::ReaperTake,
     marker_svc: &crate::Reaper,
-    region_svc: &crate::ReaperRegion,
+    region_svc: &crate::Reaper,
     tempo_map_svc: &crate::ReaperTempoMap,
     midi_svc: &crate::ReaperMidi,
     live_midi_svc: &crate::ReaperLiveMidi,
@@ -1094,83 +1094,47 @@ async fn dispatch_marker(
 async fn dispatch_region(
     op: &RegionOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperRegion,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::RegionService;
+    use daw_proto::sync::Regions;
+    // Fully-qualified calls — `Reaper` impls multiple service traits
+    // and many verbs overlap.
     match op {
         RegionOp::GetRegions(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::RegionList(svc.get_regions(ctx).await))
+            Ok(StepOutput::RegionList(Regions::all(svc, ctx)))
         }
         RegionOp::GetRegion(p, id) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptRegion(svc.get_region(ctx, *id).await))
-        }
-        RegionOp::GetRegionsInRange(p, s, e) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::RegionList(
-                svc.get_regions_in_range(ctx, *s, *e).await,
-            ))
-        }
-        RegionOp::GetRegionAt(p, pos) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptRegion(svc.get_region_at(ctx, *pos).await))
+            Ok(StepOutput::OptRegion(Regions::get(svc, ctx, *id)))
         }
         RegionOp::RegionCount(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Usize(svc.region_count(ctx).await as u64))
+            Ok(StepOutput::Usize(Regions::count(svc, ctx) as u64))
         }
         RegionOp::AddRegion(p, s, e, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(
-                svc.add_region(ctx, *s, *e, name.clone()).await,
-            ))
+            let id = Regions::add(svc, ctx, *s, *e, name).map_err(|e| e.to_string())?;
+            Ok(StepOutput::U32(id))
         }
         RegionOp::RemoveRegion(p, id) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.remove_region(ctx, *id).await;
+            Regions::remove(svc, ctx, *id).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         RegionOp::SetRegionBounds(p, id, s, e) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_region_bounds(ctx, *id, *s, *e).await;
+            Regions::set_bounds(svc, ctx, *id, *s, *e).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         RegionOp::RenameRegion(p, id, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.rename_region(ctx, *id, name.clone()).await;
+            Regions::rename(svc, ctx, *id, name).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         RegionOp::SetRegionColor(p, id, color) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_region_color(ctx, *id, *color).await;
-            Ok(StepOutput::Unit)
-        }
-        RegionOp::AddRegionInLane(p, req) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(
-                svc.add_region_in_lane(ctx, req.clone()).await,
-            ))
-        }
-        RegionOp::SetRegionLane(p, id, lane) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_region_lane(ctx, *id, *lane).await;
-            Ok(StepOutput::Unit)
-        }
-        RegionOp::GetRegionsInLane(p, lane) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::RegionList(
-                svc.get_regions_in_lane(ctx, *lane).await,
-            ))
-        }
-        RegionOp::GotoRegionStart(p, id) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_region_start(ctx, *id).await;
-            Ok(StepOutput::Unit)
-        }
-        RegionOp::GotoRegionEnd(p, id) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_region_end(ctx, *id).await;
+            Regions::set_color(svc, ctx, *id, *color).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
     }

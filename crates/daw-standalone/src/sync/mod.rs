@@ -20,7 +20,7 @@ mod items;
 // lives at `crate::marker`. The borrowed `StandaloneMarkers<'a>` view
 // retired with the port.
 mod project;
-mod regions;
+// regions ported to architect::rpc — see `crate::region`.
 mod routing;
 mod takes;
 mod tempo_map;
@@ -36,7 +36,6 @@ pub use fx_chains::StandaloneFxChains;
 pub use fx_params::StandaloneFxParams;
 pub use items::StandaloneItems;
 pub use project::StandaloneProject;
-pub use regions::StandaloneRegions;
 pub use routing::StandaloneRouting;
 pub use takes::StandaloneTakes;
 pub use tempo_map::StandaloneTempoMap;

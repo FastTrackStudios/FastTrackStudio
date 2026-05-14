@@ -34,7 +34,7 @@ mod items;
 // declaration alongside `Marker` itself. See `marker/service.rs`.
 mod plugin_loader;
 mod project;
-mod regions;
+// `Regions` ported to architect::rpc — see `crate::region`.
 mod routing;
 mod takes;
 mod tempo_map;
@@ -57,12 +57,14 @@ pub use items::Items;
 pub use crate::marker::{Markers, MarkersRpc};
 #[cfg(feature = "vox")]
 pub use crate::marker::{MarkersClient, serve as serve_markers};
+pub use crate::region::{Regions, RegionsRpc};
+#[cfg(feature = "vox")]
+pub use crate::region::{RegionsClient, serve as serve_regions};
 pub use crate::track::{Tracks, TracksRpc};
 #[cfg(feature = "vox")]
 pub use crate::track::{TracksClient, serve as serve_tracks};
 pub use plugin_loader::PluginLoader;
 pub use project::Project;
-pub use regions::Regions;
 pub use routing::Routing;
 pub use takes::Takes;
 pub use tempo_map::TempoMap;

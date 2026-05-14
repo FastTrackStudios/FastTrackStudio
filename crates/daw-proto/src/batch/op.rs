@@ -324,24 +324,21 @@ pub enum MarkerOp {
 // Region operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Regions` trait. Variants
+// for retired surfaces (range queries, region-at-position, lane
+// placement, goto navigation) came from the old `RegionService` and
+// were retired alongside the port.
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum RegionOp {
     GetRegions(ProjectArg),
     GetRegion(ProjectArg, u32),
-    GetRegionsInRange(ProjectArg, f64, f64),
-    GetRegionAt(ProjectArg, f64),
     RegionCount(ProjectArg),
     AddRegion(ProjectArg, f64, f64, String),
     RemoveRegion(ProjectArg, u32),
     SetRegionBounds(ProjectArg, u32, f64, f64),
     RenameRegion(ProjectArg, u32, String),
     SetRegionColor(ProjectArg, u32, u32),
-    AddRegionInLane(ProjectArg, AddRegionInLaneRequest),
-    SetRegionLane(ProjectArg, u32, Option<u32>),
-    GetRegionsInLane(ProjectArg, u32),
-    GotoRegionStart(ProjectArg, u32),
-    GotoRegionEnd(ProjectArg, u32),
 }
 
 // =============================================================================
@@ -1081,19 +1078,12 @@ fn region_op_project_arg(op: &RegionOp) -> &ProjectArg {
     match op {
         RegionOp::GetRegions(p)
         | RegionOp::GetRegion(p, _)
-        | RegionOp::GetRegionsInRange(p, _, _)
-        | RegionOp::GetRegionAt(p, _)
         | RegionOp::RegionCount(p)
         | RegionOp::AddRegion(p, _, _, _)
         | RegionOp::RemoveRegion(p, _)
         | RegionOp::SetRegionBounds(p, _, _, _)
         | RegionOp::RenameRegion(p, _, _)
-        | RegionOp::SetRegionColor(p, _, _)
-        | RegionOp::AddRegionInLane(p, _)
-        | RegionOp::SetRegionLane(p, _, _)
-        | RegionOp::GetRegionsInLane(p, _)
-        | RegionOp::GotoRegionStart(p, _)
-        | RegionOp::GotoRegionEnd(p, _) => p,
+        | RegionOp::SetRegionColor(p, _, _) => p,
     }
 }
 

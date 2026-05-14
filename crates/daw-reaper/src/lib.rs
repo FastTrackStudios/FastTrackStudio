@@ -102,7 +102,9 @@ pub use plugin_loader::{ReaperPluginLoader, eager_load_fx_plugins, set_plugin_co
 pub use position_conversion::ReaperPositionConversion;
 pub use project::ReaperProject;
 pub use project_import::register_project_importer;
-pub use region::ReaperRegion;
+// `Regions` impl'd on `Reaper` — see `crate::region`. The old async
+// `ReaperRegion` service struct retired with the architect::rpc port.
+pub use region::get_regions_on_main_thread;
 pub use routing::ReaperRouting;
 pub use screenset::ReaperScreenset;
 pub use tempo_map::ReaperTempoMap;

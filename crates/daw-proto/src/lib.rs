@@ -73,7 +73,10 @@ pub use plugin_loader::*;
 pub use position_conversion::*;
 pub use primitives::*;
 pub use project::*;
-pub use region::*;
+// Explicit re-exports (see marker / track for the rationale).
+#[cfg(feature = "vox")]
+pub use region::RegionsClient;
+pub use region::{AddRegionInLaneRequest, Region, RegionError, RegionEvent, Regions, RegionsRpc};
 pub use resource::*;
 pub use routing::*;
 pub use screenset::*;

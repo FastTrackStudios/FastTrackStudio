@@ -9,11 +9,11 @@ use daw_proto::{
     ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
     MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
-    RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
-    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
+    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
+    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TransportServiceDispatcher,
+    WindowGeometryServiceDispatcher,
 };
-use daw_proto::{marker, track};
+use daw_proto::{marker, region, track};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
@@ -22,10 +22,10 @@ use daw_proto::{
     input_service_service_descriptor, item_service_service_descriptor,
     live_midi_service_service_descriptor, midi_service_service_descriptor,
     plugin_loader_service_service_descriptor, project_service_service_descriptor,
-    region_service_service_descriptor, routing_service_service_descriptor,
-    screenset_service_service_descriptor, take_service_service_descriptor,
-    tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-    transport_service_service_descriptor, window_geometry_service_service_descriptor,
+    routing_service_service_descriptor, screenset_service_service_descriptor,
+    take_service_service_descriptor, tempo_map_service_service_descriptor,
+    toolbar_service_service_descriptor, transport_service_service_descriptor,
+    window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -51,7 +51,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     // Create REAPER implementations
     let transport = crate::ReaperTransport::new();
     let project = crate::ReaperProject::new();
-    let region = crate::ReaperRegion::new();
+    // Regions ported to architect::rpc — mounted via region::serve(Reaper)
     let tempo_map = crate::ReaperTempoMap::new();
     let audio_engine = crate::ReaperAudioEngine::new();
     let midi = crate::ReaperMidi::new();
@@ -86,10 +86,7 @@ pub fn create_daw_handler() -> RoutedHandler {
         // `marker::serve(Reaper)` builds the dispatcher + bridges sync
         // calls onto REAPER's main thread via `HasDispatcher`.
         .with(marker::descriptor(), marker::serve(crate::Reaper))
-        .with(
-            region_service_service_descriptor(),
-            RegionServiceDispatcher::new(region),
-        )
+        .with(region::descriptor(), region::serve(crate::Reaper))
         .with(
             tempo_map_service_service_descriptor(),
             TempoMapServiceDispatcher::new(tempo_map),

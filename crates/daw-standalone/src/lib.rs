@@ -49,7 +49,9 @@ pub use live_midi::StandaloneLiveMidi;
 pub use midi::StandaloneMidi;
 pub use position_conversion::StandalonePositionConversion;
 pub use project::{StandaloneProject, project_guids};
-pub use region::StandaloneRegion;
+// `Regions` impl'd directly on `Standalone` — see `crate::region`.
+// The old async `StandaloneRegion` service struct retired with the
+// architect::rpc port.
 pub use resource::StandaloneResource;
 pub use routing::StandaloneRouting;
 pub use sync::Standalone;

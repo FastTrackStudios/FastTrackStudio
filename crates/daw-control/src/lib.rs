@@ -131,7 +131,7 @@ pub(crate) use daw_proto::MarkersClient;
 pub(crate) use daw_proto::MidiServiceClient;
 pub(crate) use daw_proto::PositionConversionServiceClient;
 pub(crate) use daw_proto::ProjectServiceClient;
-pub(crate) use daw_proto::RegionServiceClient;
+pub(crate) use daw_proto::RegionsClient;
 pub(crate) use daw_proto::RoutingServiceClient;
 pub(crate) use daw_proto::ScreensetServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
@@ -206,7 +206,7 @@ pub struct DawClients {
     pub(crate) transport: TransportServiceClient,
     pub(crate) project: ProjectServiceClient,
     pub(crate) marker: MarkersClient,
-    pub(crate) region: RegionServiceClient,
+    pub(crate) region: RegionsClient,
     pub(crate) tempo_map: TempoMapServiceClient,
     pub(crate) track: TracksClient,
     pub(crate) fx: FxServiceClient,
@@ -242,7 +242,7 @@ impl DawClients {
             transport: TransportServiceClient::new(handle.clone()),
             project: ProjectServiceClient::new(handle.clone()),
             marker: MarkersClient::new(handle.clone()),
-            region: RegionServiceClient::new(handle.clone()),
+            region: RegionsClient::new(handle.clone()),
             tempo_map: TempoMapServiceClient::new(handle.clone()),
             track: TracksClient::new(handle.clone()),
             fx: FxServiceClient::new(handle.clone()),

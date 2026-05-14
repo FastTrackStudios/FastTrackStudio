@@ -17,7 +17,7 @@ pub mod items;
 // see `crate::marker`. The borrowed-view pattern (`ReaperMarkers<'a>`)
 // retired with the port.
 pub mod project;
-pub mod regions;
+// regions ported to architect::rpc — see `crate::region`.
 pub mod routing;
 pub mod takes;
 pub mod tempo_map;
@@ -32,7 +32,6 @@ pub use fx_chains::ReaperFxChains;
 pub use fx_params::ReaperFxParams;
 pub use items::ReaperItems;
 pub use project::ReaperProject;
-pub use regions::ReaperRegions;
 pub use routing::ReaperRouting;
 pub use takes::ReaperTakes;
 pub use tempo_map::ReaperTempoMap;
