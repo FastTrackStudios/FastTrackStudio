@@ -10926,6 +10926,8 @@ dependencies = [
  "timer-ui",
  "tracing",
  "uuid",
+ "vox-core 0.3.1 (git+https://github.com/Codys-Wright/vox?rev=fd3167b6d6b89b60edd9c78f7b8890f5a87571d5)",
+ "vox-websocket",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
