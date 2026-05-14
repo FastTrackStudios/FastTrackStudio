@@ -52,6 +52,7 @@ pub mod dawfile_service;
 pub mod ext_state;
 pub mod fx;
 pub mod fx_chains;
+pub mod fx_params;
 pub mod health;
 pub mod input;
 pub mod item;

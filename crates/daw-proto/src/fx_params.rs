@@ -1,7 +1,12 @@
-//! FX parameter operations on a specific FX in a chain.
+//! FX parameter operations (architect::rpc port).
+//!
+//! Per-parameter ops on a specific FX in a chain. `FxChainContext`
+//! carries the owning track GUID; `fx_idx` + `param_idx` identify
+//! the target parameter. Mount via `fx_params::serve(Reaper)`.
 
 use crate::{DawResult, FxChainContext, FxParameter};
 
+#[architect_rpc_derive::rpc]
 pub trait FxParams {
     fn count(&self, ctx: FxChainContext, fx_idx: u32) -> u32;
 
@@ -13,3 +18,8 @@ pub trait FxParams {
     fn name(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<String>;
     fn info(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<FxParameter>;
 }
+
+#[cfg(feature = "vox")]
+pub use FxParamsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use fx_params_rpc_service_descriptor as descriptor;

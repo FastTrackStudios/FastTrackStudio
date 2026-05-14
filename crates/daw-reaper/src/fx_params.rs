@@ -1,48 +1,40 @@
-//! Sync FX parameters handle: [`ReaperFxParams`].
+//! `impl FxParams for Reaper` — sync trait + REAPER C API.
+//!
+//! Each call resolves the chain through `FxChainContext` against the
+//! current project, then indexes into the FX + parameter. Mount via
+//! `daw_proto::fx_params::serve(Reaper)`.
 
-use daw_proto::sync::FxParams as FxParamsTrait;
+use daw_proto::sync::FxParams;
 use daw_proto::{DawError, DawResult, FxChainContext, FxParameter};
-use reaper_high::{FxChain, Track};
+use reaper_high::{FxChain, Reaper as ReaperHigh, Track};
 
 use crate::fx::build_fx_parameter;
+use crate::sync::find_track_by_guid;
 
-use super::ReaperMainThread;
-
-pub struct ReaperFxParams<'a> {
-    _mt: &'a ReaperMainThread,
-    guid: &'a str,
-}
-
-impl<'a> ReaperFxParams<'a> {
-    pub(crate) fn new(mt: &'a ReaperMainThread, guid: &'a str) -> Self {
-        Self { _mt: mt, guid }
-    }
-
-    fn resolve_chain(&self, ctx: &FxChainContext) -> Option<(Track, FxChain)> {
-        let project = super::resolve_project(self.guid).ok()?;
-        match ctx {
-            FxChainContext::Track(track_guid) => {
-                let track = super::find_track_by_guid(&project, track_guid)?;
-                let chain = track.normal_fx_chain();
-                Some((track, chain))
-            }
-            FxChainContext::Input(track_guid) => {
-                let track = super::find_track_by_guid(&project, track_guid)?;
-                let chain = track.input_fx_chain();
-                Some((track, chain))
-            }
-            FxChainContext::Monitoring => {
-                let track = project.master_track().ok()?;
-                let chain = track.input_fx_chain();
-                Some((track, chain))
-            }
+fn resolve_chain(ctx: &FxChainContext) -> Option<(Track, FxChain)> {
+    let project = ReaperHigh::get().current_project();
+    match ctx {
+        FxChainContext::Track(track_guid) => {
+            let track = find_track_by_guid(&project, track_guid)?;
+            let chain = track.normal_fx_chain();
+            Some((track, chain))
+        }
+        FxChainContext::Input(track_guid) => {
+            let track = find_track_by_guid(&project, track_guid)?;
+            let chain = track.input_fx_chain();
+            Some((track, chain))
+        }
+        FxChainContext::Monitoring => {
+            let track = project.master_track().ok()?;
+            let chain = track.input_fx_chain();
+            Some((track, chain))
         }
     }
 }
 
-impl<'a> FxParamsTrait for ReaperFxParams<'a> {
+impl FxParams for crate::Reaper {
     fn count(&self, ctx: FxChainContext, fx_idx: u32) -> u32 {
-        let Some((_track, chain)) = self.resolve_chain(&ctx) else {
+        let Some((_track, chain)) = resolve_chain(&ctx) else {
             return 0;
         };
         if fx_idx >= chain.fx_count() {
@@ -53,7 +45,7 @@ impl<'a> FxParamsTrait for ReaperFxParams<'a> {
     }
 
     fn get(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<f64> {
-        let (_track, chain) = self.resolve_chain(&ctx)?;
+        let (_track, chain) = resolve_chain(&ctx)?;
         if fx_idx >= chain.fx_count() {
             return None;
         }
@@ -66,8 +58,7 @@ impl<'a> FxParamsTrait for ReaperFxParams<'a> {
     }
 
     fn set(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32, value: f64) -> DawResult<()> {
-        let (_track, chain) = self
-            .resolve_chain(&ctx)
+        let (_track, chain) = resolve_chain(&ctx)
             .ok_or_else(|| DawError::not_found("FxChain", &format!("{ctx:?}")))?;
         if fx_idx >= chain.fx_count() {
             return Err(DawError::out_of_range(
@@ -94,7 +85,7 @@ impl<'a> FxParamsTrait for ReaperFxParams<'a> {
     }
 
     fn name(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<String> {
-        let (_track, chain) = self.resolve_chain(&ctx)?;
+        let (_track, chain) = resolve_chain(&ctx)?;
         if fx_idx >= chain.fx_count() {
             return None;
         }
@@ -107,7 +98,7 @@ impl<'a> FxParamsTrait for ReaperFxParams<'a> {
     }
 
     fn info(&self, ctx: FxChainContext, fx_idx: u32, param_idx: u32) -> Option<FxParameter> {
-        let (_track, chain) = self.resolve_chain(&ctx)?;
+        let (_track, chain) = resolve_chain(&ctx)?;
         if fx_idx >= chain.fx_count() {
             return None;
         }

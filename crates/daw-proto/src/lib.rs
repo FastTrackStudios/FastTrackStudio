@@ -19,6 +19,7 @@ pub mod error;
 pub mod ext_state;
 pub mod fx;
 pub mod fx_chains;
+pub mod fx_params;
 pub mod health;
 pub mod input;
 pub mod item;
@@ -91,6 +92,9 @@ pub use ext_state::{ExtState, ExtStateRpc};
 #[cfg(feature = "vox")]
 pub use fx_chains::FxChainsClient;
 pub use fx_chains::{FxChains, FxChainsRpc};
+#[cfg(feature = "vox")]
+pub use fx_params::FxParamsClient;
+pub use fx_params::{FxParams, FxParamsRpc};
 #[cfg(feature = "vox")]
 pub use take::TakesClient;
 pub use take::{Takes, TakesRpc};

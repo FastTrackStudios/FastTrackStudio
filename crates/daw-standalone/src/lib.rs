@@ -23,6 +23,7 @@ mod automation;
 mod ext_state;
 mod fx;
 mod fx_chains;
+mod fx_params;
 mod item;
 mod live_midi;
 mod marker;

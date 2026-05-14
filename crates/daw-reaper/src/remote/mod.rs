@@ -17,7 +17,7 @@
 pub mod daw;
 // ext_state ported to architect::rpc — see `crate::ext_state`.
 // fx_chains ported to architect::rpc — see `crate::fx_chains`.
-pub mod fx_params;
+// fx_params ported to architect::rpc — see `crate::fx_params`.
 pub mod items;
 // markers ported to the singleton `Reaper` backend — see
 // `crate::marker`. The remote/marshal-to-main-thread wrapper is no
@@ -33,7 +33,6 @@ pub mod routing;
 // transport ported to architect::rpc — see `crate::transport`.
 
 pub use daw::ReaperRemote;
-pub use fx_params::RemoteFxParams;
 pub use items::RemoteItems;
 pub use project::RemoteProject;
 pub use routing::RemoteRouting;
