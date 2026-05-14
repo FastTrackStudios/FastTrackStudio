@@ -14,18 +14,29 @@ tests/playwright/
 └── README.md               # you are here
 ```
 
-## First-time setup
+## Run the suite (Nix shell — recommended)
+
+The `playwright` dev shell bundles node + a Nix-managed Chromium
++ all the Wayland/X11/GTK libs Playwright needs. From the repo
+root:
+
+```sh
+nix develop .#playwright --command just test-browser
+```
+
+That runs `npm install` (just to fetch `@playwright/test`; no
+browser download — `PLAYWRIGHT_BROWSERS_PATH` is preset to
+nixpkgs's `playwright-driver.browsers`) and then runs the suite.
+
+## Run the suite (manual / non-Nix)
+
+If you're not on Nix, install node ≥ 20 and Chromium yourself,
+then:
 
 ```sh
 cd tests/playwright
 npm install
-npx playwright install chromium
-```
-
-## Run the suite
-
-```sh
-cd tests/playwright
+npx playwright install chromium     # ~150MB browser download
 npx playwright test
 ```
 
