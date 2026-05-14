@@ -38,6 +38,8 @@ task-db = { path = "../db" }
 
 project-proto = { workspace = true }
 project-crdt = { workspace = true }
+knowledge-proto = { workspace = true }
+knowledge-crdt = { workspace = true }
 architect = { workspace = true, features = ["server-axum"] }
 architect-auth = { workspace = true, features = ["full"] }
 
@@ -49,3 +51,6 @@ futures = { workspace = true }
 crdt = { workspace = true }
 project-crdt = { workspace = true }
 project-proto = { workspace = true, features = ["fake"] }
+knowledge-proto = { workspace = true }
+architect = { workspace = true }
+chrono = { workspace = true }

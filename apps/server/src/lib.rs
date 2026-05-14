@@ -39,6 +39,10 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use crdt::loro::{self, ExportMode};
 use crdt::{CrdtDoc, Persistence};
+use knowledge_proto::{
+    BaseRepoDispatcher, BlockRepoDispatcher, FolderRepoDispatcher, KnowledgeTagRepoDispatcher,
+    PageRepoDispatcher, VaultRepoDispatcher,
+};
 use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
 use project_proto::{
     DocId, ProjectRepoDispatcher, SyncError, TaskRepoDispatcher, UpdateBytes, WorkspaceSync,
@@ -266,6 +270,17 @@ pub struct AppState {
     pub share_service: ShareServiceImpl,
     pub revocations: RevocationList,
     pub basename_index: MemoryBasenameIndex,
+    /// Org vault doc, pre-opened. Phase 5 wires the Knowledge repo
+    /// dispatchers against this single doc; later phases lift the
+    /// single-doc binding so per-project vaults can be opened on
+    /// demand.
+    pub org_vault_doc: Arc<CrdtDoc>,
+    pub vault_repo: Arc<knowledge_crdt::VaultRepoLoro>,
+    pub folder_repo: Arc<knowledge_crdt::FolderRepoLoro>,
+    pub page_repo: Arc<knowledge_crdt::PageRepoLoro>,
+    pub block_repo: Arc<knowledge_crdt::BlockRepoLoro>,
+    pub knowledge_tag_repo: Arc<knowledge_crdt::KnowledgeTagRepoLoro>,
+    pub base_repo: Arc<knowledge_crdt::BaseRepoLoro>,
 }
 
 impl AppState {
@@ -328,6 +343,22 @@ impl AppState {
         let share_service = ShareServiceImpl::new(keypair.clone(), revocations.clone());
         let basename_index = MemoryBasenameIndex::new();
 
+        // Open the org vault doc. Phase 5 wires the Knowledge
+        // dispatchers against this single doc; later phases lift the
+        // binding so per-project vaults can be opened on demand.
+        let org_vault_open = registry
+            .get_or_open(&DocId::org_vault())
+            .await
+            .map_err(|e| eyre::eyre!("open org vault: {e}"))?;
+        let org_vault_doc = org_vault_open.doc.clone();
+        let vault_repo = Arc::new(knowledge_crdt::VaultRepoLoro::new(&org_vault_doc));
+        let folder_repo = Arc::new(knowledge_crdt::FolderRepoLoro::new(&org_vault_doc));
+        let page_repo = Arc::new(knowledge_crdt::PageRepoLoro::new(&org_vault_doc));
+        let block_repo = Arc::new(knowledge_crdt::BlockRepoLoro::new(&org_vault_doc));
+        let knowledge_tag_repo =
+            Arc::new(knowledge_crdt::KnowledgeTagRepoLoro::new(&org_vault_doc));
+        let base_repo = Arc::new(knowledge_crdt::BaseRepoLoro::new(&org_vault_doc));
+
         Ok(Self {
             registry,
             workspace_doc,
@@ -340,6 +371,13 @@ impl AppState {
             share_service,
             revocations,
             basename_index,
+            org_vault_doc,
+            vault_repo,
+            folder_repo,
+            page_repo,
+            block_repo,
+            knowledge_tag_repo,
+            base_repo,
         })
     }
 }
@@ -584,6 +622,12 @@ async fn vox_ws_handler(
         };
         let auth = state.auth.auth.clone();
         let share_service = state.share_service.clone();
+        let vault_repo = (*state.vault_repo).clone();
+        let folder_repo = (*state.folder_repo).clone();
+        let page_repo = (*state.page_repo).clone();
+        let block_repo = (*state.block_repo).clone();
+        let knowledge_tag_repo = (*state.knowledge_tag_repo).clone();
+        let base_repo = (*state.base_repo).clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "ProjectRepo" => {
@@ -607,6 +651,31 @@ async fn vox_ws_handler(
                 }
                 "ShareService" => {
                     connection.handle_with(ShareServiceDispatcher::new(share_service.clone()));
+                    Ok(())
+                }
+                "VaultRepo" => {
+                    connection.handle_with(VaultRepoDispatcher::new(vault_repo.clone()));
+                    Ok(())
+                }
+                "FolderRepo" => {
+                    connection.handle_with(FolderRepoDispatcher::new(folder_repo.clone()));
+                    Ok(())
+                }
+                "PageRepo" => {
+                    connection.handle_with(PageRepoDispatcher::new(page_repo.clone()));
+                    Ok(())
+                }
+                "BlockRepo" => {
+                    connection.handle_with(BlockRepoDispatcher::new(block_repo.clone()));
+                    Ok(())
+                }
+                "KnowledgeTagRepo" => {
+                    connection
+                        .handle_with(KnowledgeTagRepoDispatcher::new(knowledge_tag_repo.clone()));
+                    Ok(())
+                }
+                "BaseRepo" => {
+                    connection.handle_with(BaseRepoDispatcher::new(base_repo.clone()));
                     Ok(())
                 }
                 other => {
