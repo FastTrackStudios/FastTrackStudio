@@ -10909,6 +10909,8 @@ dependencies = [
  "location-proto",
  "location-ui",
  "loro",
+ "notifications-proto",
+ "notifications-ui",
  "person-crdt",
  "person-proto",
  "person-ui",

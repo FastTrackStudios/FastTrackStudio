@@ -26,6 +26,8 @@ crdt = { path = "../../../architect/libs/crdt" }
 agent-proto = { workspace = true, features = ["fake"] }
 agent-crdt.workspace = true
 agent-ui.workspace = true
+notifications-proto.workspace = true
+notifications-ui.workspace = true
 caldav-proto = { workspace = true, features = ["fake"] }
 caldav-crdt.workspace = true
 caldav-ui.workspace = true

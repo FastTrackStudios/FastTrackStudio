@@ -447,6 +447,24 @@ pub fn AgentDashboardView() -> Element {
     let mut items = use_signal::<Vec<AgentRun>>(Vec::new);
     let nav = use_navigator();
 
+    // Notifications watcher — diff AgentRun.status against the prev
+    // snapshot on every items() change; push terminal/blocking
+    // transitions through the shared NotificationsCtx (drives bell,
+    // inbox, toast stack).
+    let mut notif_ctx = use_context::<crate::notifications_ctx::NotificationsCtx>();
+    let prev_statuses =
+        use_signal::<std::collections::HashMap<Uuid, String>>(std::collections::HashMap::new);
+    use_effect(move || {
+        let current = items.read().clone();
+        let (emit, next) =
+            crate::notifications_ctx::diff_runs_for_notifications(&prev_statuses.peek(), &current);
+        for n in emit {
+            notif_ctx.push(n);
+        }
+        let mut p = prev_statuses.clone();
+        p.set(next);
+    });
+
     let refresh_tx: mpsc::UnboundedSender<()> = use_hook(|| {
         let (tx, mut rx) = mpsc::unbounded::<()>();
         let repo_for_loop = repo.clone();
