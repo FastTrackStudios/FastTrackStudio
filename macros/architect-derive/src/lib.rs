@@ -115,6 +115,13 @@ struct ParsedField<'a> {
     ident: &'a Ident,
     ty: &'a Type,
     attrs: FieldAttrs,
+    /// Pass-through attributes from the source field — everything
+    /// that isn't `#[architect(...)]`. Forwarded onto the emitted
+    /// `<Entity>Create` field so `#[dummy(faker = "...")]` annotations
+    /// (and any other field-level derive helpers like `#[serde(...)]`)
+    /// reach the generated Dummy impl that `seed_fake_<entity>`
+    /// drives.
+    forward_attrs: Vec<syn::Attribute>,
 }
 
 fn expand(input: DeriveInput) -> Result<TokenStream2> {
@@ -143,10 +150,17 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let mut parsed: Vec<ParsedField> = Vec::with_capacity(named.len());
     for f in named.iter() {
         let attrs = parse_field_attrs(f)?;
+        let forward_attrs: Vec<syn::Attribute> = f
+            .attrs
+            .iter()
+            .filter(|a| !a.path().is_ident("architect"))
+            .cloned()
+            .collect();
         parsed.push(ParsedField {
             ident: f.ident.as_ref().unwrap(),
             ty: &f.ty,
             attrs,
+            forward_attrs,
         });
     }
 
@@ -177,7 +191,8 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let create_field_defs = create_fields.iter().map(|f| {
         let id = f.ident;
         let ty = f.ty;
-        quote! { pub #id: #ty }
+        let fwd = &f.forward_attrs;
+        quote! { #(#fwd)* pub #id: #ty }
     });
     let create_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
@@ -254,10 +269,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     // a `<Entity>Create` via fake-rs, and feeds each one into the
     // repo. Gated on the user crate's `fake` feature, plus only
     // emitted when a repo trait exists to call into.
-    let seed_fn_ident = format_ident!(
-        "seed_fake_{}",
-        ident.to_string().to_snake_case()
-    );
+    let seed_fn_ident = format_ident!("seed_fake_{}", ident.to_string().to_snake_case());
     let seed_fn = if container.emit_repo {
         quote! {
             /// Generate `count` faked `#ident` instances and persist
@@ -546,7 +558,14 @@ fn build_server_block(
 
         }
 
+        // Only the `<Ident>RepoStorage` type leaks into the parent
+        // module. The SeaORM `Model` / `Entity` / `Column` / `Relation`
+        // / `ActiveModel` items stay inside `__<snake>_storage` —
+        // re-exporting them by their bare names collides when multiple
+        // `#[derive(Entity)]` structs share a module. Code that wants
+        // to reach into them (rare; the repo trait covers normal use)
+        // can name `__<snake>_storage::Entity` directly.
         #[cfg(feature = "server")]
-        #vis use #storage_mod::{Model, Entity, Column, Relation, ActiveModel, #storage_ident};
+        #vis use #storage_mod::#storage_ident;
     }
 }
