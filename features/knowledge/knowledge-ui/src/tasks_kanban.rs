@@ -59,46 +59,47 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
     });
 
     let move_doc = local_doc.read().clone();
-    let on_move = use_callback(move |(page_id, target): (Uuid, String)| {
+    let on_move = use_callback(move |drop: super::views::KanbanDrop| {
         let doc = move_doc.clone();
         spawn(async move {
             let page_repo = PageRepoLoro::new(&doc);
-            let page = match page_repo.get(page_id).await {
+            let page = match page_repo.get(drop.page_id).await {
                 Ok(p) => p,
                 Err(e) => {
-                    tracing::warn!(?e, %page_id, "kanban: page lookup failed");
+                    tracing::warn!(?e, page_id = %drop.page_id, "kanban: page lookup failed");
                     return;
                 }
             };
-            // Re-encode frontmatter_json with the new status +
-            // a fresh sort_order at the end of the target bucket.
-            // Phase 6.5b: append-only (LexoRank::after of the
-            // tail rank in the target bucket). Phase 6.6+ will
-            // grow drop-position awareness.
             let mut fm: indexmap::IndexMap<String, serde_json::Value> =
                 serde_json::from_str(&page.frontmatter_json).unwrap_or_default();
-            fm.insert("status".into(), serde_json::Value::String(target.clone()));
-            // Ensure kind:task is preserved (defensive).
+            fm.insert(
+                "status".into(),
+                serde_json::Value::String(drop.target_bucket.clone()),
+            );
             fm.entry("kind".into())
                 .or_insert(serde_json::Value::String("task".into()));
-            // Compute a sort_order that places this card after any
-            // existing card in the target bucket.
-            let tail_rank = match tail_rank_in_bucket(&doc, &target).await {
-                Ok(opt) => opt,
+            // Compute the new sort_order. Three cases:
+            //  - `before` set: drop just before that card.
+            //    `between(prev_rank, before_rank)`.
+            //  - `before` unset: drop at the bucket's tail.
+            //    `after(tail_rank)` or `first()`.
+            // We exclude the dragged page itself from the
+            // bucket scan so the rank space stays consistent.
+            let new_rank = match compute_drop_rank(&doc, &drop).await {
+                Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!(?e, "kanban: tail_rank lookup failed");
-                    None
+                    tracing::warn!(
+                        ?e,
+                        "kanban: sort_order compute failed; falling back to tail"
+                    );
+                    lexorank::first()
                 }
-            };
-            let new_rank = match tail_rank {
-                Some(r) => lexorank::after(&r),
-                None => lexorank::first(),
             };
             fm.insert("sort_order".into(), serde_json::Value::String(new_rank));
             let new_json = serde_json::to_string(&fm).unwrap_or_else(|_| "{}".into());
             if let Err(e) = page_repo
                 .update(
-                    page_id,
+                    drop.page_id,
                     PageUpdate {
                         frontmatter_json: Some(new_json),
                         ..Default::default()
@@ -106,13 +107,16 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
                 )
                 .await
             {
-                tracing::warn!(?e, %page_id, "kanban: page update failed");
+                tracing::warn!(?e, page_id = %drop.page_id, "kanban: page update failed");
             }
         });
     });
 
+    // Per-column inline add: creates a `kind: task` page already
+    // in the target bucket so it lands directly under the input
+    // without a status flip.
     let add_doc = local_doc.read().clone();
-    let on_add_task = use_callback(move |basename: String| {
+    let on_add_to_bucket = use_callback(move |(bucket, title): (String, String)| {
         let doc = add_doc.clone();
         spawn(async move {
             let vault_repo = VaultRepoLoro::new(&doc);
@@ -128,14 +132,19 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
                 return;
             };
             let now = chrono::Utc::now();
-            let fm = serde_json::json!({"kind": "task", "status": "todo"}).to_string();
+            let fm = serde_json::json!({
+                "kind": "task",
+                "title": title.clone(),
+                "status": bucket,
+            })
+            .to_string();
             let page_repo = PageRepoLoro::new(&doc);
             if let Err(e) = page_repo
                 .create(PageCreate {
                     vault_id: vault.id,
                     folder_id: None,
-                    path: format!("{basename}.md"),
-                    basename,
+                    path: format!("{title}.md"),
+                    basename: title,
                     ext: "md".into(),
                     aliases: Vec::new(),
                     frontmatter_json: fm,
@@ -160,8 +169,8 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
     rsx! {
         div {
             id: "tasks-kanban-route",
-            class: "mx-auto flex max-w-7xl flex-col gap-4 p-6 lg:p-10",
-            HStack { class: "items-center gap-3",
+            class: "mx-auto flex max-w-7xl flex-col gap-4 p-4 sm:p-6 lg:p-10",
+            div { class: "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2",
                 Heading { level: HeadingLevel::H1, "Tasks (kanban)" }
                 span { "data-testid": "tasks-kanban-version-badge",
                     StatusBadge {
@@ -171,12 +180,12 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
                 }
             }
             if let Some(err) = last_error.read().as_ref() {
-                div { "data-testid": "tasks-kanban-sync-error",
-                    class: "rounded-md border border-border bg-card p-3 text-sm",
-                    "Sync: {err}"
+                Alert {
+                    variant: AlertVariant::Destructive,
+                    AlertTitle { "Sync error" }
+                    AlertDescription { "{err}" }
                 }
             }
-            AddTaskRow { on_add_task }
             match &*snapshot.read_unchecked() {
                 None => rsx! { Text { variant: TextVariant::Muted, "Building local doc…" } },
                 Some(Err(err)) => rsx! { Text { variant: TextVariant::Muted, "Decode failed: {err}" } },
@@ -186,6 +195,7 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
                         group_key: String::from("status"),
                         on_select,
                         on_move,
+                        on_add: Some(on_add_to_bucket),
                     }
                 },
             }
@@ -193,6 +203,7 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
     }
 }
 
+#[allow(dead_code)]
 #[component]
 fn AddTaskRow(on_add_task: Callback<String>) -> Element {
     let mut value = use_signal(String::new);
@@ -301,6 +312,80 @@ fn page_to_row(p: Page) -> BaseRow {
 /// `bucket` (status = `bucket`). Returns None when the bucket is
 /// empty — the caller then picks `lexorank::first()`. Phase 6.5b
 /// MVP: append-only on drop.
+/// Compute the new `sort_order` rank for a kanban drop.
+///
+/// - `drop.before == None` → append. `lexorank::after(tail_rank)`
+///   or `first()` if the bucket was empty.
+/// - `drop.before == Some(target)` → insert just before
+///   `target`. Find the card immediately above `target` in the
+///   target bucket (excluding the dragged card itself) and call
+///   `lexorank::between(prev_rank, target_rank)`. If `target`
+///   is the first card, use `lexorank::before(target_rank)`.
+async fn compute_drop_rank(
+    doc: &CrdtDoc,
+    drop: &super::views::KanbanDrop,
+) -> Result<String, knowledge_proto::architect::RepoError> {
+    let page_repo = PageRepoLoro::new(doc);
+    let pages = page_repo.list(big_page(), None, None).await?;
+
+    // Build the bucket's ordered list of (page_id, sort_order),
+    // excluding the dragged card so its current rank doesn't
+    // interfere with `between` math.
+    let mut bucket: Vec<(Uuid, String)> = pages
+        .items
+        .into_iter()
+        .filter(|p| p.id != drop.page_id)
+        .filter_map(|p| {
+            let fm: serde_json::Value = serde_json::from_str(&p.frontmatter_json).ok()?;
+            let status = fm.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            if status != drop.target_bucket {
+                return None;
+            }
+            let rank = fm
+                .get("sort_order")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_default();
+            Some((p.id, rank))
+        })
+        .collect();
+    bucket.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let Some(before_id) = drop.before else {
+        // Append case.
+        return Ok(match bucket.last() {
+            Some((_, r)) if !r.is_empty() => lexorank::after(r),
+            _ => lexorank::first(),
+        });
+    };
+
+    let pos = bucket.iter().position(|(id, _)| *id == before_id);
+    match pos {
+        Some(0) => {
+            // Insert before the first card.
+            let head_rank = &bucket[0].1;
+            if head_rank.is_empty() {
+                Ok(lexorank::first())
+            } else {
+                Ok(lexorank::before(head_rank))
+            }
+        }
+        Some(i) => {
+            let prev = &bucket[i - 1].1;
+            let target = &bucket[i].1;
+            Ok(lexorank::between(prev, target).unwrap_or_else(|| lexorank::after(prev)))
+        }
+        None => {
+            // before_id isn't in the target bucket — drop landed
+            // on the column rather than a card. Append.
+            Ok(match bucket.last() {
+                Some((_, r)) if !r.is_empty() => lexorank::after(r),
+                _ => lexorank::first(),
+            })
+        }
+    }
+}
+
 async fn tail_rank_in_bucket(
     doc: &CrdtDoc,
     bucket: &str,

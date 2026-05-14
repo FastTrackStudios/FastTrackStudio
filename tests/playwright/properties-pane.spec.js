@@ -25,11 +25,9 @@ test("properties pane appears for a `kind: task` page", async ({ page }) => {
   await page.goto("/tasks-kanban");
   const title = `Pane-${Date.now()}`;
   await page
-    .locator("[data-testid='tasks-kanban-new-task-input']")
+    .locator("[data-testid='kanban-add-input-todo']")
     .fill(title);
-  await page
-    .locator("[data-testid='tasks-kanban-add-button'] button")
-    .click();
+  await page.locator("[data-testid='kanban-add-input-todo']").press("Enter");
   // Wait for the card to register.
   await expect(
     page
@@ -85,11 +83,9 @@ test("editing the status property updates the kanban column on the other tab", a
     await a.goto("/tasks-kanban");
     const title = `PaneEdit-${Date.now()}`;
     await a
-      .locator("[data-testid='tasks-kanban-new-task-input']")
+      .locator("[data-testid='kanban-add-input-todo']")
       .fill(title);
-    await a
-      .locator("[data-testid='tasks-kanban-add-button'] button")
-      .click();
+    await a.locator("[data-testid='kanban-add-input-todo']").press("Enter");
     await expect(
       a
         .locator("[data-testid='kanban-column-todo']")

@@ -39,6 +39,61 @@ test("toggle checkbox flips data-task-done locally", async ({ page }) => {
 });
 
 /**
+ * Filter tabs at the top scope the visible task list. Switching
+ * to "Done" should hide every active row.
+ */
+test("filter tabs scope the visible tasks", async ({ page }) => {
+  await page.goto("/projects");
+  await expect(
+    page.locator("[data-testid='version-badge']"),
+  ).toContainText(/^v[1-9]/);
+  const tabs = page.locator("[data-testid='tasks-filter-tabs']");
+  await expect(tabs).toBeVisible();
+
+  // Snapshot a row's `data-task-done` so we know what to look
+  // for after the filter change.
+  const allRows = page.locator("[data-testid^='task-row-']");
+  await expect(allRows.first()).toBeVisible();
+
+  // Switch to Done tab. Every remaining row must have
+  // data-task-done="true".
+  await tabs.getByText(/Done/).click();
+  await expect(allRows.first()).toBeVisible();
+  const doneStatuses = await allRows.evaluateAll((nodes) =>
+    nodes.map((n) => n.getAttribute("data-task-done")),
+  );
+  expect(doneStatuses.every((s) => s === "true")).toBeTruthy();
+
+  // Switch to Active. Every remaining row must have
+  // data-task-done="false".
+  await tabs.getByText(/Active/).click();
+  await expect(allRows.first()).toBeVisible();
+  const activeStatuses = await allRows.evaluateAll((nodes) =>
+    nodes.map((n) => n.getAttribute("data-task-done")),
+  );
+  expect(activeStatuses.every((s) => s === "false")).toBeTruthy();
+});
+
+/**
+ * The per-project inline add input creates a new task linked to
+ * the matching project.
+ */
+test("inline add input creates a task in the right project", async ({ page }) => {
+  await page.goto("/projects");
+  const project = "Website Redesign";
+  const title = `Inline-${Date.now()}`;
+  const input = page.locator(`[data-testid='add-task-input-${project}']`);
+  await expect(input).toBeVisible();
+  await input.fill(title);
+  await input.press("Enter");
+  // Task appears under the same project card.
+  const projectCard = page.locator(`[data-testid='project-card-${project}']`);
+  await expect(
+    projectCard.locator("[data-testid^='task-row-']").filter({ hasText: title }),
+  ).toBeVisible();
+});
+
+/**
  * Phase post-10 — inline expand opens a properties pane for the
  * task page, the same component `/knowledge` uses. Editing the
  * status dropdown writes to the page's frontmatter and triggers

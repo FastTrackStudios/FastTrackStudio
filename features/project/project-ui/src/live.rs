@@ -36,6 +36,47 @@ use project_proto::architect::Page as PageWindow;
 use project_proto::{UpdateBytes, WorkspaceSyncClient};
 use uuid::Uuid;
 
+/// Filter mode for `/projects`. Stored on a Signal so the page
+/// can re-render on change without re-running the snapshot
+/// resource.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskFilter {
+    All,
+    Active,
+    Done,
+}
+
+impl TaskFilter {
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Active => "Active",
+            Self::Done => "Done",
+        }
+    }
+    fn value(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Active => "active",
+            Self::Done => "done",
+        }
+    }
+    fn parse(s: &str) -> Self {
+        match s {
+            "active" => Self::Active,
+            "done" => Self::Done,
+            _ => Self::All,
+        }
+    }
+    fn matches(self, task: &TaskRow) -> bool {
+        match self {
+            Self::All => true,
+            Self::Active => !task.done,
+            Self::Done => task.done,
+        }
+    }
+}
+
 /// The full route entry. Spawns the sync loop and renders from the
 /// local doc on every imported chunk.
 #[component]
@@ -44,6 +85,7 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
     let version: Signal<u64> = use_signal(|| 0u64);
     let last_error: Signal<Option<String>> = use_signal(|| None::<String>);
     let mut expanded: Signal<Option<Uuid>> = use_signal(|| None);
+    let mut filter: Signal<TaskFilter> = use_signal(|| TaskFilter::All);
 
     // Spawn the sync loop once. Subscribes to `vault/org` (the
     // org-wide reference vault) so tasks + projects are visible
@@ -104,8 +146,20 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
         },
     );
 
+    // Per-project inline task creation.
+    let add_doc = local_doc.read().clone();
+    let on_add_task = use_callback(move |(project_name, title): (String, String)| {
+        let doc = add_doc.clone();
+        spawn(async move {
+            if let Err(e) = create_task_page(&doc, &project_name, &title).await {
+                tracing::warn!(?e, "create task failed");
+            }
+        });
+    });
+
     let version_label = format!("v{}", version.read());
     let expanded_id = *expanded.read();
+    let current_filter = *filter.read();
     let total_tasks: usize = match &*snapshot.read_unchecked() {
         Some(Ok(snap)) => snap.tasks_by_project.values().map(|v| v.len()).sum(),
         _ => 0,
@@ -119,13 +173,16 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
             .count(),
         _ => 0,
     };
+    let active_tasks = total_tasks.saturating_sub(done_tasks);
     rsx! {
         div {
             id: "projects-route",
-            class: "mx-auto flex max-w-5xl flex-col gap-6 p-6 lg:p-10",
+            class: "mx-auto flex max-w-5xl flex-col gap-4 sm:gap-6 p-4 sm:p-6 lg:p-10",
             // ── Page header ────────────────────────────────────
-            HStack { class: "items-center justify-between",
-                HStack { class: "items-center gap-3",
+            // On mobile: stack title above the badge. On sm+:
+            // inline justify-between.
+            div { class: "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2",
+                HStack { class: "items-baseline gap-3 flex-wrap",
                     Heading { level: HeadingLevel::H1, "Projects" }
                     if total_tasks > 0 {
                         Text { variant: TextVariant::Muted, "{done_tasks} of {total_tasks} done" }
@@ -135,6 +192,34 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                     StatusBadge {
                         variant: if last_error.read().is_some() { StatusBadgeVariant::Danger } else { StatusBadgeVariant::Success },
                         label: version_label,
+                    }
+                }
+            }
+            // ── Filter tabs ─────────────────────────────────────
+            if total_tasks > 0 {
+                div { "data-testid": "tasks-filter-tabs",
+                    Tabs {
+                        value: Some(current_filter.value().to_string()),
+                        on_change: Callback::new(move |v: String| {
+                            filter.set(TaskFilter::parse(&v));
+                        }),
+                        TabList {
+                            TabTrigger {
+                                value: "all".to_string(),
+                                index: 0,
+                                "All ({total_tasks})"
+                            }
+                            TabTrigger {
+                                value: "active".to_string(),
+                                index: 1,
+                                "Active ({active_tasks})"
+                            }
+                            TabTrigger {
+                                value: "done".to_string(),
+                                index: 2,
+                                "Done ({done_tasks})"
+                            }
+                        }
                     }
                 }
             }
@@ -158,9 +243,11 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                 Some(Ok(snap)) => rsx! { TasksByProjectView {
                     snapshot: snap.clone(),
                     expanded: expanded_id,
+                    filter: current_filter,
                     on_toggle_done,
                     on_toggle_expand,
                     on_edit_property,
+                    on_add_task,
                 } },
             }
         }
@@ -183,9 +270,11 @@ fn ProjectSkeleton() -> Element {
 pub fn TasksByProjectView(
     snapshot: Snapshot,
     expanded: Option<Uuid>,
+    filter: TaskFilter,
     on_toggle_done: Callback<(Uuid, bool)>,
     on_toggle_expand: Callback<Uuid>,
     on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
+    on_add_task: Callback<(String, String)>,
 ) -> Element {
     if snapshot.ordered_projects.is_empty() && snapshot.tasks_by_project.is_empty() {
         return rsx! {
@@ -202,9 +291,11 @@ pub fn TasksByProjectView(
                     name: project_name.clone(),
                     tasks: snapshot.tasks_by_project.get(project_name).cloned().unwrap_or_default(),
                     expanded,
+                    filter,
                     on_toggle_done,
                     on_toggle_expand,
                     on_edit_property,
+                    on_add_task,
                 }
             }
         }
@@ -216,36 +307,57 @@ fn ProjectBlock(
     name: String,
     tasks: Vec<TaskRow>,
     expanded: Option<Uuid>,
+    filter: TaskFilter,
     on_toggle_done: Callback<(Uuid, bool)>,
     on_toggle_expand: Callback<Uuid>,
     on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
+    on_add_task: Callback<(String, String)>,
 ) -> Element {
     let initials = project_initials(&name);
     let done_count = tasks.iter().filter(|t| t.done).count();
+    let total = tasks.len();
+    let visible_tasks: Vec<TaskRow> = tasks
+        .iter()
+        .filter(|t| filter.matches(t))
+        .cloned()
+        .collect();
+    // Inline create only makes sense for real projects, not the
+    // synthetic `(no project)` bucket.
+    let can_add = name != "(no project)";
+    let card_testid = format!("project-card-{name}");
     rsx! {
-        Card { class: "overflow-hidden",
-            CardHeader { class: "py-4",
+        div { "data-testid": card_testid,
+            Card { class: "overflow-hidden",
+            CardHeader { class: "py-3 sm:py-4",
                 HStack { class: "items-center justify-between gap-3",
-                    HStack { class: "items-center gap-3",
+                    HStack { class: "items-center gap-3 min-w-0",
                         Avatar {
                             size: AvatarSize::Small,
                             AvatarFallback { "{initials}" }
                         }
-                        Heading { level: HeadingLevel::H3, "{name}" }
-                    }
-                    HStack { class: "items-center gap-2",
-                        Badge { variant: BadgeVariant::Secondary,
-                            "{done_count}/{tasks.len()}"
+                        Heading {
+                            level: HeadingLevel::H3,
+                            class: "truncate",
+                            "{name}"
                         }
                     }
+                    Badge { variant: BadgeVariant::Secondary, "{done_count}/{total}" }
                 }
             }
-            CardContent { class: "py-0 pb-4",
-                if tasks.is_empty() {
-                    Text { variant: TextVariant::Muted, "No tasks in this project yet." }
+            CardContent { class: "py-0 pb-3 sm:pb-4",
+                if visible_tasks.is_empty() && !tasks.is_empty() {
+                    div { class: "text-sm text-muted-foreground py-2",
+                        "No tasks match the current filter."
+                    }
+                } else if tasks.is_empty() {
+                    if can_add {
+                        Text { variant: TextVariant::Muted, "No tasks yet — add one below." }
+                    } else {
+                        Text { variant: TextVariant::Muted, "No tasks in this project yet." }
+                    }
                 } else {
                     ItemGroup { class: "gap-1",
-                        for task in tasks.iter() {
+                        for task in visible_tasks.iter() {
                             TaskRowEl {
                                 key: "{task.page_id}",
                                 row: task.clone(),
@@ -256,6 +368,57 @@ fn ProjectBlock(
                             }
                         }
                     }
+                }
+                if can_add {
+                    AddTaskInput {
+                        project_name: name.clone(),
+                        on_submit: on_add_task,
+                    }
+                }
+            }
+            }
+        }
+    }
+}
+
+#[component]
+fn AddTaskInput(project_name: String, on_submit: Callback<(String, String)>) -> Element {
+    let mut value = use_signal(String::new);
+    let testid = format!("add-task-input-{project_name}");
+    let submit_testid = format!("add-task-submit-{project_name}");
+    let project_for_submit = project_name.clone();
+    let mut submit = move |_: ()| {
+        let v = value.read().trim().to_string();
+        if v.is_empty() {
+            return;
+        }
+        on_submit.call((project_for_submit.clone(), v));
+        value.set(String::new());
+    };
+    let mut submit_for_enter = submit.clone();
+    rsx! {
+        div { class: "mt-2 flex items-center gap-2",
+            // Plus glyph as a visual hint instead of a separate
+            // button — single-input affordance is friendlier on
+            // mobile (no fat-finger between two targets).
+            span { class: "text-muted-foreground select-none", "+" }
+            input {
+                "data-testid": testid,
+                r#type: "text",
+                class: "flex-1 h-9 sm:h-8 rounded-md border border-border bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                value: "{value}",
+                placeholder: "Add a task and press Enter",
+                oninput: move |e| value.set(e.value()),
+                onkeydown: move |e| {
+                    if e.key() == Key::Enter { submit_for_enter(()); }
+                },
+            }
+            span { "data-testid": submit_testid,
+                Button {
+                    variant: ButtonVariant::Secondary,
+                    size: ButtonSize::Small,
+                    on_click: move |_| submit(()),
+                    "Add"
                 }
             }
         }
@@ -550,6 +713,65 @@ async fn update_page_property_json(
         )
         .await
         .map_err(|e| format!("update: {e}"))?;
+    Ok(())
+}
+
+/// Create a fresh `kind: task` Knowledge page linked to
+/// `project_name` (via the `projects:` frontmatter array).
+/// Defaults: status=todo, priority=normal. Vault id is taken
+/// from the first vault on the local doc; if none exist, the
+/// caller's seed flow should have planted one.
+async fn create_task_page(
+    doc: &Arc<CrdtDoc>,
+    project_name: &str,
+    title: &str,
+) -> Result<(), String> {
+    use knowledge_crdt::VaultRepoLoro;
+    use knowledge_proto::{PageCreate, VaultRepo};
+    let vault_repo = VaultRepoLoro::new(doc);
+    let big = PageWindow {
+        index: 0,
+        size: 100,
+    };
+    let vaults = vault_repo
+        .list(big, None, None)
+        .await
+        .map_err(|e| format!("vault list: {e}"))?;
+    let vault = vaults
+        .items
+        .into_iter()
+        .next()
+        .ok_or_else(|| "no vault to attach the task to".to_string())?;
+
+    let fm = serde_json::json!({
+        "kind": "task",
+        "title": title,
+        "status": "todo",
+        "priority": "normal",
+        "projects": [project_name],
+    })
+    .to_string();
+    let now = chrono::Utc::now();
+    let page_repo = PageRepoLoro::new(doc);
+    page_repo
+        .create(PageCreate {
+            vault_id: vault.id,
+            folder_id: None,
+            path: format!("{title}.md"),
+            basename: title.into(),
+            ext: "md".into(),
+            aliases: Vec::new(),
+            frontmatter_json: fm,
+            stat_ctime: now,
+            stat_mtime: now,
+            stat_size: 0,
+            is_journal: false,
+            journal_day: None,
+            shadow_for_kind: None,
+            shadow_for_id: None,
+        })
+        .await
+        .map_err(|e| format!("page create: {e}"))?;
     Ok(())
 }
 
