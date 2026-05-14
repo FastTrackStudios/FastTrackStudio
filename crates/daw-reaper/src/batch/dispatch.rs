@@ -149,7 +149,7 @@ async fn dispatch_transport(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::Transport;
+    use daw_proto::transport::service::Transport;
     match op {
         TransportOp::Play(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
@@ -276,7 +276,7 @@ async fn dispatch_track(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::Tracks;
+    use daw_proto::Tracks;
     match op {
         TrackOp::GetTracks(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
@@ -794,7 +794,7 @@ async fn dispatch_item(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::Items;
+    use daw_proto::Items;
     let err = |e: daw_proto::DawError| format!("{e:?}");
     match op {
         ItemOp::GetItems(p, t) => {
@@ -932,7 +932,7 @@ async fn dispatch_take(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::Takes;
+    use daw_proto::Takes;
     match op {
         TakeOp::GetTakes(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
@@ -1051,7 +1051,7 @@ async fn dispatch_marker(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::Markers;
+    use daw_proto::Markers;
     // Fully-qualified calls — `Reaper` impls both `Markers` and
     // `Tracks`, and many verbs (`all`, `get`, `count`, `add`,
     // `remove`, `rename`, `set_color`) appear on both.
@@ -1105,7 +1105,7 @@ async fn dispatch_region(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::Regions;
+    use daw_proto::Regions;
     // Fully-qualified calls — `Reaper` impls multiple service traits
     // and many verbs overlap.
     match op {
@@ -1158,7 +1158,7 @@ async fn dispatch_tempo_map(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::TempoMap;
+    use daw_proto::TempoMap;
     match op {
         TempoMapOp::GetTempoPoints(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
@@ -1417,7 +1417,7 @@ async fn dispatch_ext_state(
     outputs: &[Option<StepOutput>],
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::sync::ExtState;
+    use daw_proto::ExtState;
     match op {
         ExtStateOp::GetExtState(section, key) => {
             Ok(StepOutput::OptStr(ExtState::get(svc, section, key)))

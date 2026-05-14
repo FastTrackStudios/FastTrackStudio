@@ -1,6 +1,6 @@
 //! Remote audio engine handle: [`RemoteAudioEngine`].
 
-use daw_proto::sync::{AudioEngine as AudioEngineTrait, Daw as _};
+use daw_proto::{AudioEngine as AudioEngineTrait, Daw as _};
 use daw_proto::{AudioEngineState, AudioInputInfo, AudioLatency, DawResult};
 
 use super::{ReaperRemote, dispatch, dispatch_read, main_thread};

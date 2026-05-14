@@ -12,7 +12,7 @@
 //! and `get_tempo_and_time_sig_at_on_main_thread` stay public for
 //! callers that hold a main-thread proof (batch sync dispatcher etc).
 
-use daw_proto::sync::TempoMap;
+use daw_proto::TempoMap;
 use daw_proto::{
     DawError, DawResult, Position, ProjectContext, TempoPoint, TimePosition, TimeSignature,
 };

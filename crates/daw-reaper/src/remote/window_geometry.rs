@@ -1,6 +1,6 @@
 //! Remote window geometry handle: [`RemoteWindowGeometry`].
 
-use daw_proto::sync::{Daw as _, WindowGeometry as WindowGeometryTrait};
+use daw_proto::{Daw as _, WindowGeometry as WindowGeometryTrait};
 use daw_proto::{DawResult, ScreensetRect, WindowTarget};
 
 use super::{ReaperRemote, dispatch};

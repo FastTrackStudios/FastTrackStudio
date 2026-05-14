@@ -49,3 +49,15 @@ pub trait PluginLoaderService {
     /// Check if a plugin at the given path is already loaded.
     async fn is_loaded(&self, plugin_path: String) -> bool;
 }
+
+// =============================================================================
+// Sync trait — relocated from `crate::sync::plugin_loader`.
+// =============================================================================
+
+use crate::DawResult;
+
+pub trait PluginLoader {
+    fn load(&self, path: &str) -> DawResult<LoadedPluginInfo>;
+    fn list_loaded(&self) -> Vec<LoadedPluginInfo>;
+    fn is_loaded(&self, path: &str) -> bool;
+}

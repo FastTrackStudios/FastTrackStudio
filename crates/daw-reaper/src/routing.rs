@@ -1380,7 +1380,7 @@ impl ReaperRouting {
 // async `RoutingService` (above) stays parallel for now.
 
 mod sync_impl {
-    use daw_proto::sync::Routing as RoutingTrait;
+    use daw_proto::Routing as RoutingTrait;
     use daw_proto::{DawError, DawResult, RouteType, TrackRoute};
     use reaper_high::{Reaper as ReaperHigh, SendPartnerType, Track};
     use reaper_medium::{EditMode, ReaperVolumeValue, TrackSendCategory};

@@ -6,7 +6,7 @@
 
 use std::ffi::CString;
 
-use daw_proto::sync::ExtState;
+use daw_proto::ExtState;
 use daw_proto::{DawError, DawResult, ProjectContext};
 use reaper_high::Reaper as ReaperHigh;
 

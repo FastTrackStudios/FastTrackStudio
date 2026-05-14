@@ -1,11 +1,16 @@
+//! Root sync `Daw` handle.
+//!
+//! Relocated from the retired `crate::sync` module. The trait is the
+//! entry point for all sync DAW operations on a backend
+//! (`ReaperMainThread`, `Standalone`, …). It's a regular sync trait
+//! rather than an architect::rpc service because its methods aren't
+//! per-project (current_project/project/projects) or are
+//! infrastructure (show_console_msg/last_touched_fx).
+
 use crate::DawResult;
 
-use super::Project;
+use crate::project::Project;
 
-/// Root sync handle. Entry point for all sync DAW operations.
-///
-/// Implementations are constructed by their host crate (e.g. `ReaperMainThread::try_new()`)
-/// and exposed via `daw::current()` once the architecture migration lands.
 pub trait Daw {
     type Project<'a>: Project + 'a
     where

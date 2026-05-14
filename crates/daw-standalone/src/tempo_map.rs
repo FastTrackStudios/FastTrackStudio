@@ -4,7 +4,7 @@
 //! ~400-line async impl with parallel state + event streams retired
 //! in favor of operating directly on the canonical project state.
 
-use daw_proto::sync::TempoMap;
+use daw_proto::TempoMap;
 use daw_proto::{DawError, DawResult, ProjectContext, TempoPoint};
 
 use crate::sync::Standalone;

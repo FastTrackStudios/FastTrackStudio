@@ -4,7 +4,7 @@
 //! current project, then indexes into the FX + parameter. Mount via
 //! `daw_proto::fx_params::serve(Reaper)`.
 
-use daw_proto::sync::FxParams;
+use daw_proto::FxParams;
 use daw_proto::{DawError, DawResult, FxChainContext, FxParameter};
 use reaper_high::{FxChain, Reaper as ReaperHigh, Track};
 

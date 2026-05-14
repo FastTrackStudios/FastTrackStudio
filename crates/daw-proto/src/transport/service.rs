@@ -11,7 +11,7 @@
 //!
 //! Naming note: this trait is `Transport`, same as the data struct.
 //! They share the name because they always have — backend code
-//! addresses them by path (`daw_proto::sync::Transport` for the
+//! addresses them by path (`daw_proto::Transport` for the
 //! trait, `daw_proto::Transport` / `daw_proto::transport::Transport`
 //! for the struct).
 

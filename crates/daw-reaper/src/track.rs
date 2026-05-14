@@ -12,7 +12,7 @@
 
 use std::cell::RefCell;
 
-use daw_proto::sync::Tracks;
+use daw_proto::Tracks;
 use daw_proto::{DawError, DawResult, ProjectContext, Track, TrackRef};
 use reaper_high::{GroupingBehavior, Project, Reaper as ReaperHigh};
 use reaper_medium::GangBehavior;

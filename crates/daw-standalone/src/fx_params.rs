@@ -3,7 +3,7 @@
 //! Backed by `ProjectState::fx_chains` — each `FxEntry` carries a
 //! `params: HashMap<u32, f64>` of normalized parameter values.
 
-use daw_proto::sync::FxParams;
+use daw_proto::FxParams;
 use daw_proto::{DawError, DawResult, FxChainContext, FxParameter};
 
 use crate::sync::{FxChainKey, ProjectState, Standalone};

@@ -267,3 +267,21 @@ pub trait ProjectService {
     /// followed by a `CurrentChanged` event with the current project GUID.
     async fn subscribe(&self, tx: Tx<ProjectEvent>);
 }
+
+// =============================================================================
+// Sync trait — relocated from `crate::sync::project`.
+// =============================================================================
+//
+// `Project` is the per-project sync handle trait. Most sub-domain accessors
+// (transport / regions / markers / tracks / tempo_map / ext_state /
+// fx_chains / fx_params / items / takes / routing) have been lifted out by
+// their architect::rpc ports — clients reach those services through
+// `daw::service::<feature>::Client` with a `ProjectContext` per call.
+//
+// Renamed `Project` so it doesn't clash with the async `ProjectService`
+// above.
+
+pub trait Project {
+    fn guid(&self) -> &str;
+    fn info(&self) -> crate::DawResult<crate::ProjectInfo>;
+}

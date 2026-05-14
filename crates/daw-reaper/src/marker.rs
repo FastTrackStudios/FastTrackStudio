@@ -29,7 +29,7 @@ use std::pin::Pin;
 
 use architect::HasDispatcher;
 use architect::dispatch::{BoxedAny, DispatchError, Dispatcher};
-use daw_proto::sync::Markers;
+use daw_proto::Markers;
 use daw_proto::{DawError, DawResult, Marker, Position, ProjectContext, TimePosition};
 use reaper_high::Reaper as ReaperHigh;
 use reaper_medium::{MarkerOrRegionPosition, PositionInSeconds};

@@ -7,7 +7,7 @@
 //! state. Position advancement isn't simulated here — callers tick
 //! the clock externally if they need playback simulation.
 
-use daw_proto::sync::Transport;
+use daw_proto::transport::service::Transport;
 use daw_proto::{
     DawError, DawResult, LoopRegion, PlayState, ProjectContext, TimeSignature,
     Transport as TransportState,

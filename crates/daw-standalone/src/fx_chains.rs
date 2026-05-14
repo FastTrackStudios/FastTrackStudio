@@ -4,7 +4,7 @@
 //! Each `FxChainContext` maps to a `FxChainKey` for storage; the owning
 //! project is resolved through the current project guid.
 
-use daw_proto::sync::FxChains;
+use daw_proto::FxChains;
 use daw_proto::{DawError, DawResult, Fx, FxChainContext};
 
 use crate::sync::{FxChainKey, FxEntry, Standalone};

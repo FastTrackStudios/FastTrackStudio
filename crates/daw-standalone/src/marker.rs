@@ -14,7 +14,7 @@
 
 use architect::HasDispatcher;
 use architect::dispatch::CurrentThreadDispatcher;
-use daw_proto::sync::Markers;
+use daw_proto::Markers;
 use daw_proto::{DawError, DawResult, Marker, Position, PositionInSeconds, ProjectContext};
 
 use crate::sync::Standalone;

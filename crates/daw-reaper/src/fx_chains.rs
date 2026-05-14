@@ -5,7 +5,7 @@
 //! goes through `daw_proto::fx_chains::serve(Reaper)`; the
 //! architect::rpc bridge dispatches onto the main thread.
 
-use daw_proto::sync::FxChains;
+use daw_proto::FxChains;
 use daw_proto::{DawError, DawResult, Fx, FxChainContext};
 use reaper_high::{FxChain, Reaper as ReaperHigh, Track};
 use reaper_medium::{TrackFxLocation, TransferBehavior};

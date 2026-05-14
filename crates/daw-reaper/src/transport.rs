@@ -17,7 +17,7 @@
 
 use std::ffi::CStr;
 
-use daw_proto::sync::Transport;
+use daw_proto::transport::service::Transport;
 use daw_proto::{
     DawError, DawResult, PlayState, ProjectContext, TimeSignature, Transport as TransportState,
 };

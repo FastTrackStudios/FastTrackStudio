@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use daw_proto::{
-    DawError, DawResult, Fx, FxChainContext, Item, LastTouchedFx, Marker, ProjectInfo, Region,
-    Take, TempoPoint, Track, TrackRoute, Transport as TransportState, sync::Daw,
+    Daw, DawError, DawResult, Fx, FxChainContext, Item, LastTouchedFx, Marker, ProjectInfo, Region,
+    Take, TempoPoint, Track, TrackRoute, Transport as TransportState,
 };
 
 use super::project::StandaloneProject;
@@ -144,7 +144,7 @@ impl StandaloneState {
 
 /// Root sync handle for the in-memory standalone backend.
 ///
-/// Implements [`daw_proto::sync::Daw`]. Construct with [`Standalone::new`] and
+/// Implements [`daw_proto::Daw`]. Construct with [`Standalone::new`] and
 /// optionally seed projects via [`Standalone::seed_project`].
 #[derive(Clone)]
 pub struct Standalone {

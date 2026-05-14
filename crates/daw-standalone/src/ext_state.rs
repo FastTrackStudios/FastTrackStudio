@@ -4,7 +4,7 @@
 //! keys live in `ProjectState::project_ext_state`. The `persist` flag
 //! is ignored — the standalone mock is transient.
 
-use daw_proto::sync::ExtState;
+use daw_proto::ExtState;
 use daw_proto::{DawError, DawResult, ProjectContext};
 
 use crate::sync::Standalone;

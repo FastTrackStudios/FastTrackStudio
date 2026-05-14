@@ -4,7 +4,7 @@
 //! The old async `StandaloneTake` service + per-service locks retire
 //! with the port; everything now goes through canonical project state.
 
-use daw_proto::sync::Takes;
+use daw_proto::Takes;
 use daw_proto::{
     AddTakeMarkerAtPositionRequest, DawError, DawResult, Duration, ItemRef, ProjectContext,
     SourceType, Take, TakeMarker, TakeMarkerCreate, TakeMarkerUpdate, TakeRef,

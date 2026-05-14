@@ -1,7 +1,7 @@
 //! Remote action registry handle: [`RemoteActionRegistry`].
 
 use daw_proto::DawResult;
-use daw_proto::sync::{ActionRegistry as ActionRegistryTrait, Daw as _};
+use daw_proto::{ActionRegistry as ActionRegistryTrait, Daw as _};
 
 use super::{ReaperRemote, dispatch, main_thread};
 

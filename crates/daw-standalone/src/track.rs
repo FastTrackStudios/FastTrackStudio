@@ -6,7 +6,7 @@
 //! storage was retired in favor of operating directly on the
 //! canonical state — fewer places for state to drift.
 
-use daw_proto::sync::Tracks;
+use daw_proto::Tracks;
 use daw_proto::{DawError, DawResult, ProjectContext, Track, TrackRef};
 use uuid::Uuid;
 

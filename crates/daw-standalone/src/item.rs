@@ -5,7 +5,7 @@
 //! `StandaloneItem` async service struct + parallel item state
 //! retired with the port.
 
-use daw_proto::sync::Items;
+use daw_proto::Items;
 use daw_proto::{
     BeatAttachMode, DawError, DawResult, Duration, FadeShape, Item, ItemRef, PositionInSeconds,
     ProjectContext, TrackRef,

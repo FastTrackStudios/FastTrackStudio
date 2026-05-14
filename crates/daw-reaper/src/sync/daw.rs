@@ -2,7 +2,7 @@
 
 use std::marker::PhantomData;
 
-use daw_proto::sync::Daw;
+use daw_proto::Daw;
 use daw_proto::{DawError, DawResult, LastTouchedFx, ProjectInfo};
 use reaper_high::Reaper;
 use reaper_medium::{ProjectRef, TrackFxLocation};

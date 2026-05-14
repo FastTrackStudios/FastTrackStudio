@@ -6,7 +6,7 @@
 //! event streams) retired in favor of operating directly on the
 //! canonical state.
 
-use daw_proto::sync::Regions;
+use daw_proto::Regions;
 use daw_proto::{DawError, DawResult, ProjectContext, Region};
 
 use crate::sync::Standalone;

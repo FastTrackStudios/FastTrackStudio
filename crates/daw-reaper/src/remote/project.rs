@@ -1,6 +1,6 @@
 //! Per-project remote handle: [`RemoteProject`].
 
-use daw_proto::sync::{Daw as _, Project as ProjectTrait};
+use daw_proto::{Daw as _, Project as ProjectTrait};
 use daw_proto::{DawResult, ProjectInfo};
 
 use super::{ReaperRemote, dispatch, main_thread};

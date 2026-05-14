@@ -4,7 +4,7 @@
 //! `HashMap<track_guid, Vec<TrackRoute>>`. Resolves the current
 //! project automatically.
 
-use daw_proto::sync::Routing;
+use daw_proto::Routing;
 use daw_proto::{DawError, DawResult, RouteType, TrackRoute};
 
 use crate::sync::Standalone;

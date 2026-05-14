@@ -1,6 +1,6 @@
 //! Remote toolbar handle: [`RemoteToolbar`].
 
-use daw_proto::sync::{Daw as _, Toolbar as ToolbarTrait};
+use daw_proto::{Daw as _, Toolbar as ToolbarTrait};
 use daw_proto::{DawResult, ToolbarButton, ToolbarTarget};
 
 use super::{ReaperRemote, dispatch, dispatch_read};

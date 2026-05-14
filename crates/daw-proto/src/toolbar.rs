@@ -197,3 +197,21 @@ pub struct TrackedButton {
     /// Workflow that owns this button.
     pub workflow_id: String,
 }
+
+// =============================================================================
+// Sync trait — relocated from `crate::sync::toolbar`.
+// =============================================================================
+//
+// Minimal sync surface: add a button, remove a button, and check whether the
+// host supports toolbar manipulation. Snapshots and bulk capture stay on the
+// async service.
+
+use crate::DawResult;
+
+pub trait Toolbar {
+    fn is_available(&self) -> bool;
+
+    fn add_button(&self, button: ToolbarButton, workflow_id: &str) -> DawResult<()>;
+    fn update_button(&self, button: ToolbarButton, workflow_id: &str) -> DawResult<()>;
+    fn remove_button(&self, target: ToolbarTarget, cmd_name: &str) -> DawResult<()>;
+}

@@ -5,7 +5,7 @@
 //! `Transport` and the trait `Transport` share a name but live at
 //! different paths (struct: `daw_proto::Transport` /
 //! `daw_proto::transport::Transport`; trait:
-//! `daw_proto::sync::Transport`).
+//! `daw_proto::Transport`).
 
 pub mod actions;
 pub mod error;

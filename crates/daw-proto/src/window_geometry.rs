@@ -50,3 +50,26 @@ pub trait WindowGeometryService {
     /// Move + resize to an explicit rect.
     async fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> WindowGeometryResult;
 }
+
+// =============================================================================
+// Sync trait — relocated from `crate::sync::window_geometry`.
+// =============================================================================
+//
+// Operations key off `WindowTarget` (Focused / Main) instead of raw HWND
+// handles, which matches REAPER + SWELL semantics across platforms.
+
+use crate::DawResult;
+
+pub trait WindowGeometry {
+    /// Outer rect of the targeted window in screen coordinates.
+    fn rect(&self, target: WindowTarget) -> Option<ScreensetRect>;
+
+    /// Translate the window by `(dx, dy)` pixels.
+    fn nudge(&self, target: WindowTarget, dx: i32, dy: i32) -> DawResult<()>;
+
+    /// Resize the window by `(dw, dh)` pixels (clamped to a sane minimum).
+    fn grow(&self, target: WindowTarget, dw: i32, dh: i32) -> DawResult<()>;
+
+    /// Replace the window's rect.
+    fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> DawResult<()>;
+}

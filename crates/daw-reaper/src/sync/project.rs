@@ -1,6 +1,6 @@
 //! Per-project sync handle: [`ReaperProject`].
 
-use daw_proto::sync::Project as ProjectTrait;
+use daw_proto::Project as ProjectTrait;
 use daw_proto::{DawResult, ProjectInfo};
 
 use crate::project::project_to_info;

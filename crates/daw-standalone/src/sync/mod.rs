@@ -1,6 +1,6 @@
 //! Sync trait implementation for the standalone backend.
 //!
-//! This module implements `daw_proto::sync::*` traits with an in-memory state
+//! This module implements `daw_proto::*` traits with an in-memory state
 //! store. It is intended for tests and non-REAPER hosts. The state lives behind
 //! a single `std::sync::Mutex` (this is non-realtime control state — std mutex
 //! is fine, this is not the audio path).

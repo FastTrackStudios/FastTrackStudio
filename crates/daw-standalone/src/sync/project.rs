@@ -1,6 +1,6 @@
 //! `StandaloneProject` — per-project sync handle.
 
-use daw_proto::{DawResult, ProjectInfo, sync::Project};
+use daw_proto::{DawResult, Project, ProjectInfo};
 
 use super::daw::Standalone;
 // `ExtState` ported to architect::rpc — see `crate::ext_state`.

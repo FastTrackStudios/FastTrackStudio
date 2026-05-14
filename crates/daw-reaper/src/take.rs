@@ -9,7 +9,7 @@
 
 use std::ffi::CString;
 
-use daw_proto::sync::Takes;
+use daw_proto::Takes;
 use daw_proto::{
     AddTakeMarkerAtPositionRequest, DawError, DawResult, Duration, ItemRef, ProjectContext,
     SourceType, Take, TakeMarker, TakeMarkerCreate, TakeMarkerUpdate, TakeRef,

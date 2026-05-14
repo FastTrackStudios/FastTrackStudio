@@ -567,7 +567,7 @@ impl Default for ReaperItem {
 // `HasDispatcher`). Mount through `daw_proto::item::serve(Reaper)`. Mutations
 // return `DawResult<()>` so callers can see why a handle resolved to nothing.
 
-use daw_proto::sync::Items;
+use daw_proto::Items;
 
 fn item_not_found(item: &ItemRef) -> daw_proto::DawError {
     daw_proto::DawError::not_found("Item", &format!("{item:?}"))

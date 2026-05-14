@@ -317,3 +317,28 @@ pub trait ActionRegistryService {
 unsafe impl vox_types::Reborrow for ActionEvent {
     type Ref<'a> = ActionEvent;
 }
+
+// =============================================================================
+// Sync trait — relocated from `crate::sync::action_registry`.
+// =============================================================================
+//
+// Setup-time service used during plugin/extension init. Stays as a plain
+// sync trait until its architect::rpc port lands.
+
+use crate::DawResult;
+
+pub trait ActionRegistry {
+    /// Register a plain action; returns the host-assigned command id.
+    fn register(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    /// Register an action that also appears in the host's main menu.
+    fn register_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    /// Register a toggle (on/off) action.
+    fn register_toggle(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    /// Register a toggle action that also appears in the main menu.
+    fn register_toggle_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    fn unregister(&self, cmd_name: &str) -> DawResult<()>;
+}

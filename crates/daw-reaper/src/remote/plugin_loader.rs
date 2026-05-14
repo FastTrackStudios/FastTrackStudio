@@ -1,6 +1,6 @@
 //! Remote plugin loader handle: [`RemotePluginLoader`].
 
-use daw_proto::sync::{Daw as _, PluginLoader as PluginLoaderTrait};
+use daw_proto::{Daw as _, PluginLoader as PluginLoaderTrait};
 use daw_proto::{DawResult, LoadedPluginInfo};
 
 use super::{ReaperRemote, dispatch, dispatch_read, main_thread};
