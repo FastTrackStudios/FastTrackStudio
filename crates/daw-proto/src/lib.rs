@@ -85,6 +85,9 @@ pub use screenset::*;
 // architect-emitted `serve` / `descriptor` / `Dispatcher` aliases
 // can't be glob-imported at the crate root.)
 #[cfg(feature = "vox")]
+pub use ext_state::ExtStateClient;
+pub use ext_state::{ExtState, ExtStateRpc};
+#[cfg(feature = "vox")]
 pub use take::TakesClient;
 pub use take::{Takes, TakesRpc};
 #[cfg(feature = "vox")]

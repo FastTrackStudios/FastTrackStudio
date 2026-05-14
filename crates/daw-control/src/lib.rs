@@ -121,7 +121,7 @@ pub(crate) use daw_proto::ActionRegistryServiceClient;
 pub(crate) use daw_proto::AudioEngineServiceClient;
 pub(crate) use daw_proto::AutomationServiceClient;
 pub(crate) use daw_proto::DawFileServiceClient;
-pub(crate) use daw_proto::ExtStateServiceClient;
+pub(crate) use daw_proto::ExtStateClient;
 pub(crate) use daw_proto::FxServiceClient;
 pub(crate) use daw_proto::HealthServiceClient;
 pub(crate) use daw_proto::InputServiceClient;
@@ -221,7 +221,7 @@ pub struct DawClients {
     pub(crate) live_midi: LiveMidiServiceClient,
     pub(crate) midi: MidiServiceClient,
     pub(crate) audio_engine: AudioEngineServiceClient,
-    pub(crate) ext_state: ExtStateServiceClient,
+    pub(crate) ext_state: ExtStateClient,
     pub(crate) health: HealthServiceClient,
     pub(crate) input: InputServiceClient,
     pub(crate) toolbar: ToolbarServiceClient,
@@ -257,7 +257,7 @@ impl DawClients {
             live_midi: LiveMidiServiceClient::new(handle.clone()),
             midi: MidiServiceClient::new(handle.clone()),
             audio_engine: AudioEngineServiceClient::new(handle.clone()),
-            ext_state: ExtStateServiceClient::new(handle.clone()),
+            ext_state: ExtStateClient::new(handle.clone()),
             health: HealthServiceClient::new(handle.clone()),
             input: InputServiceClient::new(handle.clone()),
             toolbar: ToolbarServiceClient::new(handle.clone()),

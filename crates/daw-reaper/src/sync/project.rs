@@ -5,9 +5,7 @@ use daw_proto::{DawResult, ProjectInfo};
 
 use crate::project::project_to_info;
 
-use super::{
-    ReaperExtState, ReaperFxChains, ReaperFxParams, ReaperItems, ReaperMainThread, ReaperRouting,
-};
+use super::{ReaperFxChains, ReaperFxParams, ReaperItems, ReaperMainThread, ReaperRouting};
 
 /// A handle scoped to a single REAPER project tab.
 pub struct ReaperProject<'a> {
@@ -22,10 +20,6 @@ impl<'a> ReaperProject<'a> {
 }
 
 impl<'a> ProjectTrait for ReaperProject<'a> {
-    type ExtState<'b>
-        = ReaperExtState<'b>
-    where
-        Self: 'b;
     type FxChains<'b>
         = ReaperFxChains<'b>
     where
@@ -50,10 +44,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
     fn info(&self) -> DawResult<ProjectInfo> {
         let project = super::resolve_project(&self.guid)?;
         Ok(project_to_info(&project))
-    }
-
-    fn ext_state(&self) -> Self::ExtState<'_> {
-        ReaperExtState::new(self.mt)
     }
 
     fn fx_chains(&self) -> Self::FxChains<'_> {

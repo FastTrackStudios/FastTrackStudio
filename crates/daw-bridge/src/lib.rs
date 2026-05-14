@@ -32,11 +32,10 @@ use routed_handler::{DawConnectionAcceptor, RoutedHandler};
 // Service dispatchers for method ID routing
 use daw::service::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
-    DawFileServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
-    HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
-    LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
-    ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    DawFileServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher,
+    ItemServiceDispatcher, LiveMidiServiceDispatcher, MidiServiceDispatcher,
+    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RoutingServiceDispatcher,
+    ScreensetServiceDispatcher, ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -166,7 +165,7 @@ async fn register_daw_dispatcher() {
     // Tracks ported — mount via daw::service::track::serve(Reaper).
     let routing = daw::reaper::ReaperRouting::new();
     let live_midi = daw::reaper::ReaperLiveMidi::new();
-    let ext_state = daw::reaper::ReaperExtState::new();
+    // ExtState ported — mount via daw::service::ext_state::serve(Reaper).
     let item = daw::reaper::ReaperItem::new();
     // Takes ported — mount via daw::service::take::serve(Reaper).
     let health = daw::reaper::ReaperHealth::new();
@@ -185,13 +184,12 @@ async fn register_daw_dispatcher() {
     use daw::service::{
         action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
         batch_service_service_descriptor, daw_file_service_service_descriptor,
-        ext_state_service_service_descriptor, fx_service_service_descriptor,
-        health_service_service_descriptor, input_service_service_descriptor,
-        item_service_service_descriptor, live_midi_service_service_descriptor,
-        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
-        project_service_service_descriptor, routing_service_service_descriptor,
-        screenset_service_service_descriptor, toolbar_service_service_descriptor,
-        window_geometry_service_service_descriptor,
+        fx_service_service_descriptor, health_service_service_descriptor,
+        input_service_service_descriptor, item_service_service_descriptor,
+        live_midi_service_service_descriptor, midi_service_service_descriptor,
+        plugin_loader_service_service_descriptor, project_service_service_descriptor,
+        routing_service_service_descriptor, screenset_service_service_descriptor,
+        toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -248,8 +246,8 @@ async fn register_daw_dispatcher() {
             LiveMidiServiceDispatcher::new(live_midi),
         )
         .with(
-            ext_state_service_service_descriptor(),
-            ExtStateServiceDispatcher::new(ext_state),
+            daw::service::ext_state::descriptor(),
+            daw::service::ext_state::serve(daw::reaper::Reaper),
         )
         .with(
             health_service_service_descriptor(),

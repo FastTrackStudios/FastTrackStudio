@@ -1,75 +1,55 @@
-//! Extension State — Persistent Key-Value Storage
+//! Extension State — persistent key-value storage (architect::rpc port).
 //!
-//! Inspired by rea-rs's `HasExtState` trait. Provides persistent key-value
-//! storage via REAPER's `GetExtState`/`SetExtState`/`DeleteExtState` C API.
+//! Sync trait + `#[architect::rpc]` derives the async vox client +
+//! dispatcher. Stateless singleton backends — `ProjectContext` and
+//! the section/key strings flow through every call.
 //!
-//! Values are stored as strings, scoped by a `section` namespace and `key`.
-//! The `persist` flag controls whether values survive REAPER restarts
-//! (stored in `reaper-extstate.ini`).
+//! Global keys live in REAPER's `reaper-extstate.ini` (`persist=true`)
+//! or memory (`persist=false`); project-scoped keys live inside the
+//! `.RPP` file.
 //!
-//! Typed access via serde is provided client-side in `daw-control`, not here.
-//! This keeps the proto layer free of serde dependencies.
+//! Typed access via serde is provided client-side in `daw-control`,
+//! not here — keeps the proto layer free of serde deps.
 
+use crate::DawResult;
 use crate::project::ProjectContext;
-use vox::service;
 
-/// Service for persistent key-value storage (REAPER's ExtState API).
-///
-/// Each key is scoped by a `section` string (typically your extension name)
-/// and a `key` string. Values are plain strings at the RPC level.
-///
-/// # Example (via daw-control)
-///
-/// ```rust,ignore
-/// // Store a value
-/// daw.ext_state().set("MyExtension", "last_preset", "Clean Guitar", true).await?;
-///
-/// // Retrieve it
-/// let preset = daw.ext_state().get("MyExtension", "last_preset").await?;
-/// ```
-#[service]
-pub trait ExtStateService {
-    /// Get a value by section and key. Returns `None` if not set or empty.
-    async fn get_ext_state(&self, section: String, key: String) -> Option<String>;
+#[architect_rpc_derive::rpc]
+pub trait ExtState {
+    /// Get a global value. `None` if unset or empty.
+    fn get(&self, section: &str, key: &str) -> Option<String>;
 
-    /// Set a value. If `persist` is true, it survives REAPER restarts.
-    async fn set_ext_state(&self, section: String, key: String, value: String, persist: bool);
+    /// Set a global value. `persist=true` writes through to
+    /// `reaper-extstate.ini`; `false` keeps it in memory only.
+    fn set(&self, section: &str, key: &str, value: &str, persist: bool) -> DawResult<()>;
 
-    /// Delete a value. If `persist` is true, also removes from persistent storage.
-    async fn delete_ext_state(&self, section: String, key: String, persist: bool);
+    /// Delete a global value. `persist=true` removes it from
+    /// persistent storage as well.
+    fn delete(&self, section: &str, key: &str, persist: bool) -> DawResult<()>;
 
-    /// Check if a value exists for the given section and key.
-    async fn has_ext_state(&self, section: String, key: String) -> bool;
+    /// Whether a global value is set.
+    fn has(&self, section: &str, key: &str) -> bool;
 
-    // === Project-Scoped ExtState ===
-    // These methods store data in the project file (.RPP) instead of global storage.
+    /// Project-scoped get. Returns `None` if unset.
+    fn get_project(&self, project: ProjectContext, section: &str, key: &str) -> Option<String>;
 
-    /// Get a project-scoped value by section and key. Returns `None` if not set or empty.
-    /// Project-scoped values are saved with the .RPP file.
-    async fn get_project_ext_state(
+    /// Project-scoped set. Value lives inside the `.RPP` file.
+    fn set_project(
         &self,
         project: ProjectContext,
-        section: String,
-        key: String,
-    ) -> Option<String>;
+        section: &str,
+        key: &str,
+        value: &str,
+    ) -> DawResult<()>;
 
-    /// Set a project-scoped value. The value is saved with the project file.
-    async fn set_project_ext_state(
-        &self,
-        project: ProjectContext,
-        section: String,
-        key: String,
-        value: String,
-    );
+    /// Project-scoped delete.
+    fn delete_project(&self, project: ProjectContext, section: &str, key: &str) -> DawResult<()>;
 
-    /// Delete a project-scoped value.
-    async fn delete_project_ext_state(&self, project: ProjectContext, section: String, key: String);
-
-    /// Check if a project-scoped value exists for the given section and key.
-    async fn has_project_ext_state(
-        &self,
-        project: ProjectContext,
-        section: String,
-        key: String,
-    ) -> bool;
+    /// Whether a project-scoped value is set.
+    fn has_project(&self, project: ProjectContext, section: &str, key: &str) -> bool;
 }
+
+#[cfg(feature = "vox")]
+pub use ExtStateRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use ext_state_rpc_service_descriptor as descriptor;

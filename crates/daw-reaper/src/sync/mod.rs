@@ -9,7 +9,7 @@
 //! borrow.
 
 pub mod daw;
-pub mod ext_state;
+// ext_state ported to architect::rpc — see `crate::ext_state`.
 pub mod fx_chains;
 pub mod fx_params;
 pub mod items;
@@ -27,7 +27,6 @@ pub mod routing;
 // transport ported to architect::rpc — see `crate::transport`.
 
 pub use daw::ReaperMainThread;
-pub use ext_state::ReaperExtState;
 pub use fx_chains::ReaperFxChains;
 pub use fx_params::ReaperFxParams;
 pub use items::ReaperItems;

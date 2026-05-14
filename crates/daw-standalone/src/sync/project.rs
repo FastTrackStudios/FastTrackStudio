@@ -3,7 +3,7 @@
 use daw_proto::{DawResult, ProjectInfo, sync::Project};
 
 use super::daw::Standalone;
-use super::ext_state::StandaloneExtState;
+// `ExtState` ported to architect::rpc — see `crate::ext_state`.
 use super::fx_chains::StandaloneFxChains;
 use super::fx_params::StandaloneFxParams;
 use super::items::StandaloneItems;
@@ -29,10 +29,6 @@ impl<'a> StandaloneProject<'a> {
 }
 
 impl<'a> Project for StandaloneProject<'a> {
-    type ExtState<'b>
-        = StandaloneExtState<'b>
-    where
-        Self: 'b;
     type FxChains<'b>
         = StandaloneFxChains<'b>
     where
@@ -56,10 +52,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn info(&self) -> DawResult<ProjectInfo> {
         self.daw.with_project(&self.guid, |p| p.info.clone())
-    }
-
-    fn ext_state(&self) -> Self::ExtState<'_> {
-        StandaloneExtState::new(self.daw, self.guid.clone())
     }
 
     fn fx_chains(&self) -> Self::FxChains<'_> {

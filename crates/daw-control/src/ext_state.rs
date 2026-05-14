@@ -52,7 +52,7 @@ impl ExtState {
         Ok(self
             .clients
             .ext_state
-            .get_ext_state(section.to_string(), key.to_string())
+            .get(section.to_string(), key.to_string())
             .await?)
     }
 
@@ -66,13 +66,13 @@ impl ExtState {
     ) -> crate::Result<()> {
         self.clients
             .ext_state
-            .set_ext_state(
+            .set(
                 section.to_string(),
                 key.to_string(),
                 value.to_string(),
                 persist,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -80,8 +80,8 @@ impl ExtState {
     pub async fn delete(&self, section: &str, key: &str, persist: bool) -> crate::Result<()> {
         self.clients
             .ext_state
-            .delete_ext_state(section.to_string(), key.to_string(), persist)
-            .await?;
+            .delete(section.to_string(), key.to_string(), persist)
+            .await??;
         Ok(())
     }
 
@@ -90,7 +90,7 @@ impl ExtState {
         Ok(self
             .clients
             .ext_state
-            .has_ext_state(section.to_string(), key.to_string())
+            .has(section.to_string(), key.to_string())
             .await?)
     }
 

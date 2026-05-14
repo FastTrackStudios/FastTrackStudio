@@ -85,7 +85,9 @@ pub use audio_accessor::ReaperAudioAccessor;
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
 pub use dawfile_service::DawFileOps;
-pub use ext_state::ReaperExtState;
+// `ExtState` impl'd on `Reaper` — see `crate::ext_state`. The old
+// async `ReaperExtState` service struct retired with the architect
+// rpc port.
 pub use fx::ReaperFx;
 pub use health::ReaperHealth;
 pub use input::ReaperInput;

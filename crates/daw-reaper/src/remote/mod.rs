@@ -15,7 +15,7 @@
 //! `&'a ReaperRemote` and inherit its `Send + Sync` discipline via the borrow.
 
 pub mod daw;
-pub mod ext_state;
+// ext_state ported to architect::rpc — see `crate::ext_state`.
 pub mod fx_chains;
 pub mod fx_params;
 pub mod items;
@@ -33,7 +33,6 @@ pub mod routing;
 // transport ported to architect::rpc — see `crate::transport`.
 
 pub use daw::ReaperRemote;
-pub use ext_state::RemoteExtState;
 pub use fx_chains::RemoteFxChains;
 pub use fx_params::RemoteFxParams;
 pub use items::RemoteItems;

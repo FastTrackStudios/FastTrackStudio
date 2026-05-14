@@ -24,7 +24,7 @@ pub async fn dispatch_op(
     tempo_map_svc: &crate::Reaper,
     midi_svc: &crate::ReaperMidi,
     live_midi_svc: &crate::ReaperLiveMidi,
-    ext_state_svc: &crate::ReaperExtState,
+    ext_state_svc: &crate::Reaper,
     audio_engine_svc: &crate::ReaperAudioEngine,
     position_svc: &crate::ReaperPositionConversion,
     health_svc: &crate::ReaperHealth,
@@ -1410,51 +1410,45 @@ async fn dispatch_live_midi(
 async fn dispatch_ext_state(
     op: &ExtStateOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperExtState,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::ExtStateService;
+    use daw_proto::sync::ExtState;
     match op {
-        ExtStateOp::GetExtState(section, key) => Ok(StepOutput::OptStr(
-            svc.get_ext_state(section.clone(), key.clone()).await,
-        )),
+        ExtStateOp::GetExtState(section, key) => {
+            Ok(StepOutput::OptStr(ExtState::get(svc, section, key)))
+        }
         ExtStateOp::SetExtState(section, key, value, persist) => {
-            svc.set_ext_state(section.clone(), key.clone(), value.clone(), *persist)
-                .await;
+            ExtState::set(svc, section, key, value, *persist).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         ExtStateOp::DeleteExtState(section, key, persist) => {
-            svc.delete_ext_state(section.clone(), key.clone(), *persist)
-                .await;
+            ExtState::delete(svc, section, key, *persist).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
-        ExtStateOp::HasExtState(section, key) => Ok(StepOutput::Bool(
-            svc.has_ext_state(section.clone(), key.clone()).await,
-        )),
+        ExtStateOp::HasExtState(section, key) => {
+            Ok(StepOutput::Bool(ExtState::has(svc, section, key)))
+        }
         ExtStateOp::GetProjectExtState(p, section, key) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptStr(
-                svc.get_project_ext_state(ctx, section.clone(), key.clone())
-                    .await,
-            ))
+            Ok(StepOutput::OptStr(ExtState::get_project(
+                svc, ctx, section, key,
+            )))
         }
         ExtStateOp::SetProjectExtState(p, section, key, value) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_project_ext_state(ctx, section.clone(), key.clone(), value.clone())
-                .await;
+            ExtState::set_project(svc, ctx, section, key, value).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         ExtStateOp::DeleteProjectExtState(p, section, key) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.delete_project_ext_state(ctx, section.clone(), key.clone())
-                .await;
+            ExtState::delete_project(svc, ctx, section, key).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         ExtStateOp::HasProjectExtState(p, section, key) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Bool(
-                svc.has_project_ext_state(ctx, section.clone(), key.clone())
-                    .await,
-            ))
+            Ok(StepOutput::Bool(ExtState::has_project(
+                svc, ctx, section, key,
+            )))
         }
     }
 }

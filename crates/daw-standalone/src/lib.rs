@@ -41,7 +41,7 @@ mod transport;
 mod ui;
 
 pub use automation::StandaloneAutomation;
-pub use ext_state::StandaloneExtState;
+// `ExtState` impl'd directly on `Standalone` — see `crate::ext_state`.
 pub use fx::StandaloneFx;
 pub use item::{StandaloneItem, StandaloneTake};
 pub use live_midi::StandaloneLiveMidi;

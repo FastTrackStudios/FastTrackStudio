@@ -63,6 +63,10 @@ pub struct ProjectState {
     pub next_marker_id: u32,
     /// Per-track ext state keyed by `(track_guid, section, key)`.
     pub track_ext_state: HashMap<(String, String, String), String>,
+    /// Project-scoped ext state keyed by `(section, key)`. Mirrors
+    /// REAPER's GetProjExtState/SetProjExtState semantics — these
+    /// values live with the project, not the host.
+    pub project_ext_state: HashMap<(String, String), String>,
 
     // Phase 2 storage ─────────────────────────────────────────────────────
     /// FX chains keyed by their context.
@@ -99,6 +103,7 @@ impl ProjectState {
             next_region_id: 0,
             next_marker_id: 0,
             track_ext_state: HashMap::new(),
+            project_ext_state: HashMap::new(),
             fx_chains: HashMap::new(),
             items: HashMap::new(),
             items_by_track: HashMap::new(),

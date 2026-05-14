@@ -26,7 +26,7 @@
 mod action_registry;
 mod audio_engine;
 mod daw;
-mod ext_state;
+// `ExtState` ported to architect::rpc — see `crate::ext_state`.
 mod fx_chains;
 mod fx_params;
 mod items;
@@ -44,10 +44,12 @@ mod toolbar;
 // `Transport` ported to architect::rpc — see `crate::transport::service`.
 mod window_geometry;
 
+pub use crate::ext_state::{ExtState, ExtStateRpc};
+#[cfg(feature = "vox")]
+pub use crate::ext_state::{ExtStateClient, serve as serve_ext_state};
 pub use action_registry::ActionRegistry;
 pub use audio_engine::AudioEngine;
 pub use daw::Daw;
-pub use ext_state::ExtState;
 pub use fx_chains::FxChains;
 pub use fx_params::FxParams;
 pub use items::Items;

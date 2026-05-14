@@ -12,7 +12,7 @@
 //! need broader surgery to converge.
 
 mod daw;
-mod ext_state;
+// ext_state ported to architect::rpc — see `crate::ext_state`.
 mod fx_chains;
 mod fx_params;
 mod items;
@@ -32,7 +32,6 @@ mod routing;
 pub use daw::{
     FxChainKey, FxEntry, ItemEntry, ProjectState, Standalone, StandaloneState, TakeList,
 };
-pub use ext_state::StandaloneExtState;
 pub use fx_chains::StandaloneFxChains;
 pub use fx_params::StandaloneFxParams;
 pub use items::StandaloneItems;

@@ -6,23 +6,22 @@
 use daw_proto::automation::{AutomationServiceDispatcher, automation_service_service_descriptor};
 use daw_proto::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
-    ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
-    InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
-    MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
-    RoutingServiceDispatcher, ScreensetServiceDispatcher, ToolbarServiceDispatcher,
-    WindowGeometryServiceDispatcher,
+    FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
+    LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
+    ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
+    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
-use daw_proto::{marker, region, take, tempo_map, track, transport};
+use daw_proto::{ext_state, marker, region, take, tempo_map, track, transport};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
-    daw_file_service_service_descriptor, ext_state_service_service_descriptor,
-    fx_service_service_descriptor, health_service_service_descriptor,
-    input_service_service_descriptor, item_service_service_descriptor,
-    live_midi_service_service_descriptor, midi_service_service_descriptor,
-    plugin_loader_service_service_descriptor, project_service_service_descriptor,
-    routing_service_service_descriptor, screenset_service_service_descriptor,
-    toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
+    daw_file_service_service_descriptor, fx_service_service_descriptor,
+    health_service_service_descriptor, input_service_service_descriptor,
+    item_service_service_descriptor, live_midi_service_service_descriptor,
+    midi_service_service_descriptor, plugin_loader_service_service_descriptor,
+    project_service_service_descriptor, routing_service_service_descriptor,
+    screenset_service_service_descriptor, toolbar_service_service_descriptor,
+    window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -56,7 +55,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     // Tracks ported to architect::rpc — mounted via track::serve(Reaper)
     let routing = crate::ReaperRouting::new();
     let live_midi = crate::ReaperLiveMidi::new();
-    let ext_state = crate::ReaperExtState::new();
+    // ExtState ported — mount via ext_state::serve(Reaper)
     let item = crate::ReaperItem::new();
     // Takes ported to architect::rpc — mounted via take::serve(Reaper)
     let health = crate::ReaperHealth::new();
@@ -108,10 +107,7 @@ pub fn create_daw_handler() -> RoutedHandler {
             live_midi_service_service_descriptor(),
             LiveMidiServiceDispatcher::new(live_midi),
         )
-        .with(
-            ext_state_service_service_descriptor(),
-            ExtStateServiceDispatcher::new(ext_state),
-        )
+        .with(ext_state::descriptor(), ext_state::serve(crate::Reaper))
         .with(
             health_service_service_descriptor(),
             HealthServiceDispatcher::new(health),

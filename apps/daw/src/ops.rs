@@ -44,7 +44,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::automation_service_service_descriptor(),
         daw::service::batch_service_service_descriptor(),
         daw::service::dock_host_service_service_descriptor(),
-        daw::service::ext_state_service_service_descriptor(),
+        daw::service::ext_state::descriptor(),
         daw::service::fx_service_service_descriptor(),
         daw::service::health_service_service_descriptor(),
         daw::service::input_service_service_descriptor(),

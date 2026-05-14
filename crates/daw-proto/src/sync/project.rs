@@ -1,6 +1,6 @@
 use crate::DawResult;
 
-use super::{ExtState, FxChains, FxParams, Items, Routing};
+use super::{FxChains, FxParams, Items, Routing};
 
 /// Per-project sync handle. Owns sub-domain accessors.
 ///
@@ -8,9 +8,6 @@ use super::{ExtState, FxChains, FxParams, Items, Routing};
 /// been lifted out by their architect::rpc ports. Other accessors
 /// follow as their services are ported.
 pub trait Project {
-    type ExtState<'a>: ExtState + 'a
-    where
-        Self: 'a;
     type FxChains<'a>: FxChains + 'a
     where
         Self: 'a;
@@ -31,7 +28,6 @@ pub trait Project {
     // accessors retired by their architect::rpc ports — mount the
     // singletons via `<feature>::serve(Reaper)` or use the architect-
     // emitted clients directly with a ProjectContext.
-    fn ext_state(&self) -> Self::ExtState<'_>;
     fn fx_chains(&self) -> Self::FxChains<'_>;
     fn fx_params(&self) -> Self::FxParams<'_>;
     fn items(&self) -> Self::Items<'_>;
