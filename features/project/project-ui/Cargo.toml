@@ -5,15 +5,14 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-# Dumb Dioxus components for the `project` feature.
+# Dioxus components for the `project` feature.
 #
-# Scoped to the `Project` entity for v1 — Task/Cycle/Milestone come
-# later. Caller hands in data + receives events. No state ownership,
-# no Loro client, no WebSocket — keeps the components portable and
-# easy to storybook in isolation. `task-ui` does the wiring
-# (constructing `ProjectRepoLoro` against a workspace-wide `CrdtDoc`,
-# calling these components with the live list, dispatching
-# `create`/`delete`).
+# Two layers:
+#   - Dumb components — data + callbacks in, RSX out. Storybook-able
+#     in isolation; no I/O.
+#   - "Live" wrappers — own a `use_resource` and a vox client connect
+#     so a route can mount them with just a URL. These pull in the
+#     vox-websocket transport and only compile under wasm32.
 #
 # Outside the workspace because dioxus + wasm constraints can't be
 # unified with the native server build.
@@ -25,6 +24,12 @@ chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 uuid = { workspace = true, features = ["v4", "js"] }
 
 fts-ui.workspace = true
+
+# Vox client surface — this crate owns the wasm fetching glue for the
+# project feature so task-ui only routes; it doesn't construct
+# clients.
+vox-core = { workspace = true }
+vox-websocket = { workspace = true }
 
 # Web-only — clipboard writes from the TaskGitPanel. Gated with
 # `#[cfg(target_arch = "wasm32")]` at the call sites.

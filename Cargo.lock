@@ -6691,6 +6691,8 @@ dependencies = [
  "fts-ui",
  "project-proto",
  "uuid",
+ "vox-core 0.3.1",
+ "vox-websocket",
  "web-sys",
 ]
 

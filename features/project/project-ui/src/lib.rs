@@ -1,13 +1,17 @@
-//! Project feature UI. Dumb components — data + callbacks in, RSX out.
+//! Project feature UI.
 //!
-//! - [`ProjectList`]       — full collection view, dispatches `on_delete`
-//! - [`ProjectRow`]        — single-row presentation (composable into other lists)
-//! - [`ProjectCreateForm`] — minimal new-project form, emits the create payload
-//! - [`ProjectDashboard`]  — purpose-built dashboard for the live route
-//! - [`pm`]                — task-management components (list / board / sheet
-//!                           / palette / header / priority badge)
+//! Two layers:
+//! - Dumb components — `ProjectList`, `ProjectRow`, `ProjectCreateForm`,
+//!   `ProjectDashboard`, the `pm::*` task-management views — caller
+//!   hands data + callbacks, gets RSX. Storybook-able in isolation.
+//! - [`live`] wrappers — own a `use_resource` and a vox client
+//!   connect, so a route can mount the feature with just a URL prop.
+//!   Wasm-only fetching; native build returns a placeholder error.
 
+pub mod live;
 pub mod pm;
+
+pub use live::{Snapshot, TasksByProjectLive, TasksByProjectView};
 pub use pm::*;
 
 use dioxus::prelude::*;
