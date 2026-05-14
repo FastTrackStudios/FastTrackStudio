@@ -7,7 +7,8 @@ use super::daw::Standalone;
 // `FxChains` ported to architect::rpc — see `crate::fx_chains`.
 // `FxParams` ported to architect::rpc — see `crate::fx_params`.
 use super::items::StandaloneItems;
-use super::routing::StandaloneRouting;
+// `Routing` ported to architect::rpc — `impl Routing for Standalone`
+// lives at `crate::routing_sync`.
 // `Takes` ported to architect::rpc — `impl Takes for Standalone`
 // lives at `crate::take`. Borrowed view retired with the port.
 // `Tracks` ported to architect::rpc — `impl Tracks for Standalone`
@@ -33,10 +34,6 @@ impl<'a> Project for StandaloneProject<'a> {
         = StandaloneItems<'b>
     where
         Self: 'b;
-    type Routing<'b>
-        = StandaloneRouting<'b>
-    where
-        Self: 'b;
 
     fn guid(&self) -> &str {
         &self.guid
@@ -48,9 +45,5 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn items(&self) -> Self::Items<'_> {
         StandaloneItems::new(self.daw, self.guid.clone())
-    }
-
-    fn routing(&self) -> Self::Routing<'_> {
-        StandaloneRouting::new(self.daw, self.guid.clone())
     }
 }

@@ -1,10 +1,14 @@
-//! Track sends, receives, and hardware outputs.
+//! Routing service (architect::rpc port) — sync surface for the
+//! per-track sends / receives / hardware-outputs core.
 //!
-//! Sends are scoped to source-track guid + send index. Adding a send takes the
-//! destination track guid and returns the new send index on the source.
+//! The fuller async `RoutingService` (set_mono, set_phase,
+//! source/dest channel mapping, parent send, subscribe_routing,
+//! …) stays parallel for now — it's tracked as separate work in the
+//! punch list. This trait covers the canonical sync surface.
 
 use crate::{DawResult, TrackRoute};
 
+#[architect_rpc_derive::rpc]
 pub trait Routing {
     fn sends(&self, source_track_guid: &str) -> Vec<TrackRoute>;
     fn receives(&self, dest_track_guid: &str) -> Vec<TrackRoute>;
@@ -21,3 +25,8 @@ pub trait Routing {
     fn set_send_muted(&self, track_guid: &str, send_idx: u32, muted: bool) -> DawResult<()>;
     fn is_send_muted(&self, track_guid: &str, send_idx: u32) -> bool;
 }
+
+#[cfg(feature = "vox")]
+pub use RoutingRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use routing_rpc_service_descriptor as descriptor;

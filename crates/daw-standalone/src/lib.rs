@@ -34,6 +34,7 @@ mod project;
 mod region;
 mod resource;
 mod routing;
+mod routing_sync;
 mod shared_state;
 pub mod sync;
 mod take;

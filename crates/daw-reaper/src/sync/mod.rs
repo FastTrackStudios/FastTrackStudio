@@ -18,7 +18,7 @@ pub mod items;
 // retired with the port.
 pub mod project;
 // regions ported to architect::rpc — see `crate::region`.
-pub mod routing;
+// routing ported to architect::rpc — see `crate::routing_sync`.
 // takes ported to architect::rpc — see `crate::take`.
 // tempo_map ported to architect::rpc — see `crate::tempo_map`.
 // tracks ported to architect::rpc — `impl Tracks for Reaper` lives
@@ -29,7 +29,6 @@ pub mod routing;
 pub use daw::ReaperMainThread;
 pub use items::ReaperItems;
 pub use project::ReaperProject;
-pub use routing::ReaperRouting;
 
 // =============================================================================
 // Internal helpers shared across sync sub-handles

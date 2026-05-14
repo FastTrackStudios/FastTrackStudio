@@ -1370,3 +1370,163 @@ impl ReaperRouting {
             .is_some()
     }
 }
+
+// ============================================================================
+// architect::rpc port — `impl Routing for crate::Reaper`
+// ============================================================================
+//
+// Sync trait + REAPER C API. Mount via `daw_proto::routing::serve(Reaper)`.
+// Each call resolves against the current project + track guid. The fuller
+// async `RoutingService` (above) stays parallel for now.
+
+mod sync_impl {
+    use daw_proto::sync::Routing as RoutingTrait;
+    use daw_proto::{DawError, DawResult, RouteType, TrackRoute};
+    use reaper_high::{Reaper as ReaperHigh, SendPartnerType, Track};
+    use reaper_medium::{EditMode, ReaperVolumeValue, TrackSendCategory};
+
+    use crate::routing::convert_track_route;
+    use crate::safe_wrappers::routing as routing_sw;
+    use crate::sync::find_track_by_guid;
+
+    fn track(track_guid: &str) -> Option<Track> {
+        let project = ReaperHigh::get().current_project();
+        find_track_by_guid(&project, track_guid)
+    }
+
+    impl RoutingTrait for crate::Reaper {
+        fn sends(&self, source_track_guid: &str) -> Vec<TrackRoute> {
+            let Some(t) = track(source_track_guid) else {
+                return Vec::new();
+            };
+            t.typed_sends(SendPartnerType::Track)
+                .enumerate()
+                .map(|(i, r)| convert_track_route(&r, RouteType::Send, i as u32))
+                .collect()
+        }
+
+        fn receives(&self, dest_track_guid: &str) -> Vec<TrackRoute> {
+            let Some(t) = track(dest_track_guid) else {
+                return Vec::new();
+            };
+            t.receives()
+                .enumerate()
+                .map(|(i, r)| convert_track_route(&r, RouteType::Receive, i as u32))
+                .collect()
+        }
+
+        fn hardware_outputs(&self, track_guid: &str) -> Vec<TrackRoute> {
+            let Some(t) = track(track_guid) else {
+                return Vec::new();
+            };
+            t.typed_sends(SendPartnerType::HardwareOutput)
+                .enumerate()
+                .map(|(i, r)| convert_track_route(&r, RouteType::HardwareOutput, i as u32))
+                .collect()
+        }
+
+        fn send_count(&self, track_guid: &str) -> u32 {
+            track(track_guid)
+                .map(|t| t.typed_send_count(SendPartnerType::Track))
+                .unwrap_or(0)
+        }
+
+        fn receive_count(&self, track_guid: &str) -> u32 {
+            track(track_guid).map(|t| t.receive_count()).unwrap_or(0)
+        }
+
+        fn add_send(&self, source_track_guid: &str, dest_track_guid: &str) -> DawResult<u32> {
+            let source = track(source_track_guid)
+                .ok_or_else(|| DawError::not_found("Track", source_track_guid))?;
+            let dest = track(dest_track_guid)
+                .ok_or_else(|| DawError::not_found("Track", dest_track_guid))?;
+            let route = source.add_send_to(&dest);
+            route
+                .track_route_index()
+                .ok_or_else(|| DawError::operation_failed("add_send: no track_route_index"))
+        }
+
+        fn remove_send(&self, source_track_guid: &str, send_idx: u32) -> DawResult<()> {
+            let t = track(source_track_guid)
+                .ok_or_else(|| DawError::not_found("Track", source_track_guid))?;
+            let raw_track = t
+                .raw()
+                .map_err(|e| DawError::invalid_object("Track", &format!("{e:?}")))?;
+            routing_sw::remove_track_send(
+                ReaperHigh::get().medium_reaper(),
+                raw_track,
+                TrackSendCategory::Send,
+                send_idx,
+            );
+            Ok(())
+        }
+
+        fn set_send_volume(&self, track_guid: &str, send_idx: u32, volume: f64) -> DawResult<()> {
+            let t = track(track_guid).ok_or_else(|| DawError::not_found("Track", track_guid))?;
+            let hw_count = t.typed_send_count(SendPartnerType::HardwareOutput);
+            let route = t.send_by_index(hw_count + send_idx).ok_or_else(|| {
+                DawError::out_of_range(
+                    send_idx,
+                    t.typed_send_count(SendPartnerType::Track),
+                    "routing.send_idx",
+                )
+            })?;
+            let val = ReaperVolumeValue::new(volume)
+                .map_err(|e| DawError::operation_failed(format!("invalid volume: {e:?}")))?;
+            route
+                .set_volume(val, EditMode::NormalTweak)
+                .map_err(|e| DawError::operation_failed(format!("set_volume: {e:?}")))?;
+            Ok(())
+        }
+
+        fn set_send_pan(&self, track_guid: &str, send_idx: u32, pan: f64) -> DawResult<()> {
+            let t = track(track_guid).ok_or_else(|| DawError::not_found("Track", track_guid))?;
+            let hw_count = t.typed_send_count(SendPartnerType::HardwareOutput);
+            let route = t.send_by_index(hw_count + send_idx).ok_or_else(|| {
+                DawError::out_of_range(
+                    send_idx,
+                    t.typed_send_count(SendPartnerType::Track),
+                    "routing.send_idx",
+                )
+            })?;
+            let pan_obj = reaper_high::Pan::from_normalized_value(pan.clamp(-1.0, 1.0));
+            route
+                .set_pan(pan_obj, EditMode::NormalTweak)
+                .map_err(|e| DawError::operation_failed(format!("set_pan: {e:?}")))?;
+            Ok(())
+        }
+
+        fn set_send_muted(&self, track_guid: &str, send_idx: u32, muted: bool) -> DawResult<()> {
+            let t = track(track_guid).ok_or_else(|| DawError::not_found("Track", track_guid))?;
+            let hw_count = t.typed_send_count(SendPartnerType::HardwareOutput);
+            let route = t.send_by_index(hw_count + send_idx).ok_or_else(|| {
+                DawError::out_of_range(
+                    send_idx,
+                    t.typed_send_count(SendPartnerType::Track),
+                    "routing.send_idx",
+                )
+            })?;
+            if muted {
+                route
+                    .mute()
+                    .map_err(|e| DawError::operation_failed(format!("mute: {e:?}")))?;
+            } else {
+                route
+                    .unmute()
+                    .map_err(|e| DawError::operation_failed(format!("unmute: {e:?}")))?;
+            }
+            Ok(())
+        }
+
+        fn is_send_muted(&self, track_guid: &str, send_idx: u32) -> bool {
+            let Some(t) = track(track_guid) else {
+                return false;
+            };
+            let hw_count = t.typed_send_count(SendPartnerType::HardwareOutput);
+            let Some(route) = t.send_by_index(hw_count + send_idx) else {
+                return false;
+            };
+            route.is_muted().unwrap_or(false)
+        }
+    }
+}

@@ -3,7 +3,7 @@
 use daw_proto::sync::{Daw as _, Project as ProjectTrait};
 use daw_proto::{DawResult, ProjectInfo};
 
-use super::{ReaperRemote, RemoteItems, RemoteRouting, dispatch, main_thread};
+use super::{ReaperRemote, RemoteItems, dispatch, main_thread};
 
 /// A `Send + Sync` handle scoped to a single REAPER project tab.
 pub struct RemoteProject<'a> {
@@ -22,10 +22,6 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
         = RemoteItems<'b>
     where
         Self: 'b;
-    type Routing<'b>
-        = RemoteRouting<'b>
-    where
-        Self: 'b;
 
     fn guid(&self) -> &str {
         &self.guid
@@ -41,9 +37,5 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
 
     fn items(&self) -> Self::Items<'_> {
         RemoteItems::new(self.remote, &self.guid)
-    }
-
-    fn routing(&self) -> Self::Routing<'_> {
-        RemoteRouting::new(self.remote, &self.guid)
     }
 }

@@ -1,6 +1,6 @@
 use crate::DawResult;
 
-use super::{Items, Routing};
+use super::Items;
 
 /// Per-project sync handle. Owns sub-domain accessors.
 ///
@@ -9,9 +9,6 @@ use super::{Items, Routing};
 /// follow as their services are ported.
 pub trait Project {
     type Items<'a>: Items + 'a
-    where
-        Self: 'a;
-    type Routing<'a>: Routing + 'a
     where
         Self: 'a;
 
@@ -23,5 +20,4 @@ pub trait Project {
     // singletons via `<feature>::serve(Reaper)` or use the architect-
     // emitted clients directly with a ProjectContext.
     fn items(&self) -> Self::Items<'_>;
-    fn routing(&self) -> Self::Routing<'_>;
 }

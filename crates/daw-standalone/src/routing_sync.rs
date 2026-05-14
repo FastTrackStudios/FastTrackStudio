@@ -1,18 +1,21 @@
-//! `StandaloneRouting` — sync routing sub-handle.
+//! `impl Routing for Standalone` — post-architect::rpc port.
+//!
+//! Backed by `ProjectState::sends`/`receives`/`hw_outputs` —
+//! `HashMap<track_guid, Vec<TrackRoute>>`. Resolves the current
+//! project automatically.
 
-use daw_proto::{DawError, DawResult, RouteType, TrackRoute, sync::Routing};
+use daw_proto::sync::Routing;
+use daw_proto::{DawError, DawResult, RouteType, TrackRoute};
 
-use super::daw::Standalone;
+use crate::sync::Standalone;
 
-pub struct StandaloneRouting<'a> {
-    daw: &'a Standalone,
-    project_guid: String,
+fn resolve_project(daw: &Standalone) -> Option<String> {
+    let state = daw.state.lock().ok()?;
+    state.current_project_guid.clone()
 }
 
-impl<'a> StandaloneRouting<'a> {
-    pub(crate) fn new(daw: &'a Standalone, project_guid: String) -> Self {
-        Self { daw, project_guid }
-    }
+fn no_project() -> DawError {
+    DawError::not_found("Project", "current")
 }
 
 fn reindex(routes: &mut [TrackRoute]) {
@@ -21,53 +24,63 @@ fn reindex(routes: &mut [TrackRoute]) {
     }
 }
 
-impl<'a> Routing for StandaloneRouting<'a> {
+impl Routing for Standalone {
     fn sends(&self, source_track_guid: &str) -> Vec<TrackRoute> {
-        self.daw
-            .with_project(&self.project_guid, |p| {
-                p.sends.get(source_track_guid).cloned().unwrap_or_default()
-            })
-            .unwrap_or_default()
+        let Some(guid) = resolve_project(self) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.sends.get(source_track_guid).cloned().unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
     fn receives(&self, dest_track_guid: &str) -> Vec<TrackRoute> {
-        self.daw
-            .with_project(&self.project_guid, |p| {
-                p.receives.get(dest_track_guid).cloned().unwrap_or_default()
-            })
-            .unwrap_or_default()
+        let Some(guid) = resolve_project(self) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.receives.get(dest_track_guid).cloned().unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
     fn hardware_outputs(&self, track_guid: &str) -> Vec<TrackRoute> {
-        self.daw
-            .with_project(&self.project_guid, |p| {
-                p.hw_outputs.get(track_guid).cloned().unwrap_or_default()
-            })
-            .unwrap_or_default()
+        let Some(guid) = resolve_project(self) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.hw_outputs.get(track_guid).cloned().unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
     fn send_count(&self, track_guid: &str) -> u32 {
-        self.daw
-            .with_project(&self.project_guid, |p| {
-                p.sends.get(track_guid).map(|v| v.len() as u32).unwrap_or(0)
-            })
-            .unwrap_or(0)
+        let Some(guid) = resolve_project(self) else {
+            return 0;
+        };
+        self.with_project(&guid, |p| {
+            p.sends.get(track_guid).map(|v| v.len() as u32).unwrap_or(0)
+        })
+        .unwrap_or(0)
     }
 
     fn receive_count(&self, track_guid: &str) -> u32 {
-        self.daw
-            .with_project(&self.project_guid, |p| {
-                p.receives
-                    .get(track_guid)
-                    .map(|v| v.len() as u32)
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0)
+        let Some(guid) = resolve_project(self) else {
+            return 0;
+        };
+        self.with_project(&guid, |p| {
+            p.receives
+                .get(track_guid)
+                .map(|v| v.len() as u32)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
     }
 
     fn add_send(&self, source_track_guid: &str, dest_track_guid: &str) -> DawResult<u32> {
-        self.daw.with_project_mut(&self.project_guid, |p| {
-            // Validate both tracks exist.
+        let guid = resolve_project(self).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
             let dest_name = p
                 .tracks
                 .iter()
@@ -99,12 +112,13 @@ impl<'a> Routing for StandaloneRouting<'a> {
             recv.dest_track_guid = Some(dest_track_guid.to_string());
             receives.push(recv);
 
-            Ok(send_idx)
+            Ok::<u32, DawError>(send_idx)
         })?
     }
 
     fn remove_send(&self, source_track_guid: &str, send_idx: u32) -> DawResult<()> {
-        self.daw.with_project_mut(&self.project_guid, |p| {
+        let guid = resolve_project(self).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
             let sends = p
                 .sends
                 .get_mut(source_track_guid)
@@ -115,24 +129,22 @@ impl<'a> Routing for StandaloneRouting<'a> {
             let removed = sends.remove(send_idx as usize);
             reindex(sends);
 
-            // Remove the matching receive on the dest track.
-            if let Some(dest) = removed.dest_track_guid.as_deref() {
-                if let Some(recvs) = p.receives.get_mut(dest) {
-                    if let Some(pos) = recvs
-                        .iter()
-                        .position(|r| r.source_track_guid == source_track_guid)
-                    {
-                        recvs.remove(pos);
-                        reindex(recvs);
-                    }
-                }
+            if let Some(dest) = removed.dest_track_guid.as_deref()
+                && let Some(recvs) = p.receives.get_mut(dest)
+                && let Some(pos) = recvs
+                    .iter()
+                    .position(|r| r.source_track_guid == source_track_guid)
+            {
+                recvs.remove(pos);
+                reindex(recvs);
             }
             Ok::<(), DawError>(())
         })?
     }
 
     fn set_send_volume(&self, track_guid: &str, send_idx: u32, volume: f64) -> DawResult<()> {
-        self.daw.with_project_mut(&self.project_guid, |p| {
+        let guid = resolve_project(self).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
             let sends = p
                 .sends
                 .get_mut(track_guid)
@@ -146,7 +158,8 @@ impl<'a> Routing for StandaloneRouting<'a> {
     }
 
     fn set_send_pan(&self, track_guid: &str, send_idx: u32, pan: f64) -> DawResult<()> {
-        self.daw.with_project_mut(&self.project_guid, |p| {
+        let guid = resolve_project(self).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
             let sends = p
                 .sends
                 .get_mut(track_guid)
@@ -160,7 +173,8 @@ impl<'a> Routing for StandaloneRouting<'a> {
     }
 
     fn set_send_muted(&self, track_guid: &str, send_idx: u32, muted: bool) -> DawResult<()> {
-        self.daw.with_project_mut(&self.project_guid, |p| {
+        let guid = resolve_project(self).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
             let sends = p
                 .sends
                 .get_mut(track_guid)
@@ -174,14 +188,16 @@ impl<'a> Routing for StandaloneRouting<'a> {
     }
 
     fn is_send_muted(&self, track_guid: &str, send_idx: u32) -> bool {
-        self.daw
-            .with_project(&self.project_guid, |p| {
-                p.sends
-                    .get(track_guid)
-                    .and_then(|sends| sends.get(send_idx as usize))
-                    .map(|s| s.muted)
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false)
+        let Some(guid) = resolve_project(self) else {
+            return false;
+        };
+        self.with_project(&guid, |p| {
+            p.sends
+                .get(track_guid)
+                .and_then(|sends| sends.get(send_idx as usize))
+                .map(|s| s.muted)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
     }
 }

@@ -25,7 +25,7 @@ pub mod items;
 // threading through `HasDispatcher`.
 pub mod project;
 // regions ported to architect::rpc — see `crate::region`.
-pub mod routing;
+// routing ported to architect::rpc — see `crate::routing_sync`.
 // takes ported to architect::rpc — see `crate::take`.
 // tempo_map ported to architect::rpc — see `crate::tempo_map`.
 // tracks ported to architect::rpc — `marker::serve(Reaper)` style
@@ -35,7 +35,6 @@ pub mod routing;
 pub use daw::ReaperRemote;
 pub use items::RemoteItems;
 pub use project::RemoteProject;
-pub use routing::RemoteRouting;
 
 use daw_proto::{DawError, DawResult};
 

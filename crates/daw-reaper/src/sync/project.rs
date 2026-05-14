@@ -5,7 +5,7 @@ use daw_proto::{DawResult, ProjectInfo};
 
 use crate::project::project_to_info;
 
-use super::{ReaperItems, ReaperMainThread, ReaperRouting};
+use super::{ReaperItems, ReaperMainThread};
 
 /// A handle scoped to a single REAPER project tab.
 pub struct ReaperProject<'a> {
@@ -24,10 +24,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
         = ReaperItems<'b>
     where
         Self: 'b;
-    type Routing<'b>
-        = ReaperRouting<'b>
-    where
-        Self: 'b;
 
     fn guid(&self) -> &str {
         &self.guid
@@ -40,9 +36,5 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
 
     fn items(&self) -> Self::Items<'_> {
         ReaperItems::new(self.mt, &self.guid)
-    }
-
-    fn routing(&self) -> Self::Routing<'_> {
-        ReaperRouting::new(self.mt, &self.guid)
     }
 }

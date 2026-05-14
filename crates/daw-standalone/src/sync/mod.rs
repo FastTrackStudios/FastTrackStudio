@@ -21,7 +21,7 @@ mod items;
 // retired with the port.
 mod project;
 // regions ported to architect::rpc — see `crate::region`.
-mod routing;
+// routing ported to architect::rpc — see `crate::routing_sync`.
 // takes ported to architect::rpc — see `crate::take`.
 // tempo_map ported to architect::rpc — see `crate::tempo_map`.
 // tracks ported to architect::rpc — `impl Tracks for Standalone`
@@ -34,4 +34,3 @@ pub use daw::{
 };
 pub use items::StandaloneItems;
 pub use project::StandaloneProject;
-pub use routing::StandaloneRouting;
