@@ -71,19 +71,9 @@ fn codegen_typescript(workspace_root: &Path) -> Result<(), Box<dyn std::error::E
 }
 
 fn service_descriptors() -> Vec<&'static vox_types::ServiceDescriptor> {
-    vec![
-        task_core::task_service_service_descriptor(),
-        task_core::project_service_service_descriptor(),
-        task_core::time_service_service_descriptor(),
-        task_core::people_service_service_descriptor(),
-        task_core::conversation_service_service_descriptor(),
-        task_core::operating_service_service_descriptor(),
-        task_core::invoice_service_service_descriptor(),
-        task_core::activity_service_service_descriptor(),
-        task_core::mail_service_service_descriptor(),
-        task_core::calendar_service_service_descriptor(),
-        task_core::system_service_service_descriptor(),
-    ]
+    // Vertical-slice reset: per-feature service descriptors will be
+    // pulled from the new features/* trios as they come online.
+    Vec::new()
 }
 
 fn build_obsidian_plugin(workspace_root: &Path) -> Result<(), Box<dyn std::error::Error>> {

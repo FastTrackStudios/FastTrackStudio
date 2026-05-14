@@ -1,14 +1,10 @@
 //! Thin shell — env-driven config, then hands off to `task_server::router`.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 
-use agent_hermes::{MockChatModel, MockIntegration};
-use agent_proto::ChatModelRegistry;
-use agent_proto::integration::IntegrationRegistry;
 use eyre::WrapErr;
 use task_db::{WORKSPACE_DOC_ID, default_database_url, open_and_migrate, seed};
-use task_server::{AppState, Sealing, router};
+use task_server::{AppState, router};
 use tracing::info;
 
 #[tokio::main]
@@ -37,70 +33,7 @@ async fn main() -> eyre::Result<()> {
     }
 
     let mut state = AppState::new(persistence).await?;
-
-    // Wire the vox RPC service impls against the same sea-orm DB the
-    // CRDT persistence uses. Phase 1 enables `TaskService` +
-    // `InboxService`; the rest land in Phase 2 / Phase 3.
     state.wire_vox(db);
-
-    // Sealing for at-rest webhook secrets. Reads
-    // TASK_SERVER_SEALING_KEY when set; falls back to a
-    // machine-stable dev key with a warning. Always present in v1 —
-    // GitHub-webhook verification needs it.
-    state.sealing = Some(Sealing::from_env());
-
-    // Hermes inbound webhook secret. Optional; when unset the
-    // `/webhooks/hermes/event` route returns 401 for every request.
-    state.hermes_webhook_secret = std::env::var("HERMES_WEBHOOK_SECRET").ok();
-
-    // Build the EventSink that wraps the in-state repos. Shared by
-    // every plugin's `run_event_loop`.
-    let sink = state.build_event_sink();
-    state.event_sink = Some(sink.clone());
-
-    // Plugin registry. Mock is always present; Hermes only when
-    // `HERMES_BASE_URL` is configured.
-    let mut registry = IntegrationRegistry::new();
-    registry.register(Arc::new(MockIntegration::new()));
-    if let Ok(hermes_base_url) = std::env::var("HERMES_BASE_URL") {
-        // Phase B2 ships only the stub HermesIntegration shell —
-        // wire it so the registry has the plugin slot occupied;
-        // dispatch returns IntegrationError::Disabled until the
-        // parallel HTTP/WS work lands.
-        match build_hermes(&hermes_base_url) {
-            Ok(p) => registry.register(p),
-            Err(e) => tracing::warn!(?e, "skipping hermes plugin"),
-        }
-    }
-    state.registry = Arc::new(registry);
-
-    // ChatModelRegistry — MockChatModel always; HermesChatModel when
-    // HERMES_BASE_URL is configured. Hermes registers a profile per
-    // known Hermes assignee (commander / architect / curator / …) so
-    // the chat model picker lists them.
-    let mut chat_registry = ChatModelRegistry::new();
-    chat_registry.register(Arc::new(MockChatModel));
-    if let Ok(hermes_base_url) = std::env::var("HERMES_BASE_URL") {
-        match build_hermes_chat(&hermes_base_url) {
-            Ok(m) => chat_registry.register(m),
-            Err(e) => tracing::warn!(?e, "skipping hermes chat model"),
-        }
-    }
-    state.chat_model_registry = Arc::new(chat_registry);
-
-    // Spawn the per-plugin event loops. They keep running until
-    // `state.shutdown` flips.
-    let shutdown = state.shutdown.clone();
-    for plugin in state.registry.all() {
-        let sink = sink.clone();
-        let s = shutdown.clone();
-        let name = plugin.name();
-        tokio::spawn(async move {
-            if let Err(e) = plugin.run_event_loop(sink, s).await {
-                tracing::warn!(plugin = name, ?e, "event loop exited");
-            }
-        });
-    }
 
     let app = router(state);
 
@@ -108,35 +41,7 @@ async fn main() -> eyre::Result<()> {
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
 
-    shutdown.set();
     Ok(())
-}
-
-fn hermes_config_from_env(base_url: &str) -> eyre::Result<agent_hermes::HermesConfig> {
-    use agent_hermes::HermesConfig;
-    Ok(HermesConfig {
-        base_url: url::Url::parse(base_url).wrap_err("invalid HERMES_BASE_URL")?,
-        session_token: std::env::var("HERMES_SESSION_TOKEN").unwrap_or_default(),
-        default_board: std::env::var("HERMES_DEFAULT_BOARD").ok(),
-        default_profile: std::env::var("HERMES_DEFAULT_PROFILE")
-            .unwrap_or_else(|_| "engineer".to_string()),
-        webhook_secret: std::env::var("HERMES_WEBHOOK_SECRET").ok(),
-    })
-}
-
-fn build_hermes_chat(base_url: &str) -> eyre::Result<Arc<dyn agent_proto::chat_model::ChatModel>> {
-    use agent_hermes::HermesChatModel;
-    Ok(Arc::new(HermesChatModel::new(hermes_config_from_env(
-        base_url,
-    )?)))
-}
-
-fn build_hermes(
-    base_url: &str,
-) -> eyre::Result<Arc<dyn agent_proto::integration::AgentIntegration>> {
-    use agent_hermes::HermesIntegration;
-    let config = hermes_config_from_env(base_url)?;
-    Ok(Arc::new(HermesIntegration::new(config)))
 }
 
 fn env_truthy(key: &str) -> bool {

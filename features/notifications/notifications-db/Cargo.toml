@@ -1,9 +1,0 @@
-[package]
-name = "notifications-db"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-
-[dependencies]
-notifications-proto.workspace = true

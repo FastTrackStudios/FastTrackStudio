@@ -8,13 +8,12 @@ name = "task"
 path = "src/main.rs"
 
 [dependencies]
-task-core = { path = "../task-core" }
 vox = { workspace = true, features = ["transport-websocket", "transport-websocket-tls"] }
 tokio = { workspace = true }
 chrono.workspace = true
 eyre.workspace = true
 clap = { version = "4", features = ["derive", "env"] }
-facet-json.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+project-proto = { workspace = true }

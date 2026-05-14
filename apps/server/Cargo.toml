@@ -47,16 +47,8 @@ sea-orm-migration.workspace = true
 # with fake data — UI design loops without manual setup.
 task-db = { path = "../db" }
 
-# Webhook receivers (GitHub + Hermes), inbound HMAC verification,
-# sealing of webhook secrets, and integration plugin registry boot.
-agent-proto = { workspace = true }
-agent-crdt = { workspace = true }
-agent-hermes = { path = "../../features/agent/agent-hermes" }
-chat-proto = { workspace = true }
-chat-crdt = { workspace = true }
 project-proto = { workspace = true }
 project-crdt = { workspace = true }
-task-core = { path = "../../crates/task-core", features = ["server"] }
 architect = { workspace = true, features = ["server-axum"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -77,7 +69,5 @@ url = { workspace = true }
 # Integration tests spawn the server in-process and drive it with
 # raw WebSocket clients to verify the realtime byte-relay end-to-end.
 tokio-tungstenite = "0.27"
-timer-proto = { workspace = true, default-features = false }
-timer-crdt.workspace = true
 architect.workspace = true
 chrono.workspace = true

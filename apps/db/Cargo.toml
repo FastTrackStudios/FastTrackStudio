@@ -33,39 +33,6 @@ crdt-seaorm.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 
-# Every feature's proto + crdt — the proto for the seed helper, the
-# crdt for the matching RepoLoro newtype that wraps a shared CrdtDoc.
-agent-proto = { workspace = true, features = ["fake"] }
-agent-crdt.workspace = true
-caldav-proto = { workspace = true, features = ["fake"] }
-caldav-crdt.workspace = true
-calendar-proto = { workspace = true, features = ["fake"] }
-calendar-crdt.workspace = true
-chat-proto = { workspace = true, features = ["fake"] }
-chat-crdt.workspace = true
-conference-proto = { workspace = true, features = ["fake"] }
-conference-crdt.workspace = true
-cookbook-proto = { workspace = true, features = ["fake"] }
-cookbook-crdt.workspace = true
-email-proto = { workspace = true, features = ["fake"] }
-email-crdt.workspace = true
-finance-proto = { workspace = true, features = ["fake"] }
-finance-crdt.workspace = true
-fitness-proto = { workspace = true, features = ["fake"] }
-fitness-crdt.workspace = true
-inventory-proto = { workspace = true, features = ["fake"] }
-inventory-crdt.workspace = true
-invoice-proto = { workspace = true, features = ["fake"] }
-invoice-crdt.workspace = true
-location-proto = { workspace = true, features = ["fake"] }
-location-crdt.workspace = true
-person-proto = { workspace = true, features = ["fake"] }
-person-crdt.workspace = true
+# Vertical-slice reset: only project trio remains.
 project-proto = { workspace = true, features = ["fake"] }
 project-crdt.workspace = true
-threads-proto = { workspace = true, features = ["fake"] }
-threads-crdt.workspace = true
-timer-proto = { workspace = true, features = ["fake"] }
-timer-crdt.workspace = true
-knowledge-proto.workspace = true
-knowledge-crdt.workspace = true

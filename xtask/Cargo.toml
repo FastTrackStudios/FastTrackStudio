@@ -9,7 +9,6 @@ name = "xtask"
 path = "src/main.rs"
 
 [dependencies]
-task-core.workspace = true
 vox-codegen.workspace = true
 vox-types.workspace = true
 xshell          = "0.2"
