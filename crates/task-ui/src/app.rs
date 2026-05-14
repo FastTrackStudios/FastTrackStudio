@@ -26,6 +26,9 @@ pub enum Route {
         #[route("/knowledge")]
         KnowledgeRoute {},
 
+        #[route("/tasks-kanban")]
+        TasksKanbanRoute {},
+
         #[route("/inbox")]
         InboxRoute {},
 
@@ -56,6 +59,11 @@ fn ProjectsRoute() -> Element {
 #[component]
 fn KnowledgeRoute() -> Element {
     rsx! { crate::feature_routes::knowledge::KnowledgeView {} }
+}
+
+#[component]
+fn TasksKanbanRoute() -> Element {
+    rsx! { crate::feature_routes::tasks_kanban::TasksKanbanView {} }
 }
 
 #[component]
@@ -397,6 +405,11 @@ fn nav_tabs() -> Vec<NavTab> {
             route: Route::KnowledgeRoute {},
         },
         NavTab {
+            label: "Tasks kanban",
+            icon: icon_folder_kanban,
+            route: Route::TasksKanbanRoute {},
+        },
+        NavTab {
             label: "Vox test",
             icon: icon_settings,
             route: Route::VoxTestRoute {},
@@ -448,6 +461,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::DashboardRoute {} => "Home",
         Route::ProjectsRoute {} => "Projects",
         Route::KnowledgeRoute {} => "Knowledge",
+        Route::TasksKanbanRoute {} => "Tasks kanban",
         Route::InboxRoute {} => "Inbox",
         Route::SettingsRoute {} => "Settings",
         Route::VoxTestRoute {} => "Vox test",

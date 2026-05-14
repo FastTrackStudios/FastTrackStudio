@@ -8,5 +8,9 @@
 //! `project-ui::TasksByProjectLive` uses.
 
 pub mod live;
+pub mod tasks_kanban;
+pub mod views;
 
 pub use live::{KnowledgeLive, KnowledgeSnapshot, KnowledgeView};
+pub use tasks_kanban::TasksKanbanLive;
+pub use views::{KindCalendar, KindGallery, KindKanban, KindList};

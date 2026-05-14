@@ -1317,3 +1317,387 @@ filters:
         assert!(p.views.is_empty());
     }
 }
+
+// ── Executor ─────────────────────────────────────────────────────────
+//
+// Phase 6 — runs a `ParsedBase` (or just a `ViewSpec`) over a page-set.
+// Pages are presented as `BaseRow`s — minimal projection of a Knowledge
+// `Page` that the executor needs (id, basename, frontmatter map).
+// Reads pull `frontmatter_json` once and decode top-level keys into
+// `serde_json::Value`.
+
+/// Minimal page projection. The knowledge-ui layer constructs these
+/// from `knowledge_proto::Page` values before feeding the executor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BaseRow {
+    pub page_id: uuid::Uuid,
+    pub basename: String,
+    /// Top-level frontmatter map. Empty if the page has no
+    /// frontmatter or it failed to decode.
+    pub frontmatter: indexmap::IndexMap<String, serde_json::Value>,
+}
+
+impl BaseRow {
+    /// Build from a `(page_id, basename, frontmatter_json)` triple.
+    pub fn from_parts(
+        page_id: uuid::Uuid,
+        basename: impl Into<String>,
+        frontmatter_json: &str,
+    ) -> Self {
+        let frontmatter: indexmap::IndexMap<String, serde_json::Value> =
+            serde_json::from_str(frontmatter_json).unwrap_or_default();
+        Self {
+            page_id,
+            basename: basename.into(),
+            frontmatter,
+        }
+    }
+
+    fn lookup(&self, expr: &Expr) -> serde_json::Value {
+        match expr {
+            Expr::FileProp { name } if name == "name" => {
+                serde_json::Value::String(self.basename.clone())
+            }
+            Expr::NoteProp { name } => self
+                .frontmatter
+                .get(name)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+            Expr::Literal { value } => value.clone(),
+            // Unsupported in Phase 6: FileProp other than name,
+            // FormulaRef. Return null so comparisons fail
+            // predictably rather than panicking.
+            _ => serde_json::Value::Null,
+        }
+    }
+}
+
+/// Result of running a view: rows grouped (or one bucket when no
+/// `group_by`), in the order they should render.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExecutedView {
+    /// `(bucket_label, rows)`. `bucket_label` is `""` when no
+    /// `group_by` is configured.
+    pub groups: Vec<(String, Vec<BaseRow>)>,
+}
+
+/// Run one `ViewSpec` over `rows`. Applies (in order):
+/// 1. Global filter (AND-ed with view-scoped filter, if present).
+/// 2. Sort by the view's `sort` keys, falling back to `basename`.
+/// 3. Group by `group_by` (frontmatter key). When `None`, one
+///    bucket labelled `""`.
+/// 4. Limit (per-bucket).
+pub fn execute_view<I: IntoIterator<Item = BaseRow>>(
+    base: &ParsedBase,
+    view: &ViewSpec,
+    rows: I,
+) -> ExecutedView {
+    let combined: FilterNode = match &view.filter {
+        Some(view_filter) if !matches!(base.global_filter, FilterNode::None) => FilterNode::And {
+            args: vec![base.global_filter.clone(), view_filter.clone()],
+        },
+        Some(view_filter) => view_filter.clone(),
+        None => base.global_filter.clone(),
+    };
+
+    let mut filtered: Vec<BaseRow> = rows
+        .into_iter()
+        .filter(|r| filter_matches(&combined, r))
+        .collect();
+
+    filtered.sort_by(|a, b| compare_rows(a, b, &view.sort));
+
+    let groups: Vec<(String, Vec<BaseRow>)> = if let Some(key) = view.group_by.as_deref() {
+        let mut buckets: indexmap::IndexMap<String, Vec<BaseRow>> = indexmap::IndexMap::new();
+        for r in filtered {
+            let label = r
+                .frontmatter
+                .get(key)
+                .map(value_to_label)
+                .unwrap_or_default();
+            buckets.entry(label).or_default().push(r);
+        }
+        // Stable: insertion order is the order labels were first
+        // observed. Caller can reorder via post-processing.
+        buckets.into_iter().collect()
+    } else {
+        vec![("".to_string(), filtered)]
+    };
+
+    let limited = if let Some(limit) = view.limit {
+        groups
+            .into_iter()
+            .map(|(k, mut v)| {
+                v.truncate(limit as usize);
+                (k, v)
+            })
+            .collect()
+    } else {
+        groups
+    };
+
+    ExecutedView { groups: limited }
+}
+
+fn value_to_label(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn filter_matches(node: &FilterNode, row: &BaseRow) -> bool {
+    match node {
+        FilterNode::None => true,
+        FilterNode::And { args } => args.iter().all(|n| filter_matches(n, row)),
+        FilterNode::Or { args } => args.iter().any(|n| filter_matches(n, row)),
+        FilterNode::Not { arg } => !filter_matches(arg, row),
+        FilterNode::Truthy { expr } => is_truthy(&row.lookup(expr)),
+        FilterNode::Cmp { left, op, right } => {
+            let l = row.lookup(left);
+            let r = row.lookup(right);
+            cmp_values(&l, *op, &r)
+        }
+        // Call (hasTag, hasLink, contains, …) — Phase 6 stub. The
+        // `contains` case maps to the Cmp::Contains op already;
+        // other Calls return false so they don't accidentally let
+        // everything through.
+        FilterNode::Call { name, args, .. } if name == "contains" && args.len() == 1 => {
+            let l = row.lookup(&Expr::NoteProp {
+                name: String::new(),
+            });
+            cmp_values(&l, CmpOp::Contains, &row.lookup(&args[0]))
+        }
+        FilterNode::Call { .. } => false,
+    }
+}
+
+fn is_truthy(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => false,
+        serde_json::Value::Bool(b) => *b,
+        serde_json::Value::String(s) => !s.is_empty(),
+        serde_json::Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(false),
+        serde_json::Value::Array(a) => !a.is_empty(),
+        serde_json::Value::Object(m) => !m.is_empty(),
+    }
+}
+
+fn cmp_values(l: &serde_json::Value, op: CmpOp, r: &serde_json::Value) -> bool {
+    use serde_json::Value as V;
+    match (l, r) {
+        (V::String(a), V::String(b)) => match op {
+            CmpOp::Eq => a == b,
+            CmpOp::Neq => a != b,
+            CmpOp::Lt => a < b,
+            CmpOp::Le => a <= b,
+            CmpOp::Gt => a > b,
+            CmpOp::Ge => a >= b,
+            CmpOp::Contains => a.contains(b.as_str()),
+            CmpOp::StartsWith => a.starts_with(b.as_str()),
+            CmpOp::EndsWith => a.ends_with(b.as_str()),
+        },
+        (V::Number(a), V::Number(b)) => {
+            let af = a.as_f64().unwrap_or(0.0);
+            let bf = b.as_f64().unwrap_or(0.0);
+            match op {
+                CmpOp::Eq => af == bf,
+                CmpOp::Neq => af != bf,
+                CmpOp::Lt => af < bf,
+                CmpOp::Le => af <= bf,
+                CmpOp::Gt => af > bf,
+                CmpOp::Ge => af >= bf,
+                _ => false,
+            }
+        }
+        (V::Bool(a), V::Bool(b)) => matches!(op, CmpOp::Eq) && a == b,
+        // Mixed types: only equality on null vs null is meaningful.
+        (V::Null, V::Null) => matches!(op, CmpOp::Eq),
+        _ => false,
+    }
+}
+
+fn compare_rows(a: &BaseRow, b: &BaseRow, sort: &[SortKey]) -> std::cmp::Ordering {
+    for key in sort {
+        // `basename` (or `file.name`) is on the row itself, not in
+        // frontmatter. Everything else is a frontmatter lookup.
+        let (av, bv) = if key.property == "basename" || key.property == "file.name" {
+            (
+                serde_json::Value::String(a.basename.clone()),
+                serde_json::Value::String(b.basename.clone()),
+            )
+        } else {
+            (
+                a.lookup(&Expr::NoteProp {
+                    name: key.property.clone(),
+                }),
+                b.lookup(&Expr::NoteProp {
+                    name: key.property.clone(),
+                }),
+            )
+        };
+        let ord = compare_values(&av, &bv);
+        let ord = match key.direction {
+            SortDir::Asc => ord,
+            SortDir::Desc => ord.reverse(),
+        };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    a.basename.cmp(&b.basename)
+}
+
+fn compare_values(a: &serde_json::Value, b: &serde_json::Value) -> std::cmp::Ordering {
+    use serde_json::Value as V;
+    match (a, b) {
+        (V::Null, V::Null) => std::cmp::Ordering::Equal,
+        (V::Null, _) => std::cmp::Ordering::Less,
+        (_, V::Null) => std::cmp::Ordering::Greater,
+        (V::String(x), V::String(y)) => x.cmp(y),
+        (V::Number(x), V::Number(y)) => x
+            .as_f64()
+            .unwrap_or(0.0)
+            .partial_cmp(&y.as_f64().unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (V::Bool(x), V::Bool(y)) => x.cmp(y),
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
+#[cfg(test)]
+mod executor_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn row(name: &str, fm: serde_json::Value) -> BaseRow {
+        BaseRow::from_parts(Uuid::new_v4(), name, &fm.to_string())
+    }
+
+    fn task(name: &str, status: &str) -> BaseRow {
+        row(
+            name,
+            serde_json::json!({ "kind": "task", "status": status }),
+        )
+    }
+
+    fn note(name: &str) -> BaseRow {
+        row(name, serde_json::json!({ "kind": "note" }))
+    }
+
+    fn task_kanban_base() -> ParsedBase {
+        ParsedBase {
+            global_filter: FilterNode::Cmp {
+                left: Expr::NoteProp {
+                    name: "kind".into(),
+                },
+                op: CmpOp::Eq,
+                right: Expr::Literal {
+                    value: serde_json::json!("task"),
+                },
+            },
+            formulas: vec![],
+            properties: vec![],
+            views: vec![ViewSpec {
+                kind: ViewKind::Board,
+                name: "Kanban".into(),
+                filter: None,
+                order: vec!["status".into()],
+                sort: vec![SortKey {
+                    property: "basename".into(),
+                    direction: SortDir::Asc,
+                }],
+                limit: None,
+                group_by: Some("status".into()),
+                extras: serde_json::Value::Null,
+            }],
+        }
+    }
+
+    #[test]
+    fn filters_by_kind_and_groups_by_status() {
+        let base = task_kanban_base();
+        let view = &base.views[0];
+        let rows = vec![
+            task("Buy capacitors", "todo"),
+            task("Solder header", "in_progress"),
+            task("Test rig", "done"),
+            note("Meeting"),
+        ];
+        let out = execute_view(&base, view, rows);
+        let labels: Vec<&str> = out.groups.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(labels.contains(&"todo"));
+        assert!(labels.contains(&"in_progress"));
+        assert!(labels.contains(&"done"));
+        // Meeting (kind=note) is filtered out → no "" bucket.
+        assert!(!labels.contains(&""));
+        let total: usize = out.groups.iter().map(|(_, v)| v.len()).sum();
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn ungrouped_returns_single_bucket() {
+        let mut base = task_kanban_base();
+        base.views[0].group_by = None;
+        let view = &base.views[0];
+        let out = execute_view(
+            &base,
+            view,
+            vec![task("a", "todo"), task("b", "in_progress")],
+        );
+        assert_eq!(out.groups.len(), 1);
+        assert_eq!(out.groups[0].0, "");
+        assert_eq!(out.groups[0].1.len(), 2);
+    }
+
+    #[test]
+    fn limit_truncates_per_bucket() {
+        let mut base = task_kanban_base();
+        base.views[0].limit = Some(1);
+        let view = &base.views[0];
+        let out = execute_view(
+            &base,
+            view,
+            vec![
+                task("a", "todo"),
+                task("b", "todo"),
+                task("c", "in_progress"),
+            ],
+        );
+        for (_label, rows) in &out.groups {
+            assert!(rows.len() <= 1);
+        }
+    }
+
+    #[test]
+    fn sort_desc_reverses() {
+        let base = ParsedBase {
+            global_filter: FilterNode::None,
+            formulas: vec![],
+            properties: vec![],
+            views: vec![ViewSpec {
+                kind: ViewKind::List,
+                name: "All".into(),
+                filter: None,
+                order: vec![],
+                sort: vec![SortKey {
+                    property: "basename".into(),
+                    direction: SortDir::Desc,
+                }],
+                limit: None,
+                group_by: None,
+                extras: serde_json::Value::Null,
+            }],
+        };
+        let out = execute_view(&base, &base.views[0], vec![note("a"), note("c"), note("b")]);
+        let names: Vec<&str> = out.groups[0]
+            .1
+            .iter()
+            .map(|r| r.basename.as_str())
+            .collect();
+        assert_eq!(names, vec!["c", "b", "a"]);
+    }
+}

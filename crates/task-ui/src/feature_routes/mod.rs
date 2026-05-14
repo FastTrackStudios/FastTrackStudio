@@ -4,3 +4,4 @@
 
 pub mod knowledge;
 pub mod project;
+pub mod tasks_kanban;

@@ -4847,6 +4847,7 @@ dependencies = [
  "dioxus",
  "fts-ui",
  "futures",
+ "indexmap",
  "knowledge-crdt",
  "knowledge-proto",
  "project-proto",
