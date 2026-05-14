@@ -106,12 +106,31 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
 
     let version_label = format!("v{}", version.read());
     let expanded_id = *expanded.read();
+    let total_tasks: usize = match &*snapshot.read_unchecked() {
+        Some(Ok(snap)) => snap.tasks_by_project.values().map(|v| v.len()).sum(),
+        _ => 0,
+    };
+    let done_tasks: usize = match &*snapshot.read_unchecked() {
+        Some(Ok(snap)) => snap
+            .tasks_by_project
+            .values()
+            .flat_map(|v| v.iter())
+            .filter(|t| t.done)
+            .count(),
+        _ => 0,
+    };
     rsx! {
         div {
             id: "projects-route",
-            class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
-            HStack { class: "items-center gap-3",
-                Heading { level: HeadingLevel::H1, "Projects" }
+            class: "mx-auto flex max-w-5xl flex-col gap-6 p-6 lg:p-10",
+            // ── Page header ────────────────────────────────────
+            HStack { class: "items-center justify-between",
+                HStack { class: "items-center gap-3",
+                    Heading { level: HeadingLevel::H1, "Projects" }
+                    if total_tasks > 0 {
+                        Text { variant: TextVariant::Muted, "{done_tasks} of {total_tasks} done" }
+                    }
+                }
                 span { "data-testid": "version-badge",
                     StatusBadge {
                         variant: if last_error.read().is_some() { StatusBadgeVariant::Danger } else { StatusBadgeVariant::Success },
@@ -120,13 +139,22 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                 }
             }
             if let Some(err) = last_error.read().as_ref() {
-                div { class: "rounded-md border border-border bg-card p-3 text-sm",
-                    "Sync: {err}"
+                Alert {
+                    variant: AlertVariant::Destructive,
+                    AlertTitle { "Sync error" }
+                    AlertDescription { "{err}" }
                 }
             }
+            // ── Body ────────────────────────────────────────────
             match &*snapshot.read_unchecked() {
-                None => rsx! { Text { variant: TextVariant::Muted, "Building local doc…" } },
-                Some(Err(err)) => rsx! { Text { variant: TextVariant::Muted, "Decode failed: {err}" } },
+                None => rsx! { ProjectSkeleton {} },
+                Some(Err(err)) => rsx! {
+                    Alert {
+                        variant: AlertVariant::Destructive,
+                        AlertTitle { "Decode failed" }
+                        AlertDescription { "{err}" }
+                    }
+                },
                 Some(Ok(snap)) => rsx! { TasksByProjectView {
                     snapshot: snap.clone(),
                     expanded: expanded_id,
@@ -134,6 +162,17 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                     on_toggle_expand,
                     on_edit_property,
                 } },
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectSkeleton() -> Element {
+    rsx! {
+        VStack { class: "gap-4",
+            for _ in 0..2 {
+                Skeleton { class: "h-32 w-full rounded-lg" }
             }
         }
     }
@@ -150,11 +189,13 @@ pub fn TasksByProjectView(
 ) -> Element {
     if snapshot.ordered_projects.is_empty() && snapshot.tasks_by_project.is_empty() {
         return rsx! {
-            Text { variant: TextVariant::Muted, "No tasks yet — try `task-server` with TASK_SERVER_SEED=1." }
+            EmptyState {
+                message: "No projects yet — run task-server with TASK_SERVER_SEED=1 to get demo data, or add a task on /tasks-kanban.".to_string(),
+            }
         };
     }
     rsx! {
-        div { class: "flex flex-col gap-6",
+        VStack { class: "gap-4",
             for (project_name, _project_page_id) in snapshot.ordered_projects.iter() {
                 ProjectBlock {
                     key: "{project_name}",
@@ -179,26 +220,53 @@ fn ProjectBlock(
     on_toggle_expand: Callback<Uuid>,
     on_edit_property: Callback<(Uuid, String, serde_json::Value)>,
 ) -> Element {
+    let initials = project_initials(&name);
+    let done_count = tasks.iter().filter(|t| t.done).count();
     rsx! {
-        section { class: "rounded-md border border-border bg-card p-4",
-            HStack { class: "items-baseline justify-between mb-3",
-                Heading { level: HeadingLevel::H3, "{name}" }
-                Text { variant: TextVariant::Muted, "{tasks.len()} task(s)" }
+        Card { class: "overflow-hidden",
+            CardHeader { class: "py-4",
+                HStack { class: "items-center justify-between gap-3",
+                    HStack { class: "items-center gap-3",
+                        Avatar {
+                            size: AvatarSize::Small,
+                            AvatarFallback { "{initials}" }
+                        }
+                        Heading { level: HeadingLevel::H3, "{name}" }
+                    }
+                    HStack { class: "items-center gap-2",
+                        Badge { variant: BadgeVariant::Secondary,
+                            "{done_count}/{tasks.len()}"
+                        }
+                    }
+                }
             }
-            ul { class: "flex flex-col gap-1.5",
-                for task in tasks.iter() {
-                    TaskRowEl {
-                        key: "{task.page_id}",
-                        row: task.clone(),
-                        is_expanded: expanded == Some(task.page_id),
-                        on_toggle_done,
-                        on_toggle_expand,
-                        on_edit_property,
+            CardContent { class: "py-0 pb-4",
+                if tasks.is_empty() {
+                    Text { variant: TextVariant::Muted, "No tasks in this project yet." }
+                } else {
+                    ItemGroup { class: "gap-1",
+                        for task in tasks.iter() {
+                            TaskRowEl {
+                                key: "{task.page_id}",
+                                row: task.clone(),
+                                is_expanded: expanded == Some(task.page_id),
+                                on_toggle_done,
+                                on_toggle_expand,
+                                on_edit_property,
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+fn project_initials(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|w| w.chars().next().map(|c| c.to_ascii_uppercase()))
+        .take(2)
+        .collect()
 }
 
 #[component]
@@ -216,30 +284,55 @@ fn TaskRowEl(
     let expand_testid = format!("task-expand-{page_id}");
     let registry = PropertySchemaRegistry::with_builtins();
     let task_schema = registry.get("task");
+    let priority_color = priority_dot_color(&row.priority);
     rsx! {
-        li {
-            class: "flex flex-col gap-1",
+        div { class: "flex flex-col",
+            // Row uses `Item` for clean affordance: padding,
+            // hover, focus ring. data-testid lives on the wrapper
+            // div so playwright doesn't need to chase Item's
+            // generated class names.
             div {
-                class: "flex items-center gap-3 text-sm",
                 "data-testid": row_testid,
                 "data-task-done": if current_done { "true" } else { "false" },
-                input {
-                    r#type: "checkbox",
-                    "data-testid": checkbox_testid,
-                    checked: current_done,
-                    onchange: move |_| on_toggle_done.call((page_id, current_done)),
-                }
-                span {
-                    class: if current_done { "text-muted-foreground line-through flex-1 cursor-pointer" } else { "text-foreground flex-1 cursor-pointer" },
-                    onclick: move |_| on_toggle_expand.call(page_id),
-                    "{row.title}"
-                }
-                StatusPill { status: row.status.clone() }
-                PriorityPill { priority: row.priority.clone() }
-                span { "data-testid": expand_testid,
-                    Button {
-                        on_click: move |_| on_toggle_expand.call(page_id),
-                        if is_expanded { "▾" } else { "▸" }
+                Item {
+                    variant: ItemVariant::Default,
+                    size: ItemSize::Small,
+                    interactive: true,
+                    class: "group",
+                    ItemMedia { class: "size-7 bg-transparent",
+                        input {
+                            r#type: "checkbox",
+                            "data-testid": checkbox_testid,
+                            class: "size-4 cursor-pointer accent-primary",
+                            checked: current_done,
+                            onchange: move |_| on_toggle_done.call((page_id, current_done)),
+                            // Stop click from bubbling to row-click expand.
+                            onclick: move |e| e.stop_propagation(),
+                        }
+                    }
+                    ItemContent {
+                        class: if current_done { "min-w-0 line-through text-muted-foreground cursor-pointer" } else { "min-w-0 cursor-pointer" },
+                        // ItemContent doesn't take onclick directly;
+                        // delegate to a child span.
+                        span {
+                            class: "block truncate",
+                            onclick: move |_| on_toggle_expand.call(page_id),
+                            ItemTitle { class: "truncate", "{row.title}" }
+                        }
+                    }
+                    ItemActions { class: "gap-1.5",
+                        if let Some(color) = priority_color {
+                            StatusDot { color, size: StatusDotSize::Small }
+                        }
+                        StatusPill { status: row.status.clone() }
+                        span { "data-testid": expand_testid,
+                            Button {
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::Small,
+                                on_click: move |_| on_toggle_expand.call(page_id),
+                                if is_expanded { "▾" } else { "▸" }
+                            }
+                        }
                     }
                 }
             }
@@ -249,7 +342,7 @@ fn TaskRowEl(
                 if let Some(schema) = task_schema {
                     div {
                         "data-testid": format!("task-properties-{page_id}"),
-                        class: "ml-7 mb-2",
+                        class: "mx-2 mb-2 mt-1 rounded-md border border-border/60 bg-muted/40 p-3",
                         knowledge_ui::PropertiesPane {
                             schema: schema.clone(),
                             frontmatter_json: row.frontmatter_json.clone(),
@@ -267,6 +360,15 @@ fn TaskRowEl(
     }
 }
 
+fn priority_dot_color(priority: &str) -> Option<StatusDotColor> {
+    match priority {
+        "urgent" => Some(StatusDotColor::Danger),
+        "high" => Some(StatusDotColor::Warning),
+        "low" => Some(StatusDotColor::Neutral),
+        _ => None,
+    }
+}
+
 #[component]
 fn StatusPill(status: String) -> Element {
     let (variant, label) = match status.as_str() {
@@ -274,22 +376,6 @@ fn StatusPill(status: String) -> Element {
         "in_progress" => (StatusBadgeVariant::Warning, "In progress"),
         "blocked" => (StatusBadgeVariant::Danger, "Blocked"),
         "done" => (StatusBadgeVariant::Success, "Done"),
-        other => (StatusBadgeVariant::Neutral, other),
-    };
-    rsx! {
-        StatusBadge { variant, label: label.to_string() }
-    }
-}
-
-#[component]
-fn PriorityPill(priority: String) -> Element {
-    if priority.is_empty() || priority == "normal" {
-        return rsx! {};
-    }
-    let (variant, label) = match priority.as_str() {
-        "low" => (StatusBadgeVariant::Neutral, "low"),
-        "high" => (StatusBadgeVariant::Warning, "high"),
-        "urgent" => (StatusBadgeVariant::Danger, "urgent"),
         other => (StatusBadgeVariant::Neutral, other),
     };
     rsx! {

@@ -52,12 +52,14 @@ fn KindListItem(row: BaseRow, on_select: Callback<Uuid>) -> Element {
     }
 }
 
-/// `KindKanban` — one column per bucket. Cards carry a
-/// `Move to {target}` button for each other bucket so tests + users
-/// can move them without HTML5 DnD.
+/// `KindKanban` — column per bucket, cards per row. Built on
+/// fts-ui primitives (Card / Badge / Item). Cards are draggable;
+/// columns are drop targets. No move buttons — the kanban is a
+/// purely visual drag interface. Use `KindList` for keyboard-
+/// driven reordering instead.
 ///
-/// `on_move` fires with `(page_id, target_bucket_label)`. The caller
-/// translates that into a frontmatter update (e.g. `status: <label>`).
+/// `on_move` fires with `(page_id, target_bucket_label)`. The
+/// caller translates that into a frontmatter update.
 #[component]
 pub fn KindKanban(
     view: ExecutedView,
@@ -65,18 +67,16 @@ pub fn KindKanban(
     on_select: Callback<Uuid>,
     on_move: Callback<(Uuid, String)>,
 ) -> Element {
-    let bucket_labels: Vec<String> = view.groups.iter().map(|(k, _)| k.clone()).collect();
     rsx! {
         div {
             "data-testid": "kind-kanban",
             "data-group-key": "{group_key}",
-            class: "flex flex-row gap-3 overflow-x-auto",
+            class: "flex flex-row gap-4 overflow-x-auto pb-2 -mx-1 px-1",
             for (label, rows) in view.groups.iter() {
                 KanbanColumn {
                     key: "{label}",
                     label: label.clone(),
                     rows: rows.clone(),
-                    bucket_labels: bucket_labels.clone(),
                     on_select,
                     on_move,
                 }
@@ -89,31 +89,22 @@ pub fn KindKanban(
 fn KanbanColumn(
     label: String,
     rows: Vec<BaseRow>,
-    bucket_labels: Vec<String>,
     on_select: Callback<Uuid>,
     on_move: Callback<(Uuid, String)>,
 ) -> Element {
     let column_testid = format!("kanban-column-{label}");
-    // HTML5 DnD: column accepts drops. The dragged page id is read
-    // out of `text/plain` (set by the card's ondragstart). On drop,
-    // fire `on_move` with the current column label as target.
-    //
-    // Adapted from TaskNotes' KanbanView.ts:1284-1606 / 2689-2920.
-    // Our version is much shorter because:
-    // - we don't need the `suppressRenderUntil` workaround (Loro
-    //   has no file-watcher race that fights optimistic DOM),
-    // - we don't fan-out to swimlanes (Phase 6.6+),
-    // - we delegate sort-order recomputation to the caller.
+    // Per-column DnD drop target. Loro avoids Obsidian's file-
+    // watcher race so we don't need TaskNotes'
+    // `suppressRenderUntil` workaround.
     let label_for_drop = label.clone();
+    let count = rows.len();
+    let bucket_variant = column_badge_variant(&label);
     rsx! {
         section {
             "data-testid": column_testid,
             "data-bucket": "{label}",
-            class: "min-w-[14rem] flex-1 rounded-md border border-border bg-card p-3 flex flex-col gap-2",
-            ondragover: move |e| {
-                // preventDefault lets the column become a drop target.
-                e.prevent_default();
-            },
+            class: "min-w-[18rem] w-72 shrink-0",
+            ondragover: move |e| e.prevent_default(),
             ondrop: move |e| {
                 e.prevent_default();
                 let dt = e.data().data_transfer();
@@ -124,19 +115,32 @@ fn KanbanColumn(
                     }
                 }
             },
-            HStack { class: "items-baseline justify-between",
-                Heading { level: HeadingLevel::H4, "{column_label(&label)}" }
-                Text { variant: TextVariant::Muted, "{rows.len()}" }
-            }
-            div { class: "flex flex-col gap-2",
-                for row in rows.iter() {
-                    KanbanCard {
-                        key: "{row.page_id}",
-                        row: row.clone(),
-                        current_bucket: label.clone(),
-                        bucket_labels: bucket_labels.clone(),
-                        on_select,
-                        on_move,
+            Card { class: "h-full flex flex-col",
+                CardHeader { class: "py-3 pb-2",
+                    HStack { class: "items-center justify-between",
+                        HStack { class: "items-center gap-2",
+                            StatusDot { color: bucket_dot_color(&label), size: StatusDotSize::Small }
+                            Heading { level: HeadingLevel::H4, "{column_label(&label)}" }
+                        }
+                        Badge { variant: bucket_variant, "{count}" }
+                    }
+                }
+                CardContent { class: "pt-0 pb-3",
+                    if rows.is_empty() {
+                        div { class: "rounded-md border border-dashed border-border/60 p-3 text-center text-xs text-muted-foreground",
+                            "Drop here"
+                        }
+                    } else {
+                        div { class: "flex flex-col gap-2",
+                            for row in rows.iter() {
+                                KanbanCard {
+                                    key: "{row.page_id}",
+                                    row: row.clone(),
+                                    current_bucket: label.clone(),
+                                    on_select,
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -146,50 +150,78 @@ fn KanbanColumn(
 
 fn column_label(s: &str) -> String {
     if s.is_empty() {
-        "(none)".into()
-    } else {
-        s.to_string()
+        return "(none)".into();
+    }
+    // Pretty-print snake_case → "Snake case".
+    let mut chars = s.chars();
+    let first = chars
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_default();
+    let rest: String = chars.map(|c| if c == '_' { ' ' } else { c }).collect();
+    format!("{first}{rest}")
+}
+
+/// Map common bucket labels to a `StatusDot` color so columns
+/// get a small leading swatch that mirrors the
+/// `EnumWithMetadata.color` declaration in the task schema.
+fn bucket_dot_color(label: &str) -> StatusDotColor {
+    match label {
+        "todo" => StatusDotColor::Neutral,
+        "in_progress" => StatusDotColor::Warning,
+        "blocked" => StatusDotColor::Danger,
+        "done" => StatusDotColor::Success,
+        _ => StatusDotColor::Neutral,
+    }
+}
+
+fn column_badge_variant(label: &str) -> BadgeVariant {
+    match label {
+        "in_progress" => BadgeVariant::Default,
+        "done" => BadgeVariant::Secondary,
+        _ => BadgeVariant::Outline,
     }
 }
 
 #[component]
-fn KanbanCard(
-    row: BaseRow,
-    current_bucket: String,
-    bucket_labels: Vec<String>,
-    on_select: Callback<Uuid>,
-    on_move: Callback<(Uuid, String)>,
-) -> Element {
+fn KanbanCard(row: BaseRow, current_bucket: String, on_select: Callback<Uuid>) -> Element {
     let id = row.page_id;
     let card_testid = format!("kanban-card-{id}");
-    // HTML5 DnD: write the page id into the drag data on dragstart.
-    // The column's ondrop reads it back. Move buttons stay as the
-    // accessibility fallback + the playwright button-driven path.
+    let priority = row
+        .frontmatter
+        .get("priority")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let priority_color = priority_dot(&priority);
     rsx! {
         article {
             "data-testid": card_testid,
             "data-bucket": "{current_bucket}",
-            class: "rounded border border-border bg-background p-2 flex flex-col gap-1 cursor-grab active:cursor-grabbing",
+            class: "group/card relative rounded-md border border-border bg-background hover:bg-accent/30 hover:border-border/80 transition-colors cursor-grab active:cursor-grabbing shadow-xs",
             draggable: true,
             ondragstart: move |e| {
                 let dt = e.data().data_transfer();
                 let _ = dt.set_data("text/plain", &id.to_string());
                 let _ = dt.set_effect_allowed("move");
             },
-            div {
-                class: "text-sm cursor-pointer",
-                onclick: move |_| on_select.call(id),
-                "{row.basename}"
+            // Drag handle (visual; the whole card is draggable).
+            // Shows on hover only — keeps the resting card clean.
+            span {
+                class: "absolute left-1.5 top-2 text-muted-foreground/40 text-xs opacity-0 group-hover/card:opacity-100 transition-opacity select-none",
+                "⋮⋮"
             }
-            HStack { class: "gap-1 flex-wrap",
-                for target in bucket_labels.iter() {
-                    if target != &current_bucket {
-                        MoveButton {
-                            key: "{target}",
-                            page_id: id,
-                            target: target.clone(),
-                            on_move,
+            div { class: "p-3 pl-5 flex flex-col gap-2",
+                HStack { class: "items-start gap-2",
+                    if let Some(color) = priority_color {
+                        span { class: "mt-1.5",
+                            StatusDot { color, size: StatusDotSize::Small }
                         }
+                    }
+                    div {
+                        class: "flex-1 text-sm leading-snug cursor-pointer min-w-0",
+                        onclick: move |_| on_select.call(id),
+                        "{row.basename}"
                     }
                 }
             }
@@ -197,17 +229,12 @@ fn KanbanCard(
     }
 }
 
-#[component]
-fn MoveButton(page_id: Uuid, target: String, on_move: Callback<(Uuid, String)>) -> Element {
-    let testid = format!("kanban-move-{page_id}-to-{target}");
-    let target_for_click = target.clone();
-    rsx! {
-        span { "data-testid": testid,
-            Button {
-                on_click: move |_| on_move.call((page_id, target_for_click.clone())),
-                "→ {column_label(&target)}"
-            }
-        }
+fn priority_dot(priority: &str) -> Option<StatusDotColor> {
+    match priority {
+        "urgent" => Some(StatusDotColor::Danger),
+        "high" => Some(StatusDotColor::Warning),
+        "low" => Some(StatusDotColor::Neutral),
+        _ => None,
     }
 }
 

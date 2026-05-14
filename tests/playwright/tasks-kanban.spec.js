@@ -115,19 +115,14 @@ test("two tabs sync kanban: card moves across columns", async ({ browser }) => {
     await expect(todoA.getByText(title, { exact: true })).toBeVisible();
     await expect(todoB.getByText(title, { exact: true })).toBeVisible();
 
-    // Tab A "drags" via the per-card move button: → in_progress.
-    // The card's testid is derived from its page id, which we
-    // discover by walking the DOM from the title text.
+    // Tab A drags the card from todo → in_progress. The kanban
+    // is drag-only — no buttons.
     const cardA = a
       .locator("[data-testid^='kanban-card-']")
       .filter({ hasText: title });
     await expect(cardA).toBeVisible();
-    // The move buttons inside the card carry data-testid prefixed
-    // `kanban-move-<page_id>-to-<bucket>`. Click the one ending in
-    // `-to-in_progress`.
-    await cardA
-      .locator("[data-testid$='-to-in_progress'] button")
-      .click();
+    const ipColA = a.locator("[data-testid='kanban-column-in_progress']");
+    await cardA.dragTo(ipColA);
 
     // Card is now in the in_progress column in both tabs.
     const ipA = a.locator("[data-testid='kanban-column-in_progress']");
