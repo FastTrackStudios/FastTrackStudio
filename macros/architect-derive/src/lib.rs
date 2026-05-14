@@ -442,7 +442,8 @@ fn build_server_block(
 
     quote! {
         #[cfg(feature = "server")]
-        mod #storage_mod {
+        #[doc(hidden)]
+        pub mod #storage_mod {
             // User's types (Uuid, DateTime<Utc>, etc.) come via super::*.
             // We deliberately avoid `use ::sea_orm::entity::prelude::*`
             // because it re-exports DateTime/etc and collides with the

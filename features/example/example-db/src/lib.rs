@@ -6,8 +6,12 @@
 //! axum server, a CLI tool, a migration binary — depends on this
 //! crate. Wasm clients never see it.
 
-pub use example_proto::Entity as ExampleEntity;
-pub use example_proto::{
+// The architect-derive macro puts the SeaORM `Entity`/`Model`/`Column`/
+// `Relation`/`ActiveModel` items inside a hidden `__<snake>_storage`
+// module so multiple `#[derive(Entity)]` structs in one crate don't
+// collide on those bare names. Re-export them from there.
+pub use example_proto::__example_storage::Entity as ExampleEntity;
+pub use example_proto::__example_storage::{
     ActiveModel as ExampleActiveModel, Column as ExampleColumn, Model as ExampleModel,
     Relation as ExampleRelation,
 };

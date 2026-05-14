@@ -71,8 +71,17 @@ diagnostics = ["moire/diagnostics"]
 # get the SeaORM bridge for free. Drop after one release cycle.
 server = ["server-seaorm"]
 
+# Dispatcher impls (see `architect::dispatch`). The current-thread
+# dispatcher is always available; runtime-specific impls are gated.
+#
+#   dispatch-tokio   spawn_blocking-backed dispatcher. Right for
+#                    server-side binaries wrapping sync work behind an
+#                    async service.
+dispatch-tokio = ["dep:tokio"]
+
 [dependencies]
 architect-derive = { path = "../architect-derive" }
+architect-rpc-derive = { path = "../architect-rpc-derive" }
 facet.workspace = true
 facet-core.workspace = true
 uuid.workspace = true
@@ -97,3 +106,6 @@ tracing = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
 moire = { workspace = true, optional = true }
+
+[dev-dependencies]
+futures-lite = "2"

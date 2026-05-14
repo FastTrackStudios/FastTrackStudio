@@ -30,6 +30,12 @@
 
 pub use architect_derive::Entity;
 
+// `#[architect::rpc]` attribute macro — turns a sync (or mixed) trait
+// into a sync API + async vox client + server-side host. See
+// `DESIGN.md` and the `dispatch` module for the runtime contract the
+// emitted code relies on.
+pub use architect_rpc_derive::rpc;
+
 // Re-export facet unconditionally — every architect-emitted struct
 // uses it for wire encoding regardless of whether RPC is in play.
 pub use facet;
@@ -173,6 +179,174 @@ pub mod seed {
     impl SeedCount for RangeInclusive<u32> {
         fn pick(&self) -> usize {
             (*self.start() as usize..=*self.end() as usize).pick()
+        }
+    }
+}
+
+// ── Dispatcher trait (used by #[architect::rpc] bridges) ───────────────
+//
+// `Dispatcher` is the marshaling primitive that runs a sync closure on
+// the right thread / executor and produces a future for its result. The
+// trait is intentionally object-safe (`Pin<Box<dyn Future>>` return) so
+// architect-rpc-emitted host types can store `Arc<dyn Dispatcher>` and
+// compose runtimes at runtime.
+//
+// Concrete impls live downstream (one per runtime context). Three are
+// shipped in this crate as zero-cost helpers; more exotic ones (the
+// REAPER main-thread queue, custom AudioWorklet bridges, etc.) live in
+// the consumers that need them.
+
+pub mod dispatch {
+    //! Marshaling primitive for `#[architect::rpc]` bridges.
+    //!
+    //! See [`Dispatcher`] for the contract. Consumers typically pick a
+    //! pre-built dispatcher per binary — `tokio` server binaries reach
+    //! for [`TokioBlockingDispatcher`]; tests and pure in-process
+    //! callers reach for [`CurrentThreadDispatcher`]; runtime-specific
+    //! dispatchers (moiré main-thread queue, REAPER defer queue) live
+    //! in their own crates.
+
+    use core::future::Future;
+    use core::pin::Pin;
+
+    /// Errors produced by a [`Dispatcher`]. These wrap "transport-level"
+    /// failures around the user's closure — the closure shutdown, the
+    /// runtime tear-down, a panic inside the worker. Application-level
+    /// errors returned from the closure flow through the future's
+    /// `Output` unchanged.
+    #[derive(Debug, Clone, PartialEq, Eq, facet::Facet, thiserror::Error)]
+    #[repr(u8)]
+    pub enum DispatchError {
+        /// The dispatcher has been shut down and cannot accept work.
+        #[error("dispatcher has shut down")]
+        ShutDown,
+        /// The worker that ran the closure panicked. The string is the
+        /// formatted panic payload when recoverable, or a generic
+        /// description when not.
+        #[error("worker panicked: {0}")]
+        Panicked(String),
+        /// The closure was cancelled before producing a result. Used by
+        /// dispatchers that support deadlines or cooperative cancellation.
+        #[error("dispatch cancelled")]
+        Cancelled,
+    }
+
+    /// Marshals a sync closure onto a runtime-appropriate execution
+    /// context and returns a future for its result.
+    ///
+    /// Object-safe by design: bridges store `Arc<dyn Dispatcher>` so the
+    /// dispatcher choice is composable at runtime. The boxed-future
+    /// return is one allocation per call, dwarfed by the dispatcher's
+    /// own thread-hop cost.
+    pub trait Dispatcher: Send + Sync + 'static {
+        /// Run `f` on the dispatcher's execution context. The returned
+        /// future resolves to the closure's value (wrapped in `Ok`) or
+        /// a [`DispatchError`] describing why the closure never ran or
+        /// never completed.
+        fn dispatch(
+            &self,
+            f: Box<dyn FnOnce() -> BoxedAny + Send + 'static>,
+        ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>>;
+    }
+
+    /// Opaque type carrying the closure's return value across the
+    /// dispatcher boundary. Bridges downcast back to the concrete type
+    /// they sent in; the type-erasure keeps `Dispatcher` object-safe
+    /// without making it generic.
+    pub type BoxedAny = Box<dyn core::any::Any + Send + 'static>;
+
+    /// Convenience: run a typed closure through any `Dispatcher` and
+    /// recover the typed result. This is the API bridge code generated
+    /// by `#[architect::rpc]` actually calls — the trait method's
+    /// `BoxedAny` shape stays a framework-internal detail.
+    pub async fn run<D, F, T>(dispatcher: &D, f: F) -> Result<T, DispatchError>
+    where
+        D: Dispatcher + ?Sized,
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let boxed: Box<dyn FnOnce() -> BoxedAny + Send + 'static> =
+            Box::new(move || Box::new(f()) as BoxedAny);
+        let any = dispatcher.dispatch(boxed).await?;
+        Ok(*any
+            .downcast::<T>()
+            .expect("dispatcher must not alter the closure's return type"))
+    }
+
+    // ── Standard dispatcher: current-thread (call inline) ──────────────
+
+    /// Calls the closure inline on the current thread. The returned
+    /// future is always `Poll::Ready(Ok(_))` — no scheduling, no thread
+    /// hop. Right for tests, single-threaded contexts, and in-process
+    /// callers where there's no thread to marshal to.
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct CurrentThreadDispatcher;
+
+    impl Dispatcher for CurrentThreadDispatcher {
+        fn dispatch(
+            &self,
+            f: Box<dyn FnOnce() -> BoxedAny + Send + 'static>,
+        ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>>
+        {
+            let result = f();
+            Box::pin(async move { Ok(result) })
+        }
+    }
+
+    // ── Standard dispatcher: tokio spawn_blocking ──────────────────────
+
+    /// Marshals the closure onto a tokio blocking thread via
+    /// [`tokio::task::spawn_blocking`]. Right for server-side binaries
+    /// that wrap sync-shaped backends (a sync DB driver, a CPU-bound
+    /// transform) inside an async service.
+    ///
+    /// Requires the `tokio` cargo feature; pulls `tokio` with the
+    /// `rt` capability so `spawn_blocking` is available.
+    #[cfg(feature = "dispatch-tokio")]
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct TokioBlockingDispatcher;
+
+    #[cfg(feature = "dispatch-tokio")]
+    impl Dispatcher for TokioBlockingDispatcher {
+        fn dispatch(
+            &self,
+            f: Box<dyn FnOnce() -> BoxedAny + Send + 'static>,
+        ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>>
+        {
+            Box::pin(async move {
+                tokio::task::spawn_blocking(f).await.map_err(|join_err| {
+                    if join_err.is_panic() {
+                        DispatchError::Panicked(format!("{join_err:?}"))
+                    } else {
+                        DispatchError::Cancelled
+                    }
+                })
+            })
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn current_thread_runs_inline_and_returns_value() {
+            let d = CurrentThreadDispatcher;
+            // `run` is async; resolve the future synchronously since
+            // CurrentThreadDispatcher never actually defers.
+            let fut = run(&d, || 1u32 + 2);
+            let result = futures_lite::future::block_on(fut).unwrap();
+            assert_eq!(result, 3);
+        }
+
+        #[test]
+        fn current_thread_passes_owned_data_through() {
+            let d = CurrentThreadDispatcher;
+            let payload = vec!["a".to_string(), "b".to_string()];
+            let payload_clone = payload.clone();
+            let fut = run(&d, move || payload_clone);
+            let result = futures_lite::future::block_on(fut).unwrap();
+            assert_eq!(result, payload);
         }
     }
 }
