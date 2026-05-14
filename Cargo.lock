@@ -6784,6 +6784,7 @@ dependencies = [
  "crdt",
  "dioxus",
  "fts-ui",
+ "futures",
  "project-crdt",
  "project-proto",
  "tracing",
@@ -8629,6 +8630,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "dotenvy",
  "eyre",
  "project-proto",
  "serde",

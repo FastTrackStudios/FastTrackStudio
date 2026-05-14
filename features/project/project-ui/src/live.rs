@@ -5,29 +5,39 @@
 //!
 //! ```text
 //!   server CrdtDoc ─┐
-//!                   │  subscribe_local_update → broadcast → Tx<Vec<u8>>
+//!                   │  subscribe_local_update → broadcast → Tx<UpdateBytes>
 //!                   ▼
 //!         WorkspaceSync vox session
 //!                   │ (typed RPC over WebSocket)
 //!                   ▼
 //!   client CrdtDoc (this module's `local_doc`)
-//!                   │  *RepoLoro::list — synchronous reads
-//!                   ▼
-//!                  UI
+//!                   │
+//!                   ├── *RepoLoro::list — synchronous reads (renders)
+//!                   │
+//!                   └── *RepoLoro::update — local commit
+//!                          │
+//!                          └── subscribe_local_update fires
+//!                                 │
+//!                                 └── mpsc → apply_update → server
 //! ```
 //!
 //! On mount the `TasksByProjectLive` component:
 //! 1. Builds an empty in-memory `CrdtDoc` (no persistence; ephemeral).
-//! 2. Spawns a background task that opens a `WorkspaceSyncClient`
-//!    over a fresh WebSocket, calls `subscribe(tx)`, and pumps each
-//!    received chunk into `local_doc.apply_remote(bytes)`.
-//! 3. Bumps a `version` `Signal` after every import so the render
-//!    `use_resource` re-runs and pulls fresh data from the local doc.
+//! 2. Opens two `WorkspaceSyncClient` sessions over fresh
+//!    WebSockets — one for the long-lived `subscribe` stream, one
+//!    for short-lived `apply_update` calls.
+//! 3. Wires `local_doc.subscribe_local_update(callback)` so every
+//!    locally-committed change pushes its bytes into a futures
+//!    mpsc that a background task drains by calling
+//!    `apply_update`. Loro's `import` (used for remote bytes)
+//!    does NOT trigger this callback — no echo loop.
+//! 4. Bumps a `version` `Signal` after every imported chunk so the
+//!    render `use_resource` re-runs and pulls fresh data from the
+//!    local doc.
 //!
-//! Reads in this view always go through the local doc — works offline
-//! once the snapshot is in. Writes (not yet wired in this component)
-//! would `local_doc.commit()` and call `client.apply_update(bytes)`
-//! to push back up.
+//! Reads always hit the local doc — works offline once the
+//! snapshot is in. Writes commit locally first (instant render)
+//! and propagate to peers via the upload pipeline.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,9 +45,13 @@ use std::sync::Arc;
 use crdt::CrdtDoc;
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
+use futures::StreamExt;
+use futures::channel::mpsc::unbounded;
 use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
 use project_proto::architect::Page;
-use project_proto::{Project, ProjectRepo, Task, TaskRepo, UpdateBytes, WorkspaceSyncClient};
+use project_proto::{
+    Project, ProjectRepo, Task, TaskRepo, TaskUpdate, UpdateBytes, WorkspaceSyncClient,
+};
 use uuid::Uuid;
 
 /// The full route entry. Spawns the sync loop and renders from the
@@ -69,6 +83,28 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
         async move { build_snapshot(doc).await }
     });
 
+    // Mutation handler — commits to the LOCAL doc; the
+    // subscribe_local_update callback in run_sync_loop picks up
+    // the bytes and ships them to the server.
+    let on_set_status = use_callback(move |(task_id, new_status): (Uuid, String)| {
+        let doc = local_doc.read().clone();
+        spawn(async move {
+            let task_repo = TaskRepoLoro::new(&doc);
+            if let Err(e) = task_repo
+                .update(
+                    task_id,
+                    TaskUpdate {
+                        status: Some(new_status),
+                        ..Default::default()
+                    },
+                )
+                .await
+            {
+                tracing::warn!(?e, %task_id, "local task update failed");
+            }
+        });
+    });
+
     rsx! {
         div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
             HStack { class: "items-center gap-3",
@@ -86,15 +122,20 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
             match &*snapshot.read_unchecked() {
                 None => rsx! { Text { variant: TextVariant::Muted, "Building local doc…" } },
                 Some(Err(err)) => rsx! { Text { variant: TextVariant::Muted, "Decode failed: {err}" } },
-                Some(Ok(snap)) => rsx! { TasksByProjectView { snapshot: snap.clone() } },
+                Some(Ok(snap)) => rsx! { TasksByProjectView {
+                    snapshot: snap.clone(),
+                    on_set_status: on_set_status,
+                } },
             }
         }
     }
 }
 
-/// Dumb render half — feed it a `Snapshot` and it draws the cards.
+/// Render half — feed it a `Snapshot` and (optionally) a status
+/// callback per row. Without the callback, status badges are
+/// non-interactive.
 #[component]
-pub fn TasksByProjectView(snapshot: Snapshot) -> Element {
+pub fn TasksByProjectView(snapshot: Snapshot, on_set_status: Callback<(Uuid, String)>) -> Element {
     if snapshot.ordered_projects.is_empty() {
         return rsx! {
             Text { variant: TextVariant::Muted, "No projects with tasks (waiting on snapshot…)." }
@@ -103,9 +144,72 @@ pub fn TasksByProjectView(snapshot: Snapshot) -> Element {
     rsx! {
         div { class: "flex flex-col gap-6",
             for (project_id, name) in snapshot.ordered_projects.iter() {
-                {render_project_block(*project_id, name.clone(), snapshot.tasks_by_project.get(project_id).cloned().unwrap_or_default())}
+                ProjectBlock {
+                    key: "{project_id}",
+                    project_id: *project_id,
+                    name: name.clone(),
+                    tasks: snapshot.tasks_by_project.get(project_id).cloned().unwrap_or_default(),
+                    on_set_status: on_set_status,
+                }
             }
         }
+    }
+}
+
+#[component]
+fn ProjectBlock(
+    project_id: Uuid,
+    name: String,
+    tasks: Vec<Task>,
+    on_set_status: Callback<(Uuid, String)>,
+) -> Element {
+    rsx! {
+        section { class: "rounded-md border border-border bg-card p-4",
+            HStack { class: "items-baseline justify-between mb-3",
+                Heading { level: HeadingLevel::H3, "{name}" }
+                Text { variant: TextVariant::Muted, "{tasks.len()} task(s)" }
+            }
+            ul { class: "flex flex-col gap-1.5",
+                for task in tasks.iter() {
+                    TaskRow { key: "{task.id}", task: task.clone(), on_set_status: on_set_status }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TaskRow(task: Task, on_set_status: Callback<(Uuid, String)>) -> Element {
+    let task_id = task.id;
+    let current_status = task.status.clone();
+    let next = next_status(&current_status).to_string();
+    let click_status = next.clone();
+    rsx! {
+        li { class: "flex items-center gap-3 text-sm",
+            button {
+                class: "rounded border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent",
+                title: "Cycle status → {click_status}",
+                onclick: move |_| on_set_status.call((task_id, click_status.clone())),
+                "→"
+            }
+            StatusBadge {
+                variant: status_variant(&current_status),
+                label: current_status.clone(),
+            }
+            span { class: "text-foreground", "{task.title}" }
+        }
+    }
+}
+
+fn next_status(current: &str) -> &'static str {
+    match current {
+        "todo" => "in-progress",
+        "in-progress" => "in-review",
+        "in-review" => "done",
+        "done" => "todo",
+        "blocked" => "todo",
+        "cancelled" => "todo",
+        _ => "todo",
     }
 }
 
@@ -161,21 +265,52 @@ async fn run_sync_loop(
     mut version: Signal<u64>,
     mut last_error: Signal<Option<String>>,
 ) {
-    let client: WorkspaceSyncClient = match connect_client(&url).await {
+    // One vox session per direction — `subscribe` holds its session
+    // for the lifetime of the stream, so `apply_update` needs its
+    // own.
+    let sub_client: WorkspaceSyncClient = match connect_client(&url).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::warn!(%e, "sync connect failed");
+            tracing::warn!(%e, "sync subscribe-client connect failed");
             last_error.set(Some(e));
             return;
         }
     };
-    let (tx, mut rx) = vox::channel::<UpdateBytes>();
+    let apply_client: WorkspaceSyncClient = match connect_client(&url).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(%e, "sync apply-client connect failed");
+            last_error.set(Some(e));
+            return;
+        }
+    };
 
-    // The `subscribe` future resolves when the server stops sending
-    // (or the channel closes). Spawn it so we can pump `rx`
-    // concurrently in this scope.
+    // Wire local commits → mpsc → apply_update. The Subscription
+    // handle returned by `subscribe_local_update` must outlive the
+    // doc; leak it (the doc itself outlives the page).
+    let (upload_tx, mut upload_rx) = unbounded::<Vec<u8>>();
+    let upload_sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
+        let _ = upload_tx.unbounded_send(bytes.to_vec());
+        true
+    }));
+    std::mem::forget(upload_sub);
+
+    // Background uploader: drains the mpsc, ships each chunk via
+    // `apply_update`. Holds `apply_client` for the lifetime of the
+    // page (component teardown drops it implicitly when the spawn
+    // task is canceled).
     spawn(async move {
-        if let Err(e) = client.subscribe(tx).await {
+        while let Some(bytes) = upload_rx.next().await {
+            if let Err(e) = apply_client.apply_update(UpdateBytes(bytes)).await {
+                tracing::warn!(?e, "apply_update failed");
+            }
+        }
+    });
+
+    // Subscribe stream — pumps remote bytes into the local doc.
+    let (tx, mut rx) = vox::channel::<UpdateBytes>();
+    spawn(async move {
+        if let Err(e) = sub_client.subscribe(tx).await {
             tracing::warn!(error = ?e, "WorkspaceSync::subscribe ended with error");
         }
     });
@@ -200,31 +335,6 @@ async fn run_sync_loop(
                 tracing::warn!(?e, "rx.recv failed");
                 last_error.set(Some(format!("recv: {e:?}")));
                 return;
-            }
-        }
-    }
-}
-
-fn render_project_block(project_id: Uuid, name: String, tasks: Vec<Task>) -> Element {
-    rsx! {
-        section {
-            key: "{project_id}",
-            class: "rounded-md border border-border bg-card p-4",
-            HStack { class: "items-baseline justify-between mb-3",
-                Heading { level: HeadingLevel::H3, "{name}" }
-                Text { variant: TextVariant::Muted, "{tasks.len()} task(s)" }
-            }
-            ul { class: "flex flex-col gap-1.5",
-                for task in tasks.iter() {
-                    li { key: "{task.id}",
-                        class: "flex items-center gap-3 text-sm",
-                        StatusBadge {
-                            variant: status_variant(&task.status),
-                            label: task.status.clone(),
-                        }
-                        span { class: "text-foreground", "{task.title}" }
-                    }
-                }
             }
         }
     }

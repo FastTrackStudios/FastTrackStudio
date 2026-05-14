@@ -11,11 +11,10 @@ pub(crate) struct RemoteVoxConfig {
 
 impl RemoteVoxConfig {
     pub(crate) fn from_args(
-        server: Option<String>,
+        server: String,
         session_token: Option<String>,
         organization_id: Option<String>,
     ) -> eyre::Result<Self> {
-        let server = server.ok_or_else(|| eyre::eyre!("--server (or TASK_SERVER) is required"))?;
         let base = normalize_vox_url(&server);
         let mut vox_url = base.clone();
         let mut display_url = base;

@@ -3,6 +3,14 @@
 //! Talks to a `task-server` over vox WebSocket. `task list` calls the
 //! auto-generated `TaskRepoClient::list`; `task doctor` just prints
 //! the resolved endpoint URL.
+//!
+//! Endpoint resolution (first match wins):
+//! 1. `--server <url>` flag.
+//! 2. `TASK_VOX_URL` env var (loaded from `.env` if present in CWD
+//!    or any parent dir — see `dotenvy::dotenv()`). Named to avoid
+//!    collision with the broader `TASK_SERVER` you may already
+//!    have set for the prod box.
+//! 3. `ws://127.0.0.1:9090/vox` default.
 
 mod shared;
 
@@ -17,9 +25,16 @@ use uuid::Uuid;
 #[derive(Parser)]
 #[command(name = "task", about = "Task management CLI", version)]
 struct Cli {
-    /// Vox WebSocket URL (e.g. ws://127.0.0.1:9090/vox).
-    #[arg(long, env = "TASK_SERVER", global = true)]
-    server: Option<String>,
+    /// Vox WebSocket URL (e.g. ws://127.0.0.1:9090/vox). Falls back
+    /// to `TASK_VOX_URL` (loaded from .env) then to the localhost
+    /// default.
+    #[arg(
+        long,
+        env = "TASK_VOX_URL",
+        default_value = "ws://127.0.0.1:9090/vox",
+        global = true
+    )]
+    server: String,
 
     /// Architect Auth session token for remote vox.
     #[arg(long, env = "TASK_SESSION_TOKEN", global = true)]
@@ -52,6 +67,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    // Best-effort .env load before clap reads env. Missing file is
+    // not an error — we just fall through to the hard-coded default.
+    let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     match cli.command {
         Commands::List => {
@@ -112,7 +130,8 @@ async fn main() -> eyre::Result<()> {
                     let tasks = grouped.get(&project_id).expect("inserted above");
                     println!("\n## {name}  ({} tasks)", tasks.len());
                     for task in tasks {
-                        println!("  [{}] {}", task.status, task.title);
+                        let short_id = &task.id.to_string()[..8];
+                        println!("  [{short_id}] [{}] {}", task.status, task.title);
                     }
                 }
             }

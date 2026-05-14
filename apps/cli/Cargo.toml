@@ -17,3 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 project-proto = { workspace = true }
+# Pull TASK_SERVER (and friends) from a `.env` file in CWD or any
+# parent dir, so a user can `task list` instead of typing
+# `--server ws://...` every time.
+dotenvy = "0.15"

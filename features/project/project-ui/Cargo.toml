@@ -35,6 +35,10 @@ vox-websocket = { workspace = true }
 crdt = { workspace = true }
 project-crdt = { workspace = true }
 tracing = { workspace = true }
+# `futures::channel::mpsc::unbounded` bridges Loro's sync
+# `subscribe_local_update` callback into the async `apply_update`
+# uploader task.
+futures = { workspace = true }
 
 # Web-only — clipboard writes from the TaskGitPanel. Gated with
 # `#[cfg(target_arch = "wasm32")]` at the call sites.
