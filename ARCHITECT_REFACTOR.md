@@ -1,7 +1,9 @@
 # DAW → architect::rpc — Refactor Plan
 
-> **Status:** Markers + Tracks ported (commits `00e37eb` → `44cf77f` → followup).
-> Remaining: 15+ services. This doc tracks the plan, the recipe, and the punch list.
+> **Status:** 11 services ported — markers, tracks, regions, transport,
+> tempo_map, takes, ext_state, fx_chains, fx_params, routing, items.
+> Remaining: 17 services (fx is the biggest still ahead). This doc
+> tracks the plan, the recipe, and the punch list.
 
 ## Goal
 
@@ -158,15 +160,15 @@ Sorted roughly by complexity (ascending — start with smaller).
 |---|---|---|---|---|---|
 | ✅ | markers | 230 | 391 + 162 sync + 103 remote | 548 + 93 sync | DONE |
 | ✅ | tracks | 275 | 1486 + 203 sync + 182 remote | 422 + 131 sync | DONE |
-| 1 | **regions** | 120 | TBD | TBD | shape matches markers — same lanes / range / goto retirements |
-| 2 | **transport** | TBD | TBD | TBD | per-project play/stop/rec/loop. No project-list semantics. |
-| 3 | **tempo_map** | 108 | TBD | TBD | get/set tempo + time-sig points. Some streaming. |
-| 4 | **takes** | TBD | TBD | TBD | per-item take CRUD. Mirrors items shape. |
-| 5 | **ext_state** | TBD | TBD | TBD | project-scoped key-value. Trivial port. |
-| 6 | **fx_chains** | TBD | TBD | TBD | enumerate chain on a track/take. Stateless. |
-| 7 | **fx_params** | TBD | TBD | TBD | get/set a param on an FX node. |
-| 8 | **routing** | 160 | TBD | TBD | sends/receives/hw outputs. Decent surface. |
-| 9 | **items** | 348 | TBD | TBD | items + per-item take iteration. Sibling-trait for take details. |
+| ✅ | regions | 120 | net −1353 (29 files) | — | commit `54f399f`. Lanes / range / goto retired. |
+| ✅ | transport | — | net −2008 (32 files) | — | commit `82ee692`. Broadcaster + cache + polling retired. |
+| ✅ | tempo_map | 108 | net −1074 (29 files) | — | commit `d8986ac`. Broadcaster retired; TimeToQn/QnToTime batch ops dropped. |
+| ✅ | takes | — | net −555 (32 files) | — | commit `f9eb81a`. Full 22-method surface (`TakeService` retired). Standalone moved to canonical `ProjectState::takes`. |
+| ✅ | ext_state | — | net −352 (26 files) | — | commit `1ab144b`. 8-method trait (global + project-scoped). New `ProjectState::project_ext_state`. |
+| ✅ | fx_chains | — | net −221 (17 files) | — | commit `3c42774`. `FxChainContext` flows through; no `ProjectContext` (chain context already encodes track). |
+| ✅ | fx_params | — | net −104 (16 files) | — | commit `07b6488`. Smallest port. |
+| ✅ | routing | 160 | net −202 (16 files) | — | commit `3133305`. Sync surface only (12 methods); async `RoutingService` (set_mono/phase/channels/parent_send) stays parallel — separate work. |
+| ✅ | items | 348 | net −711 (26 files) | — | commit `0ebe0d5`. **Full retirement** of `ItemService` (24 methods); `StandaloneItem` + parallel state retired. |
 | 10 | **fx** | 502 | TBD | TBD | biggest service. Plugin/chain/param/preset CRUD. |
 | 11 | **midi** | 238 | TBD | TBD | per-take MIDI editing. |
 | 12 | **automation** | 161 | TBD | TBD | envelope + point CRUD. |
@@ -189,6 +191,114 @@ Sorted roughly by complexity (ascending — start with smaller).
 The async-LOC column is the existing async `<Foo>Service` trait size.
 The REAPER/Standalone columns are the impl sizes that will shrink to
 roughly 30–60% under the port.
+
+**Running totals (9 services landed):** −6580 LOC net across
+223 file changes. Avg per port: −731 LOC, 25 files. Largest delete
+was transport (−2008 LOC); smallest was fx_params (−104).
+
+## Patterns learned from real ports
+
+These surfaced during the first 9 services. Promoted from commit
+messages and inline notes.
+
+### Naming convention (post-rev)
+
+- The architect::rpc trait lives in `daw-proto/src/<feature>/service.rs`
+  (**keep** `service.rs` — don't rename to `trait.rs`; that's a keyword
+  and the convention is settled).
+- The legacy async `#[vox::service] trait FooService` **gets deleted
+  in-place** as part of the port. No parallel coexistence.
+- The architect-emitted dispatcher + descriptor get aliased at the
+  bottom of `service.rs` so callers can `<feature>::serve(Reaper)` /
+  `<feature>::descriptor()` cleanly:
+  ```rust
+  #[cfg(feature = "vox")]
+  pub use FooRpcDispatcher as Dispatcher;
+  #[cfg(feature = "vox")]
+  pub use foo_rpc_service_descriptor as descriptor;
+  ```
+
+### `serve` / `descriptor` name collision inside a parent module
+
+If the trait sits inside a module that also re-exports other names
+(e.g. `item/` holds Items + Take types + take-marker structs), the
+unqualified `serve` glob in lib.rs collides with sibling traits'
+`serve`. Mitigation: alias inside the parent `mod.rs` —
+`serve as serve_items` / `descriptor as items_descriptor` — and mount
+with the aliased name. The fully-isolated services (`marker/`,
+`region/`, etc.) don't need this and keep `serve` / `descriptor` plain.
+
+### Project trait collapse
+
+Every port drops one `type <Sub><'a>: <Sub> + 'a` GAT and one
+`fn <sub>(&self) -> Self::<Sub><'_>` accessor from `daw-proto::sync::
+Project`. After 9 ports the trait now only has `guid()` + `info()`.
+The borrowed-view structs (`Reaper<Sub><'a>` /
+`Standalone<Sub><'a>` / `Remote<Sub><'a>`) retire in lockstep — they
+were the *implementations* of those GATs and have no other consumer.
+
+### Three-file deletion per port
+
+Each port deletes:
+- `daw-proto/src/sync/<feature>.rs` (legacy sync trait)
+- `daw-reaper/src/sync/<feature>.rs` + `daw-reaper/src/remote/<feature>.rs`
+- `daw-standalone/src/sync/<feature>.rs`
+
+Sometimes a fourth (the top-level `<feature>.rs` rewritten as
+`impl <Trait> for Reaper`). The `sync/` and `remote/` mod.rs's lose
+their `mod <feature>;` + `pub use <feature>::*` lines.
+
+### Standalone state migration
+
+Some services had parallel async state (item.rs had its own
+`Arc<RwLock<Vec<ItemState>>>`; ext_state had its own HashMaps). The
+port moves storage onto canonical `ProjectState` / `StandaloneState`
+fields. New fields added across ports:
+- `ProjectState::project_ext_state` (ext_state port)
+- (existing `takes`, `items`, `items_by_track`, `fx_chains`,
+  `tempo_points`, `transport`, `regions`, `markers`, `tracks`,
+  `global_ext_state` all in place)
+
+### `mutate_<thing>` helper on Standalone
+
+For services with many one-line setters (takes, items, fx_chains,
+fx_params, ext_state), a private `mutate_<thing>(daw, project, ref,
+|item| { ... })` helper collapses the resolve-project +
+with_project_mut + lookup boilerplate. Used in standalone `take.rs`
+and `item.rs`.
+
+### Daw-control facade `.await??` pattern
+
+For trait methods returning `DawResult<T>`, the vox client returns
+`Result<DawResult<T>, vox::Error>` — so the facade needs `.await??`
+to flatten. Sed `'.await?;' → '.await??;'` per method works; check
+must-use warnings afterward to find any missed ones.
+
+### Don't bundle the renamed wrappers in daw-control
+
+After renaming `<Foo>ServiceClient` → `<Foo>Client` in
+`daw-control/src/lib.rs`, the client name shows up in 3 places
+(import, struct field type, `new()` call). A single sed replaces all
+three. Then update the per-service file in `daw-control/src/<foo>.rs`
+which usually calls `.<method>(...)` directly on the client.
+
+### `subscribe_<foo>` retires by default
+
+Streaming methods drop with the port. They're "sibling-trait territory"
+— if a concrete consumer needs streaming, a separate trait alongside
+the synchronous one carries it. So far no port has needed to revive
+streaming. The corresponding broadcaster + receiver + polling
+functions in daw-reaper also drop.
+
+### Scope check: full surface vs. minimal
+
+Two ports hit the >500 LOC threshold (takes, items). For takes the
+sync trait was the obvious target (no async parallel). For items
+we explicitly chose **full async surface retirement** (deleting the
+~25-method async `ItemService` rather than adding a small parallel
+sync trait). The chosen scope was confirmed before the port —
+established convention going forward: **full retirement is the
+default** when async + sync would otherwise coexist.
 
 ## Pre-port survey (do before starting each service)
 
