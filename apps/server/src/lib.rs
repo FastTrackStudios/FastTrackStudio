@@ -114,9 +114,16 @@ impl WorkspaceSync for WorkspaceSyncImpl {
     }
 
     async fn subscribe(&self, output: vox::Tx<UpdateBytes>) {
-        // Catch the new subscriber up with one full snapshot, then
-        // bridge live updates from the broadcast channel until the
-        // client drops its receiver (`output.send` returns Err).
+        // Order matters: subscribe to the broadcast channel BEFORE
+        // taking the snapshot. If we did it the other way around,
+        // any commit that happened between snapshot-export and
+        // broadcast-subscribe would be silently dropped for this
+        // peer — they wouldn't be in the snapshot AND they
+        // wouldn't be in the broadcast queue either. Subscribing
+        // first means we MAY redeliver some bytes that are already
+        // in the snapshot, but Loro `import` is idempotent so
+        // duplicates are a no-op.
+        let mut rx = self.update_tx.subscribe();
         let snapshot = match self.doc.loro().export(ExportMode::Snapshot) {
             Ok(b) => b,
             Err(e) => {
@@ -129,7 +136,6 @@ impl WorkspaceSync for WorkspaceSyncImpl {
             return;
         }
 
-        let mut rx = self.update_tx.subscribe();
         loop {
             match rx.recv().await {
                 Ok(bytes) => {

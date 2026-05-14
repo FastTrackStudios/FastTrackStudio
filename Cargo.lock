@@ -8668,6 +8668,7 @@ dependencies = [
  "crdt",
  "crdt-seaorm",
  "eyre",
+ "futures",
  "loro",
  "project-crdt",
  "project-proto",

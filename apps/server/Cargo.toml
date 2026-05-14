@@ -37,3 +37,7 @@ architect-auth = { workspace = true, features = ["full"] }
 # Native vox client for the end-to-end sync test in `tests/sync.rs`.
 vox = { workspace = true, features = ["transport-websocket"] }
 loro = "1.10"
+futures = { workspace = true }
+crdt = { workspace = true }
+project-crdt = { workspace = true }
+project-proto = { workspace = true, features = ["fake"] }
