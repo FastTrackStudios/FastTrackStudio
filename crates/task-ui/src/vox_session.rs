@@ -99,28 +99,44 @@ impl VoxSession {
             }
         };
         match link_result {
-            Ok(link) => match vox_core::acceptor_on(link)
-                .on_connection(())
-                .establish::<vox_core::NoopClient>()
-                .await
-            {
-                Ok(session) => {
-                    std::mem::forget(session);
-                    status.set(VoxStatus::Connected {
-                        url: server_url.clone(),
-                    });
-                    Some(Self { server_url })
+            Ok(link) => {
+                let establish_fut = std::panic::AssertUnwindSafe(async {
+                    vox_core::acceptor_on(link)
+                        .on_connection(())
+                        .establish::<vox_core::NoopClient>()
+                        .await
+                });
+                let establish_result = futures_util::FutureExt::catch_unwind(establish_fut).await;
+                let final_result = match establish_result {
+                    Ok(r) => r,
+                    Err(_) => {
+                        tracing::warn!(%server_url, "vox handshake panicked");
+                        status.set(VoxStatus::Failed {
+                            stage: "establish".into(),
+                            error: "vox handshake threw (server may not be running an acceptor on /vox)".into(),
+                        });
+                        return None;
+                    }
+                };
+                match final_result {
+                    Ok(session) => {
+                        std::mem::forget(session);
+                        status.set(VoxStatus::Connected {
+                            url: server_url.clone(),
+                        });
+                        Some(Self { server_url })
+                    }
+                    Err(e) => {
+                        let err = format!("{e:?}");
+                        tracing::warn!(?e, %server_url, "vox establish failed");
+                        status.set(VoxStatus::Failed {
+                            stage: "establish".into(),
+                            error: err,
+                        });
+                        None
+                    }
                 }
-                Err(e) => {
-                    let err = format!("{e:?}");
-                    tracing::warn!(?e, %server_url, "vox establish failed");
-                    status.set(VoxStatus::Failed {
-                        stage: "establish".into(),
-                        error: err,
-                    });
-                    None
-                }
-            },
+            }
             Err(e) => {
                 let err = format!("{e:?}");
                 tracing::warn!(?e, %server_url, "vox WS connect failed");
