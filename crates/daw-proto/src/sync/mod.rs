@@ -29,7 +29,7 @@ mod daw;
 // `ExtState` ported to architect::rpc — see `crate::ext_state`.
 // `FxChains` ported to architect::rpc — see `crate::fx_chains`.
 // `FxParams` ported to architect::rpc — see `crate::fx_params`.
-mod items;
+// `Items` ported to architect::rpc — see `crate::item::service`.
 // `Markers` lives in `crate::marker::service` now — one canonical
 // declaration alongside `Marker` itself. See `marker/service.rs`.
 mod plugin_loader;
@@ -53,10 +53,12 @@ pub use crate::fx_chains::{FxChainsClient, serve as serve_fx_chains};
 pub use crate::fx_params::{FxParams, FxParamsRpc};
 #[cfg(feature = "vox")]
 pub use crate::fx_params::{FxParamsClient, serve as serve_fx_params};
+pub use crate::item::{Items, ItemsRpc};
+#[cfg(feature = "vox")]
+pub use crate::item::{ItemsClient, serve as serve_items};
 pub use action_registry::ActionRegistry;
 pub use audio_engine::AudioEngine;
 pub use daw::Daw;
-pub use items::Items;
 // `Markers` and its architect-emitted RPC face (`MarkersRpc`,
 // `MarkersClient`, `serve`) are re-exported from `crate::marker`,
 // which is the canonical home for everything marker-related.

@@ -12,7 +12,7 @@ pub mod daw;
 // ext_state ported to architect::rpc — see `crate::ext_state`.
 // fx_chains ported to architect::rpc — see `crate::fx_chains`.
 // fx_params ported to architect::rpc — see `crate::fx_params`.
-pub mod items;
+// items ported to architect::rpc — see `crate::item` (Items impl on Reaper).
 // markers ported to a singleton `Reaper` backend at the crate root —
 // see `crate::marker`. The borrowed-view pattern (`ReaperMarkers<'a>`)
 // retired with the port.
@@ -27,7 +27,6 @@ pub mod project;
 // transport ported to architect::rpc — see `crate::transport`.
 
 pub use daw::ReaperMainThread;
-pub use items::ReaperItems;
 pub use project::ReaperProject;
 
 // =============================================================================

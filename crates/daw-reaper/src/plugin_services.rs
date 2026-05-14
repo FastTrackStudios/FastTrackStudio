@@ -6,22 +6,21 @@
 use daw_proto::automation::{AutomationServiceDispatcher, automation_service_service_descriptor};
 use daw_proto::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
-    FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
+    FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher,
     LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
     ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
     ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
-use daw_proto::{ext_state, marker, region, take, tempo_map, track, transport};
+use daw_proto::{ext_state, item, marker, region, take, tempo_map, track, transport};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
     daw_file_service_service_descriptor, fx_service_service_descriptor,
     health_service_service_descriptor, input_service_service_descriptor,
-    item_service_service_descriptor, live_midi_service_service_descriptor,
-    midi_service_service_descriptor, plugin_loader_service_service_descriptor,
-    project_service_service_descriptor, routing_service_service_descriptor,
-    screenset_service_service_descriptor, toolbar_service_service_descriptor,
-    window_geometry_service_service_descriptor,
+    live_midi_service_service_descriptor, midi_service_service_descriptor,
+    plugin_loader_service_service_descriptor, project_service_service_descriptor,
+    routing_service_service_descriptor, screenset_service_service_descriptor,
+    toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -56,7 +55,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let routing = crate::ReaperRouting::new();
     let live_midi = crate::ReaperLiveMidi::new();
     // ExtState ported — mount via ext_state::serve(Reaper)
-    let item = crate::ReaperItem::new();
+    // Items ported to architect::rpc — mount via item::serve(Reaper)
     // Takes ported to architect::rpc — mounted via take::serve(Reaper)
     let health = crate::ReaperHealth::new();
     let action_registry = crate::ReaperActionRegistry::new();
@@ -112,10 +111,7 @@ pub fn create_daw_handler() -> RoutedHandler {
             health_service_service_descriptor(),
             HealthServiceDispatcher::new(health),
         )
-        .with(
-            item_service_service_descriptor(),
-            ItemServiceDispatcher::new(item),
-        )
+        .with(item::items_descriptor(), item::serve(crate::Reaper))
         .with(take::descriptor(), take::serve(crate::Reaper))
         .with(
             action_registry_service_service_descriptor(),

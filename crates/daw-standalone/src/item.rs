@@ -1,377 +1,381 @@
-//! Standalone item and take implementation
+//! `impl Items for Standalone` — post-architect::rpc port.
+//!
+//! Backed by `ProjectState::items` (HashMap<item_guid, ItemEntry>)
+//! + `ProjectState::items_by_track` (ordering per track). The old
+//! `StandaloneItem` async service struct + parallel item state
+//! retired with the port.
 
-use crate::platform::RwLock;
+use daw_proto::sync::Items;
 use daw_proto::{
-    ProjectContext,
-    item::{FadeShape, Item, ItemEvent, ItemRef, ItemService, Take, TakeRef},
-    primitives::{BeatAttachMode, Duration, PositionInSeconds},
-    track::TrackRef,
+    BeatAttachMode, DawError, DawResult, Duration, FadeShape, Item, ItemRef, PositionInSeconds,
+    ProjectContext, TrackRef,
 };
-use std::sync::Arc;
-use uuid::Uuid;
-use vox::Tx;
 
-/// Internal item state
-#[derive(Clone)]
-pub(crate) struct ItemState {
-    guid: String,
-    track_guid: String,
-    index: u32,
-    position: PositionInSeconds,
-    length: Duration,
-    muted: bool,
-    selected: bool,
-    locked: bool,
-    volume: f64,
-    takes: Vec<TakeState>,
-    active_take_index: u32,
-}
+use crate::sync::{ItemEntry, ProjectState, Standalone};
 
-/// Internal take state
-#[derive(Clone)]
-struct TakeState {
-    guid: String,
-    index: u32,
-    name: String,
-    volume: f64,
-    play_rate: f64,
-    pitch: f64,
-    preserve_pitch: bool,
-    is_midi: bool,
-}
-
-impl ItemState {
-    fn new(track_guid: String, index: u32, position: PositionInSeconds, length: Duration) -> Self {
-        let guid = Uuid::new_v4().to_string();
-        let take = TakeState::new(0, "Take 1".to_string());
-        Self {
-            guid,
-            track_guid,
-            index,
-            position,
-            length,
-            muted: false,
-            selected: false,
-            locked: false,
-            volume: 1.0,
-            takes: vec![take],
-            active_take_index: 0,
-        }
-    }
-
-    fn to_item(&self) -> Item {
-        Item {
-            guid: self.guid.clone(),
-            track_guid: self.track_guid.clone(),
-            index: self.index,
-            position: self.position,
-            length: self.length,
-            snap_offset: Duration::ZERO,
-            muted: self.muted,
-            selected: self.selected,
-            locked: self.locked,
-            volume: self.volume,
-            fade_in_length: Duration::ZERO,
-            fade_out_length: Duration::ZERO,
-            fade_in_shape: FadeShape::Linear,
-            fade_out_shape: FadeShape::Linear,
-            beat_attach_mode: BeatAttachMode::Time,
-            loop_source: false,
-            auto_stretch: false,
-            color: None,
-            group_id: None,
-            take_count: self.takes.len() as u32,
-            active_take_index: self.active_take_index,
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => {
+            let state = daw.state.lock().ok()?;
+            state.current_project_guid.clone()
         }
     }
 }
 
-impl TakeState {
-    fn new(index: u32, name: String) -> Self {
-        Self {
-            guid: Uuid::new_v4().to_string(),
-            index,
-            name,
-            volume: 1.0,
-            play_rate: 1.0,
-            pitch: 0.0,
-            preserve_pitch: true,
-            is_midi: false,
-        }
-    }
+fn no_project() -> DawError {
+    DawError::not_found("Project", "context")
+}
 
-    fn to_take(&self, item_guid: &str) -> Take {
-        Take {
-            guid: self.guid.clone(),
-            item_guid: item_guid.to_string(),
-            index: self.index,
-            is_active: false, // Set by caller
-            name: self.name.clone(),
-            color: None,
-            volume: self.volume,
-            play_rate: self.play_rate,
-            pitch: self.pitch,
-            preserve_pitch: self.preserve_pitch,
-            start_offset: Duration::ZERO,
-            source_type: daw_proto::item::SourceType::Empty,
-            source_file_path: None,
-            source_length: None,
-            source_sample_rate: None,
-            source_channels: None,
-            is_midi: self.is_midi,
-            midi_note_count: None,
-        }
+fn resolve_track_guid(p: &ProjectState, track: &TrackRef) -> Option<String> {
+    match track {
+        TrackRef::Guid(g) => Some(g.clone()),
+        TrackRef::Index(idx) => p.tracks.get(*idx as usize).map(|t| t.guid.clone()),
+        TrackRef::Master => None,
     }
 }
 
-/// Standalone item service implementation
-#[derive(Clone)]
-pub struct StandaloneItem {
-    items: Arc<RwLock<Vec<ItemState>>>,
-}
-
-impl Default for StandaloneItem {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StandaloneItem {
-    pub fn new() -> Self {
-        Self {
-            items: Arc::new(RwLock::new("standalone-items", Vec::new())),
+fn item_guid_from_ref(p: &ProjectState, item: &ItemRef) -> Option<String> {
+    match item {
+        ItemRef::Guid(g) => Some(g.clone()),
+        ItemRef::ProjectIndex(idx) => {
+            // Loose mapping: take the Nth item by insertion order.
+            p.items.keys().nth(*idx as usize).cloned()
         }
-    }
-
-    fn find_item<'a>(items: &'a mut [ItemState], item_ref: &ItemRef) -> Option<&'a mut ItemState> {
-        match item_ref {
-            ItemRef::Guid(guid) => items.iter_mut().find(|i| &i.guid == guid),
-            ItemRef::Index(idx) => items.iter_mut().find(|i| i.index == *idx),
-            ItemRef::ProjectIndex(idx) => items.get_mut(*idx as usize),
-        }
+        ItemRef::Index(_) => None,
     }
 }
 
-impl ItemService for StandaloneItem {
-    async fn get_items(&self, _project: ProjectContext, track: TrackRef) -> Vec<Item> {
-        let items = self.items.read().await;
-        let track_guid = match track {
-            TrackRef::Guid(g) => g,
-            _ => return vec![],
+fn mutate_item<F, R>(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    f: F,
+) -> DawResult<R>
+where
+    F: FnOnce(&mut Item) -> R,
+{
+    let guid = resolve_project(daw, project).ok_or_else(no_project)?;
+    daw.with_project_mut(&guid, |p| {
+        let item_guid = item_guid_from_ref(p, item)
+            .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+        let entry = p
+            .items
+            .get_mut(&item_guid)
+            .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+        Ok::<R, DawError>(f(&mut entry.item))
+    })?
+}
+
+impl Items for Standalone {
+    fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
         };
-        items
-            .iter()
-            .filter(|i| i.track_guid == track_guid)
-            .map(|i| i.to_item())
-            .collect()
+        self.with_project(&guid, |p| {
+            let Some(track_guid) = resolve_track_guid(p, &track) else {
+                return Vec::new();
+            };
+            p.items_by_track
+                .get(&track_guid)
+                .map(|guids| {
+                    guids
+                        .iter()
+                        .filter_map(|g| p.items.get(g).map(|e| e.item.clone()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
-    async fn get_item(&self, _project: ProjectContext, item: ItemRef) -> Option<Item> {
-        let items = self.items.read().await;
-        match &item {
-            ItemRef::Guid(guid) => items.iter().find(|i| &i.guid == guid).map(|i| i.to_item()),
-            ItemRef::Index(_) | ItemRef::ProjectIndex(_) => None,
-        }
+    fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)?;
+            p.items.get(&item_guid).map(|e| e.item.clone())
+        })
+        .ok()
+        .flatten()
     }
 
-    async fn get_all_items(&self, _project: ProjectContext) -> Vec<Item> {
-        let items = self.items.read().await;
-        items.iter().map(|i| i.to_item()).collect()
-    }
-
-    async fn get_selected_items(&self, _project: ProjectContext) -> Vec<Item> {
-        let items = self.items.read().await;
-        items
-            .iter()
-            .filter(|i| i.selected)
-            .map(|i| i.to_item())
-            .collect()
-    }
-
-    async fn item_count(&self, _project: ProjectContext, track: TrackRef) -> u32 {
-        let items = self.items.read().await;
-        let track_guid = match track {
-            TrackRef::Guid(g) => g,
-            _ => return 0,
+    fn get_all_items(&self, project: ProjectContext) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
         };
-        items.iter().filter(|i| i.track_guid == track_guid).count() as u32
+        self.with_project(&guid, |p| {
+            p.items.values().map(|e| e.item.clone()).collect()
+        })
+        .unwrap_or_default()
     }
 
-    async fn add_item(
+    fn get_selected_items(&self, project: ProjectContext) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.items
+                .values()
+                .filter(|e| e.item.selected)
+                .map(|e| e.item.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
+        let Some(guid) = resolve_project(self, &project) else {
+            return 0;
+        };
+        self.with_project(&guid, |p| {
+            let Some(track_guid) = resolve_track_guid(p, &track) else {
+                return 0;
+            };
+            p.items_by_track
+                .get(&track_guid)
+                .map(|v| v.len() as u32)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+    }
+
+    fn add_item(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         track: TrackRef,
         position: PositionInSeconds,
         length: Duration,
     ) -> Option<String> {
-        let track_guid = match track {
-            TrackRef::Guid(g) => g,
-            _ => return None,
-        };
-        let mut items = self.items.write().await;
-        let index = items.len() as u32;
-        let item = ItemState::new(track_guid, index, position, length);
-        let guid = item.guid.clone();
-        items.push(item);
-        Some(guid)
+        let guid = resolve_project(self, &project)?;
+        self.with_project_mut(&guid, |p| {
+            let track_guid = resolve_track_guid(p, &track)?;
+            if !p.tracks.iter().any(|t| t.guid == track_guid) {
+                return None;
+            }
+            let counter = p.next_item_counter;
+            p.next_item_counter += 1;
+            let item_guid = format!("standalone-item-{counter:016x}");
+            let order = p.items_by_track.entry(track_guid.clone()).or_default();
+            let index = order.len() as u32;
+            order.push(item_guid.clone());
+            let mut item = Item::default();
+            item.guid = item_guid.clone();
+            item.track_guid = track_guid;
+            item.index = index;
+            item.position = position;
+            item.length = length;
+            p.items.insert(item_guid.clone(), ItemEntry { item });
+            Some(item_guid)
+        })
+        .ok()
+        .flatten()
     }
 
-    async fn delete_item(&self, _project: ProjectContext, item: ItemRef) {
-        let mut items = self.items.write().await;
-        if let ItemRef::Guid(guid) = item {
-            items.retain(|i| i.guid != guid);
-        }
+    fn delete_item(&self, project: ProjectContext, item: ItemRef) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let entry = p
+                .items
+                .remove(&item_guid)
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            if let Some(order) = p.items_by_track.get_mut(&entry.item.track_guid) {
+                order.retain(|g| g != &item_guid);
+                for (i, g) in order.iter().enumerate() {
+                    if let Some(e) = p.items.get_mut(g) {
+                        e.item.index = i as u32;
+                    }
+                }
+            }
+            p.takes.remove(&item_guid);
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn duplicate_item(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
-        let mut items = self.items.write().await;
-        let source = Self::find_item(&mut items, &item)?.clone();
-        let mut new_item = source;
-        new_item.guid = Uuid::new_v4().to_string();
-        new_item.index = items.len() as u32;
-        let guid = new_item.guid.clone();
-        items.push(new_item);
-        Some(guid)
+    fn duplicate_item(&self, project: ProjectContext, item: ItemRef) -> Option<String> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)?;
+            let src = p.items.get(&item_guid)?.clone();
+            let counter = p.next_item_counter;
+            p.next_item_counter += 1;
+            let new_guid = format!("standalone-item-{counter:016x}");
+            let order = p
+                .items_by_track
+                .entry(src.item.track_guid.clone())
+                .or_default();
+            let new_index = order.len() as u32;
+            order.push(new_guid.clone());
+            let mut new_item = src.item.clone();
+            new_item.guid = new_guid.clone();
+            new_item.index = new_index;
+            p.items
+                .insert(new_guid.clone(), ItemEntry { item: new_item });
+            Some(new_guid)
+        })
+        .ok()
+        .flatten()
     }
 
-    async fn set_position(
+    fn set_position(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         item: ItemRef,
         position: PositionInSeconds,
-    ) {
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.position = position;
-        }
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.position = position)
     }
 
-    async fn set_length(&self, _project: ProjectContext, item: ItemRef, length: Duration) {
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.length = length;
-        }
-    }
-
-    async fn move_to_track(&self, _project: ProjectContext, item: ItemRef, track: TrackRef) {
-        let track_guid = match track {
-            TrackRef::Guid(g) => g,
-            _ => return,
-        };
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.track_guid = track_guid;
-        }
-    }
-
-    async fn set_muted(&self, _project: ProjectContext, item: ItemRef, muted: bool) {
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.muted = muted;
-        }
-    }
-
-    async fn set_selected(&self, _project: ProjectContext, item: ItemRef, selected: bool) {
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.selected = selected;
-        }
-    }
-
-    async fn set_locked(&self, _project: ProjectContext, item: ItemRef, locked: bool) {
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.locked = locked;
-        }
-    }
-
-    async fn select_all_items(&self, _project: ProjectContext, selected: bool) {
-        let mut items = self.items.write().await;
-        for i in items.iter_mut() {
-            i.selected = selected;
-        }
-    }
-
-    async fn set_volume(&self, _project: ProjectContext, item: ItemRef, volume: f64) {
-        let mut items = self.items.write().await;
-        if let Some(i) = Self::find_item(&mut items, &item) {
-            i.volume = volume;
-        }
-    }
-
-    async fn set_fade_in(
+    fn set_length(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _length: Duration,
-        _shape: FadeShape,
-    ) {
-        // Stub - no-op
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.length = length)
     }
 
-    async fn set_fade_out(
+    fn move_to_track(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _length: Duration,
-        _shape: FadeShape,
-    ) {
-        // Stub - no-op
+        project: ProjectContext,
+        item: ItemRef,
+        track: TrackRef,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let track_guid = resolve_track_guid(p, &track)
+                .ok_or_else(|| DawError::not_found("Track", &format!("{track:?}")))?;
+            // Remove from current track's ordering.
+            let entry = p
+                .items
+                .get(&item_guid)
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            let prev_track = entry.item.track_guid.clone();
+            if let Some(order) = p.items_by_track.get_mut(&prev_track) {
+                order.retain(|g| g != &item_guid);
+            }
+            // Insert into new track.
+            let order = p.items_by_track.entry(track_guid.clone()).or_default();
+            let new_index = order.len() as u32;
+            order.push(item_guid.clone());
+            if let Some(e) = p.items.get_mut(&item_guid) {
+                e.item.track_guid = track_guid;
+                e.item.index = new_index;
+            }
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn set_loop_source(&self, _project: ProjectContext, _item: ItemRef, _loop_source: bool) {
-        // Stub - no-op
-    }
-
-    async fn set_beat_attach_mode(
+    fn set_snap_offset(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _mode: BeatAttachMode,
-    ) {
-        // Stub - no-op
+        project: ProjectContext,
+        item: ItemRef,
+        offset: Duration,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.snap_offset = offset)
     }
 
-    async fn set_snap_offset(&self, _project: ProjectContext, _item: ItemRef, _offset: Duration) {
-        // Stub - no-op
+    fn set_muted(&self, project: ProjectContext, item: ItemRef, muted: bool) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.muted = muted)
     }
 
-    async fn set_auto_stretch(
+    fn set_selected(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _auto_stretch: bool,
-    ) {
-        // Stub - no-op
+        project: ProjectContext,
+        item: ItemRef,
+        selected: bool,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.selected = selected)
     }
 
-    async fn set_color(&self, _project: ProjectContext, _item: ItemRef, _color: Option<u32>) {
-        // Stub - no-op
+    fn set_locked(&self, project: ProjectContext, item: ItemRef, locked: bool) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.locked = locked)
     }
 
-    async fn set_group_id(&self, _project: ProjectContext, _item: ItemRef, _group_id: Option<u32>) {
-        // Stub - no-op
+    fn select_all_items(&self, project: ProjectContext, selected: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            for entry in p.items.values_mut() {
+                entry.item.selected = selected;
+            }
+        })
     }
 
-    async fn subscribe_items(&self, _project: ProjectContext, _tx: Tx<ItemEvent>) {}
-}
-
-/// Standalone take service implementation
-#[derive(Clone)]
-pub struct StandaloneTake {
-    items: Arc<RwLock<Vec<ItemState>>>,
-}
-
-impl StandaloneTake {
-    #[allow(dead_code)]
-    pub(crate) fn new(items: Arc<RwLock<Vec<ItemState>>>) -> Self {
-        Self { items }
+    fn set_volume(&self, project: ProjectContext, item: ItemRef, volume: f64) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.volume = volume)
     }
 
-    /// Create with shared state from StandaloneItem
-    pub fn from_item_service(item_service: &StandaloneItem) -> Self {
-        Self {
-            items: item_service.items.clone(),
-        }
+    fn set_fade_in(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+        shape: FadeShape,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| {
+            i.fade_in_length = length;
+            i.fade_in_shape = shape;
+        })
+    }
+
+    fn set_fade_out(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+        shape: FadeShape,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| {
+            i.fade_out_length = length;
+            i.fade_out_shape = shape;
+        })
+    }
+
+    fn set_loop_source(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        loop_source: bool,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.loop_source = loop_source)
+    }
+
+    fn set_beat_attach_mode(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        mode: BeatAttachMode,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.beat_attach_mode = mode)
+    }
+
+    fn set_auto_stretch(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        auto_stretch: bool,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.auto_stretch = auto_stretch)
+    }
+
+    fn set_color(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        color: Option<u32>,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.color = color)
+    }
+
+    fn set_group_id(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        group_id: Option<u32>,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.group_id = group_id)
     }
 }

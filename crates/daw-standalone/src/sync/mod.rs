@@ -15,7 +15,7 @@ mod daw;
 // ext_state ported to architect::rpc — see `crate::ext_state`.
 // fx_chains ported to architect::rpc — see `crate::fx_chains`.
 // fx_params ported to architect::rpc — see `crate::fx_params`.
-mod items;
+// items ported to architect::rpc — see `crate::item`.
 // markers ported to architect::rpc — `impl Markers for Standalone`
 // lives at `crate::marker`. The borrowed `StandaloneMarkers<'a>` view
 // retired with the port.
@@ -32,5 +32,4 @@ mod project;
 pub use daw::{
     FxChainKey, FxEntry, ItemEntry, ProjectState, Standalone, StandaloneState, TakeList,
 };
-pub use items::StandaloneItems;
 pub use project::StandaloneProject;

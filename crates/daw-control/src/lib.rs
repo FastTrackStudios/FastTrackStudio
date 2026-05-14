@@ -125,7 +125,7 @@ pub(crate) use daw_proto::ExtStateClient;
 pub(crate) use daw_proto::FxServiceClient;
 pub(crate) use daw_proto::HealthServiceClient;
 pub(crate) use daw_proto::InputServiceClient;
-pub(crate) use daw_proto::ItemServiceClient;
+pub(crate) use daw_proto::ItemsClient;
 pub(crate) use daw_proto::LiveMidiServiceClient;
 pub(crate) use daw_proto::MarkersClient;
 pub(crate) use daw_proto::MidiServiceClient;
@@ -211,7 +211,7 @@ pub struct DawClients {
     pub(crate) track: TracksClient,
     pub(crate) fx: FxServiceClient,
     pub(crate) position_conversion: PositionConversionServiceClient,
-    pub(crate) item: ItemServiceClient,
+    pub(crate) item: ItemsClient,
     pub(crate) take: TakesClient,
     pub(crate) routing: RoutingServiceClient,
     pub(crate) screenset: ScreensetServiceClient,
@@ -247,7 +247,7 @@ impl DawClients {
             track: TracksClient::new(handle.clone()),
             fx: FxServiceClient::new(handle.clone()),
             position_conversion: PositionConversionServiceClient::new(handle.clone()),
-            item: ItemServiceClient::new(handle.clone()),
+            item: ItemsClient::new(handle.clone()),
             take: TakesClient::new(handle.clone()),
             routing: RoutingServiceClient::new(handle.clone()),
             screenset: ScreensetServiceClient::new(handle.clone()),

@@ -33,9 +33,9 @@ use routed_handler::{DawConnectionAcceptor, RoutedHandler};
 use daw::service::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
     DawFileServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher,
-    ItemServiceDispatcher, LiveMidiServiceDispatcher, MidiServiceDispatcher,
-    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RoutingServiceDispatcher,
-    ScreensetServiceDispatcher, ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
+    ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
+    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -166,7 +166,7 @@ async fn register_daw_dispatcher() {
     let routing = daw::reaper::ReaperRouting::new();
     let live_midi = daw::reaper::ReaperLiveMidi::new();
     // ExtState ported — mount via daw::service::ext_state::serve(Reaper).
-    let item = daw::reaper::ReaperItem::new();
+    // Items ported — mount via daw::service::item::serve(Reaper).
     // Takes ported — mount via daw::service::take::serve(Reaper).
     let health = daw::reaper::ReaperHealth::new();
     let action_registry = daw::reaper::ReaperActionRegistry::new();
@@ -185,11 +185,11 @@ async fn register_daw_dispatcher() {
         action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
         batch_service_service_descriptor, daw_file_service_service_descriptor,
         fx_service_service_descriptor, health_service_service_descriptor,
-        input_service_service_descriptor, item_service_service_descriptor,
-        live_midi_service_service_descriptor, midi_service_service_descriptor,
-        plugin_loader_service_service_descriptor, project_service_service_descriptor,
-        routing_service_service_descriptor, screenset_service_service_descriptor,
-        toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
+        input_service_service_descriptor, live_midi_service_service_descriptor,
+        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
+        project_service_service_descriptor, routing_service_service_descriptor,
+        screenset_service_service_descriptor, toolbar_service_service_descriptor,
+        window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -254,8 +254,8 @@ async fn register_daw_dispatcher() {
             HealthServiceDispatcher::new(health),
         )
         .with(
-            item_service_service_descriptor(),
-            ItemServiceDispatcher::new(item),
+            daw::service::item::items_descriptor(),
+            daw::service::item::serve(daw::reaper::Reaper),
         )
         .with(
             daw::service::take::descriptor(),

@@ -46,7 +46,8 @@ mod ui;
 pub use automation::StandaloneAutomation;
 // `ExtState` impl'd directly on `Standalone` — see `crate::ext_state`.
 pub use fx::StandaloneFx;
-pub use item::{StandaloneItem, StandaloneTake};
+// `Items` impl'd directly on `Standalone` — see `crate::item`.
+// `StandaloneItem` / `StandaloneTake` retired with their async services.
 pub use live_midi::StandaloneLiveMidi;
 // `Markers` is now impl'd directly on `Standalone` — see `crate::marker`.
 // The old async `StandaloneMarker` service struct was retired with the

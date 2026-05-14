@@ -13,9 +13,13 @@ mod take;
 pub use error::{ItemError, TakeError};
 pub use event::{ItemEvent, TakeEvent};
 pub use item::{FadeShape, Item, ItemRef};
+pub use service::{Items, ItemsRpc};
+
+#[cfg(feature = "vox")]
 pub use service::{
-    ItemService, ItemServiceClient, ItemServiceDispatcher, item_service_service_descriptor,
+    Dispatcher as ItemsDispatcher, ItemsClient, descriptor as items_descriptor, serve,
 };
+
 pub use take::{
     AddTakeMarkerAtPositionRequest, SourceType, Take, TakeMarker, TakeMarkerCreate,
     TakeMarkerUpdate, TakeRating, TakeRef, take_rating_actions,

@@ -257,24 +257,7 @@ impl ProjectItems {
         Ok(())
     }
 
-    // =========================================================================
-    // Streaming
-    // =========================================================================
-
-    /// Subscribe to item events (added, removed, moved, etc.)
-    ///
-    /// Returns a receiver that streams granular item events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe(&self) -> Result<Rx<ItemEvent>> {
-        let (tx, rx) = vox::channel::<ItemEvent>();
-        self.clients
-            .item
-            .subscribe_items(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
-
-    // Take subscriptions retired alongside the architect::rpc port —
+    // Item + take subscriptions retired with the architect::rpc port —
     // sibling-trait territory if streaming surfaces a real consumer.
 }
 

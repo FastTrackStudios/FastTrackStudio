@@ -8,7 +8,7 @@ mod error;
 mod event;
 mod route;
 mod service;
-pub mod sync_service;
+mod sync_service;
 
 pub use error::*;
 pub use event::*;

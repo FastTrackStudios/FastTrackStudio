@@ -17,7 +17,7 @@ pub async fn dispatch_op(
     track_svc: &crate::Reaper,
     fx_svc: &crate::ReaperFx,
     routing_svc: &crate::ReaperRouting,
-    item_svc: &crate::ReaperItem,
+    item_svc: &crate::Reaper,
     take_svc: &crate::Reaper,
     marker_svc: &crate::Reaper,
     region_svc: &crate::Reaper,
@@ -792,127 +792,132 @@ async fn dispatch_routing(
 async fn dispatch_item(
     op: &ItemOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperItem,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::ItemService;
+    use daw_proto::sync::Items;
+    let err = |e: daw_proto::DawError| format!("{e:?}");
     match op {
         ItemOp::GetItems(p, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            Ok(StepOutput::ItemList(svc.get_items(ctx, tr).await))
+            Ok(StepOutput::ItemList(Items::get_items(svc, ctx, tr)))
         }
         ItemOp::GetItem(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptItem(svc.get_item(ctx, item.clone()).await))
+            Ok(StepOutput::OptItem(Items::get_item(svc, ctx, item.clone())))
         }
         ItemOp::GetAllItems(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::ItemList(svc.get_all_items(ctx).await))
+            Ok(StepOutput::ItemList(Items::get_all_items(svc, ctx)))
         }
         ItemOp::GetSelectedItems(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::ItemList(svc.get_selected_items(ctx).await))
+            Ok(StepOutput::ItemList(Items::get_selected_items(svc, ctx)))
         }
         ItemOp::ItemCount(p, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            Ok(StepOutput::U32(svc.item_count(ctx, tr).await))
+            Ok(StepOutput::U32(Items::item_count(svc, ctx, tr)))
         }
         ItemOp::AddItem(p, t, pos, len) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            Ok(StepOutput::OptStr(svc.add_item(ctx, tr, *pos, *len).await))
+            Ok(StepOutput::OptStr(Items::add_item(
+                svc, ctx, tr, *pos, *len,
+            )))
         }
         ItemOp::DeleteItem(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.delete_item(ctx, item.clone()).await;
+            Items::delete_item(svc, ctx, item.clone()).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::DuplicateItem(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptStr(
-                svc.duplicate_item(ctx, item.clone()).await,
-            ))
+            Ok(StepOutput::OptStr(Items::duplicate_item(
+                svc,
+                ctx,
+                item.clone(),
+            )))
         }
         ItemOp::SetPosition(p, item, pos) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_position(ctx, item.clone(), *pos).await;
+            Items::set_position(svc, ctx, item.clone(), *pos).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetLength(p, item, len) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_length(ctx, item.clone(), *len).await;
+            Items::set_length(svc, ctx, item.clone(), *len).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::MoveToTrack(p, item, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.move_to_track(ctx, item.clone(), tr).await;
+            Items::move_to_track(svc, ctx, item.clone(), tr).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetSnapOffset(p, item, offset) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_snap_offset(ctx, item.clone(), *offset).await;
+            Items::set_snap_offset(svc, ctx, item.clone(), *offset).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetMuted(p, item, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_muted(ctx, item.clone(), *v).await;
+            Items::set_muted(svc, ctx, item.clone(), *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetSelected(p, item, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_selected(ctx, item.clone(), *v).await;
+            Items::set_selected(svc, ctx, item.clone(), *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetLocked(p, item, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_locked(ctx, item.clone(), *v).await;
+            Items::set_locked(svc, ctx, item.clone(), *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SelectAllItems(p, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.select_all_items(ctx, *v).await;
+            Items::select_all_items(svc, ctx, *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetVolume(p, item, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_volume(ctx, item.clone(), *v).await;
+            Items::set_volume(svc, ctx, item.clone(), *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetFadeIn(p, item, len, shape) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_fade_in(ctx, item.clone(), *len, *shape).await;
+            Items::set_fade_in(svc, ctx, item.clone(), *len, *shape).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetFadeOut(p, item, len, shape) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_fade_out(ctx, item.clone(), *len, *shape).await;
+            Items::set_fade_out(svc, ctx, item.clone(), *len, *shape).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetLoopSource(p, item, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_loop_source(ctx, item.clone(), *v).await;
+            Items::set_loop_source(svc, ctx, item.clone(), *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetBeatAttachMode(p, item, mode) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_beat_attach_mode(ctx, item.clone(), *mode).await;
+            Items::set_beat_attach_mode(svc, ctx, item.clone(), *mode).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetAutoStretch(p, item, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_auto_stretch(ctx, item.clone(), *v).await;
+            Items::set_auto_stretch(svc, ctx, item.clone(), *v).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetColor(p, item, color) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_color(ctx, item.clone(), *color).await;
+            Items::set_color(svc, ctx, item.clone(), *color).map_err(err)?;
             Ok(StepOutput::Unit)
         }
         ItemOp::SetGroupId(p, item, gid) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_group_id(ctx, item.clone(), *gid).await;
+            Items::set_group_id(svc, ctx, item.clone(), *gid).map_err(err)?;
             Ok(StepOutput::Unit)
         }
     }

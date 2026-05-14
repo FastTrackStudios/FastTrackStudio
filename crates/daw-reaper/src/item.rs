@@ -11,20 +11,17 @@ use crate::safe_wrappers::item as item_sw;
 use crate::track::{resolve_project, resolve_track};
 use daw_control::lock::LockExt;
 use daw_proto::{
-    BeatAttachMode, Duration, FadeShape, Item, ItemEvent, ItemRef, ItemService, PositionInSeconds,
+    BeatAttachMode, Duration, FadeShape, Item, ItemEvent, ItemRef, PositionInSeconds,
     ProjectContext, SourceType, Take, TakeRef, TrackRef,
 };
 use reaper_high::{Project, Reaper};
 use reaper_medium::{
     DurationInSeconds, ItemAttributeKey, MediaItem, MediaItemTake,
-    ProjectContext as ReaperProjectContext, ProjectRef, Semitones, TakeAttributeKey,
-    UiRefreshBehavior,
+    ProjectContext as ReaperProjectContext, ProjectRef, TakeAttributeKey, UiRefreshBehavior,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
-use tracing::{debug, info};
-use vox::Tx;
 
 // =============================================================================
 // Helpers
@@ -97,11 +94,6 @@ pub fn init_item_broadcaster() {
     let (tx, _rx) = broadcast::channel::<ItemEvent>(1024);
     let _ = ITEM_BROADCASTER.set(tx);
     let _ = ITEM_CACHE.set(Mutex::new(HashMap::new()));
-}
-
-/// Get a receiver for item events.
-fn item_receiver() -> Option<broadcast::Receiver<ItemEvent>> {
-    ITEM_BROADCASTER.get().map(|tx| tx.subscribe())
 }
 
 /// Poll REAPER item state for ALL open projects and broadcast changes.
@@ -567,568 +559,425 @@ impl Default for ReaperItem {
     }
 }
 
-impl ItemService for ReaperItem {
-    // =========================================================================
-    // Queries
-    // =========================================================================
+// =============================================================================
+// architect::rpc port — `impl Items for crate::Reaper`
+// =============================================================================
+//
+// Each call assumes main-thread execution (the architect bridge dispatches via
+// `HasDispatcher`). Mount through `daw_proto::item::serve(Reaper)`. Mutations
+// return `DawResult<()>` so callers can see why a handle resolved to nothing.
 
-    async fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item> {
-        main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            let mut items = Vec::new();
-            let proj_ctx = resolve_project_context(&project);
+use daw_proto::sync::Items;
 
-            // Resolve track
-            let track_ptr = match &track {
-                TrackRef::Master => Some(medium.get_master_track(proj_ctx)),
-                TrackRef::Index(idx) => medium.get_track(proj_ctx, *idx),
-                TrackRef::Guid(_) => {
-                    // Use project-aware track resolution for GUID lookups
-                    resolve_project(&project)
-                        .or_else(|| Some(reaper.current_project()))
-                        .and_then(|proj| resolve_track(&proj, &track))
-                        .and_then(|t| t.raw().ok())
-                }
-            };
+fn item_not_found(item: &ItemRef) -> daw_proto::DawError {
+    daw_proto::DawError::not_found("Item", &format!("{item:?}"))
+}
 
-            if let Some(track) = track_ptr {
-                let count = item_sw::count_track_media_items(medium, track);
-                for i in 0..count {
-                    if let Some(item) = item_sw::get_track_media_item(medium, track, i)
-                        && let Some(mut item_data) = Self::media_item_to_item(item)
-                    {
-                        item_data.index = i;
-                        items.push(item_data);
-                    }
-                }
+fn track_not_found(track: &TrackRef) -> daw_proto::DawError {
+    daw_proto::DawError::not_found("Track", &format!("{track:?}"))
+}
+
+impl Items for crate::Reaper {
+    fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item> {
+        let reaper = Reaper::get();
+        let medium = reaper.medium_reaper();
+        let proj_ctx = resolve_project_context(&project);
+
+        let track_ptr = match &track {
+            TrackRef::Master => Some(medium.get_master_track(proj_ctx)),
+            TrackRef::Index(idx) => medium.get_track(proj_ctx, *idx),
+            TrackRef::Guid(_) => resolve_project(&project)
+                .or_else(|| Some(reaper.current_project()))
+                .and_then(|proj| resolve_track(&proj, &track))
+                .and_then(|t| t.raw().ok()),
+        };
+
+        let Some(track) = track_ptr else {
+            return Vec::new();
+        };
+        let count = item_sw::count_track_media_items(medium, track);
+        let mut items = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            if let Some(item) = item_sw::get_track_media_item(medium, track, i)
+                && let Some(mut data) = ReaperItem::media_item_to_item(item)
+            {
+                data.index = i;
+                items.push(data);
             }
-
-            items
-        })
-        .await
-        .unwrap_or_default()
+        }
+        items
     }
 
-    async fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item> {
-        main_thread::query(move || {
-            let proj_ctx = resolve_project_context(&project);
-            let item_ptr = Self::resolve_item(&item, proj_ctx)?;
-            Self::media_item_to_item(item_ptr)
-        })
-        .await
-        .unwrap_or(None)
+    fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item> {
+        let proj_ctx = resolve_project_context(&project);
+        let item_ptr = ReaperItem::resolve_item(&item, proj_ctx)?;
+        ReaperItem::media_item_to_item(item_ptr)
     }
 
-    async fn get_all_items(&self, _project: ProjectContext) -> Vec<Item> {
-        main_thread::query(|| {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            let mut items = Vec::new();
-
-            let count = medium.count_media_items(ReaperProjectContext::CurrentProject);
-            for i in 0..count {
-                if let Some(item) = medium.get_media_item(ReaperProjectContext::CurrentProject, i)
-                    && let Some(mut item_data) = Self::media_item_to_item(item)
-                {
-                    item_data.index = i;
-                    items.push(item_data);
-                }
+    fn get_all_items(&self, _project: ProjectContext) -> Vec<Item> {
+        let medium = Reaper::get().medium_reaper();
+        let count = medium.count_media_items(ReaperProjectContext::CurrentProject);
+        let mut items = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            if let Some(item) = medium.get_media_item(ReaperProjectContext::CurrentProject, i)
+                && let Some(mut data) = ReaperItem::media_item_to_item(item)
+            {
+                data.index = i;
+                items.push(data);
             }
-
-            items
-        })
-        .await
-        .unwrap_or_default()
+        }
+        items
     }
 
-    async fn get_selected_items(&self, _project: ProjectContext) -> Vec<Item> {
-        main_thread::query(|| {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            let mut items = Vec::new();
-
-            let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
-            for i in 0..count {
-                if let Some(item) =
-                    medium.get_selected_media_item(ReaperProjectContext::CurrentProject, i)
-                    && let Some(item_data) = Self::media_item_to_item(item)
-                {
-                    items.push(item_data);
-                }
+    fn get_selected_items(&self, _project: ProjectContext) -> Vec<Item> {
+        let medium = Reaper::get().medium_reaper();
+        let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
+        let mut items = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            if let Some(item) =
+                medium.get_selected_media_item(ReaperProjectContext::CurrentProject, i)
+                && let Some(data) = ReaperItem::media_item_to_item(item)
+            {
+                items.push(data);
             }
-
-            items
-        })
-        .await
-        .unwrap_or_default()
+        }
+        items
     }
 
-    async fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
-        main_thread::query(move || {
-            let proj =
-                resolve_project(&project).or_else(|| Some(Reaper::get().current_project()))?;
-            let reaper_track = resolve_track(&proj, &track)?;
-            Some(reaper_track.item_count())
-        })
-        .await
-        .flatten()
-        .unwrap_or(0)
+    fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
+        let proj = resolve_project(&project).unwrap_or_else(|| Reaper::get().current_project());
+        resolve_track(&proj, &track)
+            .map(|t| t.item_count())
+            .unwrap_or(0)
     }
 
-    // =========================================================================
-    // CRUD Operations
-    // =========================================================================
-
-    async fn add_item(
+    fn add_item(
         &self,
         project: ProjectContext,
         track: TrackRef,
         position: PositionInSeconds,
         length: Duration,
     ) -> Option<String> {
-        debug!(
-            "ReaperItem: add_item {:?} at {} for {}",
-            track,
-            position.as_seconds(),
-            length.as_seconds()
+        let proj = resolve_project(&project).unwrap_or_else(|| Reaper::get().current_project());
+        let reaper_track = resolve_track(&proj, &track)?;
+        let low = Reaper::get().medium_reaper().low();
+        let track_ptr = reaper_track.raw().ok()?;
+        let start = position.as_seconds();
+        let end = start + length.as_seconds();
+        let item = crate::safe_wrappers::midi::create_new_midi_item(low, track_ptr, start, end)?;
+        Reaper::get().medium_reaper().update_timeline();
+        Some(item_guid_string(Reaper::get().medium_reaper(), item))
+    }
+
+    fn delete_item(&self, _project: ProjectContext, item: ItemRef) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let medium = Reaper::get().medium_reaper();
+        let track = item_sw::get_media_item_track(medium, item_ptr).ok_or_else(|| {
+            daw_proto::DawError::operation_failed("get_media_item_track returned None")
+        })?;
+        item_sw::delete_track_media_item(medium, track, item_ptr);
+        Ok(())
+    }
+
+    fn duplicate_item(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+        let medium = Reaper::get().medium_reaper();
+        medium.select_all_media_items(ReaperProjectContext::CurrentProject, false);
+        item_sw::set_media_item_selected(medium, item_ptr, true);
+        item_sw::main_on_command_ex(
+            medium,
+            reaper_medium::CommandId::new(41295),
+            0,
+            ReaperProjectContext::CurrentProject,
         );
-        main_thread::query(move || {
-            let proj =
-                resolve_project(&project).or_else(|| Some(Reaper::get().current_project()))?;
-            let reaper_track = resolve_track(&proj, &track)?;
-
-            // Use CreateNewMIDIItemInProj via existing safe wrapper —
-            // creates a properly initialized MIDI item with active take
-            let low = Reaper::get().medium_reaper().low();
-            let track_ptr = reaper_track.raw().ok()?;
-            let start = position.as_seconds();
-            let end = start + length.as_seconds();
-
-            let item =
-                crate::safe_wrappers::midi::create_new_midi_item(low, track_ptr, start, end)?;
-
-            Reaper::get().medium_reaper().update_timeline();
-
-            // Get the item GUID
-            let guid = item_guid_string(Reaper::get().medium_reaper(), item);
-            Some(guid)
-        })
-        .await
-        .unwrap_or(None)
+        let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
+        if count > 0 {
+            let new_item =
+                medium.get_selected_media_item(ReaperProjectContext::CurrentProject, count - 1)?;
+            Some(format!("{:p}", new_item.as_ptr()))
+        } else {
+            None
+        }
     }
 
-    async fn delete_item(&self, _project: ProjectContext, item: ItemRef) {
-        debug!("ReaperItem: delete_item");
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                && let Some(track) = item_sw::get_media_item_track(medium, item_ptr)
-            {
-                item_sw::delete_track_media_item(medium, track, item_ptr);
-            }
-        });
-    }
-
-    async fn duplicate_item(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
-        debug!("ReaperItem: duplicate_item");
-        main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-
-            // First select only this item
-            medium.select_all_media_items(ReaperProjectContext::CurrentProject, false);
-            item_sw::set_media_item_selected(medium, item_ptr, true);
-
-            // Duplicate using action
-            item_sw::main_on_command_ex(
-                medium,
-                reaper_medium::CommandId::new(41295), // Item: Duplicate items
-                0,
-                ReaperProjectContext::CurrentProject,
-            );
-
-            // Get the newly duplicated item (should be the last selected)
-            let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
-            if count > 0 {
-                let new_item = medium
-                    .get_selected_media_item(ReaperProjectContext::CurrentProject, count - 1)?;
-                // Use pointer as temporary ID
-                Some(format!("{:p}", new_item.as_ptr()))
-            } else {
-                None
-            }
-        })
-        .await
-        .unwrap_or(None)
-    }
-
-    // =========================================================================
-    // Position & Length
-    // =========================================================================
-
-    async fn set_position(
+    fn set_position(
         &self,
         _project: ProjectContext,
         item: ItemRef,
         position: PositionInSeconds,
-    ) {
-        debug!("ReaperItem: set_position to {}", position.as_seconds());
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                && let Ok(pos) = reaper_medium::PositionInSeconds::new(position.as_seconds())
-            {
-                item_sw::set_media_item_position(medium, item_ptr, pos, UiRefreshBehavior::Refresh);
-            }
-        });
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let pos = reaper_medium::PositionInSeconds::new(position.as_seconds()).map_err(|e| {
+            daw_proto::DawError::operation_failed(format!("invalid position: {e:?}"))
+        })?;
+        let medium = Reaper::get().medium_reaper();
+        item_sw::set_media_item_position(medium, item_ptr, pos, UiRefreshBehavior::Refresh);
+        Ok(())
     }
 
-    async fn set_length(&self, _project: ProjectContext, item: ItemRef, length: Duration) {
-        debug!("ReaperItem: set_length to {}", length.as_seconds());
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                && let Ok(len) = DurationInSeconds::new(length.as_seconds())
-            {
-                item_sw::set_media_item_length(medium, item_ptr, len, UiRefreshBehavior::Refresh);
-            }
-        });
+    fn set_length(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let len = DurationInSeconds::new(length.as_seconds())
+            .map_err(|e| daw_proto::DawError::operation_failed(format!("invalid length: {e:?}")))?;
+        let medium = Reaper::get().medium_reaper();
+        item_sw::set_media_item_length(medium, item_ptr, len, UiRefreshBehavior::Refresh);
+        Ok(())
     }
 
-    async fn move_to_track(&self, project: ProjectContext, item: ItemRef, track: TrackRef) {
-        debug!("ReaperItem: move_to_track");
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                let Some(proj) = resolve_project(&project) else {
-                    return;
-                };
-                if let Some(resolved) = resolve_track(&proj, &track)
-                    && let Ok(raw) = resolved.raw()
-                {
-                    item_sw::move_item_to_track(medium.low(), item_ptr, raw);
-                }
-            }
-        });
+    fn move_to_track(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        track: TrackRef,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let proj = resolve_project(&project)
+            .ok_or_else(|| daw_proto::DawError::not_found("Project", "context"))?;
+        let target = resolve_track(&proj, &track).ok_or_else(|| track_not_found(&track))?;
+        let raw = target
+            .raw()
+            .map_err(|e| daw_proto::DawError::invalid_object("Track", &format!("{e:?}")))?;
+        item_sw::move_item_to_track(Reaper::get().medium_reaper().low(), item_ptr, raw);
+        Ok(())
     }
 
-    async fn set_snap_offset(&self, _project: ProjectContext, item: ItemRef, offset: Duration) {
-        debug!("ReaperItem: set_snap_offset to {}", offset.as_seconds());
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::SnapOffset,
-                    offset.as_seconds(),
-                );
-            }
-        });
+    fn set_snap_offset(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        offset: Duration,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::SnapOffset,
+            offset.as_seconds(),
+        );
+        Ok(())
     }
 
-    // =========================================================================
-    // State
-    // =========================================================================
-
-    async fn set_muted(&self, _project: ProjectContext, item: ItemRef, muted: bool) {
-        debug!("ReaperItem: set_muted to {}", muted);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::Mute,
-                    if muted { 1.0 } else { 0.0 },
-                );
-            }
-        });
+    fn set_muted(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        muted: bool,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::Mute,
+            if muted { 1.0 } else { 0.0 },
+        );
+        Ok(())
     }
 
-    async fn set_selected(&self, _project: ProjectContext, item: ItemRef, selected: bool) {
-        debug!("ReaperItem: set_selected to {}", selected);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_media_item_selected(medium, item_ptr, selected);
-            }
-        });
+    fn set_selected(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        selected: bool,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        item_sw::set_media_item_selected(Reaper::get().medium_reaper(), item_ptr, selected);
+        Ok(())
     }
 
-    async fn set_locked(&self, _project: ProjectContext, item: ItemRef, locked: bool) {
-        debug!("ReaperItem: set_locked to {}", locked);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            // Lock attribute not available in reaper_medium
-            // Would need chunk manipulation or low-level API
-            let _ = (item, locked, medium, reaper);
-        });
+    fn set_locked(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        _locked: bool,
+    ) -> daw_proto::DawResult<()> {
+        // Lock attribute isn't exposed via reaper_medium ItemAttributeKey;
+        // chunk-manipulation fallback lives in the async surface. No-op
+        // for now once the handle resolves.
+        ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        Ok(())
     }
 
-    async fn select_all_items(&self, _project: ProjectContext, selected: bool) {
-        debug!("ReaperItem: select_all_items to {}", selected);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            medium.select_all_media_items(ReaperProjectContext::CurrentProject, selected);
-        });
+    fn select_all_items(
+        &self,
+        _project: ProjectContext,
+        selected: bool,
+    ) -> daw_proto::DawResult<()> {
+        Reaper::get()
+            .medium_reaper()
+            .select_all_media_items(ReaperProjectContext::CurrentProject, selected);
+        Ok(())
     }
 
-    // =========================================================================
-    // Audio Properties
-    // =========================================================================
-
-    async fn set_volume(&self, _project: ProjectContext, item: ItemRef, volume: f64) {
-        debug!("ReaperItem: set_volume to {}", volume);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(medium, item_ptr, ItemAttributeKey::Vol, volume);
-            }
-        });
+    fn set_volume(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        volume: f64,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::Vol,
+            volume,
+        );
+        Ok(())
     }
 
-    async fn set_fade_in(
+    fn set_fade_in(
         &self,
         _project: ProjectContext,
         item: ItemRef,
         length: Duration,
         shape: FadeShape,
-    ) {
-        debug!(
-            "ReaperItem: set_fade_in length={}, shape={:?}",
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let medium = Reaper::get().medium_reaper();
+        item_sw::set_item_info_value(
+            medium,
+            item_ptr,
+            ItemAttributeKey::FadeInLen,
             length.as_seconds(),
-            shape
         );
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::FadeInLen,
-                    length.as_seconds(),
-                );
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::FadeInShape,
-                    proto_fade_to_reaper(shape) as f64,
-                );
-            }
-        });
+        item_sw::set_item_info_value(
+            medium,
+            item_ptr,
+            ItemAttributeKey::FadeInShape,
+            proto_fade_to_reaper(shape) as f64,
+        );
+        Ok(())
     }
 
-    async fn set_fade_out(
+    fn set_fade_out(
         &self,
         _project: ProjectContext,
         item: ItemRef,
         length: Duration,
         shape: FadeShape,
-    ) {
-        debug!(
-            "ReaperItem: set_fade_out length={}, shape={:?}",
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let medium = Reaper::get().medium_reaper();
+        item_sw::set_item_info_value(
+            medium,
+            item_ptr,
+            ItemAttributeKey::FadeOutLen,
             length.as_seconds(),
-            shape
         );
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::FadeOutLen,
-                    length.as_seconds(),
-                );
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::FadeOutShape,
-                    proto_fade_to_reaper(shape) as f64,
-                );
-            }
-        });
+        item_sw::set_item_info_value(
+            medium,
+            item_ptr,
+            ItemAttributeKey::FadeOutShape,
+            proto_fade_to_reaper(shape) as f64,
+        );
+        Ok(())
     }
 
-    // =========================================================================
-    // Timing Behavior
-    // =========================================================================
-
-    async fn set_loop_source(&self, _project: ProjectContext, item: ItemRef, loop_source: bool) {
-        debug!("ReaperItem: set_loop_source to {}", loop_source);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::LoopSrc,
-                    if loop_source { 1.0 } else { 0.0 },
-                );
-            }
-        });
+    fn set_loop_source(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        loop_source: bool,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::LoopSrc,
+            if loop_source { 1.0 } else { 0.0 },
+        );
+        Ok(())
     }
 
-    async fn set_beat_attach_mode(
+    fn set_beat_attach_mode(
         &self,
         _project: ProjectContext,
         item: ItemRef,
         mode: BeatAttachMode,
-    ) {
-        debug!("ReaperItem: set_beat_attach_mode to {:?}", mode);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                // REAPER uses TimeBase attribute
-                // 0 = time, 1 = beats (position, length, rate), 2 = beats (position only)
-                let timebase = match mode {
-                    BeatAttachMode::Time => 0.0,
-                    BeatAttachMode::Beats => 1.0,
-                    BeatAttachMode::BeatsPositionOnly => 2.0,
-                };
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::BeatAttachMode,
-                    timebase,
-                );
-            }
-        });
-    }
-
-    async fn set_auto_stretch(&self, _project: ProjectContext, item: ItemRef, auto_stretch: bool) {
-        debug!("ReaperItem: set_auto_stretch to {}", auto_stretch);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::AutoStretch,
-                    if auto_stretch { 1.0 } else { 0.0 },
-                );
-            }
-        });
-    }
-
-    // =========================================================================
-    // Visual Properties
-    // =========================================================================
-
-    async fn set_color(&self, _project: ProjectContext, item: ItemRef, color: Option<u32>) {
-        debug!("ReaperItem: set_color to {:?}", color);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                // Bit 24 (0x01000000) tells REAPER to use the custom color.
-                // Without it, the item inherits its track's color.
-                let color_value = color.map(|c| (c as i32) | 0x01000000).unwrap_or(0);
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::CustomColor,
-                    color_value as f64,
-                );
-            }
-        });
-    }
-
-    async fn set_group_id(&self, _project: ProjectContext, item: ItemRef, group_id: Option<u32>) {
-        debug!("ReaperItem: set_group_id to {:?}", group_id);
-        main_thread::run(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-            {
-                let group_value = group_id.map(|g| g as i32).unwrap_or(0);
-                item_sw::set_item_info_value(
-                    medium,
-                    item_ptr,
-                    ItemAttributeKey::GroupId,
-                    group_value as f64,
-                );
-            }
-        });
-    }
-
-    // =========================================================================
-    // Subscriptions
-    // =========================================================================
-
-    async fn subscribe_items(&self, _project: ProjectContext, tx: Tx<ItemEvent>) {
-        info!("ReaperItem: subscribe_items - subscribing to broadcast channel");
-
-        let Some(mut rx) = item_receiver() else {
-            info!("ReaperItem: item broadcast channel not initialized");
-            return;
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let timebase = match mode {
+            BeatAttachMode::Time => 0.0,
+            BeatAttachMode::Beats => 1.0,
+            BeatAttachMode::BeatsPositionOnly => 2.0,
         };
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::BeatAttachMode,
+            timebase,
+        );
+        Ok(())
+    }
 
-        moire::task::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            debug!("ReaperItem: subscribe_items stream closed");
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(count)) => {
-                        debug!("ReaperItem: subscribe_items lagged by {} messages", count);
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        info!("ReaperItem: item broadcast channel closed");
-                        break;
-                    }
-                }
-            }
-            info!("ReaperItem: subscribe_items stream ended");
-        });
+    fn set_auto_stretch(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        auto_stretch: bool,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::AutoStretch,
+            if auto_stretch { 1.0 } else { 0.0 },
+        );
+        Ok(())
+    }
+
+    fn set_color(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        color: Option<u32>,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let value = color.map(|c| (c as i32) | 0x01000000).unwrap_or(0);
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::CustomColor,
+            value as f64,
+        );
+        Ok(())
+    }
+
+    fn set_group_id(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        group_id: Option<u32>,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let value = group_id.map(|g| g as i32).unwrap_or(0);
+        item_sw::set_item_info_value(
+            Reaper::get().medium_reaper(),
+            item_ptr,
+            ItemAttributeKey::GroupId,
+            value as f64,
+        );
+        Ok(())
     }
 }
 

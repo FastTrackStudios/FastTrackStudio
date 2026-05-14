@@ -6,7 +6,7 @@ use super::daw::Standalone;
 // `ExtState` ported to architect::rpc — see `crate::ext_state`.
 // `FxChains` ported to architect::rpc — see `crate::fx_chains`.
 // `FxParams` ported to architect::rpc — see `crate::fx_params`.
-use super::items::StandaloneItems;
+// `Items` ported to architect::rpc — see `crate::item`.
 // `Routing` ported to architect::rpc — `impl Routing for Standalone`
 // lives at `crate::routing_sync`.
 // `Takes` ported to architect::rpc — `impl Takes for Standalone`
@@ -30,20 +30,11 @@ impl<'a> StandaloneProject<'a> {
 }
 
 impl<'a> Project for StandaloneProject<'a> {
-    type Items<'b>
-        = StandaloneItems<'b>
-    where
-        Self: 'b;
-
     fn guid(&self) -> &str {
         &self.guid
     }
 
     fn info(&self) -> DawResult<ProjectInfo> {
         self.daw.with_project(&self.guid, |p| p.info.clone())
-    }
-
-    fn items(&self) -> Self::Items<'_> {
-        StandaloneItems::new(self.daw, self.guid.clone())
     }
 }
