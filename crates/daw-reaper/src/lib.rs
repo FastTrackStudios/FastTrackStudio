@@ -112,12 +112,13 @@ pub use toolbar::ReaperToolbar;
 // `Tracks` impl'd on `Reaper` — see `crate::track`. The old async
 // `ReaperTrack` service struct + broadcasters retired with the port.
 pub use track::add_track_on_main_thread;
-pub use transport::ReaperTransport;
+// `Transport` impl'd on `Reaper` — see `crate::transport`. The old
+// async `ReaperTransport` service struct + broadcasters retired with
+// the architect::rpc port.
 pub use window_geometry::ReaperWindowGeometry;
 
 // Re-export the main thread bridge and transport broadcaster functions
 pub use main_thread::set_task_support;
-pub use transport::{init_transport_broadcaster, poll_and_broadcast};
 
 // Re-export FX broadcaster functions
 pub use fx::{init_fx_broadcaster, poll_and_broadcast_fx};

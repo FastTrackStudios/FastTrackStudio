@@ -37,7 +37,7 @@ use daw::service::{
     LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
     ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
     TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
-    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
+    WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -146,7 +146,7 @@ async fn register_daw_dispatcher() {
     daw::reaper::set_task_support(Global::task_support());
 
     // Initialize all broadcasters
-    daw::reaper::init_transport_broadcaster();
+    // Transport broadcaster retired alongside the architect::rpc port.
     daw::reaper::init_fx_broadcaster();
     // Track broadcaster retired alongside the architect::rpc port.
     daw::reaper::init_item_broadcaster();
@@ -155,7 +155,7 @@ async fn register_daw_dispatcher() {
     info!("All broadcasters initialized");
 
     // Create REAPER implementations
-    let transport = daw::reaper::ReaperTransport::new();
+    // Transport ported — mount via daw::service::transport::serve(Reaper).
     let project = daw::reaper::ReaperProject::new();
     // Markers ported to architect::rpc — backend is the singleton
     // `Reaper` and mounting goes through `daw::rpc::marker::serve`.
@@ -193,14 +193,14 @@ async fn register_daw_dispatcher() {
         project_service_service_descriptor, routing_service_service_descriptor,
         screenset_service_service_descriptor, take_service_service_descriptor,
         tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-        transport_service_service_descriptor, window_geometry_service_service_descriptor,
+        window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
     let daw_handler = RoutedHandler::new()
         .with(
-            transport_service_service_descriptor(),
-            TransportServiceDispatcher::new(transport),
+            daw::service::transport::descriptor(),
+            daw::service::transport::serve(daw::reaper::Reaper),
         )
         .with(
             project_service_service_descriptor(),
@@ -456,7 +456,7 @@ extern "C" fn timer_callback() {
             }
 
             // Poll all broadcasters for state changes
-            daw::reaper::poll_and_broadcast();
+            // Transport broadcaster retired alongside the architect::rpc port.
             daw::reaper::poll_and_broadcast_fx();
             // Track broadcaster retired alongside the architect::rpc port.
             daw::reaper::poll_and_broadcast_items();

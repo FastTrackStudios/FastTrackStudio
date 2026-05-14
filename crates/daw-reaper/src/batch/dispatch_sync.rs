@@ -261,10 +261,6 @@ fn dispatch_transport_sync(
             fire_cmd(medium, 40044);
             Ok(StepOutput::Unit)
         }
-        TransportOp::PlayFromLastStartPosition(_p) => {
-            fire_cmd(medium, 1007); // same as Play
-            Ok(StepOutput::Unit)
-        }
         TransportOp::Record(_p) => {
             fire_cmd(medium, 1013);
             Ok(StepOutput::Unit)
@@ -381,44 +377,6 @@ fn dispatch_transport_sync(
                 ts.time_signature.numerator.get(),
                 ts.time_signature.denominator.get(),
             )))
-        }
-        TransportOp::SetPositionMusical(_p, measure, beat, subdivision) => {
-            let beats_within_measure = *beat as f64 + *subdivision as f64 / 1000.0;
-            if let Ok(beats) = reaper_medium::PositionInBeats::new(beats_within_measure) {
-                let time_seconds = medium.time_map_2_beats_to_time(
-                    ReaperProjectContext::CurrentProject,
-                    reaper_medium::MeasureMode::FromMeasureAtIndex(*measure),
-                    beats,
-                );
-                if let Ok(pos) = PositionInSeconds::new(time_seconds.get()) {
-                    reaper.current_project().set_edit_cursor_position(
-                        pos,
-                        SetEditCurPosOptions {
-                            move_view: false,
-                            seek_play: true,
-                        },
-                    );
-                }
-            }
-            Ok(StepOutput::Unit)
-        }
-        TransportOp::GotoMeasure(_p, measure) => {
-            let beats = reaper_medium::PositionInBeats::new(0.0).unwrap();
-            let time_seconds = medium.time_map_2_beats_to_time(
-                ReaperProjectContext::CurrentProject,
-                reaper_medium::MeasureMode::FromMeasureAtIndex(*measure),
-                beats,
-            );
-            if let Ok(pos) = PositionInSeconds::new(time_seconds.get()) {
-                reaper.current_project().set_edit_cursor_position(
-                    pos,
-                    SetEditCurPosOptions {
-                        move_view: false,
-                        seek_play: true,
-                    },
-                );
-            }
-            Ok(StepOutput::Unit)
         }
     }
 }

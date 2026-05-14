@@ -329,52 +329,7 @@ async fn transport_get_time_signature(ctx: &ReaperTestContext) -> eyre::Result<(
     Ok(())
 }
 
-// ─── Musical Position ───────────────────────────────────────────────────
-
-#[reaper_test(isolated)]
-async fn transport_set_position_musical(ctx: &ReaperTestContext) -> eyre::Result<()> {
-    let transport = ctx.project().transport();
-
-    // Go to measure 2, beat 1 (0-indexed)
-    transport.set_position_musical(1, 0, 0).await?;
-    let pos = transport.get_position().await?;
-    assert!(
-        pos > 0.0,
-        "musical position should move playhead forward, got {pos}"
-    );
-
-    Ok(())
-}
-
-#[reaper_test(isolated)]
-async fn transport_goto_measure(ctx: &ReaperTestContext) -> eyre::Result<()> {
-    let transport = ctx.project().transport();
-
-    transport.goto_measure(4).await?;
-    let pos = transport.get_position().await?;
-    assert!(
-        pos > 0.0,
-        "goto_measure(4) should move playhead forward, got {pos}"
-    );
-
-    transport.goto_measure(0).await?;
-    let pos = transport.get_position().await?;
-    assert!(pos < 0.1, "goto_measure(0) should go to start, got {pos}");
-
-    Ok(())
-}
-
-// ─── Subscribe State ────────────────────────────────────────────────────
-
-#[reaper_test(isolated)]
-async fn transport_subscribe_state(ctx: &ReaperTestContext) -> eyre::Result<()> {
-    let transport = ctx.project().transport();
-
-    let mut rx = transport.subscribe_state().await?;
-
-    // Should receive an initial state
-    let state = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await?;
-    assert!(state.is_ok(), "should receive at least one state update");
-
-    Ok(())
-}
+// Musical-position navigation (set_position_musical, goto_measure)
+// and subscribe_state retired alongside the architect::rpc port — the
+// sync `Transport` trait carries only the canonical verbs. Tests
+// covering those surfaces will return on a sibling trait.

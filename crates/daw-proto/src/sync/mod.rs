@@ -41,7 +41,7 @@ mod tempo_map;
 mod toolbar;
 // `Tracks` ported to architect::rpc — see `crate::track::service`.
 // Re-exported below alongside the rest of the sync trait family.
-mod transport;
+// `Transport` ported to architect::rpc — see `crate::transport::service`.
 mod window_geometry;
 
 pub use action_registry::ActionRegistry;
@@ -63,11 +63,14 @@ pub use crate::region::{RegionsClient, serve as serve_regions};
 pub use crate::track::{Tracks, TracksRpc};
 #[cfg(feature = "vox")]
 pub use crate::track::{TracksClient, serve as serve_tracks};
+pub use crate::transport::TransportRpc;
+pub use crate::transport::service::Transport;
+#[cfg(feature = "vox")]
+pub use crate::transport::{TransportClient, serve as serve_transport};
 pub use plugin_loader::PluginLoader;
 pub use project::Project;
 pub use routing::Routing;
 pub use takes::Takes;
 pub use tempo_map::TempoMap;
 pub use toolbar::Toolbar;
-pub use transport::Transport;
 pub use window_geometry::WindowGeometry;

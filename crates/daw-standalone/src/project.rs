@@ -1,6 +1,6 @@
 //! Standalone project implementation
 
-use crate::transport::SharedProjectState;
+use crate::shared_state::SharedProjectState;
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use std::sync::Arc;
 use std::time::Duration;

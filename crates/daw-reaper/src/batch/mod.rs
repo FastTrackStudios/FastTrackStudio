@@ -20,7 +20,7 @@ use daw_proto::batch::*;
 /// Inner state for the batch executor (not Clone due to ReaperAudioAccessor's Mutex).
 struct BatchExecutorInner {
     project_svc: crate::ReaperProject,
-    transport_svc: crate::ReaperTransport,
+    transport_svc: crate::Reaper,
     track_svc: crate::Reaper,
     fx_svc: crate::ReaperFx,
     routing_svc: crate::ReaperRouting,
@@ -60,7 +60,7 @@ impl BatchExecutor {
         Self {
             inner: Arc::new(BatchExecutorInner {
                 project_svc: crate::ReaperProject::new(),
-                transport_svc: crate::ReaperTransport::new(),
+                transport_svc: crate::Reaper,
                 track_svc: crate::Reaper,
                 fx_svc: crate::ReaperFx::new(),
                 routing_svc: crate::ReaperRouting::new(),

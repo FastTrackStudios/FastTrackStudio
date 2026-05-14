@@ -66,6 +66,10 @@ pub enum ProjectOp {
 // Transport operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Transport` trait. The
+// retired variants (PlayFromLastStartPosition, SetPositionMusical,
+// GotoMeasure) came from the old `TransportService` and land on
+// follow-on sibling traits if/when needed.
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum TransportOp {
@@ -74,7 +78,6 @@ pub enum TransportOp {
     Stop(ProjectArg),
     PlayPause(ProjectArg),
     PlayStop(ProjectArg),
-    PlayFromLastStartPosition(ProjectArg),
     Record(ProjectArg),
     StopRecording(ProjectArg),
     ToggleRecording(ProjectArg),
@@ -94,8 +97,6 @@ pub enum TransportOp {
     GetPlayrate(ProjectArg),
     SetPlayrate(ProjectArg, f64),
     GetTimeSignature(ProjectArg),
-    SetPositionMusical(ProjectArg, i32, i32, i32),
-    GotoMeasure(ProjectArg, i32),
 }
 
 // =============================================================================
@@ -618,7 +619,6 @@ impl BatchOp {
                     | TransportOp::Stop(p)
                     | TransportOp::PlayPause(p)
                     | TransportOp::PlayStop(p)
-                    | TransportOp::PlayFromLastStartPosition(p)
                     | TransportOp::Record(p)
                     | TransportOp::StopRecording(p)
                     | TransportOp::ToggleRecording(p)
@@ -638,8 +638,6 @@ impl BatchOp {
                     | TransportOp::SetTempo(p, _)
                     | TransportOp::SetLoop(p, _)
                     | TransportOp::SetPlayrate(p, _) => p,
-                    TransportOp::SetPositionMusical(p, _, _, _)
-                    | TransportOp::GotoMeasure(p, _) => p,
                 };
                 check_project(p, deps);
             }

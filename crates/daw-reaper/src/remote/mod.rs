@@ -30,7 +30,7 @@ pub mod takes;
 pub mod tempo_map;
 // tracks ported to architect::rpc — `marker::serve(Reaper)` style
 // mounting handles threading via `HasDispatcher`.
-pub mod transport;
+// transport ported to architect::rpc — see `crate::transport`.
 
 pub use daw::ReaperRemote;
 pub use ext_state::RemoteExtState;
@@ -41,7 +41,6 @@ pub use project::RemoteProject;
 pub use routing::RemoteRouting;
 pub use takes::RemoteTakes;
 pub use tempo_map::RemoteTempoMap;
-pub use transport::RemoteTransport;
 
 use daw_proto::{DawError, DawResult};
 

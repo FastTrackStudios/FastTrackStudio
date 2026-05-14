@@ -13,7 +13,7 @@ pub async fn dispatch_op(
     op: &BatchOp,
     outputs: &[Option<StepOutput>],
     project_svc: &crate::ReaperProject,
-    transport_svc: &crate::ReaperTransport,
+    transport_svc: &crate::Reaper,
     track_svc: &crate::Reaper,
     fx_svc: &crate::ReaperFx,
     routing_svc: &crate::ReaperRouting,
@@ -147,135 +147,122 @@ async fn dispatch_project(
 async fn dispatch_transport(
     op: &TransportOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperTransport,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::transport::transport::TransportService;
+    use daw_proto::sync::Transport;
     match op {
         TransportOp::Play(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.play(ctx).await;
+            Transport::play(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::Pause(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.pause(ctx).await;
+            Transport::pause(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::Stop(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.stop(ctx).await;
+            Transport::stop(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::PlayPause(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.play_pause(ctx).await;
+            Transport::play_pause(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::PlayStop(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.play_stop(ctx).await;
-            Ok(StepOutput::Unit)
-        }
-        TransportOp::PlayFromLastStartPosition(p) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.play_from_last_start_position(ctx).await;
+            Transport::play_stop(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::Record(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.record(ctx).await;
+            Transport::record(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::StopRecording(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.stop_recording(ctx).await;
+            Transport::stop_recording(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::ToggleRecording(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.toggle_recording(ctx).await;
+            Transport::toggle_recording(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::SetPosition(p, secs) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_position(ctx, *secs).await;
+            Transport::set_position(svc, ctx, *secs).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::GetPosition(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.get_position(ctx).await))
+            Ok(StepOutput::F64(Transport::get_position(svc, ctx)))
         }
         TransportOp::GotoStart(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_start(ctx).await;
+            Transport::goto_start(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::GotoEnd(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_end(ctx).await;
+            Transport::goto_end(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::GetState(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Transport(svc.get_state(ctx).await))
+            Ok(StepOutput::Transport(Transport::get_state(svc, ctx)))
         }
         TransportOp::GetPlayState(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::PlayState(svc.get_play_state(ctx).await))
+            Ok(StepOutput::PlayState(Transport::get_play_state(svc, ctx)))
         }
         TransportOp::IsPlaying(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Bool(svc.is_playing(ctx).await))
+            Ok(StepOutput::Bool(Transport::is_playing(svc, ctx)))
         }
         TransportOp::IsRecording(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Bool(svc.is_recording(ctx).await))
+            Ok(StepOutput::Bool(Transport::is_recording(svc, ctx)))
         }
         TransportOp::GetTempo(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.get_tempo(ctx).await))
+            Ok(StepOutput::F64(Transport::get_tempo(svc, ctx)))
         }
         TransportOp::SetTempo(p, bpm) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_tempo(ctx, *bpm).await;
+            Transport::set_tempo(svc, ctx, *bpm).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::ToggleLoop(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.toggle_loop(ctx).await;
+            Transport::toggle_loop(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::IsLooping(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Bool(svc.is_looping(ctx).await))
+            Ok(StepOutput::Bool(Transport::is_looping(svc, ctx)))
         }
         TransportOp::SetLoop(p, enabled) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_loop(ctx, *enabled).await;
+            Transport::set_loop(svc, ctx, *enabled).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::GetPlayrate(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.get_playrate(ctx).await))
+            Ok(StepOutput::F64(Transport::get_playrate(svc, ctx)))
         }
         TransportOp::SetPlayrate(p, rate) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_playrate(ctx, *rate).await;
+            Transport::set_playrate(svc, ctx, *rate).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TransportOp::GetTimeSignature(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::TimeSignature(svc.get_time_signature(ctx).await))
-        }
-        TransportOp::SetPositionMusical(p, m, b, s) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_position_musical(ctx, *m, *b, *s).await;
-            Ok(StepOutput::Unit)
-        }
-        TransportOp::GotoMeasure(p, m) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_measure(ctx, *m).await;
-            Ok(StepOutput::Unit)
+            Ok(StepOutput::TimeSignature(Transport::get_time_signature(
+                svc, ctx,
+            )))
         }
     }
 }

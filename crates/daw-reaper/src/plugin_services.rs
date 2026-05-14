@@ -10,10 +10,9 @@ use daw_proto::{
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
     MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
     RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TransportServiceDispatcher,
-    WindowGeometryServiceDispatcher,
+    TempoMapServiceDispatcher, ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
-use daw_proto::{marker, region, track};
+use daw_proto::{marker, region, track, transport};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
@@ -24,8 +23,7 @@ use daw_proto::{
     plugin_loader_service_service_descriptor, project_service_service_descriptor,
     routing_service_service_descriptor, screenset_service_service_descriptor,
     take_service_service_descriptor, tempo_map_service_service_descriptor,
-    toolbar_service_service_descriptor, transport_service_service_descriptor,
-    window_geometry_service_service_descriptor,
+    toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -40,7 +38,7 @@ use crate::routed_handler::RoutedHandler;
 /// Call after REAPER API is initialized (`PluginHost::init` handles this).
 pub fn create_daw_handler() -> RoutedHandler {
     // Initialize broadcasters (idempotent if already done by daw-bridge)
-    crate::init_transport_broadcaster();
+    // Transport broadcaster retired alongside the architect::rpc port.
     crate::init_fx_broadcaster();
     // Track broadcaster retired alongside the architect::rpc port —
     // streaming subscriptions live on a sibling trait when revived.
@@ -49,7 +47,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     crate::init_tempo_map_broadcaster();
 
     // Create REAPER implementations
-    let transport = crate::ReaperTransport::new();
+    // Transport ported to architect::rpc — mounted via transport::serve(Reaper)
     let project = crate::ReaperProject::new();
     // Regions ported to architect::rpc — mounted via region::serve(Reaper)
     let tempo_map = crate::ReaperTempoMap::new();
@@ -74,10 +72,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let batch = crate::batch::BatchExecutor::new();
 
     RoutedHandler::new()
-        .with(
-            transport_service_service_descriptor(),
-            TransportServiceDispatcher::new(transport),
-        )
+        .with(transport::descriptor(), transport::serve(crate::Reaper))
         .with(
             project_service_service_descriptor(),
             ProjectServiceDispatcher::new(project),

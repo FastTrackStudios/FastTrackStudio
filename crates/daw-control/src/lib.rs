@@ -137,12 +137,12 @@ pub(crate) use daw_proto::ScreensetServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TracksClient;
+pub(crate) use daw_proto::TransportClient;
 pub(crate) use daw_proto::WindowGeometryServiceClient;
 pub(crate) use daw_proto::batch::BatchServiceClient;
 pub(crate) use daw_proto::dock_host::DockHostServiceClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
 pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
-pub(crate) use daw_proto::transport::transport::TransportServiceClient;
 pub use vox::Caller;
 
 pub mod error;
@@ -203,7 +203,7 @@ pub use self::window_geometry::WindowGeometry;
 pub struct DawClients {
     pub(crate) action_registry: ActionRegistryServiceClient,
     pub(crate) dock_host: DockHostServiceClient,
-    pub(crate) transport: TransportServiceClient,
+    pub(crate) transport: TransportClient,
     pub(crate) project: ProjectServiceClient,
     pub(crate) marker: MarkersClient,
     pub(crate) region: RegionsClient,
@@ -239,7 +239,7 @@ impl DawClients {
         Self {
             action_registry: ActionRegistryServiceClient::new(handle.clone()),
             dock_host: DockHostServiceClient::new(handle.clone()),
-            transport: TransportServiceClient::new(handle.clone()),
+            transport: TransportClient::new(handle.clone()),
             project: ProjectServiceClient::new(handle.clone()),
             marker: MarkersClient::new(handle.clone()),
             region: RegionsClient::new(handle.clone()),

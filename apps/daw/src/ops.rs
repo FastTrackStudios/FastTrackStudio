@@ -64,7 +64,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::tempo_map_service_service_descriptor(),
         daw::service::toolbar_service_service_descriptor(),
         daw::service::track::descriptor(),
-        daw::service::transport_service_service_descriptor(),
+        daw::service::transport::descriptor(),
         daw::service::ui_service_service_descriptor(),
     ]
 }
@@ -503,10 +503,12 @@ pub async fn transport_set_playrate(daw: &Daw, rate: f64) -> Result<Value> {
     transport_state_for_project(&project).await
 }
 
-pub async fn transport_goto_measure(daw: &Daw, measure: i32) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.transport().goto_measure(measure).await?;
-    transport_state_for_project(&project).await
+pub async fn transport_goto_measure(_daw: &Daw, _measure: i32) -> Result<Value> {
+    // Musical-position navigation retired with the architect::rpc port —
+    // sibling-trait territory if revived.
+    Err(eyre::eyre!(
+        "transport goto-measure retired with the architect::rpc port"
+    ))
 }
 
 pub async fn markers(daw: &Daw) -> Result<Value> {

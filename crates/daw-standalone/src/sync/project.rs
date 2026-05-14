@@ -13,7 +13,8 @@ use super::tempo_map::StandaloneTempoMap;
 // `Tracks` ported to architect::rpc — `impl Tracks for Standalone`
 // lives at `crate::track`. The borrowed `StandaloneTracks<'a>` view
 // retired with the port.
-use super::transport::StandaloneTransport;
+// `Transport` ported to architect::rpc — impl on `Standalone` at
+// `crate::transport`.
 
 /// Per-project sync handle. Owns sub-domain accessors.
 pub struct StandaloneProject<'a> {
@@ -28,10 +29,6 @@ impl<'a> StandaloneProject<'a> {
 }
 
 impl<'a> Project for StandaloneProject<'a> {
-    type Transport<'b>
-        = StandaloneTransport<'b>
-    where
-        Self: 'b;
     type TempoMap<'b>
         = StandaloneTempoMap<'b>
     where
@@ -67,10 +64,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn info(&self) -> DawResult<ProjectInfo> {
         self.daw.with_project(&self.guid, |p| p.info.clone())
-    }
-
-    fn transport(&self) -> Self::Transport<'_> {
-        StandaloneTransport::new(self.daw, self.guid.clone())
     }
 
     fn tempo_map(&self) -> Self::TempoMap<'_> {

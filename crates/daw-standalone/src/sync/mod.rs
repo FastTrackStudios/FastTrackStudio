@@ -26,7 +26,8 @@ mod takes;
 mod tempo_map;
 // tracks ported to architect::rpc — `impl Tracks for Standalone`
 // lives at `crate::track`.
-mod transport;
+// `Transport` ported to architect::rpc — `impl Transport for
+// Standalone` lives at `crate::transport`.
 
 pub use daw::{
     FxChainKey, FxEntry, ItemEntry, ProjectState, Standalone, StandaloneState, TakeList,
@@ -39,4 +40,3 @@ pub use project::StandaloneProject;
 pub use routing::StandaloneRouting;
 pub use takes::StandaloneTakes;
 pub use tempo_map::StandaloneTempoMap;
-pub use transport::StandaloneTransport;

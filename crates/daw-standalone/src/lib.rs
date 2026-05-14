@@ -32,6 +32,7 @@ mod project;
 mod region;
 mod resource;
 mod routing;
+mod shared_state;
 pub mod sync;
 mod tempo_map;
 mod track;
@@ -58,5 +59,7 @@ pub use sync::Standalone;
 pub use tempo_map::StandaloneTempoMap;
 // `Tracks` impl'd directly on `Standalone` — see `crate::track`.
 // The old async `StandaloneTrack` service struct retired with the port.
-pub use transport::{SharedProjectState, StandaloneTransport};
+// `Transport` impl'd directly on `Standalone` — see `crate::transport`.
+// The old async `StandaloneTransport` service struct retired with the port.
+pub use shared_state::SharedProjectState;
 pub use ui::StandaloneUi;
