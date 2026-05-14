@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use clap::{Parser, Subcommand};
 use project_proto::architect::Page;
-use project_proto::{ProjectRepoClient, TaskRepoClient};
+use project_proto::{ProjectRepoClient, TaskRepoClient, TaskUpdate};
 use shared::RemoteVoxConfig;
 use uuid::Uuid;
 
@@ -35,8 +35,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// List tasks via the project-proto Task vox client (TODO).
+    /// List tasks grouped by project.
     List,
+    /// Update a task's status. Triggers a live push to every
+    /// subscribed peer through `WorkspaceSync`.
+    SetStatus {
+        /// Task UUID (any unambiguous prefix accepted).
+        task_id: String,
+        /// New status — e.g. todo / in-progress / in-review / done /
+        /// blocked / cancelled. Whatever the renderer recognizes.
+        status: String,
+    },
     /// Probe the configured vox endpoint.
     Doctor,
 }
@@ -107,6 +116,56 @@ async fn main() -> eyre::Result<()> {
                     }
                 }
             }
+        }
+        Commands::SetStatus { task_id, status } => {
+            let remote =
+                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
+            let tasks: TaskRepoClient = remote.connect().await?;
+            // Resolve a UUID prefix → full id by listing all tasks.
+            // Cheap at this scale; revisit if/when the corpus grows
+            // past the page size.
+            let id = if let Ok(id) = Uuid::parse_str(&task_id) {
+                id
+            } else {
+                let page = tasks
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 1000,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|e| eyre::eyre!("task list (for id resolve): {e}"))?;
+                let prefix = task_id.to_lowercase();
+                let matches: Vec<_> = page
+                    .items
+                    .iter()
+                    .filter(|t| t.id.to_string().starts_with(&prefix))
+                    .collect();
+                match matches.as_slice() {
+                    [] => return Err(eyre::eyre!("no task matched prefix {task_id:?}")),
+                    [t] => t.id,
+                    multi => {
+                        return Err(eyre::eyre!(
+                            "{} tasks matched prefix {task_id:?}; use a longer prefix",
+                            multi.len()
+                        ));
+                    }
+                }
+            };
+            let updated = tasks
+                .update(
+                    id,
+                    TaskUpdate {
+                        status: Some(status.clone()),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| eyre::eyre!("task update: {e}"))?;
+            println!("{} {} → {}", updated.id, updated.title, updated.status);
         }
         Commands::Doctor => {
             let remote =
