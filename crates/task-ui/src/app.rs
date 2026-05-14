@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use dioxus_router::Navigator;
 use fts_ui::lucide_dioxus::{
-    FolderKanban, House, Inbox as InboxIcon, Menu, Palette, Settings as SettingsIcon,
+    BookOpen, FolderKanban, House, Inbox as InboxIcon, Menu, Palette, Settings as SettingsIcon,
 };
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
@@ -22,6 +22,9 @@ pub enum Route {
 
         #[route("/projects")]
         ProjectsRoute {},
+
+        #[route("/knowledge")]
+        KnowledgeRoute {},
 
         #[route("/inbox")]
         InboxRoute {},
@@ -48,6 +51,11 @@ fn DashboardRoute() -> Element {
 #[component]
 fn ProjectsRoute() -> Element {
     rsx! { crate::feature_routes::project::ProjectView {} }
+}
+
+#[component]
+fn KnowledgeRoute() -> Element {
+    rsx! { crate::feature_routes::knowledge::KnowledgeView {} }
 }
 
 #[component]
@@ -362,6 +370,9 @@ fn icon_folder_kanban() -> Element {
 fn icon_settings() -> Element {
     rsx! { SettingsIcon { size: 16 } }
 }
+fn icon_knowledge() -> Element {
+    rsx! { BookOpen { size: 16 } }
+}
 
 fn nav_tabs() -> Vec<NavTab> {
     vec![
@@ -379,6 +390,11 @@ fn nav_tabs() -> Vec<NavTab> {
             label: "Projects",
             icon: icon_folder_kanban,
             route: Route::ProjectsRoute {},
+        },
+        NavTab {
+            label: "Knowledge",
+            icon: icon_knowledge,
+            route: Route::KnowledgeRoute {},
         },
         NavTab {
             label: "Vox test",
@@ -411,6 +427,11 @@ fn primary_mobile_tabs() -> Vec<NavTab> {
             route: Route::ProjectsRoute {},
         },
         NavTab {
+            label: "Knowledge",
+            icon: icon_knowledge,
+            route: Route::KnowledgeRoute {},
+        },
+        NavTab {
             label: "Settings",
             icon: icon_settings,
             route: Route::SettingsRoute {},
@@ -426,6 +447,7 @@ fn route_title(route: &Route) -> &'static str {
     match route {
         Route::DashboardRoute {} => "Home",
         Route::ProjectsRoute {} => "Projects",
+        Route::KnowledgeRoute {} => "Knowledge",
         Route::InboxRoute {} => "Inbox",
         Route::SettingsRoute {} => "Settings",
         Route::VoxTestRoute {} => "Vox test",

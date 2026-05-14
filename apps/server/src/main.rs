@@ -33,12 +33,51 @@ async fn main() -> eyre::Result<()> {
 
     let state = AppState::new(persistence).await?;
 
+    if seed_on_start {
+        seed_knowledge_org_vault(&state).await?;
+    }
+
     let app = router(state);
 
     info!(%bind, "listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
 
+    Ok(())
+}
+
+/// Ensure the org vault doc has an "Org" vault row. Idempotent.
+/// Phase 5c demo seeding so the Knowledge route renders something
+/// on first paint without needing the CLI.
+async fn seed_knowledge_org_vault(state: &AppState) -> eyre::Result<()> {
+    use knowledge_proto::{VaultCreate, VaultRepo};
+    let big = project_proto::architect::Page {
+        index: 0,
+        size: 1000,
+    };
+    let vaults = state
+        .vault_repo
+        .list(big, None, None)
+        .await
+        .map_err(|e| eyre::eyre!("seed vault list: {e}"))?;
+    if !vaults.items.is_empty() {
+        info!(count = vaults.items.len(), "org vault already seeded");
+        return Ok(());
+    }
+    let v = state
+        .vault_repo
+        .create(VaultCreate {
+            name: "Org".into(),
+            root_path: None,
+            use_markdown_links: false,
+            new_link_format: "shortest".into(),
+            attachment_folder_path: "".into(),
+            default_view_mode: "source".into(),
+            config_json: "{}".into(),
+        })
+        .await
+        .map_err(|e| eyre::eyre!("seed vault create: {e}"))?;
+    info!(vault_id = %v.id, "seeded Org vault");
     Ok(())
 }
 

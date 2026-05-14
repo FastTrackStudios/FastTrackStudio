@@ -26,6 +26,7 @@ crdt = { path = "../../../architect/libs/crdt" }
 project-proto = { workspace = true, features = ["fake"] }
 project-crdt.workspace = true
 project-ui.workspace = true
+knowledge-ui.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

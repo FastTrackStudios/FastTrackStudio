@@ -1903,6 +1903,8 @@ name = "daw-proto"
 version = "0.1.0"
 dependencies = [
  "actions-proto",
+ "architect",
+ "architect-rpc-derive",
  "facet",
  "thiserror 2.0.18",
  "vox 0.4.0",
@@ -4834,6 +4836,26 @@ dependencies = [
  "thiserror 2.0.18",
  "uuid",
  "vox 0.3.1",
+]
+
+[[package]]
+name = "knowledge-ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "crdt",
+ "dioxus",
+ "fts-ui",
+ "futures",
+ "knowledge-crdt",
+ "knowledge-proto",
+ "project-proto",
+ "serde_json",
+ "tracing",
+ "uuid",
+ "vox 0.3.1",
+ "vox-core 0.3.1",
+ "vox-websocket",
 ]
 
 [[package]]
@@ -8834,6 +8856,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "js-sys",
+ "knowledge-ui",
  "loro",
  "project-crdt",
  "project-proto",
