@@ -31,6 +31,7 @@ exclude = [
     "features/threads/spec",    "features/threads/tests",
     "features/timer/spec",      "features/timer/tests",
     "features/knowledge/spec",  "features/knowledge/tests",
+    "features/notifications/spec", "features/notifications/tests",
 ]
 resolver = "2"
 
@@ -141,6 +142,11 @@ knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
 knowledge-db = { path = "features/knowledge/knowledge-db" }
 knowledge-ui = { path = "features/knowledge/knowledge-ui" }
 knowledge-sync = { path = "features/knowledge/knowledge-sync" }
+notifications = { path = "features/notifications/notifications" }
+notifications-proto = { path = "features/notifications/notifications-proto" }
+notifications-crdt = { path = "features/notifications/notifications-crdt" }
+notifications-db = { path = "features/notifications/notifications-db" }
+notifications-ui = { path = "features/notifications/notifications-ui" }
 
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault
 # directories. Server-only dep; never reaches wasm.
