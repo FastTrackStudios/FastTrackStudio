@@ -60,7 +60,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::resource_service_service_descriptor(),
         daw::service::routing_service_service_descriptor(),
         daw::service::screenset_service_service_descriptor(),
-        daw::service::take_service_service_descriptor(),
+        daw::service::take::descriptor(),
         daw::service::tempo_map::descriptor(),
         daw::service::toolbar_service_service_descriptor(),
         daw::service::track::descriptor(),

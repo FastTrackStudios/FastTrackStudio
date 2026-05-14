@@ -18,7 +18,7 @@ pub async fn dispatch_op(
     fx_svc: &crate::ReaperFx,
     routing_svc: &crate::ReaperRouting,
     item_svc: &crate::ReaperItem,
-    take_svc: &crate::ReaperTake,
+    take_svc: &crate::Reaper,
     marker_svc: &crate::Reaper,
     region_svc: &crate::Reaper,
     tempo_map_svc: &crate::Reaper,
@@ -925,94 +925,111 @@ async fn dispatch_item(
 async fn dispatch_take(
     op: &TakeOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperTake,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::TakeService;
+    use daw_proto::sync::Takes;
     match op {
         TakeOp::GetTakes(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::TakeList(svc.get_takes(ctx, item.clone()).await))
+            Ok(StepOutput::TakeList(Takes::get_takes(
+                svc,
+                ctx,
+                item.clone(),
+            )))
         }
         TakeOp::GetTake(p, item, take) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptTake(
-                svc.get_take(ctx, item.clone(), take.clone()).await,
-            ))
+            Ok(StepOutput::OptTake(Takes::get_take(
+                svc,
+                ctx,
+                item.clone(),
+                take.clone(),
+            )))
         }
         TakeOp::GetActiveTake(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptTake(
-                svc.get_active_take(ctx, item.clone()).await,
-            ))
+            Ok(StepOutput::OptTake(Takes::get_active_take(
+                svc,
+                ctx,
+                item.clone(),
+            )))
         }
         TakeOp::TakeCount(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(svc.take_count(ctx, item.clone()).await))
+            Ok(StepOutput::U32(Takes::take_count(svc, ctx, item.clone())))
         }
         TakeOp::AddTake(p, item) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptStr(svc.add_take(ctx, item.clone()).await))
+            Ok(StepOutput::OptStr(Takes::add_take(svc, ctx, item.clone())))
         }
         TakeOp::DeleteTake(p, item, take) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.delete_take(ctx, item.clone(), take.clone()).await;
+            Takes::delete_take(svc, ctx, item.clone(), take.clone())
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetActiveTake(p, item, take) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_active_take(ctx, item.clone(), take.clone()).await;
+            Takes::set_active_take(svc, ctx, item.clone(), take.clone())
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetName(p, item, take, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_name(ctx, item.clone(), take.clone(), name.clone())
-                .await;
+            Takes::set_name(svc, ctx, item.clone(), take.clone(), name.clone())
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetColor(p, item, take, color) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_color(ctx, item.clone(), take.clone(), *color).await;
+            Takes::set_color(svc, ctx, item.clone(), take.clone(), *color)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetVolume(p, item, take, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_volume(ctx, item.clone(), take.clone(), *v).await;
+            Takes::set_volume(svc, ctx, item.clone(), take.clone(), *v)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetPlayRate(p, item, take, rate) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_play_rate(ctx, item.clone(), take.clone(), *rate)
-                .await;
+            Takes::set_play_rate(svc, ctx, item.clone(), take.clone(), *rate)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetPitch(p, item, take, semi) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_pitch(ctx, item.clone(), take.clone(), *semi).await;
+            Takes::set_pitch(svc, ctx, item.clone(), take.clone(), *semi)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetPreservePitch(p, item, take, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_preserve_pitch(ctx, item.clone(), take.clone(), *v)
-                .await;
+            Takes::set_preserve_pitch(svc, ctx, item.clone(), take.clone(), *v)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetStartOffset(p, item, take, offset) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_start_offset(ctx, item.clone(), take.clone(), *offset)
-                .await;
+            Takes::set_start_offset(svc, ctx, item.clone(), take.clone(), *offset)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::SetSourceFile(p, item, take, path) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_source_file(ctx, item.clone(), take.clone(), path.clone())
-                .await;
+            Takes::set_source_file(svc, ctx, item.clone(), take.clone(), path.clone())
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TakeOp::GetSourceType(p, item, take) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::SourceType(
-                svc.get_source_type(ctx, item.clone(), take.clone()).await,
-            ))
+            Ok(StepOutput::SourceType(Takes::get_source_type(
+                svc,
+                ctx,
+                item.clone(),
+                take.clone(),
+            )))
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::DawResult;
 
-use super::{ExtState, FxChains, FxParams, Items, Routing, Takes};
+use super::{ExtState, FxChains, FxParams, Items, Routing};
 
 /// Per-project sync handle. Owns sub-domain accessors.
 ///
@@ -20,9 +20,6 @@ pub trait Project {
     type Items<'a>: Items + 'a
     where
         Self: 'a;
-    type Takes<'a>: Takes + 'a
-    where
-        Self: 'a;
     type Routing<'a>: Routing + 'a
     where
         Self: 'a;
@@ -38,6 +35,5 @@ pub trait Project {
     fn fx_chains(&self) -> Self::FxChains<'_>;
     fn fx_params(&self) -> Self::FxParams<'_>;
     fn items(&self) -> Self::Items<'_>;
-    fn takes(&self) -> Self::Takes<'_>;
     fn routing(&self) -> Self::Routing<'_>;
 }

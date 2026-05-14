@@ -9,10 +9,10 @@ use daw_proto::{
     ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
     MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
-    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
-    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    RoutingServiceDispatcher, ScreensetServiceDispatcher, ToolbarServiceDispatcher,
+    WindowGeometryServiceDispatcher,
 };
-use daw_proto::{marker, region, tempo_map, track, transport};
+use daw_proto::{marker, region, take, tempo_map, track, transport};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
@@ -22,8 +22,7 @@ use daw_proto::{
     live_midi_service_service_descriptor, midi_service_service_descriptor,
     plugin_loader_service_service_descriptor, project_service_service_descriptor,
     routing_service_service_descriptor, screenset_service_service_descriptor,
-    take_service_service_descriptor, toolbar_service_service_descriptor,
-    window_geometry_service_service_descriptor,
+    toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -59,7 +58,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let live_midi = crate::ReaperLiveMidi::new();
     let ext_state = crate::ReaperExtState::new();
     let item = crate::ReaperItem::new();
-    let take = crate::ReaperTake::new();
+    // Takes ported to architect::rpc — mounted via take::serve(Reaper)
     let health = crate::ReaperHealth::new();
     let action_registry = crate::ReaperActionRegistry::new();
     let input = crate::ReaperInput::new();
@@ -121,10 +120,7 @@ pub fn create_daw_handler() -> RoutedHandler {
             item_service_service_descriptor(),
             ItemServiceDispatcher::new(item),
         )
-        .with(
-            take_service_service_descriptor(),
-            TakeServiceDispatcher::new(take),
-        )
+        .with(take::descriptor(), take::serve(crate::Reaper))
         .with(
             action_registry_service_service_descriptor(),
             ActionRegistryServiceDispatcher::new(action_registry),

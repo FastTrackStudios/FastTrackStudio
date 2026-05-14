@@ -19,7 +19,7 @@ pub mod items;
 pub mod project;
 // regions ported to architect::rpc — see `crate::region`.
 pub mod routing;
-pub mod takes;
+// takes ported to architect::rpc — see `crate::take`.
 // tempo_map ported to architect::rpc — see `crate::tempo_map`.
 // tracks ported to architect::rpc — `impl Tracks for Reaper` lives
 // at `crate::track`. The borrowed `ReaperTracks<'a>` view retired
@@ -33,7 +33,6 @@ pub use fx_params::ReaperFxParams;
 pub use items::ReaperItems;
 pub use project::ReaperProject;
 pub use routing::ReaperRouting;
-pub use takes::ReaperTakes;
 
 // =============================================================================
 // Internal helpers shared across sync sub-handles

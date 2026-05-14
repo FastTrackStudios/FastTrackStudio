@@ -14,8 +14,7 @@ pub use error::{ItemError, TakeError};
 pub use event::{ItemEvent, TakeEvent};
 pub use item::{FadeShape, Item, ItemRef};
 pub use service::{
-    ItemService, ItemServiceClient, ItemServiceDispatcher, TakeService, TakeServiceClient,
-    TakeServiceDispatcher, item_service_service_descriptor, take_service_service_descriptor,
+    ItemService, ItemServiceClient, ItemServiceDispatcher, item_service_service_descriptor,
 };
 pub use take::{
     AddTakeMarkerAtPositionRequest, SourceType, Take, TakeMarker, TakeMarkerCreate,

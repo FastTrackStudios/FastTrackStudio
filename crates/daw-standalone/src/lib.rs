@@ -34,6 +34,7 @@ mod resource;
 mod routing;
 mod shared_state;
 pub mod sync;
+mod take;
 mod tempo_map;
 mod track;
 mod transport;

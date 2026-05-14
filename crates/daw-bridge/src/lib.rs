@@ -36,7 +36,7 @@ use daw::service::{
     HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
     LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
     ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher, ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -168,7 +168,7 @@ async fn register_daw_dispatcher() {
     let live_midi = daw::reaper::ReaperLiveMidi::new();
     let ext_state = daw::reaper::ReaperExtState::new();
     let item = daw::reaper::ReaperItem::new();
-    let take = daw::reaper::ReaperTake::new();
+    // Takes ported — mount via daw::service::take::serve(Reaper).
     let health = daw::reaper::ReaperHealth::new();
     let action_registry = daw::reaper::ReaperActionRegistry::new();
     let input = daw::reaper::ReaperInput::new();
@@ -190,8 +190,8 @@ async fn register_daw_dispatcher() {
         item_service_service_descriptor, live_midi_service_service_descriptor,
         midi_service_service_descriptor, plugin_loader_service_service_descriptor,
         project_service_service_descriptor, routing_service_service_descriptor,
-        screenset_service_service_descriptor, take_service_service_descriptor,
-        toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
+        screenset_service_service_descriptor, toolbar_service_service_descriptor,
+        window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -260,8 +260,8 @@ async fn register_daw_dispatcher() {
             ItemServiceDispatcher::new(item),
         )
         .with(
-            take_service_service_descriptor(),
-            TakeServiceDispatcher::new(take),
+            daw::service::take::descriptor(),
+            daw::service::take::serve(daw::reaper::Reaper),
         )
         .with(
             action_registry_service_service_descriptor(),

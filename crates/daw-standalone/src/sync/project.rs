@@ -8,7 +8,8 @@ use super::fx_chains::StandaloneFxChains;
 use super::fx_params::StandaloneFxParams;
 use super::items::StandaloneItems;
 use super::routing::StandaloneRouting;
-use super::takes::StandaloneTakes;
+// `Takes` ported to architect::rpc — `impl Takes for Standalone`
+// lives at `crate::take`. Borrowed view retired with the port.
 // `Tracks` ported to architect::rpc — `impl Tracks for Standalone`
 // lives at `crate::track`. The borrowed `StandaloneTracks<'a>` view
 // retired with the port.
@@ -44,10 +45,6 @@ impl<'a> Project for StandaloneProject<'a> {
         = StandaloneItems<'b>
     where
         Self: 'b;
-    type Takes<'b>
-        = StandaloneTakes<'b>
-    where
-        Self: 'b;
     type Routing<'b>
         = StandaloneRouting<'b>
     where
@@ -75,10 +72,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn items(&self) -> Self::Items<'_> {
         StandaloneItems::new(self.daw, self.guid.clone())
-    }
-
-    fn takes(&self) -> Self::Takes<'_> {
-        StandaloneTakes::new(self.daw, self.guid.clone())
     }
 
     fn routing(&self) -> Self::Routing<'_> {

@@ -7,7 +7,6 @@ use crate::project::project_to_info;
 
 use super::{
     ReaperExtState, ReaperFxChains, ReaperFxParams, ReaperItems, ReaperMainThread, ReaperRouting,
-    ReaperTakes,
 };
 
 /// A handle scoped to a single REAPER project tab.
@@ -39,10 +38,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
         = ReaperItems<'b>
     where
         Self: 'b;
-    type Takes<'b>
-        = ReaperTakes<'b>
-    where
-        Self: 'b;
     type Routing<'b>
         = ReaperRouting<'b>
     where
@@ -71,10 +66,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
 
     fn items(&self) -> Self::Items<'_> {
         ReaperItems::new(self.mt, &self.guid)
-    }
-
-    fn takes(&self) -> Self::Takes<'_> {
-        ReaperTakes::new(self.mt, &self.guid)
     }
 
     fn routing(&self) -> Self::Routing<'_> {

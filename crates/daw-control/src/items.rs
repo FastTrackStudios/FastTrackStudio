@@ -274,18 +274,8 @@ impl ProjectItems {
         Ok(rx)
     }
 
-    /// Subscribe to take events (added, removed, activated, etc.)
-    ///
-    /// Returns a receiver that streams granular take events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe_takes(&self) -> Result<Rx<TakeEvent>> {
-        let (tx, rx) = vox::channel::<TakeEvent>();
-        self.clients
-            .take
-            .subscribe_takes(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
+    // Take subscriptions retired alongside the architect::rpc port —
+    // sibling-trait territory if streaming surfaces a real consumer.
 }
 
 impl std::fmt::Debug for ProjectItems {
@@ -741,7 +731,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 name.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -764,7 +754,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 semitones,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -778,7 +768,7 @@ impl TakeHandle {
         self.clients
             .take
             .set_play_rate(self.context(), self.item_ref(), self.take_ref.clone(), rate)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -797,7 +787,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 volume,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -810,7 +800,7 @@ impl TakeHandle {
         self.clients
             .take
             .set_active_take(self.context(), self.item_ref(), self.take_ref.clone())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -819,7 +809,7 @@ impl TakeHandle {
         self.clients
             .take
             .delete_take(self.context(), self.item_ref(), self.take_ref.clone())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -833,7 +823,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 path.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -847,7 +837,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 color,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -861,7 +851,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 preserve,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -939,7 +929,7 @@ impl TakeHandle {
                     color,
                 },
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -990,7 +980,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 index,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -1044,7 +1034,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 command_id,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 

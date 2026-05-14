@@ -134,7 +134,7 @@ pub(crate) use daw_proto::ProjectServiceClient;
 pub(crate) use daw_proto::RegionsClient;
 pub(crate) use daw_proto::RoutingServiceClient;
 pub(crate) use daw_proto::ScreensetServiceClient;
-pub(crate) use daw_proto::TakeServiceClient;
+pub(crate) use daw_proto::TakesClient;
 pub(crate) use daw_proto::TempoMapClient;
 pub(crate) use daw_proto::TracksClient;
 pub(crate) use daw_proto::TransportClient;
@@ -212,7 +212,7 @@ pub struct DawClients {
     pub(crate) fx: FxServiceClient,
     pub(crate) position_conversion: PositionConversionServiceClient,
     pub(crate) item: ItemServiceClient,
-    pub(crate) take: TakeServiceClient,
+    pub(crate) take: TakesClient,
     pub(crate) routing: RoutingServiceClient,
     pub(crate) screenset: ScreensetServiceClient,
     pub(crate) dawfile: DawFileServiceClient,
@@ -248,7 +248,7 @@ impl DawClients {
             fx: FxServiceClient::new(handle.clone()),
             position_conversion: PositionConversionServiceClient::new(handle.clone()),
             item: ItemServiceClient::new(handle.clone()),
-            take: TakeServiceClient::new(handle.clone()),
+            take: TakesClient::new(handle.clone()),
             routing: RoutingServiceClient::new(handle.clone()),
             screenset: ScreensetServiceClient::new(handle.clone()),
             dawfile: DawFileServiceClient::new(handle.clone()),

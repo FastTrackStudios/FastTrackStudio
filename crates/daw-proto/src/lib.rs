@@ -35,6 +35,7 @@ pub mod resource;
 pub mod routing;
 pub mod screenset;
 pub mod sync;
+pub mod take;
 pub mod tempo_map;
 pub mod toolbar;
 pub mod track;
@@ -83,6 +84,9 @@ pub use screenset::*;
 // Explicit re-exports (see marker / track / region for rationale —
 // architect-emitted `serve` / `descriptor` / `Dispatcher` aliases
 // can't be glob-imported at the crate root.)
+#[cfg(feature = "vox")]
+pub use take::TakesClient;
+pub use take::{Takes, TakesRpc};
 #[cfg(feature = "vox")]
 pub use tempo_map::TempoMapClient;
 pub use tempo_map::{TempoMap, TempoMapError, TempoMapEvent, TempoMapRpc, TempoPoint};

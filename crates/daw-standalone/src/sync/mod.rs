@@ -22,7 +22,7 @@ mod items;
 mod project;
 // regions ported to architect::rpc — see `crate::region`.
 mod routing;
-mod takes;
+// takes ported to architect::rpc — see `crate::take`.
 // tempo_map ported to architect::rpc — see `crate::tempo_map`.
 // tracks ported to architect::rpc — `impl Tracks for Standalone`
 // lives at `crate::track`.
@@ -38,4 +38,3 @@ pub use fx_params::StandaloneFxParams;
 pub use items::StandaloneItems;
 pub use project::StandaloneProject;
 pub use routing::StandaloneRouting;
-pub use takes::StandaloneTakes;

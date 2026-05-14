@@ -36,7 +36,7 @@ mod plugin_loader;
 mod project;
 // `Regions` ported to architect::rpc — see `crate::region`.
 mod routing;
-mod takes;
+// `Takes` ported to architect::rpc — see `crate::take::service`.
 // `TempoMap` ported to architect::rpc — see `crate::tempo_map`.
 mod toolbar;
 // `Tracks` ported to architect::rpc — see `crate::track::service`.
@@ -60,6 +60,9 @@ pub use crate::marker::{MarkersClient, serve as serve_markers};
 pub use crate::region::{Regions, RegionsRpc};
 #[cfg(feature = "vox")]
 pub use crate::region::{RegionsClient, serve as serve_regions};
+pub use crate::take::{Takes, TakesRpc};
+#[cfg(feature = "vox")]
+pub use crate::take::{TakesClient, serve as serve_takes};
 pub use crate::tempo_map::{TempoMap, TempoMapRpc};
 #[cfg(feature = "vox")]
 pub use crate::tempo_map::{TempoMapClient, serve as serve_tempo_map};
@@ -73,6 +76,5 @@ pub use crate::transport::{TransportClient, serve as serve_transport};
 pub use plugin_loader::PluginLoader;
 pub use project::Project;
 pub use routing::Routing;
-pub use takes::Takes;
 pub use toolbar::Toolbar;
 pub use window_geometry::WindowGeometry;

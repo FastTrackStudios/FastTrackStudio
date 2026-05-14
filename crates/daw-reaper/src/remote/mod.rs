@@ -26,7 +26,7 @@ pub mod items;
 pub mod project;
 // regions ported to architect::rpc — see `crate::region`.
 pub mod routing;
-pub mod takes;
+// takes ported to architect::rpc — see `crate::take`.
 // tempo_map ported to architect::rpc — see `crate::tempo_map`.
 // tracks ported to architect::rpc — `marker::serve(Reaper)` style
 // mounting handles threading via `HasDispatcher`.
@@ -39,7 +39,6 @@ pub use fx_params::RemoteFxParams;
 pub use items::RemoteItems;
 pub use project::RemoteProject;
 pub use routing::RemoteRouting;
-pub use takes::RemoteTakes;
 
 use daw_proto::{DawError, DawResult};
 
