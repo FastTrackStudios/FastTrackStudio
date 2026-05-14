@@ -151,21 +151,94 @@ When the user clicks `[[Acme Corporation]]`, the client navigates
 to that page. The Acme page sees backlinks from every project
 mentioning it — automatically.
 
-### Two vault tiers per server
+### Three vault tiers per server
 
-Server holds two Knowledge vaults:
+Server holds three Knowledge vaults:
 
-- **`vault://org`** — global to the server. Members, schemas,
-  glossary, workflow templates, org-wide policies. Every member
-  reads; admins write.
+- **`vault://org`** — global org reference data. Members,
+  schemas, glossary, workflow templates, people directory,
+  org-wide policies. Every member reads; admins write.
+- **`vault://comms`** — centralized communication. Chat threads,
+  email threads, voice transcripts. Each thread is its **own
+  sub-doc** (`comms/thread/<uuid>`) — busy orgs have 50k+
+  threads, so per-thread docs not one mega-doc. The vault root
+  page is an index (thread metadata, participants, last
+  message-at). ACL lives on each thread page; private DMs are
+  participant-only, public channels are org-readable.
 - **`vault://project/<uuid>`** — one per project. Project members
-  read+write per ACL. Pages here can reference org-vault pages
-  freely.
+  read+write per ACL. Pages here can wiki-link freely across all
+  three vaults — to people in `org`, to messages in `comms`, to
+  pages in other projects.
 
-A "person" lives in the org vault. A "project task" lives in the
-project vault. A wiki-link from a project page to a person page
-crosses vault boundaries (resolved at query time, both vaults are
-on the same server).
+A "person" lives in the org vault. An email thread lives in the
+comms vault. A "project task" lives in the project vault. A
+wiki-link from a project page to an email message
+(`[[Email: Acme renewal#^msg-abc]]`) crosses vault boundaries —
+resolved at query time, all three vaults on the same server.
+
+### Why centralized comms (not per-project)
+
+Communication is **inherently cross-cutting**:
+
+- An email arrives in the inbox before anyone knows which project
+  it belongs to (or whether it belongs to a project at all).
+- One thread often references multiple projects, or branches into
+  a new one over time.
+- Personal emails / DMs aren't "about" any project.
+- Mail clients (Nextcloud Mail, Apple Mail, Gmail) and chat
+  platforms (Slack, Discord) already model storage this way: one
+  warehouse per-user/per-org, tagged + searched, never moved into
+  "project folders."
+
+Projects backlink to specific messages when relevant. The thread
+stays in `vault://comms`. Backlinks emerge automatically:
+opening an email-thread page shows "Referenced by these 3
+projects."
+
+### Bridges write to vault://comms
+
+- **IMAP bridge** → `kind: email_thread` pages, one block per
+  message. Pulls from Nextcloud Mail's IMAP backend (or any
+  IMAP).
+- **Slack / Discord / etc. bridges** → `kind: chat_thread`
+  pages, one block per message. Webhook-driven.
+- **Voice memo / transcript ingestion** (later) → `kind:
+  transcript` pages.
+
+Multiple sources, one target vault.
+
+### Agents synthesize across vaults
+
+```
+Agent runtime
+   reads:  vault://comms threads
+           vault://org for participant context
+           vault://project/<id> for current state
+   thinks: "this Acme email mentions the renewal deadline"
+   writes: kind: decision block on the project page, with
+           derived_from: [[Email: Acme renewal#^msg-abc]]
+           (cross-vault block ref, resolves via wiki-link index)
+```
+
+Synthesis lives in the project vault. Raw comms stay where they
+are. Both linked. **Audit trail + curated surface side by
+side.**
+
+### Federation gives unified inbox
+
+When a client federates across N servers:
+
+```
+Client connects to:
+├── personal.cody.dev         vault://comms = personal email
+├── studio.fasttrackaudio.com vault://comms = studio Slack + email
+└── acme-corp.com             vault://comms = work email (employee scope)
+```
+
+A unified-inbox view queries `kind: email_thread` + `kind:
+chat_thread` across all three servers' comms vaults. One screen,
+three sovereign backends. This is where federation pays off
+operationally.
 
 ### Custom views
 
@@ -325,9 +398,11 @@ single org vault.
 
 | Doc id | Contents |
 |---|---|
-| `vault/org` | Org-wide Knowledge vault: people, schemas, workflows, glossary |
-| `project/<uuid>` | One project — its tasks, milestones, files, attachments, ACL |
-| `user/<uuid>` | Per-user private state (inbox, saved views) — *Phase 4* |
+| `vault/org` | Org-wide reference: people, schemas, workflows, glossary |
+| `vault/comms` | Comms vault index: thread metadata, participants, last-message-at. The actual threads are sub-docs (see next row). |
+| `comms/thread/<uuid>` | One chat or email thread — one block per message. ACL on the thread page determines who can read. |
+| `project/<uuid>` | One project — its tasks, milestones, decisions, attachments, ACL |
+| `user/<uuid>` | Per-user private state (inbox state, saved views) — *Phase 4* |
 
 ### WorkspaceSync trait, revised
 
@@ -827,20 +902,29 @@ filesystem-backed and architect-auth-managed.
 
 ## 14.9 Communication as Knowledge (chat, email, decisions)
 
-High-volume streamy data (chat threads, email) fits the
-Knowledge model **if you set the granularity right**:
+Communication fits the Knowledge model **if granularity and
+storage location are right**:
 
-- **A conversation is one Page.** Frontmatter declares the kind:
-  `kind: chat_thread, source: slack` or `kind: email_thread`.
-- **Each message is one Block** on that page. Frontmatter
+- **One thread = one Page = one CrdtDoc.** Threads live as
+  `comms/thread/<uuid>` sub-docs under the centralized
+  `vault://comms` (see §4). Per-thread docs scale: busy orgs
+  have 50k+ threads over time, so one mega-doc would be wrong;
+  per-thread docs sync only what users are looking at.
+- **Each message is one Block** on the thread page. Frontmatter
   per-block: `sent_at`, `from: [[Person]]`, optional
   `in_reply_to: <block-id>`.
-- **Block refs are message refs.** A task page can carry a
-  `derived_from: [[#^msg-7b2c]]` to a specific message.
+- **Block refs are message refs.** A project page carries
+  `derived_from: [[Email: Acme renewal#^msg-abc]]` to a specific
+  message in the centralized comms vault.
 
-Volume is fine: Loro handles 10k+ blocks per doc; an extremely
-busy channel gets archived to a follow-up page. The whole
-conversation renders as one timeline.
+Volume is fine: Loro handles 10k+ blocks per thread; if a chat
+channel exceeds that, archive into a follow-up thread. The
+whole conversation renders as one timeline page.
+
+**Centralized, not per-project.** §4 covers why: comms arrives
+before project assignment is known, threads cross projects, and
+mail/chat platforms already store this way. Projects link in via
+backlinks; the thread stays in `vault://comms`.
 
 ### Synthesis via agents (the bridge)
 
