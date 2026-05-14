@@ -36,6 +36,8 @@ project-proto = { path = "features/project/project-proto" }
 project-crdt = { path = "features/project/project-crdt" }
 project-db = { path = "features/project/project-db" }
 project-ui = { path = "features/project/project-ui" }
+knowledge-proto = { path = "features/knowledge/knowledge-proto" }
+knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault
