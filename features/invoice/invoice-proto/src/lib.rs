@@ -163,6 +163,7 @@ pub struct Invoice {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FinanceTags"))]
     pub tags: Vec<String>,
 
@@ -290,6 +291,7 @@ pub struct Client {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FinanceTags"))]
     pub tags: Vec<String>,
 
@@ -399,6 +401,7 @@ pub struct RecurringInvoice {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FinanceTags"))]
     pub tags: Vec<String>,
 
