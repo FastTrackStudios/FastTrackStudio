@@ -9,16 +9,20 @@
 
 use std::sync::Arc;
 
+use architect::vox;
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::response::IntoResponse;
 use axum::routing::get;
+use crdt::loro::{self, ExportMode};
 use crdt::{CrdtDoc, Persistence};
 use project_crdt::{CycleRepoLoro, MilestoneRepoLoro, ProjectRepoLoro, TaskRepoLoro};
 use project_proto::{
-    CycleRepoDispatcher, MilestoneRepoDispatcher, ProjectRepoDispatcher, TaskRepoDispatcher,
+    CycleRepoDispatcher, MilestoneRepoDispatcher, ProjectRepoDispatcher, SyncError,
+    TaskRepoDispatcher, UpdateBytes, WorkspaceSync, WorkspaceSyncDispatcher,
 };
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 /// Shared workspace doc id — every entity in the vertical slice
@@ -36,6 +40,7 @@ pub struct AppState {
     pub task_repo: Arc<TaskRepoLoro>,
     pub cycle_repo: Arc<CycleRepoLoro>,
     pub milestone_repo: Arc<MilestoneRepoLoro>,
+    pub sync: WorkspaceSyncImpl,
 }
 
 impl AppState {
@@ -49,6 +54,7 @@ impl AppState {
         let task_repo = Arc::new(TaskRepoLoro::new(&workspace_doc));
         let cycle_repo = Arc::new(CycleRepoLoro::new(&workspace_doc));
         let milestone_repo = Arc::new(MilestoneRepoLoro::new(&workspace_doc));
+        let sync = WorkspaceSyncImpl::new(workspace_doc.clone());
         Ok(Self {
             persistence,
             workspace_doc,
@@ -56,7 +62,94 @@ impl AppState {
             task_repo,
             cycle_repo,
             milestone_repo,
+            sync,
         })
+    }
+}
+
+/// Server-side `WorkspaceSync` implementation. Owns a broadcast
+/// channel of raw Loro update bytes; every committed local change
+/// on `workspace_doc` (via `subscribe_local_update`) is fanned out
+/// to every active `subscribe()` caller.
+///
+/// Channel capacity is 256 — a slow subscriber that lags out gets
+/// `RecvError::Lagged` and we recover by sending a fresh full
+/// snapshot. Snapshot is much bigger than a delta but
+/// idempotent-merge-safe; importing twice is a no-op.
+#[derive(Clone)]
+pub struct WorkspaceSyncImpl {
+    doc: Arc<CrdtDoc>,
+    update_tx: broadcast::Sender<Vec<u8>>,
+    // The Subscription handle from `subscribe_local_update` must
+    // stay alive for the callback to fire. Wrapped in Arc so
+    // `WorkspaceSyncImpl` stays `Clone`.
+    _subscription: Arc<loro::Subscription>,
+}
+
+impl WorkspaceSyncImpl {
+    pub fn new(doc: Arc<CrdtDoc>) -> Self {
+        let (update_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let tx_for_cb = update_tx.clone();
+        let subscription = doc.loro().subscribe_local_update(Box::new(move |bytes| {
+            // `send` errors when there are no active subscribers —
+            // that's fine; we'll still get fresh receivers later
+            // and they'll catch up via the snapshot path.
+            let _ = tx_for_cb.send(bytes.to_vec());
+            true
+        }));
+        Self {
+            doc,
+            update_tx,
+            _subscription: Arc::new(subscription),
+        }
+    }
+}
+
+impl WorkspaceSync for WorkspaceSyncImpl {
+    async fn apply_update(&self, update: UpdateBytes) -> Result<(), SyncError> {
+        self.doc
+            .apply_remote(&update.0)
+            .map_err(|e| SyncError::InvalidUpdate(e.to_string()))
+    }
+
+    async fn subscribe(&self, output: vox::Tx<UpdateBytes>) {
+        // Catch the new subscriber up with one full snapshot, then
+        // bridge live updates from the broadcast channel until the
+        // client drops its receiver (`output.send` returns Err).
+        let snapshot = match self.doc.loro().export(ExportMode::Snapshot) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(?e, "snapshot export failed");
+                let _ = output.close(Default::default()).await;
+                return;
+            }
+        };
+        if output.send(UpdateBytes(snapshot)).await.is_err() {
+            return;
+        }
+
+        let mut rx = self.update_tx.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(bytes) => {
+                    if output.send(UpdateBytes(bytes)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(skipped = n, "subscriber lagged; resending snapshot");
+                    let snap = self
+                        .doc
+                        .loro()
+                        .export(ExportMode::Snapshot)
+                        .unwrap_or_default();
+                    if output.send(UpdateBytes(snap)).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -98,6 +191,7 @@ async fn vox_ws_handler(
         let task_repo = (*state.task_repo).clone();
         let cycle_repo = (*state.cycle_repo).clone();
         let milestone_repo = (*state.milestone_repo).clone();
+        let sync = state.sync.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "ProjectRepo" => {
@@ -114,6 +208,10 @@ async fn vox_ws_handler(
                 }
                 "MilestoneRepo" => {
                     connection.handle_with(MilestoneRepoDispatcher::new(milestone_repo.clone()));
+                    Ok(())
+                }
+                "WorkspaceSync" => {
+                    connection.handle_with(WorkspaceSyncDispatcher::new(sync.clone()));
                     Ok(())
                 }
                 other => {

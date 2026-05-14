@@ -31,6 +31,7 @@ task-db = { path = "../db" }
 project-proto = { workspace = true }
 project-crdt = { workspace = true }
 architect = { workspace = true, features = ["server-axum"] }
+architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.27"

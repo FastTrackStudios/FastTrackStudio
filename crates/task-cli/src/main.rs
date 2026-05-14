@@ -21,7 +21,7 @@ struct Cli {
     #[arg(long, env = "TASK_SERVER", global = true)]
     server: Option<String>,
 
-    /// Better Auth session token for remote vox.
+    /// Architect Auth session token for remote vox.
     #[arg(long, env = "TASK_SESSION_TOKEN", global = true)]
     session_token: Option<String>,
 

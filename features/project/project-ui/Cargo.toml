@@ -27,9 +27,14 @@ fts-ui.workspace = true
 
 # Vox client surface — this crate owns the wasm fetching glue for the
 # project feature so task-ui only routes; it doesn't construct
-# clients.
+# clients. `vox` (high-level) re-exports `Tx`/`Rx`/`channel`; the
+# `runtime` baseline keeps the wasm side small.
+vox = { workspace = true }
 vox-core = { workspace = true }
 vox-websocket = { workspace = true }
+crdt = { workspace = true }
+project-crdt = { workspace = true }
+tracing = { workspace = true }
 
 # Web-only — clipboard writes from the TaskGitPanel. Gated with
 # `#[cfg(target_arch = "wasm32")]` at the call sites.

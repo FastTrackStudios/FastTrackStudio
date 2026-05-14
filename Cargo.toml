@@ -1,5 +1,5 @@
 [workspace]
-# Vertical-slice reset: only tasks + projects + auth remain.
+# Vertical-slice reset: tasks + projects remain; auth is provided by architect-auth.
 members = [
     "apps/*",
     "crates/*",
@@ -9,7 +9,6 @@ members = [
 ]
 exclude = [
     "features/project/spec",    "features/project/tests",
-    "features/auth/spec",       "features/auth/tests",
 ]
 resolver = "2"
 
@@ -37,8 +36,7 @@ project-proto = { path = "features/project/project-proto" }
 project-crdt = { path = "features/project/project-crdt" }
 project-db = { path = "features/project/project-db" }
 project-ui = { path = "features/project/project-ui" }
-auth = { path = "features/auth/auth" }
-auth-db = { path = "features/auth/auth-db" }
+architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault
 # directories. Server-only dep; never reaches wasm.
@@ -286,24 +284,6 @@ version = "0.2.0"
 
 [workspace.dependencies.base64]
 version = "0.22"
-
-[workspace.dependencies.better-auth]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
-default-features = false
-
-[workspace.dependencies.better-auth-core]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
-
-[workspace.dependencies.better-auth-api]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
-default-features = false
-
-[workspace.dependencies.better-auth-derive]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
 
 [workspace.dependencies.cookie]
 version = "0.18"
