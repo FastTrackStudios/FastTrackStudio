@@ -105,13 +105,18 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
         });
     });
 
+    let version_label = format!("v{}", version.read());
     rsx! {
-        div { class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
+        div {
+            id: "projects-route",
+            class: "mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10",
             HStack { class: "items-center gap-3",
                 Heading { level: HeadingLevel::H1, "Projects" }
-                StatusBadge {
-                    variant: if last_error.read().is_some() { StatusBadgeVariant::Danger } else { StatusBadgeVariant::Success },
-                    label: format!("v{}", version.read()),
+                span { "data-testid": "version-badge",
+                    StatusBadge {
+                        variant: if last_error.read().is_some() { StatusBadgeVariant::Danger } else { StatusBadgeVariant::Success },
+                        label: version_label,
+                    }
                 }
             }
             if let Some(err) = last_error.read().as_ref() {
@@ -180,10 +185,16 @@ fn ProjectBlock(
 fn TaskRow(task: Task, on_toggle_done: Callback<(Uuid, bool)>) -> Element {
     let task_id = task.id;
     let current_done = task.done;
+    let row_testid = format!("task-row-{task_id}");
+    let checkbox_testid = format!("task-checkbox-{task_id}");
     rsx! {
-        li { class: "flex items-center gap-3 text-sm",
+        li {
+            class: "flex items-center gap-3 text-sm",
+            "data-testid": row_testid,
+            "data-task-done": if current_done { "true" } else { "false" },
             input {
                 r#type: "checkbox",
+                "data-testid": checkbox_testid,
                 checked: current_done,
                 onchange: move |_| on_toggle_done.call((task_id, !current_done)),
             }
