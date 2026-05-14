@@ -193,6 +193,7 @@ name = "architect"
 version = "0.1.0"
 dependencies = [
  "architect-derive",
+ "architect-rpc-derive",
  "async-trait",
  "axum",
  "chrono",
@@ -225,6 +226,15 @@ name = "architect-derive"
 version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "architect-rpc-derive"
+version = "0.1.0"
+dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8797,6 +8807,7 @@ dependencies = [
  "sea-orm",
  "sea-orm-migration",
  "serde",
+ "serde_json",
  "serde_yaml",
  "sha2",
  "task-db",

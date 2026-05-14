@@ -43,6 +43,12 @@ impl MemoryBasenameIndex {
         self.inner.write().unwrap().remove(basename);
     }
 
+    /// Drop every entry. The indexer (Phase 5b) calls this before a
+    /// full rebuild so removed person-pages don't keep ghost entries.
+    pub fn clear(&self) {
+        self.inner.write().unwrap().clear();
+    }
+
     pub fn len(&self) -> usize {
         self.inner.read().unwrap().len()
     }

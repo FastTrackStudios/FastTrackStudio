@@ -14,6 +14,7 @@
 pub mod acl;
 pub mod basename_index;
 pub mod capability;
+pub mod knowledge_index;
 pub mod share_link;
 
 use std::collections::{HashMap, VecDeque};
@@ -23,6 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::basename_index::MemoryBasenameIndex;
 use crate::capability::{CapabilityScope, ServerKeypair, default_keypair_path};
+use crate::knowledge_index::KnowledgeIndexer;
 use crate::share_link::{RevocationList, ShareServiceImpl};
 use project_proto::ShareServiceDispatcher;
 
@@ -281,6 +283,7 @@ pub struct AppState {
     pub block_repo: Arc<knowledge_crdt::BlockRepoLoro>,
     pub knowledge_tag_repo: Arc<knowledge_crdt::KnowledgeTagRepoLoro>,
     pub base_repo: Arc<knowledge_crdt::BaseRepoLoro>,
+    pub indexer: KnowledgeIndexer,
 }
 
 impl AppState {
@@ -359,6 +362,37 @@ impl AppState {
             Arc::new(knowledge_crdt::KnowledgeTagRepoLoro::new(&org_vault_doc));
         let base_repo = Arc::new(knowledge_crdt::BaseRepoLoro::new(&org_vault_doc));
 
+        // Knowledge indexer — rebuilds frontmatter / backlink /
+        // basename indexes on every org-vault commit. The
+        // subscribe_local_update callback fires inside Loro's
+        // mutation path; we don't .await there, so kick the rebuild
+        // off into a background task. Cheap rebuild for the
+        // vertical-slice scale.
+        let indexer = KnowledgeIndexer::new(
+            (*page_repo).clone(),
+            (*block_repo).clone(),
+            basename_index.clone(),
+        );
+        {
+            let indexer_for_cb = indexer.clone();
+            let sub = org_vault_doc
+                .loro()
+                .subscribe_local_update(Box::new(move |_bytes| {
+                    let idx = indexer_for_cb.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = idx.rebuild().await {
+                            tracing::warn!(?e, "knowledge indexer rebuild failed");
+                        }
+                    });
+                    true
+                }));
+            // Subscription handle lives as long as the doc, which
+            // lives as long as the registry, which lives as long as
+            // AppState. Leak deliberately — see the same pattern in
+            // OpenDoc.
+            std::mem::forget(sub);
+        }
+
         Ok(Self {
             registry,
             workspace_doc,
@@ -378,6 +412,7 @@ impl AppState {
             block_repo,
             knowledge_tag_repo,
             base_repo,
+            indexer,
         })
     }
 }
