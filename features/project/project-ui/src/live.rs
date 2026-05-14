@@ -86,7 +86,7 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
     // Mutation handler — commits to the LOCAL doc; the
     // subscribe_local_update callback in run_sync_loop picks up
     // the bytes and ships them to the server.
-    let on_set_status = use_callback(move |(task_id, new_status): (Uuid, String)| {
+    let on_toggle_done = use_callback(move |(task_id, done): (Uuid, bool)| {
         let doc = local_doc.read().clone();
         spawn(async move {
             let task_repo = TaskRepoLoro::new(&doc);
@@ -94,7 +94,7 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                 .update(
                     task_id,
                     TaskUpdate {
-                        status: Some(new_status),
+                        done: Some(done),
                         ..Default::default()
                     },
                 )
@@ -124,18 +124,16 @@ pub fn TasksByProjectLive(vox_url: String) -> Element {
                 Some(Err(err)) => rsx! { Text { variant: TextVariant::Muted, "Decode failed: {err}" } },
                 Some(Ok(snap)) => rsx! { TasksByProjectView {
                     snapshot: snap.clone(),
-                    on_set_status: on_set_status,
+                    on_toggle_done: on_toggle_done,
                 } },
             }
         }
     }
 }
 
-/// Render half — feed it a `Snapshot` and (optionally) a status
-/// callback per row. Without the callback, status badges are
-/// non-interactive.
+/// Render half — feed it a `Snapshot` and a done-toggle callback.
 #[component]
-pub fn TasksByProjectView(snapshot: Snapshot, on_set_status: Callback<(Uuid, String)>) -> Element {
+pub fn TasksByProjectView(snapshot: Snapshot, on_toggle_done: Callback<(Uuid, bool)>) -> Element {
     if snapshot.ordered_projects.is_empty() {
         return rsx! {
             Text { variant: TextVariant::Muted, "No projects with tasks (waiting on snapshot…)." }
@@ -149,7 +147,7 @@ pub fn TasksByProjectView(snapshot: Snapshot, on_set_status: Callback<(Uuid, Str
                     project_id: *project_id,
                     name: name.clone(),
                     tasks: snapshot.tasks_by_project.get(project_id).cloned().unwrap_or_default(),
-                    on_set_status: on_set_status,
+                    on_toggle_done,
                 }
             }
         }
@@ -161,7 +159,7 @@ fn ProjectBlock(
     project_id: Uuid,
     name: String,
     tasks: Vec<Task>,
-    on_set_status: Callback<(Uuid, String)>,
+    on_toggle_done: Callback<(Uuid, bool)>,
 ) -> Element {
     rsx! {
         section { class: "rounded-md border border-border bg-card p-4",
@@ -171,7 +169,7 @@ fn ProjectBlock(
             }
             ul { class: "flex flex-col gap-1.5",
                 for task in tasks.iter() {
-                    TaskRow { key: "{task.id}", task: task.clone(), on_set_status: on_set_status }
+                    TaskRow { key: "{task.id}", task: task.clone(), on_toggle_done }
                 }
             }
         }
@@ -179,37 +177,21 @@ fn ProjectBlock(
 }
 
 #[component]
-fn TaskRow(task: Task, on_set_status: Callback<(Uuid, String)>) -> Element {
+fn TaskRow(task: Task, on_toggle_done: Callback<(Uuid, bool)>) -> Element {
     let task_id = task.id;
-    let current_status = task.status.clone();
-    let next = next_status(&current_status).to_string();
-    let click_status = next.clone();
+    let current_done = task.done;
     rsx! {
         li { class: "flex items-center gap-3 text-sm",
-            button {
-                class: "rounded border border-border bg-background px-2 py-0.5 text-xs hover:bg-accent",
-                title: "Cycle status → {click_status}",
-                onclick: move |_| on_set_status.call((task_id, click_status.clone())),
-                "→"
+            input {
+                r#type: "checkbox",
+                checked: current_done,
+                onchange: move |_| on_toggle_done.call((task_id, !current_done)),
             }
-            StatusBadge {
-                variant: status_variant(&current_status),
-                label: current_status.clone(),
+            span {
+                class: if current_done { "text-muted-foreground line-through" } else { "text-foreground" },
+                "{task.title}"
             }
-            span { class: "text-foreground", "{task.title}" }
         }
-    }
-}
-
-fn next_status(current: &str) -> &'static str {
-    match current {
-        "todo" => "in-progress",
-        "in-progress" => "in-review",
-        "in-review" => "done",
-        "done" => "todo",
-        "blocked" => "todo",
-        "cancelled" => "todo",
-        _ => "todo",
     }
 }
 
@@ -337,15 +319,6 @@ async fn run_sync_loop(
                 return;
             }
         }
-    }
-}
-
-fn status_variant(status: &str) -> StatusBadgeVariant {
-    match status {
-        "done" => StatusBadgeVariant::Success,
-        "in-progress" | "in-review" => StatusBadgeVariant::Warning,
-        "blocked" | "cancelled" => StatusBadgeVariant::Danger,
-        _ => StatusBadgeVariant::Neutral,
     }
 }
 

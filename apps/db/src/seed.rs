@@ -68,9 +68,7 @@ async fn seed_all(cdoc: &CrdtDoc) -> eyre::Result<()> {
         task.project_id = *project_ids
             .choose(&mut rng)
             .expect("at least one project seeded");
-        // Subtask + cycle linkage stay None so the demo stays flat.
-        task.parent_id = None;
-        task.cycle_id = None;
+        // Faker generates a random `done` bool; let it be.
         task_repo.create(task).await?;
     }
     info!(

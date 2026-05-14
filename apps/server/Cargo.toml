@@ -34,4 +34,6 @@ architect = { workspace = true, features = ["server-axum"] }
 architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
-tokio-tungstenite = "0.27"
+# Native vox client for the end-to-end sync test in `tests/sync.rs`.
+vox = { workspace = true, features = ["transport-websocket"] }
+loro = "1.10"

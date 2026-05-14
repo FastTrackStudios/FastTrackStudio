@@ -17,10 +17,10 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use crdt::loro::{self, ExportMode};
 use crdt::{CrdtDoc, Persistence};
-use project_crdt::{CycleRepoLoro, MilestoneRepoLoro, ProjectRepoLoro, TaskRepoLoro};
+use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
 use project_proto::{
-    CycleRepoDispatcher, MilestoneRepoDispatcher, ProjectRepoDispatcher, SyncError,
-    TaskRepoDispatcher, UpdateBytes, WorkspaceSync, WorkspaceSyncDispatcher,
+    ProjectRepoDispatcher, SyncError, TaskRepoDispatcher, UpdateBytes, WorkspaceSync,
+    WorkspaceSyncDispatcher,
 };
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -38,8 +38,6 @@ pub struct AppState {
     pub workspace_doc: Arc<CrdtDoc>,
     pub project_repo: Arc<ProjectRepoLoro>,
     pub task_repo: Arc<TaskRepoLoro>,
-    pub cycle_repo: Arc<CycleRepoLoro>,
-    pub milestone_repo: Arc<MilestoneRepoLoro>,
     pub sync: WorkspaceSyncImpl,
 }
 
@@ -52,16 +50,12 @@ impl AppState {
         let workspace_doc = Arc::new(workspace_doc);
         let project_repo = Arc::new(ProjectRepoLoro::new(&workspace_doc));
         let task_repo = Arc::new(TaskRepoLoro::new(&workspace_doc));
-        let cycle_repo = Arc::new(CycleRepoLoro::new(&workspace_doc));
-        let milestone_repo = Arc::new(MilestoneRepoLoro::new(&workspace_doc));
         let sync = WorkspaceSyncImpl::new(workspace_doc.clone());
         Ok(Self {
             persistence,
             workspace_doc,
             project_repo,
             task_repo,
-            cycle_repo,
-            milestone_repo,
             sync,
         })
     }
@@ -107,9 +101,16 @@ impl WorkspaceSyncImpl {
 
 impl WorkspaceSync for WorkspaceSyncImpl {
     async fn apply_update(&self, update: UpdateBytes) -> Result<(), SyncError> {
+        // Loro's `subscribe_local_update` only fires for local
+        // mutations — imports (this `apply_remote` call) don't
+        // trigger it. So we broadcast the bytes manually after a
+        // successful import. Result: every other subscriber sees
+        // exactly the same chunk that this peer pushed.
         self.doc
             .apply_remote(&update.0)
-            .map_err(|e| SyncError::InvalidUpdate(e.to_string()))
+            .map_err(|e| SyncError::InvalidUpdate(e.to_string()))?;
+        let _ = self.update_tx.send(update.0);
+        Ok(())
     }
 
     async fn subscribe(&self, output: vox::Tx<UpdateBytes>) {
@@ -189,8 +190,6 @@ async fn vox_ws_handler(
     ws.on_upgrade(move |socket| async move {
         let project_repo = (*state.project_repo).clone();
         let task_repo = (*state.task_repo).clone();
-        let cycle_repo = (*state.cycle_repo).clone();
-        let milestone_repo = (*state.milestone_repo).clone();
         let sync = state.sync.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
@@ -200,14 +199,6 @@ async fn vox_ws_handler(
                 }
                 "TaskRepo" => {
                     connection.handle_with(TaskRepoDispatcher::new(task_repo.clone()));
-                    Ok(())
-                }
-                "CycleRepo" => {
-                    connection.handle_with(CycleRepoDispatcher::new(cycle_repo.clone()));
-                    Ok(())
-                }
-                "MilestoneRepo" => {
-                    connection.handle_with(MilestoneRepoDispatcher::new(milestone_repo.clone()));
                     Ok(())
                 }
                 "WorkspaceSync" => {

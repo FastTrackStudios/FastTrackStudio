@@ -6765,11 +6765,9 @@ name = "project-proto"
 version = "0.1.0"
 dependencies = [
  "architect",
- "chrono",
  "facet",
  "fake",
  "sea-orm",
- "serde",
  "thiserror 2.0.18",
  "uuid",
  "vox 0.3.1",
@@ -8670,16 +8668,17 @@ dependencies = [
  "crdt",
  "crdt-seaorm",
  "eyre",
+ "loro",
  "project-crdt",
  "project-proto",
  "sea-orm",
  "task-db",
  "tokio",
- "tokio-tungstenite 0.27.0",
  "tower-http",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vox 0.3.1",
 ]
 
 [[package]]
@@ -8914,18 +8913,6 @@ dependencies = [
  "log",
  "tokio",
  "tungstenite 0.26.2",
-]
-
-[[package]]
-name = "tokio-tungstenite"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "489a59b6730eda1b0171fcfda8b121f4bee2b35cba8645ca35c5f7ba3eb736c1"
-dependencies = [
- "futures-util",
- "log",
- "tokio",
- "tungstenite 0.27.0",
 ]
 
 [[package]]

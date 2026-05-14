@@ -52,14 +52,14 @@ struct Cli {
 enum Commands {
     /// List tasks grouped by project.
     List,
-    /// Update a task's status. Triggers a live push to every
+    /// Mark a task done (or undone). Triggers a live push to every
     /// subscribed peer through `WorkspaceSync`.
-    SetStatus {
+    SetDone {
         /// Task UUID (any unambiguous prefix accepted).
         task_id: String,
-        /// New status — e.g. todo / in-progress / in-review / done /
-        /// blocked / cancelled. Whatever the renderer recognizes.
-        status: String,
+        /// `true` (or absent) to mark done; `false` to clear.
+        #[arg(default_value_t = true)]
+        done: bool,
     },
     /// Probe the configured vox endpoint.
     Doctor,
@@ -131,12 +131,13 @@ async fn main() -> eyre::Result<()> {
                     println!("\n## {name}  ({} tasks)", tasks.len());
                     for task in tasks {
                         let short_id = &task.id.to_string()[..8];
-                        println!("  [{short_id}] [{}] {}", task.status, task.title);
+                        let mark = if task.done { "[x]" } else { "[ ]" };
+                        println!("  [{short_id}] {mark} {}", task.title);
                     }
                 }
             }
         }
-        Commands::SetStatus { task_id, status } => {
+        Commands::SetDone { task_id, done } => {
             let remote =
                 RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
             let tasks: TaskRepoClient = remote.connect().await?;
@@ -178,13 +179,14 @@ async fn main() -> eyre::Result<()> {
                 .update(
                     id,
                     TaskUpdate {
-                        status: Some(status.clone()),
+                        done: Some(done),
                         ..Default::default()
                     },
                 )
                 .await
                 .map_err(|e| eyre::eyre!("task update: {e}"))?;
-            println!("{} {} → {}", updated.id, updated.title, updated.status);
+            let mark = if updated.done { "done" } else { "open" };
+            println!("{} {} → {mark}", updated.id, updated.title);
         }
         Commands::Doctor => {
             let remote =
