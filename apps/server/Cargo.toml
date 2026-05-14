@@ -65,9 +65,3 @@ subtle = "2"
 thiserror = { workspace = true }
 url = { workspace = true }
 
-[dev-dependencies]
-# Integration tests spawn the server in-process and drive it with
-# raw WebSocket clients to verify the realtime byte-relay end-to-end.
-tokio-tungstenite = "0.27"
-architect.workspace = true
-chrono.workspace = true

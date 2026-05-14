@@ -33,10 +33,9 @@ impl RemoteVoxConfig {
         })
     }
 
-    /// Open a typed vox client. Held for the call-site; today no
-    /// concrete service client exists in the workspace, so this is
-    /// here as the connection seam for Phase D.
-    #[allow(dead_code)]
+    /// Open a typed vox client by establishing a session against the
+    /// configured endpoint. The concrete client type is inferred from
+    /// the call site (e.g. `let c: TaskRepoClient = remote.connect().await?`).
     pub(crate) async fn connect<C>(&self) -> eyre::Result<C>
     where
         C: vox::FromVoxSession,

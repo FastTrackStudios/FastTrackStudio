@@ -1,14 +1,14 @@
 //! `task` CLI — vertical-slice scaffold.
 //!
-//! Right now the CLI is intentionally tiny while the per-feature
-//! commands get rebuilt on top of vox-RPC against the new
-//! features/* trios. The `server` subcommand opens a vox session to
-//! verify connectivity; `task list` is a placeholder until the
-//! Project + Task vox services land.
+//! Talks to a `task-server` over vox WebSocket. `task list` calls the
+//! auto-generated `TaskRepoClient::list`; `task doctor` just prints
+//! the resolved endpoint URL.
 
 mod shared;
 
 use clap::{Parser, Subcommand};
+use project_proto::TaskRepoClient;
+use project_proto::architect::Page;
 use shared::RemoteVoxConfig;
 
 #[derive(Parser)]
@@ -43,11 +43,20 @@ async fn main() -> eyre::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Commands::List => {
-            let _remote =
+            let remote =
                 RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
-            println!(
-                "task list: vox transport not wired yet — stand by for Phase D Project/Task service clients."
-            );
+            let client: TaskRepoClient = remote.connect().await?;
+            let page = client
+                .list(Page::default(), None, None)
+                .await
+                .map_err(|e| eyre::eyre!("task list: {e}"))?;
+            if page.items.is_empty() {
+                println!("(no tasks)");
+            } else {
+                for task in page.items {
+                    println!("{}\t{}\t{}", task.id, task.status, task.title);
+                }
+            }
         }
         Commands::Doctor => {
             let remote =

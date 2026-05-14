@@ -25,15 +25,13 @@ async fn main() -> eyre::Result<()> {
 
     info!(%database_url, "connecting");
     let persistence = open_and_migrate(&database_url).await?;
-    let db = persistence.db().clone();
 
     if seed_on_start {
         info!("TASK_SERVER_SEED=1 — seeding workspace doc before listening");
         seed::run(persistence.clone(), WORKSPACE_DOC_ID).await?;
     }
 
-    let mut state = AppState::new(persistence).await?;
-    state.wire_vox(db);
+    let state = AppState::new(persistence).await?;
 
     let app = router(state);
 

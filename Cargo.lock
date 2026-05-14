@@ -8681,7 +8681,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.27.0",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -8922,18 +8921,6 @@ dependencies = [
  "log",
  "tokio",
  "tungstenite 0.26.2",
-]
-
-[[package]]
-name = "tokio-tungstenite"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "489a59b6730eda1b0171fcfda8b121f4bee2b35cba8645ca35c5f7ba3eb736c1"
-dependencies = [
- "futures-util",
- "log",
- "tokio",
- "tungstenite 0.27.0",
 ]
 
 [[package]]
