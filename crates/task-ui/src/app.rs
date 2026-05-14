@@ -88,6 +88,8 @@ pub enum Route {
         AgentRunDetailRoute { run_id: Uuid },
         #[route("/notifications")]
         NotificationsRoute {},
+        #[route("/vox-test")]
+        VoxTestRoute {},
         #[route("/settings/integrations")]
         IntegrationsSettingsRoute {},
         #[route("/settings/webhooks")]
@@ -222,6 +224,58 @@ fn AgentRunDetailRoute(run_id: Uuid) -> Element {
 }
 
 #[component]
+fn VoxTestRoute() -> Element {
+    let vox_status = use_context::<crate::vox_session::VoxStatusCtx>();
+    let mut reconnect_tick = use_signal(|| 0u32);
+    use_effect(move || {
+        let _ = reconnect_tick.read();
+        crate::vox_session::spawn_session_bootstrap(vox_status.0);
+    });
+    let status = vox_status.0.read().clone();
+    let (label, variant) = match &status {
+        crate::vox_session::VoxStatus::Idle => ("Idle", StatusBadgeVariant::Neutral),
+        crate::vox_session::VoxStatus::Connecting { .. } => {
+            ("Connecting…", StatusBadgeVariant::Warning)
+        }
+        crate::vox_session::VoxStatus::Connected { .. } => {
+            ("Connected", StatusBadgeVariant::Success)
+        }
+        crate::vox_session::VoxStatus::Failed { .. } => ("Failed", StatusBadgeVariant::Danger),
+    };
+    let detail = match &status {
+        crate::vox_session::VoxStatus::Idle => "Waiting for the bootstrap to run…".to_string(),
+        crate::vox_session::VoxStatus::Connecting { url } => format!("Opening WS to {url}"),
+        crate::vox_session::VoxStatus::Connected { url } => format!(
+            "Vox handshake completed against {url}. NoopClient is held alive for the lifetime of the page; service-specific clients (ChatServiceClient, AgentServiceClient) land when their RPC methods are wired."
+        ),
+        crate::vox_session::VoxStatus::Failed { stage, error } => {
+            format!("{stage} failed: {error}")
+        }
+    };
+    rsx! {
+        div { class: "mx-auto max-w-3xl flex flex-col gap-4 p-6 lg:p-10",
+            HStack { class: "items-center gap-3",
+                Heading { level: HeadingLevel::H1, "Vox session test" }
+                StatusBadge { variant, label: label.to_string() }
+            }
+            Text { variant: TextVariant::Muted,
+                "Validates that the wasm client can establish a vox session against the server's /vox WebSocket route. The connection is best-effort: failure here degrades chat-ai to the local scripted simulation; success means the rails are in place for the next slice (per-service RPC clients)."
+            }
+            div {
+                class: "rounded-md border border-border bg-card p-4 text-sm whitespace-pre-wrap",
+                "{detail}"
+            }
+            HStack { class: "gap-2",
+                Button {
+                    on_click: move |_| reconnect_tick.with_mut(|v| *v += 1),
+                    "Reconnect"
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn NotificationsRoute() -> Element {
     let mut ctx = use_context::<crate::notifications_ctx::NotificationsCtx>();
     rsx! {
@@ -290,8 +344,10 @@ pub fn App() -> Element {
     // Open the vox RPC session to /vox once per app load. Best-effort
     // — failures degrade to local-sim chat. Service-specific clients
     // (ChatServiceClient, AgentServiceClient) are constructed when
-    // their RPC methods exist; this just establishes the rail.
-    use_hook(crate::vox_session::spawn_session_bootstrap);
+    // their RPC methods exist; this just establishes the rail. Status
+    // surfaces via VoxStatusCtx for the /vox-test route.
+    let vox_status = use_context_provider(crate::vox_session::VoxStatusCtx::new);
+    use_hook(move || crate::vox_session::spawn_session_bootstrap(vox_status.0));
 
     // Derive the initial theme state from the active org's static
     // default. Default mode is Dark — flip to Light via the popover.
@@ -877,6 +933,7 @@ fn route_title(route: &Route) -> &'static str {
         Route::AgentDashboardRoute {} => "Agent dashboard",
         Route::AgentRunDetailRoute { .. } => "Agent run",
         Route::NotificationsRoute {} => "Notifications",
+        Route::VoxTestRoute {} => "Vox test",
         Route::IntegrationsSettingsRoute {} => "Integrations",
         Route::WebhooksRoute {} => "Webhooks",
     }

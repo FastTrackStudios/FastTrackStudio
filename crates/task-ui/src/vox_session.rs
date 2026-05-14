@@ -1,55 +1,118 @@
-//! Minimal wasm-side vox session helper.
+//! Wasm-side vox session helper + status signal.
 //!
 //! Opens a WebSocket to `/vox` on the same origin as the page, runs
-//! the vox handshake, and leaks the session handle so the connection
-//! stays open for the lifetime of the page. Service-specific clients
+//! the vox handshake, and publishes the result via a `VoxStatus`
+//! Dioxus context. The `/vox-test` route reads that context to show
+//! whether the session is live. Service-specific clients
 //! (`ChatServiceClient`, `AgentServiceClient`, …) are not yet
 //! constructed — that lands when each trait grows the RPC method it
 //! needs (e.g. `ChatService::send_message`).
-//!
-//! The handshake establishes the rails so the next slice of work
-//! only needs to add the method-level wiring, not the transport.
+
+use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
+
+/// Lifecycle of the vox session, surfaced via Dioxus context.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VoxStatus {
+    /// Bootstrap hasn't run yet (e.g. native target, or before
+    /// `spawn_session_bootstrap` fires).
+    Idle,
+    /// The WS connection is being established. Carries the URL we're
+    /// dialing.
+    Connecting { url: String },
+    /// Handshake succeeded — the link is open + no service clients
+    /// constructed yet.
+    Connected { url: String },
+    /// Establish failed at some stage. `stage` is `"connect"` or
+    /// `"establish"`; `error` is the wrapped reason.
+    Failed { stage: String, error: String },
+}
+
+impl VoxStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Connecting { .. } => "connecting",
+            Self::Connected { .. } => "connected",
+            Self::Failed { .. } => "failed",
+        }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { .. })
+    }
+}
+
+/// Context-friendly newtype so the test page can `use_context` it.
+#[derive(Clone, Copy)]
+pub struct VoxStatusCtx(pub Signal<VoxStatus>);
+
+impl VoxStatusCtx {
+    pub fn new() -> Self {
+        Self(Signal::new(VoxStatus::Idle))
+    }
+}
+
+impl Default for VoxStatusCtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub struct VoxSession {
     pub server_url: String,
 }
 
 impl VoxSession {
-    /// Open a session against the same origin as the page, at the
-    /// fixed `/vox` route. Returns `None` on any failure — caller
-    /// falls back to local-only behaviour. Leaks the session handle
-    /// so the link's IO loop survives this fn's stack frame.
+    /// Open a session against the same origin as the page at the
+    /// fixed `/vox` route. Leaks the session handle so the link's IO
+    /// loop survives this fn's stack frame.
     #[cfg(target_arch = "wasm32")]
-    pub async fn connect() -> Option<Self> {
+    pub async fn connect_and_publish(mut status: Signal<VoxStatus>) -> Option<Self> {
         let server_url = vox_url();
+        status.set(VoxStatus::Connecting {
+            url: server_url.clone(),
+        });
         match vox_websocket::WsLink::connect(&server_url).await {
-            Ok(link) => {
-                let session = match vox_core::acceptor_on(link)
-                    .on_connection(())
-                    .establish::<vox_core::NoopClient>()
-                    .await
-                {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!(?e, %server_url, "vox establish failed");
-                        return None;
-                    }
-                };
-                std::mem::forget(session);
-                Some(Self { server_url })
-            }
+            Ok(link) => match vox_core::acceptor_on(link)
+                .on_connection(())
+                .establish::<vox_core::NoopClient>()
+                .await
+            {
+                Ok(session) => {
+                    std::mem::forget(session);
+                    status.set(VoxStatus::Connected {
+                        url: server_url.clone(),
+                    });
+                    Some(Self { server_url })
+                }
+                Err(e) => {
+                    let err = format!("{e:?}");
+                    tracing::warn!(?e, %server_url, "vox establish failed");
+                    status.set(VoxStatus::Failed {
+                        stage: "establish".into(),
+                        error: err,
+                    });
+                    None
+                }
+            },
             Err(e) => {
+                let err = format!("{e:?}");
                 tracing::warn!(?e, %server_url, "vox WS connect failed");
+                status.set(VoxStatus::Failed {
+                    stage: "connect".into(),
+                    error: err,
+                });
                 None
             }
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn connect() -> Option<Self> {
+    pub async fn connect_and_publish(mut status: Signal<VoxStatus>) -> Option<Self> {
+        let _ = status;
         None
     }
 }
@@ -67,23 +130,22 @@ fn vox_url() -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(dead_code)]
 fn vox_url() -> String {
-    "ws://localhost:8080/vox".to_string()
+    "ws://localhost:9090/vox".to_string()
 }
 
-/// Establish the vox session once at app start and stash it in a
-/// Dioxus context so route components can grab it. For now this is a
-/// best-effort connect with no per-service client construction.
+/// Spawn the session bootstrap. Publishes lifecycle to the
+/// `VoxStatusCtx` Signal in the surrounding Dioxus context. Safe to
+/// call once at app start; subsequent invocations re-attempt the
+/// connection (the previous attempt's leaked session stays open
+/// until the WS itself closes).
 #[cfg(target_arch = "wasm32")]
-pub fn spawn_session_bootstrap() {
+pub fn spawn_session_bootstrap(status: Signal<VoxStatus>) {
     spawn_local(async move {
-        let Some(session) = VoxSession::connect().await else {
-            tracing::info!("vox session not established; chat falls back to local sim");
-            return;
-        };
-        tracing::info!(url = %session.server_url, "vox session established (no service clients wired yet)");
+        let _ = VoxSession::connect_and_publish(status).await;
     });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn spawn_session_bootstrap() {}
+pub fn spawn_session_bootstrap(_status: Signal<VoxStatus>) {}
