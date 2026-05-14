@@ -13,31 +13,10 @@
 
 use reaper_test::reaper_test;
 
-#[reaper_test(isolated)]
-async fn lane_set_marker_lane_does_not_lose_marker(
-    ctx: &reaper_test::ReaperTestContext,
-) -> eyre::Result<()> {
-    let project = ctx.project().clone();
-    let markers = project.markers();
-
-    let id = markers.add(2.5, "lane-test").await?;
-    markers.set_lane(id, Some(3)).await?;
-
-    let m = markers
-        .get(id)
-        .await?
-        .ok_or_else(|| eyre::eyre!("marker disappeared after set_lane"))?;
-    assert_eq!(m.id, Some(id), "marker id should survive set_lane");
-
-    markers.set_lane(id, None).await?;
-    let m2 = markers
-        .get(id)
-        .await?
-        .ok_or_else(|| eyre::eyre!("marker disappeared after lane reset"))?;
-    assert_eq!(m2.id, Some(id), "marker should survive lane=None reset");
-
-    Ok(())
-}
+// `lane_set_marker_lane_does_not_lose_marker` retired alongside the
+// `MarkerService::set_marker_lane` surface — the architect::rpc port
+// trimmed `Markers` to the canonical CRUD verbs. Lane placement will
+// return on a sibling trait when there's a real use case driving it.
 
 #[reaper_test(isolated)]
 async fn lane_set_region_lane_does_not_lose_region(

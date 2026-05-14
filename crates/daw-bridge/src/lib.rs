@@ -34,11 +34,11 @@ use daw::service::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
     DawFileServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
     HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
-    LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiServiceDispatcher,
-    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
+    LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
+    ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
+    ScreensetServiceDispatcher, TakeServiceDispatcher, TempoMapServiceDispatcher,
+    ToolbarServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
+    WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -158,7 +158,8 @@ async fn register_daw_dispatcher() {
     // Create REAPER implementations
     let transport = daw::reaper::ReaperTransport::new();
     let project = daw::reaper::ReaperProject::new();
-    let marker = daw::reaper::ReaperMarker::new();
+    // Markers ported to architect::rpc — backend is the singleton
+    // `Reaper` and mounting goes through `daw::rpc::marker::serve`.
     let region = daw::reaper::ReaperRegion::new();
     let tempo_map = daw::reaper::ReaperTempoMap::new();
     let audio_engine = daw::reaper::ReaperAudioEngine::new();
@@ -189,13 +190,12 @@ async fn register_daw_dispatcher() {
         ext_state_service_service_descriptor, fx_service_service_descriptor,
         health_service_service_descriptor, input_service_service_descriptor,
         item_service_service_descriptor, live_midi_service_service_descriptor,
-        marker_service_service_descriptor, midi_service_service_descriptor,
-        plugin_loader_service_service_descriptor, project_service_service_descriptor,
-        region_service_service_descriptor, routing_service_service_descriptor,
-        screenset_service_service_descriptor, take_service_service_descriptor,
-        tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-        track_service_service_descriptor, transport_service_service_descriptor,
-        window_geometry_service_service_descriptor,
+        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
+        project_service_service_descriptor, region_service_service_descriptor,
+        routing_service_service_descriptor, screenset_service_service_descriptor,
+        take_service_service_descriptor, tempo_map_service_service_descriptor,
+        toolbar_service_service_descriptor, track_service_service_descriptor,
+        transport_service_service_descriptor, window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -208,9 +208,12 @@ async fn register_daw_dispatcher() {
             project_service_service_descriptor(),
             ProjectServiceDispatcher::new(project),
         )
+        // Markers via architect::rpc — `marker::serve(Reaper)` builds
+        // the dispatcher + bridges sync calls onto REAPER's main
+        // thread through `HasDispatcher`.
         .with(
-            marker_service_service_descriptor(),
-            MarkerServiceDispatcher::new(marker),
+            daw::service::marker::descriptor(),
+            daw::service::marker::serve(daw::reaper::Reaper),
         )
         .with(
             region_service_service_descriptor(),

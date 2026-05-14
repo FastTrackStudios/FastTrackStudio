@@ -4,15 +4,15 @@
 //! Used by `PluginHost` to create a local `Daw` instance without SHM.
 
 use daw_proto::automation::{AutomationServiceDispatcher, automation_service_service_descriptor};
+use daw_proto::marker;
 use daw_proto::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
     ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
-    MarkerServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
-    ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
-    ScreensetServiceDispatcher, TakeServiceDispatcher, TempoMapServiceDispatcher,
-    ToolbarServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
-    WindowGeometryServiceDispatcher,
+    MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
+    RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
+    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
+    TrackServiceDispatcher, TransportServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 use daw_proto::{
@@ -20,13 +20,13 @@ use daw_proto::{
     daw_file_service_service_descriptor, ext_state_service_service_descriptor,
     fx_service_service_descriptor, health_service_service_descriptor,
     input_service_service_descriptor, item_service_service_descriptor,
-    live_midi_service_service_descriptor, marker_service_service_descriptor,
-    midi_service_service_descriptor, plugin_loader_service_service_descriptor,
-    project_service_service_descriptor, region_service_service_descriptor,
-    routing_service_service_descriptor, screenset_service_service_descriptor,
-    take_service_service_descriptor, tempo_map_service_service_descriptor,
-    toolbar_service_service_descriptor, track_service_service_descriptor,
-    transport_service_service_descriptor, window_geometry_service_service_descriptor,
+    live_midi_service_service_descriptor, midi_service_service_descriptor,
+    plugin_loader_service_service_descriptor, project_service_service_descriptor,
+    region_service_service_descriptor, routing_service_service_descriptor,
+    screenset_service_service_descriptor, take_service_service_descriptor,
+    tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
+    track_service_service_descriptor, transport_service_service_descriptor,
+    window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -51,7 +51,6 @@ pub fn create_daw_handler() -> RoutedHandler {
     // Create REAPER implementations
     let transport = crate::ReaperTransport::new();
     let project = crate::ReaperProject::new();
-    let marker = crate::ReaperMarker::new();
     let region = crate::ReaperRegion::new();
     let tempo_map = crate::ReaperTempoMap::new();
     let audio_engine = crate::ReaperAudioEngine::new();
@@ -83,10 +82,10 @@ pub fn create_daw_handler() -> RoutedHandler {
             project_service_service_descriptor(),
             ProjectServiceDispatcher::new(project),
         )
-        .with(
-            marker_service_service_descriptor(),
-            MarkerServiceDispatcher::new(marker),
-        )
+        // Markers ported to architect::rpc — see `crate::marker`.
+        // `marker::serve(Reaper)` builds the dispatcher + bridges sync
+        // calls onto REAPER's main thread via `HasDispatcher`.
+        .with(marker::descriptor(), marker::serve(crate::Reaper))
         .with(
             region_service_service_descriptor(),
             RegionServiceDispatcher::new(region),

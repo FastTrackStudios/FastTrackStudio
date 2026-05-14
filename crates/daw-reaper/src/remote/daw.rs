@@ -5,10 +5,7 @@ use std::sync::Arc;
 use daw_proto::sync::{Daw, Project as _};
 use daw_proto::{DawResult, LastTouchedFx, ProjectInfo};
 
-use super::{
-    RemoteActionRegistry, RemoteAudioEngine, RemotePluginLoader, RemoteProject, RemoteToolbar,
-    RemoteWindowGeometry, dispatch, dispatch_read, main_thread,
-};
+use super::{RemoteProject, dispatch, dispatch_read, main_thread};
 
 /// `Send + Sync` root handle for REAPER, dispatching every call onto the
 /// main thread via `main_thread::query` and blocking on a tokio runtime.
@@ -41,26 +38,6 @@ impl ReaperRemote {
 impl Daw for ReaperRemote {
     type Project<'a>
         = RemoteProject<'a>
-    where
-        Self: 'a;
-    type ActionRegistry<'a>
-        = RemoteActionRegistry<'a>
-    where
-        Self: 'a;
-    type AudioEngine<'a>
-        = RemoteAudioEngine<'a>
-    where
-        Self: 'a;
-    type PluginLoader<'a>
-        = RemotePluginLoader<'a>
-    where
-        Self: 'a;
-    type Toolbar<'a>
-        = RemoteToolbar<'a>
-    where
-        Self: 'a;
-    type WindowGeometry<'a>
-        = RemoteWindowGeometry<'a>
     where
         Self: 'a;
 
@@ -106,25 +83,5 @@ impl Daw for ReaperRemote {
             let mt = crate::sync::ReaperMainThread::try_new()?;
             mt.last_touched_fx()
         })
-    }
-
-    fn action_registry(&self) -> Self::ActionRegistry<'_> {
-        RemoteActionRegistry::new(self)
-    }
-
-    fn audio_engine(&self) -> Self::AudioEngine<'_> {
-        RemoteAudioEngine::new(self)
-    }
-
-    fn plugin_loader(&self) -> Self::PluginLoader<'_> {
-        RemotePluginLoader::new(self)
-    }
-
-    fn toolbar(&self) -> Self::Toolbar<'_> {
-        RemoteToolbar::new(self)
-    }
-
-    fn window_geometry(&self) -> Self::WindowGeometry<'_> {
-        RemoteWindowGeometry::new(self)
     }
 }

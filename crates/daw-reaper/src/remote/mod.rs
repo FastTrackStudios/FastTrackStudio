@@ -14,43 +14,35 @@
 //! Sub-handles ([`RemoteProject`], [`RemoteTransport`], etc.) borrow
 //! `&'a ReaperRemote` and inherit its `Send + Sync` discipline via the borrow.
 
-pub mod action_registry;
-pub mod audio_engine;
 pub mod daw;
 pub mod ext_state;
 pub mod fx_chains;
 pub mod fx_params;
 pub mod items;
-pub mod markers;
-pub mod plugin_loader;
+// markers ported to the singleton `Reaper` backend — see
+// `crate::marker`. The remote/marshal-to-main-thread wrapper is no
+// longer needed; mounting via `marker::serve(Reaper)` handles
+// threading through `HasDispatcher`.
 pub mod project;
 pub mod regions;
 pub mod routing;
 pub mod takes;
 pub mod tempo_map;
-pub mod toolbar;
 pub mod tracks;
 pub mod transport;
-pub mod window_geometry;
 
-pub use action_registry::RemoteActionRegistry;
-pub use audio_engine::RemoteAudioEngine;
 pub use daw::ReaperRemote;
 pub use ext_state::RemoteExtState;
 pub use fx_chains::RemoteFxChains;
 pub use fx_params::RemoteFxParams;
 pub use items::RemoteItems;
-pub use markers::RemoteMarkers;
-pub use plugin_loader::RemotePluginLoader;
 pub use project::RemoteProject;
 pub use regions::RemoteRegions;
 pub use routing::RemoteRouting;
 pub use takes::RemoteTakes;
 pub use tempo_map::RemoteTempoMap;
-pub use toolbar::RemoteToolbar;
 pub use tracks::RemoteTracks;
 pub use transport::RemoteTransport;
-pub use window_geometry::RemoteWindowGeometry;
 
 use daw_proto::{DawError, DawResult};
 

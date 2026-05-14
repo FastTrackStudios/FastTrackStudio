@@ -50,7 +50,7 @@ fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
         daw::service::input_service_service_descriptor(),
         daw::service::item_service_service_descriptor(),
         daw::service::live_midi_service_service_descriptor(),
-        daw::service::marker_service_service_descriptor(),
+        daw::service::marker::descriptor(),
         daw::service::midi_service_service_descriptor(),
         daw::service::peak_service_service_descriptor(),
         daw::service::plugin_loader_service_service_descriptor(),
@@ -550,10 +550,15 @@ pub async fn regions(daw: &Daw) -> Result<Value> {
 
 pub async fn marker_add(daw: &Daw, position: f64, name: &str, lane: Option<u32>) -> Result<Value> {
     let project = daw.current_project().await?;
-    let id = match lane {
-        Some(lane) => project.markers().add_in_lane(position, name, lane).await?,
-        None => project.markers().add(position, name).await?,
-    };
+    // Ruler-lane placement retired with the architect::rpc port — the
+    // sync `Markers` trait carries only the canonical CRUD verbs. The
+    // CLI continues to accept `--lane` for forward compat; we log and
+    // fall through to plain `add` until a lane-aware sibling trait
+    // lands.
+    if lane.is_some() {
+        tracing::debug!("marker_add: --lane ignored (no longer supported on the sync trait)");
+    }
+    let id = project.markers().add(position, name).await?;
     Ok(json!({ "id": id, "position_seconds": position, "name": name }))
 }
 

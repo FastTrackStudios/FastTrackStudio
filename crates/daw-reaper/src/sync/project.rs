@@ -6,8 +6,8 @@ use daw_proto::{DawResult, ProjectInfo};
 use crate::project::project_to_info;
 
 use super::{
-    ReaperExtState, ReaperFxChains, ReaperFxParams, ReaperItems, ReaperMainThread, ReaperMarkers,
-    ReaperRegions, ReaperRouting, ReaperTakes, ReaperTempoMap, ReaperTracks, ReaperTransport,
+    ReaperExtState, ReaperFxChains, ReaperFxParams, ReaperItems, ReaperMainThread, ReaperRegions,
+    ReaperRouting, ReaperTakes, ReaperTempoMap, ReaperTracks, ReaperTransport,
 };
 
 /// A handle scoped to a single REAPER project tab.
@@ -29,10 +29,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
         Self: 'b;
     type Regions<'b>
         = ReaperRegions<'b>
-    where
-        Self: 'b;
-    type Markers<'b>
-        = ReaperMarkers<'b>
     where
         Self: 'b;
     type TempoMap<'b>
@@ -83,10 +79,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
 
     fn regions(&self) -> Self::Regions<'_> {
         ReaperRegions::new(self.mt, &self.guid)
-    }
-
-    fn markers(&self) -> Self::Markers<'_> {
-        ReaperMarkers::new(self.mt, &self.guid)
     }
 
     fn tempo_map(&self) -> Self::TempoMap<'_> {

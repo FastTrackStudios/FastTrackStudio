@@ -127,7 +127,7 @@ pub(crate) use daw_proto::HealthServiceClient;
 pub(crate) use daw_proto::InputServiceClient;
 pub(crate) use daw_proto::ItemServiceClient;
 pub(crate) use daw_proto::LiveMidiServiceClient;
-pub(crate) use daw_proto::MarkerServiceClient;
+pub(crate) use daw_proto::MarkersClient;
 pub(crate) use daw_proto::MidiServiceClient;
 pub(crate) use daw_proto::PositionConversionServiceClient;
 pub(crate) use daw_proto::ProjectServiceClient;
@@ -205,7 +205,7 @@ pub struct DawClients {
     pub(crate) dock_host: DockHostServiceClient,
     pub(crate) transport: TransportServiceClient,
     pub(crate) project: ProjectServiceClient,
-    pub(crate) marker: MarkerServiceClient,
+    pub(crate) marker: MarkersClient,
     pub(crate) region: RegionServiceClient,
     pub(crate) tempo_map: TempoMapServiceClient,
     pub(crate) track: TrackServiceClient,
@@ -241,7 +241,7 @@ impl DawClients {
             dock_host: DockHostServiceClient::new(handle.clone()),
             transport: TransportServiceClient::new(handle.clone()),
             project: ProjectServiceClient::new(handle.clone()),
-            marker: MarkerServiceClient::new(handle.clone()),
+            marker: MarkersClient::new(handle.clone()),
             region: RegionServiceClient::new(handle.clone()),
             tempo_map: TempoMapServiceClient::new(handle.clone()),
             track: TrackServiceClient::new(handle.clone()),

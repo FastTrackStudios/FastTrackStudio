@@ -4,9 +4,9 @@ use daw_proto::sync::{Daw as _, Project as ProjectTrait};
 use daw_proto::{DawResult, ProjectInfo};
 
 use super::{
-    ReaperRemote, RemoteExtState, RemoteFxChains, RemoteFxParams, RemoteItems, RemoteMarkers,
-    RemoteRegions, RemoteRouting, RemoteTakes, RemoteTempoMap, RemoteTracks, RemoteTransport,
-    dispatch, main_thread,
+    ReaperRemote, RemoteExtState, RemoteFxChains, RemoteFxParams, RemoteItems, RemoteRegions,
+    RemoteRouting, RemoteTakes, RemoteTempoMap, RemoteTracks, RemoteTransport, dispatch,
+    main_thread,
 };
 
 /// A `Send + Sync` handle scoped to a single REAPER project tab.
@@ -28,10 +28,6 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
         Self: 'b;
     type Regions<'b>
         = RemoteRegions<'b>
-    where
-        Self: 'b;
-    type Markers<'b>
-        = RemoteMarkers<'b>
     where
         Self: 'b;
     type TempoMap<'b>
@@ -85,10 +81,6 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
 
     fn regions(&self) -> Self::Regions<'_> {
         RemoteRegions::new(self.remote, &self.guid)
-    }
-
-    fn markers(&self) -> Self::Markers<'_> {
-        RemoteMarkers::new(self.remote, &self.guid)
     }
 
     fn tempo_map(&self) -> Self::TempoMap<'_> {

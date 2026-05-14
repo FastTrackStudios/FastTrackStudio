@@ -110,7 +110,7 @@ fn toolbar_targets() -> impl Iterator<Item = ToolbarTarget> {
 // Immediate operations (run on main thread from timer callback)
 // ============================================================================
 
-pub(crate) fn is_api_available() -> bool {
+fn is_api_available() -> bool {
     Reaper::get()
         .medium_reaper()
         .low()
@@ -164,10 +164,7 @@ fn add_toolbar_command_item(
         .map_err(|e| format!("Failed to add toolbar item: {e}"))
 }
 
-pub(crate) fn add_button_immediate(
-    button: &ToolbarButton,
-    workflow_id: &str,
-) -> Result<CommandId, String> {
+fn add_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<CommandId, String> {
     let command_id = resolve_command_id(&button.command_name)?;
     let toolbar_name = resolve_toolbar_name_for_add(&button.target, command_id, |toolbar_name| {
         add_toolbar_command_item(
@@ -197,10 +194,7 @@ pub(crate) fn add_button_immediate(
     Ok(command_id)
 }
 
-pub(crate) fn update_button_immediate(
-    button: &ToolbarButton,
-    workflow_id: &str,
-) -> Result<CommandId, String> {
+fn update_button_immediate(button: &ToolbarButton, workflow_id: &str) -> Result<CommandId, String> {
     let command_id = resolve_command_id(&button.command_name)?;
     let toolbar_name = resolve_toolbar_name_for_command(&button.target, command_id)
         .unwrap_or_else(|| target_to_str(&button.target));
@@ -350,10 +344,7 @@ fn set_button_icon_immediate(
     Ok(command_id)
 }
 
-pub(crate) fn remove_button_immediate(
-    target: &ToolbarTarget,
-    command_name: &str,
-) -> Result<(), String> {
+fn remove_button_immediate(target: &ToolbarTarget, command_name: &str) -> Result<(), String> {
     let command_id = resolve_command_id(command_name)?;
     let mut removed = Vec::new();
 

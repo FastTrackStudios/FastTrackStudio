@@ -2,7 +2,7 @@
 //!
 //! A marker represents a named point in time within a project.
 
-use crate::{Position, TimePosition};
+use crate::Position;
 use facet::Facet;
 
 /// A marker at a specific position in the project timeline
@@ -26,45 +26,26 @@ pub struct Marker {
 }
 
 impl Marker {
-    /// Create a new marker at the given position with a name
+    /// Create a marker at the given position with a name. All other
+    /// fields take their `Default` values; override individual ones
+    /// with the `..Marker::new(pos, name)` struct-update pattern:
+    ///
+    /// ```ignore
+    /// Marker {
+    ///     id: Some(42),
+    ///     color: Some(0xFF0000),
+    ///     ..Marker::new(pos, "loud".into())
+    /// }
+    /// ```
     pub fn new(position: Position, name: String) -> Self {
         Self {
-            id: None,
             position,
             name,
-            color: None,
-            guid: None,
-            lane: None,
+            ..Self::default()
         }
     }
 
-    /// Create a marker from a time position in seconds
-    pub fn from_seconds(seconds: f64, name: String) -> Self {
-        Self::new(
-            Position::from_time(TimePosition::from_seconds(seconds)),
-            name,
-        )
-    }
-
-    /// Create a marker with all metadata
-    pub fn new_full(
-        id: Option<u32>,
-        position: Position,
-        name: String,
-        color: Option<u32>,
-        guid: Option<String>,
-    ) -> Self {
-        Self {
-            id,
-            position,
-            name,
-            color,
-            guid,
-            lane: None,
-        }
-    }
-
-    /// Get the position in seconds
+    /// Position in seconds, or `0.0` if no time component is set.
     pub fn position_seconds(&self) -> f64 {
         self.position
             .time
@@ -73,13 +54,13 @@ impl Marker {
             .unwrap_or(0.0)
     }
 
-    /// Check if the marker is within a time range (inclusive)
+    /// Whether the marker's position falls within `[start, end]`.
     pub fn is_in_range(&self, start: f64, end: f64) -> bool {
         let pos = self.position_seconds();
         pos >= start && pos <= end
     }
 
-    /// Check if the marker is at a specific position (within tolerance)
+    /// Whether the marker is within `tolerance` seconds of `seconds`.
     pub fn is_at_position(&self, seconds: f64, tolerance: f64) -> bool {
         (self.position_seconds() - seconds).abs() <= tolerance
     }
@@ -87,6 +68,13 @@ impl Marker {
 
 impl Default for Marker {
     fn default() -> Self {
-        Self::new(Position::start(), String::new())
+        Self {
+            id: None,
+            position: Position::start(),
+            name: String::new(),
+            color: None,
+            guid: None,
+            lane: None,
+        }
     }
 }

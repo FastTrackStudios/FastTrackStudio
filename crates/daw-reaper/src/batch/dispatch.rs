@@ -19,7 +19,7 @@ pub async fn dispatch_op(
     routing_svc: &crate::ReaperRouting,
     item_svc: &crate::ReaperItem,
     take_svc: &crate::ReaperTake,
-    marker_svc: &crate::ReaperMarker,
+    marker_svc: &crate::Reaper,
     region_svc: &crate::ReaperRegion,
     tempo_map_svc: &crate::ReaperTempoMap,
     midi_svc: &crate::ReaperMidi,
@@ -1110,97 +1110,47 @@ async fn dispatch_take(
 async fn dispatch_marker(
     op: &MarkerOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperMarker,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::MarkerService;
+    use daw_proto::sync::Markers;
     match op {
         MarkerOp::GetMarkers(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::MarkerList(svc.get_markers(ctx).await))
+            Ok(StepOutput::MarkerList(svc.all(ctx)))
         }
         MarkerOp::GetMarker(p, id) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptMarker(svc.get_marker(ctx, *id).await))
-        }
-        MarkerOp::GetMarkersInRange(p, s, e) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::MarkerList(
-                svc.get_markers_in_range(ctx, *s, *e).await,
-            ))
-        }
-        MarkerOp::GetNextMarker(p, after) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptMarker(
-                svc.get_next_marker(ctx, *after).await,
-            ))
-        }
-        MarkerOp::GetPreviousMarker(p, before) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptMarker(
-                svc.get_previous_marker(ctx, *before).await,
-            ))
+            Ok(StepOutput::OptMarker(svc.get(ctx, *id)))
         }
         MarkerOp::MarkerCount(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Usize(svc.marker_count(ctx).await as u64))
+            Ok(StepOutput::Usize(svc.count(ctx) as u64))
         }
         MarkerOp::AddMarker(p, pos, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(
-                svc.add_marker(ctx, *pos, name.clone()).await,
-            ))
+            let id = svc.add(ctx, *pos, name).map_err(|e| e.to_string())?;
+            Ok(StepOutput::U32(id))
         }
         MarkerOp::RemoveMarker(p, id) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.remove_marker(ctx, *id).await;
+            svc.remove(ctx, *id).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         MarkerOp::MoveMarker(p, id, pos) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.move_marker(ctx, *id, *pos).await;
+            svc.set_position(ctx, *id, *pos)
+                .map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         MarkerOp::RenameMarker(p, id, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.rename_marker(ctx, *id, name.clone()).await;
+            svc.rename(ctx, *id, name).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         MarkerOp::SetMarkerColor(p, id, color) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_marker_color(ctx, *id, *color).await;
+            svc.set_color(ctx, *id, *color).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
-        }
-        MarkerOp::GotoNextMarker(p) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_next_marker(ctx).await;
-            Ok(StepOutput::Unit)
-        }
-        MarkerOp::GotoPreviousMarker(p) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_previous_marker(ctx).await;
-            Ok(StepOutput::Unit)
-        }
-        MarkerOp::GotoMarker(p, id) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.goto_marker(ctx, *id).await;
-            Ok(StepOutput::Unit)
-        }
-        MarkerOp::AddMarkerInLane(p, pos, name, lane) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(
-                svc.add_marker_in_lane(ctx, *pos, name.clone(), *lane).await,
-            ))
-        }
-        MarkerOp::SetMarkerLane(p, id, lane) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_marker_lane(ctx, *id, *lane).await;
-            Ok(StepOutput::Unit)
-        }
-        MarkerOp::GetMarkersInLane(p, lane) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::MarkerList(
-                svc.get_markers_in_lane(ctx, *lane).await,
-            ))
         }
     }
 }

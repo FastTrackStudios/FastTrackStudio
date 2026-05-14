@@ -82,38 +82,6 @@ impl<'a> TracksTrait for ReaperTracks<'a> {
         tracks
     }
 
-    fn add(&self, name: &str, at_index: Option<u32>) -> DawResult<String> {
-        let project = super::resolve_project(self.guid)?;
-        let idx = at_index.unwrap_or_else(|| project.track_count());
-        let track = project
-            .insert_track_at(idx)
-            .map_err(|e| DawError::operation_failed(format!("insert_track_at: {e:?}")))?;
-        if !name.is_empty() {
-            track.set_name(name);
-        }
-        Ok(track.guid().to_string_without_braces())
-    }
-
-    fn remove(&self, guid: &str) -> DawResult<()> {
-        let project = super::resolve_project(self.guid)?;
-        let track = super::find_track_by_guid(&project, guid)
-            .ok_or_else(|| DawError::not_found("Track", guid))?;
-        project.remove_track(&track);
-        Ok(())
-    }
-
-    fn remove_all(&self) -> DawResult<()> {
-        let project = super::resolve_project(self.guid)?;
-        while project.track_count() > 0 {
-            if let Some(track) = project.track_by_index(project.track_count() - 1) {
-                project.remove_track(&track);
-            } else {
-                break;
-            }
-        }
-        Ok(())
-    }
-
     fn master(&self) -> DawResult<Track> {
         let project = super::resolve_project(self.guid)?;
         let master = project

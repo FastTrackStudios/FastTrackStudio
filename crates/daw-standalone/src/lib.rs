@@ -43,7 +43,9 @@ pub use ext_state::StandaloneExtState;
 pub use fx::StandaloneFx;
 pub use item::{StandaloneItem, StandaloneTake};
 pub use live_midi::StandaloneLiveMidi;
-pub use marker::StandaloneMarker;
+// `Markers` is now impl'd directly on `Standalone` — see `crate::marker`.
+// The old async `StandaloneMarker` service struct was retired with the
+// architect::rpc port; mount via `daw_proto::marker::serve(Standalone::new())`.
 pub use midi::StandaloneMidi;
 pub use position_conversion::StandalonePositionConversion;
 pub use project::{StandaloneProject, project_guids};

@@ -1,19 +1,20 @@
 use crate::DawResult;
 
 use super::{
-    ExtState, FxChains, FxParams, Items, Markers, Regions, Routing, Takes, TempoMap, Tracks,
-    Transport,
+    ExtState, FxChains, FxParams, Items, Regions, Routing, Takes, TempoMap, Tracks, Transport,
 };
 
 /// Per-project sync handle. Owns sub-domain accessors.
+///
+/// `Markers` was lifted out of this trait when it got ported to
+/// `#[architect::rpc]`: backends now hold no per-project state, so
+/// `marker::serve(Reaper)` mounts once per binary and serves every
+/// project. Other accessors will follow as their services are ported.
 pub trait Project {
     type Transport<'a>: Transport + 'a
     where
         Self: 'a;
     type Regions<'a>: Regions + 'a
-    where
-        Self: 'a;
-    type Markers<'a>: Markers + 'a
     where
         Self: 'a;
     type TempoMap<'a>: TempoMap + 'a
@@ -46,7 +47,9 @@ pub trait Project {
 
     fn transport(&self) -> Self::Transport<'_>;
     fn regions(&self) -> Self::Regions<'_>;
-    fn markers(&self) -> Self::Markers<'_>;
+    // `markers()` accessor retired — use `marker::serve(Reaper)` to
+    // mount the backend, or call directly via the architect-emitted
+    // `MarkersClient` for the project guid.
     fn tempo_map(&self) -> Self::TempoMap<'_>;
     fn tracks(&self) -> Self::Tracks<'_>;
     fn ext_state(&self) -> Self::ExtState<'_>;

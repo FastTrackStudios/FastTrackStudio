@@ -30,7 +30,6 @@
 //! );
 //! ```
 
-pub mod architect_bridge;
 pub mod batch;
 pub mod bootstrap;
 pub mod local_caller;
@@ -91,7 +90,12 @@ pub use health::ReaperHealth;
 pub use input::ReaperInput;
 pub use item::{ReaperItem, ReaperTake};
 pub use live_midi::ReaperLiveMidi;
-pub use marker::ReaperMarker;
+// New shape (post-architect::rpc port): one singleton `Reaper`
+// backend that impls per-service traits (`Markers`, eventually
+// `Items`, `Tracks`, …) with project context flowing through each
+// call. Mounting goes through `marker::serve(Reaper)`. The dispatcher
+// is exposed for direct use in tests / non-vox call sites.
+pub use marker::{Reaper, ReaperMainThreadDispatcher};
 pub use midi::ReaperMidi;
 pub use peak::ReaperPeak;
 pub use plugin_loader::{ReaperPluginLoader, eager_load_fx_plugins, set_plugin_context};

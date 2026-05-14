@@ -1,391 +1,251 @@
-//! REAPER Marker Implementation
+//! `Reaper` — the REAPER backend singleton.
 //!
-//! Implements MarkerService by dispatching REAPER API calls to the main thread
-//! using `crate::main_thread`.
+//! After the `#[architect::rpc]` port, backends are stateless: they
+//! don't hold a project guid, they don't hold a TaskSupport handle,
+//! they don't allocate at construction. The full mount surface is:
+//!
+//! ```ignore
+//! use daw_proto::marker;
+//! router.mount(marker::serve(Reaper));
+//! ```
+//!
+//! `Reaper` carries:
+//!
+//! - The dispatcher (via [`architect::HasDispatcher`]) — every sync
+//!   method goes through [`ReaperMainThreadDispatcher`] to land on
+//!   the REAPER main thread before touching the C API.
+//! - Per-service trait impls (`Markers`, eventually `Items`, `Tracks`,
+//!   …). Each method takes `ProjectContext` so one `Reaper` instance
+//!   serves every project the binary touches.
+//!
+//! Tests / alternate-runtime scenarios that want a different dispatcher
+//! (e.g. `CurrentThreadDispatcher` for unit tests without REAPER
+//! running) use a newtype wrapper with its own `HasDispatcher` impl.
+
+use std::any::Any;
+use std::ffi::CString;
+use std::future::Future;
+use std::pin::Pin;
+
+use architect::HasDispatcher;
+use architect::dispatch::{BoxedAny, DispatchError, Dispatcher};
+use daw_proto::sync::Markers;
+use daw_proto::{DawError, DawResult, Marker, Position, ProjectContext, TimePosition};
+use reaper_high::Reaper as ReaperHigh;
+use reaper_medium::{MarkerOrRegionPosition, PositionInSeconds};
 
 use crate::main_thread;
 use crate::project_context::resolve_project_context;
 use crate::safe_wrappers::markers as sw;
 use crate::safe_wrappers::ruler_lanes;
-use daw_proto::{Marker, MarkerEvent, MarkerService, Position, ProjectContext, TimePosition};
-use reaper_medium::{BookmarkRef, MarkerOrRegionPosition, ProjectContext as ReaperProjectContext};
-use std::ffi::CString;
-use std::time::Duration;
-use tracing::{debug, info};
-use vox::Tx;
 
-/// REAPER marker implementation.
-///
-/// All methods dispatch to the main thread via `main_thread`.
-#[derive(Clone)]
-pub struct ReaperMarker;
+// ── Dispatcher ─────────────────────────────────────────────────────────
 
-impl ReaperMarker {
-    pub fn new() -> Self {
-        Self
-    }
-}
+/// Marshals sync closures onto REAPER's main thread via
+/// [`main_thread::query`]. Use this with any architect-rpc host whose
+/// backend touches REAPER state.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ReaperMainThreadDispatcher;
 
-impl Default for ReaperMarker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MarkerService for ReaperMarker {
-    // =========================================================================
-    // Query Methods
-    // =========================================================================
-
-    async fn get_markers(&self, project: ProjectContext) -> Vec<Marker> {
-        main_thread::query(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let mut markers = Vec::new();
-
-            // Resolve the project context to a REAPER project context
-            let reaper_ctx = resolve_project_context(&project);
-
-            // Get total count of markers and regions
-            let count_result = medium.count_project_markers(reaper_ctx);
-            let total_count = count_result.total_count;
-
-            // Enumerate all markers/regions
-            for idx in 0..total_count {
-                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                    if let Some(info) = result {
-                        // region_end_position is None for markers, Some for regions
-                        if info.region_end_position.is_none() {
-                            let id = info.id.get();
-                            let lane = ruler_lanes::assigned_lane(low, reaper_ctx, false, id)
-                                .or_else(|| ruler_lanes::get_marker_lane(low, reaper_ctx, idx));
-                            markers.push(Marker {
-                                id: Some(id),
-                                position: Position::from_time(TimePosition::from_seconds(
-                                    info.position.get(),
-                                )),
-                                name: info.name.to_string(),
-                                color: {
-                                    let c = info.color.to_raw();
-                                    if c != 0 { Some(c as u32) } else { None }
-                                },
-                                guid: None,
-                                lane,
-                            });
-                        }
-                    }
-                });
-            }
-
-            // Sort by position
-            markers.sort_by(|a, b| {
-                a.position_seconds()
-                    .partial_cmp(&b.position_seconds())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-
-            markers
-        })
-        .await
-        .unwrap_or_default()
-    }
-
-    async fn get_marker(&self, project: ProjectContext, id: u32) -> Option<Marker> {
-        let markers = self.get_markers(project).await;
-        markers.into_iter().find(|m| m.id == Some(id))
-    }
-
-    async fn get_markers_in_range(
+impl Dispatcher for ReaperMainThreadDispatcher {
+    fn dispatch(
         &self,
-        project: ProjectContext,
-        start: f64,
-        end: f64,
-    ) -> Vec<Marker> {
-        let markers = self.get_markers(project).await;
-        markers
-            .into_iter()
-            .filter(|m| m.is_in_range(start, end))
-            .collect()
-    }
-
-    async fn get_next_marker(&self, project: ProjectContext, after: f64) -> Option<Marker> {
-        let markers = self.get_markers(project).await;
-        markers
-            .into_iter()
-            .filter(|m| m.position_seconds() > after)
-            .min_by(|a, b| {
-                a.position_seconds()
-                    .partial_cmp(&b.position_seconds())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    }
-
-    async fn get_previous_marker(&self, project: ProjectContext, before: f64) -> Option<Marker> {
-        let markers = self.get_markers(project).await;
-        markers
-            .into_iter()
-            .filter(|m| m.position_seconds() < before)
-            .max_by(|a, b| {
-                a.position_seconds()
-                    .partial_cmp(&b.position_seconds())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    }
-
-    async fn marker_count(&self, project: ProjectContext) -> usize {
-        self.get_markers(project).await.len()
-    }
-
-    // =========================================================================
-    // Mutation Methods
-    // =========================================================================
-
-    async fn add_marker(&self, _project: ProjectContext, position: f64, name: String) -> u32 {
-        debug!("ReaperMarker: add_marker '{}' at {}", name, position);
-        main_thread::query(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            if let Ok(pos) = reaper_medium::PositionInSeconds::new(position) {
-                medium
-                    .add_project_marker_2(
-                        ReaperProjectContext::CurrentProject,
-                        MarkerOrRegionPosition::Marker(pos),
-                        name.as_str(),
-                        None,
-                        None,
-                    )
-                    .unwrap_or(0)
-            } else {
-                0
+        f: Box<dyn FnOnce() -> BoxedAny + Send + 'static>,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>> {
+        Box::pin(async move {
+            // `main_thread::query` returns `None` when TaskSupport
+            // isn't installed (extension not yet bootstrapped or
+            // already torn down). Map that to `ShutDown` so callers
+            // see a clean error instead of a silent panic.
+            match main_thread::query(f).await {
+                Some(any) => Ok(any),
+                None => Err(DispatchError::ShutDown),
             }
         })
-        .await
-        .unwrap_or(0)
     }
+}
 
-    async fn remove_marker(&self, _project: ProjectContext, id: u32) {
-        debug!("ReaperMarker: remove_marker {}", id);
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::delete_project_marker(low, ReaperProjectContext::CurrentProject, id as i32, false);
-        });
+// ── Backend singleton ──────────────────────────────────────────────────
+
+/// REAPER backend identity. Stateless — project context flows through
+/// each method call. Mount with `marker::serve(Reaper)` (and the
+/// per-service `serve` of every other trait `Reaper` impls).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Reaper;
+
+impl HasDispatcher for Reaper {
+    type Dispatcher = ReaperMainThreadDispatcher;
+
+    fn dispatcher(&self) -> Self::Dispatcher {
+        ReaperMainThreadDispatcher
     }
+}
 
-    async fn move_marker(&self, _project: ProjectContext, id: u32, position: f64) {
-        debug!("ReaperMarker: move_marker {} to {}", id, position);
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::set_project_marker(low, id as i32, false, position, 0.0, None);
-        });
-    }
+// ── Markers impl ───────────────────────────────────────────────────────
 
-    async fn rename_marker(&self, _project: ProjectContext, id: u32, name: String) {
-        debug!("ReaperMarker: rename_marker {} to '{}'", id, name);
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            if let Ok(cname) = CString::new(name) {
-                sw::set_project_marker(low, id as i32, false, -1.0, 0.0, Some(&cname));
-            }
-        });
-    }
+impl Markers for Reaper {
+    fn all(&self, project: ProjectContext) -> Vec<Marker> {
+        let reaper = ReaperHigh::get();
+        let medium = reaper.medium_reaper();
+        let low = medium.low();
+        let ctx = resolve_project_context(&project);
+        let mut markers = Vec::new();
 
-    async fn set_marker_color(&self, _project: ProjectContext, id: u32, color: u32) {
-        debug!("ReaperMarker: set_marker_color {} to {}", id, color);
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let reaper_ctx = ReaperProjectContext::CurrentProject;
-            let total_count = medium.count_project_markers(reaper_ctx).total_count;
-            let reaper_color = (color | 0x01000000) as i32;
-
-            for idx in 0..total_count {
-                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                    if let Some(info) = result
-                        && info.region_end_position.is_none()
-                        && info.id.get() == id
-                        && let Ok(name) = CString::new(info.name.to_string())
-                    {
-                        sw::set_project_marker_by_index2(
-                            low,
-                            reaper_ctx,
-                            idx as i32,
-                            false,
+        let total_count = medium.count_project_markers(ctx).total_count;
+        for idx in 0..total_count {
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                if let Some(info) = result
+                    && info.region_end_position.is_none()
+                {
+                    let id = info.id.get();
+                    let lane = ruler_lanes::assigned_lane(low, ctx, false, id)
+                        .or_else(|| ruler_lanes::get_marker_lane(low, ctx, idx));
+                    markers.push(Marker {
+                        id: Some(id),
+                        position: Position::from_time(TimePosition::from_seconds(
                             info.position.get(),
-                            0.0,
-                            id as i32,
-                            Some(&name),
-                            reaper_color,
-                            0,
-                        );
-                    }
-                });
-            }
-        });
-    }
-
-    // =========================================================================
-    // Navigation Methods
-    // =========================================================================
-
-    async fn goto_next_marker(&self, _project: ProjectContext) {
-        debug!("ReaperMarker: goto_next_marker");
-        main_thread::run(|| {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            // 40173: Markers: Go to next marker/project end
-            medium.main_on_command_ex(
-                reaper_medium::CommandId::new(40173),
-                0,
-                ReaperProjectContext::CurrentProject,
-            );
-        });
-    }
-
-    async fn goto_previous_marker(&self, _project: ProjectContext) {
-        debug!("ReaperMarker: goto_previous_marker");
-        main_thread::run(|| {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            // 40172: Markers: Go to previous marker/project start
-            medium.main_on_command_ex(
-                reaper_medium::CommandId::new(40172),
-                0,
-                ReaperProjectContext::CurrentProject,
-            );
-        });
-    }
-
-    async fn add_marker_in_lane(
-        &self,
-        project: ProjectContext,
-        position: f64,
-        name: String,
-        lane: u32,
-    ) -> u32 {
-        debug!(
-            "ReaperMarker: add_marker_in_lane '{}' at {} in lane {}",
-            name, position, lane
-        );
-        let id = self.add_marker(project.clone(), position, name).await;
-        if id != 0 {
-            // Find the enumeration index for the newly created marker and set its lane
-            main_thread::run(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                let low = medium.low();
-                let reaper_ctx = ReaperProjectContext::CurrentProject;
-                let count_result = medium.count_project_markers(reaper_ctx);
-                let total_count = count_result.total_count;
-
-                for idx in 0..total_count {
-                    medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                        if let Some(info) = result
-                            && info.region_end_position.is_none()
-                            && info.id.get() == id
-                        {
-                            if ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane) {
-                                ruler_lanes::remember_assigned_lane(
-                                    low, reaper_ctx, false, id, lane,
-                                );
-                            }
-                        }
+                        )),
+                        name: info.name.to_string(),
+                        color: {
+                            let c = info.color.to_raw();
+                            if c != 0 { Some(c as u32) } else { None }
+                        },
+                        guid: None,
+                        lane,
                     });
                 }
             });
         }
-        id
-    }
 
-    async fn set_marker_lane(&self, _project: ProjectContext, id: u32, lane: Option<u32>) {
-        debug!("ReaperMarker: set_marker_lane id={id} lane={lane:?}");
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let reaper_ctx = ReaperProjectContext::CurrentProject;
-            let total_count = medium.count_project_markers(reaper_ctx).total_count;
-            // None → lane 0 (REAPER's default lane).
-            let lane_value = lane.unwrap_or(0);
-            for idx in 0..total_count {
-                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                    if let Some(info) = result
-                        && info.region_end_position.is_none()
-                        && info.id.get() == id
-                    {
-                        if ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value) {
-                            ruler_lanes::remember_assigned_lane(
-                                low, reaper_ctx, false, id, lane_value,
-                            );
-                        }
-                    }
-                });
-            }
+        markers.sort_by(|a, b| {
+            a.position_seconds()
+                .partial_cmp(&b.position_seconds())
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
-    }
-
-    async fn get_markers_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Marker> {
-        let markers = self.get_markers(project).await;
         markers
-            .into_iter()
-            .filter(|m| m.lane == Some(lane))
-            .collect()
     }
 
-    async fn goto_marker(&self, _project: ProjectContext, id: u32) {
-        debug!("ReaperMarker: goto_marker {}", id);
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            medium.go_to_marker(
-                ReaperProjectContext::CurrentProject,
-                BookmarkRef::Id(reaper_medium::BookmarkId::new(id as _)),
-            );
-        });
+    fn get(&self, project: ProjectContext, id: u32) -> Option<Marker> {
+        self.all(project).into_iter().find(|m| m.id == Some(id))
     }
 
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerEvent>) {
-        info!("ReaperMarker::subscribe() - starting marker stream");
-
-        // Clone self for the spawned task
-        let this = self.clone();
-
-        // Spawn the streaming loop so this method returns immediately
-        // (vox needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
-            // Send initial state
-            let markers = this.get_markers(project.clone()).await;
-            if tx
-                .send(MarkerEvent::MarkersChanged(markers.clone()))
-                .await
-                .is_err()
-            {
-                debug!("ReaperMarker::subscribe() - client disconnected during initial send");
-                return;
-            }
-
-            // Poll for changes at 60Hz
-            let mut last_markers = markers;
-
-            loop {
-                tokio::time::sleep(Duration::from_micros(16667)).await;
-
-                let current_markers = this.get_markers(project.clone()).await;
-                if current_markers != last_markers {
-                    if tx
-                        .send(MarkerEvent::MarkersChanged(current_markers.clone()))
-                        .await
-                        .is_err()
-                    {
-                        debug!("ReaperMarker::subscribe() - client disconnected");
-                        break;
-                    }
-                    last_markers = current_markers;
+    fn count(&self, project: ProjectContext) -> u32 {
+        let medium = ReaperHigh::get().medium_reaper();
+        let ctx = resolve_project_context(&project);
+        let total = medium.count_project_markers(ctx).total_count;
+        let mut n = 0u32;
+        for idx in 0..total {
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                if let Some(info) = result
+                    && info.region_end_position.is_none()
+                {
+                    n += 1;
                 }
-            }
-
-            info!("ReaperMarker::subscribe() - stream ended");
-        });
+            });
+        }
+        n
     }
+
+    fn add(&self, project: ProjectContext, position: f64, name: &str) -> DawResult<u32> {
+        let ctx = resolve_project_context(&project);
+        let medium = ReaperHigh::get().medium_reaper();
+        let pos = PositionInSeconds::new(position)
+            .map_err(|e| DawError::operation_failed(format!("invalid position: {e:?}")))?;
+        let id = medium
+            .add_project_marker_2(ctx, MarkerOrRegionPosition::Marker(pos), name, None, None)
+            .map_err(|e| DawError::operation_failed(format!("add marker failed: {e:?}")))?;
+        Ok(id)
+    }
+
+    fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
+        let ctx = resolve_project_context(&project);
+        let low = ReaperHigh::get().medium_reaper().low();
+        sw::delete_project_marker(low, ctx, id as i32, false);
+        Ok(())
+    }
+
+    fn set_position(&self, _project: ProjectContext, id: u32, position: f64) -> DawResult<()> {
+        let low = ReaperHigh::get().medium_reaper().low();
+        sw::set_project_marker(low, id as i32, false, position, 0.0, None);
+        Ok(())
+    }
+
+    fn rename(&self, _project: ProjectContext, id: u32, name: &str) -> DawResult<()> {
+        let low = ReaperHigh::get().medium_reaper().low();
+        let cname = CString::new(name)
+            .map_err(|e| DawError::operation_failed(format!("invalid name: {e}")))?;
+        sw::set_project_marker(low, id as i32, false, -1.0, 0.0, Some(&cname));
+        Ok(())
+    }
+
+    fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()> {
+        let ctx = resolve_project_context(&project);
+        let medium = ReaperHigh::get().medium_reaper();
+        let low = medium.low();
+        let total_count = medium.count_project_markers(ctx).total_count;
+        let reaper_color = (color | 0x01000000) as i32;
+
+        let mut found = false;
+        for idx in 0..total_count {
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                if let Some(info) = result
+                    && info.region_end_position.is_none()
+                    && info.id.get() == id
+                    && let Ok(name) = CString::new(info.name.to_string())
+                {
+                    sw::set_project_marker_by_index2(
+                        low,
+                        ctx,
+                        idx as i32,
+                        false,
+                        info.position.get(),
+                        0.0,
+                        id as i32,
+                        Some(&name),
+                        reaper_color,
+                        0,
+                    );
+                    found = true;
+                }
+            });
+            if found {
+                break;
+            }
+        }
+        if !found {
+            return Err(DawError::not_found("Marker", &id.to_string()));
+        }
+        Ok(())
+    }
+}
+
+// ── Compile-time tripwires ─────────────────────────────────────────────
+//
+// Fail the build (here, with an obvious diagnostic) if the wiring
+// contract slips — these are cheaper to maintain than catching the
+// same problem at every `marker::serve(Reaper)` callsite.
+
+#[allow(dead_code)]
+fn _assert_reaper_is_arc_safe() {
+    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+    assert_send_sync_static::<Reaper>();
+}
+
+#[allow(dead_code)]
+fn _assert_dispatcher_impls_trait() {
+    fn assert_dispatcher<T: Dispatcher>() {}
+    assert_dispatcher::<ReaperMainThreadDispatcher>();
+}
+
+#[allow(dead_code)]
+fn _assert_reaper_has_dispatcher() {
+    fn assert_has_dispatcher<T: HasDispatcher>() {}
+    assert_has_dispatcher::<Reaper>();
+}
+
+#[allow(dead_code)]
+fn _erase_unused() {
+    // `Any` is referenced by `BoxedAny` indirectly; quiet the lint
+    // without a top-of-file `#[allow]`.
+    let _: Option<&dyn Any> = None;
 }

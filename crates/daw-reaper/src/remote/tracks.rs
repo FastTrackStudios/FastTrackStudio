@@ -73,32 +73,6 @@ impl<'a> TracksTrait for RemoteTracks<'a> {
         })
     }
 
-    fn add(&self, name: &str, at_index: Option<u32>) -> DawResult<String> {
-        let guid = self.guid.clone();
-        let name = name.to_string();
-        dispatch(self.remote, move || {
-            let mt = main_thread()?;
-            mt.project(&guid)?.tracks().add(&name, at_index)
-        })
-    }
-
-    fn remove(&self, guid: &str) -> DawResult<()> {
-        let proj_guid = self.guid.clone();
-        let track_guid = guid.to_string();
-        dispatch(self.remote, move || {
-            let mt = main_thread()?;
-            mt.project(&proj_guid)?.tracks().remove(&track_guid)
-        })
-    }
-
-    fn remove_all(&self) -> DawResult<()> {
-        let guid = self.guid.clone();
-        dispatch(self.remote, move || {
-            let mt = main_thread()?;
-            mt.project(&guid)?.tracks().remove_all()
-        })
-    }
-
     fn master(&self) -> DawResult<Track> {
         let guid = self.guid.clone();
         dispatch(self.remote, move || {

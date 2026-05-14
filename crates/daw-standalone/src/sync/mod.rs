@@ -11,27 +11,22 @@
 //! async services have their own per-service locks and entry points and would
 //! need broader surgery to converge.
 
-mod action_registry;
-mod audio_engine;
 mod daw;
 mod ext_state;
 mod fx_chains;
 mod fx_params;
 mod items;
-mod markers;
-mod plugin_loader;
+// markers ported to architect::rpc — `impl Markers for Standalone`
+// lives at `crate::marker`. The borrowed `StandaloneMarkers<'a>` view
+// retired with the port.
 mod project;
 mod regions;
 mod routing;
 mod takes;
 mod tempo_map;
-mod toolbar;
 mod tracks;
 mod transport;
-mod window_geometry;
 
-pub use action_registry::{ActionEntry, StandaloneActionRegistry};
-pub use audio_engine::StandaloneAudioEngine;
 pub use daw::{
     FxChainKey, FxEntry, ItemEntry, ProjectState, Standalone, StandaloneState, TakeList,
 };
@@ -39,14 +34,10 @@ pub use ext_state::StandaloneExtState;
 pub use fx_chains::StandaloneFxChains;
 pub use fx_params::StandaloneFxParams;
 pub use items::StandaloneItems;
-pub use markers::StandaloneMarkers;
-pub use plugin_loader::StandalonePluginLoader;
 pub use project::StandaloneProject;
 pub use regions::StandaloneRegions;
 pub use routing::StandaloneRouting;
 pub use takes::StandaloneTakes;
 pub use tempo_map::StandaloneTempoMap;
-pub use toolbar::{StandaloneToolbar, ToolbarEntry, ToolbarTargetKey};
 pub use tracks::StandaloneTracks;
 pub use transport::StandaloneTransport;
-pub use window_geometry::StandaloneWindowGeometry;

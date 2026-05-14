@@ -311,26 +311,22 @@ pub enum AutomationOp {
 // Marker operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Markers` trait. The
+// in-range / next / previous / goto / lane variants that used to live
+// here came from the old `MarkerService` and are retired alongside
+// the port — callers reconstruct them by filtering `GetMarkers` (for
+// queries) or call transport ops directly (for goto-style navigation).
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum MarkerOp {
     GetMarkers(ProjectArg),
     GetMarker(ProjectArg, u32),
-    GetMarkersInRange(ProjectArg, f64, f64),
-    GetNextMarker(ProjectArg, f64),
-    GetPreviousMarker(ProjectArg, f64),
     MarkerCount(ProjectArg),
     AddMarker(ProjectArg, f64, String),
     RemoveMarker(ProjectArg, u32),
     MoveMarker(ProjectArg, u32, f64),
     RenameMarker(ProjectArg, u32, String),
     SetMarkerColor(ProjectArg, u32, u32),
-    GotoNextMarker(ProjectArg),
-    GotoPreviousMarker(ProjectArg),
-    GotoMarker(ProjectArg, u32),
-    AddMarkerInLane(ProjectArg, f64, String, u32),
-    SetMarkerLane(ProjectArg, u32, Option<u32>),
-    GetMarkersInLane(ProjectArg, u32),
 }
 
 // =============================================================================
@@ -1105,21 +1101,12 @@ fn marker_op_project_arg(op: &MarkerOp) -> &ProjectArg {
     match op {
         MarkerOp::GetMarkers(p)
         | MarkerOp::GetMarker(p, _)
-        | MarkerOp::GetMarkersInRange(p, _, _)
-        | MarkerOp::GetNextMarker(p, _)
-        | MarkerOp::GetPreviousMarker(p, _)
         | MarkerOp::MarkerCount(p)
         | MarkerOp::AddMarker(p, _, _)
         | MarkerOp::RemoveMarker(p, _)
         | MarkerOp::MoveMarker(p, _, _)
         | MarkerOp::RenameMarker(p, _, _)
-        | MarkerOp::SetMarkerColor(p, _, _)
-        | MarkerOp::GotoNextMarker(p)
-        | MarkerOp::GotoPreviousMarker(p)
-        | MarkerOp::GotoMarker(p, _)
-        | MarkerOp::AddMarkerInLane(p, _, _, _)
-        | MarkerOp::SetMarkerLane(p, _, _)
-        | MarkerOp::GetMarkersInLane(p, _) => p,
+        | MarkerOp::SetMarkerColor(p, _, _) => p,
     }
 }
 

@@ -30,7 +30,8 @@ mod ext_state;
 mod fx_chains;
 mod fx_params;
 mod items;
-mod markers;
+// `Markers` lives in `crate::marker::service` now — one canonical
+// declaration alongside `Marker` itself. See `marker/service.rs`.
 mod plugin_loader;
 mod project;
 mod regions;
@@ -49,14 +50,12 @@ pub use ext_state::ExtState;
 pub use fx_chains::FxChains;
 pub use fx_params::FxParams;
 pub use items::Items;
-pub use markers::Markers;
-// Re-export the architect-emitted RPC face. `MarkersHost` is the
-// server-side bridge (wraps a backend + Dispatcher); `MarkersRpc` is
-// the hidden async mirror trait the bridge implements; `MarkersClient`
-// is vox's auto-generated caller proxy. See `architect/DESIGN.md`.
+// `Markers` and its architect-emitted RPC face (`MarkersRpc`,
+// `MarkersClient`, `serve`) are re-exported from `crate::marker`,
+// which is the canonical home for everything marker-related.
+pub use crate::marker::{Markers, MarkersRpc};
 #[cfg(feature = "vox")]
-pub use markers::MarkersClient;
-pub use markers::{MarkersHost, MarkersRpc};
+pub use crate::marker::{MarkersClient, serve as serve_markers};
 pub use plugin_loader::PluginLoader;
 pub use project::Project;
 pub use regions::Regions;

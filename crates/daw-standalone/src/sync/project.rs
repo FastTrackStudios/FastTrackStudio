@@ -7,7 +7,6 @@ use super::ext_state::StandaloneExtState;
 use super::fx_chains::StandaloneFxChains;
 use super::fx_params::StandaloneFxParams;
 use super::items::StandaloneItems;
-use super::markers::StandaloneMarkers;
 use super::regions::StandaloneRegions;
 use super::routing::StandaloneRouting;
 use super::takes::StandaloneTakes;
@@ -34,10 +33,6 @@ impl<'a> Project for StandaloneProject<'a> {
         Self: 'b;
     type Regions<'b>
         = StandaloneRegions<'b>
-    where
-        Self: 'b;
-    type Markers<'b>
-        = StandaloneMarkers<'b>
     where
         Self: 'b;
     type TempoMap<'b>
@@ -87,10 +82,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn regions(&self) -> Self::Regions<'_> {
         StandaloneRegions::new(self.daw, self.guid.clone())
-    }
-
-    fn markers(&self) -> Self::Markers<'_> {
-        StandaloneMarkers::new(self.daw, self.guid.clone())
     }
 
     fn tempo_map(&self) -> Self::TempoMap<'_> {
