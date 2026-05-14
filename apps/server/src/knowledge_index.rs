@@ -24,6 +24,7 @@ use std::sync::{Arc, RwLock};
 
 use architect::{Filter, Page as PageWindow, Sort};
 use knowledge_crdt::{BlockRepoLoro, PageRepoLoro};
+use knowledge_proto::property_schema::{PropertySchemaRegistry, PropertyType};
 use knowledge_proto::{BlockRepo, PageRepo};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
@@ -100,16 +101,32 @@ pub struct KnowledgeIndexer {
     pub frontmatter: FrontmatterIndex,
     pub backlinks: BacklinkIndex,
     pub basenames: MemoryBasenameIndex,
+    pub schemas: Arc<PropertySchemaRegistry>,
     pages: PageRepoLoro,
     blocks: BlockRepoLoro,
 }
 
 impl KnowledgeIndexer {
     pub fn new(pages: PageRepoLoro, blocks: BlockRepoLoro, basenames: MemoryBasenameIndex) -> Self {
+        Self::with_schemas(
+            pages,
+            blocks,
+            basenames,
+            Arc::new(PropertySchemaRegistry::with_builtins()),
+        )
+    }
+
+    pub fn with_schemas(
+        pages: PageRepoLoro,
+        blocks: BlockRepoLoro,
+        basenames: MemoryBasenameIndex,
+        schemas: Arc<PropertySchemaRegistry>,
+    ) -> Self {
         Self {
             frontmatter: FrontmatterIndex::new(),
             backlinks: BacklinkIndex::new(),
             basenames,
+            schemas,
             pages,
             blocks,
         }
@@ -137,20 +154,34 @@ impl KnowledgeIndexer {
 
         for page in &pages.items {
             basename_to_page.insert(page.basename.clone(), page.id);
-            if let Ok(JsonValue::Object(map)) =
+            let Ok(JsonValue::Object(map)) =
                 serde_json::from_str::<JsonValue>(&page.frontmatter_json)
-            {
-                for (k, v) in &map {
-                    let val_str = json_value_to_index_string(v);
-                    if let Some(s) = val_str {
-                        frontmatter
-                            .entry((k.clone(), s.clone()))
-                            .or_default()
-                            .insert(page.id);
-                        if k == "auth_user_id" {
-                            if let Ok(uid) = Uuid::parse_str(&s) {
-                                basename_users.insert(page.basename.clone(), uid);
-                            }
+            else {
+                continue;
+            };
+            // What kind is this page? Drives schema-aware
+            // decomposition. Fallback: no kind = treat every value
+            // as a scalar (legacy behavior).
+            let page_kind = map.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            let schema = if page_kind.is_empty() {
+                None
+            } else {
+                self.schemas.get(page_kind)
+            };
+            for (k, v) in &map {
+                // Find the declared property type, if any.
+                let declared = schema
+                    .as_ref()
+                    .and_then(|s| s.properties.iter().find(|p| &p.key == k))
+                    .map(|p| p.ty.clone());
+                index_value(&mut frontmatter, page.id, k, v, declared.as_ref());
+
+                // Side-channel: harvest `auth_user_id` for the
+                // basename index.
+                if k == "auth_user_id" {
+                    if let Some(s) = v.as_str() {
+                        if let Ok(uid) = Uuid::parse_str(s) {
+                            basename_users.insert(page.basename.clone(), uid);
                         }
                     }
                 }
@@ -190,9 +221,84 @@ fn json_value_to_index_string(v: &JsonValue) -> Option<String> {
         JsonValue::Number(n) => Some(n.to_string()),
         JsonValue::Bool(b) => Some(b.to_string()),
         JsonValue::Null => None,
-        // Arrays + objects: skip for the index. A Bases-query layer
-        // can decompose them later.
+        // Arrays + objects: skip for the legacy index path. The
+        // schema-aware decomposition in `index_value` handles these.
         _ => None,
+    }
+}
+
+/// Schema-aware indexing — Phase 6.5a upgrade.
+///
+/// - For `Tags` / `Aliases` / `LinkList` types (lists of strings),
+///   index each element under `(key, element)`.
+/// - For `Struct` / `StructList` types, index nested fields under
+///   `(key.field, value)` paths (one level deep — deeper nesting
+///   stays opaque until Phase 6.6).
+/// - For scalar types, fall back to the legacy stringification.
+/// - When `declared` is `None`, mirror legacy behavior for scalars
+///   AND fall through to list-element decomposition so untyped
+///   pages still index their array values.
+fn index_value(
+    frontmatter: &mut HashMap<(String, String), HashSet<Uuid>>,
+    page_id: Uuid,
+    key: &str,
+    value: &JsonValue,
+    declared: Option<&PropertyType>,
+) {
+    use PropertyType::*;
+    let list_like = matches!(
+        declared,
+        Some(Tags) | Some(Aliases) | Some(LinkList) | Some(Multitext)
+    );
+    let struct_like = matches!(declared, Some(Struct { .. }) | Some(StructList { .. }));
+    match value {
+        // Scalars first — typed or untyped, same logic.
+        JsonValue::String(_) | JsonValue::Number(_) | JsonValue::Bool(_) => {
+            if let Some(s) = json_value_to_index_string(value) {
+                frontmatter
+                    .entry((key.to_string(), s))
+                    .or_default()
+                    .insert(page_id);
+            }
+        }
+        JsonValue::Null => {}
+        JsonValue::Array(items) => {
+            if list_like || declared.is_none() {
+                // Decompose: one entry per element. Skip non-scalar
+                // elements (deeper nesting is opaque).
+                for el in items {
+                    if let Some(s) = json_value_to_index_string(el) {
+                        frontmatter
+                            .entry((key.to_string(), s))
+                            .or_default()
+                            .insert(page_id);
+                    } else if struct_like {
+                        if let JsonValue::Object(map) = el {
+                            index_struct_fields(frontmatter, page_id, key, map);
+                        }
+                    }
+                }
+            }
+        }
+        JsonValue::Object(map) => {
+            if struct_like || declared.is_none() {
+                index_struct_fields(frontmatter, page_id, key, map);
+            }
+        }
+    }
+}
+
+fn index_struct_fields(
+    frontmatter: &mut HashMap<(String, String), HashSet<Uuid>>,
+    page_id: Uuid,
+    parent_key: &str,
+    map: &serde_json::Map<String, JsonValue>,
+) {
+    for (child_key, child_value) in map {
+        if let Some(s) = json_value_to_index_string(child_value) {
+            let path = format!("{parent_key}.{child_key}");
+            frontmatter.entry((path, s)).or_default().insert(page_id);
+        }
     }
 }
 
