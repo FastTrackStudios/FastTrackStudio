@@ -625,48 +625,326 @@ should depend on a future phase.
 - **Test**: a client subscribed only to `kind: task` doesn't
   receive bytes when `kind: recording_session` blocks change.
 
-## 14. Open questions
+## 14. Decisions (formerly open questions)
 
-Things I want your input on before Phase 1 starts:
+These were originally open; resolved in a design pass and locked
+in here so subsequent code doesn't re-litigate them.
 
-1. **Object store v0 backend.** Filesystem under
-   `${TASK_DATA_DIR}/attachments/` is the simplest, but the
-   per-server NixOS module would need to mount this directory.
-   Alternative: SQLite BLOB for v0 with no separate storage. Slower
-   but zero ops burden. Which?
+### 14.1 Object store: pluggable, Nextcloud-first
 
-2. **Server ID.** Each server needs a stable ID for tokens to
-   carry. Options: UUID generated at install time + persisted; or
-   derived from the public key. Public-key-derived is nicer
-   because clients can verify a token was issued by the server
-   they think it was.
+`ObjectStore` is a Rust trait with multiple backends:
 
-3. **Architect-auth's storage backend.** It uses SeaORM. Same
-   database as the CRDT persistence, or a separate file?
-   Recommendation: separate file (`${DATA_DIR}/auth.db` vs
-   `${DATA_DIR}/crdt.db`) so each can be backed up / restored
-   independently.
+```rust
+trait ObjectStore {
+    async fn initiate_upload(&self, ...) -> UploadTicket;
+    async fn get_download_url(&self, id, valid_for) -> DownloadUrl;
+    async fn delete(&self, id) -> Result<()>;
+}
+```
 
-4. **ACL conflict resolution.** Loro's default merges work for
-   adds. If two admins concurrently *revoke* someone's access,
-   that's also fine (idempotent). The hard case: admin A grants
-   `[[Bob]]` write access; concurrently admin B revokes Bob.
-   Last-write-wins per peer means one of them silently loses.
-   Acceptable for v0, but worth flagging.
+V0 backends:
 
-5. **Schema for `acl:` frontmatter.** I sketched it above. Does
-   that shape work, or do you want explicit per-resource scopes
-   (e.g. "Alice can read attachments but not tasks")?
+- **`FsObjectStore`** — `${DATA_DIR}/attachments/<project>/<hash>`. Axum
+  serves signed URLs valid for 5 minutes. For dev + tiny deploys.
+- **`NextcloudWebDavObjectStore`** — uploads via WebDAV, downloads via
+  Nextcloud's public-link sharing (OCS API). Tracks Nextcloud
+  share-id alongside the Loro entity. **This is the recommended
+  production backend.** It means Task focuses on Knowledge +
+  collab CRDT; Nextcloud handles file storage + public sharing +
+  expiration + password-protected links + everything Nextcloud
+  already does well.
+- **`S3CompatObjectStore`** — for users who already have MinIO /
+  Backblaze / AWS. Phase 7 v1.
 
-6. **Anonymous user discoverability.** When an anonymous-share-link
-   user makes an edit, do other users see "share-link-abc123"
-   attribution, or a friendlier "Anonymous guest"? Server can
-   substitute on display while keeping the stable id in Loro.
+The wider implication: **Nextcloud is a first-class peer**, not
+just a file backend. A Task server may be configured to:
 
-7. **Cross-server wiki link precedence.** If `[[Cody]]` resolves
-   on multiple connected servers, which wins? Recommendation:
-   first explicit hit (`[[personal:Cody]]`) wins; bare names
-   resolve to the currently-focused server.
+- Use Nextcloud OIDC as its primary auth provider (instead of
+  architect-auth-managed accounts).
+- Sync Knowledge `kind: task` blocks to Nextcloud Tasks (CalDAV).
+- Sync Knowledge `kind: event` pages to Nextcloud Calendar.
+- Store attachments via Nextcloud WebDAV.
+- Generate public share links via Nextcloud OCS (the anonymous
+  share-link primitive in §5 becomes a Nextcloud share token,
+  which works in any client, not just ours).
+
+A Task server with no Nextcloud configured falls back to
+filesystem-backed everything (FsObjectStore + architect-auth
+local accounts). Pluggability all the way down.
+
+### 14.2 Server ID — derived from public key
+
+Ed25519 keypair generated at first boot, persisted to
+`${DATA_DIR}/server.key`. Server ID is the public key's hex
+encoding (or its SHA-256 hash, truncated for friendliness).
+Clients verify capability tokens against this key. Rotating the
+keypair = "new server" identity from clients' POV — they re-pair.
+
+### 14.3 Auth as its own microservice
+
+Architect-auth runs as a separate process with its own database
+(`${DATA_DIR}/auth.db`). Task-server holds an `AuthClient` that
+talks to it over vox RPC. Architect-auth already supports `vox`
+as a feature. Sessions are cached on Task-server's side so the
+hot path is one in-memory check, not a network round-trip.
+
+For dev / small deployments, both processes run on the same
+machine — communication over `localhost`. For scale, separate
+hosts. **The architecture pretends they're separate from day one
+to make the scale-out boring.**
+
+### 14.4 ACL conflict resolution
+
+Loro's default last-write-wins per-peer is fine for v0. The
+edge case (admin A grants, admin B revokes concurrently) is
+documented but not addressed in v0. Admins should coordinate.
+Add tombstones in v2 if it becomes a real problem.
+
+### 14.5 ACL frontmatter shape — YAML
+
+```yaml
+acl:
+  # Symbolic groups that resolve at runtime.
+  read: ["@org-members", "[[Cody]]"]
+  write: ["[[Cody]]", "[[Alice]]"]
+  admin: ["[[Cody]]"]
+
+  # Active share tokens (server maintains the source of truth in
+  # the project doc's `share_links` root container, but the
+  # frontmatter can mirror the active ones for visibility).
+  share_links:
+    - id: 4f3a-...
+      scope: read
+      created_by: "[[Cody]]"
+      expires: 2026-06-01T00:00:00Z
+      label: "Acme review"
+```
+
+Symbolic groups: `@org-members`, `@org-admins`, `@everyone`
+(authenticated, any org), `@anyone` (truly public — accepts
+anonymous tokens too).
+
+### 14.6 Anonymous edit tracking + claim flow
+
+Each anonymous share token gets a stable Loro peer id of the
+form `share-link-<token-uuid>`. All edits under that token bear
+that peer in Loro's history.
+
+When the anonymous user later creates a real account:
+
+```rust
+#[vox::service]
+trait AnonymousClaim {
+    /// User has signed in (architect-auth session). They had
+    /// prior edits via share link `token_id`. Claim them.
+    async fn claim_anonymous_session(
+        &self,
+        token_id: Uuid,
+    ) -> Result<ClaimSummary, ClaimError>;
+}
+```
+
+The server records `(peer_id = share-link-<token_id>, user_id,
+claimed_at)` in an `anonymous_claims` table. The display layer
+uses this table to substitute the friendly user name for the
+share-link peer id when rendering history.
+
+Loro's history is immutable — we don't rewrite the peer in the
+doc. The claim is metadata applied at render time. Per-server:
+claiming on Server A doesn't claim on Server B (different
+tokens, different histories).
+
+Edge case: a single share link might be used by multiple
+humans (URL was forwarded). First-claim-wins; subsequent
+claimers are told the session is already attributed. Admin can
+manually reassign via a privileged endpoint if needed.
+
+### 14.7 Cross-server wiki links — hybrid
+
+Three syntaxes, in order of intent:
+
+| Syntax | Resolves to | Scope |
+|---|---|---|
+| `[[Acme]]` | Page in **current server's** vaults | Local |
+| `[[@work/Acme]]` | Page on server with local alias `work` | Cross-server, alias-mapped |
+| `[[https://server.example/page/<uuid>]]` | Page by absolute URL | Cross-server, max portable |
+
+**Key design rules:**
+
+1. **Resolution is 100% client-side.** Servers never tell each
+   other about cross-server links. No federation protocol, no
+   leaked data.
+2. **Aliases live in the client's `ServerRegistry`.** When you add
+   a server, you choose a short alias for it (`work`, `studio`,
+   etc.). The alias is local to your client install — different
+   collaborators may have different aliases for the same server.
+3. **Backlinks are server-local.** A page on server A does NOT
+   see "incoming wiki links from server B." Backlinks are an
+   internal-to-this-server index.
+4. **Export to markdown** preserves syntax as-is. Bare local
+   names are local; `@alias/` is recipient-mapped; absolute URLs
+   work for anyone.
+5. **Broken cross-server links** render like Obsidian's
+   "non-existent page" indicator — clickable, with an option to
+   create on the target server if you have permission.
+
+The `LinkRef` proto type extends to carry `server_alias:
+Option<String>` populated when the source uses `@alias/`. The
+block's `refs_json` stores this so the renderer can dispatch:
+
+```rust
+match link.server_alias.as_deref() {
+    None => resolve_local(link.target_linkpath, current_vault),
+    Some(alias) => {
+        let server_url = client_registry.lookup_alias(alias)?;
+        resolve_remote(server_url, link.target_linkpath)
+    }
+}
+```
+
+When the target server is offline, the link renders as
+"unresolved (alias `@work` offline)" — clickable when the server
+comes back online.
+
+### 14.8 Nextcloud interop scope
+
+Beyond the object-store note in §14.1, the Task ↔ Nextcloud
+interop matrix:
+
+| Concern | Nextcloud handles | Task handles |
+|---|---|---|
+| **Files** (media, exports) | Storage, versioning, public links | Reference (path + sha + nextcloud-share-id) |
+| **Auth** | OIDC provider (if configured) | Session token, ACL resolution against the OIDC user_id |
+| **Calendar events** | CalDAV storage | Mirror `kind: event` pages → VTODO/VEVENT |
+| **Tasks (CalDAV)** | VTODO storage | Mirror `kind: task` blocks → VTODO |
+| **Email** | SMTP / IMAP, Mail app, address book | Inbox feature (deferred); `kind: email_thread` pages |
+| **Public sharing** | OCS public-link API | Generate via OCS; embed link in project page |
+| **User directory** | Nextcloud users + groups | `[[Person]]` pages with `nextcloud_user_id` frontmatter |
+
+Each integration is opt-in. A Task server with no Nextcloud
+configured is fully functional standalone — it just runs
+filesystem-backed and architect-auth-managed.
+
+## 14.9 Communication as Knowledge (chat, email, decisions)
+
+High-volume streamy data (chat threads, email) fits the
+Knowledge model **if you set the granularity right**:
+
+- **A conversation is one Page.** Frontmatter declares the kind:
+  `kind: chat_thread, source: slack` or `kind: email_thread`.
+- **Each message is one Block** on that page. Frontmatter
+  per-block: `sent_at`, `from: [[Person]]`, optional
+  `in_reply_to: <block-id>`.
+- **Block refs are message refs.** A task page can carry a
+  `derived_from: [[#^msg-7b2c]]` to a specific message.
+
+Volume is fine: Loro handles 10k+ blocks per doc; an extremely
+busy channel gets archived to a follow-up page. The whole
+conversation renders as one timeline.
+
+### Synthesis via agents (the bridge)
+
+The **agents feature** (deleted with main but worth resurrecting)
+is the bridge between raw conversations and structured project
+state:
+
+```
+agent runtime ── subscribes ──► chat_thread pages
+        │                      (vox WorkspaceSync,
+        │                       same as any other client)
+        ▼
+   LLM synthesis
+   per-batch
+        │
+        ▼
+   writes via apply_update:
+     - `kind: decision` blocks on the project page
+     - `kind: task` blocks with assignee/due
+     - wiki-links back to source messages
+```
+
+Raw transcript = audit trail. Synthesis = what humans read. The
+two live side by side — open a project page, see current state +
+recent decisions + open tasks, all sourced from conversation but
+distilled. Click any decision → see the original message thread.
+
+Agents are vox clients with privileged auth (architect-auth
+service accounts or API keys). They subscribe just like the UI.
+
+### Email + chat ingestion
+
+A separate **Bridge process** monitors IMAP / Slack / Discord /
+whatever. Same model as the agent runtime — vox client, talks
+to Task server.
+
+```
+IMAP/Slack/...  →  Bridge  →  vox apply_update  →  Task server
+                              (creates/updates
+                               kind: email_thread
+                               or kind: chat_thread
+                               pages with new blocks)
+```
+
+Outgoing email: a `SendEmail` RPC the Bridge picks up and
+dispatches via SMTP. Outgoing chat: same shape, vendor-specific.
+
+When the server is configured with a Nextcloud (§14.8), the
+Bridge writes to Nextcloud Mail too so the email is reachable
+from any standard mail client.
+
+## 14.10 CLI + agent readability — primary design constraint
+
+**Everything users or agents interact with is markdown + YAML
+frontmatter.** No proprietary binary formats users have to
+parse. No schemas only the Task client understands. An LLM
+dropped into a vault with `grep`, `cat`, and `find` can do
+useful work without the Task client running.
+
+This is non-negotiable. Implications:
+
+1. **The Loro doc serializes to markdown deterministically.**
+   The `obsidian.rs` parser/serializer in `knowledge-proto` (~1100
+   lines) already does this. Export = render the doc as markdown
+   files. Import = parse markdown into Loro entities. Round-trip
+   stable.
+
+2. **Two equally-valid agent access modes.**
+
+   | Mode | Use case | Latency |
+   |---|---|---|
+   | **vox subscribe** | Interactive agent watching for changes | real-time |
+   | **CLI / file export** | Batch agent (nightly summarizer, weekly report) | minutes / on-demand |
+
+   Same data, different access pattern. An agent can be written
+   the simple way (parse markdown files) and upgraded to the
+   live way (vox subscribe) without rewriting business logic.
+
+3. **No hidden state.** Wiki-link resolution rules, ACL formats,
+   frontmatter conventions, `kind:` taxonomies — all documented
+   + readable. An agent shouldn't have to reverse-engineer
+   anything. Spec lives in markdown in the org vault.
+
+4. **CLI completeness matters.** The `task` binary must expose
+   every read path the UI does:
+
+   ```
+   task list-pages [--kind <k>] [--vault <v>]
+   task get-page <id-or-path> [--format markdown|json]
+   task put-page <path>                       # create/update
+   task search "<query>"                      # FTS over body
+   task graph --from <page>                   # outgoing links
+   task backlinks <page>                      # incoming links
+   task subscribe --doc <id>                  # tail changes
+   task export --vault <v> --out <dir>        # markdown dump
+   task import --path <dir>                   # markdown ingest
+   ```
+
+   Already partially there with `task new-task`, `task new-project`,
+   `task list`, `task set-done`. Round out in Phase 5/6.
+
+5. **Frontmatter conventions are part of the platform contract.**
+   Documented `kind:` taxonomy, recognized property names, ACL
+   schema — these belong in the spec, not buried in code.
 
 ## 15. What this is NOT
 
