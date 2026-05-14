@@ -12,9 +12,15 @@
 //! Phases 5+ land they migrate to Knowledge-vault-backed reads.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use architect::vox;
+use architect_auth::{
+    ArchitectAuth, AuthServiceDispatcher,
+    db::{AuthSeaOrmStorage, Migrator as AuthMigrator},
+    transport::vox::{AuthServerMiddleware, AuthVoxService},
+};
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
@@ -27,6 +33,8 @@ use project_proto::{
     DocId, ProjectRepoDispatcher, SyncError, TaskRepoDispatcher, UpdateBytes, WorkspaceSync,
     WorkspaceSyncDispatcher,
 };
+use sea_orm::Database;
+use sea_orm_migration::MigratorTrait;
 use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
@@ -139,6 +147,34 @@ fn doc_id_to_uuid(s: &str) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
+/// Auth state attached to the server. Holds an `ArchitectAuth`
+/// backed by its own SQLite — distinct from the CRDT persistence —
+/// per `plans/decentralized-foundation.md` §13 Phase 2.
+#[derive(Clone)]
+pub struct AuthState {
+    pub auth: ArchitectAuth<AuthSeaOrmStorage>,
+}
+
+impl AuthState {
+    /// Open the auth DB at the given URL, run migrations, build
+    /// `ArchitectAuth`. `secret` must be ≥32 bytes.
+    pub async fn open(db_url: &str, secret: &str) -> eyre::Result<Self> {
+        let db = Database::connect(db_url)
+            .await
+            .map_err(|e| eyre::eyre!("connect auth db `{db_url}`: {e}"))?;
+        AuthMigrator::up(&db, None)
+            .await
+            .map_err(|e| eyre::eyre!("auth migrations: {e}"))?;
+        let storage = AuthSeaOrmStorage::new(db);
+        let auth = ArchitectAuth::builder()
+            .secret(secret)
+            .storage(storage)
+            .build()
+            .map_err(|e| eyre::eyre!("build ArchitectAuth: {e}"))?;
+        Ok(Self { auth })
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub registry: DocRegistry,
@@ -149,10 +185,25 @@ pub struct AppState {
     pub project_repo: Arc<ProjectRepoLoro>,
     pub task_repo: Arc<TaskRepoLoro>,
     pub sync: WorkspaceSyncImpl,
+    pub auth: AuthState,
 }
 
 impl AppState {
+    /// Build app state with auth opened at the default XDG path
+    /// (`$XDG_DATA_HOME/task-server/auth.sqlite`, fallback
+    /// `~/.local/share/task-server/auth.sqlite`).
     pub async fn new<P: Persistence + 'static>(persistence: P) -> eyre::Result<Self> {
+        let auth_db_url = format!("sqlite://{}?mode=rwc", default_auth_db_path()?.display());
+        let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
+        Self::new_with_auth(persistence, auth).await
+    }
+
+    /// Build app state with explicit auth — used by tests that want
+    /// an in-memory auth DB.
+    pub async fn new_with_auth<P: Persistence + 'static>(
+        persistence: P,
+        auth: AuthState,
+    ) -> eyre::Result<Self> {
         let persistence: Arc<dyn Persistence> = Arc::new(persistence);
         let registry = DocRegistry::new(persistence.clone());
 
@@ -175,8 +226,29 @@ impl AppState {
             project_repo,
             task_repo,
             sync,
+            auth,
         })
     }
+}
+
+/// Dev default — replace via config in a later phase. Length-checked
+/// at build time so this fails loudly if shortened.
+const DEFAULT_AUTH_SECRET: &str = "task-server-auth-dev-secret-32+!";
+
+/// Resolve `$XDG_DATA_HOME/task-server/auth.sqlite` with the standard
+/// fallback. Creates parent directories if missing.
+pub fn default_auth_db_path() -> eyre::Result<PathBuf> {
+    let base = match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => PathBuf::from(v),
+        _ => {
+            let home = std::env::var("HOME")
+                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
+            PathBuf::from(home).join(".local").join("share")
+        }
+    };
+    let dir = base.join("task-server");
+    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("auth.sqlite"))
 }
 
 /// Server-side `WorkspaceSync` implementation. Routes every
@@ -303,6 +375,7 @@ async fn vox_ws_handler(
         let project_repo = (*state.project_repo).clone();
         let task_repo = (*state.task_repo).clone();
         let sync = state.sync.clone();
+        let auth = state.auth.auth.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "ProjectRepo" => {
@@ -315,6 +388,13 @@ async fn vox_ws_handler(
                 }
                 "WorkspaceSync" => {
                     connection.handle_with(WorkspaceSyncDispatcher::new(sync.clone()));
+                    Ok(())
+                }
+                "AuthService" => {
+                    connection.handle_with(
+                        AuthServiceDispatcher::new(AuthVoxService::new(auth.clone()))
+                            .with_middleware(AuthServerMiddleware),
+                    );
                     Ok(())
                 }
                 other => {

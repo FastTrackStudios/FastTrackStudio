@@ -8731,6 +8731,7 @@ dependencies = [
  "project-crdt",
  "project-proto",
  "sea-orm",
+ "sea-orm-migration",
  "sha2",
  "task-db",
  "tokio",

@@ -3,11 +3,64 @@
 //! Holds [`RemoteVoxConfig`] — endpoint resolution — and
 //! [`LiveSession`] — a synced local `CrdtDoc` over `WorkspaceSync`.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crdt::CrdtDoc;
 use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 use project_proto::{UpdateBytes, WorkspaceSyncClient};
+
+/// Per-server identity + session token, keyed by server URL.
+///
+/// Phase 2 (`plans/decentralized-foundation.md` §13): the client
+/// stores one session token per server it's connected to. Phase 8
+/// grows the persistence side (`servers.json` on native,
+/// IndexedDB on web); Phase 2 is in-memory only.
+///
+/// Not yet wired into the CLI command paths — the existing
+/// `RemoteVoxConfig::from_args` flow still threads the token via
+/// `--session-token`. The registry is the receiving end the
+/// federation UI (Phase 8) will write into.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ServerRegistry {
+    inner: Arc<Mutex<HashMap<String, ServerEntry>>>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct ServerEntry {
+    pub server_url: String,
+    pub session_token: Option<String>,
+}
+
+#[allow(dead_code)]
+impl ServerRegistry {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn upsert(&self, server_url: impl Into<String>, session_token: Option<String>) {
+        let url = server_url.into();
+        let entry = ServerEntry {
+            server_url: url.clone(),
+            session_token,
+        };
+        self.inner.lock().unwrap().insert(url, entry);
+    }
+
+    pub(crate) fn get(&self, server_url: &str) -> Option<ServerEntry> {
+        self.inner.lock().unwrap().get(server_url).cloned()
+    }
+
+    pub(crate) fn token_for(&self, server_url: &str) -> Option<String> {
+        self.get(server_url).and_then(|e| e.session_token)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.inner.lock().unwrap().len()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct RemoteVoxConfig {
@@ -175,4 +228,25 @@ fn percent_encode_query_value(value: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_registry_round_trips_token() {
+        let r = ServerRegistry::new();
+        assert_eq!(r.len(), 0);
+        r.upsert("ws://a/vox", Some("tok-a".into()));
+        r.upsert("ws://b/vox", None);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r.token_for("ws://a/vox").as_deref(), Some("tok-a"));
+        assert_eq!(r.token_for("ws://b/vox"), None);
+        assert_eq!(r.token_for("ws://c/vox"), None);
+        // Re-upserting overwrites.
+        r.upsert("ws://a/vox", Some("tok-a2".into()));
+        assert_eq!(r.len(), 2);
+        assert_eq!(r.token_for("ws://a/vox").as_deref(), Some("tok-a2"));
+    }
 }

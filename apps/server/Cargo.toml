@@ -26,6 +26,7 @@ sha2 = "0.10"
 crdt.workspace = true
 crdt-seaorm.workspace = true
 sea-orm.workspace = true
+sea-orm-migration.workspace = true
 
 task-db = { path = "../db" }
 
