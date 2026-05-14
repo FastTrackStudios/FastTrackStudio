@@ -8,6 +8,12 @@
 //! - [`CommentCreateForm`] — minimal new-comment form, emits the create payload
 
 use dioxus::prelude::*;
+pub mod embed;
+pub use embed::{
+    AnchorChip, ComposerSubmit, EmbedMode, ThreadCard, ThreadComposer, ThreadEmbed,
+    breadcrumb_label,
+};
+
 use fts_ui::lucide_dioxus::{CheckCheck, MessageSquare, Plus, Send, Trash2};
 use fts_ui::prelude::*;
 use std::collections::BTreeMap;
