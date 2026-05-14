@@ -666,6 +666,57 @@ should depend on a future phase.
   kanban grouped by `status`. Update a task's status frontmatter
   via the kanban drag-drop; observe the change in another tab.
 
+### Phase 6.5: Properties
+
+Inserted 2026-05-14 after a research pass on Obsidian's Properties
+feature, the TaskNotes plugin (`~/Development/research/tasknotes`),
+and our own production vault `~/Documents/The Observatory`. The
+existing `frontmatter_json: String` (top-level, untyped) blocks
+faithful TaskNotes-style modelling — specifically nested structs in
+lists (`blockedBy: [{uid, reltype}]`), typed dates for Bases
+comparisons, status-with-metadata, and concurrent-safe ordering.
+
+Two sub-phases:
+
+**6.5a — server-side schema core**:
+
+- `knowledge-proto::property_schema` module: `PropertyType`,
+  `PropertyDef`, `KindSchema`, `PropertySchemaRegistry`,
+  `FieldRenames`.
+- Property types supported in 6.5a: `Text`, `Multitext`, `Number`,
+  `Checkbox`, `Date`, `Datetime`, `Tags`, `Aliases`, `Link`,
+  `LinkList`, `EnumWithMetadata` (status/priority with `color`,
+  `icon`, `order`, `isCompleted`, `autoArchive` flags),
+  `Struct(named-fields)`, `Computed(read_fn)`, `LexoRank`, `Json`.
+  `Recurrence(RRULE)` + `Duration(ISO 8601)` defer to 6.6.
+- Hybrid storage: hardcoded built-in schemas for `task`, `project`,
+  `area`, `person`, `daily`; user-extensible via `kind: schema`
+  Pages in `vault://org` that the indexer merges at boot.
+- Best-effort coerce + warn on type mismatch — store original in
+  a shadow field, surface a warning. Matches Obsidian's behavior.
+- Phase 5b `FrontmatterIndex` upgrade: schema-aware decomposition
+  so `List<Wikilink>` indexes per element and `Struct` indexes by
+  `<parent>.<child>` paths. Bases executor uses the schema to
+  type-coerce comparisons.
+- `LexoRank` primitive (~80 lines, helper crate or inline module).
+- **Test**: load 10 representative pages from
+  `~/Documents/The Observatory/TaskNotes/` through the schema and
+  verify they round-trip without data loss; verify Bases date
+  comparison gets typed values.
+
+**6.5b — properties UI + kanban DnD**:
+
+- Properties pane in `knowledge-ui` with type-specific editors
+  (text input, chip list, date picker, status dropdown with color
+  chips). Drag-to-reorder properties.
+- Port HTML5 DnD from TaskNotes' `KanbanView.ts:1284-3372` into
+  our `KindKanban`. Drop their 10-second `suppressRenderUntil`
+  workaround — Loro has no file-watcher race. Use `LexoRank` for
+  inter-card ordering.
+- **Test**: playwright spec replaces the button-driven move with
+  real `dragTo` between two tabs; verify the `status` frontmatter
+  + `sortOrder` LexoRank land correctly on both sides.
+
 ### Phase 7: Attachments
 
 - `AttachmentService` with `initiate_upload` + `get_download_url`.

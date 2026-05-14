@@ -116,6 +116,43 @@ Clarification likely needed: query language surface (YAML-in-frontmatter vs. inl
 
 ---
 
+# Phase 6.5: Properties
+
+Inserted after Phase 6 commit landed. Driven by a research pass on Obsidian core, the TaskNotes plugin, and our production vault. Detailed scope in `plans/decentralized-foundation.md` §13 Phase 6.5.
+
+Three decisions locked with the user 2026-05-14:
+- Storage: **hybrid** — hardcoded core schemas in the server binary, page-overridable via `kind: schema` Pages in `vault://org` that the indexer merges at boot.
+- Strictness: **best-effort coerce + warn** — match Obsidian; store original in shadow field if coercion fails.
+- Status model: **full StatusConfig** — `status` is an `EnumWithMetadata` carrying `{value, label, color, icon, order, isCompleted, autoArchive}`.
+
+## 6.5a — server schema core (no UI)
+
+Done when:
+
+- `knowledge-proto::property_schema` module exists with `PropertyType` enum (Text, Multitext, Number, Checkbox, Date, Datetime, Tags, Aliases, Link, LinkList, EnumWithMetadata, Struct, Computed, LexoRank, Json), `PropertyDef`, `KindSchema`, `PropertySchemaRegistry`, `FieldRenames`. Show file + types.
+- Built-in schemas for `task`, `project`, `area`, `person`, `daily`. Modelled on TaskNotes (`~/Development/research/tasknotes/src/types.ts:445-711`) and The Observatory's actual top-key frequency.
+- `PropertySchemaRegistry` exposes a merge path: hardcoded built-ins + any `kind: schema` Pages in the org vault, merged at boot.
+- `LexoRank` primitive lands (small helper module ≈80 lines).
+- `apps/server/src/knowledge_index.rs` `FrontmatterIndex` upgraded to schema-aware decomposition: `List<Wikilink>`, `Tags`, `Aliases` index per element; `Struct` indexes `<parent>.<child>` paths. Show diff.
+- `apps/server/src/property_schema.rs` (or equivalent) wires the registry into AppState.
+- Bases executor (`knowledge-proto::bases::execute_view`) takes an optional `&PropertySchemaRegistry` and coerces `Cmp` operands by declared type when one is present.
+- Test corpus: load ≥5 representative pages from `~/Documents/The Observatory` (any mix — TaskNotes folder, a daily note, an area page) through the schema; assert round-trip preserves every field. Test added to `apps/server/tests/`.
+- Coerce-or-shadow: when a value can't coerce to its declared type, the original is preserved in a sibling `__shadow__<field>` JSON entry + a warning logged. Tested.
+- `cargo test -p knowledge-proto` + `cargo test -p task-server --lib` clean; UI + wasm checks clean.
+- Commit on `thin-vertical-slice` referencing `plans/decentralized-foundation.md` §13 Phase 6.5.
+
+Clarification likely needed: how `kind: schema` Pages serialize their schema content (JSON in frontmatter vs YAML body) — ask if not obvious.
+
+## 6.5b — properties UI + kanban DnD
+
+Done when:
+
+- Properties pane component in `knowledge-ui` rendering type-specific editors for every `PropertyType`. fts-ui primitives + theme tokens only. Wired into the `KnowledgeLive` route as the top-of-page pane.
+- HTML5 DnD ported from TaskNotes `KanbanView.ts:1284-3372` into our `KindKanban`. Drop their `suppressRenderUntil` workaround.
+- `sortOrder: LexoRank` field added to the `task` kind schema; the kanban writes it on drop.
+- Playwright spec uses `dragTo` to move a kanban card across columns; verify both `status` and `sortOrder` on the target page in tab B.
+- All native + browser tests pass; UI + wasm clean.
+
 # Phase 7: Attachments
 
 Done when:
