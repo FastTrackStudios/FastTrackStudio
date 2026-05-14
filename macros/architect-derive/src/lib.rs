@@ -32,6 +32,14 @@ struct FieldAttrs {
     fulltext: bool,
     exclude_create: bool,
     exclude_update: bool,
+    /// Store this field as a JSON column in the SeaORM model. Required
+    /// for `Vec<T>` / structured types — `sea_orm::Value` has no
+    /// blanket `From<Vec<T>>` impl, so without this attribute the
+    /// generated DeriveEntityModel fails to compile on `server`
+    /// builds. The field type must be `serde::Serialize +
+    /// DeserializeOwned`; sea-orm's `with-json` feature handles the
+    /// rest. No-op when the `server` feature isn't active.
+    json: bool,
 }
 
 fn parse_container_attrs(attrs: &[syn::Attribute]) -> Result<ContainerAttrs> {
@@ -80,6 +88,8 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
                 out.sortable = true;
             } else if p.is_ident("fulltext") {
                 out.fulltext = true;
+            } else if p.is_ident("json") {
+                out.json = true;
             } else if p.is_ident("exclude") {
                 meta.parse_nested_meta(|inner| {
                     if inner.path.is_ident("create") {
@@ -363,6 +373,9 @@ fn build_server_block(
             } else {
                 sea_attrs.push(quote! { primary_key, auto_increment = false });
             }
+        }
+        if f.attrs.json {
+            sea_attrs.push(quote! { column_type = "Json" });
         }
         let sea = if sea_attrs.is_empty() {
             quote! {}
