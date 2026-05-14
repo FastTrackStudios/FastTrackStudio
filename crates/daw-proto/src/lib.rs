@@ -80,7 +80,12 @@ pub use region::{AddRegionInLaneRequest, Region, RegionError, RegionEvent, Regio
 pub use resource::*;
 pub use routing::*;
 pub use screenset::*;
-pub use tempo_map::*;
+// Explicit re-exports (see marker / track / region for rationale —
+// architect-emitted `serve` / `descriptor` / `Dispatcher` aliases
+// can't be glob-imported at the crate root.)
+#[cfg(feature = "vox")]
+pub use tempo_map::TempoMapClient;
+pub use tempo_map::{TempoMap, TempoMapError, TempoMapEvent, TempoMapRpc, TempoPoint};
 pub use toolbar::*;
 // Explicit re-exports (see marker::* note above for the rationale).
 #[cfg(feature = "vox")]

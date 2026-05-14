@@ -9,7 +9,6 @@ use super::fx_params::StandaloneFxParams;
 use super::items::StandaloneItems;
 use super::routing::StandaloneRouting;
 use super::takes::StandaloneTakes;
-use super::tempo_map::StandaloneTempoMap;
 // `Tracks` ported to architect::rpc — `impl Tracks for Standalone`
 // lives at `crate::track`. The borrowed `StandaloneTracks<'a>` view
 // retired with the port.
@@ -29,10 +28,6 @@ impl<'a> StandaloneProject<'a> {
 }
 
 impl<'a> Project for StandaloneProject<'a> {
-    type TempoMap<'b>
-        = StandaloneTempoMap<'b>
-    where
-        Self: 'b;
     type ExtState<'b>
         = StandaloneExtState<'b>
     where
@@ -64,10 +59,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn info(&self) -> DawResult<ProjectInfo> {
         self.daw.with_project(&self.guid, |p| p.info.clone())
-    }
-
-    fn tempo_map(&self) -> Self::TempoMap<'_> {
-        StandaloneTempoMap::new(self.daw, self.guid.clone())
     }
 
     fn ext_state(&self) -> Self::ExtState<'_> {

@@ -21,7 +21,7 @@ pub async fn dispatch_op(
     take_svc: &crate::ReaperTake,
     marker_svc: &crate::Reaper,
     region_svc: &crate::Reaper,
-    tempo_map_svc: &crate::ReaperTempoMap,
+    tempo_map_svc: &crate::Reaper,
     midi_svc: &crate::ReaperMidi,
     live_midi_svc: &crate::ReaperLiveMidi,
     ext_state_svc: &crate::ReaperExtState,
@@ -1134,91 +1134,92 @@ async fn dispatch_region(
 async fn dispatch_tempo_map(
     op: &TempoMapOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperTempoMap,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::TempoMapService;
+    use daw_proto::sync::TempoMap;
     match op {
         TempoMapOp::GetTempoPoints(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::TempoPointList(svc.get_tempo_points(ctx).await))
+            Ok(StepOutput::TempoPointList(TempoMap::get_tempo_points(
+                svc, ctx,
+            )))
         }
         TempoMapOp::GetTempoPoint(p, i) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptTempoPoint(
-                svc.get_tempo_point(ctx, *i).await,
-            ))
+            Ok(StepOutput::OptTempoPoint(TempoMap::get_tempo_point(
+                svc, ctx, *i,
+            )))
         }
         TempoMapOp::TempoPointCount(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Usize(svc.tempo_point_count(ctx).await as u64))
+            Ok(StepOutput::Usize(
+                TempoMap::tempo_point_count(svc, ctx) as u64
+            ))
         }
         TempoMapOp::GetTempoAt(p, secs) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.get_tempo_at(ctx, *secs).await))
+            Ok(StepOutput::F64(TempoMap::get_tempo_at(svc, ctx, *secs)))
         }
         TempoMapOp::GetTimeSignatureAt(p, secs) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            let (n, d) = svc.get_time_signature_at(ctx, *secs).await;
+            let (n, d) = TempoMap::get_time_signature_at(svc, ctx, *secs);
             Ok(StepOutput::I32Pair(n, d))
-        }
-        TempoMapOp::TimeToQn(p, secs) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.time_to_qn(ctx, *secs).await))
-        }
-        TempoMapOp::QnToTime(p, qn) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.qn_to_time(ctx, *qn).await))
         }
         TempoMapOp::TimeToMusical(p, secs) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            let (m, b, f) = svc.time_to_musical(ctx, *secs).await;
+            let (m, b, f) = TempoMap::time_to_musical(svc, ctx, *secs);
             Ok(StepOutput::MusicalTime(m, b, f))
         }
         TempoMapOp::MusicalToTime(p, m, b, f) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.musical_to_time(ctx, *m, *b, *f).await))
+            Ok(StepOutput::F64(TempoMap::musical_to_time(
+                svc, ctx, *m, *b, *f,
+            )))
         }
         TempoMapOp::AddTempoPoint(p, secs, bpm) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(svc.add_tempo_point(ctx, *secs, *bpm).await))
+            let idx =
+                TempoMap::add_tempo_point(svc, ctx, *secs, *bpm).map_err(|e| format!("{e:?}"))?;
+            Ok(StepOutput::U32(idx))
         }
         TempoMapOp::RemoveTempoPoint(p, i) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.remove_tempo_point(ctx, *i).await;
+            TempoMap::remove_tempo_point(svc, ctx, *i).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TempoMapOp::SetTempoAtPoint(p, i, bpm) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_tempo_at_point(ctx, *i, *bpm).await;
+            TempoMap::set_tempo_at_point(svc, ctx, *i, *bpm).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TempoMapOp::SetTimeSignatureAtPoint(p, i, n, d) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_time_signature_at_point(ctx, *i, *n, *d).await;
+            TempoMap::set_time_signature_at_point(svc, ctx, *i, *n, *d)
+                .map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TempoMapOp::MoveTempoPoint(p, i, secs) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.move_tempo_point(ctx, *i, *secs).await;
+            TempoMap::move_tempo_point(svc, ctx, *i, *secs).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TempoMapOp::GetDefaultTempo(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::F64(svc.get_default_tempo(ctx).await))
+            Ok(StepOutput::F64(TempoMap::get_default_tempo(svc, ctx)))
         }
         TempoMapOp::SetDefaultTempo(p, bpm) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_default_tempo(ctx, *bpm).await;
+            TempoMap::set_default_tempo(svc, ctx, *bpm).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
         TempoMapOp::GetDefaultTimeSignature(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            let (n, d) = svc.get_default_time_signature(ctx).await;
+            let (n, d) = TempoMap::get_default_time_signature(svc, ctx);
             Ok(StepOutput::I32Pair(n, d))
         }
         TempoMapOp::SetDefaultTimeSignature(p, n, d) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_default_time_signature(ctx, *n, *d).await;
+            TempoMap::set_default_time_signature(svc, ctx, *n, *d).map_err(|e| format!("{e:?}"))?;
             Ok(StepOutput::Unit)
         }
     }

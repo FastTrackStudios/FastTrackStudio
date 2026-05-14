@@ -5,7 +5,7 @@ use daw_proto::{DawResult, ProjectInfo};
 
 use super::{
     ReaperRemote, RemoteExtState, RemoteFxChains, RemoteFxParams, RemoteItems, RemoteRouting,
-    RemoteTakes, RemoteTempoMap, dispatch, main_thread,
+    RemoteTakes, dispatch, main_thread,
 };
 
 /// A `Send + Sync` handle scoped to a single REAPER project tab.
@@ -21,10 +21,6 @@ impl<'a> RemoteProject<'a> {
 }
 
 impl<'a> ProjectTrait for RemoteProject<'a> {
-    type TempoMap<'b>
-        = RemoteTempoMap<'b>
-    where
-        Self: 'b;
     type ExtState<'b>
         = RemoteExtState<'b>
     where
@@ -60,10 +56,6 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
             let mt = main_thread()?;
             mt.project(&guid)?.info()
         })
-    }
-
-    fn tempo_map(&self) -> Self::TempoMap<'_> {
-        RemoteTempoMap::new(self.remote, &self.guid)
     }
 
     fn ext_state(&self) -> Self::ExtState<'_> {

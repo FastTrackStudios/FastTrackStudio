@@ -107,7 +107,12 @@ pub use project_import::register_project_importer;
 pub use region::get_regions_on_main_thread;
 pub use routing::ReaperRouting;
 pub use screenset::ReaperScreenset;
-pub use tempo_map::ReaperTempoMap;
+// `TempoMap` impl'd on `Reaper` — see `crate::tempo_map`. The old
+// async `ReaperTempoMap` service struct + broadcasters retired with
+// the architect::rpc port.
+pub use tempo_map::{
+    get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread, time_to_qn_on_main_thread,
+};
 pub use toolbar::ReaperToolbar;
 // `Tracks` impl'd on `Reaper` — see `crate::track`. The old async
 // `ReaperTrack` service struct + broadcasters retired with the port.
@@ -125,7 +130,8 @@ pub use fx::{init_fx_broadcaster, poll_and_broadcast_fx};
 
 // Re-export track broadcaster functions
 
-// Re-export tempo map broadcaster functions
+// Tempo map broadcaster + polling retired with architect::rpc port.
+// Stubs kept on `tempo_map` module so existing call sites remain.
 pub use tempo_map::{init_tempo_map_broadcaster, poll_and_broadcast_tempo_map};
 
 // Re-export item broadcaster functions

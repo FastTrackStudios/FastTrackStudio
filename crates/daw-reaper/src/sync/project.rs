@@ -7,7 +7,7 @@ use crate::project::project_to_info;
 
 use super::{
     ReaperExtState, ReaperFxChains, ReaperFxParams, ReaperItems, ReaperMainThread, ReaperRouting,
-    ReaperTakes, ReaperTempoMap,
+    ReaperTakes,
 };
 
 /// A handle scoped to a single REAPER project tab.
@@ -23,10 +23,6 @@ impl<'a> ReaperProject<'a> {
 }
 
 impl<'a> ProjectTrait for ReaperProject<'a> {
-    type TempoMap<'b>
-        = ReaperTempoMap<'b>
-    where
-        Self: 'b;
     type ExtState<'b>
         = ReaperExtState<'b>
     where
@@ -59,10 +55,6 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
     fn info(&self) -> DawResult<ProjectInfo> {
         let project = super::resolve_project(&self.guid)?;
         Ok(project_to_info(&project))
-    }
-
-    fn tempo_map(&self) -> Self::TempoMap<'_> {
-        ReaperTempoMap::new(self.mt, &self.guid)
     }
 
     fn ext_state(&self) -> Self::ExtState<'_> {

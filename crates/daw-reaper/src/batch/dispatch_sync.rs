@@ -2235,16 +2235,6 @@ fn dispatch_tempo_map_sync(
                 Ok(StepOutput::I32Pair(4, 4))
             }
         }
-        TempoMapOp::TimeToQn(p, seconds) => {
-            let _project = proj(p, outputs)?;
-            let qn = tm_sw::time_to_qn(low, ReaperProjectContext::CurrentProject, *seconds);
-            Ok(StepOutput::F64(qn))
-        }
-        TempoMapOp::QnToTime(p, qn) => {
-            let _project = proj(p, outputs)?;
-            let time = tm_sw::qn_to_time(low, ReaperProjectContext::CurrentProject, *qn);
-            Ok(StepOutput::F64(time))
-        }
         TempoMapOp::TimeToMusical(p, seconds) => {
             let _project = proj(p, outputs)?;
             if let Ok(pos) = PositionInSeconds::new(*seconds) {

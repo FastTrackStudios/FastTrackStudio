@@ -10,9 +10,9 @@ use daw_proto::{
     InputServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
     MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
     RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
-use daw_proto::{marker, region, track, transport};
+use daw_proto::{marker, region, tempo_map, track, transport};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
@@ -22,8 +22,8 @@ use daw_proto::{
     live_midi_service_service_descriptor, midi_service_service_descriptor,
     plugin_loader_service_service_descriptor, project_service_service_descriptor,
     routing_service_service_descriptor, screenset_service_service_descriptor,
-    take_service_service_descriptor, tempo_map_service_service_descriptor,
-    toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
+    take_service_service_descriptor, toolbar_service_service_descriptor,
+    window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -50,7 +50,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     // Transport ported to architect::rpc — mounted via transport::serve(Reaper)
     let project = crate::ReaperProject::new();
     // Regions ported to architect::rpc — mounted via region::serve(Reaper)
-    let tempo_map = crate::ReaperTempoMap::new();
+    // TempoMap ported to architect::rpc — mounted via tempo_map::serve(Reaper)
     let audio_engine = crate::ReaperAudioEngine::new();
     let midi = crate::ReaperMidi::new();
     let fx = crate::ReaperFx::new();
@@ -82,10 +82,7 @@ pub fn create_daw_handler() -> RoutedHandler {
         // calls onto REAPER's main thread via `HasDispatcher`.
         .with(marker::descriptor(), marker::serve(crate::Reaper))
         .with(region::descriptor(), region::serve(crate::Reaper))
-        .with(
-            tempo_map_service_service_descriptor(),
-            TempoMapServiceDispatcher::new(tempo_map),
-        )
+        .with(tempo_map::descriptor(), tempo_map::serve(crate::Reaper))
         .with(
             audio_engine_service_service_descriptor(),
             AudioEngineServiceDispatcher::new(audio_engine),

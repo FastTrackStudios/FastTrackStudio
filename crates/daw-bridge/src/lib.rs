@@ -36,8 +36,7 @@ use daw::service::{
     HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
     LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
     ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
-    WindowGeometryServiceDispatcher,
+    TakeServiceDispatcher, ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -160,7 +159,7 @@ async fn register_daw_dispatcher() {
     // Markers ported to architect::rpc — backend is the singleton
     // `Reaper` and mounting goes through `daw::rpc::marker::serve`.
     // Regions ported — mount via daw::service::region::serve(Reaper).
-    let tempo_map = daw::reaper::ReaperTempoMap::new();
+    // TempoMap ported — mount via daw::service::tempo_map::serve(Reaper).
     let audio_engine = daw::reaper::ReaperAudioEngine::new();
     let midi = daw::reaper::ReaperMidi::new();
     let fx = daw::reaper::ReaperFx::new();
@@ -192,8 +191,7 @@ async fn register_daw_dispatcher() {
         midi_service_service_descriptor, plugin_loader_service_service_descriptor,
         project_service_service_descriptor, routing_service_service_descriptor,
         screenset_service_service_descriptor, take_service_service_descriptor,
-        tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-        window_geometry_service_service_descriptor,
+        toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -218,8 +216,8 @@ async fn register_daw_dispatcher() {
             daw::service::region::serve(daw::reaper::Reaper),
         )
         .with(
-            tempo_map_service_service_descriptor(),
-            TempoMapServiceDispatcher::new(tempo_map),
+            daw::service::tempo_map::descriptor(),
+            daw::service::tempo_map::serve(daw::reaper::Reaper),
         )
         .with(
             audio_engine_service_service_descriptor(),

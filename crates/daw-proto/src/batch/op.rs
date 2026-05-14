@@ -354,8 +354,6 @@ pub enum TempoMapOp {
     TempoPointCount(ProjectArg),
     GetTempoAt(ProjectArg, f64),
     GetTimeSignatureAt(ProjectArg, f64),
-    TimeToQn(ProjectArg, f64),
-    QnToTime(ProjectArg, f64),
     TimeToMusical(ProjectArg, f64),
     MusicalToTime(ProjectArg, i32, i32, f64),
     AddTempoPoint(ProjectArg, f64, f64),
@@ -1092,8 +1090,6 @@ fn tempo_map_op_project_arg(op: &TempoMapOp) -> &ProjectArg {
         | TempoMapOp::TempoPointCount(p)
         | TempoMapOp::GetTempoAt(p, _)
         | TempoMapOp::GetTimeSignatureAt(p, _)
-        | TempoMapOp::TimeToQn(p, _)
-        | TempoMapOp::QnToTime(p, _)
         | TempoMapOp::TimeToMusical(p, _)
         | TempoMapOp::MusicalToTime(p, _, _, _)
         | TempoMapOp::AddTempoPoint(p, _, _)
