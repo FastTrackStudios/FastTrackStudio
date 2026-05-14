@@ -82,6 +82,10 @@ pub enum Route {
         TimerRoute {},
         #[route("/agents/runs")]
         AgentRunsRoute {},
+        #[route("/agent/dashboard")]
+        AgentDashboardRoute {},
+        #[route("/agent/dashboard/:run_id")]
+        AgentRunDetailRoute { run_id: Uuid },
         #[route("/settings/integrations")]
         IntegrationsSettingsRoute {},
         #[route("/settings/webhooks")]
@@ -203,6 +207,16 @@ fn TimerRoute() -> Element {
 #[component]
 fn AgentRunsRoute() -> Element {
     rsx! { crate::feature_routes::agent::AgentRunBoardView {} }
+}
+
+#[component]
+fn AgentDashboardRoute() -> Element {
+    rsx! { crate::feature_routes::agent::AgentDashboardView {} }
+}
+
+#[component]
+fn AgentRunDetailRoute(run_id: Uuid) -> Element {
+    rsx! { crate::feature_routes::agent::AgentRunDetailRouteView { run_id } }
 }
 #[component]
 fn IntegrationsSettingsRoute() -> Element {
@@ -805,6 +819,8 @@ fn route_title(route: &Route) -> &'static str {
         Route::ThreadsRoute {} => "Threads",
         Route::TimerRoute {} => "Timer",
         Route::AgentRunsRoute {} => "Agent runs",
+        Route::AgentDashboardRoute {} => "Agent dashboard",
+        Route::AgentRunDetailRoute { .. } => "Agent run",
         Route::IntegrationsSettingsRoute {} => "Integrations",
         Route::WebhooksRoute {} => "Webhooks",
     }

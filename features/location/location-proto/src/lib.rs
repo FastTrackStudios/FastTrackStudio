@@ -78,6 +78,7 @@ pub struct Location {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::LocationTags"))]
     pub tags: Vec<String>,
 

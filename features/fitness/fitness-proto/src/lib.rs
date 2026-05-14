@@ -31,6 +31,7 @@ pub struct Exercise {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ExerciseCategory"))]
     pub category: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MuscleGroups"))]
     pub muscle_groups: Vec<String>,
 
@@ -45,6 +46,7 @@ pub struct Exercise {
     )]
     pub instructions: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FitnessTags"))]
     pub tags: Vec<String>,
 
@@ -82,12 +84,14 @@ pub struct Routine {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::Difficulty"))]
     pub difficulty: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::lorem::en::Word(), 3..10)")
     )]
     pub exercise_ids: Vec<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FitnessTags"))]
     pub tags: Vec<String>,
 
@@ -133,6 +137,7 @@ pub struct WorkoutSession {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::Mood"))]
     pub mood: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FitnessTags"))]
     pub tags: Vec<String>,
 

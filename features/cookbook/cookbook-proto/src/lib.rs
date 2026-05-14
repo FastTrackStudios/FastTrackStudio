@@ -44,6 +44,7 @@ pub struct Cookbook {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ImageUrl"))]
     pub cover_image_url: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::CookbookTags"))]
     pub tags: Vec<String>,
 
@@ -100,6 +101,7 @@ pub struct Recipe {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ImageUrl"))]
     pub image_url: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::RecipeTags"))]
     pub tags: Vec<String>,
 
@@ -268,6 +270,7 @@ pub struct FoodProduct {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::PantryTags"))]
     pub tags: Vec<String>,
 
@@ -320,6 +323,7 @@ pub struct PantryItem {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::PantryTags"))]
     pub tags: Vec<String>,
 
@@ -369,6 +373,7 @@ pub struct ShoppingListItem {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::PantryTags"))]
     pub tags: Vec<String>,
 

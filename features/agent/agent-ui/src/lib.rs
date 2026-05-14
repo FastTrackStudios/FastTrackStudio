@@ -8,8 +8,13 @@
 //!   Hermes-agent + git integration arc.
 
 pub mod agent_chat_page;
+pub mod dashboard;
 pub mod hermes_kit;
 pub use agent_chat_page::{AgentChatPage, AgentChatPageProps};
+pub use dashboard::{
+    AgentDashboard, DashboardFilters, DashboardSort, InlineDiff, NewRunDialog, NewRunDraft,
+    RunDetailPane, RunDetailView, SortField,
+};
 pub use hermes_kit::*;
 
 use agent_proto::{AgentRun, AgentRunCreate};
@@ -253,6 +258,20 @@ pub fn AgentRunCreateForm(on_submit: EventHandler<AgentRunCreate>) -> Element {
                                 external_id: None,
                                 external_url: None,
                                 log_cursor: None,
+                                parent_run_id: None,
+                                worktree_path: None,
+                                git_repo_connection_id: None,
+                                spawned_from_message_id: None,
+                                input_tokens: None,
+                                output_tokens: None,
+                                cache_read_tokens: None,
+                                cache_creation_tokens: None,
+                                cost_cents_estimate: None,
+                                tool_call_count: 0,
+                                assistant_message_count: 0,
+                                max_tokens: None,
+                                max_tool_calls: None,
+                                max_wall_seconds: None,
                             };
                             on_submit.call(payload);
                             name.set(String::new());

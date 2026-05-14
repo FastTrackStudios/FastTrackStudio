@@ -58,6 +58,7 @@ pub struct Person {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::PersonTags"))]
     pub tags: Vec<String>,
 
@@ -120,6 +121,7 @@ pub struct Client {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ClientTags"))]
     pub tags: Vec<String>,
 
@@ -157,6 +159,7 @@ pub struct Team {
     #[architect(filterable)]
     pub archived: bool,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::TeamTags"))]
     pub tags: Vec<String>,
 

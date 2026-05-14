@@ -8,9 +8,7 @@
 //! we keep the menu shape simple and rely on small Ghost buttons.
 
 use dioxus::prelude::*;
-use fts_ui::lucide_dioxus::{
-    CircleCheck, CornerDownRight, MessageSquare, Send, Smile, Trash2,
-};
+use fts_ui::lucide_dioxus::{CircleCheck, CornerDownRight, MessageSquare, Send, Smile, Trash2};
 use fts_ui::prelude::*;
 use threads_proto::{Anchor, Comment};
 use uuid::Uuid;

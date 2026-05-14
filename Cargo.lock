@@ -67,9 +67,14 @@ version = "0.1.0"
 dependencies = [
  "agent-crdt",
  "agent-db",
+ "agent-hermes",
  "agent-proto",
  "architect",
+ "async-trait",
+ "chrono",
  "crdt",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

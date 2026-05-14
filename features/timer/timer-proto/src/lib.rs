@@ -72,6 +72,7 @@ pub struct TimeEntry {
     pub billable_rate_cents: Option<u32>,
 
     /// Free-form tags for grouping / reporting.
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::TimerTags"))]
     pub tags: Vec<String>,
 

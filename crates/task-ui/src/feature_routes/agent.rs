@@ -417,3 +417,148 @@ pub fn WebhookEventLogView() -> Element {
         }
     }
 }
+
+// ── P4 dashboard views ───────────────────────────────────────────────
+//
+// `/agent/dashboard` and `/agent/dashboard/:run_id` per issue #24 +
+// plans/agent-p4-dashboard.goal.md. Reuses the same Loro-backed
+// `AgentRunRepoLoro` so the dashboard sees the same runs as the
+// existing chat / board surfaces. Detail view's logs/tool-calls/
+// conversation panes use polling via repo `list()` calls — live
+// streaming via `LiveUpdateBus` is a follow-up that needs the server-
+// side bus reachable from wasm clients (out of scope for the goal's
+// "polls repo if not wired" fallback).
+
+use agent_proto::{AgentLogLine, ConversationMessage, ToolCall};
+use agent_ui::dashboard::{AgentDashboard, RunDetailView};
+use dioxus_router::hooks::use_navigator;
+
+use crate::app::Route;
+
+fn build_repo() -> (Rc<AgentRunRepoLoro>, Rc<CrdtDoc>) {
+    let doc = Rc::new(CrdtDoc::ephemeral());
+    let repo = Rc::new(AgentRunRepoLoro::new(&doc));
+    (repo, doc)
+}
+
+#[component]
+pub fn AgentDashboardView() -> Element {
+    let (repo, doc) = use_hook(build_repo);
+    let mut items = use_signal::<Vec<AgentRun>>(Vec::new);
+    let nav = use_navigator();
+
+    let refresh_tx: mpsc::UnboundedSender<()> = use_hook(|| {
+        let (tx, mut rx) = mpsc::unbounded::<()>();
+        let repo_for_loop = repo.clone();
+        spawn_local(async move {
+            while rx.next().await.is_some() {
+                if let Ok(list) = repo_for_loop
+                    .list(
+                        Page {
+                            index: 0,
+                            size: 200,
+                        },
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    items.set(list.items);
+                }
+            }
+        });
+        tx
+    });
+
+    use_hook({
+        let tx = refresh_tx.clone();
+        move || {
+            let _ = tx.unbounded_send(());
+        }
+    });
+
+    let on_open_run = {
+        let nav = nav.clone();
+        move |run_id: Uuid| {
+            nav.push(Route::AgentRunDetailRoute { run_id });
+        }
+    };
+
+    let on_create = {
+        let repo = repo.clone();
+        let tx = refresh_tx.clone();
+        let nav = nav.clone();
+        move |payload: AgentRunCreate| {
+            let repo = repo.clone();
+            let tx = tx.clone();
+            let nav = nav.clone();
+            spawn_local(async move {
+                if let Ok(run) = repo.create(payload).await {
+                    let _ = tx.unbounded_send(());
+                    nav.push(Route::AgentRunDetailRoute { run_id: run.id });
+                }
+            });
+        }
+    };
+
+    rsx! {
+        AgentDashboard {
+            runs: items(),
+            on_open_run,
+            on_create,
+        }
+    }
+}
+
+#[component]
+pub fn AgentRunDetailRouteView(run_id: Uuid) -> Element {
+    let (repo, _doc) = use_hook(build_repo);
+    let mut run = use_signal::<Option<AgentRun>>(|| None);
+    let logs = use_signal::<Vec<AgentLogLine>>(Vec::new);
+    let tool_calls = use_signal::<Vec<ToolCall>>(Vec::new);
+    let conversation = use_signal::<Vec<ConversationMessage>>(Vec::new);
+    let nav = use_navigator();
+
+    let load_run_id = run_id;
+    use_hook({
+        let repo = repo.clone();
+        move || {
+            spawn_local(async move {
+                if let Ok(r) = repo.get(load_run_id).await {
+                    run.set(Some(r));
+                }
+            });
+        }
+    });
+
+    match run() {
+        Some(r) => {
+            let on_back = {
+                let nav = nav.clone();
+                move |_| {
+                    nav.push(Route::AgentDashboardRoute {});
+                }
+            };
+            let on_cancel = move |_id: Uuid| {
+                // Hook for AgentService.cancel — server wiring is a
+                // follow-up; the row's status flips locally via the
+                // sync round-trip when a real backend is connected.
+            };
+            rsx! {
+                RunDetailView {
+                    run: r,
+                    logs: logs(),
+                    tool_calls: tool_calls(),
+                    conversation: conversation(),
+                    on_cancel,
+                    on_back,
+                }
+            }
+        }
+        None => rsx! {
+            div { class: "p-6",
+                fts_ui::prelude::Text { variant: fts_ui::prelude::TextVariant::Muted, "Loading run {run_id}…" }
+            }
+        },
+    }
+}

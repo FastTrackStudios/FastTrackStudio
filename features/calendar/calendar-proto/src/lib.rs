@@ -54,6 +54,7 @@ pub struct CalendarEvent {
     #[cfg_attr(feature = "fake", dummy(faker = "fake::faker::name::en::Name()"))]
     pub organizer: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::name::en::Name(), 1..6)")
@@ -70,6 +71,7 @@ pub struct CalendarEvent {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::EventStatus"))]
     pub status: String,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::EventTags"))]
     pub tags: Vec<String>,
 

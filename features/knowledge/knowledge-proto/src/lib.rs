@@ -165,6 +165,7 @@ pub struct Page {
     pub ext: String,
 
     /// Frontmatter `aliases:` field, materialized for lookups.
+    #[architect(json)]
     pub aliases: Vec<String>,
 
     /// Order-preserving frontmatter (via `IndexMap`-backed serde).

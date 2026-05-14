@@ -63,6 +63,7 @@ pub struct CalDavAccount {
     )]
     pub last_error: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::CalDavTags"))]
     pub tags: Vec<String>,
 

@@ -57,12 +57,14 @@ pub struct Comment {
     #[cfg_attr(feature = "fake", dummy(faker = "fake::faker::name::en::Name()"))]
     pub resolved_by: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::internet::en::Username(), 0..4)")
     )]
     pub mentions: Vec<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ThreadsTags"))]
     pub tags: Vec<String>,
 
@@ -198,6 +200,7 @@ pub struct Attachment {
     )]
     pub uploader: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ThreadsTags"))]
     pub tags: Vec<String>,
 

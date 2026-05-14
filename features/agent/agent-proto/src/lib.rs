@@ -76,8 +76,57 @@ pub struct AgentRun {
     #[cfg_attr(feature = "fake", dummy(faker = "1u32..500"))]
     pub cost_cents: Option<u32>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::AgentTags"))]
     pub tags: Vec<String>,
+
+    // ── MVP additions per features/agent/spec/agent.md ──────────────
+    /// Run lineage: parent for reruns / forks / continuations.
+    #[architect(filterable)]
+    pub parent_run_id: Option<Uuid>,
+
+    /// Filesystem path the agent operates in (CWD). None for web-only
+    /// agents that don't bind to a worktree.
+    pub worktree_path: Option<String>,
+
+    /// Optional git remote binding for PR creation et al.
+    #[architect(filterable)]
+    pub git_repo_connection_id: Option<Uuid>,
+
+    /// When the run was spawned from a conversation message.
+    #[architect(filterable)]
+    pub spawned_from_message_id: Option<Uuid>,
+
+    // ── Token + cost tracking ──────────────────────────────────────
+    #[cfg_attr(feature = "fake", dummy(faker = "500u32..200_000"))]
+    pub input_tokens: Option<u32>,
+    #[cfg_attr(feature = "fake", dummy(faker = "500u32..200_000"))]
+    pub output_tokens: Option<u32>,
+    #[cfg_attr(feature = "fake", dummy(faker = "0u32..50_000"))]
+    pub cache_read_tokens: Option<u32>,
+    #[cfg_attr(feature = "fake", dummy(faker = "0u32..50_000"))]
+    pub cache_creation_tokens: Option<u32>,
+
+    /// Cost estimate in cents (i64 — signed for refunds / credit).
+    /// `cost_cents` above is the legacy u32; this is the new field
+    /// the service maintains going forward.
+    #[architect(sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "1i64..50_000"))]
+    pub cost_cents_estimate: Option<i64>,
+
+    // ── Denormalized counters ──────────────────────────────────────
+    #[cfg_attr(feature = "fake", dummy(faker = "0u32..200"))]
+    pub tool_call_count: u32,
+    #[cfg_attr(feature = "fake", dummy(faker = "0u32..200"))]
+    pub assistant_message_count: u32,
+
+    // ── Resource limits ────────────────────────────────────────────
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MaybeTokenLimit"))]
+    pub max_tokens: Option<u64>,
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MaybeToolLimit"))]
+    pub max_tool_calls: Option<u32>,
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MaybeWallSeconds"))]
+    pub max_wall_seconds: Option<u32>,
 
     // ── Integration plugin extensions ────────────────────────────────
     //
@@ -270,6 +319,7 @@ pub struct AgentConversation {
 
     /// Names of tools available to this conversation. Resolved
     /// against the server-side tool registry when dispatching.
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::AgentToolSet"))]
     pub tool_set: Vec<String>,
 
@@ -406,6 +456,254 @@ pub fn default_model_catalog() -> Vec<ModelInfo> {
     ]
 }
 
+// ── ToolCall ──────────────────────────────────────────────────────────
+//
+// Structured tool-call records, separate from `AgentLogLine`. The log
+// stream gets one row per event (including a tool-shaped one for
+// visibility); the `ToolCall` entity is the sortable + filterable
+// view the UI uses for "show me every Bash call this run", "approve
+// this Edit", etc. Per spec rule `agent.tool-call.entity`.
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "agent_tool_calls", repo)]
+pub struct ToolCall {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable)]
+    pub run_id: Uuid,
+
+    /// Monotonic per-run order. Server-assigned on insert.
+    #[architect(sortable)]
+    pub seq: i64,
+
+    /// Tool name: `Bash`, `Read`, `Edit`, `Write`, `NotebookEdit`,
+    /// `WebFetch`, etc. Free-text; UI maps known names to icons.
+    #[architect(filterable, sortable, fulltext)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ToolName"))]
+    pub name: String,
+
+    /// JSON-encoded tool arguments. For file-edit tools includes
+    /// `{path, before, after}` so the UI can render an inline diff
+    /// without re-reading the file (r[agent.tool-call.file-edit-diff]).
+    #[architect(fulltext)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ToolArgsJson"))]
+    pub args_json: String,
+
+    /// JSON-encoded tool result. None while pending / running.
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MaybeToolResultJson"))]
+    pub result_json: Option<String>,
+
+    /// `pending`, `approved`, `denied`, `running`, `ok`, `error`.
+    #[architect(filterable, sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ToolCallStatus"))]
+    pub status: String,
+
+    #[architect(sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::RecentDateTime"))]
+    pub started_at: Option<DateTime<Utc>>,
+
+    #[architect(sortable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::RecentDateTime"))]
+    pub completed_at: Option<DateTime<Utc>>,
+
+    /// When true, the run pauses on this tool until the user calls
+    /// `AgentService.approve_tool` or `.deny_tool`.
+    #[architect(filterable)]
+    pub approval_required: bool,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
+// ── ConversationMessage ───────────────────────────────────────────────
+//
+// One message inside an `AgentConversation`. Per spec rule
+// `agent.conversation.message`. Body field is intended to back a
+// `LoroText` container at the CRDT layer; this proto holds the plain
+// `String` view so wasm clients can serialize/deserialize without a
+// Loro dep.
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "agent_conversation_messages", repo)]
+pub struct ConversationMessage {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable)]
+    pub conversation_id: Uuid,
+
+    /// Monotonic per-conversation order. Server-assigned on insert.
+    #[architect(sortable)]
+    pub seq: i64,
+
+    /// `user`, `assistant`, `tool`, `system`.
+    #[architect(filterable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MessageRole"))]
+    pub role: String,
+
+    /// Message text. Backed by a `LoroText` container in the CRDT
+    /// layer (r[agent.crdt.conversation-message-text]) for multi-peer
+    /// concurrent edits while a human composes.
+    #[architect(fulltext)]
+    #[cfg_attr(
+        feature = "fake",
+        dummy(faker = "fake::faker::lorem::en::Paragraph(1..3)")
+    )]
+    pub body: String,
+
+    /// Set when `role=tool` — links to the originating `ToolCall.id`.
+    #[architect(filterable)]
+    pub tool_call_id: Option<Uuid>,
+
+    /// Set when `role=assistant` — which model produced this message.
+    #[architect(filterable)]
+    #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ConversationModel"))]
+    pub model_id: Option<String>,
+
+    /// True while the assistant is still streaming tokens into this
+    /// row. UI concatenates streaming rows by `id` until this flips
+    /// to false (r[agent.log-line.assistant-streaming]).
+    pub streaming: bool,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
+// ── Run status state machine ──────────────────────────────────────────
+//
+// Per spec r[agent.run.status-state-machine]. Validates transitions
+// at the service layer; the repo accepts any string so historical
+// data and provider-native states keep round-tripping.
+
+/// Canonical statuses an AgentRun can hold. Stored as a string in
+/// `AgentRun.status`; this enum is the validator's view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStatus {
+    Queued,
+    Starting,
+    Running,
+    Paused,
+    AwaitingInput,
+    Completed,
+    Failed,
+    Cancelled,
+    TimedOut,
+}
+
+impl RunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Starting => "starting",
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::AwaitingInput => "awaiting-input",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::TimedOut => "timed-out",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "queued" => Some(Self::Queued),
+            "starting" => Some(Self::Starting),
+            "running" => Some(Self::Running),
+            "paused" => Some(Self::Paused),
+            "awaiting-input" => Some(Self::AwaitingInput),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            "timed-out" => Some(Self::TimedOut),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::TimedOut
+        )
+    }
+}
+
+/// Return Ok(()) when `from -> to` is a legal transition per the spec
+/// state machine. Returns `InvalidInput` with a descriptive message
+/// otherwise.
+pub fn validate_status_transition(from: RunStatus, to: RunStatus) -> Result<(), AgentServiceError> {
+    use RunStatus::*;
+    let ok = match (from, to) {
+        // Terminal states are absorbing.
+        (Completed | Failed | Cancelled | TimedOut, _) => false,
+        // Forward queue progression.
+        (Queued, Starting | Cancelled) => true,
+        (Starting, Running | Failed | Cancelled) => true,
+        // From running: user pause, agent block, or terminal.
+        (Running, Paused | AwaitingInput | Completed | Failed | Cancelled | TimedOut) => true,
+        // From paused or awaiting-input: only resume or cancel.
+        (Paused | AwaitingInput, Running | Cancelled | Failed | TimedOut) => true,
+        // Same-state writes are no-ops (allow idempotent retries).
+        (a, b) if a == b => true,
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(AgentServiceError::InvalidInput(format!(
+            "illegal AgentRun status transition: {} -> {}",
+            from.as_str(),
+            to.as_str()
+        )))
+    }
+}
+
+// ── Live update events ────────────────────────────────────────────────
+//
+// Per spec r[agent.live-update.events]. Three event kinds carried
+// over a vox subscription keyed on `run_id` or `workspace_id`.
+
+#[derive(::facet::Facet, Clone, Debug, PartialEq)]
+#[repr(C)]
+pub enum AgentEvent {
+    /// Run transitioned to a new status. Subscribers refetch the run
+    /// if they need other fields.
+    RunStateChanged { run_id: Uuid, new_status: String },
+    /// A log line was appended. Carries the line's id + sequence so
+    /// subscribers can drive a virtualized list without an extra
+    /// fetch round-trip; full body comes via the standard repo `get`.
+    LogAppended {
+        run_id: Uuid,
+        log_id: Uuid,
+        seq: i64,
+    },
+    /// A tool call changed status (pending → approved → running → ok
+    /// / error etc.). Subscribers refetch the row to render the new
+    /// state.
+    ToolCallChanged {
+        run_id: Uuid,
+        tool_call_id: Uuid,
+        new_status: String,
+    },
+}
+
+// Provider backend trait: see `agent_proto::integration::AgentIntegration`.
+// Hermes is the canonical backend — model selection (claude-code, codex,
+// gemini, custom) happens inside Hermes itself, so the Task side talks
+// only to Hermes through `AgentIntegration` (dispatch / cancel /
+// fetch_run / fetch_logs / run_event_loop). Older adapter sketches
+// (claude-code / codex direct subprocess) are deferred — Hermes covers
+// them via its model registry.
+
 #[derive(Debug, Clone, PartialEq, Eq, ::facet::Facet, thiserror::Error)]
 #[repr(u8)]
 pub enum AgentServiceError {
@@ -419,7 +717,30 @@ pub enum AgentServiceError {
 
 #[cfg_attr(feature = "vox", vox::service)]
 pub trait AgentService {
+    /// Start a new run. Service selects the adapter by `kind`, creates
+    /// the `AgentRun` row, and kicks off the adapter. Returns the
+    /// newly-created run.
+    async fn start_run(
+        &self,
+        prompt: String,
+        kind: String,
+        worktree_path: Option<String>,
+    ) -> Result<AgentRun, AgentServiceError>;
+
+    /// Cancel a run. The adapter is signalled gracefully; on timeout
+    /// the service forces a hard kill and marks the run cancelled.
     async fn cancel(&self, run_id: Uuid) -> Result<(), AgentServiceError>;
+
+    /// Approve a tool call that's blocking on user consent.
+    async fn approve_tool(&self, tool_call_id: Uuid) -> Result<(), AgentServiceError>;
+
+    /// Deny a tool call. The agent stays in `awaiting-input` until it
+    /// proposes an alternative or the user cancels the run.
+    async fn deny_tool(
+        &self,
+        tool_call_id: Uuid,
+        reason: Option<String>,
+    ) -> Result<(), AgentServiceError>;
 }
 
 #[cfg(feature = "fake")]
@@ -638,6 +959,111 @@ pub mod fakers {
             } else {
                 None
             }
+        }
+    }
+
+    // ── Fakers for MVP additions (P1) ────────────────────────────────
+
+    pub struct MaybeTokenLimit;
+    impl Dummy<MaybeTokenLimit> for Option<u64> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MaybeTokenLimit, rng: &mut R) -> Self {
+            if rng.random_bool(0.3) {
+                Some(rng.random_range(10_000u64..2_000_000))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct MaybeToolLimit;
+    impl Dummy<MaybeToolLimit> for Option<u32> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MaybeToolLimit, rng: &mut R) -> Self {
+            if rng.random_bool(0.3) {
+                Some(rng.random_range(10u32..500))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct MaybeWallSeconds;
+    impl Dummy<MaybeWallSeconds> for Option<u32> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MaybeWallSeconds, rng: &mut R) -> Self {
+            if rng.random_bool(0.3) {
+                Some(rng.random_range(60u32..7200))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct ToolName;
+    impl Dummy<ToolName> for String {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &ToolName, rng: &mut R) -> Self {
+            pick(
+                rng,
+                &[
+                    "Bash",
+                    "Read",
+                    "Edit",
+                    "Write",
+                    "Grep",
+                    "Glob",
+                    "WebFetch",
+                    "WebSearch",
+                    "NotebookEdit",
+                ],
+            )
+        }
+    }
+
+    pub struct ToolArgsJson;
+    impl Dummy<ToolArgsJson> for String {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &ToolArgsJson, rng: &mut R) -> Self {
+            pick(
+                rng,
+                &[
+                    r#"{"command":"ls -la"}"#,
+                    r#"{"file_path":"src/lib.rs"}"#,
+                    r#"{"path":"src/main.rs","before":"old","after":"new"}"#,
+                    r#"{"pattern":"TODO","path":"src/"}"#,
+                ],
+            )
+        }
+    }
+
+    pub struct MaybeToolResultJson;
+    impl Dummy<MaybeToolResultJson> for Option<String> {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MaybeToolResultJson, rng: &mut R) -> Self {
+            if rng.random_bool(0.7) {
+                Some(pick(
+                    rng,
+                    &[
+                        r#"{"stdout":"file.rs\nmod.rs\n","exit_code":0}"#,
+                        r#"{"hash":"abc123","written":42}"#,
+                        r#"{"matches":["file.rs:10","mod.rs:5"]}"#,
+                    ],
+                ))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub struct ToolCallStatus;
+    impl Dummy<ToolCallStatus> for String {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &ToolCallStatus, rng: &mut R) -> Self {
+            pick(
+                rng,
+                &["pending", "approved", "denied", "running", "ok", "error"],
+            )
+        }
+    }
+
+    pub struct MessageRole;
+    impl Dummy<MessageRole> for String {
+        fn dummy_with_rng<R: Rng + ?Sized>(_: &MessageRole, rng: &mut R) -> Self {
+            pick(rng, &["user", "assistant", "tool", "system"])
         }
     }
 
