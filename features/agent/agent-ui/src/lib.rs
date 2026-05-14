@@ -8,8 +8,13 @@
 //!   Hermes-agent + git integration arc.
 
 pub mod agent_chat_page;
+pub mod dashboard;
 pub mod hermes_kit;
 pub use agent_chat_page::{AgentChatPage, AgentChatPageProps};
+pub use dashboard::{
+    AgentDashboard, DashboardFilters, DashboardSort, InlineDiff, NewRunDialog, NewRunDraft,
+    RunDetailPane, RunDetailView, SortField,
+};
 pub use hermes_kit::*;
 
 use agent_proto::{AgentRun, AgentRunCreate};

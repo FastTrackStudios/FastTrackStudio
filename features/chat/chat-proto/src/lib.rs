@@ -36,6 +36,7 @@ pub struct Channel {
     #[architect(filterable)]
     pub archived: bool,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ChatTags"))]
     pub tags: Vec<String>,
 
@@ -88,12 +89,14 @@ pub struct Message {
     #[architect(filterable)]
     pub deleted: bool,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::internet::en::Username(), 0..4)")
     )]
     pub mentions: Vec<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::filesystem::en::FileName(), 0..3)")

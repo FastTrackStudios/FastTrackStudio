@@ -109,6 +109,7 @@ pub struct InventoryItem {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::InventoryTags"))]
     pub tags: Vec<String>,
 

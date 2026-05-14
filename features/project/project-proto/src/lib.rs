@@ -225,6 +225,7 @@ pub struct Task {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::FutureDateTime"))]
     pub due_date: Option<DateTime<Utc>>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ProjectTags"))]
     pub tags: Vec<String>,
 
@@ -257,12 +258,14 @@ pub struct Task {
     /// Canonical PR URLs (GitHub, GitLab, Forgejo). Multi-element when
     /// the agent's work spans repos or pushes to backports. Append-
     /// only in normal flow; the UI may dedupe on display.
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::PrUrls"))]
     pub pr_urls: Vec<String>,
 
     /// Leaf commit pointers produced by the agent. The Task owns this
     /// list directly (no separate Entity) since commits are
     /// per-task and never queried independently.
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::CommitRefList"))]
     pub commit_refs: Vec<CommitRef>,
 

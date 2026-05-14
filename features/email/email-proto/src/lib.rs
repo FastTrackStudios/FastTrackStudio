@@ -26,18 +26,21 @@ pub struct Email {
     )]
     pub from_addr: String,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::internet::en::FreeEmail(), 1..4)")
     )]
     pub to_addrs: Vec<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::internet::en::FreeEmail(), 0..3)")
     )]
     pub cc_addrs: Vec<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::internet::en::FreeEmail(), 0..2)")
@@ -69,6 +72,7 @@ pub struct Email {
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::ThreadId"))]
     pub thread_id: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::EmailTags"))]
     pub tags: Vec<String>,
 

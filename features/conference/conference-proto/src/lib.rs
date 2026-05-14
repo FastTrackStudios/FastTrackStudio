@@ -48,12 +48,14 @@ pub struct Meeting {
     )]
     pub notes: Option<String>,
 
+    #[architect(json)]
     #[cfg_attr(
         feature = "fake",
         dummy(faker = "(fake::faker::name::en::Name(), 2..8)")
     )]
     pub participants: Vec<String>,
 
+    #[architect(json)]
     #[cfg_attr(feature = "fake", dummy(faker = "crate::fakers::MeetingTags"))]
     pub tags: Vec<String>,
 
