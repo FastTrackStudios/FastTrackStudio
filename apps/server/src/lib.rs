@@ -11,9 +11,14 @@
 //! for read-side compatibility with the existing UI route. As
 //! Phases 5+ land they migrate to Knowledge-vault-backed reads.
 
-use std::collections::HashMap;
+pub mod capability;
+
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::capability::{CapabilityScope, ServerKeypair, default_keypair_path};
 
 use architect::vox;
 use architect_auth::{
@@ -79,21 +84,42 @@ impl OpenDoc {
     }
 }
 
+/// Default LRU cap on the doc registry. Overridable via
+/// `TASK_SERVER_DOC_CACHE_CAP` env var. Phase 3 brings up eviction
+/// (Phase 1 deferred it).
+pub const DEFAULT_DOC_CACHE_CAP: usize = 256;
+
 /// Server-side registry of open `CrdtDoc`s. Lazy-loads from
-/// persistence on first access; never evicts (v0 — Phase 1 ships
-/// without LRU eviction, that lands later when we have multi-doc
-/// usage in production).
+/// persistence on first access. LRU-bounded: when the registry hits
+/// `cap`, the least-recently-used doc is dropped from memory. Its
+/// state survives in persistence so re-opening rehydrates it.
 #[derive(Clone)]
 pub struct DocRegistry {
     persistence: Arc<dyn Persistence>,
-    docs: Arc<Mutex<HashMap<DocId, Arc<OpenDoc>>>>,
+    inner: Arc<Mutex<RegistryInner>>,
+    cap: usize,
+}
+
+struct RegistryInner {
+    docs: HashMap<DocId, Arc<OpenDoc>>,
+    /// MRU at the back, LRU at the front. On access, we re-push the
+    /// id to the back; on eviction, we pop from the front.
+    order: VecDeque<DocId>,
 }
 
 impl DocRegistry {
     pub fn new(persistence: Arc<dyn Persistence>) -> Self {
+        Self::with_cap(persistence, default_doc_cache_cap())
+    }
+
+    pub fn with_cap(persistence: Arc<dyn Persistence>, cap: usize) -> Self {
         Self {
             persistence,
-            docs: Arc::new(Mutex::new(HashMap::new())),
+            inner: Arc::new(Mutex::new(RegistryInner {
+                docs: HashMap::new(),
+                order: VecDeque::new(),
+            })),
+            cap: cap.max(1),
         }
     }
 
@@ -103,9 +129,10 @@ impl DocRegistry {
     /// share state.
     pub async fn get_or_open(&self, id: &DocId) -> Result<Arc<OpenDoc>, SyncError> {
         {
-            let docs = self.docs.lock().await;
-            if let Some(d) = docs.get(id) {
-                return Ok(d.clone());
+            let mut inner = self.inner.lock().await;
+            if let Some(d) = inner.docs.get(id).cloned() {
+                touch_order(&mut inner.order, id);
+                return Ok(d);
             }
         }
         // First-time load. Hash the DocId string into a uuid for
@@ -115,26 +142,63 @@ impl DocRegistry {
         let storage_uuid = if id.as_str() == "workspace" {
             WORKSPACE_DOC_ID
         } else {
-            // SHA-256 → first 16 bytes → Uuid. Deterministic per
-            // doc-id string.
             doc_id_to_uuid(id.as_str())
         };
         let doc = CrdtDoc::open(storage_uuid, ErasedPersistence(self.persistence.clone()))
             .await
             .map_err(|e| SyncError::Internal(format!("open doc `{}`: {e}", id.as_str())))?;
         let entry = Arc::new(OpenDoc::new(Arc::new(doc)));
-        let mut docs = self.docs.lock().await;
-        // Race: someone else opened it between our two locks.
-        // Keep theirs.
-        Ok(docs.entry(id.clone()).or_insert(entry).clone())
+        let mut inner = self.inner.lock().await;
+        // Race: someone else opened it between our two locks. Keep theirs.
+        if let Some(d) = inner.docs.get(id).cloned() {
+            touch_order(&mut inner.order, id);
+            return Ok(d);
+        }
+        inner.docs.insert(id.clone(), entry.clone());
+        inner.order.push_back(id.clone());
+        // Evict LRUs until under cap.
+        while inner.docs.len() > self.cap {
+            if let Some(victim) = inner.order.pop_front() {
+                if &victim == id {
+                    // Don't evict the freshly-inserted entry; put it back.
+                    inner.order.push_back(victim);
+                    break;
+                }
+                if inner.docs.remove(&victim).is_some() {
+                    tracing::debug!(doc = %victim.as_str(), "doc registry: evicted LRU");
+                }
+            } else {
+                break;
+            }
+        }
+        Ok(entry)
     }
 
     /// Read-only access for callers that already know the doc is
     /// open. Returns None for unopened docs — the WorkspaceSync
     /// path goes through `get_or_open`.
     pub async fn try_get(&self, id: &DocId) -> Option<Arc<OpenDoc>> {
-        self.docs.lock().await.get(id).cloned()
+        self.inner.lock().await.docs.get(id).cloned()
     }
+
+    /// Current in-memory doc count. Tests use this to assert eviction.
+    pub async fn open_count(&self) -> usize {
+        self.inner.lock().await.docs.len()
+    }
+}
+
+fn touch_order(order: &mut VecDeque<DocId>, id: &DocId) {
+    if let Some(pos) = order.iter().position(|d| d == id) {
+        order.remove(pos);
+    }
+    order.push_back(id.clone());
+}
+
+fn default_doc_cache_cap() -> usize {
+    std::env::var("TASK_SERVER_DOC_CACHE_CAP")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_DOC_CACHE_CAP)
 }
 
 /// Deterministic `DocId` → `Uuid` mapping for the persistence
@@ -186,23 +250,55 @@ pub struct AppState {
     pub task_repo: Arc<TaskRepoLoro>,
     pub sync: WorkspaceSyncImpl,
     pub auth: AuthState,
+    pub keypair: ServerKeypair,
+    /// When true, every vox connection must present `?cap=<token>`
+    /// and the impl enforces the scope. When false (legacy / dev),
+    /// the impl runs without enforcement so the existing UI + sync
+    /// tests keep working until Phase 4 issues capabilities through
+    /// the share-link service. Tests opt in.
+    pub enforce_capability: bool,
 }
 
 impl AppState {
     /// Build app state with auth opened at the default XDG path
     /// (`$XDG_DATA_HOME/task-server/auth.sqlite`, fallback
-    /// `~/.local/share/task-server/auth.sqlite`).
+    /// `~/.local/share/task-server/auth.sqlite`) and the server
+    /// keypair at `$XDG_DATA_HOME/task-server/server-key.ed25519`
+    /// (auto-generated on first boot). Capability enforcement off —
+    /// flip via `with_capability_enforcement`.
     pub async fn new<P: Persistence + 'static>(persistence: P) -> eyre::Result<Self> {
         let auth_db_url = format!("sqlite://{}?mode=rwc", default_auth_db_path()?.display());
         let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
-        Self::new_with_auth(persistence, auth).await
+        let keypair = ServerKeypair::load_or_generate(&default_keypair_path()?)
+            .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
+        Self::new_inner(persistence, auth, keypair, false).await
     }
 
     /// Build app state with explicit auth — used by tests that want
-    /// an in-memory auth DB.
+    /// an in-memory auth DB. Capability enforcement off.
     pub async fn new_with_auth<P: Persistence + 'static>(
         persistence: P,
         auth: AuthState,
+    ) -> eyre::Result<Self> {
+        let keypair = ServerKeypair::generate_ephemeral();
+        Self::new_inner(persistence, auth, keypair, false).await
+    }
+
+    /// Build app state with capability enforcement on, using the
+    /// caller's keypair. Used by Phase 3 + 4 tests.
+    pub async fn new_with_capability<P: Persistence + 'static>(
+        persistence: P,
+        auth: AuthState,
+        keypair: ServerKeypair,
+    ) -> eyre::Result<Self> {
+        Self::new_inner(persistence, auth, keypair, true).await
+    }
+
+    async fn new_inner<P: Persistence + 'static>(
+        persistence: P,
+        auth: AuthState,
+        keypair: ServerKeypair,
+        enforce_capability: bool,
     ) -> eyre::Result<Self> {
         let persistence: Arc<dyn Persistence> = Arc::new(persistence);
         let registry = DocRegistry::new(persistence.clone());
@@ -227,8 +323,20 @@ impl AppState {
             task_repo,
             sync,
             auth,
+            keypair,
+            enforce_capability,
         })
     }
+}
+
+/// Resolve `now` as unix seconds. Tests stay deterministic by
+/// passing `i64::MAX / 2` into scope expiries — verification only
+/// compares.
+fn now_unix() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Dev default — replace via config in a later phase. Length-checked
@@ -254,19 +362,56 @@ pub fn default_auth_db_path() -> eyre::Result<PathBuf> {
 /// Server-side `WorkspaceSync` implementation. Routes every
 /// `subscribe` / `apply_update` call to the registry, fetching the
 /// per-doc broadcast channel.
+///
+/// Capability enforcement is per-connection: the `vox_ws_handler`
+/// builds a fresh `WorkspaceSyncImpl` per WebSocket, optionally
+/// scoped to a `CapabilityScope`. When `scope` is `Some`, calls
+/// must target a doc the scope allows; `apply_update` also requires
+/// `can_write`. `None` = no enforcement, which is the legacy
+/// localhost-dev path (matching the pre-Phase-3 behavior).
 #[derive(Clone)]
 pub struct WorkspaceSyncImpl {
     registry: DocRegistry,
+    scope: Option<CapabilityScope>,
 }
 
 impl WorkspaceSyncImpl {
     pub fn new(registry: DocRegistry) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            scope: None,
+        }
+    }
+
+    pub fn with_scope(registry: DocRegistry, scope: CapabilityScope) -> Self {
+        Self {
+            registry,
+            scope: Some(scope),
+        }
+    }
+
+    fn check_read(&self, doc_id: &DocId) -> Result<(), SyncError> {
+        if let Some(scope) = &self.scope {
+            if !scope.allows_doc(doc_id) {
+                return Err(SyncError::Forbidden);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_write(&self, doc_id: &DocId) -> Result<(), SyncError> {
+        if let Some(scope) = &self.scope {
+            if !scope.allows_doc(doc_id) || !scope.can_write {
+                return Err(SyncError::Forbidden);
+            }
+        }
+        Ok(())
     }
 }
 
 impl WorkspaceSync for WorkspaceSyncImpl {
     async fn apply_update(&self, doc_id: DocId, update: UpdateBytes) -> Result<(), SyncError> {
+        self.check_write(&doc_id)?;
         let open = self.registry.get_or_open(&doc_id).await?;
         // Loro's `subscribe_local_update` only fires for local
         // mutations — imports (this `apply_remote` call) don't
@@ -281,6 +426,11 @@ impl WorkspaceSync for WorkspaceSyncImpl {
     }
 
     async fn subscribe(&self, doc_id: DocId, output: vox::Tx<UpdateBytes>) {
+        if self.check_read(&doc_id).is_err() {
+            tracing::info!(doc = %doc_id.as_str(), "subscribe: forbidden by capability");
+            let _ = output.close(Default::default()).await;
+            return;
+        }
         let open = match self.registry.get_or_open(&doc_id).await {
             Ok(o) => o,
             Err(e) => {
@@ -369,12 +519,45 @@ pub fn router(state: AppState) -> Router {
 
 async fn vox_ws_handler(
     State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
+    // Capability extraction. If enforcement is on, missing/invalid
+    // tokens get a `WorkspaceSyncImpl` whose scope rejects every
+    // doc — but the auth + repo dispatchers still run, since
+    // capability scoping is sync-only in Phase 3. Phase 4 widens
+    // enforcement to project repos.
+    let connection_scope: Option<CapabilityScope> = if state.enforce_capability {
+        match params.get("cap") {
+            Some(token) => match state.keypair.verify(token, now_unix()) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    tracing::warn!(?e, "vox: capability rejected");
+                    // Empty-scope sentinel — every doc check fails.
+                    Some(CapabilityScope {
+                        expires_unix: i64::MAX,
+                        can_write: false,
+                        doc_ids: Vec::new(),
+                    })
+                }
+            },
+            None => Some(CapabilityScope {
+                expires_unix: i64::MAX,
+                can_write: false,
+                doc_ids: Vec::new(),
+            }),
+        }
+    } else {
+        None
+    };
+
     ws.on_upgrade(move |socket| async move {
         let project_repo = (*state.project_repo).clone();
         let task_repo = (*state.task_repo).clone();
-        let sync = state.sync.clone();
+        let sync = match connection_scope {
+            Some(scope) => WorkspaceSyncImpl::with_scope(state.registry.clone(), scope),
+            None => state.sync.clone(),
+        };
         let auth = state.auth.auth.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
