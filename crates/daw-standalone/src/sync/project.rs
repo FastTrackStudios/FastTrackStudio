@@ -1,6 +1,6 @@
 //! `StandaloneProject` — per-project sync handle.
 
-use daw_proto::{DawResult, Project, ProjectInfo};
+use daw_proto::{DawResult, ProjectInfo, Projects};
 
 use super::daw::Standalone;
 // `ExtState` ported to architect::rpc — see `crate::ext_state`.
@@ -29,7 +29,7 @@ impl<'a> StandaloneProject<'a> {
     }
 }
 
-impl<'a> Project for StandaloneProject<'a> {
+impl<'a> Projects for StandaloneProject<'a> {
     fn guid(&self) -> &str {
         &self.guid
     }

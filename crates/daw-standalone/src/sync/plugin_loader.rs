@@ -3,7 +3,7 @@
 //! Records "loaded" plugins in an in-memory map keyed by path. Loading is
 //! idempotent: re-loading the same path returns the cached entry.
 
-use daw_proto::{DawResult, LoadedPluginInfo, sync::PluginLoader};
+use daw_proto::{DawResult, LoadedPluginInfo, PluginLoading};
 
 use super::daw::Standalone;
 
@@ -21,7 +21,7 @@ fn name_from_path(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_string()
 }
 
-impl<'a> PluginLoader for StandalonePluginLoader<'a> {
+impl<'a> PluginLoading for StandalonePluginLoader<'a> {
     fn load(&self, path: &str) -> DawResult<LoadedPluginInfo> {
         let mut s = self.daw.state.lock().expect("standalone state poisoned");
         let entry = s

@@ -6,7 +6,7 @@
 //! is genuinely async / requires the plugin context state. `list_loaded` and
 //! `is_loaded` are pure reads against the global mutex and work fine sync.
 
-use daw_proto::{DawError, DawResult, LoadedPluginInfo, sync::PluginLoader};
+use daw_proto::{DawError, DawResult, LoadedPluginInfo, PluginLoading};
 
 use super::ReaperMainThread;
 
@@ -20,7 +20,7 @@ impl<'a> ReaperPluginLoader<'a> {
     }
 }
 
-impl<'a> PluginLoader for ReaperPluginLoader<'a> {
+impl<'a> PluginLoading for ReaperPluginLoader<'a> {
     fn load(&self, path: &str) -> DawResult<LoadedPluginInfo> {
         crate::plugin_loader::load_plugin_native(path).map_err(DawError::operation_failed)
     }

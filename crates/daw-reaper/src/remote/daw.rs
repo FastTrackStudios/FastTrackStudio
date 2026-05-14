@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use daw_proto::{Daw, Project as _};
+use daw_proto::{Daw, Projects as _};
 use daw_proto::{DawResult, LastTouchedFx, ProjectInfo};
 
 use super::{RemoteProject, dispatch, dispatch_read, main_thread};

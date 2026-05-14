@@ -9,10 +9,10 @@
 
 use crate::DawResult;
 
-use crate::project::Project;
+use crate::project::Projects;
 
 pub trait Daw {
-    type Project<'a>: Project + 'a
+    type Project<'a>: Projects + 'a
     where
         Self: 'a;
 
