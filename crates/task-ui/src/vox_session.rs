@@ -156,16 +156,15 @@ impl VoxSession {
     }
 }
 
-/// Build the `/vox` WS URL from `window.location`. Same scheme/host
-/// as the page; the `ws:` / `wss:` chosen by mirroring http/https.
+/// Build the `/vox` WS URL. Hardcoded to `127.0.0.1:9090` to match
+/// `sync::sync_url` — `dx serve` runs on `:8765` but the task-server
+/// (with the actual `/vox` route) listens on `:9090`. The dev shell
+/// doesn't proxy WS routes. Production deployments override via the
+/// reverse proxy and same-origin routing; that swap lives in this fn
+/// when we have a real prod target to point at.
 #[cfg(target_arch = "wasm32")]
 fn vox_url() -> String {
-    let win = web_sys::window().expect("no window");
-    let loc = win.location();
-    let proto = loc.protocol().unwrap_or_else(|_| "http:".into());
-    let host = loc.host().unwrap_or_else(|_| "localhost".into());
-    let ws_proto = if proto == "https:" { "wss" } else { "ws" };
-    format!("{ws_proto}://{host}/vox")
+    "ws://127.0.0.1:9090/vox".to_string()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
