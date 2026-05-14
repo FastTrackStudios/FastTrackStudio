@@ -11,7 +11,9 @@ use super::regions::StandaloneRegions;
 use super::routing::StandaloneRouting;
 use super::takes::StandaloneTakes;
 use super::tempo_map::StandaloneTempoMap;
-use super::tracks::StandaloneTracks;
+// `Tracks` ported to architect::rpc — `impl Tracks for Standalone`
+// lives at `crate::track`. The borrowed `StandaloneTracks<'a>` view
+// retired with the port.
 use super::transport::StandaloneTransport;
 
 /// Per-project sync handle. Owns sub-domain accessors.
@@ -37,10 +39,6 @@ impl<'a> Project for StandaloneProject<'a> {
         Self: 'b;
     type TempoMap<'b>
         = StandaloneTempoMap<'b>
-    where
-        Self: 'b;
-    type Tracks<'b>
-        = StandaloneTracks<'b>
     where
         Self: 'b;
     type ExtState<'b>
@@ -86,10 +84,6 @@ impl<'a> Project for StandaloneProject<'a> {
 
     fn tempo_map(&self) -> Self::TempoMap<'_> {
         StandaloneTempoMap::new(self.daw, self.guid.clone())
-    }
-
-    fn tracks(&self) -> Self::Tracks<'_> {
-        StandaloneTracks::new(self.daw, self.guid.clone())
     }
 
     fn ext_state(&self) -> Self::ExtState<'_> {

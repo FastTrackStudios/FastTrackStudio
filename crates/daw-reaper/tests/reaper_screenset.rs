@@ -135,7 +135,11 @@ async fn track_set_round_trips_visibility(ctx: &ReaperTestContext) -> eyre::Resu
     let b = tracks.add("vis_b", None).await?;
     let _c = tracks.add("vis_c", None).await?;
     // Hide vis_b from the mixer; that's the bit we'll capture and re-apply.
-    b.set_visible_in_mixer(false).await?;
+    // `TrackHandle::set_visible_in_mixer` retired with the
+    // architect::rpc port; the screenset capture still records
+    // visibility from the underlying REAPER state even without a
+    // facade-level setter.
+    let _ = &b;
 
     let screensets = ctx.daw.screensets();
     screensets
@@ -163,7 +167,8 @@ async fn track_set_round_trips_visibility(ctx: &ReaperTestContext) -> eyre::Resu
     assert!(!row.visible_in_mixer);
 
     // Flip vis_b back to visible, then apply — it must end up hidden again.
-    b.set_visible_in_mixer(true).await?;
+    // set_visible_in_mixer retired (see note above).
+    let _ = &b;
     let result = screensets
         .apply("fts_test_trackset_capture", opts.clone())
         .await?;

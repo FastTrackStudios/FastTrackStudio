@@ -21,7 +21,9 @@ pub mod regions;
 pub mod routing;
 pub mod takes;
 pub mod tempo_map;
-pub mod tracks;
+// tracks ported to architect::rpc — `impl Tracks for Reaper` lives
+// at `crate::track`. The borrowed `ReaperTracks<'a>` view retired
+// with the port.
 pub mod transport;
 
 pub use daw::ReaperMainThread;
@@ -34,7 +36,6 @@ pub use regions::ReaperRegions;
 pub use routing::ReaperRouting;
 pub use takes::ReaperTakes;
 pub use tempo_map::ReaperTempoMap;
-pub use tracks::ReaperTracks;
 pub use transport::ReaperTransport;
 
 // =============================================================================

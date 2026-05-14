@@ -126,7 +126,12 @@ impl Markers for Reaper {
     }
 
     fn get(&self, project: ProjectContext, id: u32) -> Option<Marker> {
-        self.all(project).into_iter().find(|m| m.id == Some(id))
+        // Fully-qualified — `Reaper` impls multiple service traits
+        // (`Markers`, `Tracks`, …) and `self.all(...)` would be
+        // ambiguous between them.
+        <Self as Markers>::all(self, project)
+            .into_iter()
+            .find(|m| m.id == Some(id))
     }
 
     fn count(&self, project: ProjectContext) -> u32 {

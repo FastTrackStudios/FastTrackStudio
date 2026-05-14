@@ -1,422 +1,269 @@
-//! Standalone track implementation
+//! `impl Tracks for Standalone` — post-architect::rpc port.
+//!
+//! Backed by `ProjectState::tracks: Vec<Track>` in the existing
+//! in-memory state. Master track is synthesized on demand. The old
+//! 400+-line async `StandaloneTrack` impl with parallel `TrackState`
+//! storage was retired in favor of operating directly on the
+//! canonical state — fewer places for state to drift.
 
-use crate::platform::RwLock;
-use daw_proto::{
-    InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest,
-    TrackRef, TrackService,
-};
-use std::sync::Arc;
+use daw_proto::sync::Tracks;
+use daw_proto::{DawError, DawResult, ProjectContext, Track, TrackRef};
 use uuid::Uuid;
-use vox::Tx;
 
-/// Internal track state for standalone implementation
-#[derive(Clone)]
-struct TrackState {
-    guid: String,
-    index: u32,
-    name: String,
-    muted: bool,
-    soloed: bool,
-    armed: bool,
-    selected: bool,
-    volume: f64,
-    pan: f64,
-    visible_in_tcp: bool,
-    visible_in_mixer: bool,
-    color: Option<u32>,
-}
+use crate::sync::Standalone;
 
-impl TrackState {
-    fn new(guid: String, index: u32, name: String) -> Self {
-        Self {
-            guid,
-            index,
-            name,
-            muted: false,
-            soloed: false,
-            armed: false,
-            selected: false,
-            volume: 1.0,
-            pan: 0.0,
-            visible_in_tcp: true,
-            visible_in_mixer: true,
-            color: None,
-        }
-    }
-
-    fn to_track(&self) -> Track {
-        let mut track = Track::new(self.guid.clone(), self.index, self.name.clone());
-        track.muted = self.muted;
-        track.soloed = self.soloed;
-        track.armed = self.armed;
-        track.selected = self.selected;
-        track.volume = self.volume;
-        track.pan = self.pan;
-        track.visible_in_tcp = self.visible_in_tcp;
-        track.visible_in_mixer = self.visible_in_mixer;
-        track.color = self.color;
-        track
-    }
-}
-
-/// Standalone track service implementation.
-///
-/// Maintains an in-memory list of tracks for testing.
-#[derive(Clone)]
-pub struct StandaloneTrack {
-    tracks: Arc<RwLock<Vec<TrackState>>>,
-}
-
-impl Default for StandaloneTrack {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StandaloneTrack {
-    pub fn new() -> Self {
-        // Create some default tracks
-        let default_tracks = vec![
-            TrackState::new(Uuid::new_v4().to_string(), 0, "Track 1".to_string()),
-            TrackState::new(Uuid::new_v4().to_string(), 1, "Track 2".to_string()),
-            TrackState::new(Uuid::new_v4().to_string(), 2, "Vocals".to_string()),
-            TrackState::new(Uuid::new_v4().to_string(), 3, "Drums".to_string()),
-        ];
-
-        Self {
-            tracks: Arc::new(RwLock::new("standalone-tracks", default_tracks)),
-        }
-    }
-
-    /// Add a track (useful for tests)
-    pub async fn add_track(&self, name: &str) -> String {
-        let mut tracks = self.tracks.write().await;
-        let index = tracks.len() as u32;
-        let guid = Uuid::new_v4().to_string();
-        tracks.push(TrackState::new(guid.clone(), index, name.to_string()));
-        guid
-    }
-
-    fn find_track<'a>(
-        tracks: &'a mut [TrackState],
-        track_ref: &TrackRef,
-    ) -> Option<&'a mut TrackState> {
-        match track_ref {
-            TrackRef::Guid(guid) => tracks.iter_mut().find(|t| &t.guid == guid),
-            TrackRef::Index(idx) => tracks.iter_mut().find(|t| t.index == *idx),
-            TrackRef::Master => tracks.first_mut(),
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => {
+            let state = daw.state.lock().ok()?;
+            state.current_project_guid.clone()
         }
     }
 }
 
-impl TrackService for StandaloneTrack {
-    async fn get_tracks(&self, _project: ProjectContext) -> Vec<Track> {
-        let tracks = self.tracks.read().await;
-        tracks.iter().map(|t| t.to_track()).collect()
-    }
-
-    async fn get_track(&self, _project: ProjectContext, track: TrackRef) -> Option<Track> {
-        let tracks = self.tracks.read().await;
-        match &track {
-            TrackRef::Guid(guid) => tracks
-                .iter()
-                .find(|t| &t.guid == guid)
-                .map(|t| t.to_track()),
-            TrackRef::Index(idx) => tracks
-                .iter()
-                .find(|t| t.index == *idx)
-                .map(|t| t.to_track()),
-            TrackRef::Master => tracks.first().map(|t| t.to_track()),
+fn find_track_index<'a>(tracks: &'a [Track], r: &TrackRef) -> Option<usize> {
+    match r {
+        TrackRef::Guid(guid) => tracks.iter().position(|t| t.guid == *guid),
+        TrackRef::Index(idx) => {
+            let i = *idx as usize;
+            if i < tracks.len() { Some(i) } else { None }
         }
+        TrackRef::Master => None,
     }
+}
 
-    async fn track_count(&self, _project: ProjectContext) -> u32 {
-        self.tracks.read().await.len() as u32
-    }
+fn not_found_proj() -> DawError {
+    DawError::not_found("Project", "context")
+}
 
-    async fn get_selected_tracks(&self, _project: ProjectContext) -> Vec<Track> {
-        let tracks = self.tracks.read().await;
-        tracks
-            .iter()
-            .filter(|t| t.selected)
-            .map(|t| t.to_track())
-            .collect()
-    }
+fn not_found_track() -> DawError {
+    DawError::not_found("Track", "")
+}
 
-    async fn get_master_track(&self, _project: ProjectContext) -> Option<Track> {
-        let tracks = self.tracks.read().await;
-        tracks.first().map(|t| t.to_track())
-    }
-
-    async fn set_muted(&self, _project: ProjectContext, track: TrackRef, muted: bool) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.muted = muted;
-        }
-    }
-
-    async fn set_soloed(&self, _project: ProjectContext, track: TrackRef, soloed: bool) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.soloed = soloed;
-        }
-    }
-
-    async fn set_solo_exclusive(&self, _project: ProjectContext, track: TrackRef) {
-        let mut tracks = self.tracks.write().await;
-        // Unsolo all first
-        for t in tracks.iter_mut() {
-            t.soloed = false;
-        }
-        // Solo the target track
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.soloed = true;
-        }
-    }
-
-    async fn clear_all_solo(&self, _project: ProjectContext) {
-        let mut tracks = self.tracks.write().await;
-        for t in tracks.iter_mut() {
-            t.soloed = false;
-        }
-    }
-
-    async fn set_armed(&self, _project: ProjectContext, track: TrackRef, armed: bool) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.armed = armed;
-        }
-    }
-
-    async fn set_input_monitoring(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _mode: InputMonitoringMode,
-    ) {
-        // No-op in standalone
-    }
-
-    async fn set_record_input(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _input: RecordInput,
-    ) {
-        // No-op in standalone
-    }
-
-    async fn set_volume(&self, _project: ProjectContext, track: TrackRef, volume: f64) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.volume = volume.clamp(0.0, 4.0);
-        }
-    }
-
-    async fn set_pan(&self, _project: ProjectContext, track: TrackRef, pan: f64) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.pan = pan.clamp(-1.0, 1.0);
-        }
-    }
-
-    async fn set_selected(&self, _project: ProjectContext, track: TrackRef, selected: bool) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.selected = selected;
-        }
-    }
-
-    async fn select_exclusive(&self, _project: ProjectContext, track: TrackRef) {
-        let mut tracks = self.tracks.write().await;
-        for t in tracks.iter_mut() {
-            t.selected = false;
-        }
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.selected = true;
-        }
-    }
-
-    async fn clear_selection(&self, _project: ProjectContext) {
-        let mut tracks = self.tracks.write().await;
-        for t in tracks.iter_mut() {
-            t.selected = false;
-        }
-    }
-
-    async fn mute_all(&self, _project: ProjectContext) {
-        let mut tracks = self.tracks.write().await;
-        for t in tracks.iter_mut() {
-            t.muted = true;
-        }
-    }
-
-    async fn unmute_all(&self, _project: ProjectContext) {
-        let mut tracks = self.tracks.write().await;
-        for t in tracks.iter_mut() {
-            t.muted = false;
-        }
-    }
-
-    async fn add_track(
-        &self,
-        _project: ProjectContext,
-        name: String,
-        at_index: Option<u32>,
-    ) -> String {
-        let mut tracks = self.tracks.write().await;
-        let index = at_index.unwrap_or(tracks.len() as u32) as usize;
-        let guid = Uuid::new_v4().to_string();
-        tracks.insert(index, TrackState::new(guid.clone(), index as u32, name));
-        // Re-index all tracks after the insertion point
-        for (i, t) in tracks.iter_mut().enumerate() {
-            t.index = i as u32;
-        }
-        guid
-    }
-
-    async fn remove_track(&self, _project: ProjectContext, track: TrackRef) {
-        let mut tracks = self.tracks.write().await;
-        let pos = match &track {
-            TrackRef::Guid(guid) => tracks.iter().position(|t| &t.guid == guid),
-            TrackRef::Index(idx) => tracks.iter().position(|t| t.index == *idx),
-            TrackRef::Master => Some(0),
+impl Tracks for Standalone {
+    fn all(&self, project: ProjectContext) -> Vec<Track> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
         };
-        if let Some(i) = pos {
-            tracks.remove(i);
-            // Re-index remaining tracks
-            for (j, t) in tracks.iter_mut().enumerate() {
-                t.index = j as u32;
+        self.with_project(&guid, |p| p.tracks.clone())
+            .unwrap_or_default()
+    }
+
+    fn get(&self, project: ProjectContext, track: TrackRef) -> Option<Track> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project(&guid, |p| {
+            find_track_index(&p.tracks, &track).map(|i| p.tracks[i].clone())
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn count(&self, project: ProjectContext) -> u32 {
+        let Some(guid) = resolve_project(self, &project) else {
+            return 0;
+        };
+        self.with_project(&guid, |p| p.tracks.len() as u32)
+            .unwrap_or(0)
+    }
+
+    fn selected(&self, project: ProjectContext) -> Vec<Track> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.tracks.iter().filter(|t| t.selected).cloned().collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn master(&self, project: ProjectContext) -> Option<Track> {
+        // Standalone synthesizes a master track on demand — there's no
+        // persistent master row in `ProjectState::tracks`.
+        let _ = project;
+        Some(Track {
+            guid: "master".to_string(),
+            index: 0,
+            name: "MASTER".to_string(),
+            ..Default::default()
+        })
+    }
+
+    fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].muted = muted;
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn set_soloed(&self, project: ProjectContext, track: TrackRef, soloed: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].soloed = soloed;
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn set_solo_exclusive(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            for t in p.tracks.iter_mut() {
+                t.soloed = false;
             }
-        }
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].soloed = true;
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn rename_track(&self, _project: ProjectContext, track: TrackRef, name: String) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.name = name;
-        }
+    fn clear_all_solo(&self, project: ProjectContext) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            for t in p.tracks.iter_mut() {
+                t.soloed = false;
+            }
+        })
     }
 
-    async fn set_track_color(&self, _project: ProjectContext, track: TrackRef, color: u32) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.color = if color == 0 { None } else { Some(color) };
-        }
+    fn set_armed(&self, project: ProjectContext, track: TrackRef, armed: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].armed = armed;
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn set_visible_in_tcp(&self, _project: ProjectContext, track: TrackRef, visible: bool) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.visible_in_tcp = visible;
-        }
+    fn set_volume(&self, project: ProjectContext, track: TrackRef, volume: f64) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].volume = volume;
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn set_visible_in_mixer(&self, _project: ProjectContext, track: TrackRef, visible: bool) {
-        let mut tracks = self.tracks.write().await;
-        if let Some(t) = Self::find_track(&mut tracks, &track) {
-            t.visible_in_mixer = visible;
-        }
+    fn set_pan(&self, project: ProjectContext, track: TrackRef, pan: f64) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].pan = pan.clamp(-1.0, 1.0);
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn set_track_chunk(
+    fn set_selected(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _chunk: String,
-    ) -> Result<(), String> {
-        // Standalone implementation doesn't support chunk operations
-        Ok(())
-    }
-
-    async fn get_track_chunk(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-    ) -> Result<String, String> {
-        Ok(String::new())
-    }
-
-    async fn set_folder_depth(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _depth: i32,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn set_num_channels(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _num_channels: u32,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn remove_all_tracks(&self, _project: ProjectContext) -> Result<(), String> {
-        let mut tracks = self.tracks.write().await;
-        tracks.clear();
-        Ok(())
-    }
-
-    async fn move_track(
-        &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         track: TrackRef,
-        new_index: u32,
-    ) -> Result<(), String> {
-        let mut tracks = self.tracks.write().await;
-        let current_pos = match &track {
-            TrackRef::Guid(guid) => tracks.iter().position(|t| &t.guid == guid),
-            TrackRef::Index(idx) => tracks.iter().position(|t| t.index == *idx),
-            TrackRef::Master => Some(0),
-        };
-        if let Some(pos) = current_pos {
-            let t = tracks.remove(pos);
-            let insert_at = (new_index as usize).min(tracks.len());
-            tracks.insert(insert_at, t);
-            // Re-index
-            for (i, track) in tracks.iter_mut().enumerate() {
-                track.index = i as u32;
+        selected: bool,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].selected = selected;
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn select_exclusive(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            for t in p.tracks.iter_mut() {
+                t.selected = false;
             }
-        }
-        Ok(())
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].selected = true;
+            Ok::<(), DawError>(())
+        })?
     }
 
-    async fn apply_hierarchy(
-        &self,
-        _project: ProjectContext,
-        _hierarchy: daw_proto::TrackHierarchy,
-    ) -> Result<(), String> {
-        Err("apply_hierarchy not implemented for standalone".to_string())
+    fn clear_selection(&self, project: ProjectContext) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            for t in p.tracks.iter_mut() {
+                t.selected = false;
+            }
+        })
     }
 
-    async fn get_ext_state(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _request: TrackExtStateRequest,
-    ) -> Option<String> {
-        None
+    fn mute_all(&self, project: ProjectContext) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            for t in p.tracks.iter_mut() {
+                t.muted = true;
+            }
+        })
     }
 
-    async fn set_ext_state(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _request: TrackExtStateRequest,
-    ) {
+    fn unmute_all(&self, project: ProjectContext) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            for t in p.tracks.iter_mut() {
+                t.muted = false;
+            }
+        })
     }
 
-    async fn delete_ext_state(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _request: TrackExtStateRequest,
-    ) {
+    fn add(&self, project: ProjectContext, name: &str, at_index: Option<u32>) -> DawResult<String> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let new_guid = Uuid::new_v4().to_string();
+            let pos = at_index
+                .map(|i| (i as usize).min(p.tracks.len()))
+                .unwrap_or(p.tracks.len());
+            let track = Track {
+                guid: new_guid.clone(),
+                index: pos as u32,
+                name: name.to_string(),
+                ..Default::default()
+            };
+            p.tracks.insert(pos, track);
+            // Re-index the tracks below the insertion point.
+            for (i, t) in p.tracks.iter_mut().enumerate().skip(pos) {
+                t.index = i as u32;
+            }
+            new_guid
+        })
     }
 
-    async fn subscribe_tracks(&self, _project: ProjectContext, _tx: Tx<TrackEvent>) {}
+    fn remove(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks.remove(i);
+            for (idx, t) in p.tracks.iter_mut().enumerate() {
+                t.index = idx as u32;
+            }
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn remove_all(&self, project: ProjectContext) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            p.tracks.clear();
+        })
+    }
+
+    fn rename(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].name = name.to_string();
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn set_color(&self, project: ProjectContext, track: TrackRef, color: u32) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].color = if color == 0 { None } else { Some(color) };
+            Ok::<(), DawError>(())
+        })?
+    }
 }

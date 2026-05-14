@@ -4,7 +4,6 @@
 //! Used by `PluginHost` to create a local `Daw` instance without SHM.
 
 use daw_proto::automation::{AutomationServiceDispatcher, automation_service_service_descriptor};
-use daw_proto::marker;
 use daw_proto::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
     ExtStateServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher,
@@ -12,8 +11,9 @@ use daw_proto::{
     MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
     RegionServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
     TakeServiceDispatcher, TempoMapServiceDispatcher, ToolbarServiceDispatcher,
-    TrackServiceDispatcher, TransportServiceDispatcher, WindowGeometryServiceDispatcher,
+    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
 };
+use daw_proto::{marker, track};
 
 use daw_proto::{
     action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
@@ -25,8 +25,7 @@ use daw_proto::{
     region_service_service_descriptor, routing_service_service_descriptor,
     screenset_service_service_descriptor, take_service_service_descriptor,
     tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-    track_service_service_descriptor, transport_service_service_descriptor,
-    window_geometry_service_service_descriptor,
+    transport_service_service_descriptor, window_geometry_service_service_descriptor,
 };
 
 use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
@@ -43,7 +42,8 @@ pub fn create_daw_handler() -> RoutedHandler {
     // Initialize broadcasters (idempotent if already done by daw-bridge)
     crate::init_transport_broadcaster();
     crate::init_fx_broadcaster();
-    crate::init_track_broadcaster();
+    // Track broadcaster retired alongside the architect::rpc port —
+    // streaming subscriptions live on a sibling trait when revived.
     crate::init_item_broadcaster();
     crate::init_routing_broadcaster();
     crate::init_tempo_map_broadcaster();
@@ -56,7 +56,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let audio_engine = crate::ReaperAudioEngine::new();
     let midi = crate::ReaperMidi::new();
     let fx = crate::ReaperFx::new();
-    let track = crate::ReaperTrack::new();
+    // Tracks ported to architect::rpc — mounted via track::serve(Reaper)
     let routing = crate::ReaperRouting::new();
     let live_midi = crate::ReaperLiveMidi::new();
     let ext_state = crate::ReaperExtState::new();
@@ -111,10 +111,7 @@ pub fn create_daw_handler() -> RoutedHandler {
             fx_service_service_descriptor(),
             FxServiceDispatcher::new(fx),
         )
-        .with(
-            track_service_service_descriptor(),
-            TrackServiceDispatcher::new(track),
-        )
+        .with(track::descriptor(), track::serve(crate::Reaper))
         .with(
             routing_service_service_descriptor(),
             RoutingServiceDispatcher::new(routing),

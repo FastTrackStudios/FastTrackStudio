@@ -14,7 +14,7 @@ pub async fn dispatch_op(
     outputs: &[Option<StepOutput>],
     project_svc: &crate::ReaperProject,
     transport_svc: &crate::ReaperTransport,
-    track_svc: &crate::ReaperTrack,
+    track_svc: &crate::Reaper,
     fx_svc: &crate::ReaperFx,
     routing_svc: &crate::ReaperRouting,
     item_svc: &crate::ReaperItem,
@@ -287,195 +287,125 @@ async fn dispatch_transport(
 async fn dispatch_track(
     op: &TrackOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperTrack,
+    svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
-    use daw_proto::TrackService;
+    use daw_proto::sync::Tracks;
     match op {
         TrackOp::GetTracks(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::TrackList(svc.get_tracks(ctx).await))
+            Ok(StepOutput::TrackList(Tracks::all(svc, ctx)))
         }
         TrackOp::GetTrack(p, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            Ok(StepOutput::OptTrack(svc.get_track(ctx, tr).await))
+            Ok(StepOutput::OptTrack(Tracks::get(svc, ctx, tr)))
         }
         TrackOp::TrackCount(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::U32(svc.track_count(ctx).await))
+            Ok(StepOutput::U32(Tracks::count(svc, ctx)))
         }
         TrackOp::GetSelectedTracks(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::TrackList(svc.get_selected_tracks(ctx).await))
+            Ok(StepOutput::TrackList(Tracks::selected(svc, ctx)))
         }
         TrackOp::GetMasterTrack(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptTrack(svc.get_master_track(ctx).await))
+            Ok(StepOutput::OptTrack(Tracks::master(svc, ctx)))
         }
         TrackOp::SetMuted(p, t, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_muted(ctx, tr, *v).await;
+            Tracks::set_muted(svc, ctx, tr, *v).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetSoloed(p, t, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_soloed(ctx, tr, *v).await;
+            Tracks::set_soloed(svc, ctx, tr, *v).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetSoloExclusive(p, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_solo_exclusive(ctx, tr).await;
+            Tracks::set_solo_exclusive(svc, ctx, tr).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::ClearAllSolo(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.clear_all_solo(ctx).await;
+            Tracks::clear_all_solo(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetArmed(p, t, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_armed(ctx, tr, *v).await;
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::SetInputMonitoring(p, t, mode) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            svc.set_input_monitoring(ctx, tr, *mode).await;
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::SetRecordInput(p, t, input) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            svc.set_record_input(ctx, tr, *input).await;
+            Tracks::set_armed(svc, ctx, tr, *v).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetVolume(p, t, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_volume(ctx, tr, *v).await;
+            Tracks::set_volume(svc, ctx, tr, *v).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetPan(p, t, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_pan(ctx, tr, *v).await;
+            Tracks::set_pan(svc, ctx, tr, *v).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetSelected(p, t, v) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_selected(ctx, tr, *v).await;
+            Tracks::set_selected(svc, ctx, tr, *v).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SelectExclusive(p, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.select_exclusive(ctx, tr).await;
+            Tracks::select_exclusive(svc, ctx, tr).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::ClearSelection(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.clear_selection(ctx).await;
+            Tracks::clear_selection(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::MuteAll(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.mute_all(ctx).await;
+            Tracks::mute_all(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::UnmuteAll(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.unmute_all(ctx).await;
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::SetVisibleInTcp(p, t, v) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            svc.set_visible_in_tcp(ctx, tr, *v).await;
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::SetVisibleInMixer(p, t, v) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            svc.set_visible_in_mixer(ctx, tr, *v).await;
+            Tracks::unmute_all(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::AddTrack(p, name, at) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Str(svc.add_track(ctx, name.clone(), *at).await))
+            let id = Tracks::add(svc, ctx, name, *at).map_err(|e| e.to_string())?;
+            Ok(StepOutput::Str(id))
         }
         TrackOp::RemoveTrack(p, t) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.remove_track(ctx, tr).await;
+            Tracks::remove(svc, ctx, tr).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::RenameTrack(p, t, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.rename_track(ctx, tr, name.clone()).await;
+            Tracks::rename(svc, ctx, tr, name).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         TrackOp::SetTrackColor(p, t, color) => {
             let ctx = resolve_project_arg(p, outputs)?;
             let tr = resolve_track_arg(t, outputs)?;
-            svc.set_track_color(ctx, tr, *color).await;
+            Tracks::set_color(svc, ctx, tr, *color).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
-        }
-        TrackOp::SetTrackChunk(p, t, chunk) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            result_to_output(svc.set_track_chunk(ctx, tr, chunk.clone()).await)
-        }
-        TrackOp::GetTrackChunk(p, t) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            Ok(StepOutput::ResultStr(svc.get_track_chunk(ctx, tr).await))
-        }
-        TrackOp::SetFolderDepth(p, t, depth) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            result_to_output(svc.set_folder_depth(ctx, tr, *depth).await)
-        }
-        TrackOp::SetNumChannels(p, t, n) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            result_to_output(svc.set_num_channels(ctx, tr, *n).await)
         }
         TrackOp::RemoveAllTracks(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            result_to_output(svc.remove_all_tracks(ctx).await)
-        }
-        TrackOp::MoveTrack(p, t, idx) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            result_to_output(svc.move_track(ctx, tr, *idx).await)
-        }
-        TrackOp::ApplyHierarchy(p, h) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            result_to_output(svc.apply_hierarchy(ctx, h.clone()).await)
-        }
-        TrackOp::GetExtState(p, t, req) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            Ok(StepOutput::OptStr(
-                svc.get_ext_state(ctx, tr, req.clone()).await,
-            ))
-        }
-        TrackOp::SetExtState(p, t, req) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            svc.set_ext_state(ctx, tr, req.clone()).await;
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::DeleteExtState(p, t, req) => {
-            let ctx = resolve_project_arg(p, outputs)?;
-            let tr = resolve_track_arg(t, outputs)?;
-            svc.delete_ext_state(ctx, tr, req.clone()).await;
+            Tracks::remove_all(svc, ctx).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
     }
@@ -1113,43 +1043,45 @@ async fn dispatch_marker(
     svc: &crate::Reaper,
 ) -> Result<StepOutput, String> {
     use daw_proto::sync::Markers;
+    // Fully-qualified calls — `Reaper` impls both `Markers` and
+    // `Tracks`, and many verbs (`all`, `get`, `count`, `add`,
+    // `remove`, `rename`, `set_color`) appear on both.
     match op {
         MarkerOp::GetMarkers(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::MarkerList(svc.all(ctx)))
+            Ok(StepOutput::MarkerList(Markers::all(svc, ctx)))
         }
         MarkerOp::GetMarker(p, id) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::OptMarker(svc.get(ctx, *id)))
+            Ok(StepOutput::OptMarker(Markers::get(svc, ctx, *id)))
         }
         MarkerOp::MarkerCount(p) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            Ok(StepOutput::Usize(svc.count(ctx) as u64))
+            Ok(StepOutput::Usize(Markers::count(svc, ctx) as u64))
         }
         MarkerOp::AddMarker(p, pos, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            let id = svc.add(ctx, *pos, name).map_err(|e| e.to_string())?;
+            let id = Markers::add(svc, ctx, *pos, name).map_err(|e| e.to_string())?;
             Ok(StepOutput::U32(id))
         }
         MarkerOp::RemoveMarker(p, id) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.remove(ctx, *id).map_err(|e| e.to_string())?;
+            Markers::remove(svc, ctx, *id).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         MarkerOp::MoveMarker(p, id, pos) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_position(ctx, *id, *pos)
-                .map_err(|e| e.to_string())?;
+            Markers::set_position(svc, ctx, *id, *pos).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         MarkerOp::RenameMarker(p, id, name) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.rename(ctx, *id, name).map_err(|e| e.to_string())?;
+            Markers::rename(svc, ctx, *id, name).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
         MarkerOp::SetMarkerColor(p, id, color) => {
             let ctx = resolve_project_arg(p, outputs)?;
-            svc.set_color(ctx, *id, *color).map_err(|e| e.to_string())?;
+            Markers::set_color(svc, ctx, *id, *color).map_err(|e| e.to_string())?;
             Ok(StepOutput::Unit)
         }
     }

@@ -586,16 +586,6 @@ fn dispatch_track_sync(op: &TrackOp, outputs: &[Option<StepOutput>]) -> Result<S
             }
             Ok(StepOutput::Unit)
         }
-        TrackOp::SetVisibleInTcp(p, t, v) => {
-            let (_project, track) = proj_track(p, t, outputs)?;
-            track.set_shown(reaper_medium::TrackArea::Tcp, *v);
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::SetVisibleInMixer(p, t, v) => {
-            let (_project, track) = proj_track(p, t, outputs)?;
-            track.set_shown(reaper_medium::TrackArea::Mcp, *v);
-            Ok(StepOutput::Unit)
-        }
         TrackOp::RemoveAllTracks(p) => {
             let project = proj(p, outputs)?;
             let count = project.track_count();
@@ -603,26 +593,6 @@ fn dispatch_track_sync(op: &TrackOp, outputs: &[Option<StepOutput>]) -> Result<S
                 if let Some(t) = project.track_by_index(i) {
                     project.remove_track(&t);
                 }
-            }
-            Ok(StepOutput::Unit)
-        }
-        TrackOp::SetExtState(p, t, req) => {
-            let (_project, track) = proj_track(p, t, outputs)?;
-            let raw = track.raw().map_err(|e| format!("raw track: {e}"))?;
-            let c_key = std::ffi::CString::new(format!("P_EXT:{}/{}", req.section, req.key))
-                .map_err(|e| format!("CString: {e}"))?;
-            let c_val =
-                std::ffi::CString::new(req.value.as_str()).map_err(|e| format!("CString: {e}"))?;
-            unsafe {
-                Reaper::get()
-                    .medium_reaper()
-                    .low()
-                    .GetSetMediaTrackInfo_String(
-                        raw.as_ptr(),
-                        c_key.as_ptr(),
-                        c_val.as_ptr() as *mut _,
-                        true,
-                    );
             }
             Ok(StepOutput::Unit)
         }

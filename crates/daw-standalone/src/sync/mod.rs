@@ -24,7 +24,8 @@ mod regions;
 mod routing;
 mod takes;
 mod tempo_map;
-mod tracks;
+// tracks ported to architect::rpc — `impl Tracks for Standalone`
+// lives at `crate::track`.
 mod transport;
 
 pub use daw::{
@@ -39,5 +40,4 @@ pub use regions::StandaloneRegions;
 pub use routing::StandaloneRouting;
 pub use takes::StandaloneTakes;
 pub use tempo_map::StandaloneTempoMap;
-pub use tracks::StandaloneTracks;
 pub use transport::StandaloneTransport;

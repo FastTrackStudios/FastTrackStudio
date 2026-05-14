@@ -102,6 +102,10 @@ pub enum TransportOp {
 // Track operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Tracks` trait. Variants for
+// retired surfaces (input monitoring, record input, visibility, chunks,
+// folder depth, channel counts, move, apply_hierarchy, ext state) came
+// from the old `TrackService` and were retired alongside the port.
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum TrackOp {
@@ -115,8 +119,6 @@ pub enum TrackOp {
     SetSoloExclusive(ProjectArg, TrackArg),
     ClearAllSolo(ProjectArg),
     SetArmed(ProjectArg, TrackArg, bool),
-    SetInputMonitoring(ProjectArg, TrackArg, InputMonitoringMode),
-    SetRecordInput(ProjectArg, TrackArg, RecordInput),
     SetVolume(ProjectArg, TrackArg, f64),
     SetPan(ProjectArg, TrackArg, f64),
     SetSelected(ProjectArg, TrackArg, bool),
@@ -124,22 +126,11 @@ pub enum TrackOp {
     ClearSelection(ProjectArg),
     MuteAll(ProjectArg),
     UnmuteAll(ProjectArg),
-    SetVisibleInTcp(ProjectArg, TrackArg, bool),
-    SetVisibleInMixer(ProjectArg, TrackArg, bool),
     AddTrack(ProjectArg, String, Option<u32>),
     RemoveTrack(ProjectArg, TrackArg),
     RenameTrack(ProjectArg, TrackArg, String),
     SetTrackColor(ProjectArg, TrackArg, u32),
-    SetTrackChunk(ProjectArg, TrackArg, String),
-    GetTrackChunk(ProjectArg, TrackArg),
-    SetFolderDepth(ProjectArg, TrackArg, i32),
-    SetNumChannels(ProjectArg, TrackArg, u32),
     RemoveAllTracks(ProjectArg),
-    MoveTrack(ProjectArg, TrackArg, u32),
-    ApplyHierarchy(ProjectArg, TrackHierarchy),
-    GetExtState(ProjectArg, TrackArg, TrackExtStateRequest),
-    SetExtState(ProjectArg, TrackArg, TrackExtStateRequest),
-    DeleteExtState(ProjectArg, TrackArg, TrackExtStateRequest),
 }
 
 // =============================================================================
@@ -808,26 +799,14 @@ fn track_op_project_arg(op: &TrackOp) -> &ProjectArg {
         | TrackOp::SetSoloed(p, _, _)
         | TrackOp::SetSoloExclusive(p, _)
         | TrackOp::SetArmed(p, _, _)
-        | TrackOp::SetInputMonitoring(p, _, _)
-        | TrackOp::SetRecordInput(p, _, _)
         | TrackOp::SetVolume(p, _, _)
         | TrackOp::SetPan(p, _, _)
         | TrackOp::SetSelected(p, _, _)
         | TrackOp::SelectExclusive(p, _)
-        | TrackOp::SetVisibleInTcp(p, _, _)
-        | TrackOp::SetVisibleInMixer(p, _, _)
         | TrackOp::RemoveTrack(p, _)
         | TrackOp::RenameTrack(p, _, _)
-        | TrackOp::SetTrackColor(p, _, _)
-        | TrackOp::SetTrackChunk(p, _, _)
-        | TrackOp::GetTrackChunk(p, _)
-        | TrackOp::SetFolderDepth(p, _, _)
-        | TrackOp::SetNumChannels(p, _, _)
-        | TrackOp::MoveTrack(p, _, _)
-        | TrackOp::GetExtState(p, _, _)
-        | TrackOp::SetExtState(p, _, _)
-        | TrackOp::DeleteExtState(p, _, _) => p,
-        TrackOp::AddTrack(p, _, _) | TrackOp::ApplyHierarchy(p, _) => p,
+        | TrackOp::SetTrackColor(p, _, _) => p,
+        TrackOp::AddTrack(p, _, _) => p,
     }
 }
 
@@ -838,25 +817,13 @@ fn track_op_track_arg(op: &TrackOp) -> Option<&TrackArg> {
         | TrackOp::SetSoloed(_, t, _)
         | TrackOp::SetSoloExclusive(_, t)
         | TrackOp::SetArmed(_, t, _)
-        | TrackOp::SetInputMonitoring(_, t, _)
-        | TrackOp::SetRecordInput(_, t, _)
         | TrackOp::SetVolume(_, t, _)
         | TrackOp::SetPan(_, t, _)
         | TrackOp::SetSelected(_, t, _)
         | TrackOp::SelectExclusive(_, t)
-        | TrackOp::SetVisibleInTcp(_, t, _)
-        | TrackOp::SetVisibleInMixer(_, t, _)
         | TrackOp::RemoveTrack(_, t)
         | TrackOp::RenameTrack(_, t, _)
-        | TrackOp::SetTrackColor(_, t, _)
-        | TrackOp::SetTrackChunk(_, t, _)
-        | TrackOp::GetTrackChunk(_, t)
-        | TrackOp::SetFolderDepth(_, t, _)
-        | TrackOp::SetNumChannels(_, t, _)
-        | TrackOp::MoveTrack(_, t, _)
-        | TrackOp::GetExtState(_, t, _)
-        | TrackOp::SetExtState(_, t, _)
-        | TrackOp::DeleteExtState(_, t, _) => Some(t),
+        | TrackOp::SetTrackColor(_, t, _) => Some(t),
         _ => None,
     }
 }

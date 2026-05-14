@@ -67,7 +67,7 @@ impl Tracks {
 
     /// Get all tracks in the project
     pub async fn all(&self) -> Result<Vec<Track>> {
-        let tracks = self.clients.track.get_tracks(self.context()).await?;
+        let tracks = self.clients.track.all(self.context()).await?;
         Ok(tracks)
     }
 
@@ -76,7 +76,7 @@ impl Tracks {
         let track = self
             .clients
             .track
-            .get_track(self.context(), TrackRef::Index(index))
+            .get(self.context(), TrackRef::Index(index))
             .await?;
 
         Ok(track.map(|t| TrackHandle::new(t.guid, self.project_id.clone(), self.clients.clone())))
@@ -87,7 +87,7 @@ impl Tracks {
         let track = self
             .clients
             .track
-            .get_track(self.context(), TrackRef::Guid(guid.to_string()))
+            .get(self.context(), TrackRef::Guid(guid.to_string()))
             .await?;
 
         Ok(track.map(|t| TrackHandle::new(t.guid, self.project_id.clone(), self.clients.clone())))
@@ -96,7 +96,7 @@ impl Tracks {
     /// Get track by name (first match)
     pub async fn by_name(&self, name: &str) -> Result<Option<TrackHandle>> {
         // Get all tracks and find first match
-        let tracks = self.clients.track.get_tracks(self.context()).await?;
+        let tracks = self.clients.track.all(self.context()).await?;
         let track = tracks.into_iter().find(|t| t.name == name);
 
         Ok(track.map(|t| TrackHandle::new(t.guid, self.project_id.clone(), self.clients.clone())))
@@ -107,7 +107,7 @@ impl Tracks {
         let track = self
             .clients
             .track
-            .get_master_track(self.context())
+            .master(self.context())
             .await?
             .ok_or_else(|| Error::Other("No master track found".to_string()))?;
 
@@ -120,11 +120,7 @@ impl Tracks {
 
     /// Get all currently selected tracks
     pub async fn selected(&self) -> Result<Vec<TrackHandle>> {
-        let tracks = self
-            .clients
-            .track
-            .get_selected_tracks(self.context())
-            .await?;
+        let tracks = self.clients.track.selected(self.context()).await?;
 
         Ok(tracks
             .into_iter()
@@ -134,7 +130,7 @@ impl Tracks {
 
     /// Get total track count (excluding master)
     pub async fn count(&self) -> Result<u32> {
-        let count = self.clients.track.track_count(self.context()).await?;
+        let count = self.clients.track.count(self.context()).await?;
         Ok(count)
     }
 
@@ -170,20 +166,6 @@ impl Tracks {
     // Bulk Operations
     // =========================================================================
 
-    /// Apply a track hierarchy atomically in a single operation.
-    ///
-    /// Matches hierarchy nodes to existing tracks by name, preserving their
-    /// items, FX, routing, and automation. Creates new tracks only for
-    /// unmatched nodes. Reorders everything to match the hierarchy and sets
-    /// folder depths and colors — all in one main-thread tick.
-    pub async fn apply_hierarchy(&self, hierarchy: daw_proto::TrackHierarchy) -> Result<()> {
-        self.clients
-            .track
-            .apply_hierarchy(self.context(), hierarchy)
-            .await
-            .map_err(|e| Error::Other(format!("{:?}", e)))
-    }
-
     // =========================================================================
     // Track Creation / Deletion
     // =========================================================================
@@ -194,16 +176,18 @@ impl Tracks {
     /// existing tracks down. If `None`, appends at the end.
     /// Returns a [`TrackHandle`] for the newly created track.
     pub async fn add(&self, name: &str, at_index: Option<u32>) -> Result<TrackHandle> {
+        // Architect-emitted client returns `Result<DawResult<T>, vox>`;
+        // `.await??` flattens both transport + app errors. An empty
+        // guid was a sentinel-failure under the old async surface
+        // (REAPER refusing the op without returning an error); the new
+        // sync `Tracks::add` returns `DawResult<String>` directly, so
+        // any failure surfaces here as `Err` and we don't need the
+        // empty-guid check.
         let guid = self
             .clients
             .track
-            .add_track(self.context(), name.to_string(), at_index)
-            .await?;
-        if guid.is_empty() {
-            return Err(Error::InvalidOperation(
-                "add_track returned empty GUID — REAPER may have refused the operation".to_string(),
-            ));
-        }
+            .add(self.context(), name.to_string(), at_index)
+            .await??;
         Ok(TrackHandle::new(
             guid,
             self.project_id.clone(),
@@ -213,35 +197,19 @@ impl Tracks {
 
     /// Remove a track from the project by GUID, index, or master reference.
     pub async fn remove(&self, track: daw_proto::TrackRef) -> Result<()> {
-        self.clients
-            .track
-            .remove_track(self.context(), track)
-            .await?;
+        self.clients.track.remove(self.context(), track).await?;
         Ok(())
     }
 
     /// Remove all tracks from the project (excluding master).
     pub async fn remove_all(&self) -> Result<()> {
-        self.clients.track.remove_all_tracks(self.context()).await?;
+        self.clients.track.remove_all(self.context()).await?;
         Ok(())
     }
 
     // =========================================================================
     // Streaming
     // =========================================================================
-
-    /// Subscribe to track events (added, removed, renamed, mute/solo changes, etc.)
-    ///
-    /// Returns a receiver that streams granular track events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe(&self) -> Result<Rx<TrackEvent>> {
-        let (tx, rx) = vox::channel::<TrackEvent>();
-        self.clients
-            .track
-            .subscribe_tracks(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
 }
 
 impl std::fmt::Debug for Tracks {
@@ -326,7 +294,7 @@ impl TrackHandle {
     pub async fn info(&self) -> Result<Track> {
         self.clients
             .track
-            .get_track(self.context(), self.track_ref())
+            .get(self.context(), self.track_ref())
             .await?
             .ok_or_else(|| Error::Other(format!("Track not found: {}", self.track_guid)))
     }
@@ -451,24 +419,6 @@ impl TrackHandle {
         Ok(self.info().await?.armed)
     }
 
-    /// Set the input monitoring mode.
-    pub async fn set_input_monitoring(&self, mode: InputMonitoringMode) -> Result<()> {
-        self.clients
-            .track
-            .set_input_monitoring(self.context(), self.track_ref(), mode)
-            .await?;
-        Ok(())
-    }
-
-    /// Set the record input source.
-    pub async fn set_record_input(&self, input: RecordInput) -> Result<()> {
-        self.clients
-            .track
-            .set_record_input(self.context(), self.track_ref(), input)
-            .await?;
-        Ok(())
-    }
-
     // =========================================================================
     // Volume/Pan
     // =========================================================================
@@ -540,16 +490,7 @@ impl TrackHandle {
     pub async fn rename(&self, name: &str) -> Result<()> {
         self.clients
             .track
-            .rename_track(self.context(), self.track_ref(), name.to_string())
-            .await?;
-        Ok(())
-    }
-
-    /// Move this track to a new position in the track list
-    pub async fn move_to_index(&self, new_index: u32) -> Result<()> {
-        self.clients
-            .track
-            .move_track(self.context(), self.track_ref(), new_index)
+            .rename(self.context(), self.track_ref(), name.to_string())
             .await?;
         Ok(())
     }
@@ -558,124 +499,14 @@ impl TrackHandle {
     pub async fn set_color(&self, color: u32) -> Result<()> {
         self.clients
             .track
-            .set_track_color(self.context(), self.track_ref(), color)
+            .set_color(self.context(), self.track_ref(), color)
             .await?;
         Ok(())
-    }
-
-    /// Get the full track state chunk (RPP format).
-    ///
-    /// Returns the complete track state as an RPP chunk string.
-    pub async fn get_chunk(&self) -> Result<String> {
-        self.clients
-            .track
-            .get_track_chunk(self.context(), self.track_ref())
-            .await
-            .map_err(|e| Error::Other(format!("{:?}", e)))
-    }
-
-    /// Set the full track state chunk (RPP format).
-    ///
-    /// This replaces the entire track state — useful for loading
-    /// `.RTrackTemplate` content into an existing track.
-    pub async fn set_chunk(&self, chunk: String) -> Result<()> {
-        self.clients
-            .track
-            .set_track_chunk(self.context(), self.track_ref(), chunk)
-            .await?;
-        Ok(())
-    }
-
-    /// Set the number of audio channels for this track.
-    ///
-    /// Defaults to 2 (stereo). Set to 8 for multi-output plugins like FTS Guide.
-    pub async fn set_num_channels(&self, num_channels: u32) -> Result<()> {
-        self.clients
-            .track
-            .set_num_channels(self.context(), self.track_ref(), num_channels)
-            .await
-            .map_err(|e| Error::Other(format!("{:?}", e)))
-    }
-
-    /// Set the folder depth change for this track.
-    ///
-    /// Controls folder hierarchy: `1` = folder start, `0` = normal,
-    /// `-1` = close one level, `-N` = close N levels.
-    pub async fn set_folder_depth(&self, depth: i32) -> Result<()> {
-        self.clients
-            .track
-            .set_folder_depth(self.context(), self.track_ref(), depth)
-            .await
-            .map_err(|e| Error::Other(format!("{:?}", e)))
     }
 
     // =========================================================================
     // Visibility
     // =========================================================================
-
-    /// Show the track in the TCP (arrange view)
-    pub async fn show_in_tcp(&self) -> Result<()> {
-        self.clients
-            .track
-            .set_visible_in_tcp(self.context(), self.track_ref(), true)
-            .await?;
-        Ok(())
-    }
-
-    /// Hide the track from the TCP (arrange view)
-    pub async fn hide_in_tcp(&self) -> Result<()> {
-        self.clients
-            .track
-            .set_visible_in_tcp(self.context(), self.track_ref(), false)
-            .await?;
-        Ok(())
-    }
-
-    /// Set TCP visibility
-    pub async fn set_visible_in_tcp(&self, visible: bool) -> Result<()> {
-        self.clients
-            .track
-            .set_visible_in_tcp(self.context(), self.track_ref(), visible)
-            .await?;
-        Ok(())
-    }
-
-    /// Check if track is visible in TCP
-    pub async fn is_visible_in_tcp(&self) -> Result<bool> {
-        Ok(self.info().await?.visible_in_tcp)
-    }
-
-    /// Show the track in the mixer
-    pub async fn show_in_mixer(&self) -> Result<()> {
-        self.clients
-            .track
-            .set_visible_in_mixer(self.context(), self.track_ref(), true)
-            .await?;
-        Ok(())
-    }
-
-    /// Hide the track from the mixer
-    pub async fn hide_in_mixer(&self) -> Result<()> {
-        self.clients
-            .track
-            .set_visible_in_mixer(self.context(), self.track_ref(), false)
-            .await?;
-        Ok(())
-    }
-
-    /// Set mixer visibility
-    pub async fn set_visible_in_mixer(&self, visible: bool) -> Result<()> {
-        self.clients
-            .track
-            .set_visible_in_mixer(self.context(), self.track_ref(), visible)
-            .await?;
-        Ok(())
-    }
-
-    /// Check if track is visible in mixer
-    pub async fn is_visible_in_mixer(&self) -> Result<bool> {
-        Ok(self.info().await?.visible_in_mixer)
-    }
 
     // =========================================================================
     // FX Chain Access
@@ -785,63 +616,6 @@ impl TrackHandle {
     // =========================================================================
     // Track ExtState (P_EXT)
     // =========================================================================
-
-    /// Get a track-scoped extended state value.
-    ///
-    /// Uses REAPER's `P_EXT:section:key` mechanism. Values are saved in the
-    /// .RPP project file and copy with the track when duplicated.
-    pub async fn get_ext_state(&self, section: &str, key: &str) -> Result<Option<String>> {
-        Ok(self
-            .clients
-            .track
-            .get_ext_state(
-                self.context(),
-                self.track_ref(),
-                TrackExtStateRequest {
-                    section: section.to_string(),
-                    key: key.to_string(),
-                    value: String::new(),
-                },
-            )
-            .await?)
-    }
-
-    /// Set a track-scoped extended state value.
-    ///
-    /// Uses REAPER's `P_EXT:section:key` mechanism. Values are saved in the
-    /// .RPP project file and copy with the track when duplicated.
-    pub async fn set_ext_state(&self, section: &str, key: &str, value: &str) -> Result<()> {
-        self.clients
-            .track
-            .set_ext_state(
-                self.context(),
-                self.track_ref(),
-                TrackExtStateRequest {
-                    section: section.to_string(),
-                    key: key.to_string(),
-                    value: value.to_string(),
-                },
-            )
-            .await?;
-        Ok(())
-    }
-
-    /// Delete a track-scoped extended state value.
-    pub async fn delete_ext_state(&self, section: &str, key: &str) -> Result<()> {
-        self.clients
-            .track
-            .delete_ext_state(
-                self.context(),
-                self.track_ref(),
-                TrackExtStateRequest {
-                    section: section.to_string(),
-                    key: key.to_string(),
-                    value: String::new(),
-                },
-            )
-            .await?;
-        Ok(())
-    }
 }
 
 impl std::fmt::Debug for TrackHandle {

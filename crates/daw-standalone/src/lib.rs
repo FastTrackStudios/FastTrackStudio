@@ -54,6 +54,7 @@ pub use resource::StandaloneResource;
 pub use routing::StandaloneRouting;
 pub use sync::Standalone;
 pub use tempo_map::StandaloneTempoMap;
-pub use track::StandaloneTrack;
+// `Tracks` impl'd directly on `Standalone` — see `crate::track`.
+// The old async `StandaloneTrack` service struct retired with the port.
 pub use transport::{SharedProjectState, StandaloneTransport};
 pub use ui::StandaloneUi;

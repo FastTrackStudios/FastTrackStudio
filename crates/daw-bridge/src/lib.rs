@@ -37,8 +37,7 @@ use daw::service::{
     LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
     ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
     ScreensetServiceDispatcher, TakeServiceDispatcher, TempoMapServiceDispatcher,
-    ToolbarServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
-    WindowGeometryServiceDispatcher,
+    ToolbarServiceDispatcher, TransportServiceDispatcher, WindowGeometryServiceDispatcher,
 };
 
 // ============================================================================
@@ -149,7 +148,7 @@ async fn register_daw_dispatcher() {
     // Initialize all broadcasters
     daw::reaper::init_transport_broadcaster();
     daw::reaper::init_fx_broadcaster();
-    daw::reaper::init_track_broadcaster();
+    // Track broadcaster retired alongside the architect::rpc port.
     daw::reaper::init_item_broadcaster();
     daw::reaper::init_routing_broadcaster();
     daw::reaper::init_tempo_map_broadcaster();
@@ -165,7 +164,7 @@ async fn register_daw_dispatcher() {
     let audio_engine = daw::reaper::ReaperAudioEngine::new();
     let midi = daw::reaper::ReaperMidi::new();
     let fx = daw::reaper::ReaperFx::new();
-    let track = daw::reaper::ReaperTrack::new();
+    // Tracks ported — mount via daw::service::track::serve(Reaper).
     let routing = daw::reaper::ReaperRouting::new();
     let live_midi = daw::reaper::ReaperLiveMidi::new();
     let ext_state = daw::reaper::ReaperExtState::new();
@@ -194,8 +193,8 @@ async fn register_daw_dispatcher() {
         project_service_service_descriptor, region_service_service_descriptor,
         routing_service_service_descriptor, screenset_service_service_descriptor,
         take_service_service_descriptor, tempo_map_service_service_descriptor,
-        toolbar_service_service_descriptor, track_service_service_descriptor,
-        transport_service_service_descriptor, window_geometry_service_service_descriptor,
+        toolbar_service_service_descriptor, transport_service_service_descriptor,
+        window_geometry_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -239,8 +238,9 @@ async fn register_daw_dispatcher() {
             FxServiceDispatcher::new(fx),
         )
         .with(
-            track_service_service_descriptor(),
-            TrackServiceDispatcher::new(track),
+            // Tracks via architect::rpc.
+            daw::service::track::descriptor(),
+            daw::service::track::serve(daw::reaper::Reaper),
         )
         .with(
             routing_service_service_descriptor(),
@@ -459,7 +459,7 @@ extern "C" fn timer_callback() {
             // Poll all broadcasters for state changes
             daw::reaper::poll_and_broadcast();
             daw::reaper::poll_and_broadcast_fx();
-            daw::reaper::poll_and_broadcast_tracks();
+            // Track broadcaster retired alongside the architect::rpc port.
             daw::reaper::poll_and_broadcast_items();
             daw::reaper::poll_and_broadcast_routing();
             daw::reaper::poll_and_broadcast_tempo_map();

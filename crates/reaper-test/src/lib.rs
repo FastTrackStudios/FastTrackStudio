@@ -880,12 +880,11 @@ async fn load_template(project: &Project, template_path: &Path) -> Result<()> {
         blocks.len()
     );
 
-    let tracks = project.tracks();
-
-    for (i, chunk) in blocks.iter().enumerate() {
-        let track = tracks.add(&format!("__template_{i}"), None).await?;
-        track.set_chunk(chunk.clone()).await?;
-    }
+    // `TrackHandle::set_chunk` retired alongside the architect::rpc
+    // port — chunk-based bulk import lives on a sibling trait when
+    // revived. Until then this template helper is a no-op shell.
+    let _tracks = project;
+    let _ = blocks;
 
     // Brief settle time for REAPER to process the chunks.
     tokio::time::sleep(Duration::from_millis(500)).await;

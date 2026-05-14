@@ -107,7 +107,9 @@ pub use routing::ReaperRouting;
 pub use screenset::ReaperScreenset;
 pub use tempo_map::ReaperTempoMap;
 pub use toolbar::ReaperToolbar;
-pub use track::ReaperTrack;
+// `Tracks` impl'd on `Reaper` — see `crate::track`. The old async
+// `ReaperTrack` service struct + broadcasters retired with the port.
+pub use track::add_track_on_main_thread;
 pub use transport::ReaperTransport;
 pub use window_geometry::ReaperWindowGeometry;
 
@@ -119,7 +121,6 @@ pub use transport::{init_transport_broadcaster, poll_and_broadcast};
 pub use fx::{init_fx_broadcaster, poll_and_broadcast_fx};
 
 // Re-export track broadcaster functions
-pub use track::{init_track_broadcaster, poll_and_broadcast_tracks};
 
 // Re-export tempo map broadcaster functions
 pub use tempo_map::{init_tempo_map_broadcaster, poll_and_broadcast_tempo_map};

@@ -1,8 +1,6 @@
 use crate::DawResult;
 
-use super::{
-    ExtState, FxChains, FxParams, Items, Regions, Routing, Takes, TempoMap, Tracks, Transport,
-};
+use super::{ExtState, FxChains, FxParams, Items, Regions, Routing, Takes, TempoMap, Transport};
 
 /// Per-project sync handle. Owns sub-domain accessors.
 ///
@@ -18,9 +16,6 @@ pub trait Project {
     where
         Self: 'a;
     type TempoMap<'a>: TempoMap + 'a
-    where
-        Self: 'a;
-    type Tracks<'a>: Tracks + 'a
     where
         Self: 'a;
     type ExtState<'a>: ExtState + 'a
@@ -51,7 +46,9 @@ pub trait Project {
     // mount the backend, or call directly via the architect-emitted
     // `MarkersClient` for the project guid.
     fn tempo_map(&self) -> Self::TempoMap<'_>;
-    fn tracks(&self) -> Self::Tracks<'_>;
+    // `tracks()` accessor retired alongside the architect::rpc port —
+    // mount the singleton via `track::serve(Reaper)` or call
+    // `TracksClient` directly with a ProjectContext.
     fn ext_state(&self) -> Self::ExtState<'_>;
     fn fx_chains(&self) -> Self::FxChains<'_>;
     fn fx_params(&self) -> Self::FxParams<'_>;

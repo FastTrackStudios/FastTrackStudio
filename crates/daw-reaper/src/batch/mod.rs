@@ -21,7 +21,7 @@ use daw_proto::batch::*;
 struct BatchExecutorInner {
     project_svc: crate::ReaperProject,
     transport_svc: crate::ReaperTransport,
-    track_svc: crate::ReaperTrack,
+    track_svc: crate::Reaper,
     fx_svc: crate::ReaperFx,
     routing_svc: crate::ReaperRouting,
     item_svc: crate::ReaperItem,
@@ -61,7 +61,7 @@ impl BatchExecutor {
             inner: Arc::new(BatchExecutorInner {
                 project_svc: crate::ReaperProject::new(),
                 transport_svc: crate::ReaperTransport::new(),
-                track_svc: crate::ReaperTrack::new(),
+                track_svc: crate::Reaper,
                 fx_svc: crate::ReaperFx::new(),
                 routing_svc: crate::ReaperRouting::new(),
                 item_svc: crate::ReaperItem::new(),

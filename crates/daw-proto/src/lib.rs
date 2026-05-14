@@ -59,7 +59,13 @@ pub use health::*;
 pub use input::*;
 pub use item::*;
 pub use live_midi::*;
-pub use marker::*;
+// Explicit re-exports rather than glob: the architect-emitted
+// `serve` / `descriptor` / `Dispatcher` aliases in `marker::*` and
+// `track::*` collide when glob-imported at the crate root. Callers
+// reach those via the fully qualified paths `daw_proto::marker::*`.
+#[cfg(feature = "vox")]
+pub use marker::MarkersClient;
+pub use marker::{Marker, MarkerError, MarkerEvent, Markers, MarkersRpc};
 pub use markers_regions::*;
 pub use midi::*;
 pub use peak::*;
@@ -73,7 +79,15 @@ pub use routing::*;
 pub use screenset::*;
 pub use tempo_map::*;
 pub use toolbar::*;
-pub use track::*;
+// Explicit re-exports (see marker::* note above for the rationale).
+#[cfg(feature = "vox")]
+pub use track::TracksClient;
+pub use track::{
+    AddChildren, FolderDepthChange, InputMonitoringMode, RecordInput, Track, TrackError,
+    TrackEvent, TrackExtStateRequest, TrackGroup, TrackHierarchy, TrackHierarchyBuilder, TrackNode,
+    TrackRef, TrackStructureBuilder, Tracks, TracksRpc, assert_tracks_equal, display_tracklist,
+    format_tracklist,
+};
 pub use transport::*;
 pub use ui::*;
 pub use undo::*;
