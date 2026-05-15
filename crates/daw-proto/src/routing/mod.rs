@@ -11,4 +11,4 @@ pub use route::*;
 pub use service::{RouteLocation, Routing, RoutingRpc};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, RoutingClient, descriptor, layer, serve};
+pub use service::{Dispatcher, RoutingClient, Service, descriptor, layer, serve};

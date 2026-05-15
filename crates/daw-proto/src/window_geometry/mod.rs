@@ -7,4 +7,4 @@ pub use service::{WindowGeometry, WindowGeometryRpc};
 pub use types::{WindowGeometryResult, WindowTarget};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, WindowGeometryClient, descriptor, layer, serve};
+pub use service::{Dispatcher, Service, WindowGeometryClient, descriptor, layer, serve};

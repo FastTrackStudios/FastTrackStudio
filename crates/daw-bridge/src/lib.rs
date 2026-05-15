@@ -140,17 +140,17 @@ async fn register_daw_dispatcher() {
     daw::reaper::init_tempo_map_broadcaster();
     info!("Surviving broadcasters initialized");
 
-    let reaper = daw::reaper::Reaper;
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
-    // Bundle every DAW service into one `LayerSet`, bolt on the
-    // dock-host service (it's not part of `DawBackend` because its
-    // backend type differs), and serve. The MIDI analysis service
+    // Compose REAPER's full service surface, bolt on the dock-host
+    // service (it uses a different backend value, so it ships as a
+    // pre-mounted `Mounted` rather than a `Service` token), and bind
+    // the REAPER backend with `.provide`. The MIDI analysis service
     // (`keyflow-daw-analysis`) is mounted out-of-tree by fts-extensions;
     // see daw-reaper a823b67 for why.
-    let daw_handler = daw::reaper::services::all(reaper)
-        .merge(daw_proto::dock_host::layer(dock_host))
-        .serve();
+    let daw_handler = daw::reaper::services::all()
+        .add(daw_proto::dock_host::layer(dock_host))
+        .provide(daw::reaper::Reaper);
 
     let acceptor = DawConnectionAcceptor::new(daw_handler);
 

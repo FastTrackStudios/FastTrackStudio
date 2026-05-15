@@ -10,6 +10,6 @@ pub use service::{Takes, TakesRpc};
 
 #[cfg(feature = "vox")]
 pub use service::{
-    TakesClient, TakesRpcDispatcher as Dispatcher, layer, serve,
+    Service, TakesClient, TakesRpcDispatcher as Dispatcher, layer, serve,
     takes_rpc_service_descriptor as descriptor,
 };

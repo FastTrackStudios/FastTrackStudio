@@ -20,4 +20,4 @@ pub use tree::*;
 pub use types::*;
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, EffectsClient, descriptor, layer, serve};
+pub use service::{Dispatcher, EffectsClient, Service, descriptor, layer, serve};

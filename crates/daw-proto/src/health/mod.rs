@@ -5,4 +5,4 @@ mod service;
 pub use service::{Health, HealthRpc};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, HealthClient, descriptor, layer, serve};
+pub use service::{Dispatcher, HealthClient, Service, descriptor, layer, serve};

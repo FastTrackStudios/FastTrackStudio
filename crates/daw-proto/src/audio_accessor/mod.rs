@@ -7,4 +7,4 @@ pub use service::{AudioAccessors, AudioAccessorsRpc};
 pub use types::*;
 
 #[cfg(feature = "vox")]
-pub use service::{AudioAccessorsClient, Dispatcher, descriptor, layer, serve};
+pub use service::{AudioAccessorsClient, Dispatcher, Service, descriptor, layer, serve};

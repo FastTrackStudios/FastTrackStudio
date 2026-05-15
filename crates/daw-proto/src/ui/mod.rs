@@ -7,4 +7,4 @@ pub use service::{UiDialogs, UiDialogsRpc};
 pub use types::UserInputResult;
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, UiDialogsClient, descriptor, layer, serve};
+pub use service::{Dispatcher, Service, UiDialogsClient, descriptor, layer, serve};

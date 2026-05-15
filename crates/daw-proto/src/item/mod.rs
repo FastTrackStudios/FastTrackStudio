@@ -17,7 +17,8 @@ pub use service::{Items, ItemsRpc};
 
 #[cfg(feature = "vox")]
 pub use service::{
-    Dispatcher as ItemsDispatcher, ItemsClient, descriptor as items_descriptor, layer, serve,
+    Dispatcher as ItemsDispatcher, ItemsClient, Service, descriptor as items_descriptor, layer,
+    serve,
 };
 
 pub use take::{

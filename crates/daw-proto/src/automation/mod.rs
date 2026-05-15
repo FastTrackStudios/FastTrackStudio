@@ -11,4 +11,4 @@ pub use event::*;
 pub use service::{AddPointParams, Automation, AutomationRpc, SetPointParams, TimeRangeParams};
 
 #[cfg(feature = "vox")]
-pub use service::{AutomationClient, Dispatcher, descriptor, layer, serve};
+pub use service::{AutomationClient, Dispatcher, Service, descriptor, layer, serve};
