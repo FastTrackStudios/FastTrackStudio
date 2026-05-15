@@ -145,6 +145,91 @@ pub fn rename_region(
     Some(splice::replace_string(session, string_offset, new_name))
 }
 
+/// Overwrite a track's volume / mute / pan in place.
+///
+/// Locates the `0x1029` block at the same position as the track within the
+/// `0x251a` document order, then writes:
+/// - `volume_centibel` as i32 LE at payload `+1..+5`
+/// - `mute_main` as u8 at payload `+5`
+/// - `pan_main` as i32 LE at payload `+13..+17`
+///
+/// Plus the mirrored record-B fields at `+87`, `+91`, `+103` to keep the
+/// two copies of the mix state coherent (Pro Tools writes both halves and
+/// some PT versions trust the second copy for the displayed mixer).
+///
+/// All fields are fixed-size so no splice is needed. Returns `true` on
+/// success, `false` if the track wasn't found.
+pub fn set_track_mix_state(
+    session: &mut crate::raw_block::RawSession,
+    track_name: &str,
+    volume_centibel: i32,
+    mute: bool,
+    pan: i32,
+) -> bool {
+    let Some(target_idx) = find_track_index(session, track_name) else {
+        return false;
+    };
+
+    let mix_blocks = collect_blocks_ref(&session.blocks, ContentType::TrackMixSettings);
+    let Some(mb) = mix_blocks.get(target_idx) else {
+        return false;
+    };
+
+    // Payload begins at start + 9 (header + content_type).
+    let payload = mb.start + 9;
+    if payload + 281 > session.data.len() {
+        return false;
+    }
+
+    let vol = volume_centibel.to_le_bytes();
+    let pan_b = pan.to_le_bytes();
+
+    // Record A (offsets relative to payload)
+    session.data[payload + 1..payload + 5].copy_from_slice(&vol);
+    session.data[payload + 5] = if mute { 1 } else { 0 };
+    session.data[payload + 13..payload + 17].copy_from_slice(&pan_b);
+
+    // Record B mirror (offsets +87, +91, +103)
+    session.data[payload + 88..payload + 92].copy_from_slice(&vol);
+    session.data[payload + 92] = if mute { 1 } else { 0 };
+    session.data[payload + 103..payload + 107].copy_from_slice(&pan_b);
+
+    true
+}
+
+fn find_track_index(session: &crate::raw_block::RawSession, track_name: &str) -> Option<usize> {
+    let track_list = collect_blocks_ref(&session.blocks, ContentType::MidiTrackList)
+        .into_iter()
+        .next()?;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut idx = 0usize;
+    for child in &track_list.children {
+        if child.content_type != Some(ContentType::MidiTrackInfo) {
+            continue;
+        }
+        let name_off = child.start + 7 + 4;
+        if name_off + 4 > session.data.len() {
+            continue;
+        }
+        let len =
+            u32::from_le_bytes(session.data[name_off..name_off + 4].try_into().unwrap()) as usize;
+        if name_off + 4 + len > session.data.len() || len == 0 || len > 256 {
+            continue;
+        }
+        let name = String::from_utf8_lossy(&session.data[name_off + 4..name_off + 4 + len])
+            .trim_end_matches('\0')
+            .to_string();
+        if !seen.insert(name.clone()) {
+            break;
+        }
+        if name == track_name {
+            return Some(idx);
+        }
+        idx += 1;
+    }
+    None
+}
+
 /// Change a track's output routing destination.
 ///
 /// Locates the per-track `0x260e` (TrackRouting) block matching `track_name`

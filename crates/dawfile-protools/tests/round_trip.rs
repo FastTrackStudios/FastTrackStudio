@@ -347,6 +347,42 @@ fn set_track_output_round_trip_user_session() {
     }
 }
 
+#[test]
+fn set_track_mix_state_round_trip_user_session() {
+    let user_session_path = "/home/cody/Downloads/tombrooksmusic_copy-of-02-lord-of-the-fight-1-5_2026-05-11_0158/Copy of 02 LORD OF THE FIGHT 1.5/Copy of 02 LORD OF THE FIGHT 1.5.ptx";
+    let Ok(original) = std::fs::read(user_session_path) else {
+        eprintln!("skip: user session not present");
+        return;
+    };
+
+    // Mute Vocal Split.01, set its volume to -120 (-12 dB), pan to +50.
+    let mut raw = dawfile_protools::parse_raw(original).unwrap();
+    let ok = dawfile_protools::set_track_mix_state(&mut raw, "Vocal Split.01", -120, true, 50);
+    assert!(ok, "set_track_mix_state should find Vocal Split.01");
+
+    // Re-encrypt + re-parse, then verify the change survived.
+    let encrypted = raw.encrypt();
+    let mut buf = encrypted;
+    let session = dawfile_protools::parse::parse_session(&mut buf, 0).unwrap();
+    let vs = session
+        .audio_tracks
+        .iter()
+        .find(|t| t.name == "Vocal Split")
+        .expect("Vocal Split track");
+    assert_eq!(vs.volume_centibel, -120, "volume survived");
+    assert!(vs.mute, "mute survived");
+    assert_eq!(vs.pan, 50, "pan survived");
+
+    // ClickPrint should be untouched.
+    let click = session
+        .audio_tracks
+        .iter()
+        .find(|t| t.name == "ClickPrint")
+        .expect("ClickPrint");
+    assert_eq!(click.volume_centibel, -310, "ClickPrint vol unchanged");
+    assert!(click.mute, "ClickPrint mute unchanged");
+}
+
 fn get_track_starts(session: &dawfile_protools::RawSession) -> Vec<usize> {
     let mut out = Vec::new();
     collect_ct(
