@@ -1,30 +1,35 @@
-//! REAPER service registration.
+//! REAPER service surface — declared as [`architect::Services`].
 //!
-//! The canonical list of services this DAW backend exposes, built as
-//! a deferred [`architect::Layer`] cons-chain. **No where clause** —
-//! adding a service is one line in the [`architect::services!`] macro.
+//! `impl Services for Reaper` says "Reaper provides this canonical
+//! bundle." Same pattern as every per-service trait impl (`impl
+//! Transport for Reaper`, `impl Markers for Reaper`, …), now lifted
+//! one level to "impl `Services` for Reaper exposes the whole
+//! surface."
 //!
 //! ```ignore
-//! use daw_reaper::{services, Reaper};
+//! use architect::Services;
+//! use daw_reaper::Reaper;
 //!
-//! let router = services().provide(Reaper);
-//! // or, inline at any call site:
-//! let router = architect::services![transport, project, marker].provide(Reaper);
+//! // Default mount:
+//! let router = Reaper.into_router();
+//!
+//! // With overrides — last add wins on duplicate method_id:
+//! let router = Reaper::layers()
+//!     .add(fx_chains_mock::mock())              // overrides default fx_chains
+//!     .add(dock_host::layer(dock_host))         // bolt-on
+//!     .provide(Reaper);
+//!
+//! // Sub-bundles:
+//! let timeline = architect::services![transport, marker, region];
+//! let routing  = architect::services![project, routing, track];
+//! let router   = timeline.merge(routing).provide(Reaper);
 //! ```
 //!
-//! The return type is `impl Layer + ProvideAll<Reaper>` — the bundle
-//! reads as a list of service names; the return signature declares
-//! "this function produces a layer that knows how to provide for
-//! `Reaper`." If `Reaper` ever stops implementing a service's trait,
-//! the error surfaces at this function (the cons type's
-//! `ProvideAll<Reaper>` bound fails), naming the missing trait.
-//!
-//! Other backends (Pro Tools, Logic, a headless mock, …) ship their
-//! own `services()` returning `impl Layer + ProvideAll<TheirBackend>`.
-//! No central spec. Adding a service is a one-line edit in the
-//! macro list.
+//! Adding a service is one line in the [`architect::services!`] list.
+//! No bounds, no where clause. Other backends (Pro Tools, Logic, mock)
+//! each implement [`architect::Services`] with their own bundle.
 
-use architect::{Layer, ProvideAll, services};
+use architect::{Layer, ProvideAll, Services, services};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, fx_chains,
     fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project, region,
@@ -33,35 +38,35 @@ use daw_proto::{
 
 use crate::Reaper;
 
-/// The full REAPER service surface as a deferred layer. Bind with
-/// `.provide(Reaper)` to get a [`architect::LayerRouter`].
-pub fn services() -> impl Layer + ProvideAll<Reaper> {
-    services![
-        transport,
-        project,
-        marker,
-        region,
-        tempo_map,
-        audio_engine,
-        midi,
-        fx,
-        fx_chains,
-        fx_params,
-        track,
-        routing,
-        live_midi,
-        ext_state,
-        health,
-        item,
-        take,
-        action_registry,
-        input,
-        toolbar,
-        screenset,
-        dawfile_service,
-        window_geometry,
-        plugin_loader,
-        automation,
-        batch,
-    ]
+impl Services for Reaper {
+    fn layers() -> impl Layer + ProvideAll<Reaper> {
+        services![
+            transport,
+            project,
+            marker,
+            region,
+            tempo_map,
+            audio_engine,
+            midi,
+            fx,
+            fx_chains,
+            fx_params,
+            track,
+            routing,
+            live_midi,
+            ext_state,
+            health,
+            item,
+            take,
+            action_registry,
+            input,
+            toolbar,
+            screenset,
+            dawfile_service,
+            window_geometry,
+            plugin_loader,
+            automation,
+            batch,
+        ]
+    }
 }

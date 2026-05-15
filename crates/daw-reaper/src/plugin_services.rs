@@ -1,9 +1,10 @@
 //! In-process DAW service registration for CLAP plugins.
 //!
-//! Mounts [`crate::services`] onto an [`architect::LayerRouter`] so
-//! `PluginHost` can build a local `Daw` instance without SHM.
+//! Mounts REAPER's [`architect::Services`] bundle into an
+//! [`architect::LayerRouter`] so `PluginHost` can build a local
+//! `Daw` instance without SHM.
 
-use architect::{Layer, LayerRouter};
+use architect::{LayerRouter, Services};
 
 use crate::Reaper;
 
@@ -14,5 +15,5 @@ use crate::Reaper;
 pub fn create_daw_handler() -> LayerRouter {
     crate::init_item_broadcaster();
     crate::init_tempo_map_broadcaster();
-    crate::services().provide(Reaper)
+    Reaper.into_router()
 }

@@ -7,7 +7,7 @@
 
 mod routed_handler;
 
-use architect::Layer;
+use architect::{Layer, Services};
 
 // ============================================================================
 // RT-safe Global Allocator
@@ -144,13 +144,12 @@ async fn register_daw_dispatcher() {
 
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
-    // Compose REAPER's full service surface, bolt on the dock-host
-    // service (it uses a different backend value, so it ships as a
-    // pre-mounted `Mounted` rather than a `Service` token), and bind
-    // the REAPER backend with `.provide`. The MIDI analysis service
-    // (`keyflow-daw-analysis`) is mounted out-of-tree by fts-extensions;
-    // see daw-reaper a823b67 for why.
-    let daw_handler = daw::reaper::services()
+    // Reaper's canonical service surface (impl Services for Reaper),
+    // plus the dock-host bolt-on (different backend, so it ships
+    // pre-mounted). The MIDI analysis service (`keyflow-daw-analysis`)
+    // is mounted out-of-tree by fts-extensions; see daw-reaper
+    // a823b67 for why.
+    let daw_handler = <daw::reaper::Reaper as Services>::layers()
         .add(daw_proto::dock_host::layer(dock_host))
         .provide(daw::reaper::Reaper);
 
