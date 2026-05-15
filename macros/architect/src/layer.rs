@@ -356,6 +356,36 @@ macro_rules! layers {
     }};
 }
 
+/// Build a [`Layer`] from a comma-separated list of **service modules**.
+///
+/// Sibling of [`layers!`] for the common case where every entry is the
+/// macro-emitted `Service` token of a per-trait module — `services!`
+/// appends `::Service` to each ident so call sites read as a list of
+/// service names rather than a list of values.
+///
+/// ```ignore
+/// use architect::services;
+/// use daw_proto::{transport, project, marker};
+///
+/// pub fn reaper_services() -> architect::Layer<Reaper> {
+///     services![transport, project, marker]
+/// }
+/// ```
+///
+/// Equivalent to `layers![transport::Service, project::Service,
+/// marker::Service]`. Use [`layers!`] instead when you need to mix
+/// service tokens with pre-mounted services or other `Bind<B>`
+/// values.
+#[macro_export]
+macro_rules! services {
+    () => { $crate::Layer::new() };
+    ($($svc:ident),+ $(,)?) => {{
+        let __layer = $crate::Layer::new();
+        $(let __layer = $crate::Layer::add(__layer, $svc::Service);)+
+        __layer
+    }};
+}
+
 // ── LayerSink ─────────────────────────────────────────────────────────────
 
 pub trait LayerSink {
