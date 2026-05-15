@@ -148,7 +148,7 @@ async fn register_daw_dispatcher() {
     // the REAPER backend with `.provide`. The MIDI analysis service
     // (`keyflow-daw-analysis`) is mounted out-of-tree by fts-extensions;
     // see daw-reaper a823b67 for why.
-    let daw_handler = daw::reaper::services::all()
+    let daw_handler = daw::reaper::services()
         .add(daw_proto::dock_host::layer(dock_host))
         .provide(daw::reaper::Reaper);
 

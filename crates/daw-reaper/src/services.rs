@@ -1,33 +1,31 @@
-//! REAPER service registration — every architect-rpc service this
-//! backend implements, bundled as an `architect::Layer<Reaper>`.
+//! REAPER service registration.
 //!
-//! This is the canonical list of REAPER's surface. Mount it with one
-//! call, binding the backend at the very end:
+//! The canonical list of services this DAW backend exposes, built as
+//! a deferred [`architect::Layer<Reaper>`]. Bind the backend at the
+//! very end with [`architect::Layer::provide`]:
 //!
 //! ```ignore
 //! use daw_reaper::{services, Reaper};
 //!
-//! let router = services::all().provide(Reaper);
+//! let router = services().provide(Reaper);
 //! ```
 //!
-//! Service tokens (`transport::Service`, `project::Service`, …) are
-//! backend-agnostic values; only `.provide(Reaper)` ties them to the
-//! REAPER singleton. Bolt-ons with different backends mix in via
-//! `Layer::add` (any pre-mounted service implements `Bind`):
+//! Service tokens (`transport::Service`, …) are backend-agnostic
+//! values; only `.provide(Reaper)` ties them to the REAPER singleton.
+//! Bolt-ons with different backends mix in via [`architect::Layer::add`]
+//! (any pre-mounted service implements [`architect::Bind`]):
 //!
 //! ```ignore
-//! let router = services::all()
+//! let router = services()
 //!     .add(dock_host::layer(dock_host_backend))   // pre-bound, different backend
 //!     .provide(Reaper);
 //! ```
 //!
 //! Other backends (Pro Tools, Logic, headless mocks, …) ship their
 //! own equivalent — there's no umbrella trait pretending the union is
-//! a spec. Adding a service is a one-line edit here. Trait impls
-//! missing on `Reaper` fail compilation at the matching `.add` call —
-//! one place to look.
+//! a spec. Adding a service is a one-line edit here.
 
-use architect::Layer;
+use architect::{Layer, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, fx_chains,
     fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project, region,
@@ -37,33 +35,34 @@ use daw_proto::{
 use crate::Reaper;
 
 /// The full REAPER service surface as a deferred `Layer<Reaper>`.
-/// Bind with `.provide(Reaper)` to get a `LayerRouter`.
-pub fn all() -> Layer<Reaper> {
-    Layer::new()
-        .add(transport::Service)
-        .add(project::Service)
-        .add(marker::Service)
-        .add(region::Service)
-        .add(tempo_map::Service)
-        .add(audio_engine::Service)
-        .add(midi::Service)
-        .add(fx::Service)
-        .add(fx_chains::Service)
-        .add(fx_params::Service)
-        .add(track::Service)
-        .add(routing::Service)
-        .add(live_midi::Service)
-        .add(ext_state::Service)
-        .add(health::Service)
-        .add(item::Service)
-        .add(take::Service)
-        .add(action_registry::Service)
-        .add(input::Service)
-        .add(toolbar::Service)
-        .add(screenset::Service)
-        .add(dawfile_service::Service)
-        .add(window_geometry::Service)
-        .add(plugin_loader::Service)
-        .add(automation::Service)
-        .add(batch::Service)
+/// Bind with `.provide(Reaper)` to get a [`architect::LayerRouter`].
+pub fn services() -> Layer<Reaper> {
+    layers![
+        transport::Service,
+        project::Service,
+        marker::Service,
+        region::Service,
+        tempo_map::Service,
+        audio_engine::Service,
+        midi::Service,
+        fx::Service,
+        fx_chains::Service,
+        fx_params::Service,
+        track::Service,
+        routing::Service,
+        live_midi::Service,
+        ext_state::Service,
+        health::Service,
+        item::Service,
+        take::Service,
+        action_registry::Service,
+        input::Service,
+        toolbar::Service,
+        screenset::Service,
+        dawfile_service::Service,
+        window_geometry::Service,
+        plugin_loader::Service,
+        automation::Service,
+        batch::Service,
+    ]
 }
