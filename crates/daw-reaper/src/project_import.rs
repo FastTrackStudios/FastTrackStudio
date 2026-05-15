@@ -583,12 +583,10 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
             } else {
                 (track.pan as f64 / 100.0).clamp(-1.0, 1.0)
             };
-            // NOTE: track.mute is currently unreliable — the byte we read at
-            // 0x1029 +5 doesn't match the user's actual mute pattern, so we
-            // skip emitting REAPER MUTESOLO until the real mute encoding is
-            // identified. Volume/pan readings are verified accurate.
-            let _ = track.mute;
             let mut t = t.volume(linear_vol).pan(reaper_pan);
+            if track.mute {
+                t = t.muted();
+            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.audio_regions.len() {
                     continue;
@@ -730,12 +728,10 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 10f64.powf(track.volume_centibel as f64 / 200.0)
             };
             let reaper_pan = (track.pan as f64 / 100.0).clamp(-1.0, 1.0);
-            // NOTE: track.mute is currently unreliable — the byte we read at
-            // 0x1029 +5 doesn't match the user's actual mute pattern, so we
-            // skip emitting REAPER MUTESOLO until the real mute encoding is
-            // identified. Volume/pan readings are verified accurate.
-            let _ = track.mute;
             let mut t = t.volume(linear_vol).pan(reaper_pan);
+            if track.mute {
+                t = t.muted();
+            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.midi_regions.len() {
                     continue;
