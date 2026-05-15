@@ -35,6 +35,7 @@ pub mod bootstrap;
 pub mod local_caller;
 pub mod plugin_services;
 pub mod remote;
+pub mod services;
 
 pub mod safe_wrappers;
 pub mod sync;
