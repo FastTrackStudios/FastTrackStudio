@@ -1,63 +1,36 @@
-//! REAPER Resource Path Implementation
+//! `impl ResourcePaths for Reaper` — sync trait + REAPER's resource-path C API.
+//!
+//! Mounting goes through `daw_proto::resource::serve(Reaper)`. The
+//! architect::rpc bridge hops calls onto REAPER's main thread via
+//! `HasDispatcher`. All bodies assume main-thread execution.
 
-use daw_proto::resource::ResourceService;
-use reaper_high::Reaper;
 use std::path::PathBuf;
 
-use crate::main_thread;
+use daw_proto::ResourcePaths;
+use reaper_high::Reaper as ReaperHigh;
+
 use crate::safe_wrappers::cstring;
 
-/// REAPER resource path service implementation
-#[derive(Clone)]
-pub struct ReaperResource;
-
-impl ReaperResource {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for ReaperResource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ResourceService for ReaperResource {
-    async fn get_resource_path(&self) -> PathBuf {
-        main_thread::query(|| {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            let utf8_path = medium.get_resource_path(|p| p.to_path_buf());
-            Some(utf8_path.into_std_path_buf())
-        })
-        .await
-        .flatten()
-        .unwrap_or_else(|| PathBuf::from("."))
+impl ResourcePaths for crate::Reaper {
+    fn resource_path(&self) -> PathBuf {
+        let reaper = ReaperHigh::get();
+        let medium = reaper.medium_reaper();
+        let utf8_path = medium.get_resource_path(|p| p.to_path_buf());
+        utf8_path.into_std_path_buf()
     }
 
-    async fn get_ini_file_path(&self) -> PathBuf {
-        main_thread::query(|| {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            let utf8_path = medium.get_ini_file(|p| p.to_path_buf());
-            Some(utf8_path.into_std_path_buf())
-        })
-        .await
-        .flatten()
-        .unwrap_or_else(|| PathBuf::from("reaper.ini"))
+    fn ini_file_path(&self) -> PathBuf {
+        let reaper = ReaperHigh::get();
+        let medium = reaper.medium_reaper();
+        let utf8_path = medium.get_ini_file(|p| p.to_path_buf());
+        utf8_path.into_std_path_buf()
     }
 
-    async fn get_color_theme_path(&self) -> Option<PathBuf> {
-        main_thread::query(|| {
-            let reaper = Reaper::get();
-            let low = reaper.medium_reaper().low();
-
-            // GetLastColorThemeFile returns a C string pointer
-            let ptr = low.GetLastColorThemeFile();
-            cstring::read_cstr(ptr).map(PathBuf::from)
-        })
-        .await
-        .flatten()
+    fn color_theme_path(&self) -> Option<PathBuf> {
+        let reaper = ReaperHigh::get();
+        let low = reaper.medium_reaper().low();
+        // GetLastColorThemeFile returns a C string pointer
+        let ptr = low.GetLastColorThemeFile();
+        cstring::read_cstr(ptr).map(PathBuf::from)
     }
 }

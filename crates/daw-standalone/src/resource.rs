@@ -1,34 +1,23 @@
-//! Standalone Resource Path Implementation (Mock)
+//! `impl ResourcePaths for Standalone` — post-architect::rpc port.
+//!
+//! The standalone mock returns deterministic placeholder paths.
 
-use daw_proto::resource::ResourceService;
 use std::path::PathBuf;
 
-/// Standalone resource service (returns mock paths for testing)
-#[derive(Clone)]
-pub struct StandaloneResource;
+use daw_proto::ResourcePaths;
 
-impl StandaloneResource {
-    pub fn new() -> Self {
-        Self
-    }
-}
+use crate::sync::Standalone;
 
-impl Default for StandaloneResource {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ResourceService for StandaloneResource {
-    async fn get_resource_path(&self) -> PathBuf {
+impl ResourcePaths for Standalone {
+    fn resource_path(&self) -> PathBuf {
         PathBuf::from("/mock/resource")
     }
 
-    async fn get_ini_file_path(&self) -> PathBuf {
+    fn ini_file_path(&self) -> PathBuf {
         PathBuf::from("/mock/reaper.ini")
     }
 
-    async fn get_color_theme_path(&self) -> Option<PathBuf> {
+    fn color_theme_path(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/mock/theme.ReaperTheme"))
     }
 }
