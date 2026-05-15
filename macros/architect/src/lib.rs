@@ -47,9 +47,9 @@ pub use facet;
 #[cfg(feature = "vox")]
 pub use vox;
 
-// Effect-style service composition. `Layer` + `LayerSet` let callers
+// Effect-style service composition. `Layer` + `layers!` let callers
 // bundle architect-rpc services into a single value and mount them as
-// a unit. See [`layer`] module docs for the model.
+// a unit via `.provide(backend)`. See [`layer`] module docs.
 #[cfg(feature = "vox")]
 pub mod layer;
 #[cfg(feature = "vox")]

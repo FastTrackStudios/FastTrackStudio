@@ -142,9 +142,8 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     let serve_fn = emit_serve_fn(trait_name, &host_name, &rpc_dispatcher_name, vis, shape);
 
     // `layer` — bundles (descriptor, serve(backend)) into an
-    // `architect::Layer` so callers can compose mounting via
-    // `LayerSet::merge` instead of writing per-service `.with(...)`
-    // calls.
+    // `architect::Mounted` so callers can compose mounting via
+    // `Layer::merge` instead of writing per-service `.with(...)` calls.
     let layer_fn = emit_layer_fn(trait_name, vis, shape);
 
     Ok(quote! {
@@ -219,8 +218,8 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
     quote! {
         /// Immediate-bind shortcut: wrap a backend in this service's
         /// vox dispatcher and return a `Mounted`. For deferred
-        /// binding, prefer `Service` + `architect::Layer::add` /
-        /// `architect::Layer::provide`.
+        /// binding, prefer `Service` + [`architect::Layer::merge`] +
+        /// [`architect::Layer::provide`].
         ///
         #[doc = #immediate_doc]
         #[cfg(feature = "vox")]
@@ -231,15 +230,13 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
             ::architect::Mounted::new(#descriptor_fn(), serve(backend))
         }
 
-        /// Deferred-bind service token. Pass to
-        /// [`architect::Layer::add`]; the layer's `.provide(backend)`
-        /// resolves all such tokens against the same backend value.
+        /// Deferred-bind service token. Acts as a one-element
+        /// [`architect::Layer`]; compose with [`architect::Layer::merge`]
+        /// and bind a backend at [`architect::Layer::provide`] time.
         #[cfg(feature = "vox")]
         #[derive(Debug, Default, Clone, Copy)]
         #vis struct Service;
 
-        /// Backend-free descriptor accessor — lets [`architect::Layer`]
-        /// store this service without committing to a backend type.
         #[cfg(feature = "vox")]
         impl ::architect::BindAny for Service {
             fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
@@ -254,6 +251,52 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         {
             fn bind(self, backend: S) -> ::architect::Mounted {
                 ::architect::Mounted::new(#descriptor_fn(), serve(backend))
+            }
+        }
+
+        // ─ One-element Layer impls ─────────────────────────────────
+        // Lets `transport::Service.merge(marker::Service)` work the
+        // same as merging two pre-built bundles. The token is its own
+        // Layer; no wrapping needed.
+
+        #[cfg(feature = "vox")]
+        impl ::architect::Layer for Service {}
+
+        #[cfg(feature = "vox")]
+        impl<R> ::architect::Append<R> for Service
+        where
+            R: ::architect::Layer,
+        {
+            type Output = ::architect::Cons<Service, R>;
+            fn append(self, rhs: R) -> Self::Output {
+                ::architect::Cons::new(self, rhs)
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl ::architect::Descriptors for Service {
+            fn collect(
+                &self,
+                out: &mut ::std::vec::Vec<&'static ::architect::vox::ServiceDescriptor>,
+            ) {
+                out.push(::architect::BindAny::descriptor(self));
+            }
+        }
+
+        #[cfg(feature = "vox")]
+        impl<B> ::architect::ProvideAll<B> for Service
+        where
+            B: ::core::clone::Clone,
+            Service: ::architect::Bind<B>,
+        {
+            fn provide_into(
+                self,
+                backend: &B,
+                router: &mut ::architect::LayerRouter,
+            ) {
+                use ::architect::LayerSink as _;
+                let mounted = ::architect::Bind::bind(self, backend.clone());
+                router.add_mounted(mounted);
             }
         }
     }

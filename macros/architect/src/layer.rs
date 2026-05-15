@@ -1,39 +1,48 @@
-//! Effect-style layer composition — bounds-free bundle definition.
+//! Effect-style layer composition — one combinator, [`Layer::merge`].
 //!
-//! A [`Layer`] is built from a list of services. The list is a
-//! type-level cons chain ([`Empty`] / [`Cons<S, R>`]) so the bundle
-//! definition needs **no where clause** — each service's backend
-//! requirements only flow into the type when [`Layer::provide`] picks
-//! a concrete backend. Forgetting a trait impl on a backend surfaces
-//! as a compile error at the `.provide(...)` call site, naming the
-//! missing trait.
+//! Mirrors Effect-ts: a [`Layer`] is the single composable unit, and
+//! [`Layer::merge`] is the only combinator users need. Service tokens
+//! emitted by `#[architect::rpc]` are themselves one-element layers,
+//! so tokens and pre-built bundles compose the same way.
 //!
 //! ```ignore
-//! use architect::{Layer, services};
+//! use architect::{Layer, layers};
 //! use daw_proto::{transport, project, marker};
 //!
-//! pub fn services() -> impl Layer {
-//!     services![transport, project, marker]   // no bounds anywhere
-//! }
+//! // Build a bundle:
+//! let bundle = layers![transport::Service, project::Service, marker::Service];
 //!
-//! // Or inline:
-//! let router = services![transport, project, marker].provide(Reaper);
+//! // Bind and route:
+//! let router = bundle.provide(Reaper);
+//!
+//! // Compose sub-bundles via .merge() — same call site shape:
+//! let timeline = layers![transport::Service, marker::Service];
+//! let routing  = layers![project::Service];
+//! let router   = timeline.merge(routing).provide(Reaper);
+//!
+//! // Override / bolt-on (last-add wins on method_id):
+//! let router = layers![transport::Service, project::Service]
+//!     .merge(fx_chains::mock())          // override
+//!     .merge(dock_host::layer(dh))       // bolt-on, different backend
+//!     .provide(Reaper);
 //! ```
+//!
+//! Bundle definitions need **no where clause** — service tokens defer
+//! backend binding to `.provide(B)` time. Forgetting an impl surfaces
+//! at the `.provide(...)` call site, naming the missing trait.
 //!
 //! # The pieces
 //!
 //! - [`BindAny`] — "I know my descriptor." Backend-free.
 //! - [`Bind<B>`] — `BindAny` + "given backend B, produce a [`Mounted`]."
 //!   Macro-emitted per service.
-//! - [`Mounted`] — a service that's been bound. Implements both
-//!   `BindAny` and `Bind<B> for any B`, so already-mounted services
-//!   compose into a layer the same way deferred tokens do.
-//! - [`Empty`] / [`Cons<S, R>`] — the type-level list of services.
+//! - [`Mounted`] — a service that's been bound. One-element layer.
+//! - [`Empty`] / [`Cons<S, R>`] — type-level list of services.
 //!   Hidden behind `impl Layer` at function return sites.
-//! - [`Layer`] — exposes `add` / `merge` / `provide` / `descriptors`.
+//! - [`Layer`] — exposes `merge` / `provide` / `descriptors`.
 //! - [`ProvideAll<B>`] — bound checked at `.provide(B)`; recursively
 //!   requires `S: Bind<B>` for every service in the chain.
-//! - [`Append<R>`] — type-level concat for `Layer::merge`.
+//! - [`Append<R>`] — type-level concat backing `Layer::merge`.
 //! - [`LayerRouter`] — the terminal sink, implements
 //!   [`vox::Handler<DriverReplySink>`].
 
@@ -48,7 +57,12 @@ use vox::{
 };
 
 // ── Erased handler ────────────────────────────────────────────────────────
+//
+// Send / Sync requirements gated on target_arch — vox's Handler
+// future is `+ MaybeSend` (non-Send on wasm32). Native keeps the
+// thread bounds for tokio multi-thread executors.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub trait DynHandler: Send + Sync + 'static {
     fn handle(
         &self,
@@ -63,6 +77,7 @@ pub trait DynHandler: Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<H> DynHandler for H
 where
     H: Handler<DriverReplySink> + Send + Sync + 'static,
@@ -89,6 +104,48 @@ where
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+pub trait DynHandler: 'static {
+    fn handle(
+        &self,
+        call: SelfRef<RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
+    ) -> Pin<Box<dyn core::future::Future<Output = ()> + '_>>;
+
+    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy;
+    fn args_have_channels(&self, method_id: MethodId) -> bool;
+    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape>;
+    fn as_any(&self) -> &dyn Any;
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<H> DynHandler for H
+where
+    H: Handler<DriverReplySink> + 'static,
+{
+    fn handle(
+        &self,
+        call: SelfRef<RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
+    ) -> Pin<Box<dyn core::future::Future<Output = ()> + '_>> {
+        Box::pin(Handler::handle(self, call, reply, schemas))
+    }
+    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
+        Handler::retry_policy(self, method_id)
+    }
+    fn args_have_channels(&self, method_id: MethodId) -> bool {
+        Handler::args_have_channels(self, method_id)
+    }
+    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
+        Handler::response_wire_shape(self, method_id)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
 // ── Mounted ───────────────────────────────────────────────────────────────
 
 /// A service bound to a backend — descriptor + erased handler.
@@ -99,9 +156,21 @@ pub struct Mounted {
 }
 
 impl Mounted {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new<H>(descriptor: &'static ServiceDescriptor, handler: H) -> Self
     where
         H: Handler<DriverReplySink> + Send + Sync + 'static,
+    {
+        Self {
+            descriptor,
+            handler: Arc::new(handler),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new<H>(descriptor: &'static ServiceDescriptor, handler: H) -> Self
+    where
+        H: Handler<DriverReplySink> + 'static,
     {
         Self {
             descriptor,
@@ -140,8 +209,7 @@ impl core::fmt::Debug for Mounted {
 // ── BindAny / Bind ────────────────────────────────────────────────────────
 
 /// Backend-free trait — "I know my descriptor." Implemented by every
-/// service token and by [`Mounted`]. Lets [`Layer::add`] accept
-/// services without committing to a backend type.
+/// service token and by [`Mounted`].
 pub trait BindAny {
     fn descriptor(&self) -> &'static ServiceDescriptor;
 }
@@ -174,7 +242,7 @@ impl<B> Bind<B> for Mounted {
 pub struct Empty;
 
 /// One service cell prepended to a tail layer. Built by
-/// [`Layer::add`].
+/// [`Layer::merge`] when a service token is merged into a layer.
 pub struct Cons<S, R> {
     svc: S,
     rest: R,
@@ -188,28 +256,32 @@ impl<S, R> Cons<S, R> {
 
 // ── Layer trait ───────────────────────────────────────────────────────────
 
-/// The composable layer. Sealed at the impl level via [`Empty`],
-/// [`Cons`], and [`Mounted`]; user code only interacts through the
+/// The composable layer. Implemented by [`Empty`], [`Cons`],
+/// [`Mounted`], and (via the `#[architect::rpc]` derive) by each
+/// service's `Service` token. User code only interacts through the
 /// trait's methods.
 pub trait Layer: Sized {
-    /// Prepend a service (or a pre-mounted service via [`Mounted`])
-    /// to this layer. Order of services in the resulting chain
-    /// doesn't matter for dispatch (method IDs are unique).
-    fn add<S>(self, svc: S) -> Cons<S, Self>
+    /// Merge a bound service into this layer. Mirrors Effect-ts's
+    /// `Layer.merge` for the common bolt-on / override case — pass
+    /// anything convertible into a [`Mounted`] (typically the result
+    /// of a service's `layer(backend)` function or a `mock()`
+    /// builder).
+    ///
+    /// Works on any [`Layer`] including the opaque return of
+    /// [`Services::layers`], so call sites can chain
+    /// `Reaper::layers().merge(mock()).merge(bolt_on()).provide(Reaper)`.
+    ///
+    /// On duplicate method IDs the **last merged** handler wins —
+    /// that's how overrides and mocks compose.
+    ///
+    /// To compose two cons-chained sub-bundles (both built from
+    /// service tokens), use the [`layers!`] macro instead — it
+    /// concatenates via [`Append`] internally.
+    fn merge<M>(self, m: M) -> Cons<Mounted, Self>
     where
-        S: BindAny,
+        M: Into<Mounted>,
     {
-        Cons { svc, rest: self }
-    }
-
-    /// Type-level concat with another layer. The result is a new
-    /// `Layer` containing every service from both sides.
-    fn merge<R>(self, other: R) -> <Self as Append<R>>::Output
-    where
-        Self: Append<R>,
-        R: Layer,
-    {
-        Append::append(self, other)
+        Cons::new(m.into(), self)
     }
 
     /// Bind a backend and produce a [`LayerRouter`]. The bound
@@ -348,42 +420,34 @@ impl Descriptors for Mounted {
     }
 }
 
-// ── layers! / services! macros ────────────────────────────────────────────
+// ── layers! macro ─────────────────────────────────────────────────────────
 
-/// Build a [`Layer`] from a list of [`BindAny`] values (service tokens,
-/// pre-mounted services, …). Rust's analog of Effect's
-/// `Layer.mergeAll(...)`.
+/// Build a [`Layer`] from a variadic list of layers — service tokens,
+/// pre-mounted services, or already-composed sub-bundles all compose
+/// uniformly. Rust's analog of Effect-ts's `Layer.mergeAll(...)`.
 ///
 /// ```ignore
+/// // Tokens only:
 /// let router = layers![
 ///     transport::Service,
 ///     project::Service,
-///     dock_host::layer(dock_host_backend),   // pre-mounted, different backend
+///     marker::Service,
+/// ].provide(Reaper);
+///
+/// // Mix tokens, pre-mounted bolt-ons, and sub-bundles:
+/// let timeline = layers![transport::Service, marker::Service];
+/// let router = layers![
+///     timeline,
+///     project::Service,
+///     dock_host::layer(dock_host_backend),  // pre-mounted, different backend
 /// ].provide(Reaper);
 /// ```
 #[macro_export]
 macro_rules! layers {
     () => { $crate::Empty };
-    ($($svc:expr),+ $(,)?) => {{
-        let __l = $crate::Empty;
-        $(let __l = $crate::Layer::add(__l, $svc);)+
-        __l
-    }};
-}
-
-/// Ident-form shortcut for [`layers!`] — appends `::Service` to each
-/// ident. The terser form when every entry is the macro-emitted
-/// `Service` token of a per-trait module.
-///
-/// ```ignore
-/// let router = services![transport, project, marker].provide(Reaper);
-/// ```
-#[macro_export]
-macro_rules! services {
-    () => { $crate::Empty };
-    ($($svc:ident),+ $(,)?) => {{
-        let __l = $crate::Empty;
-        $(let __l = $crate::Layer::add(__l, $svc::Service);)+
+    ($first:expr $(, $rest:expr)* $(,)?) => {{
+        let __l = $first;
+        $(let __l = $crate::Append::append(__l, $rest);)*
         __l
     }};
 }
@@ -404,26 +468,25 @@ macro_rules! services {
 ///
 /// # Overriding a service
 ///
-/// `LayerRouter` resolves duplicate method-ids by **last-add wins** —
-/// register the override after the default bundle and it takes
-/// effect. The default handler stays in memory but becomes
-/// unreachable.
+/// `LayerRouter` resolves duplicate method-ids by **last-merge wins** —
+/// merge the override after the default bundle and it takes effect.
+/// The default handler stays in memory but becomes unreachable.
 ///
 /// ```ignore
 /// let router = Reaper::layers()
-///     .add(fx_chains::mock())       // overrides the default fx_chains
-///     .add(dock_host::layer(dh))    // bolt-on, different backend
+///     .merge(fx_chains::mock())     // overrides the default fx_chains
+///     .merge(dock_host::layer(dh))  // bolt-on, different backend
 ///     .provide(Reaper);
 /// ```
 ///
 /// # Sub-bundles
 ///
-/// Compose groups of services with `Layer::merge`:
+/// Compose groups of services with [`Layer::merge`] or `layers![...]`:
 ///
 /// ```ignore
-/// let timeline = services![transport, marker, region];
-/// let routing  = services![project, routing, track];
-/// let bundle   = timeline.merge(routing).merge(layers![fx_chains::mock()]);
+/// let timeline = layers![transport::Service, marker::Service, region::Service];
+/// let routing  = layers![project::Service, routing::Service, track::Service];
+/// let bundle   = layers![timeline, routing, fx_chains::mock()];
 /// let router   = bundle.provide(Reaper);
 /// ```
 pub trait Services: Sized {
