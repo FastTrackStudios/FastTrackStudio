@@ -306,17 +306,6 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         // — names which sibling services this one expects to find
         // in the same router at dispatch time. Default empty.
 
-        // Default-empty Requires impl — the service token doesn't
-        // *know* what its implementation needs at dispatch time.
-        // Per-backend requirements are declared at the bundle site
-        // via `Service.needs(&[...])`, which wraps the token in a
-        // `WithRequires<Service>` carrying the dep list.
-        #[cfg(feature = "vox")]
-        impl ::architect::Requires for Service {
-            fn requires(&self) -> &'static [&'static ::architect::vox::ServiceDescriptor] {
-                &[]
-            }
-        }
     }
 }
 

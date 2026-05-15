@@ -54,8 +54,8 @@ pub use vox;
 pub mod layer;
 #[cfg(feature = "vox")]
 pub use layer::{
-    Append, Bind, BindAny, Cons, Descriptors, Empty, Layer, LayerRouter, LayerSink, Mounted, Needs,
-    ProvideAll, RequirementGap, Requires, RequiresAll, Services, WithRequires,
+    Append, Bind, BindAny, Cons, Descriptors, Empty, Layer, LayerRouter, LayerSink, Mounted,
+    ProvideAll, Services,
 };
 
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach

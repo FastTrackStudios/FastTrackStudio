@@ -307,11 +307,9 @@ pub trait Layer: Sized {
     /// nothing here.
     fn provide<B>(self, backend: B) -> LayerRouter
     where
-        Self: ProvideAll<B> + Descriptors + RequiresAll,
+        Self: ProvideAll<B>,
         B: Clone,
     {
-        self.check_requirements()
-            .expect("layer requirements unsatisfied");
         let mut router = LayerRouter::new();
         self.provide_into(&backend, &mut router);
         router
@@ -328,59 +326,7 @@ pub trait Layer: Sized {
         Descriptors::collect(self, &mut v);
         v
     }
-
-    /// Assert that every service this layer declares (via
-    /// [`Requires`]) is also present in this same layer. Returns the
-    /// list of unsatisfied `(owner, missing_required_service)` pairs
-    /// — empty on success.
-    ///
-    /// Called automatically by [`Layer::provide`]; call directly if
-    /// you want a non-panicking check (e.g. error-channel mount).
-    fn check_requirements(&self) -> Result<(), Vec<RequirementGap>>
-    where
-        Self: Descriptors + RequiresAll,
-    {
-        let mut provided = Vec::new();
-        Descriptors::collect(self, &mut provided);
-        let mut needed = Vec::new();
-        RequiresAll::collect(self, &mut needed);
-
-        let provided_names: std::collections::HashSet<&'static str> =
-            provided.iter().map(|d| d.service_name).collect();
-
-        let gaps: Vec<RequirementGap> = needed
-            .into_iter()
-            .filter(|(_, req)| !provided_names.contains(req.service_name))
-            .map(|(owner, req)| RequirementGap {
-                owner: owner.service_name,
-                missing: req.service_name,
-            })
-            .collect();
-
-        if gaps.is_empty() { Ok(()) } else { Err(gaps) }
-    }
 }
-
-/// A `(owner, missing)` pair returned by
-/// [`Layer::check_requirements`]: service `owner` declares it needs
-/// `missing` in the same router, but `missing` was not mounted.
-#[derive(Clone, Copy, Debug)]
-pub struct RequirementGap {
-    pub owner: &'static str,
-    pub missing: &'static str,
-}
-
-impl core::fmt::Display for RequirementGap {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "service `{}` requires `{}` in the same router, but it was not mounted",
-            self.owner, self.missing
-        )
-    }
-}
-
-impl std::error::Error for RequirementGap {}
 
 impl Layer for Empty {}
 impl<S, R> Layer for Cons<S, R>
@@ -491,189 +437,6 @@ impl Descriptors for Mounted {
     }
 }
 
-// ── Requires ──────────────────────────────────────────────────────────────
-
-/// Per-token declaration: "this service expects to find these other
-/// services in the same [`LayerRouter`] at dispatch time."
-///
-/// Requirements live with the **implementation**, not the trait —
-/// the REAPER backend's `Fx` impl may dispatch through `Markers` and
-/// `Items`, while a mock `Fx` impl returns canned data and needs
-/// nothing. So the `#[architect::rpc]` derive emits a default-empty
-/// `Requires` impl per service token, and each backend's
-/// `Services::layers()` body declares its own edges using
-/// [`Needs::needs`]:
-///
-/// ```ignore
-/// impl Services for Reaper {
-///     fn layers() -> impl Layer + ProvideAll<Self> + Descriptors + RequiresAll {
-///         layers![
-///             fx::Service.needs(&[markers::descriptor(), items::descriptor()]),
-///             markers::Service,
-///             items::Service,
-///             // ...
-///         ]
-///     }
-/// }
-///
-/// impl Services for MockReaper {
-///     fn layers() -> impl Layer + ProvideAll<Self> + Descriptors + RequiresAll {
-///         // No .needs() — the mock doesn't dispatch cross-service.
-///         layers![fx::Service, markers::Service, items::Service]
-///     }
-/// }
-/// ```
-///
-/// Checked at `.provide()` time — fails fast with a clear panic
-/// naming which service needs which. [`Mounted`] reports no
-/// requirements: pre-bound bolt-ons are considered self-contained.
-pub trait Requires {
-    fn requires(&self) -> &'static [&'static ServiceDescriptor];
-}
-
-impl Requires for Mounted {
-    fn requires(&self) -> &'static [&'static ServiceDescriptor] {
-        &[]
-    }
-}
-
-/// Walks the chain collecting per-service requirements. Sibling of
-/// [`Descriptors`] — used by [`Layer::check_requirements`] /
-/// [`Layer::provide`] to assert the bundle is dependency-closed.
-pub trait RequiresAll: Layer {
-    fn collect(&self, out: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>);
-}
-
-impl RequiresAll for Empty {
-    fn collect(&self, _: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>) {}
-}
-
-impl<S, R> RequiresAll for Cons<S, R>
-where
-    S: BindAny + Requires,
-    R: RequiresAll,
-{
-    fn collect(&self, out: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>) {
-        let owner = self.svc.descriptor();
-        for req in self.svc.requires() {
-            out.push((owner, *req));
-        }
-        self.rest.collect(out);
-    }
-}
-
-impl RequiresAll for Mounted {
-    fn collect(&self, _: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>) {}
-}
-
-// ── WithRequires + Needs builder ──────────────────────────────────────────
-
-/// A service token wrapped with a per-backend requirement list.
-/// Built via [`Needs::needs`]; behaves identically to the inner token
-/// for descriptor lookup and binding, but reports its declared
-/// requirements to [`RequiresAll`].
-#[derive(Clone, Copy)]
-pub struct WithRequires<S> {
-    svc: S,
-    requires: &'static [&'static ServiceDescriptor],
-}
-
-impl<S: core::fmt::Debug> core::fmt::Debug for WithRequires<S> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("WithRequires")
-            .field("svc", &self.svc)
-            .field("requires", &self.requires.len())
-            .finish()
-    }
-}
-
-impl<S: BindAny> BindAny for WithRequires<S> {
-    fn descriptor(&self) -> &'static ServiceDescriptor {
-        self.svc.descriptor()
-    }
-}
-
-impl<S, B> Bind<B> for WithRequires<S>
-where
-    S: Bind<B>,
-{
-    fn bind(self, backend: B) -> Mounted {
-        self.svc.bind(backend)
-    }
-}
-
-impl<S> Requires for WithRequires<S> {
-    fn requires(&self) -> &'static [&'static ServiceDescriptor] {
-        self.requires
-    }
-}
-
-impl<S: BindAny> Layer for WithRequires<S> {}
-
-impl<S, R> Append<R> for WithRequires<S>
-where
-    S: BindAny,
-    R: Layer,
-{
-    type Output = Cons<WithRequires<S>, R>;
-    fn append(self, rhs: R) -> Self::Output {
-        Cons::new(self, rhs)
-    }
-}
-
-impl<S: BindAny> Descriptors for WithRequires<S> {
-    fn collect(&self, out: &mut Vec<&'static ServiceDescriptor>) {
-        out.push(self.svc.descriptor());
-    }
-}
-
-impl<S, B> ProvideAll<B> for WithRequires<S>
-where
-    B: Clone,
-    S: Bind<B>,
-{
-    fn provide_into(self, backend: &B, router: &mut LayerRouter) {
-        router.add_mounted(self.svc.bind(backend.clone()));
-    }
-}
-
-impl<S: BindAny> RequiresAll for WithRequires<S> {
-    fn collect(&self, out: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>) {
-        let owner = self.svc.descriptor();
-        for req in self.requires {
-            out.push((owner, *req));
-        }
-    }
-}
-
-/// Builder method for attaching a per-backend requirement list to a
-/// service token. Blanket-implemented for every [`BindAny`] type, so
-/// any service token (or pre-mounted bolt-on) can declare its
-/// dependencies inline at the bundle site.
-///
-/// ```ignore
-/// use architect::Needs;
-///
-/// layers![
-///     fx::Service.needs(&[markers::descriptor(), items::descriptor()]),
-///     markers::Service,
-///     items::Service,
-/// ]
-/// ```
-pub trait Needs: BindAny + Sized {
-    /// Wrap this token with the given dependency list. Each entry
-    /// must be a `&'static ServiceDescriptor` — typically obtained
-    /// via the sibling service's `descriptor()` re-export.
-    fn needs(self, requires: &'static [&'static ServiceDescriptor]) -> WithRequires<Self> {
-        WithRequires {
-            svc: self,
-            requires,
-        }
-    }
-}
-
-impl<T: BindAny> Needs for T {}
-
 // ── layers! macro ─────────────────────────────────────────────────────────
 
 /// Build a [`Layer`] from a variadic list of layers — service tokens,
@@ -701,8 +464,8 @@ macro_rules! layers {
     () => { $crate::Empty };
     ($($svc:expr),+ $(,)?) => {{
         // Always terminate the cons chain in `Empty` so the per-layer
-        // walker traits (`Descriptors`, `RequiresAll`) bottom out on
-        // the `Empty` base impl rather than on the last service token.
+        // walker trait (`Descriptors`) bottoms out on the `Empty`
+        // base impl rather than on the last service token.
         let __l = $crate::Empty;
         $(let __l = $crate::Append::append($svc, __l);)+
         __l
@@ -754,7 +517,7 @@ pub trait Services: Sized {
     /// - bind via `.provide(self)` ([`ProvideAll<Self>`])
     /// - introspect with `.descriptors()` before binding
     ///   ([`Descriptors`])
-    fn layers() -> impl Layer + ProvideAll<Self> + Descriptors + RequiresAll;
+    fn layers() -> impl Layer + ProvideAll<Self> + Descriptors;
 
     /// Convenience: build the bundle, bind `self`, return the
     /// terminal router. One-call mount when no overrides are needed.
