@@ -26,7 +26,7 @@
 //! let project = daw_reaper::ReaperProject::new();
 //! let dispatcher = RoutedDispatcher::new(
 //!     TransportServiceDispatcher::new(transport),
-//!     ProjectServiceDispatcher::new(project),
+//!     ProjectsDispatcher::new(project),
 //! );
 //! ```
 

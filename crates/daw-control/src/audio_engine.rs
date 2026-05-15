@@ -1,6 +1,6 @@
 //! High-level handle for the audio engine.
 //!
-//! Wraps the raw `AudioEngineServiceClient` so consumers never interact
+//! Wraps the raw `AudioEngineClient` so consumers never interact
 //! with the RPC layer directly.
 
 use std::sync::Arc;

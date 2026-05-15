@@ -733,7 +733,7 @@ impl ReaperTestContext {
     // ── UI assertion helpers ────────────────────────────────────────────
     //
     // Backed by `DockHostService`. Require the host extension running
-    // inside REAPER to have registered a `DockHostServiceDispatcher` —
+    // inside REAPER to have registered a `DockHostingDispatcher` —
     // see `daw_reaper_dioxus::register_dock_host_service` (TODO: wire
     // into create_daw_handler under daw-reaper feature).
 

@@ -3,13 +3,12 @@
 //! Creates a `RoutedHandler` with all REAPER service implementations.
 //! Used by `PluginHost` to create a local `Daw` instance without SHM.
 
-use daw_proto::automation::{AutomationServiceDispatcher, automation_service_service_descriptor};
+use daw_proto::automation::{AutomationDispatcher, automation_service_service_descriptor};
 use daw_proto::{
-    ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, DawFileServiceDispatcher,
-    FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher,
-    LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
-    ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    ActionRegistrationDispatcher, AudioEngineDispatcher, DawFileOpsDispatcher, EffectsDispatcher,
+    HealthDispatcher, InputDispatcher, LiveMidiDispatcher, MidiDispatcher, PluginLoadingDispatcher,
+    ProjectsDispatcher, RoutingDispatcher, ScreensetsDispatcher, ToolbarDispatcher,
+    WindowGeometryDispatcher,
 };
 use daw_proto::{ext_state, item, marker, region, take, tempo_map, track, transport};
 
@@ -23,7 +22,7 @@ use daw_proto::{
     toolbar_service_service_descriptor, window_geometry_service_service_descriptor,
 };
 
-use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
+use daw_proto::batch::{BatchExecutionDispatcher, batch_service_service_descriptor};
 
 use crate::routed_handler::RoutedHandler;
 
@@ -72,7 +71,7 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(transport::descriptor(), transport::serve(crate::Reaper))
         .with(
             project_service_service_descriptor(),
-            ProjectServiceDispatcher::new(project),
+            ProjectsDispatcher::new(project),
         )
         // Markers ported to architect::rpc — see `crate::marker`.
         // `marker::serve(Reaper)` builds the dispatcher + bridges sync
@@ -82,71 +81,65 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(tempo_map::descriptor(), tempo_map::serve(crate::Reaper))
         .with(
             audio_engine_service_service_descriptor(),
-            AudioEngineServiceDispatcher::new(audio_engine),
+            AudioEngineDispatcher::new(audio_engine),
         )
-        .with(
-            midi_service_service_descriptor(),
-            MidiServiceDispatcher::new(midi),
-        )
+        .with(midi_service_service_descriptor(), MidiDispatcher::new(midi))
         // NOTE: MidiAnalysisService is no longer registered here. The impl
         // (chord detection, chart generation) lives in keyflow as the
         // `keyflow-daw-analysis` crate; fts-extensions plugs it in via
         // `RoutedHandler::with(...)` after calling `create_daw_handler()`.
         // This breaks the daw → daw-reaper → keyflow → daw cycle.
-        .with(
-            fx_service_service_descriptor(),
-            FxServiceDispatcher::new(fx),
-        )
+        .with(fx_service_service_descriptor(), EffectsDispatcher::new(fx))
         .with(track::descriptor(), track::serve(crate::Reaper))
         .with(
             routing_service_service_descriptor(),
-            RoutingServiceDispatcher::new(routing),
+            RoutingDispatcher::new(routing),
         )
         .with(
             live_midi_service_service_descriptor(),
-            LiveMidiServiceDispatcher::new(live_midi),
+            LiveMidiDispatcher::new(live_midi),
         )
         .with(ext_state::descriptor(), ext_state::serve(crate::Reaper))
         .with(
             health_service_service_descriptor(),
-            HealthServiceDispatcher::new(health),
+            HealthDispatcher::new(health),
         )
         .with(item::items_descriptor(), item::serve(crate::Reaper))
         .with(take::descriptor(), take::serve(crate::Reaper))
         .with(
             action_registry_service_service_descriptor(),
-            ActionRegistryServiceDispatcher::new(action_registry),
+            ActionRegistrationDispatcher::new(action_registry),
         )
         .with(
             input_service_service_descriptor(),
-            InputServiceDispatcher::new(input),
+            InputDispatcher::new(input),
         )
         .with(
             toolbar_service_service_descriptor(),
-            ToolbarServiceDispatcher::new(toolbar),
+            ToolbarDispatcher::new(toolbar),
         )
         .with(
             screenset_service_service_descriptor(),
-            ScreensetServiceDispatcher::new(screenset),
+            ScreensetsDispatcher::new(screenset),
         )
         .with(
             daw_file_service_service_descriptor(),
-            DawFileServiceDispatcher::new(dawfile_ops),
+            DawFileOpsDispatcher::new(dawfile_ops),
         )
         .with(
             window_geometry_service_service_descriptor(),
-            WindowGeometryServiceDispatcher::new(window_geometry),
+            WindowGeometryDispatcher::new(window_geometry),
         )
         .with(
             plugin_loader_service_service_descriptor(),
-            PluginLoaderServiceDispatcher::new(plugin_loader),
+            PluginLoadingDispatcher::new(plugin_loader),
         )
         .with(
             automation_service_service_descriptor(),
-            AutomationServiceDispatcher::new(automation),
+            AutomationDispatcher::new(automation),
         )
         .with(
             batch_service_service_descriptor(),
-            BatchServiceDispatcher::new(batch),
+            BatchExecutionDispatcher::new(batch),
         )
 }

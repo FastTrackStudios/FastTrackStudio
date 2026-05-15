@@ -31,11 +31,10 @@ use routed_handler::{DawConnectionAcceptor, RoutedHandler};
 
 // Service dispatchers for method ID routing
 use daw::service::{
-    ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
-    DawFileServiceDispatcher, FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher,
-    LiveMidiServiceDispatcher, MidiServiceDispatcher, PluginLoaderServiceDispatcher,
-    ProjectServiceDispatcher, RoutingServiceDispatcher, ScreensetServiceDispatcher,
-    ToolbarServiceDispatcher, WindowGeometryServiceDispatcher,
+    ActionRegistrationDispatcher, AudioEngineDispatcher, BatchExecutionDispatcher,
+    DawFileOpsDispatcher, EffectsDispatcher, HealthDispatcher, InputDispatcher, LiveMidiDispatcher,
+    MidiDispatcher, PluginLoadingDispatcher, ProjectsDispatcher, RoutingDispatcher,
+    ScreensetsDispatcher, ToolbarDispatcher, WindowGeometryDispatcher,
 };
 
 // ============================================================================
@@ -200,7 +199,7 @@ async fn register_daw_dispatcher() {
         )
         .with(
             project_service_service_descriptor(),
-            ProjectServiceDispatcher::new(project),
+            ProjectsDispatcher::new(project),
         )
         // Markers via architect::rpc — `marker::serve(Reaper)` builds
         // the dispatcher + bridges sync calls onto REAPER's main
@@ -219,19 +218,13 @@ async fn register_daw_dispatcher() {
         )
         .with(
             audio_engine_service_service_descriptor(),
-            AudioEngineServiceDispatcher::new(audio_engine),
+            AudioEngineDispatcher::new(audio_engine),
         )
-        .with(
-            midi_service_service_descriptor(),
-            MidiServiceDispatcher::new(midi),
-        )
+        .with(midi_service_service_descriptor(), MidiDispatcher::new(midi))
         // MidiAnalysisService is registered out-of-tree by `keyflow-daw-
         // analysis` (loaded via fts-extensions); see daw-reaper a823b67
         // for the cycle that prevents in-tree registration.
-        .with(
-            fx_service_service_descriptor(),
-            FxServiceDispatcher::new(fx),
-        )
+        .with(fx_service_service_descriptor(), EffectsDispatcher::new(fx))
         .with(
             // Tracks via architect::rpc.
             daw::service::track::descriptor(),
@@ -239,11 +232,11 @@ async fn register_daw_dispatcher() {
         )
         .with(
             routing_service_service_descriptor(),
-            RoutingServiceDispatcher::new(routing),
+            RoutingDispatcher::new(routing),
         )
         .with(
             live_midi_service_service_descriptor(),
-            LiveMidiServiceDispatcher::new(live_midi),
+            LiveMidiDispatcher::new(live_midi),
         )
         .with(
             daw::service::ext_state::descriptor(),
@@ -251,7 +244,7 @@ async fn register_daw_dispatcher() {
         )
         .with(
             health_service_service_descriptor(),
-            HealthServiceDispatcher::new(health),
+            HealthDispatcher::new(health),
         )
         .with(
             daw::service::item::items_descriptor(),
@@ -263,43 +256,43 @@ async fn register_daw_dispatcher() {
         )
         .with(
             action_registry_service_service_descriptor(),
-            ActionRegistryServiceDispatcher::new(action_registry),
+            ActionRegistrationDispatcher::new(action_registry),
         )
         .with(
             input_service_service_descriptor(),
-            InputServiceDispatcher::new(input),
+            InputDispatcher::new(input),
         )
         .with(
             toolbar_service_service_descriptor(),
-            ToolbarServiceDispatcher::new(toolbar),
+            ToolbarDispatcher::new(toolbar),
         )
         .with(
             screenset_service_service_descriptor(),
-            ScreensetServiceDispatcher::new(screenset),
+            ScreensetsDispatcher::new(screenset),
         )
         .with(
             daw_file_service_service_descriptor(),
-            DawFileServiceDispatcher::new(dawfile_ops),
+            DawFileOpsDispatcher::new(dawfile_ops),
         )
         .with(
             window_geometry_service_service_descriptor(),
-            WindowGeometryServiceDispatcher::new(window_geometry),
+            WindowGeometryDispatcher::new(window_geometry),
         )
         .with(
             plugin_loader_service_service_descriptor(),
-            PluginLoaderServiceDispatcher::new(plugin_loader),
+            PluginLoadingDispatcher::new(plugin_loader),
         )
         .with(
             daw::service::automation::automation_service_service_descriptor(),
-            daw::service::automation::AutomationServiceDispatcher::new(automation),
+            daw::service::automation::AutomationDispatcher::new(automation),
         )
         .with(
             batch_service_service_descriptor(),
-            BatchServiceDispatcher::new(batch),
+            BatchExecutionDispatcher::new(batch),
         )
         .with(
             daw_proto::dock_host::dock_host_service_service_descriptor(),
-            daw_proto::dock_host::DockHostServiceDispatcher::new(dock_host),
+            daw_proto::dock_host::DockHostingDispatcher::new(dock_host),
         );
 
     // Build the connection acceptor from the routed handler

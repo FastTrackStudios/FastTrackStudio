@@ -32,7 +32,7 @@ struct KeepAlive {
 ///
 /// ```ignore
 /// let handler = RoutedHandler::new()
-///     .with(fx_service_descriptor(), FxServiceDispatcher::new(fx_impl));
+///     .with(fx_service_descriptor(), EffectsDispatcher::new(fx_impl));
 /// let local = LocalCaller::new(handler).await?;
 /// let daw = Daw::new(local.caller());
 /// ```
