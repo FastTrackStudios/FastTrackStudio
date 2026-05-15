@@ -529,6 +529,26 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     .map(|f| f.filename.as_str())
                     .unwrap_or("");
 
+                // Match fade entries to this item by position. PT stores
+                // fade-ins at the same start as the item; fade-outs end at
+                // the item's end (start_pos + length == item_end).
+                let item_start = tr.start_pos;
+                let item_end = item_start.saturating_add(region.length);
+                let mut fade_in_secs: Option<f64> = None;
+                let mut fade_out_secs: Option<f64> = None;
+                let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
+                for f in &track.fades {
+                    if f.length == 0 {
+                        continue;
+                    }
+                    let f_end = f.start_pos.saturating_add(f.length);
+                    if f.start_pos.abs_diff(item_start) <= tolerance {
+                        fade_in_secs = Some(f.length as f64 / sample_rate);
+                    } else if f_end.abs_diff(item_end) <= tolerance {
+                        fade_out_secs = Some(f.length as f64 / sample_rate);
+                    }
+                }
+
                 t = t.item(position_secs, length_secs, |item| {
                     let mut item = item.name(&region.name);
                     if !filename.is_empty() {
@@ -536,6 +556,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     }
                     if offset_secs > 0.0 {
                         item = item.slip_offset(offset_secs);
+                    }
+                    if let Some(fi) = fade_in_secs {
+                        item = item.fade_in(fi, dawfile_reaper::types::item::FadeCurveType::Linear);
+                    }
+                    if let Some(fo) = fade_out_secs {
+                        item =
+                            item.fade_out(fo, dawfile_reaper::types::item::FadeCurveType::Linear);
                     }
                     item
                 });
@@ -563,15 +590,26 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 
                 t = t.item(position_secs, length_secs, |item| {
                     item.name(&region.name).source_midi().midi(|midi| {
-                        let mut midi = midi;
+                        // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
+                        // the REAPER builder to use the same PPQN so positions
+                        // and durations don't need numeric rescaling.
+                        let mut midi = midi.ticks_per_qn(960_000);
                         for event in &region.events {
-                            midi = midi.at(event.position).note(
-                                0,
-                                0,
-                                event.note,
-                                event.velocity,
-                                event.duration as u32,
-                            );
+                            // Skip 0-velocity notes (would be silent anyway).
+                            if event.velocity == 0 {
+                                continue;
+                            }
+                            // Fall back to a short audible duration for hits
+                            // recorded with zero length (PT often stores
+                            // percussion that way) so REAPER renders them.
+                            let dur = if event.duration == 0 {
+                                4_800 // ~1/200 quarter at 960000 ppq
+                            } else {
+                                event.duration as u32
+                            };
+                            midi =
+                                midi.at(event.position)
+                                    .note(0, 0, event.note, event.velocity, dur);
                         }
                         midi
                     })

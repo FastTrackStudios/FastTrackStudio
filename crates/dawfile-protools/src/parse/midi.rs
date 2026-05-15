@@ -314,6 +314,7 @@ fn parse_midi_tracks(
             kind: TrackKind::Midi,
             index: tracks.len() as u16,
             playlist_name: String::new(),
+            fades: Vec::new(),
             regions: Vec::new(),
             alternate_playlists: Vec::new(),
         });

@@ -139,10 +139,33 @@ pub struct Track {
     pub playlist_name: String,
     /// Regions on the active playlist, in timeline order.
     pub regions: Vec<TrackRegion>,
+    /// Fade/crossfade entries on this track (PT marks these with byte `+46 == 0x01`
+    /// in the region-track entry). Each fade overlaps one or two `regions` items
+    /// and supplies a fade-in or fade-out length when emitting to a target DAW.
+    pub fades: Vec<FadeRegion>,
     /// Alternate (inactive) playlists stored in the session.
     ///
     /// Empty unless the session was saved with alternate playlists.
     pub alternate_playlists: Vec<Playlist>,
+}
+
+/// A fade region on a track.
+///
+/// Pro Tools stores fades as separate region placements with a fade-marker
+/// byte. The `length` is taken from the audio region the fade entry references
+/// (its `length` field), since PT auto-creates a short fade-audio region per
+/// fade and points the fade entry at it.
+#[derive(Debug, Clone)]
+pub struct FadeRegion {
+    /// Start position on the timeline (samples at target rate).
+    pub start_pos: u64,
+    /// Fade length in samples (the referenced audio region's length).
+    pub length: u64,
+    /// Index of the audio region this fade points at (in `ProToolsSession::audio_regions`).
+    pub region_index: u16,
+    /// Curve hint from the fade entry's sub-block (`+35`): 0 = linear,
+    /// 1/2 = equal-power / S-curve variants (empirical, not fully verified).
+    pub curve: u8,
 }
 
 impl Track {

@@ -22,7 +22,9 @@ use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::Cursor;
 use crate::parse::tempo::{TempoSegment, tick_to_sample};
-use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackKind, TrackRegion, ZERO_TICKS};
+use crate::types::{
+    AudioRegion, FadeRegion, NO_REGION, Playlist, Track, TrackKind, TrackRegion, ZERO_TICKS,
+};
 
 /// Internal track entry that carries the channel position used for grouping.
 struct TrackEntry {
@@ -127,6 +129,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     index: track_index,
                     playlist_name: String::new(),
                     regions: Vec::new(),
+                    fades: Vec::new(),
                     alternate_playlists: Vec::new(),
                 },
                 channel_pos: ch,
@@ -220,7 +223,7 @@ fn assign_regions_new(
             }
         };
 
-        let slot_regions = collect_slot_regions(
+        let (slot_regions, slot_fades) = collect_slot_regions(
             map_entry,
             cursor,
             regions,
@@ -230,10 +233,16 @@ fn assign_regions_new(
         );
         entries[idx].track.playlist_name = playlist_name;
         entries[idx].track.regions.extend(slot_regions);
+        entries[idx].track.fades.extend(slot_fades);
     }
 }
 
 /// Collect all region placements from a single 0x1052 block.
+///
+/// Returns `(main_regions, fades)`. Fade entries — track entries whose byte at
+/// offset +46 is `0x01` — are collected separately along with the referenced
+/// audio region's length, which empirically equals the fade duration when the
+/// referenced region is a PT-generated fade clip.
 fn collect_slot_regions(
     map_entry: &Block,
     cursor: &Cursor<'_>,
@@ -241,15 +250,14 @@ fn collect_slot_regions(
     rate_factor: f64,
     tempo_map: &[TempoSegment],
     target_sample_rate: u32,
-) -> Vec<TrackRegion> {
+) -> (Vec<TrackRegion>, Vec<FadeRegion>) {
     let data = cursor.data();
     let mut slot_regions = Vec::new();
+    let mut slot_fades = Vec::new();
 
     for track_entry in &map_entry.find_all(ContentType::AudioRegionTrackEntryNew) {
-        // Skip fade regions (byte at offset+46 == 0x01)
-        if track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01 {
-            continue;
-        }
+        let is_fade =
+            track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01;
 
         for sub_entry in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
             let raw_offset = sub_entry.offset + 4;
@@ -285,14 +293,43 @@ fn collect_slot_regions(
                 0
             };
 
-            slot_regions.push(TrackRegion {
-                region_index: raw_index,
-                start_pos: start,
-            });
+            if is_fade {
+                // Fade length comes from the audio region the fade entry
+                // references — PT auto-generates a short fade-audio region
+                // and its `length` matches the fade duration. Clamp to a
+                // sane upper bound (8 sec) so cases where the fade entry
+                // points at a full-length stem don't emit absurd fades.
+                let ref_len = regions
+                    .iter()
+                    .find(|r| r.index == raw_index)
+                    .map(|r| r.length)
+                    .unwrap_or(0);
+                let max_fade_samples = (target_sample_rate as u64) * 8;
+                let length = ref_len.min(max_fade_samples);
+
+                // Curve hint: trailing byte of the sub-entry payload.
+                let curve = if sub_entry.offset + sub_entry.block_size as usize - 2 < data.len() {
+                    data[sub_entry.offset + sub_entry.block_size as usize - 2]
+                } else {
+                    0
+                };
+
+                slot_fades.push(FadeRegion {
+                    start_pos: start,
+                    length,
+                    region_index: raw_index,
+                    curve,
+                });
+            } else {
+                slot_regions.push(TrackRegion {
+                    region_index: raw_index,
+                    start_pos: start,
+                });
+            }
         }
     }
 
-    slot_regions
+    (slot_regions, slot_fades)
 }
 
 // ── Alternate playlist grouping ────────────────────────────────────────────
