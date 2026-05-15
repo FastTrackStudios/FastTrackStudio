@@ -327,12 +327,19 @@ impl RppSerialize for SourceBlock {
 // Take
 // ---------------------------------------------------------------------------
 
-impl RppSerialize for Take {
-    fn write_rpp(&self, out: &mut String, indent: &str) {
-        if self.is_selected {
-            out.push_str(&format!("{}TAKE SEL\n", indent));
-        } else {
-            out.push_str(&format!("{}TAKE\n", indent));
+impl Take {
+    /// Serialize this take. The `emit_marker` flag controls whether a
+    /// `TAKE` / `TAKE SEL` line is emitted before the properties — this
+    /// must be `false` for the first take of an item (REAPER reads the
+    /// first take's properties directly off the ITEM block; emitting a
+    /// `TAKE` marker for it would create a phantom empty take #0).
+    fn write_take(&self, out: &mut String, indent: &str, emit_marker: bool) {
+        if emit_marker {
+            if self.is_selected {
+                out.push_str(&format!("{}TAKE SEL\n", indent));
+            } else {
+                out.push_str(&format!("{}TAKE\n", indent));
+            }
         }
         if !self.name.is_empty() {
             out.push_str(&format!("{}NAME \"{}\"\n", indent, rpp_escape(&self.name)));
@@ -484,9 +491,11 @@ impl RppSerialize for Item {
             out.push('\n');
         }
 
-        // Takes
-        for take in &self.takes {
-            take.write_rpp(out, &inner);
+        // Takes — REAPER reads the FIRST take's properties directly off the
+        // ITEM block, so we omit the `TAKE`/`TAKE SEL` marker for take #0.
+        // Subsequent takes get the marker (`TAKE SEL` for the active one).
+        for (i, take) in self.takes.iter().enumerate() {
+            take.write_take(out, &inner, i > 0);
         }
 
         out.push_str(&format!("{}>\n", indent));

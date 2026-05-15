@@ -143,6 +143,14 @@ pub struct Track {
     /// in the region-track entry). Each fade overlaps one or two `regions` items
     /// and supplies a fade-in or fade-out length when emitting to a target DAW.
     pub fades: Vec<FadeRegion>,
+    /// Fader value in 0.1 dB units. `0` = unity. Values `≤ -1440` are treated
+    /// as `-∞ dB`. Decoded from the per-track `0x1029` (TrackMixSettings) block.
+    pub volume_centibel: i32,
+    /// `true` if the track is muted in PT's Mix window. Decoded from `0x1029` `+5`.
+    pub mute: bool,
+    /// Pan position. `-100` = full L, `0` = center, `+100` = full R.
+    /// Decoded from `0x1029` `+13` (i32 LE).
+    pub pan: i32,
     /// Alternate (inactive) playlists stored in the session.
     ///
     /// Empty unless the session was saved with alternate playlists.
@@ -151,21 +159,26 @@ pub struct Track {
 
 /// A fade region on a track.
 ///
-/// Pro Tools stores fades as separate region placements with a fade-marker
-/// byte. The `length` is taken from the audio region the fade entry references
-/// (its `length` field), since PT auto-creates a short fade-audio region per
-/// fade and points the fade entry at it.
+/// Pro Tools stores fades as track entries marked with a fade flag (byte
+/// `+46 == 0x01`) plus a parallel array of `0x262f` fade-definition blocks
+/// holding the lengths and curve shape. The fade entry's `+4` field indexes
+/// into that parallel array. See `docs/pt-fade-encoding.md` for the byte
+/// layout.
 #[derive(Debug, Clone)]
 pub struct FadeRegion {
-    /// Start position on the timeline (samples at target rate).
+    /// Start position on the timeline, in samples at target rate.
     pub start_pos: u64,
-    /// Fade length in samples (the referenced audio region's length).
-    pub length: u64,
-    /// Index of the audio region this fade points at (in `ProToolsSession::audio_regions`).
-    pub region_index: u16,
-    /// Curve hint from the fade entry's sub-block (`+35`): 0 = linear,
-    /// 1/2 = equal-power / S-curve variants (empirical, not fully verified).
-    pub curve: u8,
+    /// Fade-in length in samples. `0` for a pure fade-out entry.
+    pub in_length: u64,
+    /// Fade-out length in samples. `0` for a pure fade-in entry.
+    /// When both `in_length` and `out_length` are non-zero this entry is a
+    /// crossfade; symmetric if `in_length == out_length`.
+    pub out_length: u64,
+    /// Curve shape: `1` = linear, `2` = equal power, `3` = equal gain.
+    pub shape: u8,
+    /// Index into the per-session fade-definition list (`0x262f` blocks in
+    /// document order). Useful for cross-referencing or debugging.
+    pub fade_index: u32,
 }
 
 impl Track {

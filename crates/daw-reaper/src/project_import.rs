@@ -544,10 +544,49 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         builder = builder.marker(marker.number as i32, pos_secs, &marker.name);
     }
 
-    // Audio tracks
-    for track in &session.audio_tracks {
+    // Pro Tools stores stereo tracks as TWO consecutive entries (one per
+    // channel) sharing the same `name`. They reference the same stereo source
+    // file via `.L` / `.R` region siblings. Skip the R-channel sibling so we
+    // emit ONE REAPER track per stereo pair — the L-channel items already
+    // point at the stereo audio file.
+    let mut skip_next = false;
+    for (i, track) in session.audio_tracks.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        // Stereo PT track = two consecutive same-name entries (one per channel).
+        let is_stereo = session
+            .audio_tracks
+            .get(i + 1)
+            .map(|next| next.name == track.name)
+            .unwrap_or(false);
+        if is_stereo {
+            skip_next = true;
+        }
+
         builder = builder.track(&track.name, |t| {
-            let mut t = t;
+            // Apply per-track mix state from PT's 0x1029 block.
+            // Volume is in 0.1 dB units (centibel); ≤ -1440 means -∞.
+            // Pan is -100..+100. For STEREO PT tracks the stored "pan" is the
+            // left-channel pan (defaults to -100 = full-left, the natural
+            // state), NOT a balance adjustment. REAPER's default stereo-pan
+            // mode would interpret pan = -1 as "mute the right channel", so
+            // for stereo we emit pan = 0 (centered balance) regardless.
+            let linear_vol = if track.volume_centibel <= -1440 {
+                0.0
+            } else {
+                10f64.powf(track.volume_centibel as f64 / 200.0)
+            };
+            let reaper_pan = if is_stereo {
+                0.0
+            } else {
+                (track.pan as f64 / 100.0).clamp(-1.0, 1.0)
+            };
+            let mut t = t.volume(linear_vol).pan(reaper_pan);
+            if track.mute {
+                t = t.muted();
+            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.audio_regions.len() {
                     continue;
@@ -611,30 +650,57 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     .unwrap_or("");
                 let absolute_path = resolve_audio_path(filename);
 
-                // Match fade entries to this item by position. PT stores
-                // fade-ins at the same start as the item; fade-outs end at
-                // the item's end (start_pos + length == item_end).
+                // Match fade entries to this item by timeline position.
+                // PT 0x262f fade defs carry both an in-length and an out-length:
+                //   - `out_length == 0` ⇒ pure fade-in starting at the item start
+                //   - `in_length == 0` ⇒ pure fade-out ending at the item end
+                //   - both non-zero ⇒ crossfade. The fade entry's start_pos is
+                //     the START of the in-fade (= end of the previous item).
+                //     For the LEADING item of the crossfade pair, we want the
+                //     fade-out (= the matching `in_length` of the crossfade
+                //     "into" the next item). For the TRAILING item, we want
+                //     the fade-in (= the same in_length).
                 let item_start = tr.start_pos;
                 let item_end = item_start.saturating_add(region.length);
                 let mut fade_in_secs: Option<f64> = None;
                 let mut fade_out_secs: Option<f64> = None;
                 let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
                 for f in &track.fades {
-                    if f.length == 0 {
+                    let crossfade = f.in_length > 0 && f.out_length > 0;
+                    let fade_total = f.in_length.max(f.out_length);
+                    if fade_total == 0 {
                         continue;
                     }
-                    let f_end = f.start_pos.saturating_add(f.length);
-                    if f.start_pos.abs_diff(item_start) <= tolerance {
-                        fade_in_secs = Some(f.length as f64 / sample_rate);
-                    } else if f_end.abs_diff(item_end) <= tolerance {
-                        fade_out_secs = Some(f.length as f64 / sample_rate);
+                    // Fade-IN: the fade's start coincides with this item's start.
+                    if f.start_pos.abs_diff(item_start) <= tolerance && f.in_length > 0 {
+                        fade_in_secs = Some(f.in_length as f64 / sample_rate);
+                    }
+                    // Fade-OUT: the fade ends at this item's end. For pure
+                    // fade-outs (`in == 0`) PT places start_pos = item_end - out_length.
+                    // For crossfades, start_pos sits at the boundary where the
+                    // out-fading item ends, so item_end ≈ start_pos.
+                    let f_end = f.start_pos.saturating_add(fade_total);
+                    if (crossfade && f.start_pos.abs_diff(item_end) <= tolerance)
+                        || (f.out_length > 0 && f_end.abs_diff(item_end) <= tolerance)
+                    {
+                        let out_len = if f.out_length > 0 {
+                            f.out_length
+                        } else {
+                            f.in_length
+                        };
+                        fade_out_secs = Some(out_len as f64 / sample_rate);
                     }
                 }
 
                 t = t.item(position_secs, length_secs, |item| {
-                    let mut item = item.name(&region.name);
+                    // Set the TAKE name (not the item name) to the region
+                    // name so REAPER displays a single readable label rather
+                    // than stacking item-level + take-level labels.
+                    let mut item = item;
                     if !absolute_path.is_empty() {
-                        item = item.source_wave(&absolute_path);
+                        item = item.source_wave(&absolute_path).take_name(&region.name);
+                    } else {
+                        item = item.name(&region.name);
                     }
                     if offset_secs > 0.0 {
                         item = item.slip_offset(offset_secs);
@@ -656,7 +722,16 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     // MIDI tracks
     for track in &session.midi_tracks {
         builder = builder.track(&track.name, |t| {
-            let mut t = t;
+            let linear_vol = if track.volume_centibel <= -1440 {
+                0.0
+            } else {
+                10f64.powf(track.volume_centibel as f64 / 200.0)
+            };
+            let reaper_pan = (track.pan as f64 / 100.0).clamp(-1.0, 1.0);
+            let mut t = t.volume(linear_vol).pan(reaper_pan);
+            if track.mute {
+                t = t.muted();
+            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.midi_regions.len() {
                     continue;

@@ -83,7 +83,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     let audio_regions = regions::parse_audio_regions(&blocks, &cursor, version, rate_factor);
 
     // Step 10: Parse tracks and region-to-track assignments
-    let audio_tracks = tracks::parse_audio_tracks(
+    let mut audio_tracks = tracks::parse_audio_tracks(
         &blocks,
         &cursor,
         &audio_regions,
@@ -125,7 +125,67 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             && !audio_names.contains(strip_playlist_suffix(t.name.as_str()))
     });
 
-    // Step 12: Parse plugins and I/O channels
+    // Step 12: Decode per-track mix state (volume / pan / mute) from 0x1029
+    // blocks. Each mixable track has one such block in document order; the
+    // Master output is excluded. We walk unique-name audio tracks first, then
+    // MIDI tracks (skipping the Master entry), consuming one mix-state per
+    // distinct track. Stereo channel siblings (consecutive same-name audio
+    // tracks) share a single mix state — they're a stereo pair in PT.
+    //
+    // See `docs/pt-track-properties.md` for the byte layout.
+    {
+        let mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
+        let data = cursor.data();
+        let mut mix_iter = mix_blocks.iter().filter_map(|b| {
+            let p = b.offset; // points at content_type
+            // payload starts at +2 (after content_type u16). Need +1..+5 vol,
+            // +5 mute, +13..+17 pan (offsets relative to payload start).
+            let payload = p + 2;
+            if payload + 17 > data.len() {
+                return None;
+            }
+            let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
+            let mute = data[payload + 5] != 0;
+            let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
+            Some((vol, mute, pan))
+        });
+
+        let mut last_name = String::new();
+        let mut last_state: Option<(i32, bool, i32)> = None;
+        for t in audio_tracks.iter_mut() {
+            if t.name != last_name {
+                last_state = mix_iter.next();
+                last_name = t.name.clone();
+            }
+            if let Some((v, m, p)) = last_state {
+                t.volume_centibel = v;
+                t.mute = m;
+                t.pan = p;
+            }
+        }
+
+        // MIDI tracks — skip the Master entry (PT excludes it from 0x1029).
+        let mut last_name = String::new();
+        let mut last_state: Option<(i32, bool, i32)> = None;
+        for t in midi_tracks.iter_mut() {
+            // Heuristic: PT names its master fader "Master 1" (or similar
+            // "Master" prefix). Skip those — no 0x1029 block for them.
+            if t.name == "Master 1" || t.name.starts_with("Master") {
+                continue;
+            }
+            if t.name != last_name {
+                last_state = mix_iter.next();
+                last_name = t.name.clone();
+            }
+            if let Some((v, m, p)) = last_state {
+                t.volume_centibel = v;
+                t.mute = m;
+                t.pan = p;
+            }
+        }
+    }
+
+    // Step 13: Parse plugins and I/O channels
     let plugins = plugins::parse_plugins(&blocks, &cursor);
     let io_channels = io::parse_io_channels(&blocks, &cursor);
 
@@ -144,6 +204,21 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         plugins,
         io_channels,
     })
+}
+
+/// Collect every block (and nested child) of the given content type.
+fn collect_blocks_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Vec<&'a Block> {
+    let mut out = Vec::new();
+    fn walk<'a>(blocks: &'a [Block], ct: ContentType, out: &mut Vec<&'a Block>) {
+        for b in blocks {
+            if b.content_type == Some(ct) {
+                out.push(b);
+            }
+            walk(&b.children, ct, out);
+        }
+    }
+    walk(blocks, ct, &mut out);
+    out
 }
 
 /// Find the session sample rate from block type 0x1028.

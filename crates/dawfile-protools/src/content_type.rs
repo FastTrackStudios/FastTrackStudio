@@ -69,6 +69,18 @@ pub enum ContentType {
     AudioTrackInfo = 0x1014,
     /// Audio tracks container
     AudioTrackList = 0x1015,
+    /// Per-track mix-state block (volume, pan, mute). 281-byte payload.
+    /// One block per mixable track (Master output is excluded).
+    /// See `docs/pt-track-properties.md` for the byte layout.
+    TrackMixSettings = 0x1029,
+
+    /// Per-session list of fade definitions (lengths + curve shape). Wraps
+    /// one `FadeDef` (0x262f) per fade-marked track entry.
+    FadeDefList = 0x2630,
+    /// A single fade definition: 24..36-byte payload encoding in-length,
+    /// out-length, and curve shape. Indexed by the fade entry's `+4` field.
+    /// See `docs/pt-fade-encoding.md`.
+    FadeDef = 0x262f,
 
     // ── FX / Plugins ────────────────────────────────────────────────────
     /// Plugin entry
@@ -191,6 +203,9 @@ impl ContentType {
 
             0x1014 => Some(Self::AudioTrackInfo),
             0x1015 => Some(Self::AudioTrackList),
+            0x1029 => Some(Self::TrackMixSettings),
+            0x2630 => Some(Self::FadeDefList),
+            0x262f => Some(Self::FadeDef),
 
             0x1017 => Some(Self::PluginEntry),
             0x1018 => Some(Self::PluginList),

@@ -316,6 +316,9 @@ fn parse_midi_tracks(
             playlist_name: String::new(),
             fades: Vec::new(),
             regions: Vec::new(),
+            volume_centibel: 0,
+            mute: false,
+            pan: 0,
             alternate_playlists: Vec::new(),
         });
     }

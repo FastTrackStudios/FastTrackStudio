@@ -77,6 +77,47 @@ fn main() {
         vec![0x1029, 0x102d, 0x251a, 0x2580, 0x2589]
     };
 
+    // Walk top-level blocks and report the first parent that contains 0x1029 / 0x251a children
+    {
+        fn parents_of<'a>(
+            blocks: &'a [block::Block],
+            raw: u16,
+            depth: usize,
+            path: &mut Vec<(u16, usize)>,
+        ) {
+            for (i, b) in blocks.iter().enumerate() {
+                let has_kid = b.children.iter().any(|c| c.content_type_raw == raw);
+                if has_kid {
+                    path.push((
+                        b.content_type_raw,
+                        b.children
+                            .iter()
+                            .filter(|c| c.content_type_raw == raw)
+                            .count(),
+                    ));
+                    println!(
+                        "  parent ct=0x{:04x} (depth {depth} #{i}) holds {} children of 0x{raw:04x}",
+                        b.content_type_raw,
+                        b.children
+                            .iter()
+                            .filter(|c| c.content_type_raw == raw)
+                            .count()
+                    );
+                }
+                parents_of(&b.children, raw, depth + 1, path);
+            }
+        }
+        println!("\n== Parents of 0x1029 ==");
+        let mut path = Vec::new();
+        parents_of(&blocks, 0x1029, 0, &mut path);
+        println!("== Parents of 0x251a ==");
+        path.clear();
+        parents_of(&blocks, 0x251a, 0, &mut path);
+        println!("== Parents of 0x102d ==");
+        path.clear();
+        parents_of(&blocks, 0x102d, 0, &mut path);
+    }
+
     // Concise per-track summary for 0x1029 if present
     {
         let mut found = Vec::new();

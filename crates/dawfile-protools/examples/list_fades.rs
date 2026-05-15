@@ -1,4 +1,4 @@
-//! List all fades on each track using the parser, plus the referenced region.
+//! List all fades on each track using the parser.
 
 use std::env;
 
@@ -17,22 +17,13 @@ fn main() {
         }
         println!("\nTrack: {}", t.name);
         for f in &t.fades {
-            let region_name = session
-                .audio_regions
-                .iter()
-                .find(|r| r.index == f.region_index)
-                .map(|r| (&r.name[..], r.length, r.start_pos))
-                .unwrap_or(("<missing>", 0, 0));
             println!(
-                "  fade start={} ({:.3}s)  length={} ({:.3}s)  region#{}={:?} (region.length={}, region.start={})",
-                f.start_pos,
+                "  start={:.3}s  in={:.3}s  out={:.3}s  shape={}  fade_idx={}",
                 f.start_pos as f64 / sr,
-                f.length,
-                f.length as f64 / sr,
-                f.region_index,
-                region_name.0,
-                region_name.1,
-                region_name.2,
+                f.in_length as f64 / sr,
+                f.out_length as f64 / sr,
+                f.shape,
+                f.fade_index,
             );
         }
     }
