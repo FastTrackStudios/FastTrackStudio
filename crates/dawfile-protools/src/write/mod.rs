@@ -145,6 +145,118 @@ pub fn rename_region(
     Some(splice::replace_string(session, string_offset, new_name))
 }
 
+/// Change a track's output routing destination.
+///
+/// Locates the per-track `0x260e` (TrackRouting) block matching `track_name`
+/// in the `0x251a` list and splices its length-prefixed destination string
+/// (at payload offset `+0x24`).
+///
+/// Only works for tracks that already have a destination assigned (the
+/// 66/71-byte `0x260e` variants). Tracks with the 61-byte "no destination"
+/// variant return `None` — promoting them to assigned would require
+/// inserting structural bytes, not just splicing a string.
+///
+/// Returns the byte-level size delta, or `None` if no matching track /
+/// routing block was found.
+pub fn set_track_output(
+    session: &mut crate::raw_block::RawSession,
+    track_name: &str,
+    new_destination: &str,
+) -> Option<i64> {
+    // Walk 0x251a entries (under 0x2519) in document order to find the
+    // target track's position. The 0x260e blocks are sequenced in the
+    // same order under each 0x260d wrapper, so position drives the match.
+    let track_list = collect_blocks_ref(&session.blocks, ContentType::MidiTrackList)
+        .into_iter()
+        .next()?;
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut target_idx: Option<usize> = None;
+    let mut idx = 0usize;
+    for child in &track_list.children {
+        if child.content_type != Some(ContentType::MidiTrackInfo) {
+            continue;
+        }
+        // Name is at block.start + 7 (content_type) + 4 (offset within payload).
+        let name_off = child.start + 7 + 4;
+        if name_off + 4 > session.data.len() {
+            continue;
+        }
+        let len =
+            u32::from_le_bytes(session.data[name_off..name_off + 4].try_into().unwrap()) as usize;
+        if name_off + 4 + len > session.data.len() || len == 0 || len > 256 {
+            continue;
+        }
+        let name = String::from_utf8_lossy(&session.data[name_off + 4..name_off + 4 + len])
+            .trim_end_matches('\0')
+            .to_string();
+        if !seen.insert(name.clone()) {
+            break; // second copy of the doubled list
+        }
+        if name == track_name {
+            target_idx = Some(idx);
+            break;
+        }
+        idx += 1;
+    }
+    let target_idx = target_idx?;
+
+    // Get the Nth 0x260d wrapper and its first 0x260e child.
+    let wrappers = collect_blocks_ref(&session.blocks, ContentType::TrackMixWrapper);
+    let wrapper = wrappers.get(target_idx)?;
+    let route = wrapper
+        .children
+        .iter()
+        .find(|c| c.content_type == Some(ContentType::TrackRouting))?;
+
+    // The destination string lives at payload +0x24. Payload starts at
+    // route.start + 9 (header) - but RawBlock's "payload" after the 2-byte
+    // content_type begins at start + 9. The original parser uses
+    // `route.offset + 2` where `offset = start + 7`, so payload = start + 9.
+    let str_offset = route.start + 9 + 0x24;
+
+    // Require the dest-present variant. The 61-byte empty variant starts
+    // with `ff ff 01 01 ...`; the assigned variants start with a small u16.
+    let payload_start = route.start + 9;
+    if payload_start + 2 > session.data.len() {
+        return None;
+    }
+    let first_u16 = u16::from_le_bytes(
+        session.data[payload_start..payload_start + 2]
+            .try_into()
+            .unwrap(),
+    );
+    if first_u16 == 0xffff {
+        // Empty/no-destination variant — refuse rather than corrupt.
+        return None;
+    }
+
+    if str_offset + 4 > session.data.len() {
+        return None;
+    }
+    Some(splice::replace_string(session, str_offset, new_destination))
+}
+
+fn collect_blocks_ref<'a>(
+    blocks: &'a [crate::raw_block::RawBlock],
+    ct: ContentType,
+) -> Vec<&'a crate::raw_block::RawBlock> {
+    let mut out = Vec::new();
+    fn rec<'a>(
+        blocks: &'a [crate::raw_block::RawBlock],
+        ct: ContentType,
+        out: &mut Vec<&'a crate::raw_block::RawBlock>,
+    ) {
+        for b in blocks {
+            if b.content_type == Some(ct) {
+                out.push(b);
+            }
+            rec(&b.children, ct, out);
+        }
+    }
+    rec(blocks, ct, &mut out);
+    out
+}
+
 /// Collect the `start` positions of all blocks with a given content type.
 fn collect_content_type(blocks: &[crate::raw_block::RawBlock], ct: ContentType) -> Vec<usize> {
     let mut result = Vec::new();

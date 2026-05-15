@@ -278,6 +278,75 @@ fn rename_track_preserves_other_data() {
     assert!(!wav_list.children.is_empty());
 }
 
+// =============================================================================
+// Track output routing splice (set_track_output)
+// =============================================================================
+
+#[test]
+fn set_track_output_round_trip_user_session() {
+    let user_session_path = "/home/cody/Downloads/tombrooksmusic_copy-of-02-lord-of-the-fight-1-5_2026-05-11_0158/Copy of 02 LORD OF THE FIGHT 1.5/Copy of 02 LORD OF THE FIGHT 1.5.ptx";
+    let Ok(original) = std::fs::read(user_session_path) else {
+        eprintln!("skip: user session not present");
+        return;
+    };
+
+    // Baseline read
+    let mut data = original.clone();
+    let session_a = dawfile_protools::parse::parse_session(&mut data, 0).unwrap();
+    let click = session_a
+        .audio_tracks
+        .iter()
+        .find(|t| t.name == "ClickPrint")
+        .expect("ClickPrint audio track");
+    assert_eq!(click.output, "Analog 1-2", "baseline ClickPrint output");
+
+    // Splice: rewrite ClickPrint's output to "Bus 99" (different length than "Analog 1-2")
+    let mut raw = dawfile_protools::parse_raw(original).unwrap();
+    let delta = dawfile_protools::set_track_output(&mut raw, "ClickPrint", "Bus 99");
+    assert!(
+        delta.is_some(),
+        "set_track_output should match a 0x251a entry"
+    );
+    let delta = delta.unwrap();
+    assert_eq!(delta, -("Analog 1-2".len() as i64) + "Bus 99".len() as i64);
+
+    // Re-encrypt and re-parse — the new value must survive round-trip
+    let encrypted = raw.encrypt();
+    let mut buf = encrypted;
+    let session_b = dawfile_protools::parse::parse_session(&mut buf, 0).unwrap();
+    let click2 = session_b
+        .audio_tracks
+        .iter()
+        .find(|t| t.name == "ClickPrint")
+        .expect("ClickPrint after splice");
+    assert_eq!(click2.output, "Bus 99", "splice survived round-trip");
+
+    // Every other track's output must still match the baseline read.
+    let names: Vec<&str> = session_a
+        .audio_tracks
+        .iter()
+        .map(|t| t.name.as_str())
+        .collect();
+    for name in names {
+        if name == "ClickPrint" {
+            continue;
+        }
+        let before = session_a
+            .audio_tracks
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.output.clone())
+            .unwrap_or_default();
+        let after = session_b
+            .audio_tracks
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.output.clone())
+            .unwrap_or_default();
+        assert_eq!(before, after, "{name} output drifted across splice");
+    }
+}
+
 fn get_track_starts(session: &dawfile_protools::RawSession) -> Vec<usize> {
     let mut out = Vec::new();
     collect_ct(
