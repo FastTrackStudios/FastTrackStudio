@@ -17,6 +17,8 @@
 
 #![deny(unsafe_code)]
 
+mod action_registry;
+mod audio_accessor;
 #[cfg(feature = "audio")]
 pub mod audio_engine;
 mod audio_engine_svc;
