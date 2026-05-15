@@ -29,7 +29,7 @@
 //! No bounds, no where clause. Other backends (Pro Tools, Logic, mock)
 //! each implement [`architect::Services`] with their own bundle.
 
-use architect::{Layer, ProvideAll, Services, layers};
+use architect::{Descriptors, Layer, ProvideAll, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, fx_chains,
     fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project, region,
@@ -39,7 +39,7 @@ use daw_proto::{
 use crate::Reaper;
 
 impl Services for Reaper {
-    fn layers() -> impl Layer + ProvideAll<Reaper> {
+    fn layers() -> impl Layer + ProvideAll<Reaper> + Descriptors {
         layers![
             transport::Service,
             project::Service,

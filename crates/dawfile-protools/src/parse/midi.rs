@@ -57,53 +57,116 @@ pub fn parse_midi(
 }
 
 /// Parse raw MIDI event chunks from 0x2000 blocks.
+///
+/// ## Chunk layout (PT 10+)
+///
+/// ```text
+/// [+0..+5]   magic "MdNLB"
+/// [+11..+15] u32 n_events
+/// [+15..+23] u64 zero_ticks (chunk position baseline, LE)
+/// [+23..]    n_events × 35-byte event records
+/// ```
+///
+/// ## Event record (35 bytes, relative to record start)
+///
+/// ```text
+/// [+0]       u8     extra/source note (often equal to +9; semantics unclear)
+/// [+1..+8]   bytes  flags / extra metadata
+/// [+9]       u8     MIDI note number (0..127)
+/// [+10]      u8     velocity (0..127)
+/// [+11..+19] i64 LE duration in ticks (negative = paired note-off; skip)
+/// [+19..+27] bytes  sign-extension / padding
+/// [+27..+35] u64 LE absolute tick position (same encoding as chunk zero_ticks)
+/// ```
+///
+/// Position relative to the chunk start = `position_u64 - zero_ticks_u64`.
+/// Both share the same `0x4000_00e8_...` upper-byte pattern that PT uses for
+/// timestamps; subtracting cancels the constant prefix.
 fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
     let mut chunks = Vec::new();
     let data = cursor.data();
 
     let midi_blocks = find_all_recursive(blocks, ContentType::MidiEventsBlock);
 
+    const EVENTS_START_OFFSET: usize = 23;
+    const EVENT_STRIDE: usize = 35;
+    const POS_OFFSET: usize = 27;
+    const NOTE_OFFSET: usize = 9;
+    const VEL_OFFSET: usize = 10;
+    const DUR_OFFSET: usize = 11;
+
     for block in midi_blocks {
         // Scan for ALL MdNLB magic markers within the block.
-        // A single 0x2000 block can contain multiple MIDI chunks.
         let block_end = (block.offset + block.block_size as usize).min(data.len());
         let mut search_start = block.offset;
 
         while let Some(magic_pos) = find_magic(data, search_start, block_end) {
-            // Advance search past this magic for the next iteration
             search_start = magic_pos + MIDI_MAGIC.len();
 
-            // n_events at magic + 11
             let n_events_offset = magic_pos + 11;
             if n_events_offset + 4 > data.len() {
                 break;
             }
             let n_events = cursor.u32_at(n_events_offset) as usize;
 
-            // zero_ticks at magic + 15 (5 bytes, LE)
+            // zero_ticks is an 8-byte field (u64 LE) — same encoding as the
+            // per-event position field, so subtracting yields relative ticks.
             let zt_offset = magic_pos + 15;
-            if zt_offset + 5 > data.len() {
+            if zt_offset + 8 > data.len() {
                 break;
             }
-            let zero_ticks = cursor.u40_le(zt_offset);
+            let zero_ticks_u64 =
+                u64::from_le_bytes(data[zt_offset..zt_offset + 8].try_into().unwrap());
 
-            // Events start at magic + 20, each is 35 bytes
-            let events_start = magic_pos + 20;
+            let events_start = magic_pos + EVENTS_START_OFFSET;
             let mut events = Vec::with_capacity(n_events);
             let mut max_pos: u64 = 0;
 
             for i in 0..n_events {
-                let ev_offset = events_start + i * 35;
-                if ev_offset + 35 > data.len() {
+                let ev_offset = events_start + i * EVENT_STRIDE;
+                if ev_offset + EVENT_STRIDE > data.len() {
                     break;
                 }
 
-                let midi_pos = cursor.u40_le(ev_offset);
-                let relative_pos = midi_pos.saturating_sub(zero_ticks);
+                let note = data[ev_offset + NOTE_OFFSET];
+                let velocity = data[ev_offset + VEL_OFFSET];
 
-                let note = cursor.u8_at(ev_offset + 8);
-                let duration = cursor.u40_le(ev_offset + 9);
-                let velocity = cursor.u8_at(ev_offset + 17);
+                // Duration field at +11 (8 bytes). PT stores this in two forms
+                // depending on the source track / event type:
+                //   * top byte 0x40 → `2^62 + ticks` (same baseline as the
+                //     position field; the actual duration is `value - 2^62`)
+                //   * top byte 0x00 → small positive u64, ticks directly
+                //   * top byte 0xff → negative i64 = paired note-off record,
+                //     skip to avoid duplicating notes
+                //   * anything else → unknown, skip
+                let dur_bytes: [u8; 8] = data[ev_offset + DUR_OFFSET..ev_offset + DUR_OFFSET + 8]
+                    .try_into()
+                    .unwrap();
+                let dur_raw = u64::from_le_bytes(dur_bytes);
+                const BASELINE: u64 = 0x4000_0000_0000_0000;
+                let duration = match dur_bytes[7] {
+                    0x00 => dur_raw,
+                    0x40 => dur_raw.saturating_sub(BASELINE),
+                    0xff => continue, // paired note-off
+                    _ => continue,
+                };
+                // duration == 0 is legitimate (instantaneous click/drum hit)
+
+                // Position is a u64 LE in absolute PT ticks. Subtract the
+                // chunk's zero_ticks baseline (same encoding) to get the
+                // tick offset from the chunk's reference point.
+                let pos_bytes: [u8; 8] = data[ev_offset + POS_OFFSET..ev_offset + POS_OFFSET + 8]
+                    .try_into()
+                    .unwrap();
+                let pos_abs = u64::from_le_bytes(pos_bytes);
+                let relative_pos = pos_abs.saturating_sub(zero_ticks_u64);
+
+                // Sanity check: drop events with implausible note numbers
+                // (the dump tool showed a few records with byte values outside
+                // 0..127 — likely format glitches or unused entries).
+                if note > 127 || velocity > 127 {
+                    continue;
+                }
 
                 if relative_pos > max_pos {
                     max_pos = relative_pos;
@@ -119,7 +182,9 @@ fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
 
             chunks.push(MidiChunk {
                 events,
-                zero_ticks,
+                // The legacy u40 form of zero_ticks is no longer used for
+                // arithmetic, but downstream may inspect it for debugging.
+                zero_ticks: zero_ticks_u64 & 0x000000_ffff_ffff_ffff,
                 max_pos,
             });
         }
@@ -135,6 +200,8 @@ fn parse_midi_regions(
     chunks: &[MidiChunk],
     version: u16,
     _rate_factor: f64,
+    tempo_segments: &[TempoSegment],
+    target_sample_rate: u32,
 ) -> Vec<MidiRegion> {
     let mut regions = Vec::new();
 
@@ -189,8 +256,15 @@ fn parse_midi_regions(
             Vec::new()
         };
 
-        let region_length = if chunk_idx < chunks.len() {
-            chunks[chunk_idx].max_pos
+        // Region length: max_pos is in PT ticks (relative to the chunk's zero).
+        // Convert to samples via the tempo map so downstream consumers can treat
+        // `length` as samples like audio regions.
+        let region_length_samples = if chunk_idx < chunks.len() {
+            tick_to_sample(
+                chunks[chunk_idx].max_pos,
+                tempo_segments,
+                target_sample_rate,
+            )
         } else {
             0
         };
@@ -198,9 +272,9 @@ fn parse_midi_regions(
         regions.push(MidiRegion {
             name,
             index: idx as u16,
-            start_pos: ZERO_TICKS,
+            start_pos: 0,
             sample_offset: 0,
-            length: region_length,
+            length: region_length_samples,
             events,
         });
     }
@@ -214,7 +288,10 @@ fn parse_midi_tracks(
     cursor: &Cursor<'_>,
     regions: &[MidiRegion],
     rate_factor: f64,
+    tempo_segments: &[TempoSegment],
+    target_sample_rate: u32,
 ) -> Vec<Track> {
+    let _ = rate_factor;
     let mut tracks = Vec::new();
 
     // Parse track definitions from 0x2519
@@ -265,12 +342,14 @@ fn parse_midi_tracks(
             continue;
         }
 
-        // Read start position (u40 at offset + 9)
+        // Read start position (u40 at offset + 9), stored as PT ticks (absolute,
+        // referenced from ZERO_TICKS). Convert to samples via the tempo map so
+        // it matches the units used by audio regions.
         let start_offset = entry.offset + 9;
         let start = if start_offset + 5 <= data.len() {
             let raw_start = cursor.u40_le(start_offset);
-            let relative = raw_start.abs_diff(ZERO_TICKS);
-            (relative as f64 * rate_factor) as u64
+            let relative_ticks = raw_start.abs_diff(ZERO_TICKS);
+            tick_to_sample(relative_ticks, tempo_segments, target_sample_rate)
         } else {
             0
         };

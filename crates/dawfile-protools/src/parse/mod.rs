@@ -94,7 +94,36 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     );
 
     // Step 11: Parse MIDI
-    let (midi_regions, midi_tracks) = midi::parse_midi(&blocks, &cursor, version, rate_factor);
+    let (midi_regions, mut midi_tracks) = midi::parse_midi(
+        &blocks,
+        &cursor,
+        version,
+        rate_factor,
+        &tempo_segments,
+        target_sample_rate,
+    );
+
+    // The PT MIDI track list (block 0x2519) contains entries for every track in
+    // the session, not just MIDI tracks; audio tracks that received event
+    // chunks via the MIDI region map (0x1058) get pulled in too. Drop any
+    // "MIDI" track whose name (with its playlist suffix stripped) matches an
+    // audio track. Audio tracks store the base name (e.g., "Vocal Split");
+    // MIDI list stores the active-playlist name (e.g., "Vocal Split.01").
+    fn strip_playlist_suffix(name: &str) -> &str {
+        if let Some(idx) = name.rfind('.') {
+            let suffix = &name[idx + 1..];
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                return &name[..idx];
+            }
+        }
+        name
+    }
+    let audio_names: std::collections::HashSet<&str> =
+        audio_tracks.iter().map(|t| t.name.as_str()).collect();
+    midi_tracks.retain(|t| {
+        !audio_names.contains(t.name.as_str())
+            && !audio_names.contains(strip_playlist_suffix(t.name.as_str()))
+    });
 
     // Step 12: Parse plugins and I/O channels
     let plugins = plugins::parse_plugins(&blocks, &cursor);
