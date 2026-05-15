@@ -1,74 +1,67 @@
-//! REAPER Live MIDI Implementation
+//! `impl LiveMidi for Reaper` — device management + StuffMIDIMessage injection.
 //!
-//! Implements LiveMidiService for REAPER, including StuffMIDIMessage injection
-//! for routing MIDI to armed tracks via the virtual keyboard queue.
+//! Device enumeration / open / close / send are not wired to a real
+//! MIDI driver yet; they return stubs. `stuff_midi_message` is real
+//! and routes through the REAPER C API.
+//!
+//! For editing MIDI data in takes, see `Midi`.
 
-use crate::main_thread;
 use daw_proto::live_midi::{
-    LiveMidiEvent, LiveMidiService, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming,
-    StuffMidiTarget,
+    LiveMidi, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
 };
 use tracing::{debug, warn};
 
-#[derive(Clone)]
-pub struct ReaperLiveMidi;
+impl LiveMidi for crate::Reaper {
+    // ── Device enumeration (stubs — not yet implemented) ───────────
 
-impl ReaperLiveMidi {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for ReaperLiveMidi {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl LiveMidiService for ReaperLiveMidi {
-    // === Device Enumeration (stubs — not yet implemented) ===
-
-    async fn get_input_devices(&self) -> Vec<MidiInputDevice> {
-        vec![]
+    fn input_devices(&self) -> Vec<MidiInputDevice> {
+        Vec::new()
     }
 
-    async fn get_output_devices(&self) -> Vec<MidiOutputDevice> {
-        vec![]
+    fn output_devices(&self) -> Vec<MidiOutputDevice> {
+        Vec::new()
     }
 
-    async fn get_input_device(&self, __id: u32) -> Option<MidiInputDevice> {
+    fn input_device(&self, _id: u32) -> Option<MidiInputDevice> {
         None
     }
 
-    async fn get_output_device(&self, __id: u32) -> Option<MidiOutputDevice> {
+    fn output_device(&self, _id: u32) -> Option<MidiOutputDevice> {
         None
     }
 
-    async fn open_input_device(&self, __id: u32) -> bool {
+    // ── Device state (stubs) ───────────────────────────────────────
+
+    fn open_input_device(&self, _id: u32) -> bool {
         false
     }
 
-    async fn close_input_device(&self, __id: u32) {}
+    fn close_input_device(&self, _id: u32) {}
 
-    async fn open_output_device(&self, __id: u32) -> bool {
+    fn open_output_device(&self, _id: u32) -> bool {
         false
     }
 
-    async fn close_output_device(&self, __id: u32) {}
+    fn close_output_device(&self, _id: u32) {}
 
-    async fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {}
+    // ── Output (stub) ──────────────────────────────────────────────
 
-    async fn send_midi_batch(&self, __device_id: u32, _events: Vec<LiveMidiEvent>) {}
+    fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {}
 
-    async fn subscribe_input(&self, __device_id: u32) -> bool {
+    // ── Input subscription (one-shot arm; no streaming) ────────────
+
+    fn subscribe_input(&self, _device_id: u32) -> bool {
         false
     }
 
-    async fn unsubscribe_input(&self, __device_id: u32) {}
+    fn unsubscribe_input(&self, _device_id: u32) {}
 
-    // === MIDI Injection ===
+    // ── MIDI injection ─────────────────────────────────────────────
 
-    async fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage) {
+    /// Inject into REAPER's internal MIDI queue. Used for VKB
+    /// simulation in integration tests and for sending CC to
+    /// plugins that manage presets internally.
+    fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage) {
         let Some((status, data1, data2)) = message.to_raw_bytes() else {
             warn!(
                 "stuff_midi_message: cannot convert {:?} to short message (SysEx/Raw not supported)",
@@ -88,14 +81,12 @@ impl LiveMidiService for ReaperLiveMidi {
             mode, status, data1, data2
         );
 
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            reaper.medium_reaper().low().StuffMIDIMessage(
-                mode,
-                status as i32,
-                data1 as i32,
-                data2 as i32,
-            );
-        });
+        let reaper = reaper_high::Reaper::get();
+        reaper.medium_reaper().low().StuffMIDIMessage(
+            mode,
+            status as i32,
+            data1 as i32,
+            data2 as i32,
+        );
     }
 }

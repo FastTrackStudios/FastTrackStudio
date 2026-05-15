@@ -1,13 +1,12 @@
-//! REAPER MIDI editing/reading implementation.
+//! `impl Midi for Reaper` — MIDI note/CC/event read+write for takes.
 
-use crate::main_thread;
 use crate::project_context::resolve_project_context;
 use crate::safe_wrappers::item as item_sw;
 use crate::safe_wrappers::midi as sw;
 use daw_proto::{
-    HumanizeParams, ItemRef, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
-    MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
-    ProjectContext, QuantizeParams, TakeRef, TrackRef,
+    HumanizeParams, ItemRef, Midi, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
+    MidiPitchBendCreate, MidiProgramChange, MidiSysEx, MidiTakeLocation, PpqRange, ProjectContext,
+    QuantizeParams, TakeRef, TrackRef,
 };
 use reaper_medium::{MediaItem, MediaItemTake, ProjectContext as ReaperProjectContext};
 use tracing::warn;
@@ -61,306 +60,267 @@ pub fn add_notes_to_take_on_main_thread(take: MediaItemTake, notes: &[MidiNoteCr
     sw::sort(low, take);
 }
 
-#[derive(Clone)]
-pub struct ReaperMidi;
+// =============================================================================
+// Resolution helpers (used here and by other modules, notably peak.rs)
+// =============================================================================
 
-impl ReaperMidi {
-    pub fn new() -> Self {
-        Self
-    }
+fn get_item_state_chunk(
+    medium: &reaper_medium::Reaper,
+    item: MediaItem,
+    buffer_size: usize,
+) -> Option<String> {
+    item_sw::get_item_state_chunk(medium.low(), item, buffer_size)
+}
 
-    fn get_item_state_chunk(
-        medium: &reaper_medium::Reaper,
-        item: MediaItem,
-        buffer_size: usize,
-    ) -> Option<String> {
-        item_sw::get_item_state_chunk(medium.low(), item, buffer_size)
-    }
-
-    fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
-        for line in chunk.lines() {
-            let trimmed = line.trim();
-            // IGUID is the item GUID, GUID is the take GUID
-            if let Some(rest) = trimmed.strip_prefix("IGUID ") {
-                return Some(rest.trim().to_string());
-            }
+fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
+    for line in chunk.lines() {
+        let trimmed = line.trim();
+        // IGUID is the item GUID, GUID is the take GUID
+        if let Some(rest) = trimmed.strip_prefix("IGUID ") {
+            return Some(rest.trim().to_string());
         }
-        None
     }
+    None
+}
 
-    pub fn resolve_item(
-        medium: &reaper_medium::Reaper,
-        project_ctx: ReaperProjectContext,
-        item_ref: &ItemRef,
-    ) -> Option<MediaItem> {
-        match item_ref {
-            ItemRef::ProjectIndex(index) => medium.get_media_item(project_ctx, *index),
-            ItemRef::Index(index) => medium.get_media_item(project_ctx, *index),
-            ItemRef::Guid(guid) => {
-                let count = medium.count_media_items(project_ctx);
-                for i in 0..count {
-                    let Some(item) = medium.get_media_item(project_ctx, i) else {
-                        continue;
-                    };
-                    let Some(chunk) = Self::get_item_state_chunk(medium, item, 2048) else {
-                        continue;
-                    };
-                    if let Some(item_guid) = Self::extract_guid_from_chunk(&chunk)
-                        && &item_guid == guid
-                    {
-                        return Some(item);
-                    }
+pub fn resolve_item(
+    medium: &reaper_medium::Reaper,
+    project_ctx: ReaperProjectContext,
+    item_ref: &ItemRef,
+) -> Option<MediaItem> {
+    match item_ref {
+        ItemRef::ProjectIndex(index) => medium.get_media_item(project_ctx, *index),
+        ItemRef::Index(index) => medium.get_media_item(project_ctx, *index),
+        ItemRef::Guid(guid) => {
+            let count = medium.count_media_items(project_ctx);
+            for i in 0..count {
+                let Some(item) = medium.get_media_item(project_ctx, i) else {
+                    continue;
+                };
+                let Some(chunk) = get_item_state_chunk(medium, item, 2048) else {
+                    continue;
+                };
+                if let Some(item_guid) = extract_guid_from_chunk(&chunk)
+                    && &item_guid == guid
+                {
+                    return Some(item);
                 }
-                None
             }
+            None
         }
-    }
-
-    pub fn resolve_take(
-        medium: &reaper_medium::Reaper,
-        item: MediaItem,
-        take_ref: &TakeRef,
-    ) -> Option<MediaItemTake> {
-        let low = medium.low();
-        match take_ref {
-            TakeRef::Active => {
-                // Use medium's get_active_take which handles this properly
-                crate::safe_wrappers::item::get_active_take(medium, item)
-            }
-            TakeRef::Index(index) => item_sw::get_take(low, item, *index as i32),
-            TakeRef::Guid(_) => crate::safe_wrappers::item::get_active_take(medium, item),
-        }
-    }
-
-    pub(crate) fn resolve_take_for_location(
-        medium: &reaper_medium::Reaper,
-        location: &MidiTakeLocation,
-    ) -> Option<MediaItemTake> {
-        let project_ctx = resolve_project_context(&location.project);
-        let item = Self::resolve_item(medium, project_ctx, &location.item)?;
-        Self::resolve_take(medium, item, &location.take)
-    }
-
-    pub(crate) fn read_notes(medium: &reaper_medium::Reaper, take: MediaItemTake) -> Vec<MidiNote> {
-        let low = medium.low();
-        let counts = sw::count_events(low, take);
-
-        let mut notes = Vec::with_capacity(counts.notes.max(0) as usize);
-        for index in 0..counts.notes {
-            let Some(n) = sw::get_note(low, take, index) else {
-                continue;
-            };
-            notes.push(MidiNote {
-                index: index as u32,
-                channel: n.channel.clamp(0, 15) as u8,
-                pitch: n.pitch.clamp(0, 127) as u8,
-                velocity: n.velocity.clamp(1, 127) as u8,
-                start_ppq: n.start_ppq,
-                length_ppq: (n.end_ppq - n.start_ppq).max(0.0),
-                selected: n.selected,
-                muted: n.muted,
-            });
-        }
-        notes
-    }
-
-    fn readonly_warn(method: &str) {
-        warn!("ReaperMidi::{method} is read-only in this pass; skipping mutation");
     }
 }
 
-impl Default for ReaperMidi {
-    fn default() -> Self {
-        Self::new()
+pub fn resolve_take(
+    medium: &reaper_medium::Reaper,
+    item: MediaItem,
+    take_ref: &TakeRef,
+) -> Option<MediaItemTake> {
+    let low = medium.low();
+    match take_ref {
+        TakeRef::Active => crate::safe_wrappers::item::get_active_take(medium, item),
+        TakeRef::Index(index) => item_sw::get_take(low, item, *index as i32),
+        TakeRef::Guid(_) => crate::safe_wrappers::item::get_active_take(medium, item),
     }
 }
 
-impl MidiService for ReaperMidi {
-    async fn get_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
-        main_thread::query(move || {
-            let medium = reaper_high::Reaper::get().medium_reaper();
-            let Some(take) = Self::resolve_take_for_location(medium, &location) else {
-                return Vec::new();
-            };
-            Self::read_notes(medium, take)
-        })
-        .await
-        .unwrap_or_default()
+pub(crate) fn resolve_take_for_location(
+    medium: &reaper_medium::Reaper,
+    location: &MidiTakeLocation,
+) -> Option<MediaItemTake> {
+    let project_ctx = resolve_project_context(&location.project);
+    let item = resolve_item(medium, project_ctx, &location.item)?;
+    resolve_take(medium, item, &location.take)
+}
+
+pub(crate) fn read_notes(medium: &reaper_medium::Reaper, take: MediaItemTake) -> Vec<MidiNote> {
+    let low = medium.low();
+    let counts = sw::count_events(low, take);
+
+    let mut notes = Vec::with_capacity(counts.notes.max(0) as usize);
+    for index in 0..counts.notes {
+        let Some(n) = sw::get_note(low, take, index) else {
+            continue;
+        };
+        notes.push(MidiNote {
+            index: index as u32,
+            channel: n.channel.clamp(0, 15) as u8,
+            pitch: n.pitch.clamp(0, 127) as u8,
+            velocity: n.velocity.clamp(1, 127) as u8,
+            start_ppq: n.start_ppq,
+            length_ppq: (n.end_ppq - n.start_ppq).max(0.0),
+            selected: n.selected,
+            muted: n.muted,
+        });
+    }
+    notes
+}
+
+fn readonly_warn(method: &str) {
+    warn!("Midi::{method} is read-only in this pass; skipping mutation");
+}
+
+// =============================================================================
+// `impl Midi for Reaper`
+// =============================================================================
+
+impl Midi for crate::Reaper {
+    fn notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            return Vec::new();
+        };
+        read_notes(medium, take)
     }
 
-    async fn get_notes_in_range(
-        &self,
-        location: MidiTakeLocation,
-        range: PpqRange,
-    ) -> Vec<MidiNote> {
-        self.get_notes(location)
-            .await
+    fn notes_in_range(&self, location: MidiTakeLocation, range: PpqRange) -> Vec<MidiNote> {
+        self.notes(location)
             .into_iter()
             .filter(|note| note.overlaps(range.start, range.end))
             .collect()
     }
 
-    async fn get_selected_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
-        self.get_notes(location)
-            .await
+    fn selected_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
+        self.notes(location)
             .into_iter()
             .filter(|note| note.selected)
             .collect()
     }
 
-    async fn note_count(&self, location: MidiTakeLocation) -> u32 {
-        self.get_notes(location).await.len() as u32
+    fn note_count(&self, location: MidiTakeLocation) -> u32 {
+        self.notes(location).len() as u32
     }
 
-    async fn create_midi_item(
+    fn create_midi_item(
         &self,
         project: ProjectContext,
         track: TrackRef,
         start_seconds: f64,
         end_seconds: f64,
     ) -> Option<MidiTakeLocation> {
-        main_thread::query(move || {
-            let reaper = reaper_high::Reaper::get();
-            let proj = match &project {
-                ProjectContext::Current => reaper.current_project(),
-                ProjectContext::Project(guid) => {
-                    crate::project_context::find_project_by_guid(guid)?
-                }
-            };
-            let track_obj = crate::track::resolve_track_pub(&proj, &track)?;
-            let raw_track = track_obj.raw().ok()?;
-            let take = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds)?;
+        let reaper = reaper_high::Reaper::get();
+        let proj = match &project {
+            ProjectContext::Current => reaper.current_project(),
+            ProjectContext::Project(guid) => crate::project_context::find_project_by_guid(guid)?,
+        };
+        let track_obj = crate::track::resolve_track_pub(&proj, &track)?;
+        let raw_track = track_obj.raw().ok()?;
+        let take = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds)?;
 
-            // Build a MidiTakeLocation from the item/take we just created
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let item = item_sw::get_take_item(low, take)?;
+        let medium = reaper.medium_reaper();
+        let low = medium.low();
+        let item = item_sw::get_take_item(low, take)?;
 
-            // Extract the item GUID
-            let item_guid = crate::item::item_guid_string(medium, item);
-            if item_guid.is_empty() {
-                return None;
-            }
+        let item_guid = crate::item::item_guid_string(medium, item);
+        if item_guid.is_empty() {
+            return None;
+        }
 
-            Some(MidiTakeLocation::active(project, ItemRef::Guid(item_guid)))
-        })
-        .await
-        .flatten()
+        Some(MidiTakeLocation::active(project, ItemRef::Guid(item_guid)))
     }
 
-    async fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32 {
-        // Delegate to add_notes with a single note
-        let indices = self.add_notes(location, vec![note]).await;
+    fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32 {
+        let indices = self.add_notes(location, vec![note]);
         indices.into_iter().next().unwrap_or(0)
     }
 
-    async fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
-        main_thread::query(move || {
-            let medium = reaper_high::Reaper::get().medium_reaper();
-            let Some(take) = Self::resolve_take_for_location(medium, &location) else {
-                return Vec::new();
-            };
-            let count_before = Self::read_notes(medium, take).len() as u32;
-            add_notes_to_take_on_main_thread(take, &notes);
-            // Return indices of newly added notes
-            (count_before..count_before + notes.len() as u32).collect()
-        })
-        .await
-        .unwrap_or_default()
+    fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            return Vec::new();
+        };
+        let count_before = read_notes(medium, take).len() as u32;
+        add_notes_to_take_on_main_thread(take, &notes);
+        (count_before..count_before + notes.len() as u32).collect()
     }
 
-    async fn delete_note(&self, _location: MidiTakeLocation, _index: u32) {
-        Self::readonly_warn("delete_note");
+    fn delete_note(&self, _location: MidiTakeLocation, _index: u32) {
+        readonly_warn("delete_note");
     }
 
-    async fn delete_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>) {
-        Self::readonly_warn("delete_notes");
+    fn delete_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>) {
+        readonly_warn("delete_notes");
     }
 
-    async fn delete_selected_notes(&self, _location: MidiTakeLocation) {
-        Self::readonly_warn("delete_selected_notes");
+    fn delete_selected_notes(&self, _location: MidiTakeLocation) {
+        readonly_warn("delete_selected_notes");
     }
 
-    async fn set_note_pitch(&self, _location: MidiTakeLocation, _index: u32, _pitch: u8) {
-        Self::readonly_warn("set_note_pitch");
+    fn set_note_pitch(&self, _location: MidiTakeLocation, _index: u32, _pitch: u8) {
+        readonly_warn("set_note_pitch");
     }
 
-    async fn set_note_velocity(&self, _location: MidiTakeLocation, _index: u32, _velocity: u8) {
-        Self::readonly_warn("set_note_velocity");
+    fn set_note_velocity(&self, _location: MidiTakeLocation, _index: u32, _velocity: u8) {
+        readonly_warn("set_note_velocity");
     }
 
-    async fn set_note_position(&self, _location: MidiTakeLocation, _index: u32, _start_ppq: f64) {
-        Self::readonly_warn("set_note_position");
+    fn set_note_position(&self, _location: MidiTakeLocation, _index: u32, _start_ppq: f64) {
+        readonly_warn("set_note_position");
     }
 
-    async fn set_note_length(&self, _location: MidiTakeLocation, _index: u32, _length_ppq: f64) {
-        Self::readonly_warn("set_note_length");
+    fn set_note_length(&self, _location: MidiTakeLocation, _index: u32, _length_ppq: f64) {
+        readonly_warn("set_note_length");
     }
 
-    async fn set_note_channel(&self, _location: MidiTakeLocation, _index: u32, _channel: u8) {
-        Self::readonly_warn("set_note_channel");
+    fn set_note_channel(&self, _location: MidiTakeLocation, _index: u32, _channel: u8) {
+        readonly_warn("set_note_channel");
     }
 
-    async fn set_note_selected(&self, _location: MidiTakeLocation, _index: u32, _selected: bool) {
-        Self::readonly_warn("set_note_selected");
+    fn set_note_selected(&self, _location: MidiTakeLocation, _index: u32, _selected: bool) {
+        readonly_warn("set_note_selected");
     }
 
-    async fn set_note_muted(&self, _location: MidiTakeLocation, _index: u32, _muted: bool) {
-        Self::readonly_warn("set_note_muted");
+    fn set_note_muted(&self, _location: MidiTakeLocation, _index: u32, _muted: bool) {
+        readonly_warn("set_note_muted");
     }
 
-    async fn select_all_notes(&self, _location: MidiTakeLocation, _selected: bool) {
-        Self::readonly_warn("select_all_notes");
+    fn select_all_notes(&self, _location: MidiTakeLocation, _selected: bool) {
+        readonly_warn("select_all_notes");
     }
 
-    async fn transpose_notes(
-        &self,
-        _location: MidiTakeLocation,
-        _indices: Vec<u32>,
-        _semitones: i8,
-    ) {
-        Self::readonly_warn("transpose_notes");
+    fn transpose_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>, _semitones: i8) {
+        readonly_warn("transpose_notes");
     }
 
-    async fn quantize_notes(&self, _location: MidiTakeLocation, _params: QuantizeParams) {
-        Self::readonly_warn("quantize_notes");
+    fn quantize_notes(&self, _location: MidiTakeLocation, _params: QuantizeParams) {
+        readonly_warn("quantize_notes");
     }
 
-    async fn humanize_notes(&self, _location: MidiTakeLocation, _params: HumanizeParams) {
-        Self::readonly_warn("humanize_notes");
+    fn humanize_notes(&self, _location: MidiTakeLocation, _params: HumanizeParams) {
+        readonly_warn("humanize_notes");
     }
 
-    async fn get_ccs(&self, _location: MidiTakeLocation, _controller: Option<u8>) -> Vec<MidiCC> {
+    fn ccs(&self, _location: MidiTakeLocation, _controller: Option<u8>) -> Vec<MidiCC> {
         Vec::new()
     }
 
-    async fn add_cc(&self, _location: MidiTakeLocation, _cc: MidiCCCreate) -> u32 {
-        Self::readonly_warn("add_cc");
+    fn add_cc(&self, _location: MidiTakeLocation, _cc: MidiCCCreate) -> u32 {
+        readonly_warn("add_cc");
         0
     }
 
-    async fn delete_cc(&self, _location: MidiTakeLocation, _index: u32) {
-        Self::readonly_warn("delete_cc");
+    fn delete_cc(&self, _location: MidiTakeLocation, _index: u32) {
+        readonly_warn("delete_cc");
     }
 
-    async fn set_cc_value(&self, _location: MidiTakeLocation, _index: u32, _value: u8) {
-        Self::readonly_warn("set_cc_value");
+    fn set_cc_value(&self, _location: MidiTakeLocation, _index: u32, _value: u8) {
+        readonly_warn("set_cc_value");
     }
 
-    async fn get_pitch_bends(&self, _location: MidiTakeLocation) -> Vec<MidiPitchBend> {
+    fn pitch_bends(&self, _location: MidiTakeLocation) -> Vec<MidiPitchBend> {
         Vec::new()
     }
 
-    async fn add_pitch_bend(&self, _location: MidiTakeLocation, _pb: MidiPitchBendCreate) -> u32 {
-        Self::readonly_warn("add_pitch_bend");
+    fn add_pitch_bend(&self, _location: MidiTakeLocation, _pb: MidiPitchBendCreate) -> u32 {
+        readonly_warn("add_pitch_bend");
         0
     }
 
-    async fn get_program_changes(&self, _location: MidiTakeLocation) -> Vec<MidiProgramChange> {
+    fn program_changes(&self, _location: MidiTakeLocation) -> Vec<MidiProgramChange> {
         Vec::new()
     }
 
-    async fn get_sysex(&self, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
+    fn sysex(&self, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
         Vec::new()
     }
 }

@@ -56,9 +56,8 @@ impl Peaks for crate::Reaper {
                 }
             };
 
-            let midi_item =
-                crate::midi::ReaperMidi::resolve_item(medium, reaper_project_ctx, &item)?;
-            let midi_take = crate::midi::ReaperMidi::resolve_take(medium, midi_item, &take)?;
+            let midi_item = crate::midi::resolve_item(medium, reaper_project_ctx, &item)?;
+            let midi_take = crate::midi::resolve_take(medium, midi_item, &take)?;
             let source = crate::safe_wrappers::item::get_take_source(medium, midi_take)?;
             let item_medium = crate::safe_wrappers::item::get_take_item(low, midi_take)?;
             let length = crate::safe_wrappers::item::get_item_info_value(
