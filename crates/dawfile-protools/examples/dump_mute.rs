@@ -6,15 +6,15 @@ fn main() {
     println!("audio tracks:");
     for (i, t) in session.audio_tracks.iter().enumerate() {
         println!(
-            "  [{i:02}] mute={} vol={:>5} pan={:>4}  {}",
-            t.mute as u8, t.volume_centibel, t.pan, t.name
+            "  [{i:02}] mute={} vol={:>5} pan={:>4} out={:<14}  {}",
+            t.mute as u8, t.volume_centibel, t.pan, t.output, t.name
         );
     }
     println!("midi tracks:");
     for (i, t) in session.midi_tracks.iter().enumerate() {
         println!(
-            "  [{i:02}] mute={} vol={:>5} pan={:>4}  {}",
-            t.mute as u8, t.volume_centibel, t.pan, t.name
+            "  [{i:02}] mute={} vol={:>5} pan={:>4} out={:<14}  {}",
+            t.mute as u8, t.volume_centibel, t.pan, t.output, t.name
         );
     }
 }

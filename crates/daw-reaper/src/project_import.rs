@@ -565,7 +565,12 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
             skip_next = true;
         }
 
-        builder = builder.track(&track.name, |t| {
+        let display_name = if track.output.is_empty() {
+            track.name.clone()
+        } else {
+            format!("{} → {}", track.name, track.output)
+        };
+        builder = builder.track(&display_name, |t| {
             // Apply per-track mix state from PT's 0x1029 block.
             // Volume is in 0.1 dB units (centibel); ≤ -1440 means -∞.
             // Pan is -100..+100. For STEREO PT tracks the stored "pan" is the
@@ -721,7 +726,12 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 
     // MIDI tracks
     for track in &session.midi_tracks {
-        builder = builder.track(&track.name, |t| {
+        let display_name = if track.output.is_empty() {
+            track.name.clone()
+        } else {
+            format!("{} → {}", track.name, track.output)
+        };
+        builder = builder.track(&display_name, |t| {
             let linear_vol = if track.volume_centibel <= -1440 {
                 0.0
             } else {

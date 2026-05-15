@@ -320,6 +320,7 @@ fn parse_midi_tracks(
             mute: false,
             pan: 0,
             alternate_playlists: Vec::new(),
+            output: String::new(),
         });
     }
 

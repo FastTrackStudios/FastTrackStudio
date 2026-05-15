@@ -155,6 +155,14 @@ pub struct Track {
     ///
     /// Empty unless the session was saved with alternate playlists.
     pub alternate_playlists: Vec<Playlist>,
+    /// Name of the track's output assignment (e.g. `"Analog 1-2"`, `"Bus 1"`).
+    ///
+    /// Decoded from the per-track `0x260e` block, which carries a
+    /// length-prefixed string at payload offset `+0x24..` naming either a
+    /// hardware output or an internal bus. Empty when the track is
+    /// unassigned or the block omits a destination (the 61-byte variant
+    /// — payload begins `ff ff 01 01 ...`).
+    pub output: String,
 }
 
 /// A fade region on a track.

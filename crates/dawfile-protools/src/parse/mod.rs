@@ -216,6 +216,106 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
+    // Step 12b: Decode per-track output routing from 0x260e blocks.
+    //
+    // Each `0x260d` per-track wrapper holds exactly one `0x260e` routing
+    // block as its first non-`0x1029` child. Two payload shapes observed:
+    //
+    //   - 61 bytes: no destination (payload begins `ff ff 01 01 ...`)
+    //   - 66/71 bytes: destination name as a length-prefixed string at
+    //     payload offset `+0x24..` (e.g. `0a 00 00 00 "Analog 1-2"`,
+    //     `05 00 00 00 "Bus 1"`).
+    //
+    // The `0x260d` blocks themselves are emitted in `0x251a` document
+    // order (1:1 with the same alignment used for `0x1029` above), so we
+    // pair `0x260e` with `0x251a` names the same way and build a
+    // `name → output` lookup, then resolve each parsed track by name.
+    {
+        let data = cursor.data();
+        let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
+            .into_iter()
+            .next();
+        let wrappers = collect_blocks_recursive(&blocks, ContentType::TrackMixWrapper);
+
+        let mut out_by_name: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Some(list) = track_list {
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut wrap_idx = 0usize;
+            for child in list.find_children(ContentType::MidiTrackInfo) {
+                let name_off = child.offset + 4;
+                if name_off + 4 > data.len() {
+                    continue;
+                }
+                let (name, _) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() {
+                    continue;
+                }
+                if !seen.insert(name.clone()) {
+                    break;
+                }
+                let Some(wrapper) = wrappers.get(wrap_idx) else {
+                    break;
+                };
+                wrap_idx += 1;
+                // First (and usually only) 0x260e inside the wrapper.
+                let Some(route) = wrapper
+                    .children
+                    .iter()
+                    .find(|c| c.content_type == Some(ContentType::TrackRouting))
+                else {
+                    continue;
+                };
+                let payload = route.offset + 2;
+                let payload_len = route.block_size.saturating_sub(2) as usize;
+                // Length-prefixed string at payload +0x24
+                let str_off = payload + 0x24;
+                if str_off + 4 > data.len() || str_off + 4 - payload > payload_len {
+                    continue;
+                }
+                let str_len =
+                    u32::from_le_bytes(data[str_off..str_off + 4].try_into().unwrap()) as usize;
+                if str_len == 0 || str_len > 128 {
+                    continue;
+                }
+                let data_start = str_off + 4;
+                if data_start + str_len > data.len() {
+                    continue;
+                }
+                let s = String::from_utf8_lossy(&data[data_start..data_start + str_len])
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !s.is_empty() {
+                    out_by_name.insert(name, s);
+                }
+            }
+        }
+
+        let lookup_out = |name: &str| -> Option<String> {
+            if let Some(s) = out_by_name.get(name) {
+                return Some(s.clone());
+            }
+            for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                let probe = format!("{name}{suffix}");
+                if let Some(s) = out_by_name.get(&probe) {
+                    return Some(s.clone());
+                }
+            }
+            None
+        };
+
+        for t in audio_tracks.iter_mut() {
+            if let Some(o) = lookup_out(&t.name) {
+                t.output = o;
+            }
+        }
+        for t in midi_tracks.iter_mut() {
+            if let Some(o) = lookup_out(&t.name) {
+                t.output = o;
+            }
+        }
+    }
+
     // Step 13: Parse plugins and I/O channels
     let plugins = plugins::parse_plugins(&blocks, &cursor);
     let io_channels = io::parse_io_channels(&blocks, &cursor);

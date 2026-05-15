@@ -74,6 +74,18 @@ pub enum ContentType {
     /// See `docs/pt-track-properties.md` for the byte layout.
     TrackMixSettings = 0x1029,
 
+    /// Per-track mix wrapper. Groups `0x1029` plus routing (`0x260e`) and
+    /// send entries (`0x260a`) under one container. One per mixable track,
+    /// in `0x251a` document order (29 entries in the user session).
+    TrackMixWrapper = 0x260d,
+
+    /// Track output / routing assignment. Carries a length-prefixed string
+    /// at payload offset `+0x24..` naming the destination (e.g.
+    /// `"Analog 1-2"` for a hardware output, `"Bus 1"` for an internal
+    /// bus). The 61-byte variant (payload begins `ff ff 01 01 ...`) has no
+    /// destination.
+    TrackRouting = 0x260e,
+
     /// Per-session list of fade definitions (lengths + curve shape). Wraps
     /// one `FadeDef` (0x262f) per fade-marked track entry.
     FadeDefList = 0x2630,
@@ -204,6 +216,8 @@ impl ContentType {
             0x1014 => Some(Self::AudioTrackInfo),
             0x1015 => Some(Self::AudioTrackList),
             0x1029 => Some(Self::TrackMixSettings),
+            0x260d => Some(Self::TrackMixWrapper),
+            0x260e => Some(Self::TrackRouting),
             0x2630 => Some(Self::FadeDefList),
             0x262f => Some(Self::FadeDef),
 
