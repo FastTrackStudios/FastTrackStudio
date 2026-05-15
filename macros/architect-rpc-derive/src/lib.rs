@@ -218,8 +218,8 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
 
     quote! {
         /// Immediate-bind shortcut: wrap a backend in this service's
-        /// vox dispatcher and return a `Mounted`. For deferred binding,
-        /// prefer `Service` + `architect::Layer::add` /
+        /// vox dispatcher and return a `Mounted`. For deferred
+        /// binding, prefer `Service` + `architect::Layer::add` /
         /// `architect::Layer::provide`.
         ///
         #[doc = #immediate_doc]
@@ -238,15 +238,20 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         #[derive(Debug, Default, Clone, Copy)]
         #vis struct Service;
 
+        /// Backend-free descriptor accessor — lets [`architect::Layer`]
+        /// store this service without committing to a backend type.
+        #[cfg(feature = "vox")]
+        impl ::architect::BindAny for Service {
+            fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
+                #descriptor_fn()
+            }
+        }
+
         #[cfg(feature = "vox")]
         impl<S> ::architect::Bind<S> for Service
         where
             #bounds
         {
-            fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
-                #descriptor_fn()
-            }
-
             fn bind(self, backend: S) -> ::architect::Mounted {
                 ::architect::Mounted::new(#descriptor_fn(), serve(backend))
             }

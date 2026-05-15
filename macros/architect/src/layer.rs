@@ -1,49 +1,43 @@
-//! Effect-style layer composition for architect-rpc backends.
+//! Effect-style layer composition — bounds-free bundle definition.
 //!
-//! Mirrors Effect's `@effect/platform` shape: a single composable
-//! [`Layer`] value accumulates services, [`Layer::merge`] folds two
-//! layers into one, and [`Layer::provide`] binds the backend value
-//! and produces a ready-to-serve [`LayerRouter`].
+//! A [`Layer`] is built from a list of services. The list is a
+//! type-level cons chain ([`Empty`] / [`Cons<S, R>`]) so the bundle
+//! definition needs **no where clause** — each service's backend
+//! requirements only flow into the type when [`Layer::provide`] picks
+//! a concrete backend. Forgetting a trait impl on a backend surfaces
+//! as a compile error at the `.provide(...)` call site, naming the
+//! missing trait.
 //!
 //! ```ignore
-//! use architect::Layer;
+//! use architect::{Layer, services};
 //! use daw_proto::{transport, project, marker};
 //!
-//! let router = Layer::new()
-//!     .add(transport::Service)
-//!     .add(project::Service)
-//!     .add(marker::Service)
-//!     .provide(reaper);
+//! pub fn services() -> impl Layer {
+//!     services![transport, project, marker]   // no bounds anywhere
+//! }
+//!
+//! // Or inline:
+//! let router = services![transport, project, marker].provide(Reaper);
 //! ```
-//!
-//! # Why deferred bind
-//!
-//! Pre-deferred, every consumer wrote `transport::layer(reaper)` per
-//! service — the backend value was threaded through 25× per mount
-//! site. The deferred shape separates **what services do I want** from
-//! **what backend serves them**:
-//!
-//! - One `Layer` value can be reused across backends by varying only
-//!   `.provide()`.
-//! - Service tokens (`transport::Service`, …) are backend-agnostic
-//!   values, mergeable into bundles before any backend is in scope.
-//! - Bolt-ons with different backends mix cleanly via [`Layer::add`]
-//!   — a pre-mounted [`Mounted`] still implements [`Bind`].
 //!
 //! # The pieces
 //!
-//! - [`Mounted`] — a service that's been bound to a backend.
-//! - [`Bind`] — "given a backend, produce a [`Mounted`]." Implemented
-//!   by the per-service `Service` token the rpc macro emits, and
-//!   trivially by [`Mounted`] itself.
-//! - [`Layer<B>`] — the composable layer value. `.add(...)` /
-//!   `.merge(...)` / `.provide(B)`.
-//! - [`LayerRouter`] — method-id-keyed dispatch + [`vox::Handler`]
-//!   impl. The terminal sink.
-//! - [`LayerSink`] — trait for "absorbs a [`Mounted`]."
+//! - [`BindAny`] — "I know my descriptor." Backend-free.
+//! - [`Bind<B>`] — `BindAny` + "given backend B, produce a [`Mounted`]."
+//!   Macro-emitted per service.
+//! - [`Mounted`] — a service that's been bound. Implements both
+//!   `BindAny` and `Bind<B> for any B`, so already-mounted services
+//!   compose into a layer the same way deferred tokens do.
+//! - [`Empty`] / [`Cons<S, R>`] — the type-level list of services.
+//!   Hidden behind `impl Layer` at function return sites.
+//! - [`Layer`] — exposes `add` / `merge` / `provide` / `descriptors`.
+//! - [`ProvideAll<B>`] — bound checked at `.provide(B)`; recursively
+//!   requires `S: Bind<B>` for every service in the chain.
+//! - [`Append<R>`] — type-level concat for `Layer::merge`.
+//! - [`LayerRouter`] — the terminal sink, implements
+//!   [`vox::Handler<DriverReplySink>`].
 
 use core::any::Any;
-use core::marker::PhantomData;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -54,12 +48,7 @@ use vox::{
 };
 
 // ── Erased handler ────────────────────────────────────────────────────────
-//
-// Send / Sync requirements are gated on target_arch — vox's Handler
-// returns `impl Future + MaybeSend` which is non-Send on wasm32.
-// Without the cfg the wasm build can't satisfy `+ Send`.
 
-#[cfg(not(target_arch = "wasm32"))]
 pub trait DynHandler: Send + Sync + 'static {
     fn handle(
         &self,
@@ -74,7 +63,6 @@ pub trait DynHandler: Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl<H> DynHandler for H
 where
     H: Handler<DriverReplySink> + Send + Sync + 'static,
@@ -101,54 +89,9 @@ where
     }
 }
 
-// ── wasm32 variant: no Send/Sync ──────────────────────────────────────────
-
-#[cfg(target_arch = "wasm32")]
-pub trait DynHandler: 'static {
-    fn handle(
-        &self,
-        call: SelfRef<RequestCall<'static>>,
-        reply: DriverReplySink,
-        schemas: Arc<SchemaRecvTracker>,
-    ) -> Pin<Box<dyn core::future::Future<Output = ()> + '_>>;
-
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy;
-    fn args_have_channels(&self, method_id: MethodId) -> bool;
-    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape>;
-    fn as_any(&self) -> &dyn Any;
-}
-
-#[cfg(target_arch = "wasm32")]
-impl<H> DynHandler for H
-where
-    H: Handler<DriverReplySink> + 'static,
-{
-    fn handle(
-        &self,
-        call: SelfRef<RequestCall<'static>>,
-        reply: DriverReplySink,
-        schemas: Arc<SchemaRecvTracker>,
-    ) -> Pin<Box<dyn core::future::Future<Output = ()> + '_>> {
-        Box::pin(Handler::handle(self, call, reply, schemas))
-    }
-    fn retry_policy(&self, method_id: MethodId) -> RetryPolicy {
-        Handler::retry_policy(self, method_id)
-    }
-    fn args_have_channels(&self, method_id: MethodId) -> bool {
-        Handler::args_have_channels(self, method_id)
-    }
-    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
-        Handler::response_wire_shape(self, method_id)
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
 // ── Mounted ───────────────────────────────────────────────────────────────
 
-/// A service that has been bound to a backend — descriptor + erased
-/// handler ready for [`LayerSink`].
+/// A service bound to a backend — descriptor + erased handler.
 #[derive(Clone)]
 pub struct Mounted {
     descriptor: &'static ServiceDescriptor,
@@ -156,21 +99,9 @@ pub struct Mounted {
 }
 
 impl Mounted {
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new<H>(descriptor: &'static ServiceDescriptor, handler: H) -> Self
     where
         H: Handler<DriverReplySink> + Send + Sync + 'static,
-    {
-        Self {
-            descriptor,
-            handler: Arc::new(handler),
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn new<H>(descriptor: &'static ServiceDescriptor, handler: H) -> Self
-    where
-        H: Handler<DriverReplySink> + 'static,
     {
         Self {
             descriptor,
@@ -206,194 +137,270 @@ impl core::fmt::Debug for Mounted {
     }
 }
 
-// ── Bind trait ────────────────────────────────────────────────────────────
+// ── BindAny / Bind ────────────────────────────────────────────────────────
 
-/// "Given a backend `B`, produce a [`Mounted`]."
-///
-/// Implemented by the per-service `Service` token the
-/// `#[architect::rpc]` macro emits — the bound on `B` is the same set
-/// of supertraits the architect-rpc-emitted `serve(backend)` requires.
-///
-/// Also implemented trivially by [`Mounted`] itself (returns self,
-/// ignores `B`), so already-mounted services compose with deferred
-/// tokens through the same [`Layer::add`] entry point.
-pub trait Bind<B> {
-    /// Descriptor of the service this binder will produce. Available
-    /// before `.bind()` so layers can be introspected before
-    /// providing a backend.
+/// Backend-free trait — "I know my descriptor." Implemented by every
+/// service token and by [`Mounted`]. Lets [`Layer::add`] accept
+/// services without committing to a backend type.
+pub trait BindAny {
     fn descriptor(&self) -> &'static ServiceDescriptor;
+}
 
+/// Backend-aware bind — "given backend `B`, produce a [`Mounted`]."
+/// The architect-rpc macro emits an impl of this trait per service,
+/// with the trait bounds the underlying RPC dispatcher requires.
+/// [`Mounted`] implements `Bind<B>` for any `B` (returns self,
+/// ignores `B`) so already-bound services compose in the same chain.
+pub trait Bind<B>: BindAny {
     fn bind(self, backend: B) -> Mounted;
 }
 
-impl<B> Bind<B> for Mounted {
+impl BindAny for Mounted {
     fn descriptor(&self) -> &'static ServiceDescriptor {
         self.descriptor
     }
+}
+
+impl<B> Bind<B> for Mounted {
     fn bind(self, _: B) -> Mounted {
         self
     }
 }
 
-// ── Layer ─────────────────────────────────────────────────────────────────
+// ── Empty / Cons ──────────────────────────────────────────────────────────
 
-/// A composable layer of services keyed to a backend type.
-///
-/// `Layer<B>` accumulates `Bind<B>` entries via [`Self::add`] /
-/// [`Self::merge`] and resolves them into a [`LayerRouter`] via
-/// [`Self::provide`].
-///
-/// **Inference**: when the chain ends with `.provide(backend)`, `B`
-/// usually infers from there — `Layer::new().add(...).provide(reaper)`
-/// works without turbofish. If inference can't see the eventual
-/// `.provide`, give `B` explicitly with `Layer::<Reaper>::new()`.
-pub struct Layer<B> {
-    entries: Vec<Entry<B>>,
-    _phantom: PhantomData<fn(B)>,
+/// Empty layer — base case of the cons chain.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Empty;
+
+/// One service cell prepended to a tail layer. Built by
+/// [`Layer::add`].
+pub struct Cons<S, R> {
+    svc: S,
+    rest: R,
 }
 
-struct Entry<B> {
-    descriptor: &'static ServiceDescriptor,
-    binder: Box<dyn FnOnce(B) -> Mounted + Send>,
-}
-
-impl<B> Default for Layer<B> {
-    fn default() -> Self {
-        Self {
-            entries: Vec::new(),
-            _phantom: PhantomData,
-        }
+impl<S, R> Cons<S, R> {
+    pub fn new(svc: S, rest: R) -> Self {
+        Self { svc, rest }
     }
 }
 
-impl<B> Layer<B>
-where
-    B: Clone + Send + 'static,
-{
-    pub fn new() -> Self {
-        Self::default()
-    }
+// ── Layer trait ───────────────────────────────────────────────────────────
 
-    /// Add a service (token or pre-mounted) to the layer.
-    pub fn add<S>(mut self, svc: S) -> Self
+/// The composable layer. Sealed at the impl level via [`Empty`],
+/// [`Cons`], and [`Mounted`]; user code only interacts through the
+/// trait's methods.
+pub trait Layer: Sized {
+    /// Prepend a service (or a pre-mounted service via [`Mounted`])
+    /// to this layer. Order of services in the resulting chain
+    /// doesn't matter for dispatch (method IDs are unique).
+    fn add<S>(self, svc: S) -> Cons<S, Self>
     where
-        S: Bind<B> + Send + 'static,
+        S: BindAny,
     {
-        let descriptor = svc.descriptor();
-        let binder: Box<dyn FnOnce(B) -> Mounted + Send> = Box::new(move |b| svc.bind(b));
-        self.entries.push(Entry { descriptor, binder });
-        self
+        Cons { svc, rest: self }
     }
 
-    /// Merge another layer in — the result is another `Layer<B>`.
-    pub fn merge(mut self, other: Layer<B>) -> Self {
-        self.entries.extend(other.entries);
-        self
+    /// Type-level concat with another layer. The result is a new
+    /// `Layer` containing every service from both sides.
+    fn merge<R>(self, other: R) -> <Self as Append<R>>::Output
+    where
+        Self: Append<R>,
+        R: Layer,
+    {
+        Append::append(self, other)
     }
 
-    /// Bind the backend and produce a [`LayerRouter`].
-    pub fn provide(self, backend: B) -> LayerRouter {
+    /// Bind a backend and produce a [`LayerRouter`]. The bound
+    /// `Self: ProvideAll<B>` recursively requires every service in
+    /// the chain to implement `Bind<B>`. If any one fails, the error
+    /// surfaces here, naming the missing trait.
+    fn provide<B>(self, backend: B) -> LayerRouter
+    where
+        Self: ProvideAll<B>,
+        B: Clone,
+    {
         let mut router = LayerRouter::new();
-        for entry in self.entries {
-            let mounted = (entry.binder)(backend.clone());
-            router.add_mounted(mounted);
-        }
+        self.provide_into(&backend, &mut router);
         router
     }
 
-    pub fn descriptors(&self) -> impl Iterator<Item = &'static ServiceDescriptor> + '_ {
-        self.entries.iter().map(|e| e.descriptor)
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
-impl<B> core::fmt::Debug for Layer<B> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Layer")
-            .field("len", &self.entries.len())
-            .finish_non_exhaustive()
+    /// Collect descriptors of every service in this layer — useful
+    /// for capability lists / introspection before providing a
+    /// backend.
+    fn descriptors(&self) -> Vec<&'static ServiceDescriptor>
+    where
+        Self: Descriptors,
+    {
+        let mut v = Vec::new();
+        Descriptors::collect(self, &mut v);
+        v
     }
 }
 
-// ── layers! macro ─────────────────────────────────────────────────────────
+impl Layer for Empty {}
+impl<S, R> Layer for Cons<S, R>
+where
+    S: BindAny,
+    R: Layer,
+{
+}
+impl Layer for Mounted {}
 
-/// Build a [`Layer`] from a comma-separated list of services. The
-/// Rust analogue of Effect's `Layer.mergeAll(...)` — Rust has no
-/// variadic generics, so the variadic call site arrives as a macro.
-///
-/// Each argument can be any [`Bind<B>`]: a service token, a
-/// pre-mounted [`Mounted`], or another value implementing the trait.
+// ── ProvideAll<B> ─────────────────────────────────────────────────────────
+
+/// Implemented by any chain whose services all implement `Bind<B>`.
+/// The bound check at [`Layer::provide`] uses this — `Self:
+/// ProvideAll<B>` cascades down into per-service `Bind<B>` checks.
+pub trait ProvideAll<B>: Layer {
+    fn provide_into(self, backend: &B, router: &mut LayerRouter);
+}
+
+impl<B> ProvideAll<B> for Empty {
+    fn provide_into(self, _: &B, _: &mut LayerRouter) {}
+}
+
+impl<B, S, R> ProvideAll<B> for Cons<S, R>
+where
+    B: Clone,
+    S: Bind<B>,
+    R: ProvideAll<B>,
+{
+    fn provide_into(self, backend: &B, router: &mut LayerRouter) {
+        router.add_mounted(self.svc.bind(backend.clone()));
+        self.rest.provide_into(backend, router);
+    }
+}
+
+impl<B> ProvideAll<B> for Mounted {
+    fn provide_into(self, _: &B, router: &mut LayerRouter) {
+        router.add_mounted(self);
+    }
+}
+
+// ── Append<R> ─────────────────────────────────────────────────────────────
+
+/// Type-level concat. `<Cons<A, Cons<B, Empty>> as Append<R>>::Output
+/// = Cons<A, Cons<B, R>>`.
+pub trait Append<R: Layer>: Layer {
+    type Output: Layer;
+    fn append(self, rhs: R) -> Self::Output;
+}
+
+impl<R: Layer> Append<R> for Empty {
+    type Output = R;
+    fn append(self, rhs: R) -> R {
+        rhs
+    }
+}
+
+impl<S, T, R> Append<R> for Cons<S, T>
+where
+    S: BindAny,
+    T: Append<R>,
+    R: Layer,
+{
+    type Output = Cons<S, <T as Append<R>>::Output>;
+    fn append(self, rhs: R) -> Self::Output {
+        Cons {
+            svc: self.svc,
+            rest: self.rest.append(rhs),
+        }
+    }
+}
+
+impl<R: Layer> Append<R> for Mounted {
+    type Output = Cons<Mounted, R>;
+    fn append(self, rhs: R) -> Self::Output {
+        Cons {
+            svc: self,
+            rest: rhs,
+        }
+    }
+}
+
+// ── Descriptors ───────────────────────────────────────────────────────────
+
+/// Walks the chain producing each service's descriptor.
+pub trait Descriptors: Layer {
+    fn collect(&self, out: &mut Vec<&'static ServiceDescriptor>);
+}
+
+impl Descriptors for Empty {
+    fn collect(&self, _: &mut Vec<&'static ServiceDescriptor>) {}
+}
+
+impl<S, R> Descriptors for Cons<S, R>
+where
+    S: BindAny,
+    R: Descriptors,
+{
+    fn collect(&self, out: &mut Vec<&'static ServiceDescriptor>) {
+        out.push(self.svc.descriptor());
+        self.rest.collect(out);
+    }
+}
+
+impl Descriptors for Mounted {
+    fn collect(&self, out: &mut Vec<&'static ServiceDescriptor>) {
+        out.push(self.descriptor);
+    }
+}
+
+// ── layers! / services! macros ────────────────────────────────────────────
+
+/// Build a [`Layer`] from a list of [`BindAny`] values (service tokens,
+/// pre-mounted services, …). Rust's analog of Effect's
+/// `Layer.mergeAll(...)`.
 ///
 /// ```ignore
-/// use architect::layers;
-/// use daw_proto::{transport, project, marker};
-///
-/// pub fn services() -> architect::Layer<Reaper> {
-///     layers![
-///         transport::Service,
-///         project::Service,
-///         marker::Service,
-///     ]
-/// }
+/// let router = layers![
+///     transport::Service,
+///     project::Service,
+///     dock_host::layer(dock_host_backend),   // pre-mounted, different backend
+/// ].provide(Reaper);
 /// ```
-///
-/// Expands to `Layer::new().add(a).add(b).add(c)` — saves boilerplate,
-/// not runtime cost.
 #[macro_export]
 macro_rules! layers {
-    () => { $crate::Layer::new() };
+    () => { $crate::Empty };
     ($($svc:expr),+ $(,)?) => {{
-        let __layer = $crate::Layer::new();
-        $(let __layer = $crate::Layer::add(__layer, $svc);)+
-        __layer
+        let __l = $crate::Empty;
+        $(let __l = $crate::Layer::add(__l, $svc);)+
+        __l
     }};
 }
 
-/// Build a [`Layer`] from a comma-separated list of **service modules**.
-///
-/// Sibling of [`layers!`] for the common case where every entry is the
-/// macro-emitted `Service` token of a per-trait module — `services!`
-/// appends `::Service` to each ident so call sites read as a list of
-/// service names rather than a list of values.
+/// Ident-form shortcut for [`layers!`] — appends `::Service` to each
+/// ident. The terser form when every entry is the macro-emitted
+/// `Service` token of a per-trait module.
 ///
 /// ```ignore
-/// use architect::services;
-/// use daw_proto::{transport, project, marker};
-///
-/// pub fn reaper_services() -> architect::Layer<Reaper> {
-///     services![transport, project, marker]
-/// }
+/// let router = services![transport, project, marker].provide(Reaper);
 /// ```
-///
-/// Equivalent to `layers![transport::Service, project::Service,
-/// marker::Service]`. Use [`layers!`] instead when you need to mix
-/// service tokens with pre-mounted services or other `Bind<B>`
-/// values.
 #[macro_export]
 macro_rules! services {
-    () => { $crate::Layer::new() };
+    () => { $crate::Empty };
     ($($svc:ident),+ $(,)?) => {{
-        let __layer = $crate::Layer::new();
-        $(let __layer = $crate::Layer::add(__layer, $svc::Service);)+
-        __layer
+        let __l = $crate::Empty;
+        $(let __l = $crate::Layer::add(__l, $svc::Service);)+
+        __l
     }};
 }
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
 
+/// Anything that can absorb a [`Mounted`]. Implemented by
+/// [`LayerRouter`]; downstream consumers can implement for custom
+/// dispatchers.
 pub trait LayerSink {
     fn add_mounted(&mut self, mounted: Mounted);
 }
 
 // ── LayerRouter ───────────────────────────────────────────────────────────
 
+/// Method-id-keyed dispatch + canonical [`vox::Handler<DriverReplySink>`]
+/// impl. The terminal sink for layers.
 #[derive(Default, Clone)]
 pub struct LayerRouter {
     method_map: HashMap<MethodId, usize>,
@@ -405,6 +412,7 @@ impl LayerRouter {
         Self::default()
     }
 
+    /// Lower-level entry — prefer [`Layer::provide`] for bundles.
     pub fn with<H>(mut self, descriptor: &'static ServiceDescriptor, handler: H) -> Self
     where
         H: Handler<DriverReplySink> + Send + Sync + 'static,

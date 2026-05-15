@@ -53,7 +53,10 @@ pub use vox;
 #[cfg(feature = "vox")]
 pub mod layer;
 #[cfg(feature = "vox")]
-pub use layer::{Bind, Layer, LayerRouter, LayerSink, Mounted};
+pub use layer::{
+    Append, Bind, BindAny, Cons, Descriptors, Empty, Layer, LayerRouter, LayerSink, Mounted,
+    ProvideAll,
+};
 
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach
 // `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
