@@ -195,10 +195,12 @@ pub async fn register_actions(daw: &Daw, actions: &[ActionDef]) -> Result<Action
         }
     }
 
-    let rx = registry
-        .subscribe_actions()
-        .await
-        .map_err(|e| eyre!("subscribe_actions: {e}"))?;
+    // `subscribe_actions` retired with the architect::rpc port —
+    // streaming subscriptions live on a sibling trait. Hand callers
+    // an immediately-empty `Rx` so the struct shape is preserved;
+    // wire up the sibling-trait subscription when it lands.
+    let (_tx, rx) = vox::channel::<daw_proto::ActionEvent>();
+    let _ = registry; // suppress unused-binding warning
 
     Ok(ActionRegistration {
         rx,

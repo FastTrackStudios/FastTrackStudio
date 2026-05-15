@@ -29,12 +29,14 @@ use tracing::{debug, info, warn};
 
 use routed_handler::{DawConnectionAcceptor, RoutedHandler};
 
-// Service dispatchers for method ID routing
+// Service descriptors / serve fns for method ID routing. Every backend
+// now mounts via `<service>::serve(daw::reaper::Reaper)` against the
+// stateless singleton — no per-service struct or dispatcher::new
+// indirection.
 use daw::service::{
-    ActionRegistrationDispatcher, AudioEngineDispatcher, BatchExecutionDispatcher,
-    DawFileOpsDispatcher, EffectsDispatcher, HealthDispatcher, InputDispatcher, LiveMidiDispatcher,
-    MidiDispatcher, PluginLoadingDispatcher, ProjectsDispatcher, RoutingDispatcher,
-    ScreensetsDispatcher, ToolbarDispatcher, WindowGeometryDispatcher,
+    action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, health,
+    input, item, live_midi, marker, midi, plugin_loader, project, region, routing, screenset, take,
+    tempo_map, toolbar, track, transport, window_geometry,
 };
 
 // ============================================================================
@@ -142,157 +144,59 @@ async fn register_daw_dispatcher() {
     // Set TaskSupport for daw-reaper to use
     daw::reaper::set_task_support(Global::task_support());
 
-    // Initialize all broadcasters
-    // Transport broadcaster retired alongside the architect::rpc port.
-    daw::reaper::init_fx_broadcaster();
-    // Track broadcaster retired alongside the architect::rpc port.
+    // Surviving (non-service) broadcasters — others retired with the
+    // architect::rpc port.
     daw::reaper::init_item_broadcaster();
-    daw::reaper::init_routing_broadcaster();
     daw::reaper::init_tempo_map_broadcaster();
-    info!("All broadcasters initialized");
+    info!("Surviving broadcasters initialized");
 
-    // Create REAPER implementations
-    // Transport ported — mount via daw::service::transport::serve(Reaper).
-    let project = daw::reaper::ReaperProject::new();
-    // Markers ported to architect::rpc — backend is the singleton
-    // `Reaper` and mounting goes through `daw::rpc::marker::serve`.
-    // Regions ported — mount via daw::service::region::serve(Reaper).
-    // TempoMap ported — mount via daw::service::tempo_map::serve(Reaper).
-    let audio_engine = daw::reaper::ReaperAudioEngine::new();
-    let midi = daw::reaper::ReaperMidi::new();
-    let fx = daw::reaper::ReaperFx::new();
-    // Tracks ported — mount via daw::service::track::serve(Reaper).
-    let routing = daw::reaper::ReaperRouting::new();
-    let live_midi = daw::reaper::ReaperLiveMidi::new();
-    // ExtState ported — mount via daw::service::ext_state::serve(Reaper).
-    // Items ported — mount via daw::service::item::serve(Reaper).
-    // Takes ported — mount via daw::service::take::serve(Reaper).
-    let health = daw::reaper::ReaperHealth::new();
-    let action_registry = daw::reaper::ReaperActionRegistry::new();
-    let input = daw::reaper::ReaperInput::new();
-    let toolbar = daw::reaper::ReaperToolbar::new();
-    let screenset = daw::reaper::ReaperScreenset::new();
-    let dawfile_ops = daw::reaper::DawFileOps::new();
-    let window_geometry = daw::reaper::ReaperWindowGeometry::new();
-    let plugin_loader = daw::reaper::ReaperPluginLoader::new();
-    let automation = daw::reaper::ReaperAutomation::new();
-    let batch = daw::reaper::batch::BatchExecutor::new();
+    let reaper = daw::reaper::Reaper;
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
-    // Import service descriptor functions for method_id routing
-    use daw::service::{
-        action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
-        batch_service_service_descriptor, daw_file_service_service_descriptor,
-        fx_service_service_descriptor, health_service_service_descriptor,
-        input_service_service_descriptor, live_midi_service_service_descriptor,
-        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
-        project_service_service_descriptor, routing_service_service_descriptor,
-        screenset_service_service_descriptor, toolbar_service_service_descriptor,
-        window_geometry_service_service_descriptor,
-    };
-
-    // Compose all 16 service dispatchers via RoutedHandler
+    // Compose all service dispatchers via RoutedHandler. Stateless
+    // backend — `<service>::serve(Reaper)` wraps the singleton in the
+    // architect-rpc bridge, which marshals sync calls onto REAPER's
+    // main thread through `HasDispatcher`.
     let daw_handler = RoutedHandler::new()
-        .with(
-            daw::service::transport::descriptor(),
-            daw::service::transport::serve(daw::reaper::Reaper),
-        )
-        .with(
-            project_service_service_descriptor(),
-            ProjectsDispatcher::new(project),
-        )
-        // Markers via architect::rpc — `marker::serve(Reaper)` builds
-        // the dispatcher + bridges sync calls onto REAPER's main
-        // thread through `HasDispatcher`.
-        .with(
-            daw::service::marker::descriptor(),
-            daw::service::marker::serve(daw::reaper::Reaper),
-        )
-        .with(
-            daw::service::region::descriptor(),
-            daw::service::region::serve(daw::reaper::Reaper),
-        )
-        .with(
-            daw::service::tempo_map::descriptor(),
-            daw::service::tempo_map::serve(daw::reaper::Reaper),
-        )
-        .with(
-            audio_engine_service_service_descriptor(),
-            AudioEngineDispatcher::new(audio_engine),
-        )
-        .with(midi_service_service_descriptor(), MidiDispatcher::new(midi))
+        .with(transport::descriptor(), transport::serve(reaper))
+        .with(project::descriptor(), project::serve(reaper))
+        .with(marker::descriptor(), marker::serve(reaper))
+        .with(region::descriptor(), region::serve(reaper))
+        .with(tempo_map::descriptor(), tempo_map::serve(reaper))
+        .with(audio_engine::descriptor(), audio_engine::serve(reaper))
+        .with(midi::descriptor(), midi::serve(reaper))
         // MidiAnalysisService is registered out-of-tree by `keyflow-daw-
         // analysis` (loaded via fts-extensions); see daw-reaper a823b67
         // for the cycle that prevents in-tree registration.
-        .with(fx_service_service_descriptor(), EffectsDispatcher::new(fx))
+        .with(fx::descriptor(), fx::serve(reaper))
+        .with(track::descriptor(), track::serve(reaper))
+        .with(routing::descriptor(), routing::serve(reaper))
+        .with(live_midi::descriptor(), live_midi::serve(reaper))
+        .with(ext_state::descriptor(), ext_state::serve(reaper))
+        .with(health::descriptor(), health::serve(reaper))
+        .with(item::items_descriptor(), item::serve(reaper))
+        .with(take::descriptor(), take::serve(reaper))
         .with(
-            // Tracks via architect::rpc.
-            daw::service::track::descriptor(),
-            daw::service::track::serve(daw::reaper::Reaper),
+            action_registry::descriptor(),
+            action_registry::serve(reaper),
+        )
+        .with(input::descriptor(), input::serve(reaper))
+        .with(toolbar::descriptor(), toolbar::serve(reaper))
+        .with(screenset::descriptor(), screenset::serve(reaper))
+        .with(
+            dawfile_service::descriptor(),
+            dawfile_service::serve(reaper),
         )
         .with(
-            routing_service_service_descriptor(),
-            RoutingDispatcher::new(routing),
+            window_geometry::descriptor(),
+            window_geometry::serve(reaper),
         )
+        .with(plugin_loader::descriptor(), plugin_loader::serve(reaper))
+        .with(automation::descriptor(), automation::serve(reaper))
+        .with(batch::descriptor(), batch::serve(reaper))
         .with(
-            live_midi_service_service_descriptor(),
-            LiveMidiDispatcher::new(live_midi),
-        )
-        .with(
-            daw::service::ext_state::descriptor(),
-            daw::service::ext_state::serve(daw::reaper::Reaper),
-        )
-        .with(
-            health_service_service_descriptor(),
-            HealthDispatcher::new(health),
-        )
-        .with(
-            daw::service::item::items_descriptor(),
-            daw::service::item::serve(daw::reaper::Reaper),
-        )
-        .with(
-            daw::service::take::descriptor(),
-            daw::service::take::serve(daw::reaper::Reaper),
-        )
-        .with(
-            action_registry_service_service_descriptor(),
-            ActionRegistrationDispatcher::new(action_registry),
-        )
-        .with(
-            input_service_service_descriptor(),
-            InputDispatcher::new(input),
-        )
-        .with(
-            toolbar_service_service_descriptor(),
-            ToolbarDispatcher::new(toolbar),
-        )
-        .with(
-            screenset_service_service_descriptor(),
-            ScreensetsDispatcher::new(screenset),
-        )
-        .with(
-            daw_file_service_service_descriptor(),
-            DawFileOpsDispatcher::new(dawfile_ops),
-        )
-        .with(
-            window_geometry_service_service_descriptor(),
-            WindowGeometryDispatcher::new(window_geometry),
-        )
-        .with(
-            plugin_loader_service_service_descriptor(),
-            PluginLoadingDispatcher::new(plugin_loader),
-        )
-        .with(
-            daw::service::automation::automation_service_service_descriptor(),
-            daw::service::automation::AutomationDispatcher::new(automation),
-        )
-        .with(
-            batch_service_service_descriptor(),
-            BatchExecutionDispatcher::new(batch),
-        )
-        .with(
-            daw_proto::dock_host::dock_host_service_service_descriptor(),
-            daw_proto::dock_host::DockHostingDispatcher::new(dock_host),
+            daw_proto::dock_host::descriptor(),
+            daw_proto::dock_host::serve(dock_host),
         );
 
     // Build the connection acceptor from the routed handler
@@ -444,12 +348,10 @@ extern "C" fn timer_callback() {
                 runtime.process_main_thread_tasks();
             }
 
-            // Poll all broadcasters for state changes
-            // Transport broadcaster retired alongside the architect::rpc port.
-            daw::reaper::poll_and_broadcast_fx();
-            // Track broadcaster retired alongside the architect::rpc port.
+            // Poll surviving broadcasters. FX / routing / track /
+            // transport broadcasters retired with the architect::rpc
+            // port (streaming subscriptions move to sibling traits).
             daw::reaper::poll_and_broadcast_items();
-            daw::reaper::poll_and_broadcast_routing();
             daw::reaper::poll_and_broadcast_tempo_map();
 
             // Process deferred toolbar operations

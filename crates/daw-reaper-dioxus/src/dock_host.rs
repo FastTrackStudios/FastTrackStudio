@@ -139,6 +139,40 @@ fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> 
 #[derive(Default, Clone, Copy)]
 pub struct ReaperDockHost;
 
+/// Same shape as `daw_reaper::ReaperMainThreadDispatcher` — duplicated
+/// here to avoid the daw-reaper-dioxus → daw-reaper crate cycle. The
+/// dock host always runs from REAPER's main thread so an immediate
+/// dispatcher is correct.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DockHostDispatcher;
+
+impl architect::dispatch::Dispatcher for DockHostDispatcher {
+    fn dispatch(
+        &self,
+        f: Box<dyn FnOnce() -> architect::dispatch::BoxedAny + Send + 'static>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = std::result::Result<
+                        architect::dispatch::BoxedAny,
+                        architect::dispatch::DispatchError,
+                    >,
+                > + Send
+                + 'static,
+        >,
+    > {
+        Box::pin(async move { Ok(f()) })
+    }
+}
+
+impl architect::HasDispatcher for ReaperDockHost {
+    type Dispatcher = DockHostDispatcher;
+
+    fn dispatcher(&self) -> Self::Dispatcher {
+        DockHostDispatcher
+    }
+}
+
 #[derive(Default)]
 struct HostState {
     /// `DockHandle.0 -> stable string id` (interned as `&'static str`

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use daw::rpc::{BatchBuilder, Daw};
 use daw::service::batch::*;
-use daw_proto::batch::BatchService;
+
 use daw_reaper::batch::BatchExecutor;
 use tracing::info;
 
@@ -268,7 +268,7 @@ async fn inproc_create_tracks(executor: &BatchExecutor, n: u32) -> Duration {
         b.add_track(&proj, format!("InprocTrack-{i}"), None);
     }
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     start.elapsed()
 }
 
@@ -295,7 +295,7 @@ async fn inproc_mutate_tracks(
     }
 
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     Ok(start.elapsed())
 }
 
@@ -322,7 +322,7 @@ async fn inproc_create_and_mutate(executor: &BatchExecutor, n: u32) -> Duration 
     }
 
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     start.elapsed()
 }
 
@@ -333,7 +333,7 @@ async fn inproc_add_markers(executor: &BatchExecutor, n: u32) -> Duration {
         b.add_marker(&proj, i as f64 * 0.5, format!("InprocMarker-{i}"));
     }
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     start.elapsed()
 }
 
