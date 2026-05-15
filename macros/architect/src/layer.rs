@@ -322,6 +322,40 @@ impl<B> core::fmt::Debug for Layer<B> {
     }
 }
 
+// ── layers! macro ─────────────────────────────────────────────────────────
+
+/// Build a [`Layer`] from a comma-separated list of services. The
+/// Rust analogue of Effect's `Layer.mergeAll(...)` — Rust has no
+/// variadic generics, so the variadic call site arrives as a macro.
+///
+/// Each argument can be any [`Bind<B>`]: a service token, a
+/// pre-mounted [`Mounted`], or another value implementing the trait.
+///
+/// ```ignore
+/// use architect::layers;
+/// use daw_proto::{transport, project, marker};
+///
+/// pub fn services() -> architect::Layer<Reaper> {
+///     layers![
+///         transport::Service,
+///         project::Service,
+///         marker::Service,
+///     ]
+/// }
+/// ```
+///
+/// Expands to `Layer::new().add(a).add(b).add(c)` — saves boilerplate,
+/// not runtime cost.
+#[macro_export]
+macro_rules! layers {
+    () => { $crate::Layer::new() };
+    ($($svc:expr),+ $(,)?) => {{
+        let __layer = $crate::Layer::new();
+        $(let __layer = $crate::Layer::add(__layer, $svc);)+
+        __layer
+    }};
+}
+
 // ── LayerSink ─────────────────────────────────────────────────────────────
 
 pub trait LayerSink {
