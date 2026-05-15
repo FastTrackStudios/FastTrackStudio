@@ -417,9 +417,50 @@ fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
 // Pro Tools → REAPER conversion
 // ============================================================================
 
+/// Convert a Pro Tools session at `path` to a REAPER `.rpp` string.
+///
+/// Public so that command-line tools and tests can run the conversion without
+/// going through the REAPER plugin entry point.
+pub fn protools_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    import_protools(path)
+}
+
 fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let session = dawfile_protools::read_session(path, 48000)?;
     let sample_rate = session.session_sample_rate as f64;
+
+    // Pro Tools stores audio files in `Audio Files/` next to the .ptx.
+    // Resolve a bare filename ("kick.wav") to the on-disk absolute path so
+    // REAPER items point at real audio instead of dangling-source stubs.
+    let session_dir = std::path::Path::new(path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let audio_files_dir = session_dir.join("Audio Files");
+    let resolve_audio_path = |filename: &str| -> String {
+        if filename.is_empty() {
+            return String::new();
+        }
+        // Already absolute → use as-is.
+        let p = std::path::Path::new(filename);
+        if p.is_absolute() {
+            return filename.to_string();
+        }
+        // Try Audio Files/ subdir first (the standard layout).
+        let in_audio = audio_files_dir.join(filename);
+        if in_audio.exists() {
+            return in_audio.to_string_lossy().into_owned();
+        }
+        // Fall back to session dir.
+        let in_session = session_dir.join(filename);
+        if in_session.exists() {
+            return in_session.to_string_lossy().into_owned();
+        }
+        // Last resort: emit the Audio Files/ path even if the file is
+        // missing — REAPER will show a "missing media" item rather than
+        // an empty one, and the user can relink.
+        in_audio.to_string_lossy().into_owned()
+    };
 
     let mut builder = ReaperProjectBuilder::new();
     builder = builder.sample_rate(session.session_sample_rate as i32);
@@ -521,13 +562,14 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     continue;
                 }
 
-                // Get source filename
+                // Get source filename and resolve to absolute on-disk path.
                 let filename = session
                     .audio_files
                     .iter()
                     .find(|f| f.index == region.audio_file_index)
                     .map(|f| f.filename.as_str())
                     .unwrap_or("");
+                let absolute_path = resolve_audio_path(filename);
 
                 // Match fade entries to this item by position. PT stores
                 // fade-ins at the same start as the item; fade-outs end at
@@ -551,8 +593,8 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 
                 t = t.item(position_secs, length_secs, |item| {
                     let mut item = item.name(&region.name);
-                    if !filename.is_empty() {
-                        item = item.source_wave(filename);
+                    if !absolute_path.is_empty() {
+                        item = item.source_wave(&absolute_path);
                     }
                     if offset_secs > 0.0 {
                         item = item.slip_offset(offset_secs);
