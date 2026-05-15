@@ -1,7 +1,10 @@
-//! UI service — dialogs and refresh control.
+//! UI — dialogs and refresh control.
 
 mod service;
 mod types;
 
-pub use service::{UiService, UiServiceClient, UiServiceDispatcher, ui_service_service_descriptor};
+pub use service::{UiDialogs, UiDialogsRpc};
 pub use types::UserInputResult;
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, UiDialogsClient, descriptor, serve};

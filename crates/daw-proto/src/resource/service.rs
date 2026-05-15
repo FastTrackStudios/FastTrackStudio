@@ -1,23 +1,21 @@
-//! Resource path service
-//!
-//! Provides access to REAPER resource directories and configuration files.
+//! REAPER resource-path service.
 
 use std::path::PathBuf;
-use vox::service;
 
-/// Service for accessing REAPER resource paths and configuration locations
-#[service]
-pub trait ResourceService {
-    /// Get the REAPER resource directory path
-    ///
-    /// This is the main REAPER resource directory containing presets, templates, etc.
-    async fn get_resource_path(&self) -> PathBuf;
+#[architect_rpc_derive::rpc]
+pub trait ResourcePaths {
+    /// REAPER resource directory (presets, templates, themes, …).
+    fn resource_path(&self) -> PathBuf;
 
-    /// Get the path to the REAPER INI configuration file
-    async fn get_ini_file_path(&self) -> PathBuf;
+    /// Path to REAPER's `reaper.ini` configuration file.
+    fn ini_file_path(&self) -> PathBuf;
 
-    /// Get the path to the currently loaded color theme file
-    ///
-    /// Returns None if no custom theme is loaded (using default theme)
-    async fn get_color_theme_path(&self) -> Option<PathBuf>;
+    /// Path to the currently loaded color theme file. `None` when the
+    /// default theme is active.
+    fn color_theme_path(&self) -> Option<PathBuf>;
 }
+
+#[cfg(feature = "vox")]
+pub use ResourcePathsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use resource_paths_rpc_service_descriptor as descriptor;

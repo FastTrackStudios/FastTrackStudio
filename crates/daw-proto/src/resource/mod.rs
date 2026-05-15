@@ -1,8 +1,8 @@
-//! REAPER resource paths — service trait.
+//! Resource paths — service trait.
 
 mod service;
 
-pub use service::{
-    ResourceService, ResourceServiceClient, ResourceServiceDispatcher,
-    resource_service_service_descriptor,
-};
+pub use service::{ResourcePaths, ResourcePathsRpc};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, ResourcePathsClient, descriptor, serve};

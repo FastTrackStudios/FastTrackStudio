@@ -1,7 +1,8 @@
-//! Health probe service — service trait.
+//! Health — connection liveness probe service.
 
 mod service;
 
-pub use service::{
-    HealthService, HealthServiceClient, HealthServiceDispatcher, health_service_service_descriptor,
-};
+pub use service::{Health, HealthRpc};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, HealthClient, descriptor, serve};

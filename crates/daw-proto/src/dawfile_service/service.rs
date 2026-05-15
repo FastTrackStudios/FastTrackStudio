@@ -1,23 +1,26 @@
-//! Read-only / pure-function project file operations exposed over vox.
+//! Read-only / pure-function operations on `.RPP` project files.
 
 use super::{CombineSetlistOptions, CombineSetlistResult, ProjectSummary};
-use vox::service;
 
-#[service]
-pub trait DawFileService {
+#[architect_rpc_derive::rpc]
+pub trait DawFileOps {
     /// Parse the `.RPP` at `path` and return a high-level summary.
-    ///
-    /// `error` is populated on failure (rather than returning a `Result`)
-    /// so the caller can surface the same shape regardless of outcome.
-    async fn summarize_project(&self, path: String) -> ProjectSummary;
+    /// `error` field is populated on failure (rather than returning
+    /// `Result`) so the caller can surface the same shape regardless.
+    fn summarize_project(&self, path: &str) -> ProjectSummary;
 
-    /// Combine an `.RPL` setlist into a single `.RPP` saved at `output`.
-    /// When `output` is empty, the combined file is written next to
-    /// `input` using the input's stem.
-    async fn combine_setlist(
+    /// Combine an `.RPL` setlist into a single `.RPP` saved at
+    /// `output`. When `output` is empty, the combined file is
+    /// written next to `input` using the input's stem.
+    fn combine_setlist(
         &self,
-        input: String,
-        output: String,
+        input: &str,
+        output: &str,
         options: CombineSetlistOptions,
     ) -> CombineSetlistResult;
 }
+
+#[cfg(feature = "vox")]
+pub use DawFileOpsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use daw_file_ops_rpc_service_descriptor as descriptor;

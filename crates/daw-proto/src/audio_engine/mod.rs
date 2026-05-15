@@ -1,10 +1,10 @@
-//! Audio engine — types + service traits.
+//! Audio engine — types + service trait.
 
 mod service;
 mod types;
 
-pub use service::{
-    AudioEngine, AudioEngineService, AudioEngineServiceClient, AudioEngineServiceDispatcher,
-    audio_engine_service_service_descriptor,
-};
+pub use service::{AudioEngine, AudioEngineRpc};
 pub use types::{AudioEngineState, AudioInputChannel, AudioInputInfo, AudioLatency};
+
+#[cfg(feature = "vox")]
+pub use service::{AudioEngineClient, Dispatcher, descriptor, serve};

@@ -1,10 +1,10 @@
-//! Plugin loader — types + service traits.
+//! Plugin loader — types + service trait.
 
 mod service;
 mod types;
 
-pub use service::{
-    PluginLoaderService, PluginLoaderServiceClient, PluginLoaderServiceDispatcher, PluginLoading,
-    plugin_loader_service_service_descriptor,
-};
+pub use service::{PluginLoading, PluginLoadingRpc};
 pub use types::{LoadedPluginInfo, PluginLoadResult};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, PluginLoadingClient, descriptor, serve};

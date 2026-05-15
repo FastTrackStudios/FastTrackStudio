@@ -1,36 +1,27 @@
-//! Audio engine service traits.
+//! Audio engine service — state, latency, devices, init/quit.
 //!
-//! Read-only access to engine state, latency, and audio devices, plus
-//! init/quit lifecycle. State is global to the DAW instance — no
-//! `ProjectContext` needed.
+//! Global to the DAW instance — no `ProjectContext`.
 
 use super::{AudioEngineState, AudioInputInfo, AudioLatency};
 use crate::DawResult;
-use vox::service;
 
-#[service]
-pub trait AudioEngineService {
-    async fn get_state(&self) -> AudioEngineState;
-    async fn get_latency(&self) -> AudioLatency;
-    /// Convenience: just the output latency in seconds (0.0 when
+#[architect_rpc_derive::rpc]
+pub trait AudioEngine {
+    fn state(&self) -> AudioEngineState;
+    fn latency(&self) -> AudioLatency;
+    /// Convenience: just the output latency in seconds (0.0 when the
     /// engine isn't running). Useful for visual sync compensation.
-    async fn get_output_latency_seconds(&self) -> f64;
-    async fn is_running(&self) -> bool;
-    async fn get_audio_inputs(&self) -> AudioInputInfo;
+    fn output_latency_seconds(&self) -> f64;
+    fn is_running(&self) -> bool;
+    fn inputs(&self) -> AudioInputInfo;
 
     /// Open all audio + MIDI devices.
-    async fn init(&self);
-    /// Close all audio + MIDI devices.
-    async fn quit(&self);
-}
-
-/// Sync handle counterpart.
-pub trait AudioEngine {
-    fn state(&self) -> DawResult<AudioEngineState>;
-    fn latency(&self) -> AudioLatency;
-    fn is_running(&self) -> bool;
-    fn inputs(&self) -> Vec<AudioInputInfo>;
-
     fn init(&self) -> DawResult<()>;
+    /// Close all audio + MIDI devices.
     fn quit(&self) -> DawResult<()>;
 }
+
+#[cfg(feature = "vox")]
+pub use AudioEngineRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use audio_engine_rpc_service_descriptor as descriptor;

@@ -1,80 +1,74 @@
-//! Action registry service traits.
+//! Action registration service — register/execute REAPER actions.
+//!
+//! Subscriber stream (`subscribe_actions`) retires with the
+//! architect::rpc port; sibling-trait when revived.
 
-use super::{ActionEvent, ActionExecutionResult, ActionListRequest, ActionListResponse};
+use super::{ActionExecutionResult, ActionListRequest, ActionListResponse};
 use crate::DawResult;
-use vox::{Tx, service};
 
-/// Dynamic action registration for DAW extensions and clients.
-///
-/// Extensions use this service to register REAPER actions at runtime.
-/// Registered actions appear in REAPER's action list and can be
-/// assigned keyboard shortcuts.
-#[service]
-pub trait ActionRegistryService {
-    /// Register a new REAPER action.
+#[architect_rpc_derive::rpc]
+pub trait ActionRegistration {
+    /// Register a new REAPER action. Returns the assigned command ID
+    /// (0 on failure).
     ///
-    /// - `command_name`: Unique identifier (e.g., "FTS_SIGNAL_ARM").
-    /// - `description`: Human-readable label.
+    /// - `command_name`: Unique identifier (e.g. `"FTS_SIGNAL_ARM"`).
+    /// - `description`: Label shown in REAPER's action list.
     /// - `show_in_menu`: If true, appears in REAPER's Extensions menu.
     /// - `toggleable`: If true, REAPER shows an on/off indicator.
-    ///
-    /// Returns the numeric command ID assigned by REAPER, or 0 on
-    /// failure.
-    async fn register_action(
+    fn register_action(
         &self,
-        command_name: String,
-        description: String,
+        command_name: &str,
+        description: &str,
         show_in_menu: bool,
         toggleable: bool,
     ) -> u32;
 
-    /// Returns `true` if the action was found and unregistered.
-    async fn unregister_action(&self, command_name: String) -> bool;
+    /// Convenience: register a plain action (not toggle, no menu).
+    fn register(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    /// Register an action that also appears in the host's main menu.
+    fn register_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    /// Register a toggle (on/off) action.
+    fn register_toggle(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    /// Register a toggle action that also appears in the main menu.
+    fn register_toggle_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
+
+    fn unregister(&self, cmd_name: &str) -> DawResult<()>;
 
     /// Check if an action is registered (by us or any other extension).
-    async fn is_registered(&self, command_name: String) -> bool;
+    fn is_registered(&self, command_name: &str) -> bool;
 
     /// Look up the numeric command ID for a named action.
-    async fn lookup_command_id(&self, command_name: String) -> Option<u32>;
-
-    /// Subscribe to action trigger events. Receives events for ALL
-    /// actions registered through this service — filter by
-    /// `command_name` if needed.
-    async fn subscribe_actions(&self, tx: Tx<ActionEvent>);
+    fn lookup_command_id(&self, command_name: &str) -> Option<u32>;
 
     /// Check if an action is actually present in REAPER's action list
-    /// (main section). Verifies the gaccel entry exists.
-    async fn is_in_action_list(&self, command_name: String) -> bool;
+    /// (verifies the gaccel entry exists).
+    fn is_in_action_list(&self, command_name: &str) -> bool;
 
     /// Enumerate actions in REAPER's main action list.
-    async fn list_actions(&self, request: ActionListRequest) -> ActionListResponse;
+    fn list_actions(&self, request: ActionListRequest) -> ActionListResponse;
 
     /// Execute a native DAW command by numeric ID. Maps to
     /// `Main_OnCommandEx(command_id, 0, current_project)`.
-    async fn execute_command(&self, command_id: u32);
+    fn execute_command(&self, command_id: u32);
 
     /// Execute a named action (custom or native).
-    async fn execute_named_action(&self, command_name: String) -> bool;
+    fn execute_named_action(&self, command_name: &str) -> bool;
 
-    /// Execute any REAPER action and return resolved metadata.
-    /// Accepts numeric ID or named command identifier.
-    async fn execute_action(&self, action_id: String) -> ActionExecutionResult;
+    /// Execute any REAPER action — accepts numeric ID or named
+    /// identifier. Returns resolved metadata.
+    fn execute_action(&self, action_id: &str) -> ActionExecutionResult;
 
-    /// Set the toggle state for a toggleable action. REAPER queries
-    /// state synchronously on the main thread.
-    async fn set_toggle_state(&self, command_name: String, is_on: bool);
+    /// Set the toggle state for a toggleable action.
+    fn set_toggle_state(&self, command_name: &str, is_on: bool);
 
-    /// Returns `None` if not registered or not toggleable.
-    async fn get_toggle_state(&self, command_name: String) -> Option<bool>;
+    /// `None` if not registered or not toggleable.
+    fn get_toggle_state(&self, command_name: &str) -> Option<bool>;
 }
 
-/// Sync handle counterpart — setup-time registration helpers used
-/// during plugin/extension init.
-pub trait ActionRegistry {
-    /// Returns the host-assigned command id.
-    fn register(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
-    fn register_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
-    fn register_toggle(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
-    fn register_toggle_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32>;
-    fn unregister(&self, cmd_name: &str) -> DawResult<()>;
-}
+#[cfg(feature = "vox")]
+pub use ActionRegistrationRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use action_registration_rpc_service_descriptor as descriptor;

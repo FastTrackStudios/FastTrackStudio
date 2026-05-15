@@ -1,12 +1,12 @@
-//! DAW file service — types + service trait.
+//! DAW file ops — types + service trait.
 
 mod service;
 mod types;
 
-pub use service::{
-    DawFileService, DawFileServiceClient, DawFileServiceDispatcher,
-    daw_file_service_service_descriptor,
-};
+pub use service::{DawFileOps, DawFileOpsRpc};
 pub use types::{
     CombineSetlistOptions, CombineSetlistResult, ProjectSummary, ProjectTrackSummary, SetlistSong,
 };
+
+#[cfg(feature = "vox")]
+pub use service::{DawFileOpsClient, Dispatcher, descriptor, serve};

@@ -1,43 +1,43 @@
-//! UI service trait — dialogs and refresh control.
+//! UI service — dialogs and refresh control.
 
 use super::UserInputResult;
 use std::path::PathBuf;
-use vox::service;
 
-#[service]
-pub trait UiService {
+#[architect_rpc_derive::rpc]
+pub trait UiDialogs {
     /// Multi-input dialog. Returns `None` if cancelled.
-    async fn get_user_inputs(
+    fn get_user_inputs(
         &self,
-        title: String,
+        title: &str,
         prompts: Vec<String>,
         defaults: Vec<String>,
     ) -> Option<UserInputResult>;
 
     /// File picker for an existing file.
-    async fn browse_for_file(
+    fn browse_for_file(
         &self,
-        title: String,
+        title: &str,
         initial_dir: Option<PathBuf>,
         filter: Option<String>,
     ) -> Option<PathBuf>;
 
     /// File picker for "save as".
-    async fn browse_for_save_file(
+    fn browse_for_save_file(
         &self,
-        title: String,
+        title: &str,
         initial_dir: Option<PathBuf>,
-        default_name: String,
+        default_name: &str,
         filter: Option<String>,
     ) -> Option<PathBuf>;
 
     /// Directory picker.
-    async fn browse_for_directory(
-        &self,
-        title: String,
-        initial_dir: Option<PathBuf>,
-    ) -> Option<PathBuf>;
+    fn browse_for_directory(&self, title: &str, initial_dir: Option<PathBuf>) -> Option<PathBuf>;
 
     /// Temporarily suspend UI refresh for batch operations.
-    async fn set_prevent_ui_refresh(&self, prevent: bool);
+    fn set_prevent_ui_refresh(&self, prevent: bool);
 }
+
+#[cfg(feature = "vox")]
+pub use UiDialogsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use ui_dialogs_rpc_service_descriptor as descriptor;

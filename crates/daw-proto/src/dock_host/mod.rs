@@ -1,13 +1,10 @@
 //! Dock host — platform-portable dock/window management.
-//!
-//! Abstracts over the OS-level container hosting UI panels (REAPER
-//! docker, standalone native window, browser DOM, mock for tests).
 
 mod service;
 mod types;
 
-pub use service::{
-    DockHostService, DockHostServiceClient, DockHostServiceDispatcher,
-    dock_host_service_service_descriptor,
-};
+pub use service::{DockHosting, DockHostingRpc};
 pub use types::{DockEvent, DockHandle, DockKind, PanelPixels, UiEventDto};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, DockHostingClient, descriptor, serve};

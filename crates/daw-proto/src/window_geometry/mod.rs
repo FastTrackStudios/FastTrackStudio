@@ -1,10 +1,10 @@
-//! Window geometry — types + service traits.
+//! Window geometry — types + service trait.
 
 mod service;
 mod types;
 
-pub use service::{
-    WindowGeometry, WindowGeometryService, WindowGeometryServiceClient,
-    WindowGeometryServiceDispatcher, window_geometry_service_service_descriptor,
-};
+pub use service::{WindowGeometry, WindowGeometryRpc};
 pub use types::{WindowGeometryResult, WindowTarget};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, WindowGeometryClient, descriptor, serve};

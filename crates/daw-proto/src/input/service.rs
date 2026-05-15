@@ -1,33 +1,31 @@
-//! Input service trait.
+//! Input service — keyboard/mouse interception driving + action exec.
 //!
-//! Raw input interception and streaming. The host captures
-//! keyboard/mouse events from REAPER's TranslateAccel hook and
-//! streams them to subscribing extensions. Extensions upload a
-//! `KeyFilter` to control which keys are eaten vs passed through.
-//!
-//! Domain-agnostic — the host has no knowledge of keybindings, modal
-//! editing, or command resolution.
+//! The host captures key/mouse events from REAPER's TranslateAccel
+//! hook synchronously and applies a `KeyFilter` uploaded by the
+//! extension. Eaten keys would stream over the architect-rpc bridge —
+//! streaming subscription retires by default; sibling trait when a
+//! real consumer needs it.
 
-use super::{InputEvent, KeyFilter};
-use vox::{Tx, service};
+use super::KeyFilter;
 
-#[service]
-pub trait InputService {
-    /// Subscribe to input events. Multiple subscribers supported.
-    async fn subscribe_input(&self, tx: Tx<InputEvent>);
-
+#[architect_rpc_derive::rpc]
+pub trait Input {
     /// Upload a key filter configuration. Replaces the previous one.
-    async fn set_key_filter(&self, filter: KeyFilter);
+    fn set_key_filter(&self, filter: KeyFilter);
 
-    async fn get_key_filter(&self) -> KeyFilter;
+    fn get_key_filter(&self) -> KeyFilter;
 
-    /// When disabled, TranslateAccel passes all keys through to REAPER.
-    async fn set_enabled(&self, enabled: bool);
-    async fn is_enabled(&self) -> bool;
+    /// When disabled, TranslateAccel passes all keys through.
+    fn set_enabled(&self, enabled: bool);
+    fn is_enabled(&self) -> bool;
 
     /// Execute a REAPER action by command name or numeric ID.
-    ///
-    /// Supports named commands (`"FTS_SIGNAL_NEXT_SONG"`), named with
-    /// prefix (`"_SWS_ABOUT"`), or numeric IDs (`"40044"`).
-    async fn execute_action(&self, action_id: String);
+    /// Supports named commands (`"FTS_SIGNAL_NEXT_SONG"`), named
+    /// with prefix (`"_SWS_ABOUT"`), numeric IDs (`"40044"`).
+    fn execute_action(&self, action_id: &str);
 }
+
+#[cfg(feature = "vox")]
+pub use InputRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use input_rpc_service_descriptor as descriptor;

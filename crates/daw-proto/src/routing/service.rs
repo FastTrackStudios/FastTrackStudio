@@ -1,23 +1,19 @@
-//! Routing service trait
+//! Routing service — sends, receives, hardware outputs.
 
-use super::{RouteRef, RouteType, RoutingEvent, SendMode, TrackRoute};
+use super::{RouteRef, RouteType, SendMode, TrackRoute};
+use crate::DawResult;
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
-use vox::{Tx, service};
 
-/// Specifies a route location (track + route type + route reference)
+/// Specifies a route location (track + route type + route reference).
 #[derive(Clone, Debug, facet::Facet)]
 pub struct RouteLocation {
-    /// The track containing the route
     pub track: TrackRef,
-    /// Type of route (send, receive, hardware output)
     pub route_type: RouteType,
-    /// Reference to the specific route
     pub route: RouteRef,
 }
 
 impl RouteLocation {
-    /// Create a new route location
     pub fn new(track: TrackRef, route_type: RouteType, route: RouteRef) -> Self {
         Self {
             track,
@@ -26,135 +22,124 @@ impl RouteLocation {
         }
     }
 
-    /// Create a send route location
     pub fn send(track: TrackRef, route: RouteRef) -> Self {
         Self::new(track, RouteType::Send, route)
     }
 
-    /// Create a receive route location
     pub fn receive(track: TrackRef, route: RouteRef) -> Self {
         Self::new(track, RouteType::Receive, route)
     }
 
-    /// Create a hardware output route location
     pub fn hardware_output(track: TrackRef, route: RouteRef) -> Self {
         Self::new(track, RouteType::HardwareOutput, route)
     }
 }
 
-/// Service for managing track routing (sends, receives, hardware outputs)
-#[service]
-pub trait RoutingService {
-    // === Queries ===
+#[architect_rpc_derive::rpc]
+pub trait Routing {
+    // ── Queries ────────────────────────────────────────────────────
 
-    /// Get all sends from a track
-    async fn get_sends(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute>;
+    fn sends(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute>;
+    fn receives(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute>;
+    fn hardware_outputs(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute>;
 
-    /// Get all receives to a track
-    async fn get_receives(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute>;
+    fn get_route(&self, project: ProjectContext, location: RouteLocation) -> Option<TrackRoute>;
 
-    /// Get all hardware outputs from a track
-    async fn get_hardware_outputs(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<TrackRoute>;
+    fn send_count(&self, project: ProjectContext, track: TrackRef) -> u32;
+    fn receive_count(&self, project: ProjectContext, track: TrackRef) -> u32;
 
-    /// Get a specific route
-    async fn get_route(
-        &self,
-        project: ProjectContext,
-        location: RouteLocation,
-    ) -> Option<TrackRoute>;
+    // ── CRUD ───────────────────────────────────────────────────────
 
-    // === CRUD ===
+    /// Add a send from source track to destination. Returns new index.
+    fn add_send(&self, project: ProjectContext, source: TrackRef, dest: TrackRef) -> Option<u32>;
 
-    /// Add a send from source track to destination track
-    /// Returns the index of the new send
-    async fn add_send(
-        &self,
-        project: ProjectContext,
-        source: TrackRef,
-        dest: TrackRef,
-    ) -> Option<u32>;
-
-    /// Add a hardware output to a track
-    /// Returns the index of the new hardware output
-    async fn add_hardware_output(
+    /// Add a hardware output. Returns its index.
+    fn add_hardware_output(
         &self,
         project: ProjectContext,
         track: TrackRef,
         hw_output: u32,
     ) -> Option<u32>;
 
-    /// Remove a route
-    async fn remove_route(&self, project: ProjectContext, location: RouteLocation);
+    fn remove_route(&self, project: ProjectContext, location: RouteLocation) -> DawResult<()>;
 
-    // === Levels ===
+    // ── Levels ─────────────────────────────────────────────────────
 
-    /// Set route volume
-    async fn set_volume(&self, project: ProjectContext, location: RouteLocation, volume: f64);
+    fn set_volume(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        volume: f64,
+    ) -> DawResult<()>;
 
-    /// Set route pan
-    async fn set_pan(&self, project: ProjectContext, location: RouteLocation, pan: f64);
+    fn set_pan(&self, project: ProjectContext, location: RouteLocation, pan: f64) -> DawResult<()>;
 
-    // === State ===
+    // ── State ──────────────────────────────────────────────────────
 
-    /// Set route mute state
-    async fn set_muted(&self, project: ProjectContext, location: RouteLocation, muted: bool);
+    fn set_muted(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        muted: bool,
+    ) -> DawResult<()>;
 
-    /// Set route mono state
-    async fn set_mono(&self, project: ProjectContext, location: RouteLocation, mono: bool);
+    fn set_mono(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        mono: bool,
+    ) -> DawResult<()>;
 
-    /// Set route phase inversion
-    async fn set_phase(&self, project: ProjectContext, location: RouteLocation, inverted: bool);
+    fn set_phase(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        inverted: bool,
+    ) -> DawResult<()>;
 
-    // === Mode ===
+    fn is_muted(&self, project: ProjectContext, location: RouteLocation) -> bool;
 
-    /// Set send mode (pre-fx, post-fx, post-fader)
-    async fn set_send_mode(
+    // ── Send mode ──────────────────────────────────────────────────
+
+    fn set_send_mode(
         &self,
         project: ProjectContext,
         track: TrackRef,
         route: RouteRef,
         mode: SendMode,
-    );
+    ) -> DawResult<()>;
 
-    // === Channel Mapping ===
+    // ── Channel mapping ────────────────────────────────────────────
 
-    /// Set source audio channels for a route (0-indexed start channel, num channels)
-    async fn set_source_channels(
+    fn set_source_channels(
         &self,
         project: ProjectContext,
         location: RouteLocation,
         start_channel: u32,
         num_channels: u32,
-    );
+    ) -> DawResult<()>;
 
-    /// Set destination audio channels for a route (0-indexed start channel, num channels)
-    async fn set_dest_channels(
+    fn set_dest_channels(
         &self,
         project: ProjectContext,
         location: RouteLocation,
         start_channel: u32,
         num_channels: u32,
-    );
+    ) -> DawResult<()>;
 
-    // === Parent Send (Folder routing) ===
+    // ── Parent send (folder routing) ───────────────────────────────
 
-    /// Get whether parent send is enabled (for folder track routing)
-    async fn get_parent_send_enabled(&self, project: ProjectContext, track: TrackRef) -> bool;
+    fn parent_send_enabled(&self, project: ProjectContext, track: TrackRef) -> bool;
 
-    /// Set whether parent send is enabled
-    async fn set_parent_send_enabled(
+    fn set_parent_send_enabled(
         &self,
         project: ProjectContext,
         track: TrackRef,
         enabled: bool,
-    );
-
-    // === Subscriptions ===
-
-    /// Subscribe to routing change events for a project.
-    async fn subscribe_routing(&self, project: ProjectContext, tx: Tx<RoutingEvent>);
+    ) -> DawResult<()>;
 }
+
+#[cfg(feature = "vox")]
+pub use RoutingRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use routing_rpc_service_descriptor as descriptor;

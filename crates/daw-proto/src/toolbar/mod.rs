@@ -1,13 +1,13 @@
-//! Toolbar — types + service traits.
+//! Toolbar — types + service trait.
 
 mod service;
 mod types;
 
-pub use service::{
-    Toolbar, ToolbarService, ToolbarServiceClient, ToolbarServiceDispatcher,
-    toolbar_service_service_descriptor,
-};
+pub use service::{Toolbar, ToolbarRpc};
 pub use types::{
     ToolbarButton, ToolbarIcon, ToolbarIconKind, ToolbarItemInfo, ToolbarPlacement, ToolbarResult,
     ToolbarSnapshot, ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
 };
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, ToolbarClient, descriptor, serve};

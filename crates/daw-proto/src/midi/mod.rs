@@ -1,10 +1,4 @@
-//! MIDI editing module
-//!
-//! This module provides types and services for editing MIDI data within takes.
-//! It supports CRUD operations on notes, CC events, pitch bends, and other
-//! MIDI data, plus batch operations like quantize and transpose.
-//!
-//! For real-time MIDI I/O during playback, see the `live_midi` module.
+//! MIDI editing — notes, CCs, pitch bends, program changes, SysEx.
 
 mod cc;
 mod error;
@@ -16,4 +10,10 @@ pub use cc::*;
 pub use error::*;
 pub use event::*;
 pub use note::*;
-pub use service::*;
+pub use service::{
+    HumanizeParams, Midi, MidiCCCreate, MidiPitchBendCreate, MidiRpc, MidiTakeLocation, PpqRange,
+    QuantizeParams,
+};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, MidiClient, descriptor, serve};
