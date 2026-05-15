@@ -17,6 +17,7 @@ members = [
     "macros/crdt-derive",
     "examples/external-stub",
     "examples/custom-server",
+    "examples/layered-services",
     "crates/architect-cli",
     "libs/crdt",
     "libs/crdt-seaorm", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-crdt", "features/foo/foo-db", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-crdt", "features/bar/bar-db", "features/bar/tests/native",

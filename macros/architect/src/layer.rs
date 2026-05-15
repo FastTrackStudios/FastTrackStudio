@@ -46,6 +46,48 @@
 //! - [`Append<R>`] — type-level concat backing `Layer::merge`.
 //! - [`LayerRouter`] — the terminal sink, implements
 //!   [`vox::Handler<DriverReplySink>`].
+//!
+//! # Deployment shapes
+//!
+//! A trait declared with `#[architect::rpc]` has four deployment
+//! shapes, all from the same source. The choice is made at the call
+//! site, not at the trait definition.
+//!
+//! 1. **Direct sync (zero overhead).** Call trait methods on the
+//!    backend. No router, no dispatcher, no future. One virtual call
+//!    per invocation (monomorphized away in release). Right for
+//!    same-thread, can-block hot loops.
+//!
+//!    ```ignore
+//!    let id = Markers::add(&reaper, "intro", 0.0)?;
+//!    ```
+//!
+//! 2. **In-process async (dispatcher-marshaled).** Build a
+//!    [`LayerRouter`] via [`Services::into_router`] and call through
+//!    the vox-generated `<T>Client`. Calls marshal through the
+//!    backend's dispatcher; useful when the caller can't block the
+//!    backend's thread (e.g. UI thread → DAW main thread).
+//!
+//!    ```ignore
+//!    let router = Reaper.into_router();
+//!    // Pair with a vox::Driver + in-memory transport; clients use
+//!    // the same MarkersClient type used over the network.
+//!    ```
+//!
+//! 3. **Cross-process via vox.** The same [`LayerRouter`] is a
+//!    `vox::Handler<DriverReplySink>` — plug it into any vox
+//!    transport (Unix socket, named pipe, websocket) and external
+//!    processes share the client types. Wire encoding is facet, no
+//!    serde glue.
+//!
+//! 4. **HTTP / WebSocket via axum.** Enable `architect`'s
+//!    `server-axum` feature and wrap the same router with
+//!    [`architect::axum_ws::serve`]. Browser clients use the same
+//!    `<T>Client` types compiled for wasm.
+//!
+//! See `examples/layered-services/` for a runnable composition
+//! walkthrough and `examples/custom-server/` for the axum mount
+//! variant.
 
 use core::any::Any;
 use std::collections::HashMap;
