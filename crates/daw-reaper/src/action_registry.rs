@@ -14,7 +14,8 @@
 use crate::main_thread;
 use daw_control::lock::LockExt;
 use daw_proto::{
-    ActionExecutionResult, ActionListRequest, ActionListResponse, ActionRegistration, DawResult,
+    ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest, ActionListResponse,
+    ActionOrigin, ActionRegistration, ActionSection, DawResult,
 };
 use reaper_high::{Reaper, RegisteredAction};
 use reaper_medium::{

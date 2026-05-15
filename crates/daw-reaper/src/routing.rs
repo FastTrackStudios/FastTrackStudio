@@ -391,13 +391,13 @@ impl Routing for crate::Reaper {
 
     fn remove_route(&self, project: ProjectContext, location: RouteLocation) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let raw_track = reaper_track
             .raw()
-            .map_err(|e| DawError::invalid_object("Track", format!("{e:?}")))?;
+            .map_err(|e| DawError::invalid_object("Track", &format!("{e:?}")))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
 
         let (category, actual_index) = match location.route_type {
             RouteType::Send => {
@@ -429,12 +429,12 @@ impl Routing for crate::Reaper {
         volume: f64,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let reaper_route = fetch_route(&reaper_track, location.route_type, route_index)
-            .ok_or_else(|| DawError::not_found("Route", format!("idx={route_index}")))?;
+            .ok_or_else(|| DawError::not_found("Route", &format!("idx={route_index}")))?;
         let volume_value = ReaperVolumeValue::new(volume)
             .map_err(|e| DawError::operation_failed(format!("invalid volume: {e:?}")))?;
         reaper_route
@@ -445,12 +445,12 @@ impl Routing for crate::Reaper {
 
     fn set_pan(&self, project: ProjectContext, location: RouteLocation, pan: f64) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let reaper_route = fetch_route(&reaper_track, location.route_type, route_index)
-            .ok_or_else(|| DawError::not_found("Route", format!("idx={route_index}")))?;
+            .ok_or_else(|| DawError::not_found("Route", &format!("idx={route_index}")))?;
         let pan_obj = Pan::from_normalized_value(pan.clamp(-1.0, 1.0));
         reaper_route
             .set_pan(pan_obj, EditMode::NormalTweak)
@@ -467,12 +467,12 @@ impl Routing for crate::Reaper {
         muted: bool,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let reaper_route = fetch_route(&reaper_track, location.route_type, route_index)
-            .ok_or_else(|| DawError::not_found("Route", format!("idx={route_index}")))?;
+            .ok_or_else(|| DawError::not_found("Route", &format!("idx={route_index}")))?;
         if muted {
             reaper_route
                 .mute()
@@ -492,12 +492,12 @@ impl Routing for crate::Reaper {
         mono: bool,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let reaper_route = fetch_route(&reaper_track, location.route_type, route_index)
-            .ok_or_else(|| DawError::not_found("Route", format!("idx={route_index}")))?;
+            .ok_or_else(|| DawError::not_found("Route", &format!("idx={route_index}")))?;
         reaper_route
             .set_mono(mono)
             .map_err(|e| DawError::operation_failed(format!("set_mono: {e:?}")))?;
@@ -511,12 +511,12 @@ impl Routing for crate::Reaper {
         inverted: bool,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let reaper_route = fetch_route(&reaper_track, location.route_type, route_index)
-            .ok_or_else(|| DawError::not_found("Route", format!("idx={route_index}")))?;
+            .ok_or_else(|| DawError::not_found("Route", &format!("idx={route_index}")))?;
         reaper_route
             .set_phase_inverted(inverted)
             .map_err(|e| DawError::operation_failed(format!("set_phase: {e:?}")))?;
@@ -549,12 +549,12 @@ impl Routing for crate::Reaper {
         mode: SendMode,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", track)))?;
         let raw_track = reaper_track
             .raw()
-            .map_err(|e| DawError::invalid_object("Track", format!("{e:?}")))?;
+            .map_err(|e| DawError::invalid_object("Track", &format!("{e:?}")))?;
         let route_index = resolve_route_index(&proj, &reaper_track, RouteType::Send, &route)
-            .ok_or_else(|| DawError::not_found("Route", format!("{:?}", route)))?;
+            .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", route)))?;
 
         let hw_count = reaper_track.typed_send_count(SendPartnerType::HardwareOutput);
         let (category, actual_index) = if route_index < hw_count {
@@ -584,13 +584,13 @@ impl Routing for crate::Reaper {
         _num_channels: u32,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let raw_track = reaper_track
             .raw()
-            .map_err(|e| DawError::invalid_object("Track", format!("{e:?}")))?;
+            .map_err(|e| DawError::invalid_object("Track", &format!("{e:?}")))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let (category, actual_index) =
             category_for(&reaper_track, location.route_type, route_index);
         routing_sw::set_track_send_info_value(
@@ -612,13 +612,13 @@ impl Routing for crate::Reaper {
         _num_channels: u32,
     ) -> DawResult<()> {
         let (proj, reaper_track) = resolve(&project, &location.track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", location.track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", location.track)))?;
         let raw_track = reaper_track
             .raw()
-            .map_err(|e| DawError::invalid_object("Track", format!("{e:?}")))?;
+            .map_err(|e| DawError::invalid_object("Track", &format!("{e:?}")))?;
         let route_index =
             resolve_route_index(&proj, &reaper_track, location.route_type, &location.route)
-                .ok_or_else(|| DawError::not_found("Route", format!("{:?}", location.route)))?;
+                .ok_or_else(|| DawError::not_found("Route", &format!("{:?}", location.route)))?;
         let (category, actual_index) =
             category_for(&reaper_track, location.route_type, route_index);
         routing_sw::set_track_send_info_value(
@@ -656,10 +656,10 @@ impl Routing for crate::Reaper {
         enabled: bool,
     ) -> DawResult<()> {
         let (_, reaper_track) = resolve(&project, &track)
-            .ok_or_else(|| DawError::not_found("Track", format!("{:?}", track)))?;
+            .ok_or_else(|| DawError::not_found("Track", &format!("{:?}", track)))?;
         let raw_track = reaper_track
             .raw()
-            .map_err(|e| DawError::invalid_object("Track", format!("{e:?}")))?;
+            .map_err(|e| DawError::invalid_object("Track", &format!("{e:?}")))?;
         routing_sw::set_media_track_info_value(
             Reaper::get().medium_reaper(),
             raw_track,

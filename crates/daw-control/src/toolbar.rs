@@ -102,7 +102,7 @@ impl Toolbar {
 
     /// List all tracked buttons.
     pub async fn get_tracked_buttons(&self) -> crate::Result<Vec<daw_proto::TrackedButton>> {
-        Ok(self.clients.toolbar.get_tracked_buttons().await?)
+        Ok(self.clients.toolbar.tracked_buttons().await?)
     }
 
     /// Snapshot one live toolbar as JSON.
@@ -118,7 +118,7 @@ impl Toolbar {
         live_toolbar_rows_json(
             self.clients
                 .toolbar
-                .get_tracked_buttons()
+                .tracked_buttons()
                 .await?
                 .into_iter()
                 .filter(|row| row.toolbar_name == target_name),
@@ -127,13 +127,7 @@ impl Toolbar {
 
     /// Snapshot all non-empty live toolbars as JSON.
     pub async fn get_live_toolbars_json(&self) -> crate::Result<String> {
-        live_toolbar_rows_json(
-            self.clients
-                .toolbar
-                .get_tracked_buttons()
-                .await?
-                .into_iter(),
-        )
+        live_toolbar_rows_json(self.clients.toolbar.tracked_buttons().await?.into_iter())
     }
 
     /// Parse all toolbar sections from a REAPER menu/toolbar config file as JSON.

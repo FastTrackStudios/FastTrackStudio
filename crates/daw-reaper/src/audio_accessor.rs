@@ -38,7 +38,7 @@ fn next_id() -> String {
     format!("aa-{id}")
 }
 
-fn store(ptr: SendableAccessorPtr) -> Option<String> {
+pub fn store(ptr: SendableAccessorPtr) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
@@ -50,7 +50,7 @@ fn store(ptr: SendableAccessorPtr) -> Option<String> {
     Some(id)
 }
 
-fn get_ptr(id: &str) -> Option<SendableAccessorPtr> {
+pub fn get_ptr(id: &str) -> Option<SendableAccessorPtr> {
     registry()
         .accessors
         .lock_recoverable("audio_accessor")
@@ -58,7 +58,7 @@ fn get_ptr(id: &str) -> Option<SendableAccessorPtr> {
         .copied()
 }
 
-fn remove_ptr(id: &str) -> Option<SendableAccessorPtr> {
+pub fn remove_ptr(id: &str) -> Option<SendableAccessorPtr> {
     registry()
         .accessors
         .lock_recoverable("audio_accessor")
@@ -97,8 +97,8 @@ impl AudioAccessors for crate::Reaper {
                 reaper_medium::ProjectContext::Proj(proj.raw())
             }
         };
-        let midi_item = crate::midi::ReaperMidi::resolve_item(medium, reaper_project_ctx, &item)?;
-        let midi_take = crate::midi::ReaperMidi::resolve_take(medium, midi_item, &take)?;
+        let midi_item = crate::midi::resolve_item(medium, reaper_project_ctx, &item)?;
+        let midi_take = crate::midi::resolve_take(medium, midi_item, &take)?;
         let low = medium.low();
         let accessor = aa_sw::create_take_audio_accessor(low, midi_take);
         store(SendableAccessorPtr::new(accessor))

@@ -45,7 +45,7 @@ impl Daw for ReaperRemote {
         let guid = dispatch(self, move || {
             let mt = main_thread()?;
             let project = mt.current_project()?;
-            Ok(project.guid().to_string())
+            Ok(project.guid.clone())
         })?;
         Ok(RemoteProject::new(self, guid))
     }
@@ -55,7 +55,7 @@ impl Daw for ReaperRemote {
         let validated = dispatch(self, move || {
             let mt = main_thread()?;
             let project = mt.project(&guid_owned)?;
-            Ok(project.guid().to_string())
+            Ok(project.guid.clone())
         })?;
         Ok(RemoteProject::new(self, validated))
     }

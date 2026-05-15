@@ -10,7 +10,7 @@ mod error;
 mod event;
 #[allow(clippy::module_inception)]
 mod service;
-mod tree;
+pub mod tree;
 mod types;
 
 pub use error::*;

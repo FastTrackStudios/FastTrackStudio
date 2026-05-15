@@ -10,11 +10,11 @@ use tracing::warn;
 use super::util::{build_fx_info, fx_location, read_config_str, read_config_u32, safe_fx_call};
 
 /// REAPER container addressing base offset for child slots.
-pub(crate) const CONTAINER_BASE: u32 = 0x2000000;
+pub const CONTAINER_BASE: u32 = 0x2000000;
 
 /// Build the top-level node list for an FX chain. Recurses into
 /// containers via [`build_container_node`].
-pub(crate) fn build_fx_tree_from_chain(
+pub fn build_fx_tree_from_chain(
     chain: &FxChain,
     _is_input: bool,
     top_level_count: u32,
@@ -39,7 +39,7 @@ pub(crate) fn build_fx_tree_from_chain(
 /// signals: `fx_type` config, `container_count` config, and
 /// `info().sub_type_expression`. Containers don't always cleanly
 /// stringify through raw `get_named_config_param`, so we belt-and-brace.
-pub(crate) fn is_container_fx(fx: &reaper_high::Fx) -> bool {
+pub fn is_container_fx(fx: &reaper_high::Fx) -> bool {
     if let Some(ft) = read_config_str(fx, "fx_type")
         && ft == "Container"
     {
@@ -66,10 +66,7 @@ pub(crate) fn is_container_fx(fx: &reaper_high::Fx) -> bool {
 
 /// Get the raw encoded FX index for child `child_index` of `container_fx`
 /// via REAPER's v7.06+ `container_item.X` named config.
-pub(crate) fn container_child_fx_id(
-    container_fx: &reaper_high::Fx,
-    child_index: u32,
-) -> Option<u32> {
+pub fn container_child_fx_id(container_fx: &reaper_high::Fx, child_index: u32) -> Option<u32> {
     let key = format!("container_item.{}", child_index);
     read_config_str(container_fx, &key).and_then(|s| s.parse::<u32>().ok())
 }
@@ -77,7 +74,7 @@ pub(crate) fn container_child_fx_id(
 /// Verify the actual child count of a container matches `expected_count`.
 /// Used after structural mutations to detect silent stride-addressing
 /// failures.
-pub(crate) fn verify_container_child_count(
+pub fn verify_container_child_count(
     chain: &FxChain,
     container_index: u32,
     expected_count: u32,
@@ -178,7 +175,7 @@ fn build_container_node(
 
 /// Resolve an `FxNodeId` to a raw REAPER FX index (chain-local). Plugin
 /// nodes resolve by GUID scan, container nodes by path traversal.
-pub(crate) fn resolve_node_to_raw_index(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
+pub fn resolve_node_to_raw_index(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
     if node_id.is_container() {
         resolve_container_path(chain, node_id)
     } else {
@@ -215,7 +212,7 @@ fn resolve_container_path(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
 
 /// Resolve a plugin `FxNodeId` (GUID) to its raw chain index, scanning
 /// containers if necessary.
-pub(crate) fn resolve_plugin_guid(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
+pub fn resolve_plugin_guid(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
     let target_guid = node_id.as_str();
 
     let top_count = chain.fx_count();
@@ -270,7 +267,7 @@ fn scan_children_for_guid(
 }
 
 #[allow(dead_code)]
-pub(crate) fn resolve_node_to_location(
+pub fn resolve_node_to_location(
     chain: &FxChain,
     node_id: &FxNodeId,
     is_input: bool,

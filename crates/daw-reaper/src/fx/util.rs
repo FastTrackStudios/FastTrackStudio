@@ -11,7 +11,7 @@ use crate::main_thread;
 use crate::project_context::find_project_by_guid;
 
 /// Resolve a [`ProjectContext`] to a REAPER [`reaper_high::Project`].
-pub(crate) fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
+pub fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
     match ctx {
         ProjectContext::Current => Some(Reaper::get().current_project()),
         ProjectContext::Project(guid) => find_project_by_guid(guid),
@@ -19,7 +19,7 @@ pub(crate) fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Proje
 }
 
 /// Find a track by GUID within a project (without curly braces).
-pub(crate) fn resolve_track_by_guid(project: &reaper_high::Project, guid: &str) -> Option<Track> {
+pub fn resolve_track_by_guid(project: &reaper_high::Project, guid: &str) -> Option<Track> {
     for i in 0..project.track_count() {
         if let Some(track) = project.track_by_index(i)
             && track.guid().to_string_without_braces() == guid
@@ -34,7 +34,7 @@ pub(crate) fn resolve_track_by_guid(project: &reaper_high::Project, guid: &str) 
 }
 
 /// Get the FxChain for a given FxChainContext.
-pub(crate) fn resolve_fx_chain(
+pub fn resolve_fx_chain(
     project: &reaper_high::Project,
     context: &FxChainContext,
 ) -> Option<(Track, FxChain)> {
@@ -58,7 +58,7 @@ pub(crate) fn resolve_fx_chain(
 }
 
 /// Resolve an [`FxRef`] (index/guid/name) to a raw chain index.
-pub(crate) fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
+pub fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
     match fx_ref {
         FxRef::Index(idx) => {
             if *idx < chain.fx_count() {
@@ -86,7 +86,7 @@ pub(crate) fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
 }
 
 /// Convert chain-relative index to [`TrackFxLocation`] (input vs normal).
-pub(crate) fn fx_location(index: u32, is_input: bool) -> TrackFxLocation {
+pub fn fx_location(index: u32, is_input: bool) -> TrackFxLocation {
     if is_input {
         TrackFxLocation::InputFxChain(index)
     } else {
@@ -97,7 +97,7 @@ pub(crate) fn fx_location(index: u32, is_input: bool) -> TrackFxLocation {
 /// Wrap a `reaper-high` FX accessor that may panic with stale-reference
 /// `.expect()` calls. Returns `Some(value)` on success, `None` on panic
 /// (logged via tracing). See issue #20.
-pub(crate) fn safe_fx_call<T>(
+pub fn safe_fx_call<T>(
     label: &'static str,
     fx_guid: Option<&str>,
     f: impl FnOnce() -> T,
@@ -128,7 +128,7 @@ fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// REAPER FxInfo sub-type expression → our [`FxType`] enum.
-pub(crate) fn parse_fx_type(sub_type: &str) -> FxType {
+pub fn parse_fx_type(sub_type: &str) -> FxType {
     match sub_type {
         "VST" | "VSTi" => FxType::Vst2,
         "VST3" | "VST3i" => FxType::Vst3,
@@ -144,7 +144,7 @@ pub(crate) fn parse_fx_type(sub_type: &str) -> FxType {
 /// `chain` enables a fallback GUID lookup for container children whose
 /// encoded indices (0x2000000+) can't be resolved by the bounds-checked
 /// `fx_by_index()`.
-pub(crate) fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx {
+pub fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx {
     let guid = fx
         .get_or_query_guid()
         .map(|g| g.to_string_without_braces())
@@ -195,7 +195,7 @@ pub(crate) fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx
 
 /// Build an [`FxParameter`] proto from a `reaper-high` `FxParameter`,
 /// detecting discrete step counts via multiple heuristics.
-pub(crate) fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
+pub fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
     let index = param.index();
     let name = param
         .name()
@@ -298,7 +298,7 @@ pub(crate) fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParamete
 
 /// Read a named config param as a trimmed string. Strips embedded
 /// NULs (raw `Vec<u8>` payload may include them).
-pub(crate) fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
+pub fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
     fx.get_named_config_param(key, 256).ok().map(|bytes| {
         let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
         String::from_utf8_lossy(&bytes[..end]).trim().to_string()
@@ -306,21 +306,21 @@ pub(crate) fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String>
 }
 
 /// Read a named config param as `u32` (0 on failure).
-pub(crate) fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
+pub fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
     read_config_str(fx, key)
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0)
 }
 
 /// Read a named config param as `i32` (0 on failure).
-pub(crate) fn read_config_i32(fx: &reaper_high::Fx, key: &str) -> i32 {
+pub fn read_config_i32(fx: &reaper_high::Fx, key: &str) -> i32 {
     read_config_str(fx, key)
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(0)
 }
 
 /// Read a named config param as `f64` (0.0 on failure).
-pub(crate) fn read_config_f64(fx: &reaper_high::Fx, key: &str) -> f64 {
+pub fn read_config_f64(fx: &reaper_high::Fx, key: &str) -> f64 {
     read_config_str(fx, key)
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0)

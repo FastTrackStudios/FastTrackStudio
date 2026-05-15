@@ -9,35 +9,18 @@
 mod dispatch_sync;
 mod resolve;
 
-use std::sync::Arc;
-
-use daw_proto::batch::service::BatchExecution;
+use daw_proto::BatchExecution;
 use daw_proto::batch::*;
 
-/// Inner state for the batch executor.
-struct BatchExecutorInner {
-    audio_accessor_svc: crate::ReaperAudioAccessor,
-}
-
-/// Batch executor that holds stateful service dependencies behind an Arc for Clone.
-#[derive(Clone)]
-pub struct BatchExecutor {
-    inner: Arc<BatchExecutorInner>,
-}
-
-impl Default for BatchExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// Stateless batch executor. The `AudioAccessors` registry lives at
+/// module level on `crate::audio_accessor`; no per-batch state is
+/// carried.
+#[derive(Clone, Copy, Default)]
+pub struct BatchExecutor;
 
 impl BatchExecutor {
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(BatchExecutorInner {
-                audio_accessor_svc: crate::ReaperAudioAccessor::new(),
-            }),
-        }
+        Self
     }
 
     /// Execute the batch synchronously on REAPER's main thread.
@@ -49,9 +32,7 @@ impl BatchExecutor {
         use reaper_high::Reaper;
         use reaper_medium::UndoScope;
 
-        let services = dispatch_sync::SyncServices {
-            audio_accessor_svc: &self.inner.audio_accessor_svc,
-        };
+        let services = dispatch_sync::SyncServices {};
 
         // Cache the current project GUID so resolve_project() skips FFI per op
         let current_project = Reaper::get().current_project();

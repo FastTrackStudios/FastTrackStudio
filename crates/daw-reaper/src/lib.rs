@@ -79,62 +79,21 @@ pub mod transport;
 pub mod ui;
 pub mod window_geometry;
 
-// Re-export the main types
-pub use action_registry::{
-    ReaperActionRegistry, register_extension_menu, subscribe_action_broadcasts,
-};
-pub use audio_accessor::ReaperAudioAccessor;
-pub use audio_engine::ReaperAudioEngine;
-// `Automation` impl'd on `Reaper` — see `crate::automation`. The old
-// async `ReaperAutomation` service struct retired with the sync port.
-pub use dawfile_service::DawFileOps;
-// `ExtState` impl'd on `Reaper` — see `crate::ext_state`. The old
-// async `ReaperExtState` service struct retired with the architect
-// rpc port.
-// `Effects` impl'd on `Reaper` — see `crate::fx`. The old async
-// `ReaperFx` service struct + FX event broadcaster retired with the
-// architect::rpc port.
-pub use health::ReaperHealth;
-pub use input::ReaperInput;
-pub use item::{ReaperItem, ReaperTake};
-// `LiveMidi` impl'd on `Reaper` — see `crate::live_midi`. The old
-// async `ReaperLiveMidi` service struct retired with the architect
-// rpc port.
-// New shape (post-architect::rpc port): one singleton `Reaper`
-// backend that impls per-service traits (`Markers`, eventually
-// `Items`, `Tracks`, …) with project context flowing through each
-// call. Mounting goes through `marker::serve(Reaper)`. The dispatcher
-// is exposed for direct use in tests / non-vox call sites.
+// Per-service `Reaper*` structs retired with the architect::rpc port —
+// every backend trait now impls on the `crate::Reaper` singleton.
+// Mount via `<service>::serve(Reaper)` / `<service>::descriptor()`.
+//
+// Free helpers (broadcasters / extension menu / project importer)
+// kept; they don't belong to any one service.
+pub use action_registry::{register_extension_menu, subscribe_action_broadcasts};
 pub use marker::{Reaper, ReaperMainThreadDispatcher};
-// `Midi` impl'd on `Reaper` — see `crate::midi`. The old async
-// `ReaperMidi` service struct retired with the architect::rpc port.
-pub use peak::ReaperPeak;
-pub use plugin_loader::{ReaperPluginLoader, eager_load_fx_plugins, set_plugin_context};
-pub use position_conversion::ReaperPositionConversion;
-// `Projects` impl'd on `Reaper` — see `crate::project`. The old async
-// `ReaperProject` service struct retired with the architect::rpc port.
+pub use plugin_loader::{eager_load_fx_plugins, set_plugin_context};
 pub use project_import::register_project_importer;
-// `Regions` impl'd on `Reaper` — see `crate::region`. The old async
-// `ReaperRegion` service struct retired with the architect::rpc port.
 pub use region::get_regions_on_main_thread;
-// `Routing` impl'd on `Reaper` — see `crate::routing`. The old async
-// `ReaperRouting` service struct + broadcasters retired with the
-// architect::rpc port.
-pub use screenset::ReaperScreenset;
-// `TempoMap` impl'd on `Reaper` — see `crate::tempo_map`. The old
-// async `ReaperTempoMap` service struct + broadcasters retired with
-// the architect::rpc port.
 pub use tempo_map::{
     get_tempo_and_time_sig_at_on_main_thread, qn_to_time_on_main_thread, time_to_qn_on_main_thread,
 };
-pub use toolbar::ReaperToolbar;
-// `Tracks` impl'd on `Reaper` — see `crate::track`. The old async
-// `ReaperTrack` service struct + broadcasters retired with the port.
 pub use track::add_track_on_main_thread;
-// `Transport` impl'd on `Reaper` — see `crate::transport`. The old
-// async `ReaperTransport` service struct + broadcasters retired with
-// the architect::rpc port.
-pub use window_geometry::ReaperWindowGeometry;
 
 // Re-export the main thread bridge and transport broadcaster functions
 pub use main_thread::set_task_support;

@@ -47,7 +47,7 @@ impl Envelopes {
         let envelopes = self
             .clients
             .automation
-            .get_envelopes(self.context(), self.track_ref())
+            .envelopes(self.context(), self.track_ref())
             .await?;
         Ok(envelopes)
     }
@@ -58,7 +58,7 @@ impl Envelopes {
         let envelope = self
             .clients
             .automation
-            .get_envelope(self.context(), location)
+            .envelope(self.context(), location)
             .await?;
 
         Ok(envelope.map(|_| {
@@ -164,7 +164,7 @@ impl EnvelopeHandle {
     pub async fn info(&self) -> Result<Envelope> {
         self.clients
             .automation
-            .get_envelope(self.context(), self.location())
+            .envelope(self.context(), self.location())
             .await?
             .ok_or_else(|| Error::Other("Envelope not found".to_string()))
     }
@@ -229,7 +229,7 @@ impl EnvelopeHandle {
         let points = self
             .clients
             .automation
-            .get_points(self.context(), self.location())
+            .points(self.context(), self.location())
             .await?;
         Ok(points)
     }
@@ -243,7 +243,7 @@ impl EnvelopeHandle {
         let points = self
             .clients
             .automation
-            .get_points_in_range(
+            .points_in_range(
                 self.context(),
                 self.location(),
                 TimeRangeParams::new(start, end),
@@ -257,7 +257,7 @@ impl EnvelopeHandle {
         let value = self
             .clients
             .automation
-            .get_value_at(self.context(), self.location(), time)
+            .value_at(self.context(), self.location(), time)
             .await?;
         Ok(value)
     }

@@ -71,12 +71,8 @@ impl DockHost {
         Ok(self.clients.dock_host.restore_layout(blob).await?)
     }
 
-    /// Subscribe to dock events. The provided `Tx` will receive
-    /// [`DockEvent`]s until either side closes.
-    pub async fn subscribe_events(&self, tx: Tx<DockEvent>) -> crate::Result<()> {
-        self.clients.dock_host.subscribe_dock_events(tx).await?;
-        Ok(())
-    }
+    // `subscribe_events` retired with the architect::rpc port —
+    // dock event streaming lives on a sibling trait.
 
     /// Capture the current rendered pixels of a panel.
     ///

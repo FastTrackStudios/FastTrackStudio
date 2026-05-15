@@ -25,16 +25,16 @@ use reaper_medium::{
     UndoBehavior,
 };
 
-/// Service instances needed by sync dispatch for stateful operations.
-pub struct SyncServices<'a> {
-    pub audio_accessor_svc: &'a crate::ReaperAudioAccessor,
-}
+/// Sync-dispatch service handles. Currently empty — every stateful
+/// service moved to module-level statics on `crate::*` modules during
+/// the architect::rpc port, so this is just a marker for the API.
+pub struct SyncServices {}
 
 /// Dispatch a single batch operation synchronously on the main thread.
 pub fn dispatch_op_sync(
     op: &BatchOp,
     outputs: &[Option<StepOutput>],
-    services: &SyncServices<'_>,
+    services: &SyncServices,
 ) -> Result<StepOutput, String> {
     match op {
         BatchOp::Project(op) => dispatch_project_sync(op, outputs),
@@ -56,9 +56,7 @@ pub fn dispatch_op_sync(
         BatchOp::Peak(op) => dispatch_peak_sync(op, outputs),
         BatchOp::PositionConversion(op) => dispatch_position_conversion_sync(op, outputs),
         BatchOp::Health(op) => dispatch_health_sync(op),
-        BatchOp::AudioAccessor(op) => {
-            dispatch_audio_accessor_sync(op, outputs, services.audio_accessor_svc)
-        }
+        BatchOp::AudioAccessor(op) => dispatch_audio_accessor_sync(op, outputs),
         // Services not yet sync-optimized — return error so caller falls back
         _ => Err(format!(
             "sync dispatch not implemented for {:?}",
@@ -2050,7 +2048,6 @@ fn dispatch_take_sync(op: &TakeOp, outputs: &[Option<StepOutput>]) -> Result<Ste
 // =============================================================================
 
 fn dispatch_midi_sync(op: &MidiOp, outputs: &[Option<StepOutput>]) -> Result<StepOutput, String> {
-    use crate::midi::ReaperMidi;
     use crate::safe_wrappers::item as item_sw;
 
     let reaper = Reaper::get();
@@ -2058,34 +2055,34 @@ fn dispatch_midi_sync(op: &MidiOp, outputs: &[Option<StepOutput>]) -> Result<Ste
 
     match op {
         MidiOp::GetNotes(location) => {
-            let take = ReaperMidi::resolve_take_for_location(medium, location)
+            let take = crate::midi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
-            Ok(StepOutput::MidiNoteList(ReaperMidi::read_notes(
+            Ok(StepOutput::MidiNoteList(crate::midi::read_notes(
                 medium, take,
             )))
         }
         MidiOp::GetNotesInRange(location, range) => {
-            let take = ReaperMidi::resolve_take_for_location(medium, location)
+            let take = crate::midi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
-            let notes: Vec<MidiNote> = ReaperMidi::read_notes(medium, take)
+            let notes: Vec<MidiNote> = crate::midi::read_notes(medium, take)
                 .into_iter()
                 .filter(|note| note.overlaps(range.start, range.end))
                 .collect();
             Ok(StepOutput::MidiNoteList(notes))
         }
         MidiOp::GetSelectedNotes(location) => {
-            let take = ReaperMidi::resolve_take_for_location(medium, location)
+            let take = crate::midi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
-            let notes: Vec<MidiNote> = ReaperMidi::read_notes(medium, take)
+            let notes: Vec<MidiNote> = crate::midi::read_notes(medium, take)
                 .into_iter()
                 .filter(|note| note.selected)
                 .collect();
             Ok(StepOutput::MidiNoteList(notes))
         }
         MidiOp::NoteCount(location) => {
-            let take = ReaperMidi::resolve_take_for_location(medium, location)
+            let take = crate::midi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
-            let count = ReaperMidi::read_notes(medium, take).len();
+            let count = crate::midi::read_notes(medium, take).len();
             Ok(StepOutput::U32(count as u32))
         }
         MidiOp::CreateMidiItem(p, t, start, end) => {
@@ -2109,16 +2106,16 @@ fn dispatch_midi_sync(op: &MidiOp, outputs: &[Option<StepOutput>]) -> Result<Ste
             Ok(StepOutput::OptMidiTakeLocation(location))
         }
         MidiOp::AddNote(location, note) => {
-            let take = ReaperMidi::resolve_take_for_location(medium, location)
+            let take = crate::midi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
-            let count_before = ReaperMidi::read_notes(medium, take).len() as u32;
+            let count_before = crate::midi::read_notes(medium, take).len() as u32;
             crate::midi::add_notes_to_take_on_main_thread(take, std::slice::from_ref(note));
             Ok(StepOutput::U32(count_before))
         }
         MidiOp::AddNotes(location, notes) => {
-            let take = ReaperMidi::resolve_take_for_location(medium, location)
+            let take = crate::midi::resolve_take_for_location(medium, location)
                 .ok_or_else(|| "MIDI take not found".to_string())?;
-            let count_before = ReaperMidi::read_notes(medium, take).len() as u32;
+            let count_before = crate::midi::read_notes(medium, take).len() as u32;
             crate::midi::add_notes_to_take_on_main_thread(take, notes);
             let indices: Vec<u32> = (count_before..count_before + notes.len() as u32).collect();
             Ok(StepOutput::U32List(indices))
@@ -2550,7 +2547,6 @@ fn dispatch_position_conversion_sync(
 fn dispatch_audio_accessor_sync(
     op: &AudioAccessorOp,
     outputs: &[Option<StepOutput>],
-    svc: &crate::ReaperAudioAccessor,
 ) -> Result<StepOutput, String> {
     use crate::safe_wrappers::audio_accessor as aa_sw;
     use crate::track::resolve_track_pub;
@@ -2567,7 +2563,7 @@ fn dispatch_audio_accessor_sync(
             let low = Reaper::get().medium_reaper().low();
             let accessor = aa_sw::create_track_audio_accessor(low, raw);
             let ptr = aa_sw::SendableAccessorPtr::new(accessor);
-            Ok(StepOutput::OptStr(svc.store(ptr)))
+            Ok(StepOutput::OptStr(crate::audio_accessor::store(ptr)))
         }
         AudioAccessorOp::CreateTakeAccessor(p, item_ref, take_ref) => {
             let ctx = resolve_project_arg(p, outputs)?;
@@ -2581,19 +2577,17 @@ fn dispatch_audio_accessor_sync(
                     reaper_medium::ProjectContext::Proj(proj.raw())
                 }
             };
-            let midi_item =
-                crate::midi::ReaperMidi::resolve_item(medium, reaper_project_ctx, item_ref)
-                    .ok_or_else(|| "item not found".to_string())?;
-            let midi_take = crate::midi::ReaperMidi::resolve_take(medium, midi_item, take_ref)
+            let midi_item = crate::midi::resolve_item(medium, reaper_project_ctx, item_ref)
+                .ok_or_else(|| "item not found".to_string())?;
+            let midi_take = crate::midi::resolve_take(medium, midi_item, take_ref)
                 .ok_or_else(|| "take not found".to_string())?;
             let low = medium.low();
             let accessor = aa_sw::create_take_audio_accessor(low, midi_take);
             let ptr = aa_sw::SendableAccessorPtr::new(accessor);
-            Ok(StepOutput::OptStr(svc.store(ptr)))
+            Ok(StepOutput::OptStr(crate::audio_accessor::store(ptr)))
         }
         AudioAccessorOp::HasStateChanged(id) => {
-            let ptr = svc
-                .get_ptr(id)
+            let ptr = crate::audio_accessor::get_ptr(id)
                 .ok_or_else(|| format!("unknown accessor ID '{}'", id))?;
             let low = Reaper::get().medium_reaper().low();
             Ok(StepOutput::Bool(aa_sw::audio_accessor_state_changed(
@@ -2602,8 +2596,7 @@ fn dispatch_audio_accessor_sync(
             )))
         }
         AudioAccessorOp::GetSamples(req) => {
-            let ptr = svc
-                .get_ptr(&req.accessor_id)
+            let ptr = crate::audio_accessor::get_ptr(&req.accessor_id)
                 .ok_or_else(|| format!("unknown accessor ID '{}'", req.accessor_id))?;
             let low = Reaper::get().medium_reaper().low();
             let buf_size = (req.num_channels * req.num_samples) as usize;
@@ -2631,8 +2624,7 @@ fn dispatch_audio_accessor_sync(
             }))
         }
         AudioAccessorOp::DestroyAccessor(id) => {
-            let ptr = svc
-                .remove_ptr(id)
+            let ptr = crate::audio_accessor::remove_ptr(id)
                 .ok_or_else(|| format!("unknown accessor ID '{}'", id))?;
             let low = Reaper::get().medium_reaper().low();
             aa_sw::destroy_audio_accessor(low, ptr.get());

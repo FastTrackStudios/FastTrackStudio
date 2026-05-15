@@ -44,7 +44,7 @@ impl Sends {
         let sends = self
             .clients
             .routing
-            .get_sends(self.context(), self.track_ref())
+            .sends(self.context(), self.track_ref())
             .await?;
         Ok(sends)
     }
@@ -94,18 +94,8 @@ impl Sends {
     // Streaming
     // =========================================================================
 
-    /// Subscribe to routing events (sends/receives added, removed, changed, etc.)
-    ///
-    /// Returns a receiver that streams granular routing events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe(&self) -> Result<Rx<RoutingEvent>> {
-        let (tx, rx) = vox::channel::<RoutingEvent>();
-        self.clients
-            .routing
-            .subscribe_routing(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
+    // `subscribe` retired with the architect::rpc port — routing
+    // event streaming lives on a sibling trait.
 
     /// Add a send to another track
     pub async fn add_to(&self, dest_track_guid: &str) -> Result<RouteHandle> {
@@ -172,7 +162,7 @@ impl Receives {
         let receives = self
             .clients
             .routing
-            .get_receives(self.context(), self.track_ref())
+            .receives(self.context(), self.track_ref())
             .await?;
         Ok(receives)
     }
@@ -240,7 +230,7 @@ impl HardwareOutputs {
         let outputs = self
             .clients
             .routing
-            .get_hardware_outputs(self.context(), self.track_ref())
+            .hardware_outputs(self.context(), self.track_ref())
             .await?;
         Ok(outputs)
     }

@@ -333,7 +333,7 @@ impl Daw {
         let info = self
             .clients
             .project
-            .get_current()
+            .current()
             .await?
             .ok_or(Error::NoCurrentProject)?;
 
@@ -474,40 +474,8 @@ impl Daw {
         Ok(())
     }
 
-    /// Subscribe to project changes (open, close, switch)
-    ///
-    /// Returns a receiver that streams project events:
-    /// - `ProjectsChanged`: Full list of open projects
-    /// - `CurrentChanged`: Active project changed
-    /// - `Opened`: A project was opened
-    /// - `Closed`: A project was closed
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use daw_control::Daw;
-    ///
-    /// # async fn example(daw: &Daw) -> daw_control::Result<()> {
-    /// let mut rx = daw.subscribe_projects().await?;
-    /// while let Ok(Some(event)) = rx.recv().await {
-    ///     match &*event {
-    ///         daw_control::ProjectEvent::CurrentChanged(guid) => {
-    ///             println!("Current project: {:?}", guid);
-    ///         }
-    ///         daw_control::ProjectEvent::ProjectsChanged(projects) => {
-    ///             println!("Projects: {} open", projects.len());
-    ///         }
-    ///         _ => {}
-    ///     }
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn subscribe_projects(&self) -> crate::Result<vox::Rx<ProjectEvent>> {
-        let (tx, rx) = vox::channel::<ProjectEvent>();
-        self.clients.project.subscribe(tx).await?;
-        Ok(rx)
-    }
+    // `subscribe_projects` retired with the architect::rpc port —
+    // project event streaming lives on a sibling trait.
 
     /// Get a handle to the audio engine.
     ///
@@ -606,7 +574,7 @@ impl Daw {
     /// Returns every plugin known to REAPER (VST2, VST3, CLAP, AU, JS, etc.)
     /// with its display name and full identifier string.
     pub async fn installed_plugins(&self) -> crate::Result<Vec<InstalledFx>> {
-        Ok(self.clients.fx.list_installed_fx().await?)
+        Ok(self.clients.fx.list_installed().await?)
     }
 
     /// Get the last touched FX parameter.
@@ -614,7 +582,7 @@ impl Daw {
     /// Returns information about which FX parameter was most recently
     /// adjusted by the user in the DAW UI.
     pub async fn last_touched_fx(&self) -> crate::Result<Option<LastTouchedFx>> {
-        Ok(self.clients.fx.get_last_touched_fx().await?)
+        Ok(self.clients.fx.last_touched().await?)
     }
 
     /// Show a message in the DAW's console/log window.

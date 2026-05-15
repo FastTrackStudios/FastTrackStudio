@@ -12,7 +12,7 @@ use super::util::{read_config_u32, safe_fx_call};
 
 /// Find the byte offset of the closing `>` for an RPP block in
 /// `block_text`. RPP nests with `<TAG` / standalone `>`.
-pub(crate) fn find_block_end(block_text: &str) -> Option<usize> {
+pub fn find_block_end(block_text: &str) -> Option<usize> {
     let mut depth = 0i32;
     let mut offset = 0usize;
 
@@ -36,7 +36,7 @@ pub(crate) fn find_block_end(block_text: &str) -> Option<usize> {
 /// Recursively capture FX state chunks for every plugin in the chain,
 /// descending into containers. Containers themselves are skipped (their
 /// state is the union of children).
-pub(crate) fn capture_fx_state_recursive(
+pub fn capture_fx_state_recursive(
     chain: &FxChain,
     track: &Track,
     top_level_count: u32,
@@ -114,7 +114,7 @@ fn capture_single_fx(
 
 /// Read an FX block out of the track chunk by index. Used as the CLAP
 /// fallback when `Fx::tag_chunk()` fails.
-pub(crate) fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Option<String> {
+pub fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Option<String> {
     let chunk = track
         .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
         .ok()?;
@@ -136,7 +136,7 @@ pub(crate) fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Opti
 /// Replace the raw RPP block text for a specific FX by chain index by
 /// rewriting the entire track chunk. CLAP fallback for
 /// `Fx::set_tag_chunk()`.
-pub(crate) fn set_fx_block_via_track_chunk(
+pub fn set_fx_block_via_track_chunk(
     track: &Track,
     fx_index: u32,
     new_block: &str,

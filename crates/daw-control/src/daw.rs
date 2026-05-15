@@ -78,7 +78,7 @@ impl Daw {
     pub async fn current_project() -> Result<Project> {
         let info = DawConnection::get()
             .project
-            .get_current()
+            .current()
             .await?
             .ok_or_else(|| Error::Other("No current project".to_string()))?;
 
