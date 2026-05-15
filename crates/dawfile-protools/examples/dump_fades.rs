@@ -1,87 +1,107 @@
-//! For each fade track-entry, print the referenced region's length so we can
-//! verify fade-length comes from the audio_regions table.
+//! Dump raw byte-level structure of every fade track entry in a session
+//! file, plus the audio region it references. Used for reverse-engineering
+//! the fade-length encoding.
+//!
+//! Usage: cargo run --example dump_fades -- <path-to-.ptx>
 
-use dawfile_protools::block::{self, Block};
-use dawfile_protools::content_type::ContentType;
-use dawfile_protools::cursor::Cursor;
-use dawfile_protools::decrypt;
+use dawfile_protools::{block, content_type::ContentType, cursor::Cursor, decrypt};
+use std::env;
 
-fn find_all<'a>(blocks: &'a [Block], ct: ContentType, out: &mut Vec<&'a Block>) {
-    for b in blocks {
-        if b.content_type == Some(ct) {
-            out.push(b);
-        }
-        find_all(&b.children, ct, out);
-    }
-}
+fn main() {
+    let path = env::args().nth(1).expect("usage: dump_fades <file>");
+    let mut data = std::fs::read(&path).expect("read");
+    let _ = decrypt::decrypt(&mut data).expect("decrypt");
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = std::env::args().nth(1).expect("path");
-    let s = dawfile_protools::read_session(&path, 48000)?;
-    // Re-parse raw to inspect raw bytes
-    let mut data = std::fs::read(&path)?;
-    let _ = decrypt::decrypt(&mut data)?;
     let is_be = data.get(0x11).copied().unwrap_or(0) != 0;
-    let blocks = block::parse_blocks(&data, is_be);
     let cursor = Cursor::new(&data, is_be);
+    let blocks = block::parse_blocks(&data, is_be);
 
-    let mut entries = Vec::new();
-    find_all(&blocks, ContentType::AudioRegionTrackEntryNew, &mut entries);
+    println!("is_bigendian: {is_be}");
 
-    println!("audio_regions table has {} entries", s.audio_regions.len());
+    let map_block = find_top_level(&blocks, ContentType::AudioRegionTrackMapNew)
+        .expect("AudioRegionTrackMapNew");
 
-    for (i, e) in entries.iter().enumerate() {
-        if e.offset + 47 > data.len() {
-            continue;
-        }
-        let flag = data[e.offset + 46];
-        if flag != 0x01 {
-            continue;
-        }
-        // Find the child sub-entry
-        let sub = e
-            .children
-            .iter()
-            .find(|c| c.content_type == Some(ContentType::AudioRegionTrackSubEntryNew));
-        let Some(sub) = sub else { continue };
+    let map_entries = map_block.find_all(ContentType::AudioRegionTrackMapEntriesNew);
+    println!("playlist count: {}", map_entries.len());
 
-        // Region index = u32 at sub.offset + 4
-        let raw_offset = sub.offset + 4;
-        if raw_offset + 4 > data.len() {
-            continue;
-        }
-        let raw_index = cursor.u32_at(raw_offset) as u16;
-        // Start position = u32 at sub.offset + 9 (samples) OR u40 if +16 == 0x40
-        let start_offset = sub.offset + 9;
-        let is_tick = sub.offset + 17 <= data.len() && cursor.u8_at(sub.offset + 16) == 0x40;
-        let start_samples = if !is_tick && start_offset + 4 <= data.len() {
-            cursor.u32_at(start_offset) as u64
-        } else {
-            0
+    let mut fade_count = 0usize;
+
+    for (pi, map_entry) in map_entries.iter().enumerate() {
+        let playlist_name = {
+            let no = map_entry.offset + 2;
+            let (n, _) = cursor.length_prefixed_string(no);
+            n
         };
 
-        // Look up region
-        let region = s.audio_regions.iter().find(|r| r.index == raw_index);
-        let (rname, rlen, rstart, rfile) = region
-            .map(|r| (r.name.clone(), r.length, r.start_pos, r.audio_file_index))
-            .unwrap_or((String::from("?"), 0, 0, 0));
+        for track_entry in &map_entry.find_all(ContentType::AudioRegionTrackEntryNew) {
+            let te_off = track_entry.offset;
+            let te_size = track_entry.block_size as usize;
+            let te_end = te_off + te_size;
+            let is_fade = te_off + 47 <= data.len() && data[te_off + 46] == 0x01;
 
-        println!(
-            "fade #{:2}: entry_off=0x{:x} sub_off=0x{:x} reg_idx={} start_samples={} reg={:?} reg_len={}",
-            i, e.offset, sub.offset, raw_index, start_samples, rname, rlen
-        );
-        let _ = (rstart, rfile);
-        // Dump sub-entry bytes (37 bytes after content_type)
-        let sub_end = (sub.offset + sub.block_size as usize).min(data.len());
-        let bytes: Vec<String> = data[sub.offset..sub_end]
+            if !is_fade {
+                continue;
+            }
+
+            fade_count += 1;
+            println!(
+                "\n=== FADE #{} on playlist[{}] {:?} ===",
+                fade_count, pi, playlist_name
+            );
+            println!(
+                "  TrackEntry @0x{:x}  block_size={}  end=0x{:x}",
+                te_off, te_size, te_end
+            );
+            // Dump the FULL track entry payload as hex
+            let end_show = te_end.min(data.len());
+            println!("  TrackEntry bytes ({} bytes total):", end_show - te_off);
+            print_hex_with_offsets(&data[te_off..end_show], te_off, 0);
+
+            // Dump each sub-entry
+            for sub in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
+                let so = sub.offset;
+                let ss = sub.block_size as usize;
+                let se = (so + ss).min(data.len());
+                let raw_index = cursor.u32_at(so + 4) as u16;
+                println!(
+                    "    SubEntry @0x{:x} size={} region_index={} (0x{:04x})",
+                    so, ss, raw_index, raw_index
+                );
+                println!("    SubEntry bytes:");
+                print_hex_with_offsets(&data[so..se], so, 4);
+            }
+        }
+    }
+
+    println!("\nTotal fade entries: {}", fade_count);
+}
+
+fn find_top_level(blocks: &[block::Block], ct: ContentType) -> Option<&block::Block> {
+    blocks.iter().find(|b| b.content_type == Some(ct))
+}
+
+fn print_hex_with_offsets(bytes: &[u8], abs_base: usize, indent_extra: usize) {
+    let indent = " ".repeat(2 + indent_extra);
+    for (i, chunk) in bytes.chunks(16).enumerate() {
+        let off = i * 16;
+        let hex: Vec<String> = chunk.iter().map(|b| format!("{:02x}", b)).collect();
+        let ascii: String = chunk
             .iter()
-            .map(|b| format!("{:02x}", b))
+            .map(|&b| {
+                if (0x20..0x7f).contains(&b) {
+                    b as char
+                } else {
+                    '.'
+                }
+            })
             .collect();
         println!(
-            "    sub_entry [{} bytes]: {}",
-            sub_end - sub.offset,
-            bytes.join(" ")
+            "{}+{:04x} (abs 0x{:06x}): {:48}  |{}|",
+            indent,
+            off,
+            abs_base + off,
+            hex.join(" "),
+            ascii
         );
     }
-    Ok(())
 }

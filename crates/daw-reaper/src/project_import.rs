@@ -563,10 +563,50 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 }
 
                 // Get source filename and resolve to absolute on-disk path.
+                //
+                // The region's `audio_file_index` from the parser is currently
+                // unreliable (PT12 stores file ↔ region mapping in a block we
+                // don't decode yet). Fall back to matching the region NAME
+                // against the audio file stems: PT auto-generates region names
+                // like "02 LORD OF THE FIGHT (Vocals)_1-03.L" where the part
+                // before the trailing "-NN.L/R" is the source filename stem.
+                fn region_to_file_stem(region_name: &str) -> &str {
+                    // Strip optional ".L"/".R" channel suffix.
+                    let without_chan = region_name
+                        .strip_suffix(".L")
+                        .or_else(|| region_name.strip_suffix(".R"))
+                        .unwrap_or(region_name);
+                    // Strip optional "-NN" sub-region suffix.
+                    if let Some(idx) = without_chan.rfind('-') {
+                        let suffix = &without_chan[idx + 1..];
+                        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                            return &without_chan[..idx];
+                        }
+                    }
+                    without_chan
+                }
+                let stem = region_to_file_stem(&region.name);
                 let filename = session
                     .audio_files
                     .iter()
-                    .find(|f| f.index == region.audio_file_index)
+                    // Exact match first.
+                    .find(|f| {
+                        f.filename
+                            .strip_suffix(".wav")
+                            .or_else(|| f.filename.strip_suffix(".WAV"))
+                            .map(|s| s == stem)
+                            .unwrap_or(false)
+                    })
+                    // Then try a starts-with (handles ".dup1" / ".01" tail).
+                    .or_else(|| {
+                        session.audio_files.iter().find(|f| {
+                            f.filename
+                                .strip_suffix(".wav")
+                                .or_else(|| f.filename.strip_suffix(".WAV"))
+                                .map(|s| stem.starts_with(s) || s.starts_with(stem))
+                                .unwrap_or(false)
+                        })
+                    })
                     .map(|f| f.filename.as_str())
                     .unwrap_or("");
                 let absolute_path = resolve_audio_path(filename);

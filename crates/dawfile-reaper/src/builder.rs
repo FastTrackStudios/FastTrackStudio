@@ -773,6 +773,16 @@ impl ItemBuilder {
         self
     }
 
+    /// Override the name of the last-pushed take. Useful when the take's
+    /// display label should differ from the source file path (e.g. show a
+    /// PT region name instead of the long absolute path).
+    pub fn take_name(mut self, name: impl Into<String>) -> Self {
+        if let Some(last) = self.takes.last_mut() {
+            last.name = name.into();
+        }
+        self
+    }
+
     fn build(mut self) -> Item {
         self.item.takes = self.takes;
         self.item

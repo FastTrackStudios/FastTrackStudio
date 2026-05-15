@@ -275,12 +275,16 @@ fn parse_markers_v12(
         return None;
     }
 
-    // Baseline = smallest encoded value (assumed to correspond to tick 0).
-    let baseline = raw.iter().map(|(e, _)| *e).min().unwrap();
+    // Baseline = session "tick 0" (start of bar 1) in PT's encoded form.
+    // Marker positions are stored as `2^62 + ZERO_TICKS + actual_tick_offset`,
+    // mirroring how PT stores all timestamps. Subtracting this constant gives
+    // the tick offset from the session start, so a marker at bar 3 in PT
+    // lands on bar 3 in the export (not bar 1).
+    const MARKER_BASELINE: u64 = (1u64 << 62) + ZERO_TICKS;
 
     let mut markers = Vec::with_capacity(raw.len());
     for (i, (encoded, name)) in raw.into_iter().enumerate() {
-        let tick_pos = encoded.saturating_sub(baseline);
+        let tick_pos = encoded.saturating_sub(MARKER_BASELINE);
         let sample_pos = tick_to_sample(tick_pos, tempo_map, target_sample_rate);
         markers.push(Marker {
             name,
