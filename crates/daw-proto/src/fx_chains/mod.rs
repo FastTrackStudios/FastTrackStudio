@@ -5,4 +5,4 @@ mod service;
 pub use service::{FxChains, FxChainsRpc};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, FxChainsClient, descriptor, serve};
+pub use service::{Dispatcher, FxChainsClient, descriptor, layer, serve};

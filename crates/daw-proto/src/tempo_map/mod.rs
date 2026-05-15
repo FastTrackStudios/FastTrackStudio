@@ -10,7 +10,7 @@ pub use event::*;
 pub use service::{TempoMap, TempoMapRpc};
 #[cfg(feature = "vox")]
 pub use service::{
-    TempoMapClient, TempoMapRpcDispatcher as Dispatcher, serve,
+    TempoMapClient, TempoMapRpcDispatcher as Dispatcher, layer, serve,
     tempo_map_rpc_service_descriptor as descriptor,
 };
 pub use tempo_point::*;

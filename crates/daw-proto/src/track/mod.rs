@@ -28,7 +28,7 @@ pub use service::{TrackExtStateRequest, Tracks, TracksRpc};
 // names so mounting reads `track::descriptor()` + `track::serve(Reaper)`.
 #[cfg(feature = "vox")]
 pub use service::{
-    TracksClient, TracksRpcDispatcher as Dispatcher, serve,
+    TracksClient, TracksRpcDispatcher as Dispatcher, layer, serve,
     tracks_rpc_service_descriptor as descriptor,
 };
 

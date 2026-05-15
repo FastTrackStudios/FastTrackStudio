@@ -16,4 +16,4 @@ pub use service::{
 };
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, MidiClient, descriptor, serve};
+pub use service::{Dispatcher, MidiClient, descriptor, layer, serve};

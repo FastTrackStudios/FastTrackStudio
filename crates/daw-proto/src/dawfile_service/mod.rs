@@ -9,4 +9,4 @@ pub use types::{
 };
 
 #[cfg(feature = "vox")]
-pub use service::{DawFileOpsClient, Dispatcher, descriptor, serve};
+pub use service::{DawFileOpsClient, Dispatcher, descriptor, layer, serve};

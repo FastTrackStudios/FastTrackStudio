@@ -14,4 +14,4 @@ pub use program::*;
 pub use service::{BatchExecution, BatchExecutionRpc};
 
 #[cfg(feature = "vox")]
-pub use service::{BatchExecutionClient, Dispatcher, descriptor, serve};
+pub use service::{BatchExecutionClient, Dispatcher, descriptor, layer, serve};

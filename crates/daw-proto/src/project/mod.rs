@@ -15,4 +15,4 @@ pub use service::{Projects, ProjectsRpc};
 pub use types::{ProjectContext, ProjectInfo};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, ProjectsClient, descriptor, serve};
+pub use service::{Dispatcher, ProjectsClient, descriptor, layer, serve};

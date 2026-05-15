@@ -12,4 +12,4 @@ pub use types::{
 };
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, InputClient, descriptor, serve};
+pub use service::{Dispatcher, InputClient, descriptor, layer, serve};

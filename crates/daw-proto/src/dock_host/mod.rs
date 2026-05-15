@@ -7,4 +7,4 @@ pub use service::{DockHosting, DockHostingRpc};
 pub use types::{DockEvent, DockHandle, DockKind, PanelPixels, UiEventDto};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, DockHostingClient, descriptor, serve};
+pub use service::{Dispatcher, DockHostingClient, descriptor, layer, serve};

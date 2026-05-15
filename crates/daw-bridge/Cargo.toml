@@ -23,6 +23,7 @@ daw-allocator.workspace = true
 # ROAM service framework
 vox.workspace = true
 vox-stream.workspace = true
+architect = { workspace = true, features = ["vox"] }
 
 # Async runtime
 

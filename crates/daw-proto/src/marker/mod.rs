@@ -26,6 +26,6 @@ pub use service::{Markers, MarkersRpc};
 // rather than juggling the underscored mirror names directly.
 #[cfg(feature = "vox")]
 pub use service::{
-    MarkersClient, MarkersRpcDispatcher as Dispatcher,
+    MarkersClient, MarkersRpcDispatcher as Dispatcher, layer,
     markers_rpc_service_descriptor as descriptor, serve,
 };

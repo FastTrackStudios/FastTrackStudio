@@ -27,17 +27,7 @@ use std::sync::OnceLock;
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
 
-use routed_handler::{DawConnectionAcceptor, RoutedHandler};
-
-// Service descriptors / serve fns for method ID routing. Every backend
-// now mounts via `<service>::serve(daw::reaper::Reaper)` against the
-// stateless singleton — no per-service struct or dispatcher::new
-// indirection.
-use daw::service::{
-    action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, health,
-    input, item, live_midi, marker, midi, plugin_loader, project, region, routing, screenset, take,
-    tempo_map, toolbar, track, transport, window_geometry,
-};
+use routed_handler::DawConnectionAcceptor;
 
 // ============================================================================
 // Global State (TaskSupport for main thread dispatch)
@@ -153,53 +143,15 @@ async fn register_daw_dispatcher() {
     let reaper = daw::reaper::Reaper;
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
-    // Compose all service dispatchers via RoutedHandler. Stateless
-    // backend — `<service>::serve(Reaper)` wraps the singleton in the
-    // architect-rpc bridge, which marshals sync calls onto REAPER's
-    // main thread through `HasDispatcher`.
-    let daw_handler = RoutedHandler::new()
-        .with(transport::descriptor(), transport::serve(reaper))
-        .with(project::descriptor(), project::serve(reaper))
-        .with(marker::descriptor(), marker::serve(reaper))
-        .with(region::descriptor(), region::serve(reaper))
-        .with(tempo_map::descriptor(), tempo_map::serve(reaper))
-        .with(audio_engine::descriptor(), audio_engine::serve(reaper))
-        .with(midi::descriptor(), midi::serve(reaper))
-        // MidiAnalysisService is registered out-of-tree by `keyflow-daw-
-        // analysis` (loaded via fts-extensions); see daw-reaper a823b67
-        // for the cycle that prevents in-tree registration.
-        .with(fx::descriptor(), fx::serve(reaper))
-        .with(track::descriptor(), track::serve(reaper))
-        .with(routing::descriptor(), routing::serve(reaper))
-        .with(live_midi::descriptor(), live_midi::serve(reaper))
-        .with(ext_state::descriptor(), ext_state::serve(reaper))
-        .with(health::descriptor(), health::serve(reaper))
-        .with(item::items_descriptor(), item::serve(reaper))
-        .with(take::descriptor(), take::serve(reaper))
-        .with(
-            action_registry::descriptor(),
-            action_registry::serve(reaper),
-        )
-        .with(input::descriptor(), input::serve(reaper))
-        .with(toolbar::descriptor(), toolbar::serve(reaper))
-        .with(screenset::descriptor(), screenset::serve(reaper))
-        .with(
-            dawfile_service::descriptor(),
-            dawfile_service::serve(reaper),
-        )
-        .with(
-            window_geometry::descriptor(),
-            window_geometry::serve(reaper),
-        )
-        .with(plugin_loader::descriptor(), plugin_loader::serve(reaper))
-        .with(automation::descriptor(), automation::serve(reaper))
-        .with(batch::descriptor(), batch::serve(reaper))
-        .with(
-            daw_proto::dock_host::descriptor(),
-            daw_proto::dock_host::serve(dock_host),
-        );
+    // Bundle every DAW service into one `LayerSet`, bolt on the
+    // dock-host service (it's not part of `DawBackend` because its
+    // backend type differs), and serve. The MIDI analysis service
+    // (`keyflow-daw-analysis`) is mounted out-of-tree by fts-extensions;
+    // see daw-reaper a823b67 for why.
+    let daw_handler = daw_proto::service_set::daw_layers(reaper)
+        .merge(daw_proto::dock_host::layer(dock_host))
+        .serve();
 
-    // Build the connection acceptor from the routed handler
     let acceptor = DawConnectionAcceptor::new(daw_handler);
 
     // Start Unix socket server

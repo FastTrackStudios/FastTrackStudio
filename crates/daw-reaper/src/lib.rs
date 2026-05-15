@@ -35,7 +35,7 @@ pub mod bootstrap;
 pub mod local_caller;
 pub mod plugin_services;
 pub mod remote;
-pub mod routed_handler;
+
 pub mod safe_wrappers;
 pub mod sync;
 pub mod sync_api;
@@ -116,4 +116,4 @@ pub use toolbar::process_deferred_ops as process_toolbar_ops;
 // Re-export extension bootstrap convenience
 pub use bootstrap::{build_extension_daw, build_extension_daw_with};
 pub use plugin_services::create_daw_handler;
-pub use routed_handler::RoutedHandler;
+// `RoutedHandler` retired — use `architect::LayerRouter` directly.

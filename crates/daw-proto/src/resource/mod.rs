@@ -5,4 +5,4 @@ mod service;
 pub use service::{ResourcePaths, ResourcePathsRpc};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, ResourcePathsClient, descriptor, serve};
+pub use service::{Dispatcher, ResourcePathsClient, descriptor, layer, serve};

@@ -28,6 +28,6 @@ pub use transport::{
 pub use service::TransportRpc;
 #[cfg(feature = "vox")]
 pub use service::{
-    TransportClient, TransportRpcDispatcher as Dispatcher, serve,
+    TransportClient, TransportRpcDispatcher as Dispatcher, layer, serve,
     transport_rpc_service_descriptor as descriptor,
 };

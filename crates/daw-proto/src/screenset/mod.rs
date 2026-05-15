@@ -11,4 +11,4 @@ pub use types::{
 };
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, ScreensetsClient, descriptor, serve};
+pub use service::{Dispatcher, ScreensetsClient, descriptor, layer, serve};

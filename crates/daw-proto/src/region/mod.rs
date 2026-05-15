@@ -15,6 +15,6 @@ pub use service::{AddRegionInLaneRequest, Regions, RegionsRpc};
 // names so mounting reads `region::descriptor()` + `region::serve(Reaper)`.
 #[cfg(feature = "vox")]
 pub use service::{
-    RegionsClient, RegionsRpcDispatcher as Dispatcher,
+    RegionsClient, RegionsRpcDispatcher as Dispatcher, layer,
     regions_rpc_service_descriptor as descriptor, serve,
 };

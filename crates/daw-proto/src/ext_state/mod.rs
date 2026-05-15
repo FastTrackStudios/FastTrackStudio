@@ -5,4 +5,4 @@ mod service;
 pub use service::{ExtState, ExtStateRpc};
 
 #[cfg(feature = "vox")]
-pub use service::{Dispatcher, ExtStateClient, descriptor, serve};
+pub use service::{Dispatcher, ExtStateClient, descriptor, layer, serve};
