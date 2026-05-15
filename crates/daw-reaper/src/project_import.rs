@@ -583,10 +583,12 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
             } else {
                 (track.pan as f64 / 100.0).clamp(-1.0, 1.0)
             };
+            // NOTE: track.mute is currently unreliable — the byte we read at
+            // 0x1029 +5 doesn't match the user's actual mute pattern, so we
+            // skip emitting REAPER MUTESOLO until the real mute encoding is
+            // identified. Volume/pan readings are verified accurate.
+            let _ = track.mute;
             let mut t = t.volume(linear_vol).pan(reaper_pan);
-            if track.mute {
-                t = t.muted();
-            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.audio_regions.len() {
                     continue;
@@ -728,10 +730,12 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 10f64.powf(track.volume_centibel as f64 / 200.0)
             };
             let reaper_pan = (track.pan as f64 / 100.0).clamp(-1.0, 1.0);
+            // NOTE: track.mute is currently unreliable — the byte we read at
+            // 0x1029 +5 doesn't match the user's actual mute pattern, so we
+            // skip emitting REAPER MUTESOLO until the real mute encoding is
+            // identified. Volume/pan readings are verified accurate.
+            let _ = track.mute;
             let mut t = t.volume(linear_vol).pan(reaper_pan);
-            if track.mute {
-                t = t.muted();
-            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.midi_regions.len() {
                     continue;
@@ -746,7 +750,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 }
 
                 t = t.item(position_secs, length_secs, |item| {
-                    item.name(&region.name).source_midi().midi(|midi| {
+                    // `.midi(...)` adds the MIDI take; do NOT also call
+                    // `.source_midi()` — that would push an empty MIDI take
+                    // first, leaving the real data on take #1 (and REAPER
+                    // would render the item as silent take #0).
+                    item.name(&region.name).midi(|midi| {
                         // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
                         // the REAPER builder to use the same PPQN so positions
                         // and durations don't need numeric rescaling.

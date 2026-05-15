@@ -4,7 +4,7 @@
 //! They are format-specific (not yet mapped to `daw_proto` types).
 
 /// A parsed Pro Tools session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProToolsSession {
     /// Pro Tools version that created this session (5-12).
     pub version: u16,
@@ -44,7 +44,7 @@ pub struct ProToolsSession {
 }
 
 /// A reference to an audio file used in the session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AudioFile {
     /// Filename (typically just the stem + extension, e.g. "kick.wav").
     pub filename: String,
@@ -55,7 +55,7 @@ pub struct AudioFile {
 }
 
 /// An audio region on the timeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AudioRegion {
     /// Region name.
     pub name: String,
@@ -72,7 +72,7 @@ pub struct AudioRegion {
 }
 
 /// A MIDI event within a MIDI region.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MidiEvent {
     /// Position relative to region start (in ticks).
     pub position: u64,
@@ -85,7 +85,7 @@ pub struct MidiEvent {
 }
 
 /// A MIDI region on the timeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MidiRegion {
     /// Region name.
     pub name: String,
@@ -106,7 +106,7 @@ pub struct MidiRegion {
 /// In Pro Tools, each track can have multiple playlists (named arrangements of
 /// regions). The active playlist's regions are in [`Track::regions`]; any
 /// inactive alternates are stored here.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Playlist {
     /// Playlist name (e.g. `"Kick.01"`, `"Kick.02"`).
     pub name: String,
@@ -124,7 +124,7 @@ pub enum TrackKind {
 }
 
 /// A track (audio or MIDI) with its region assignments.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Track {
     /// Track name (from the track definition block).
     pub name: String,
@@ -164,7 +164,7 @@ pub struct Track {
 /// holding the lengths and curve shape. The fade entry's `+4` field indexes
 /// into that parallel array. See `docs/pt-fade-encoding.md` for the byte
 /// layout.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FadeRegion {
     /// Start position on the timeline, in samples at target rate.
     pub start_pos: u64,
@@ -194,7 +194,7 @@ impl Track {
 }
 
 /// A region placed on a track.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrackRegion {
     /// Index into either `audio_regions` or `midi_regions`.
     pub region_index: u16,
@@ -203,7 +203,7 @@ pub struct TrackRegion {
 }
 
 /// A single constant-tempo segment on the session timeline.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TempoEvent {
     /// Position in ticks (relative to the session start, ZERO_TICKS-based).
     pub tick_start: u64,
@@ -216,7 +216,7 @@ pub struct TempoEvent {
 }
 
 /// A time-signature change event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MeterEvent {
     /// Position in ticks (relative to session start).
     pub tick_start: u64,
@@ -231,7 +231,7 @@ pub struct MeterEvent {
 }
 
 /// A user-defined marker (Pro Tools Memory Location).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Marker {
     /// Marker name.
     pub name: String,
@@ -247,7 +247,7 @@ pub struct Marker {
 ///
 /// Pro Tools keeps a single session-wide list (block 0x1018) of all plugin
 /// types used anywhere in the session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PluginEntry {
     /// Insert slot index within a track's insert chain (0-based).
     ///
@@ -283,7 +283,7 @@ impl PluginEntry {
 }
 
 /// A hardware or bus I/O channel configured in the session's I/O setup.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct IoChannel {
     /// Channel display name (e.g., "Out 1-2", "MacBook Pro Speakers 1-2").
     pub name: String,

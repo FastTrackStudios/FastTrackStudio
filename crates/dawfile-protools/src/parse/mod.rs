@@ -126,20 +126,17 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     });
 
     // Step 12: Decode per-track mix state (volume / pan / mute) from 0x1029
-    // blocks. Each mixable track has one such block in document order; the
-    // Master output is excluded. We walk unique-name audio tracks first, then
-    // MIDI tracks (skipping the Master entry), consuming one mix-state per
-    // distinct track. Stereo channel siblings (consecutive same-name audio
-    // tracks) share a single mix state — they're a stereo pair in PT.
+    // blocks. Empirically the blocks are emitted in audio-tracks order (per
+    // the 0x1015 list) followed by mixable MIDI/aux tracks (per 0x2519,
+    // skipping Master). Stereo PT tracks share one mix state across their
+    // L/R channel siblings (consecutive same-name entries).
     //
     // See `docs/pt-track-properties.md` for the byte layout.
     {
         let mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
         let data = cursor.data();
         let mut mix_iter = mix_blocks.iter().filter_map(|b| {
-            let p = b.offset; // points at content_type
-            // payload starts at +2 (after content_type u16). Need +1..+5 vol,
-            // +5 mute, +13..+17 pan (offsets relative to payload start).
+            let p = b.offset;
             let payload = p + 2;
             if payload + 17 > data.len() {
                 return None;
@@ -150,6 +147,8 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             Some((vol, mute, pan))
         });
 
+        // Audio tracks first, in 0x1015 order. Stereo channel siblings share
+        // a single mix state.
         let mut last_name = String::new();
         let mut last_state: Option<(i32, bool, i32)> = None;
         for t in audio_tracks.iter_mut() {
@@ -164,12 +163,10 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             }
         }
 
-        // MIDI tracks — skip the Master entry (PT excludes it from 0x1029).
+        // Then MIDI tracks (skip Master, no 0x1029 for it).
         let mut last_name = String::new();
         let mut last_state: Option<(i32, bool, i32)> = None;
         for t in midi_tracks.iter_mut() {
-            // Heuristic: PT names its master fader "Master 1" (or similar
-            // "Master" prefix). Skip those — no 0x1029 block for them.
             if t.name == "Master 1" || t.name.starts_with("Master") {
                 continue;
             }
