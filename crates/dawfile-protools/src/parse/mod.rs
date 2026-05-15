@@ -125,56 +125,90 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             && !audio_names.contains(strip_playlist_suffix(t.name.as_str()))
     });
 
-    // Step 12: Decode per-track mix state (volume / pan / mute) from 0x1029
-    // blocks. Empirically the blocks are emitted in audio-tracks order (per
-    // the 0x1015 list) followed by mixable MIDI/aux tracks (per 0x2519,
-    // skipping Master). Stereo PT tracks share one mix state across their
-    // L/R channel siblings (consecutive same-name entries).
+    // Step 12: Decode per-track mix state (volume / pan / mute).
     //
-    // See `docs/pt-track-properties.md` for the byte layout.
+    // Pro Tools emits one `0x1029` (TrackMixSettings) block for each track
+    // in `0x251a` (the master MIDI-track list under `0x2519`), in document
+    // order, **including** the Master and Click tracks. Verified on the
+    // user's "Lord of the Fight" session: a straight 1:1 zip puts
+    // `ClickPrint` (0x251a[02]) on `0x1029[02]` (vol=-310 = -31 dB), which
+    // matches PT's mixer reading. The "skip Master" rule previously written
+    // in `docs/pt-track-properties.md` was incorrect and has been removed.
+    //
+    // We build a `name → mix_state` map keyed by the 0x251a name and look
+    // up each parsed audio/MIDI track by its own name. PT-only tracks
+    // (Master, Click) live in `midi_tracks` already, so the lookup is
+    // symmetric for them.
     {
-        let mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
         let data = cursor.data();
-        let mut mix_iter = mix_blocks.iter().filter_map(|b| {
-            let p = b.offset;
-            let payload = p + 2;
-            if payload + 17 > data.len() {
-                return None;
-            }
-            let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
-            let mute = data[payload + 5] != 0;
-            let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
-            Some((vol, mute, pan))
-        });
+        let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
+            .into_iter()
+            .next();
+        let mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
 
-        // Audio tracks first, in 0x1015 order. Stereo channel siblings share
-        // a single mix state.
-        let mut last_name = String::new();
-        let mut last_state: Option<(i32, bool, i32)> = None;
-        for t in audio_tracks.iter_mut() {
-            if t.name != last_name {
-                last_state = mix_iter.next();
-                last_name = t.name.clone();
+        // Iterate 0x251a entries that have a mix block.
+        let mut mix_by_name: std::collections::HashMap<String, (i32, bool, i32)> =
+            std::collections::HashMap::new();
+        if let Some(list) = track_list {
+            let mut mix_idx = 0usize;
+            // 0x251a entries are duplicated in the file (2× the 30 logical
+            // tracks); the second copy mirrors the first, so we only take
+            // the first run by stopping once names start to repeat.
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for child in list.find_children(ContentType::MidiTrackInfo) {
+                // name @ child.offset + 4 (length-prefixed string)
+                let name_off = child.offset + 4;
+                if name_off + 4 > data.len() {
+                    continue;
+                }
+                let (name, _) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() {
+                    continue;
+                }
+                if !seen.insert(name.clone()) {
+                    // Hit the second copy of the list — stop.
+                    break;
+                }
+                let Some(b) = mix_blocks.get(mix_idx) else {
+                    break;
+                };
+                mix_idx += 1;
+                let payload = b.offset + 2;
+                if payload + 17 > data.len() {
+                    continue;
+                }
+                let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
+                let mute = data[payload + 5] != 0;
+                let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
+                mix_by_name.insert(name, (vol, mute, pan));
             }
-            if let Some((v, m, p)) = last_state {
+        }
+
+        let lookup = |name: &str| -> Option<(i32, bool, i32)> {
+            if let Some(s) = mix_by_name.get(name) {
+                return Some(*s);
+            }
+            // Audio tracks store the base name ("Vocal Split"); 0x251a uses
+            // the active-playlist name ("Vocal Split.01"). Try common
+            // playlist suffixes.
+            for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                let probe = format!("{name}{suffix}");
+                if let Some(s) = mix_by_name.get(&probe) {
+                    return Some(*s);
+                }
+            }
+            None
+        };
+
+        for t in audio_tracks.iter_mut() {
+            if let Some((v, m, p)) = lookup(&t.name) {
                 t.volume_centibel = v;
                 t.mute = m;
                 t.pan = p;
             }
         }
-
-        // Then MIDI tracks (skip Master, no 0x1029 for it).
-        let mut last_name = String::new();
-        let mut last_state: Option<(i32, bool, i32)> = None;
         for t in midi_tracks.iter_mut() {
-            if t.name == "Master 1" || t.name.starts_with("Master") {
-                continue;
-            }
-            if t.name != last_name {
-                last_state = mix_iter.next();
-                last_name = t.name.clone();
-            }
-            if let Some((v, m, p)) = last_state {
+            if let Some((v, m, p)) = lookup(&t.name) {
                 t.volume_centibel = v;
                 t.mute = m;
                 t.pan = p;
