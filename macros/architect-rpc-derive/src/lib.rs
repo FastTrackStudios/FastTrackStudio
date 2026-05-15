@@ -182,49 +182,75 @@ fn to_snake_case(input: &str) -> String {
     out
 }
 
-/// Emit `layer(backend) -> architect::Layer` — pairs the service
-/// descriptor with the dispatcher-wrapped backend so callers can bundle
-/// services into a `LayerSet` instead of mounting them one method-id at
-/// a time.
+/// Emit:
+///
+/// - `pub fn layer(backend) -> architect::Mounted` — immediate-bind
+///   shortcut. Useful when a caller already has the backend and just
+///   wants a bolt-on `Mounted` to drop into someone else's `Layer`.
+/// - `pub struct Service;` + `impl architect::Bind<B> for Service` —
+///   the deferred-bind token. Architectures compose these into
+///   `architect::Layer<B>` and bind once at `.provide(B)` time.
 fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -> TokenStream2 {
-    // The vox::service macro emits a free function named
-    // `<snake_rpc_trait>_service_descriptor` next to the mirror trait.
-    // We call that to pull the descriptor.
     let descriptor_fn = format_ident!(
         "{}_rpc_service_descriptor",
         to_snake_case(&trait_name.to_string())
     );
 
-    match shape {
-        Shape::Empty => quote! {},
-        Shape::AllAsync => quote! {
-            /// Bundle this service's descriptor and dispatcher into an
-            /// [`architect::Layer`] so it can be composed with other
-            /// services via [`architect::LayerSet`].
-            #[cfg(feature = "vox")]
-            #vis fn layer<S>(backend: S) -> ::architect::Layer
-            where
+    let (bounds, immediate_doc) = match shape {
+        Shape::Empty => return quote! {},
+        Shape::AllAsync => (
+            quote! {
                 S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
-            {
-                ::architect::Layer::new(#descriptor_fn(), serve(backend))
-            }
-        },
-        Shape::AllSync | Shape::Mixed => quote! {
-            /// Bundle this service's descriptor and dispatcher into an
-            /// [`architect::Layer`] so it can be composed with other
-            /// services via [`architect::LayerSet`].
-            #[cfg(feature = "vox")]
-            #vis fn layer<S>(backend: S) -> ::architect::Layer
-            where
+            },
+            "Async-native trait — no `HasDispatcher` requirement.",
+        ),
+        Shape::AllSync | Shape::Mixed => (
+            quote! {
                 S: #trait_name
                     + ::architect::HasDispatcher
                     + ::core::marker::Send
                     + ::core::marker::Sync
                     + 'static,
-            {
-                ::architect::Layer::new(#descriptor_fn(), serve(backend))
+            },
+            "Sync/mixed trait — backend must implement `HasDispatcher`.",
+        ),
+    };
+
+    quote! {
+        /// Immediate-bind shortcut: wrap a backend in this service's
+        /// vox dispatcher and return a `Mounted`. For deferred binding,
+        /// prefer `Service` + `architect::Layer::add` /
+        /// `architect::Layer::provide`.
+        ///
+        #[doc = #immediate_doc]
+        #[cfg(feature = "vox")]
+        #vis fn layer<S>(backend: S) -> ::architect::Mounted
+        where
+            #bounds
+        {
+            ::architect::Mounted::new(#descriptor_fn(), serve(backend))
+        }
+
+        /// Deferred-bind service token. Pass to
+        /// [`architect::Layer::add`]; the layer's `.provide(backend)`
+        /// resolves all such tokens against the same backend value.
+        #[cfg(feature = "vox")]
+        #[derive(Debug, Default, Clone, Copy)]
+        #vis struct Service;
+
+        #[cfg(feature = "vox")]
+        impl<S> ::architect::Bind<S> for Service
+        where
+            #bounds
+        {
+            fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
+                #descriptor_fn()
             }
-        },
+
+            fn bind(self, backend: S) -> ::architect::Mounted {
+                ::architect::Mounted::new(#descriptor_fn(), serve(backend))
+            }
+        }
     }
 }
 
