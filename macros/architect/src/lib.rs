@@ -47,6 +47,14 @@ pub use facet;
 #[cfg(feature = "vox")]
 pub use vox;
 
+// Effect-style service composition. `Layer` + `LayerSet` let callers
+// bundle architect-rpc services into a single value and mount them as
+// a unit. See [`layer`] module docs for the model.
+#[cfg(feature = "vox")]
+pub mod layer;
+#[cfg(feature = "vox")]
+pub use layer::{IntoLayerSet, Layer, LayerRouter, LayerSet, LayerSink};
+
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach
 // `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
 #[cfg(feature = "fake")]
@@ -195,6 +203,27 @@ pub mod seed {
 // shipped in this crate as zero-cost helpers; more exotic ones (the
 // REAPER main-thread queue, custom AudioWorklet bridges, etc.) live in
 // the consumers that need them.
+
+/// Backends that ship their own dispatcher.
+///
+/// Implementing this lets the macro-emitted `serve(backend)` function
+/// pull the runtime-appropriate dispatcher straight off the backend
+/// type — no explicit dispatcher argument at the mount site. The
+/// dispatcher is part of the backend's identity: a REAPER backend
+/// always wants REAPER's main-thread queue, a standalone backend
+/// always wants the current-thread dispatcher, etc.
+///
+/// Tests or alternate-runtime scenarios that want a different
+/// dispatcher for the same backend type use a newtype wrapper with
+/// its own `HasDispatcher` impl.
+pub trait HasDispatcher {
+    /// The dispatcher type this backend uses. Construction must be
+    /// free of side effects — `serve` calls this once per mount.
+    type Dispatcher: dispatch::Dispatcher;
+
+    /// Construct the dispatcher. Called once at mount time.
+    fn dispatcher(&self) -> Self::Dispatcher;
+}
 
 pub mod dispatch {
     //! Marshaling primitive for `#[architect::rpc]` bridges.

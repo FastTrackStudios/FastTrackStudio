@@ -73,9 +73,12 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     let trait_name = &trait_item.ident;
     let vis = &trait_item.vis;
     let rpc_trait_name = format_ident!("{}Rpc", trait_name);
-    let host_name = format_ident!("{}Host", trait_name);
+    // Bridge struct is hidden — users only see `serve`. The name is
+    // doc(hidden) and underscored so it doesn't show up in completions.
+    let host_name = format_ident!("__{}Bridge", trait_name);
     let client_name = format_ident!("{}Client", trait_name);
     let rpc_client_name = format_ident!("{}RpcClient", trait_name);
+    let rpc_dispatcher_name = format_ident!("{}RpcDispatcher", trait_name);
 
     // Classify + validate each method.
     let mut methods = Vec::new();
@@ -133,13 +136,147 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
         },
     };
 
+    // `serve` — the public mount verb. Users write
+    // `router.mount(marker::serve(backend, dispatcher))` and never see
+    // the hidden bridge struct or the `<T>RpcDispatcher` plumbing.
+    let serve_fn = emit_serve_fn(trait_name, &host_name, &rpc_dispatcher_name, vis, shape);
+
+    // `layer` — bundles (descriptor, serve(backend)) into an
+    // `architect::Layer` so callers can compose mounting via
+    // `LayerSet::merge` instead of writing per-service `.with(...)`
+    // calls.
+    let layer_fn = emit_layer_fn(trait_name, vis, shape);
+
     Ok(quote! {
         #user_trait
         #mirror_trait
         #host_struct
         #host_impl
         #client_alias
+        #serve_fn
+        #layer_fn
     })
+}
+
+/// Snake-case an UpperCamelCase identifier. Mirrors what `#[vox::service]`
+/// does when it derives `<snake_name>_service_descriptor` from the
+/// trait's name, so we can refer to that emitted function by name from
+/// inside the `layer()` body.
+fn to_snake_case(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 4);
+    let mut prev_lower = false;
+    for ch in input.chars() {
+        if ch.is_uppercase() {
+            if prev_lower {
+                out.push('_');
+            }
+            for lc in ch.to_lowercase() {
+                out.push(lc);
+            }
+            prev_lower = false;
+        } else {
+            out.push(ch);
+            prev_lower = ch.is_alphanumeric();
+        }
+    }
+    out
+}
+
+/// Emit `layer(backend) -> architect::Layer` — pairs the service
+/// descriptor with the dispatcher-wrapped backend so callers can bundle
+/// services into a `LayerSet` instead of mounting them one method-id at
+/// a time.
+fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -> TokenStream2 {
+    // The vox::service macro emits a free function named
+    // `<snake_rpc_trait>_service_descriptor` next to the mirror trait.
+    // We call that to pull the descriptor.
+    let descriptor_fn = format_ident!(
+        "{}_rpc_service_descriptor",
+        to_snake_case(&trait_name.to_string())
+    );
+
+    match shape {
+        Shape::Empty => quote! {},
+        Shape::AllAsync => quote! {
+            /// Bundle this service's descriptor and dispatcher into an
+            /// [`architect::Layer`] so it can be composed with other
+            /// services via [`architect::LayerSet`].
+            #[cfg(feature = "vox")]
+            #vis fn layer<S>(backend: S) -> ::architect::Layer
+            where
+                S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            {
+                ::architect::Layer::new(#descriptor_fn(), serve(backend))
+            }
+        },
+        Shape::AllSync | Shape::Mixed => quote! {
+            /// Bundle this service's descriptor and dispatcher into an
+            /// [`architect::Layer`] so it can be composed with other
+            /// services via [`architect::LayerSet`].
+            #[cfg(feature = "vox")]
+            #vis fn layer<S>(backend: S) -> ::architect::Layer
+            where
+                S: #trait_name
+                    + ::architect::HasDispatcher
+                    + ::core::marker::Send
+                    + ::core::marker::Sync
+                    + 'static,
+            {
+                ::architect::Layer::new(#descriptor_fn(), serve(backend))
+            }
+        },
+    }
+}
+
+/// Emit the `serve` free function — the public mount verb.
+///
+/// Sync / mixed: takes a backend + dispatcher, builds the hidden bridge,
+/// wraps it in the vox-emitted dispatcher, returns the mountable.
+///
+/// All-async: takes just a backend (the trait is its own RPC face).
+fn emit_serve_fn(
+    trait_name: &syn::Ident,
+    host_name: &syn::Ident,
+    rpc_dispatcher_name: &syn::Ident,
+    vis: &syn::Visibility,
+    shape: Shape,
+) -> TokenStream2 {
+    match shape {
+        Shape::Empty => quote! {},
+        Shape::AllAsync => quote! {
+            /// Wrap a backend in the vox-emitted dispatcher so it can be
+            /// mounted on a vox router. The trait is async-native, so no
+            /// thread dispatcher is required.
+            #[cfg(feature = "vox")]
+            #vis fn serve<S>(backend: S) -> #rpc_dispatcher_name<#host_name<S>>
+            where
+                S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            {
+                #rpc_dispatcher_name::new(#host_name::new(backend))
+            }
+        },
+        Shape::AllSync | Shape::Mixed => quote! {
+            /// Wrap a backend in the vox-emitted dispatcher so it can
+            /// be mounted on a vox router. Each call to a sync trait
+            /// method is marshaled through the backend's dispatcher
+            /// (pulled via `HasDispatcher`) to the thread where the
+            /// backend's work runs.
+            #[cfg(feature = "vox")]
+            #vis fn serve<S>(
+                backend: S,
+            ) -> #rpc_dispatcher_name<#host_name<S, <S as ::architect::HasDispatcher>::Dispatcher>>
+            where
+                S: #trait_name
+                    + ::architect::HasDispatcher
+                    + ::core::marker::Send
+                    + ::core::marker::Sync
+                    + 'static,
+            {
+                let dispatcher = ::architect::HasDispatcher::dispatcher(&backend);
+                #rpc_dispatcher_name::new(#host_name::new(backend, dispatcher))
+            }
+        },
+    }
 }
 
 // ── Method classification ──────────────────────────────────────────────
@@ -297,29 +434,14 @@ fn classify_shape(methods: &[Method]) -> Shape {
 
 // ── Emission ───────────────────────────────────────────────────────────
 
-/// Re-emit the user's trait with an added `Send + Sync + 'static`
-/// supertrait so impls can travel through `Arc<dyn T>`. We don't
-/// mutate the input AST; we wrap it in our own re-emission.
+/// Re-emit the user's trait unchanged. `Send + Sync + 'static` bounds
+/// live on the bridge's where-clauses (not the trait itself) so the
+/// trait remains impl-able by borrowed-view types like `Foo<'a>` in
+/// codebases that already use that pattern. Backends meant to mount
+/// on `<T>Host` must satisfy the bounds; backends used only
+/// in-process can be borrowed.
 fn emit_user_trait(trait_item: &ItemTrait) -> TokenStream2 {
-    let mut t = trait_item.clone();
-    let extra: syn::TypeParamBound = parse_quote! { ::core::marker::Send };
-    let extra2: syn::TypeParamBound = parse_quote! { ::core::marker::Sync };
-    let extra3: syn::TypeParamBound = parse_quote! { 'static };
-
-    // Only add bounds that aren't already there — keep diffs clean
-    // and avoid duplicate bound errors.
-    for b in [extra, extra2, extra3] {
-        let present = t.supertraits.iter().any(|s| matches_bound(s, &b));
-        if !present {
-            t.supertraits.push(b);
-        }
-    }
-
-    quote! { #t }
-}
-
-fn matches_bound(a: &syn::TypeParamBound, b: &syn::TypeParamBound) -> bool {
-    quote!(#a).to_string() == quote!(#b).to_string()
+    quote! { #trait_item }
 }
 
 /// Hidden mirror trait — the vox-served async surface. Each user
@@ -360,16 +482,15 @@ fn emit_bridge_host(
     vis: &syn::Visibility,
 ) -> TokenStream2 {
     quote! {
-        /// Server-side host for the trait. Construct with
-        /// `Host::new(backend, dispatcher)` and mount on a vox router.
-        ///
-        /// The dispatcher decides where each sync method actually runs:
-        /// the current thread (test / single-thread), a tokio blocking
-        /// pool (default server), a runtime-specific queue (e.g.
-        /// REAPER main thread), etc.
+        /// Internal bridge: holds a backend + dispatcher and implements
+        /// the auto-emitted `<T>Rpc` async mirror by marshaling sync
+        /// methods through the dispatcher. Hidden from documentation
+        /// and users — the public mount surface is the `serve`
+        /// function emitted alongside.
+        #[doc(hidden)]
         #vis struct #host_name<S, D>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             inner: ::std::sync::Arc<S>,
@@ -378,7 +499,7 @@ fn emit_bridge_host(
 
         impl<S, D> #host_name<S, D>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             /// Wrap a backend impl with a dispatcher. Both are kept
@@ -402,7 +523,7 @@ fn emit_bridge_host(
 
         impl<S, D> ::core::clone::Clone for #host_name<S, D>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             fn clone(&self) -> Self {
@@ -475,7 +596,7 @@ fn emit_bridge_impl(
     quote! {
         impl<S, D> #rpc_trait_name for #host_name<S, D>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             #(#method_impls)*
@@ -492,19 +613,19 @@ fn emit_passthrough_host(
     vis: &syn::Visibility,
 ) -> TokenStream2 {
     quote! {
-        /// Server-side host for an all-async trait. The trait is its
-        /// own RPC face — this struct exists for symmetry with the
-        /// sync/mixed variants so mounting code looks uniform.
+        /// Internal newtype wrapper for an all-async backend. Hidden
+        /// from documentation; user code mounts via `serve`.
+        #[doc(hidden)]
         #vis struct #host_name<S>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
         {
             inner: ::std::sync::Arc<S>,
         }
 
         impl<S> #host_name<S>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
         {
             pub fn new(inner: S) -> Self {
                 Self { inner: ::std::sync::Arc::new(inner) }
@@ -517,7 +638,7 @@ fn emit_passthrough_host(
 
         impl<S> ::core::clone::Clone for #host_name<S>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
         {
             fn clone(&self) -> Self {
                 Self { inner: ::std::sync::Arc::clone(&self.inner) }
@@ -561,7 +682,7 @@ fn emit_passthrough_impl(
     quote! {
         impl<S> #trait_name for #host_name<S>
         where
-            S: #trait_name,
+            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
         {
             #(#method_impls)*
         }
