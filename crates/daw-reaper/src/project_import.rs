@@ -424,6 +424,85 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut builder = ReaperProjectBuilder::new();
     builder = builder.sample_rate(session.session_sample_rate as i32);
 
+    // Initial tempo + time signature
+    //
+    // Pro Tools stores BPM relative to the click note value (encoded in
+    // `ticks_per_beat`: 960000 = quarter, 480000 = eighth, 1440000 = dotted-quarter, etc.).
+    // REAPER always interprets tempo as quarter-note BPM regardless of time signature.
+    // Convert: reaper_bpm = pt_bpm × (pt_tpb / 960000).
+    fn pt_bpm_to_reaper(pt_bpm: f64, pt_tpb: u64) -> f64 {
+        if pt_tpb == 0 {
+            pt_bpm
+        } else {
+            pt_bpm * (pt_tpb as f64 / 960_000.0)
+        }
+    }
+    let init_tpb = session
+        .tempo_events
+        .first()
+        .map(|t| t.ticks_per_beat)
+        .unwrap_or(960_000);
+    let init_bpm = pt_bpm_to_reaper(session.bpm, init_tpb);
+    let (init_num, init_den) = session
+        .meter_events
+        .first()
+        .map(|m| (m.numerator as i32, m.denominator as i32))
+        .unwrap_or((4, 4));
+    builder = builder.tempo_with_time_sig(init_bpm, init_num, init_den);
+
+    // Tempo / meter envelope — emit only if there's more than one change.
+    let has_tempo_changes = session.tempo_events.len() > 1;
+    let has_meter_changes = session.meter_events.len() > 1;
+    if has_tempo_changes || has_meter_changes {
+        // Merge tempo + meter events on a single timeline keyed by sample position.
+        // At each point we know the active (bpm, num, den); emit one envelope point.
+        let mut positions: Vec<u64> = session
+            .tempo_events
+            .iter()
+            .map(|t| t.sample_start)
+            .chain(session.meter_events.iter().map(|m| m.sample_start))
+            .collect();
+        positions.sort_unstable();
+        positions.dedup();
+
+        builder = builder.tempo_envelope(|mut env| {
+            let mut cur_bpm = init_bpm;
+            let mut cur_num = init_num;
+            let mut cur_den = init_den;
+            for sample_pos in positions {
+                if let Some(t) = session
+                    .tempo_events
+                    .iter()
+                    .find(|t| t.sample_start == sample_pos)
+                {
+                    cur_bpm = pt_bpm_to_reaper(t.bpm, t.ticks_per_beat);
+                }
+                let meter_changed = session
+                    .meter_events
+                    .iter()
+                    .find(|m| m.sample_start == sample_pos)
+                    .map(|m| {
+                        cur_num = m.numerator as i32;
+                        cur_den = m.denominator as i32;
+                    })
+                    .is_some();
+                let pos_secs = sample_pos as f64 / sample_rate;
+                env = if meter_changed {
+                    env.point_with_time_sig(pos_secs, cur_bpm, cur_num, cur_den)
+                } else {
+                    env.point(pos_secs, cur_bpm)
+                };
+            }
+            env
+        });
+    }
+
+    // Markers (Pro Tools Memory Locations)
+    for marker in &session.markers {
+        let pos_secs = marker.sample_pos as f64 / sample_rate;
+        builder = builder.marker(marker.number as i32, pos_secs, &marker.name);
+    }
+
     // Audio tracks
     for track in &session.audio_tracks {
         builder = builder.track(&track.name, |t| {

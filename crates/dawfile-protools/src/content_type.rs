@@ -137,6 +137,12 @@ pub enum ContentType {
     MarkerList = 0x271a,
     /// User-defined memory location container (user markers live here)
     UserMarkerContainer = 0x263b,
+    /// Song-section marker section (PT 12 layout). Holds `MarkerEntryV12` children
+    /// — each one is a user-defined memory location with name + tick position.
+    MarkerSectionV12 = 0x2030,
+    /// Song-section marker entry (PT 12 layout). Payload: header(8B) + u32 name_len
+    /// + name + u64 encoded tick position + duplicate(8B) + remaining fields.
+    MarkerEntryV12 = 0x2077,
 
     // ── Snaps ───────────────────────────────────────────────────────────
     /// Snaps block
@@ -217,6 +223,8 @@ impl ContentType {
 
             0x271a => Some(Self::MarkerList),
             0x263b => Some(Self::UserMarkerContainer),
+            0x2030 => Some(Self::MarkerSectionV12),
+            0x2077 => Some(Self::MarkerEntryV12),
             0x2511 => Some(Self::SnapsBlock),
 
             0x2028 => Some(Self::TempoBlock),

@@ -13,23 +13,23 @@
 //! // Default mount:
 //! let router = Reaper.into_router();
 //!
-//! // With overrides — last add wins on duplicate method_id:
+//! // With overrides — last merge wins on duplicate method_id:
 //! let router = Reaper::layers()
-//!     .add(fx_chains_mock::mock())              // overrides default fx_chains
-//!     .add(dock_host::layer(dock_host))         // bolt-on
+//!     .merge(fx_chains_mock::mock())            // overrides default fx_chains
+//!     .merge(dock_host::layer(dock_host))       // bolt-on
 //!     .provide(Reaper);
 //!
 //! // Sub-bundles:
-//! let timeline = architect::services![transport, marker, region];
-//! let routing  = architect::services![project, routing, track];
+//! let timeline = architect::layers![transport::Service, marker::Service, region::Service];
+//! let routing  = architect::layers![project::Service, routing::Service, track::Service];
 //! let router   = timeline.merge(routing).provide(Reaper);
 //! ```
 //!
-//! Adding a service is one line in the [`architect::services!`] list.
+//! Adding a service is one line in the [`architect::layers!`] list.
 //! No bounds, no where clause. Other backends (Pro Tools, Logic, mock)
 //! each implement [`architect::Services`] with their own bundle.
 
-use architect::{Layer, ProvideAll, Services, services};
+use architect::{Layer, ProvideAll, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, fx_chains,
     fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project, region,
@@ -40,33 +40,33 @@ use crate::Reaper;
 
 impl Services for Reaper {
     fn layers() -> impl Layer + ProvideAll<Reaper> {
-        services![
-            transport,
-            project,
-            marker,
-            region,
-            tempo_map,
-            audio_engine,
-            midi,
-            fx,
-            fx_chains,
-            fx_params,
-            track,
-            routing,
-            live_midi,
-            ext_state,
-            health,
-            item,
-            take,
-            action_registry,
-            input,
-            toolbar,
-            screenset,
-            dawfile_service,
-            window_geometry,
-            plugin_loader,
-            automation,
-            batch,
+        layers![
+            transport::Service,
+            project::Service,
+            marker::Service,
+            region::Service,
+            tempo_map::Service,
+            audio_engine::Service,
+            midi::Service,
+            fx::Service,
+            fx_chains::Service,
+            fx_params::Service,
+            track::Service,
+            routing::Service,
+            live_midi::Service,
+            ext_state::Service,
+            health::Service,
+            item::Service,
+            take::Service,
+            action_registry::Service,
+            input::Service,
+            toolbar::Service,
+            screenset::Service,
+            dawfile_service::Service,
+            window_geometry::Service,
+            plugin_loader::Service,
+            automation::Service,
+            batch::Service,
         ]
     }
 }

@@ -150,7 +150,7 @@ async fn register_daw_dispatcher() {
     // is mounted out-of-tree by fts-extensions; see daw-reaper
     // a823b67 for why.
     let daw_handler = <daw::reaper::Reaper as Services>::layers()
-        .add(daw_proto::dock_host::layer(dock_host))
+        .merge(daw_proto::dock_host::layer(dock_host))
         .provide(daw::reaper::Reaper);
 
     let acceptor = DawConnectionAcceptor::new(daw_handler);

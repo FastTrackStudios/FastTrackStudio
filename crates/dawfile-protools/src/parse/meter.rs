@@ -148,9 +148,16 @@ pub fn parse_meter_events(
 pub fn parse_markers(
     blocks: &[Block],
     cursor: &Cursor<'_>,
-    _tempo_map: &[TempoSegment],
-    _target_sample_rate: u32,
+    tempo_map: &[TempoSegment],
+    target_sample_rate: u32,
 ) -> Vec<Marker> {
+    // Pro Tools 12 stores user memory locations under a 0x2030 (MarkerSectionV12)
+    // container whose children are 0x2077 (MarkerEntryV12) entries with full
+    // position data. Try that first.
+    if let Some(markers) = parse_markers_v12(blocks, cursor, tempo_map, target_sample_rate) {
+        return markers;
+    }
+
     let user_marker_container = match find_block_recursive(blocks, ContentType::UserMarkerContainer)
     {
         Some(b) => b,
@@ -208,6 +215,95 @@ pub fn parse_markers(
     }
 
     markers
+}
+
+/// Parse user-defined markers from the PT 12 `0x2030`/`0x2077` layout.
+///
+/// ## Layout (per `0x2077` entry)
+///
+/// Relative to the content_type position (`block.offset`):
+/// ```text
+/// [0..2]                 u16   content_type = 0x2077
+/// [2..4]                 u16   flags / sub-type
+/// [4..8]                 u32   (unknown header field)
+/// [8..12]                u32   name_len
+/// [12..12+name_len]      utf8  name
+/// [12+name_len..+8]      u64   encoded tick position (LE)
+/// [..+8]                 u64   duplicate of the position field
+/// ...                          remaining payload (sub-blocks, padding)
+/// ```
+///
+/// The encoded position has a session-wide baseline; the relative tick position
+/// is `encoded - min(encoded across all entries)`. Verified empirically against
+/// known song-section positions (multiples of 960000 ticks/quarter).
+///
+/// Returns `None` if no `0x2030` container is present.
+fn parse_markers_v12(
+    blocks: &[Block],
+    cursor: &Cursor<'_>,
+    tempo_map: &[TempoSegment],
+    target_sample_rate: u32,
+) -> Option<Vec<Marker>> {
+    // Gather every 0x2077 entry under any 0x2030 container.
+    let mut entries: Vec<&Block> = Vec::new();
+    collect_marker_section_entries(blocks, &mut entries);
+    if entries.is_empty() {
+        return None;
+    }
+
+    let data = cursor.data();
+    // (encoded_tick, name) for each successfully parsed entry.
+    let mut raw: Vec<(u64, String)> = Vec::new();
+
+    for entry in &entries {
+        let p = entry.offset;
+        // Need header (12) + at least 1 byte of name + 8 bytes for position.
+        if p + 12 + 1 + 8 > data.len() {
+            continue;
+        }
+        let name_len = u32::from_le_bytes(data[p + 8..p + 12].try_into().unwrap()) as usize;
+        if name_len == 0 || p + 12 + name_len + 8 > data.len() {
+            continue;
+        }
+        let name = String::from_utf8_lossy(&data[p + 12..p + 12 + name_len]).into_owned();
+        let pos_offset = p + 12 + name_len;
+        let encoded = u64::from_le_bytes(data[pos_offset..pos_offset + 8].try_into().unwrap());
+        raw.push((encoded, name));
+    }
+
+    if raw.is_empty() {
+        return None;
+    }
+
+    // Baseline = smallest encoded value (assumed to correspond to tick 0).
+    let baseline = raw.iter().map(|(e, _)| *e).min().unwrap();
+
+    let mut markers = Vec::with_capacity(raw.len());
+    for (i, (encoded, name)) in raw.into_iter().enumerate() {
+        let tick_pos = encoded.saturating_sub(baseline);
+        let sample_pos = tick_to_sample(tick_pos, tempo_map, target_sample_rate);
+        markers.push(Marker {
+            name,
+            number: (i as u32) + 1,
+            tick_pos,
+            sample_pos,
+        });
+    }
+
+    Some(markers)
+}
+
+fn collect_marker_section_entries<'a>(blocks: &'a [Block], out: &mut Vec<&'a Block>) {
+    for b in blocks {
+        if b.content_type == Some(ContentType::MarkerSectionV12) {
+            for child in &b.children {
+                if child.content_type == Some(ContentType::MarkerEntryV12) {
+                    out.push(child);
+                }
+            }
+        }
+        collect_marker_section_entries(&b.children, out);
+    }
 }
 
 fn find_block_recursive(blocks: &[Block], ct: ContentType) -> Option<&Block> {

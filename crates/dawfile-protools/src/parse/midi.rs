@@ -6,6 +6,7 @@
 use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::{self, Cursor};
+use crate::parse::tempo::{TempoSegment, tick_to_sample};
 use crate::types::{MidiEvent, MidiRegion, NO_REGION, Track, TrackKind, TrackRegion, ZERO_TICKS};
 
 /// Magic marker that precedes MIDI event data within a 0x2000 block.
@@ -25,15 +26,32 @@ pub fn parse_midi(
     cursor: &Cursor<'_>,
     version: u16,
     rate_factor: f64,
+    tempo_segments: &[TempoSegment],
+    target_sample_rate: u32,
 ) -> (Vec<MidiRegion>, Vec<Track>) {
     // Pass 1: Parse raw MIDI event chunks
     let chunks = parse_midi_chunks(blocks, cursor);
 
     // Pass 2: Map chunks to MIDI regions
-    let regions = parse_midi_regions(blocks, cursor, &chunks, version, rate_factor);
+    let regions = parse_midi_regions(
+        blocks,
+        cursor,
+        &chunks,
+        version,
+        rate_factor,
+        tempo_segments,
+        target_sample_rate,
+    );
 
     // Pass 3: Parse MIDI tracks and assign regions
-    let tracks = parse_midi_tracks(blocks, cursor, &regions, rate_factor);
+    let tracks = parse_midi_tracks(
+        blocks,
+        cursor,
+        &regions,
+        rate_factor,
+        tempo_segments,
+        target_sample_rate,
+    );
 
     (regions, tracks)
 }
