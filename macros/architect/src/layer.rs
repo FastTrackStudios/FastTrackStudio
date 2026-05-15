@@ -493,16 +493,40 @@ impl Descriptors for Mounted {
 
 // ── Requires ──────────────────────────────────────────────────────────────
 
-/// Per-service declaration: "this service expects to find these other
-/// services in the same [`LayerRouter`] at dispatch time." The
-/// `#[architect::rpc]` derive emits a default-empty impl per service
-/// token; declare cross-service deps with
-/// `#[architect::rpc(requires(TraitA, TraitB))]` on the trait.
+/// Per-token declaration: "this service expects to find these other
+/// services in the same [`LayerRouter`] at dispatch time."
 ///
-/// Used at `.provide()` time to assert the assembled bundle is closed
-/// — fails fast with a clear panic naming which service needs which.
-/// [`Mounted`] reports no requirements: pre-bound bolt-ons are
-/// considered self-contained.
+/// Requirements live with the **implementation**, not the trait —
+/// the REAPER backend's `Fx` impl may dispatch through `Markers` and
+/// `Items`, while a mock `Fx` impl returns canned data and needs
+/// nothing. So the `#[architect::rpc]` derive emits a default-empty
+/// `Requires` impl per service token, and each backend's
+/// `Services::layers()` body declares its own edges using
+/// [`Needs::needs`]:
+///
+/// ```ignore
+/// impl Services for Reaper {
+///     fn layers() -> impl Layer + ProvideAll<Self> + Descriptors + RequiresAll {
+///         layers![
+///             fx::Service.needs(&[markers::descriptor(), items::descriptor()]),
+///             markers::Service,
+///             items::Service,
+///             // ...
+///         ]
+///     }
+/// }
+///
+/// impl Services for MockReaper {
+///     fn layers() -> impl Layer + ProvideAll<Self> + Descriptors + RequiresAll {
+///         // No .needs() — the mock doesn't dispatch cross-service.
+///         layers![fx::Service, markers::Service, items::Service]
+///     }
+/// }
+/// ```
+///
+/// Checked at `.provide()` time — fails fast with a clear panic
+/// naming which service needs which. [`Mounted`] reports no
+/// requirements: pre-bound bolt-ons are considered self-contained.
 pub trait Requires {
     fn requires(&self) -> &'static [&'static ServiceDescriptor];
 }
@@ -541,6 +565,114 @@ where
 impl RequiresAll for Mounted {
     fn collect(&self, _: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>) {}
 }
+
+// ── WithRequires + Needs builder ──────────────────────────────────────────
+
+/// A service token wrapped with a per-backend requirement list.
+/// Built via [`Needs::needs`]; behaves identically to the inner token
+/// for descriptor lookup and binding, but reports its declared
+/// requirements to [`RequiresAll`].
+#[derive(Clone, Copy)]
+pub struct WithRequires<S> {
+    svc: S,
+    requires: &'static [&'static ServiceDescriptor],
+}
+
+impl<S: core::fmt::Debug> core::fmt::Debug for WithRequires<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WithRequires")
+            .field("svc", &self.svc)
+            .field("requires", &self.requires.len())
+            .finish()
+    }
+}
+
+impl<S: BindAny> BindAny for WithRequires<S> {
+    fn descriptor(&self) -> &'static ServiceDescriptor {
+        self.svc.descriptor()
+    }
+}
+
+impl<S, B> Bind<B> for WithRequires<S>
+where
+    S: Bind<B>,
+{
+    fn bind(self, backend: B) -> Mounted {
+        self.svc.bind(backend)
+    }
+}
+
+impl<S> Requires for WithRequires<S> {
+    fn requires(&self) -> &'static [&'static ServiceDescriptor] {
+        self.requires
+    }
+}
+
+impl<S: BindAny> Layer for WithRequires<S> {}
+
+impl<S, R> Append<R> for WithRequires<S>
+where
+    S: BindAny,
+    R: Layer,
+{
+    type Output = Cons<WithRequires<S>, R>;
+    fn append(self, rhs: R) -> Self::Output {
+        Cons::new(self, rhs)
+    }
+}
+
+impl<S: BindAny> Descriptors for WithRequires<S> {
+    fn collect(&self, out: &mut Vec<&'static ServiceDescriptor>) {
+        out.push(self.svc.descriptor());
+    }
+}
+
+impl<S, B> ProvideAll<B> for WithRequires<S>
+where
+    B: Clone,
+    S: Bind<B>,
+{
+    fn provide_into(self, backend: &B, router: &mut LayerRouter) {
+        router.add_mounted(self.svc.bind(backend.clone()));
+    }
+}
+
+impl<S: BindAny> RequiresAll for WithRequires<S> {
+    fn collect(&self, out: &mut Vec<(&'static ServiceDescriptor, &'static ServiceDescriptor)>) {
+        let owner = self.svc.descriptor();
+        for req in self.requires {
+            out.push((owner, *req));
+        }
+    }
+}
+
+/// Builder method for attaching a per-backend requirement list to a
+/// service token. Blanket-implemented for every [`BindAny`] type, so
+/// any service token (or pre-mounted bolt-on) can declare its
+/// dependencies inline at the bundle site.
+///
+/// ```ignore
+/// use architect::Needs;
+///
+/// layers![
+///     fx::Service.needs(&[markers::descriptor(), items::descriptor()]),
+///     markers::Service,
+///     items::Service,
+/// ]
+/// ```
+pub trait Needs: BindAny + Sized {
+    /// Wrap this token with the given dependency list. Each entry
+    /// must be a `&'static ServiceDescriptor` — typically obtained
+    /// via the sibling service's `descriptor()` re-export.
+    fn needs(self, requires: &'static [&'static ServiceDescriptor]) -> WithRequires<Self> {
+        WithRequires {
+            svc: self,
+            requires,
+        }
+    }
+}
+
+impl<T: BindAny> Needs for T {}
 
 // ── layers! macro ─────────────────────────────────────────────────────────
 
