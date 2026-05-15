@@ -3,7 +3,7 @@
 //! Mounts [`crate::services`] onto an [`architect::LayerRouter`] so
 //! `PluginHost` can build a local `Daw` instance without SHM.
 
-use architect::LayerRouter;
+use architect::{Layer, LayerRouter};
 
 use crate::Reaper;
 
