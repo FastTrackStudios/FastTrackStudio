@@ -511,13 +511,10 @@ macro_rules! layers {
 /// ```
 pub trait Services: Sized {
     /// Build the deferred bundle for this backend. Returns an opaque
-    /// type carrying enough trait bounds to:
-    ///
-    /// - chain `.merge(...)` for bolt-ons/overrides ([`Layer`])
-    /// - bind via `.provide(self)` ([`ProvideAll<Self>`])
-    /// - introspect with `.descriptors()` before binding
-    ///   ([`Descriptors`])
-    fn layers() -> impl Layer + ProvideAll<Self> + Descriptors;
+    /// [`LayerBundle<Self>`] — a [`Layer`] that can be bound to
+    /// `Self` via `.provide(self)`, introspected with
+    /// `.descriptors()`, and extended with `.merge(...)`.
+    fn layers() -> impl LayerBundle<Self>;
 
     /// Convenience: build the bundle, bind `self`, return the
     /// terminal router. One-call mount when no overrides are needed.
@@ -528,6 +525,26 @@ pub trait Services: Sized {
         Self::layers().provide(self)
     }
 }
+
+/// Trait alias for the three bounds every `Services::layers()` return
+/// type carries: composable ([`Layer`]), bindable to backend `B`
+/// ([`ProvideAll<B>`]), and walkable for introspection
+/// ([`Descriptors`]).
+///
+/// Lets per-backend `Services` impls write:
+///
+/// ```ignore
+/// fn layers() -> impl LayerBundle<Reaper> {
+///     layers![transport::Service, project::Service, /* … */]
+/// }
+/// ```
+///
+/// instead of repeating `impl Layer + ProvideAll<Reaper> + Descriptors`.
+/// Auto-implemented for every type satisfying the three bounds — you
+/// never write the impl by hand.
+pub trait LayerBundle<B>: Layer + ProvideAll<B> + Descriptors {}
+
+impl<T, B> LayerBundle<B> for T where T: Layer + ProvideAll<B> + Descriptors {}
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
 
