@@ -48,28 +48,56 @@ use syn::{
 ///   so callers see a clean name.
 #[proc_macro_attribute]
 pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
-    if !args.is_empty() {
-        let span = proc_macro2::TokenStream::from(args);
-        return syn::Error::new_spanned(
-            span,
-            "#[architect::rpc] takes no arguments. \
-             The macro derives its behavior from the trait's method shapes.",
-        )
-        .to_compile_error()
-        .into();
-    }
+    let requires = match parse_requires_args(args) {
+        Ok(v) => v,
+        Err(err) => return err.to_compile_error().into(),
+    };
 
     let trait_item = parse_macro_input!(input as ItemTrait);
 
-    match expand(trait_item) {
+    match expand(trait_item, requires) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
+/// Parse the macro arguments. The only supported form is
+/// `requires(TraitA, TraitB, ...)` — names of other architect-rpc
+/// traits this service expects to find in the same router at
+/// dispatch time. Each name becomes a reference to that trait's
+/// emitted `<snake>_rpc_service_descriptor()` in the generated
+/// `Requires` impl.
+fn parse_requires_args(args: TokenStream) -> syn::Result<Vec<syn::Ident>> {
+    use syn::{Meta, Token, punctuated::Punctuated};
+
+    if args.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
+    let parsed = syn::parse::Parser::parse(parser, args)?;
+
+    let mut requires = Vec::new();
+    for meta in parsed {
+        match meta {
+            Meta::List(list) if list.path.is_ident("requires") => {
+                let idents =
+                    list.parse_args_with(Punctuated::<syn::Ident, Token![,]>::parse_terminated)?;
+                requires.extend(idents);
+            }
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "#[architect::rpc] supports only `requires(Trait, ...)` here",
+                ));
+            }
+        }
+    }
+    Ok(requires)
+}
+
 /// Main expansion entry. Split out from the proc-macro shim so it can
 /// be exercised from unit tests once they exist.
-fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
+fn expand(trait_item: ItemTrait, requires: Vec<syn::Ident>) -> syn::Result<TokenStream2> {
     let trait_name = &trait_item.ident;
     let vis = &trait_item.vis;
     let rpc_trait_name = format_ident!("{}Rpc", trait_name);
@@ -144,7 +172,7 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     // `layer` — bundles (descriptor, serve(backend)) into an
     // `architect::Mounted` so callers can compose mounting via
     // `Layer::merge` instead of writing per-service `.with(...)` calls.
-    let layer_fn = emit_layer_fn(trait_name, vis, shape);
+    let layer_fn = emit_layer_fn(trait_name, vis, shape, &requires);
 
     Ok(quote! {
         #user_trait
@@ -189,11 +217,25 @@ fn to_snake_case(input: &str) -> String {
 /// - `pub struct Service;` + `impl architect::Bind<B> for Service` —
 ///   the deferred-bind token. Architectures compose these into
 ///   `architect::Layer<B>` and bind once at `.provide(B)` time.
-fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -> TokenStream2 {
+fn emit_layer_fn(
+    trait_name: &syn::Ident,
+    vis: &syn::Visibility,
+    shape: Shape,
+    requires: &[syn::Ident],
+) -> TokenStream2 {
     let descriptor_fn = format_ident!(
         "{}_rpc_service_descriptor",
         to_snake_case(&trait_name.to_string())
     );
+
+    let requires_descriptors: Vec<TokenStream2> = requires
+        .iter()
+        .map(|t| {
+            let snake = to_snake_case(&t.to_string());
+            let fn_name = format_ident!("{}_rpc_service_descriptor", snake);
+            quote! { #fn_name() }
+        })
+        .collect();
 
     let (bounds, immediate_doc) = match shape {
         Shape::Empty => return quote! {},
@@ -297,6 +339,18 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
                 use ::architect::LayerSink as _;
                 let mounted = ::architect::Bind::bind(self, backend.clone());
                 router.add_mounted(mounted);
+            }
+        }
+
+        // ─ Requirements declaration ─────────────────────────────
+        // Populated from `#[architect::rpc(requires(TraitA, ...))]`
+        // — names which sibling services this one expects to find
+        // in the same router at dispatch time. Default empty.
+
+        #[cfg(feature = "vox")]
+        impl ::architect::Requires for Service {
+            fn requires(&self) -> &'static [&'static ::architect::vox::ServiceDescriptor] {
+                &[#(#requires_descriptors),*]
             }
         }
     }
