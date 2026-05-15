@@ -388,6 +388,80 @@ macro_rules! services {
     }};
 }
 
+// ── Services trait ────────────────────────────────────────────────────────
+
+/// "This backend provides a canonical bundle of services."
+///
+/// Implement once per backend (REAPER, Pro Tools, mock, …) declaring
+/// which services the backend ships as its default surface. Callers
+/// then get the full router in one call:
+///
+/// ```ignore
+/// use architect::Services;
+///
+/// let router = Reaper.into_router();
+/// ```
+///
+/// # Overriding a service
+///
+/// `LayerRouter` resolves duplicate method-ids by **last-add wins** —
+/// register the override after the default bundle and it takes
+/// effect. The default handler stays in memory but becomes
+/// unreachable.
+///
+/// ```ignore
+/// let router = Reaper::layers()
+///     .add(fx_chains::mock())       // overrides the default fx_chains
+///     .add(dock_host::layer(dh))    // bolt-on, different backend
+///     .provide(Reaper);
+/// ```
+///
+/// # Sub-bundles
+///
+/// Compose groups of services with `Layer::merge`:
+///
+/// ```ignore
+/// let timeline = services![transport, marker, region];
+/// let routing  = services![project, routing, track];
+/// let bundle   = timeline.merge(routing).merge(layers![fx_chains::mock()]);
+/// let router   = bundle.provide(Reaper);
+/// ```
+pub trait Services: Sized {
+    /// Build the deferred bundle for this backend. Returns an opaque
+    /// type that knows how to `.provide(Self)`.
+    fn layers() -> impl Layer + ProvideAll<Self>;
+
+    /// Convenience: build the bundle, bind `self`, return the
+    /// terminal router. One-call mount when no overrides are needed.
+    fn into_router(self) -> LayerRouter
+    where
+        Self: Clone + Send + Sync + 'static,
+    {
+        Self::layers().provide(self)
+    }
+}
+
+// ── bundle! macro ─────────────────────────────────────────────────────────
+
+/// Combine multiple [`Layer`] values into one via [`Layer::merge`].
+/// Sibling of [`services!`] (which builds a bundle from service
+/// tokens); `bundle!` builds a bundle from already-composed sub-bundles.
+///
+/// ```ignore
+/// let timeline = services![transport, marker, region];
+/// let routing  = services![project, routing, track];
+/// let combined = bundle![timeline, routing];
+/// ```
+#[macro_export]
+macro_rules! bundle {
+    () => { $crate::Empty };
+    ($($l:expr),+ $(,)?) => {{
+        let __l = $crate::Empty;
+        $(let __l = $crate::Layer::merge(__l, $l);)+
+        __l
+    }};
+}
+
 // ── LayerSink ─────────────────────────────────────────────────────────────
 
 /// Anything that can absorb a [`Mounted`]. Implemented by
