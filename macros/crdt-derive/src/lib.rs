@@ -70,6 +70,13 @@ struct EntityCrdtInput {
     base: Ident,
     root: LitStr,
     fields: Vec<FieldSpec>,
+    /// When set, the macro additionally manages `created_at` /
+    /// `updated_at` fields: fills both with `Utc::now()` in
+    /// `from_create`, codecs them as `dt` in encode/decode, and
+    /// bumps `updated_at` at the end of every `apply_update`.
+    /// Matches architect's `#[architect(exclude(create, update),
+    /// on_create = Utc::now())]` audit-pair convention.
+    audit_timestamps: bool,
 }
 
 struct FieldSpec {
@@ -92,6 +99,8 @@ enum FieldKind {
     OptStr,
     Bool,
     OptBool,
+    I32,
+    OptI32,
     I64,
     OptI64,
     Dt,
@@ -108,6 +117,8 @@ impl FieldKind {
             "opt_str" => Self::OptStr,
             "bool" => Self::Bool,
             "opt_bool" => Self::OptBool,
+            "i32" => Self::I32,
+            "opt_i32" => Self::OptI32,
             "i64" => Self::I64,
             "opt_i64" => Self::OptI64,
             "dt" => Self::Dt,
@@ -127,6 +138,11 @@ impl FieldKind {
                 Self::OptStr => "opt_str",
                 Self::Bool => "bool",
                 Self::OptBool => "opt_bool",
+                // i32 / opt_i32 ride i64 codecs with a cast at the
+                // emit site; no native i32 codec exists in
+                // crdt::codec today.
+                Self::I32 => "i64",
+                Self::OptI32 => "opt_i64",
                 Self::I64 => "i64",
                 Self::OptI64 => "opt_i64",
                 Self::Dt => "dt",
@@ -146,6 +162,8 @@ impl FieldKind {
                 Self::OptStr => "opt_str",
                 Self::Bool => "bool",
                 Self::OptBool => "opt_bool",
+                Self::I32 => "i64",
+                Self::OptI32 => "opt_i64",
                 Self::I64 => "i64",
                 Self::OptI64 => "opt_i64",
                 Self::Dt => "dt",
@@ -172,6 +190,7 @@ impl Parse for EntityCrdtInput {
 
         let mut root: Option<LitStr> = None;
         let mut fields: Option<Vec<FieldSpec>> = None;
+        let mut audit_timestamps = false;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -187,10 +206,15 @@ impl Parse for EntityCrdtInput {
                         content.parse_terminated(FieldSpec::parse, Token![,])?;
                     fields = Some(parsed.into_iter().collect());
                 }
+                "audit_timestamps" => {
+                    audit_timestamps = true;
+                }
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown entity_crdt key `{other}` (expected `root` or `fields`)"),
+                        format!(
+                            "unknown entity_crdt key `{other}` (expected `root`, `fields`, or `audit_timestamps`)"
+                        ),
                     ));
                 }
             }
@@ -213,6 +237,7 @@ impl Parse for EntityCrdtInput {
             base,
             root,
             fields,
+            audit_timestamps,
         })
     }
 }
@@ -271,6 +296,7 @@ fn expand(input: EntityCrdtInput) -> syn::Result<TokenStream2> {
         base,
         root,
         fields,
+        audit_timestamps,
     } = input;
 
     // Names derived from base.
@@ -297,39 +323,98 @@ fn expand(input: EntityCrdtInput) -> syn::Result<TokenStream2> {
     }
     let pk_name = &pk.name;
 
-    // `from_create`: take every NON-PK field from Create, generate a
-    // fresh Uuid for the PK.
-    let from_create_fields = fields.iter().map(|f| {
-        let n = &f.name;
-        if f.flags.pk {
-            quote! { #n: ::uuid::Uuid::new_v4() }
+    // `from_create`: take every NON-PK field from Create, generate
+    // a fresh Uuid for the PK. With `audit_timestamps`, the audit
+    // pair is appended at the end with `Utc::now()` since those
+    // fields are excluded from the Create payload by architect.
+    let from_create_fields: Vec<_> = fields
+        .iter()
+        .map(|f| {
+            let n = &f.name;
+            if f.flags.pk {
+                quote! { #n: ::uuid::Uuid::new_v4() }
+            } else {
+                quote! { #n: c.#n }
+            }
+        })
+        .chain(if audit_timestamps {
+            vec![
+                quote! { created_at: ::chrono::Utc::now() },
+                quote! { updated_at: ::chrono::Utc::now() },
+            ]
         } else {
-            quote! { #n: c.#n }
-        }
-    });
+            vec![]
+        })
+        .collect();
 
     // `encode_into`: write every field.
+    let audit_encode = if audit_timestamps {
+        quote! {
+            ::crdt::codec::write_dt(m, "created_at", e.created_at)?;
+            ::crdt::codec::write_dt(m, "updated_at", e.updated_at)?;
+        }
+    } else {
+        quote! {}
+    };
     let encode_calls = fields.iter().map(|f| {
         let n = &f.name;
         let key = LitStr::new(&n.to_string(), n.span());
         let writer = f.kind.writer();
-        if f.kind == FieldKind::OptStr {
-            quote! { ::crdt::codec::#writer(m, #key, e.#n.as_deref())?; }
-        } else if f.kind == FieldKind::StringList {
-            quote! { ::crdt::codec::#writer(m, #key, &e.#n)?; }
-        } else if f.kind.needs_ref() {
-            quote! { ::crdt::codec::#writer(m, #key, &e.#n)?; }
-        } else {
-            quote! { ::crdt::codec::#writer(m, #key, e.#n)?; }
+        match f.kind {
+            FieldKind::OptStr => quote! {
+                ::crdt::codec::#writer(m, #key, e.#n.as_deref())?;
+            },
+            FieldKind::StringList => quote! {
+                ::crdt::codec::#writer(m, #key, &e.#n)?;
+            },
+            // i32 / opt_i32 ride the i64 codec with explicit casts.
+            FieldKind::I32 => quote! {
+                ::crdt::codec::#writer(m, #key, e.#n as i64)?;
+            },
+            FieldKind::OptI32 => quote! {
+                ::crdt::codec::#writer(m, #key, e.#n.map(|v| v as i64))?;
+            },
+            k if k.needs_ref() => quote! {
+                ::crdt::codec::#writer(m, #key, &e.#n)?;
+            },
+            _ => quote! {
+                ::crdt::codec::#writer(m, #key, e.#n)?;
+            },
         }
     });
 
     // `decode_from`: read every field, build the wire.
+    let audit_decode: Vec<_> = if audit_timestamps {
+        vec![
+            quote! { created_at: ::crdt::codec::read_dt(m, "created_at")? },
+            quote! { updated_at: ::crdt::codec::read_dt(m, "updated_at")? },
+        ]
+    } else {
+        vec![]
+    };
+    // Bump updated_at at the end of apply_update so audited rows
+    // get a fresh modified-time even when the Update payload itself
+    // doesn't carry one.
+    let audit_update_bump = if audit_timestamps {
+        quote! { ::crdt::codec::write_dt(m, "updated_at", ::chrono::Utc::now())?; }
+    } else {
+        quote! {}
+    };
     let decode_fields = fields.iter().map(|f| {
         let n = &f.name;
         let key = LitStr::new(&n.to_string(), n.span());
         let reader = f.kind.reader();
-        quote! { #n: ::crdt::codec::#reader(m, #key)? }
+        match f.kind {
+            FieldKind::I32 => quote! {
+                #n: ::crdt::codec::#reader(m, #key)? as i32
+            },
+            FieldKind::OptI32 => quote! {
+                #n: ::crdt::codec::#reader(m, #key)?.map(|v| v as i32)
+            },
+            _ => quote! {
+                #n: ::crdt::codec::#reader(m, #key)?
+            },
+        }
     });
 
     // `apply_update`: write fields that are Some in the Update.
@@ -347,6 +432,16 @@ fn expand(input: EntityCrdtInput) -> syn::Result<TokenStream2> {
             FieldKind::StringList => quote! {
                 if let Some(v) = u.#n {
                     ::crdt::codec::#writer(m, #key, &v)?;
+                }
+            },
+            FieldKind::I32 => quote! {
+                if let Some(v) = u.#n {
+                    ::crdt::codec::#writer(m, #key, v as i64)?;
+                }
+            },
+            FieldKind::OptI32 => quote! {
+                if let Some(v) = u.#n {
+                    ::crdt::codec::#writer(m, #key, v.map(|x| x as i64))?;
                 }
             },
             k if k.needs_ref() => quote! {
@@ -402,15 +497,17 @@ fn expand(input: EntityCrdtInput) -> syn::Result<TokenStream2> {
 
             fn encode_into(m: &::loro::LoroMap, e: &#wire) -> ::core::result::Result<(), ::architect::RepoError> {
                 #(#encode_calls)*
+                #audit_encode
                 Ok(())
             }
 
             fn decode_from(m: &::loro::LoroMap) -> ::core::result::Result<#wire, ::architect::RepoError> {
-                Ok(#wire { #(#decode_fields),* })
+                Ok(#wire { #(#decode_fields),* #(, #audit_decode)* })
             }
 
             fn apply_update(m: &::loro::LoroMap, u: #update) -> ::core::result::Result<(), ::architect::RepoError> {
                 #(#apply_update_arms)*
+                #audit_update_bump
                 Ok(())
             }
 

@@ -1,9 +1,19 @@
 //! End-to-end tests for `#[architect::rpc]` codegen.
 //!
-//! The macro is run without the `vox` cargo feature here, so the
-//! mirror trait is a plain async trait (no `#[vox::service]` decoration).
-//! That lets us exercise the bridge logic in isolation — wiring it onto
-//! a real vox link is covered by the architect example crates.
+//! Tests run without the `vox` cargo feature, so the mirror trait is
+//! a plain async trait (no `#[vox::service]` decoration). That lets us
+//! exercise the bridge logic in isolation — wiring it onto a real vox
+//! link is covered by the architect example crates.
+//!
+//! The public surface the macro exposes is three nouns + one verb:
+//!
+//! - the user's trait (e.g. `AllSync`)
+//! - `<T>Client` (auto, vox-emitted) — for callers
+//! - `serve` (auto, in the trait's module) — for mounting
+//!
+//! The internal bridge (`__<T>Bridge`) is `#[doc(hidden)]` and isn't
+//! intended for direct use, but tests reach for it to exercise the
+//! bridge body without going through vox::service.
 
 use std::sync::Mutex;
 
@@ -46,20 +56,18 @@ impl AllSync for AllSyncBackend {
 
 #[test]
 fn all_sync_bridge_marshals_through_dispatcher() {
-    let host = AllSyncHost::new(AllSyncBackend::default(), CurrentThreadDispatcher);
+    let bridge = __AllSyncBridge::new(AllSyncBackend::default(), CurrentThreadDispatcher);
 
-    // The host implements the AllSyncRpc mirror trait; calling its
-    // async methods runs the underlying sync ops through the
-    // dispatcher.
+    // The bridge implements the AllSyncRpc mirror; calling its async
+    // methods runs the underlying sync ops through the dispatcher.
     futures_lite::future::block_on(async {
-        // owned-arg path
-        AllSyncRpc::write(&host, 1, "hello".into()).await.unwrap();
-        let v = AllSyncRpc::read(&host, 1).await;
+        AllSyncRpc::write(&bridge, 1, "hello".into()).await.unwrap();
+        let v = AllSyncRpc::read(&bridge, 1).await;
         assert_eq!(v.as_deref(), Some("hello"));
 
-        // borrowed-arg path: `&str` was rewritten to `String` in the
+        // Borrowed-arg path: `&str` was rewritten to `String` in the
         // mirror; the bridge passes `&owned` back into the sync trait.
-        let echoed = AllSyncRpc::echo_str(&host, "ping".into()).await;
+        let echoed = AllSyncRpc::echo_str(&bridge, "ping".into()).await;
         assert_eq!(echoed, "ping");
     });
 }
@@ -104,12 +112,12 @@ impl AllAsync for AllAsyncBackend {
 }
 
 #[test]
-fn all_async_host_passes_through() {
-    let host = AllAsyncHost::new(AllAsyncBackend::default());
+fn all_async_bridge_passes_through() {
+    let bridge = __AllAsyncBridge::new(AllAsyncBackend::default());
 
     futures_lite::future::block_on(async {
-        AllAsync::write(&host, 1, "async".into()).await.unwrap();
-        let v = AllAsync::read(&host, 1).await;
+        AllAsync::write(&bridge, 1, "async".into()).await.unwrap();
+        let v = AllAsync::read(&bridge, 1).await;
         assert_eq!(v.as_deref(), Some("async"));
     });
 }
@@ -145,11 +153,11 @@ impl Mixed for MixedBackend {
 
 #[test]
 fn mixed_bridge_marshals_sync_and_passes_async() {
-    let host = MixedHost::new(MixedBackend::default(), CurrentThreadDispatcher);
+    let bridge = __MixedBridge::new(MixedBackend::default(), CurrentThreadDispatcher);
 
     futures_lite::future::block_on(async {
-        MixedRpc::write(&host, 1, "x".into()).await.unwrap();
-        let v = MixedRpc::read(&host, 1).await;
+        MixedRpc::write(&bridge, 1, "x".into()).await.unwrap();
+        let v = MixedRpc::read(&bridge, 1).await;
         assert_eq!(v.as_deref(), Some("x"));
     });
 }
@@ -160,8 +168,9 @@ fn mixed_bridge_marshals_sync_and_passes_async() {
 pub trait Empty {}
 
 #[test]
-fn empty_trait_emits_passthrough_host() {
+fn empty_trait_compiles() {
+    // Empty traits don't get a `serve` function — there's nothing to
+    // serve. This test just verifies the macro accepts the shape.
     struct Backend;
     impl Empty for Backend {}
-    let _host = EmptyHost::new(Backend);
 }

@@ -7,13 +7,13 @@
 
 mod service_impl;
 
-use example::axum_ws;
 use axum::{
     Router,
     extract::{State, WebSocketUpgrade},
     response::{IntoResponse, Response},
     routing::get,
 };
+use example::axum_ws;
 use example::{ExampleRepoDispatcher, ExampleServiceDispatcher};
 use service_impl::ExampleServiceImpl;
 use std::sync::Arc;
