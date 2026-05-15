@@ -304,29 +304,35 @@ impl<S, R> Cons<S, R> {
     }
 }
 
-// ── Layer trait ───────────────────────────────────────────────────────────
+// ── Layer<B> trait ────────────────────────────────────────────────────────
 
-/// The composable layer. Implemented by [`Empty`], [`Cons`],
-/// [`Mounted`], and (via the `#[architect::rpc]` derive) by each
-/// service's `Service` token. User code only interacts through the
-/// trait's methods.
-pub trait Layer: Descriptors + Sized {
+/// The composable, bindable layer for backend `B`.
+///
+/// Auto-implemented for any type that's [`Bind<B>`] + [`Descriptors`]
+/// + `Sized` — service tokens (via the `#[architect::rpc]` derive),
+/// [`Empty`], [`Cons`], [`Mounted`]. User code interacts only through
+/// the trait's methods.
+///
+/// `B` is the backend the layer binds to. A single layer expression
+/// can satisfy `Layer<B>` for multiple backends (e.g. `Reaper` and
+/// `MockReaper`) — Rust picks the right one at `.provide(...)` time.
+///
+/// ```ignore
+/// fn layers() -> impl Layer<Reaper> {
+///     layers![transport::Service, project::Service, /* … */]
+/// }
+/// ```
+pub trait Layer<B>: Bind<B> + Descriptors + Sized {
     /// Merge a bound service into this layer. Mirrors Effect-ts's
-    /// `Layer.merge` for the common bolt-on / override case — pass
-    /// anything convertible into a [`Mounted`] (typically the result
-    /// of a service's `layer(backend)` function or a `mock()`
-    /// builder).
-    ///
-    /// Works on any [`Layer`] including the opaque return of
-    /// [`Services::layers`], so call sites can chain
-    /// `Reaper::layers().merge(mock()).merge(bolt_on()).provide(Reaper)`.
+    /// `Layer.merge` — pass anything convertible into a [`Mounted`]
+    /// (a service's `layer(backend)` result, a `mock()` builder,
+    /// etc.).
     ///
     /// On duplicate method IDs the **last merged** handler wins —
     /// that's how overrides and mocks compose.
     ///
-    /// To compose two cons-chained sub-bundles (both built from
-    /// service tokens), use the [`layers!`] macro instead — it
-    /// concatenates via [`Append`] internally.
+    /// To compose two cons-chained sub-bundles, use the [`layers!`]
+    /// macro instead — it concatenates via [`Append`] internally.
     fn merge<M>(self, m: M) -> Cons<Mounted, Self>
     where
         M: Into<Mounted>,
@@ -334,30 +340,26 @@ pub trait Layer: Descriptors + Sized {
         Cons::new(m.into(), self)
     }
 
-    /// Bind a backend and produce a [`LayerRouter`]. The bound
-    /// `Self: Bind<B>` recursively requires every service in this
-    /// chain to implement `Bind<B>`. If any one fails, the error
-    /// surfaces here, naming the missing trait.
+    /// Bind a backend and produce a [`LayerRouter`]. The
+    /// [`Bind<B>`] supertrait guarantees every service in the chain
+    /// can bind — if any can't, the compile error surfaces at this
+    /// call site naming the missing trait.
     ///
-    /// Per-service `Bind<B>` impls usually require `B: Clone`
-    /// (they clone the backend per service to construct each
-    /// `Mounted`). For non-`Clone` backends, wrap in `Arc<Backend>`
-    /// and impl the per-service traits on `Arc<Backend>` (or use a
-    /// `&'static` borrow). Zero-sized / `Copy` backends like
-    /// REAPER's stateless `Reaper` token pay nothing here.
-    fn provide<B>(self, backend: B) -> LayerRouter
-    where
-        Self: Bind<B>,
-    {
+    /// Per-service `Bind<B>` impls usually require `B: Clone` (each
+    /// service clones the backend to build its own `Mounted`). For
+    /// non-`Clone` backends, wrap in `Arc<Backend>` and impl the
+    /// per-service traits on `Arc<Backend>` (or use `&'static`).
+    /// `Copy` backends like REAPER's stateless `Reaper` token pay
+    /// nothing.
+    fn provide(self, backend: B) -> LayerRouter {
         let mut router = LayerRouter::new();
         self.bind_into(&backend, &mut router);
         router
     }
 
     /// Collect descriptors of every service in this layer — useful
-    /// for capability lists / introspection before providing a
-    /// backend. Available on any [`Layer`]; the [`Descriptors`]
-    /// supertrait guarantees the walk.
+    /// for capability lists / introspection before binding. The
+    /// [`Descriptors`] supertrait guarantees the walk.
     fn descriptors(&self) -> Vec<&'static ServiceDescriptor> {
         let mut v = Vec::new();
         Descriptors::collect(self, &mut v);
@@ -365,25 +367,20 @@ pub trait Layer: Descriptors + Sized {
     }
 }
 
-impl Layer for Empty {}
-impl<S, R> Layer for Cons<S, R>
-where
-    S: BindAny,
-    R: Layer,
-{
-}
-impl Layer for Mounted {}
+impl<B, T> Layer<B> for T where T: Bind<B> + Descriptors + Sized {}
 
 // ── Append<R> ─────────────────────────────────────────────────────────────
 
 /// Type-level concat. `<Cons<A, Cons<B, Empty>> as Append<R>>::Output
-/// = Cons<A, Cons<B, R>>`.
-pub trait Append<R: Layer>: Layer {
-    type Output: Layer;
+/// = Cons<A, Cons<B, R>>`. Structural — no [`Layer`] bound, so the
+/// `layers!` macro can build cons chains without committing to a
+/// backend at the macro site.
+pub trait Append<R>: Sized {
+    type Output;
     fn append(self, rhs: R) -> Self::Output;
 }
 
-impl<R: Layer> Append<R> for Empty {
+impl<R> Append<R> for Empty {
     type Output = R;
     fn append(self, rhs: R) -> R {
         rhs
@@ -392,9 +389,7 @@ impl<R: Layer> Append<R> for Empty {
 
 impl<S, T, R> Append<R> for Cons<S, T>
 where
-    S: BindAny,
     T: Append<R>,
-    R: Layer,
 {
     type Output = Cons<S, <T as Append<R>>::Output>;
     fn append(self, rhs: R) -> Self::Output {
@@ -405,7 +400,7 @@ where
     }
 }
 
-impl<R: Layer> Append<R> for Mounted {
+impl<R> Append<R> for Mounted {
     type Output = Cons<Mounted, R>;
     fn append(self, rhs: R) -> Self::Output {
         Cons {
@@ -517,10 +512,9 @@ macro_rules! layers {
 /// ```
 pub trait Services: Sized {
     /// Build the deferred bundle for this backend. Returns an opaque
-    /// [`LayerBundle<Self>`] — a [`Layer`] that can be bound to
-    /// `Self` via `.provide(self)`, introspected with
-    /// `.descriptors()`, and extended with `.merge(...)`.
-    fn layers() -> impl LayerBundle<Self>;
+    /// [`Layer<Self>`] — composable via `.merge(...)`, bindable via
+    /// `.provide(self)`, introspectable via `.descriptors()`.
+    fn layers() -> impl Layer<Self>;
 
     /// Convenience: build the bundle, bind `self`, return the
     /// terminal router. One-call mount when no overrides are needed.
@@ -531,26 +525,6 @@ pub trait Services: Sized {
         Self::layers().provide(self)
     }
 }
-
-/// Trait alias for the three bounds every `Services::layers()` return
-/// type carries: composable ([`Layer`]), bindable to backend `B`
-/// ([`Bind<B>`]), and walkable for introspection
-/// ([`Descriptors`]).
-///
-/// Lets per-backend `Services` impls write:
-///
-/// ```ignore
-/// fn layers() -> impl LayerBundle<Reaper> {
-///     layers![transport::Service, project::Service, /* … */]
-/// }
-/// ```
-///
-/// instead of repeating `impl Layer + Bind<Reaper>`.
-/// Auto-implemented for every type satisfying the three bounds — you
-/// never write the impl by hand.
-pub trait LayerBundle<B>: Layer + Bind<B> {}
-
-impl<T, B> LayerBundle<B> for T where T: Layer + Bind<B> {}
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
 

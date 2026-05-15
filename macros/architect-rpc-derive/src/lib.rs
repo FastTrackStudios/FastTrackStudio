@@ -264,19 +264,15 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
             }
         }
 
-        // ─ One-element Layer impls ─────────────────────────────────
-        // Lets `transport::Service.merge(marker::Service)` work the
-        // same as merging two pre-built bundles. The token is its own
-        // Layer; no wrapping needed.
+        // ─ Composition impls ───────────────────────────────────────
+        // `Layer<B>` itself is blanket-implemented by architect for
+        // any `T: Bind<B> + Descriptors + Sized`, so the Service
+        // token gets it for free once we emit Bind / Descriptors.
+        // We still need `Append<R>` (the structural cons-concat)
+        // emitted per-token so `layers![a, b]` builds a chain.
 
         #[cfg(feature = "vox")]
-        impl ::architect::Layer for Service {}
-
-        #[cfg(feature = "vox")]
-        impl<R> ::architect::Append<R> for Service
-        where
-            R: ::architect::Layer,
-        {
+        impl<R> ::architect::Append<R> for Service {
             type Output = ::architect::Cons<Service, R>;
             fn append(self, rhs: R) -> Self::Output {
                 ::architect::Cons::new(self, rhs)
