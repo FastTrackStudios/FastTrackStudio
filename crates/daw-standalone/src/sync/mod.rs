@@ -32,4 +32,3 @@ mod project;
 pub use daw::{
     FxChainKey, FxEntry, ItemEntry, ProjectState, Standalone, StandaloneState, TakeList,
 };
-pub use project::StandaloneProject;

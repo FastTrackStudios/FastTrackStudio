@@ -5,15 +5,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use daw_proto::{
     CaptureScreensetRequest, Screenset, ScreensetKind, ScreensetMonitor, ScreensetOptions,
-    ScreensetRect, ScreensetResult, ScreensetScope, ScreensetSelection, ScreensetService,
-    ScreensetSummary, ScreensetTrackVisibility, ScreensetWindow,
+    ScreensetRect, ScreensetResult, ScreensetScope, ScreensetSelection, ScreensetSummary,
+    ScreensetTrackVisibility, ScreensetWindow, Screensets,
 };
 use display_info::DisplayInfo;
 use reaper_high::Reaper;
 use reaper_low::raw;
 use reaper_medium::{CommandId, ProjectContext};
 
-use crate::main_thread;
 use crate::safe_wrappers::ext_state as sw;
 
 /// Stable id for REAPER's main window inside a captured screenset.
@@ -429,123 +428,88 @@ fn apply_screenset_immediate(id: &str) -> Result<String, String> {
     Ok(screenset.id)
 }
 
-impl ScreensetService for ReaperScreenset {
-    async fn capture_screenset(&self, request: CaptureScreensetRequest) -> ScreensetResult {
-        main_thread::query(move || {
-            let mut screenset = Screenset {
-                id: request.id,
-                name: request.name,
-                description: request.description,
-                kind: request.kind,
-                schema_version: 1,
-                updated_at_unix: now_unix(),
-                tags: request.tags,
-                actions_on_apply: request.actions_on_apply,
-                ..Default::default()
-            };
-            match request.kind {
-                ScreensetKind::Window => {
-                    let monitors = capture_monitors();
-                    let mut windows = Vec::new();
-                    if let Some(main) = capture_main_window(&monitors) {
-                        windows.push(main);
-                    }
-                    screenset.monitors = monitors;
-                    screenset.windows = windows;
-                    // The dock-layout blob is owned by the dock host adapter
-                    // and attached separately by callers that have access
-                    // to it.
+impl Screensets for crate::Reaper {
+    fn capture(&self, request: CaptureScreensetRequest) -> ScreensetResult {
+        let mut screenset = Screenset {
+            id: request.id,
+            name: request.name,
+            description: request.description,
+            kind: request.kind,
+            schema_version: 1,
+            updated_at_unix: now_unix(),
+            tags: request.tags,
+            actions_on_apply: request.actions_on_apply,
+            ..Default::default()
+        };
+        match request.kind {
+            ScreensetKind::Window => {
+                let monitors = capture_monitors();
+                let mut windows = Vec::new();
+                if let Some(main) = capture_main_window(&monitors) {
+                    windows.push(main);
                 }
-                ScreensetKind::TrackSet => {
-                    screenset.track_visibility = capture_track_visibility();
-                }
-                ScreensetKind::SelectionSet => {
-                    screenset.selection = Some(capture_selection());
-                }
+                screenset.monitors = monitors;
+                screenset.windows = windows;
             }
-            match save_screenset_immediate(screenset, request.options) {
-                Ok(id) => ScreensetResult::ok(id),
-                Err(err) => ScreensetResult::error(err),
+            ScreensetKind::TrackSet => {
+                screenset.track_visibility = capture_track_visibility();
             }
-        })
-        .await
-        .unwrap_or_else(|| ScreensetResult::error("Main thread dispatcher not available"))
-    }
-
-    async fn save_screenset(
-        &self,
-        screenset: Screenset,
-        options: ScreensetOptions,
-    ) -> ScreensetResult {
-        main_thread::query(move || match save_screenset_immediate(screenset, options) {
+            ScreensetKind::SelectionSet => {
+                screenset.selection = Some(capture_selection());
+            }
+        }
+        match save_screenset_immediate(screenset, request.options) {
             Ok(id) => ScreensetResult::ok(id),
             Err(err) => ScreensetResult::error(err),
-        })
-        .await
-        .unwrap_or_else(|| ScreensetResult::error("Main thread dispatcher not available"))
+        }
     }
 
-    async fn list_screensets(&self, options: ScreensetOptions) -> Vec<ScreensetSummary> {
-        main_thread::query(move || {
-            if options.scope != ScreensetScope::Global {
-                return Vec::new();
-            }
-            load_registry()
-        })
-        .await
-        .unwrap_or_default()
+    fn save(&self, screenset: Screenset, options: ScreensetOptions) -> ScreensetResult {
+        match save_screenset_immediate(screenset, options) {
+            Ok(id) => ScreensetResult::ok(id),
+            Err(err) => ScreensetResult::error(err),
+        }
     }
 
-    async fn get_screenset(&self, id: String, options: ScreensetOptions) -> Option<Screenset> {
-        main_thread::query(move || {
-            if options.scope != ScreensetScope::Global || validate_id(&id).is_err() {
-                return None;
-            }
-            load_screenset(&id)
-        })
-        .await
-        .flatten()
+    fn list(&self, options: ScreensetOptions) -> Vec<ScreensetSummary> {
+        if options.scope != ScreensetScope::Global {
+            return Vec::new();
+        }
+        load_registry()
     }
 
-    async fn apply_screenset(&self, id: String, options: ScreensetOptions) -> ScreensetResult {
-        main_thread::query(move || {
-            if options.scope != ScreensetScope::Global {
-                return ScreensetResult::error(
-                    "project-scoped FTS screensets are not implemented yet",
-                );
-            }
-            match apply_screenset_immediate(&id) {
-                Ok(id) => ScreensetResult::ok(id),
-                Err(err) => ScreensetResult::error(err),
-            }
-        })
-        .await
-        .unwrap_or_else(|| ScreensetResult::error("Main thread dispatcher not available"))
+    fn get(&self, id: &str, options: ScreensetOptions) -> Option<Screenset> {
+        if options.scope != ScreensetScope::Global || validate_id(id).is_err() {
+            return None;
+        }
+        load_screenset(id)
     }
 
-    async fn delete_screenset(&self, id: String, options: ScreensetOptions) -> ScreensetResult {
-        main_thread::query(move || {
-            if options.scope != ScreensetScope::Global {
-                return ScreensetResult::error(
-                    "project-scoped FTS screensets are not implemented yet",
-                );
-            }
-            if let Err(err) = validate_id(&id) {
-                return ScreensetResult::error(err);
-            }
-            if let Err(err) =
-                delete_global_value(SECTION_GLOBAL, &screenset_key(&id), options.persist)
-            {
-                return ScreensetResult::error(err);
-            }
-            let mut registry = load_registry();
-            registry.retain(|row| row.id != id);
-            if let Err(err) = save_registry(&registry, options.persist) {
-                return ScreensetResult::error(err);
-            }
-            ScreensetResult::ok(id)
-        })
-        .await
-        .unwrap_or_else(|| ScreensetResult::error("Main thread dispatcher not available"))
+    fn apply(&self, id: &str, options: ScreensetOptions) -> ScreensetResult {
+        if options.scope != ScreensetScope::Global {
+            return ScreensetResult::error("project-scoped FTS screensets are not implemented yet");
+        }
+        match apply_screenset_immediate(id) {
+            Ok(id) => ScreensetResult::ok(id),
+            Err(err) => ScreensetResult::error(err),
+        }
+    }
+
+    fn delete(&self, id: &str, options: ScreensetOptions) -> ScreensetResult {
+        if options.scope != ScreensetScope::Global {
+            return ScreensetResult::error("project-scoped FTS screensets are not implemented yet");
+        }
+        if let Err(err) = validate_id(id) {
+            return ScreensetResult::error(err);
+        }
+        if let Err(err) = delete_global_value(SECTION_GLOBAL, &screenset_key(id), options.persist) {
+            return ScreensetResult::error(err);
+        }
+        let mut registry = load_registry();
+        registry.retain(|row| row.id != id);
+        if let Err(err) = save_registry(&registry, options.persist) {
+            return ScreensetResult::error(err);
+        }
+        ScreensetResult::ok(id.to_string())
     }
 }

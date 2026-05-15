@@ -29,10 +29,12 @@ mod fx;
 mod fx_chains;
 mod fx_params;
 mod health;
+mod input;
 mod item;
 mod live_midi;
 mod marker;
 mod midi;
+mod peak;
 pub(crate) mod platform;
 mod plugin_loader;
 mod position_conversion;
@@ -41,36 +43,18 @@ mod region;
 mod resource;
 mod routing;
 mod routing_sync;
+mod screenset;
 mod shared_state;
 pub mod sync;
 mod take;
 mod tempo_map;
+mod toolbar;
 mod track;
 mod transport;
 mod ui;
 
-pub use automation::StandaloneAutomation;
-// `ExtState` impl'd directly on `Standalone` — see `crate::ext_state`.
-pub use fx::StandaloneFx;
-// `Items` impl'd directly on `Standalone` — see `crate::item`.
-// `StandaloneItem` / `StandaloneTake` retired with their async services.
-pub use live_midi::StandaloneLiveMidi;
-// `Markers` is now impl'd directly on `Standalone` — see `crate::marker`.
-// The old async `StandaloneMarker` service struct was retired with the
-// architect::rpc port; mount via `daw_proto::marker::serve(Standalone::new())`.
-pub use midi::StandaloneMidi;
-pub use position_conversion::StandalonePositionConversion;
-pub use project::{StandaloneProject, project_guids};
-// `Regions` impl'd directly on `Standalone` — see `crate::region`.
-// The old async `StandaloneRegion` service struct retired with the
-// architect::rpc port.
-pub use resource::StandaloneResource;
-pub use routing::StandaloneRouting;
-pub use sync::Standalone;
-// `TempoMap` impl'd directly on `Standalone` — see `crate::tempo_map`.
-// `Tracks` impl'd directly on `Standalone` — see `crate::track`.
-// The old async `StandaloneTrack` service struct retired with the port.
-// `Transport` impl'd directly on `Standalone` — see `crate::transport`.
-// The old async `StandaloneTransport` service struct retired with the port.
+// All per-service impls are on `Standalone` directly post-port.
+// Old `Standalone*` per-service structs retired.
+pub use project::project_guids;
 pub use shared_state::SharedProjectState;
-pub use ui::StandaloneUi;
+pub use sync::Standalone;

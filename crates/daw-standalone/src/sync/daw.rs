@@ -8,8 +8,6 @@ use daw_proto::{
     Take, TempoPoint, Track, TrackRoute, Transport as TransportState,
 };
 
-use super::project::StandaloneProject;
-
 /// Hashable key derived from `FxChainContext` for use as a HashMap key.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum FxChainKey {
@@ -229,7 +227,7 @@ impl Standalone {
 }
 
 impl Daw for Standalone {
-    type Project<'a> = StandaloneProject<'a>;
+    type Project<'a> = super::project::StandaloneProject<'a>;
 
     fn current_project(&self) -> DawResult<Self::Project<'_>> {
         let guid = {
@@ -238,14 +236,16 @@ impl Daw for Standalone {
                 .clone()
                 .ok_or_else(|| DawError::not_found("Project", "current"))?
         };
-        // Verify the project is still resident.
         self.with_project(&guid, |_| ())?;
-        Ok(StandaloneProject::new(self, guid))
+        Ok(super::project::StandaloneProject::new(self, guid))
     }
 
     fn project(&self, guid: &str) -> DawResult<Self::Project<'_>> {
         self.with_project(guid, |_| ())?;
-        Ok(StandaloneProject::new(self, guid.to_string()))
+        Ok(super::project::StandaloneProject::new(
+            self,
+            guid.to_string(),
+        ))
     }
 
     fn projects(&self) -> Vec<ProjectInfo> {
