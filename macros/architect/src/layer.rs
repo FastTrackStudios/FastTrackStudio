@@ -40,7 +40,7 @@
 //! - [`Empty`] / [`Cons<S, R>`] — type-level list of services.
 //!   Hidden behind `impl Layer` at function return sites.
 //! - [`Layer`] — exposes `merge` / `provide` / `descriptors`.
-//! - [`ProvideAll<B>`] — bound checked at `.provide(B)`; recursively
+//! - [`BindAll<B>`] — bound checked at `.provide(B)`; recursively
 //!   requires `S: Bind<B>` for every service in the chain.
 //! - [`Append<R>`] — type-level concat backing `Layer::merge`.
 //! - [`LayerRouter`] — the terminal sink, implements
@@ -270,7 +270,7 @@ impl<S, R> Cons<S, R> {
 /// [`Mounted`], and (via the `#[architect::rpc]` derive) by each
 /// service's `Service` token. User code only interacts through the
 /// trait's methods.
-pub trait Layer: Sized {
+pub trait Layer: Descriptors + Sized {
     /// Merge a bound service into this layer. Mirrors Effect-ts's
     /// `Layer.merge` for the common bolt-on / override case — pass
     /// anything convertible into a [`Mounted`] (typically the result
@@ -295,7 +295,7 @@ pub trait Layer: Sized {
     }
 
     /// Bind a backend and produce a [`LayerRouter`]. The bound
-    /// `Self: ProvideAll<B>` recursively requires every service in
+    /// `Self: BindAll<B>` recursively requires every service in
     /// the chain to implement `Bind<B>`. If any one fails, the error
     /// surfaces here, naming the missing trait.
     ///
@@ -307,7 +307,7 @@ pub trait Layer: Sized {
     /// nothing here.
     fn provide<B>(self, backend: B) -> LayerRouter
     where
-        Self: ProvideAll<B>,
+        Self: BindAll<B>,
         B: Clone,
     {
         let mut router = LayerRouter::new();
@@ -317,11 +317,9 @@ pub trait Layer: Sized {
 
     /// Collect descriptors of every service in this layer — useful
     /// for capability lists / introspection before providing a
-    /// backend.
-    fn descriptors(&self) -> Vec<&'static ServiceDescriptor>
-    where
-        Self: Descriptors,
-    {
+    /// backend. Available on any [`Layer`]; the [`Descriptors`]
+    /// supertrait guarantees the walk.
+    fn descriptors(&self) -> Vec<&'static ServiceDescriptor> {
         let mut v = Vec::new();
         Descriptors::collect(self, &mut v);
         v
@@ -337,24 +335,24 @@ where
 }
 impl Layer for Mounted {}
 
-// ── ProvideAll<B> ─────────────────────────────────────────────────────────
+// ── BindAll<B> ─────────────────────────────────────────────────────────
 
 /// Implemented by any chain whose services all implement `Bind<B>`.
 /// The bound check at [`Layer::provide`] uses this — `Self:
-/// ProvideAll<B>` cascades down into per-service `Bind<B>` checks.
-pub trait ProvideAll<B>: Layer {
+/// BindAll<B>` cascades down into per-service `Bind<B>` checks.
+pub trait BindAll<B>: Layer {
     fn provide_into(self, backend: &B, router: &mut LayerRouter);
 }
 
-impl<B> ProvideAll<B> for Empty {
+impl<B> BindAll<B> for Empty {
     fn provide_into(self, _: &B, _: &mut LayerRouter) {}
 }
 
-impl<B, S, R> ProvideAll<B> for Cons<S, R>
+impl<B, S, R> BindAll<B> for Cons<S, R>
 where
     B: Clone,
     S: Bind<B>,
-    R: ProvideAll<B>,
+    R: BindAll<B>,
 {
     fn provide_into(self, backend: &B, router: &mut LayerRouter) {
         router.add_mounted(self.svc.bind(backend.clone()));
@@ -362,7 +360,7 @@ where
     }
 }
 
-impl<B> ProvideAll<B> for Mounted {
+impl<B> BindAll<B> for Mounted {
     fn provide_into(self, _: &B, router: &mut LayerRouter) {
         router.add_mounted(self);
     }
@@ -412,7 +410,7 @@ impl<R: Layer> Append<R> for Mounted {
 // ── Descriptors ───────────────────────────────────────────────────────────
 
 /// Walks the chain producing each service's descriptor.
-pub trait Descriptors: Layer {
+pub trait Descriptors {
     fn collect(&self, out: &mut Vec<&'static ServiceDescriptor>);
 }
 
@@ -528,7 +526,7 @@ pub trait Services: Sized {
 
 /// Trait alias for the three bounds every `Services::layers()` return
 /// type carries: composable ([`Layer`]), bindable to backend `B`
-/// ([`ProvideAll<B>`]), and walkable for introspection
+/// ([`BindAll<B>`]), and walkable for introspection
 /// ([`Descriptors`]).
 ///
 /// Lets per-backend `Services` impls write:
@@ -539,12 +537,12 @@ pub trait Services: Sized {
 /// }
 /// ```
 ///
-/// instead of repeating `impl Layer + ProvideAll<Reaper> + Descriptors`.
+/// instead of repeating `impl Layer + BindAll<Reaper> + Descriptors`.
 /// Auto-implemented for every type satisfying the three bounds — you
 /// never write the impl by hand.
-pub trait LayerBundle<B>: Layer + ProvideAll<B> + Descriptors {}
+pub trait LayerBundle<B>: Layer + BindAll<B> {}
 
-impl<T, B> LayerBundle<B> for T where T: Layer + ProvideAll<B> + Descriptors {}
+impl<T, B> LayerBundle<B> for T where T: Layer + BindAll<B> {}
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
 

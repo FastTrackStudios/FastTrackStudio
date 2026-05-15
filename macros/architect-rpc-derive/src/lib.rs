@@ -285,7 +285,7 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         }
 
         #[cfg(feature = "vox")]
-        impl<B> ::architect::ProvideAll<B> for Service
+        impl<B> ::architect::BindAll<B> for Service
         where
             B: ::core::clone::Clone,
             Service: ::architect::Bind<B>,
