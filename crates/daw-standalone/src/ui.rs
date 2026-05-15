@@ -1,69 +1,38 @@
-//! Standalone UI Service Implementation (Mock)
+//! `impl UiDialogs for Standalone` — stub (headless, dialogs always cancel).
 
-use daw_proto::{UiService, UserInputResult};
+use daw_proto::{UiDialogs, UserInputResult};
 use std::path::PathBuf;
 
-/// Standalone UI service (returns mock/empty results for testing)
-#[derive(Clone)]
-pub struct StandaloneUi;
+use crate::sync::Standalone;
 
-impl StandaloneUi {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for StandaloneUi {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl UiService for StandaloneUi {
-    async fn get_user_inputs(
+impl UiDialogs for Standalone {
+    fn get_user_inputs(
         &self,
-        _title: String,
+        _title: &str,
         _prompts: Vec<String>,
-        defaults: Vec<String>,
+        _defaults: Vec<String>,
     ) -> Option<UserInputResult> {
-        // In standalone mode, return defaults as if user clicked OK
-        Some(UserInputResult {
-            ok: true,
-            values: defaults,
-        })
+        None
     }
-
-    async fn browse_for_file(
+    fn browse_for_file(
         &self,
-        _title: String,
+        _title: &str,
         _initial_dir: Option<PathBuf>,
         _filter: Option<String>,
     ) -> Option<PathBuf> {
-        // Return a mock file path
-        Some(PathBuf::from("/mock/file.wav"))
+        None
     }
-
-    async fn browse_for_save_file(
+    fn browse_for_save_file(
         &self,
-        _title: String,
+        _title: &str,
         _initial_dir: Option<PathBuf>,
-        default_name: String,
+        _default_name: &str,
         _filter: Option<String>,
     ) -> Option<PathBuf> {
-        // Return mock path with the default name
-        Some(PathBuf::from(format!("/mock/{}", default_name)))
+        None
     }
-
-    async fn browse_for_directory(
-        &self,
-        _title: String,
-        _initial_dir: Option<PathBuf>,
-    ) -> Option<PathBuf> {
-        // Return a mock directory path
-        Some(PathBuf::from("/mock/directory"))
+    fn browse_for_directory(&self, _title: &str, _initial_dir: Option<PathBuf>) -> Option<PathBuf> {
+        None
     }
-
-    async fn set_prevent_ui_refresh(&self, _prevent: bool) {
-        // No-op in standalone mode
-    }
+    fn set_prevent_ui_refresh(&self, _prevent: bool) {}
 }

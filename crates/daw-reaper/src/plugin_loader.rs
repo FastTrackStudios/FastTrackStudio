@@ -9,7 +9,7 @@
 //! Plugin loading involves `dlopen` and calling C FFI entry points. The caller
 //! must ensure plugin binaries are trusted.
 
-use daw_proto::plugin_loader::{LoadedPluginInfo, PluginLoadResult, PluginLoaderService};
+use daw_proto::plugin_loader::{LoadedPluginInfo, PluginLoadResult, PluginLoading};
 use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
@@ -198,8 +198,9 @@ pub fn eager_load_fx_plugins() {
     }
 }
 
-impl PluginLoaderService for ReaperPluginLoader {
-    async fn load_plugin(&self, plugin_path: String) -> PluginLoadResult {
+impl PluginLoading for crate::Reaper {
+    fn load(&self, plugin_path: &str) -> PluginLoadResult {
+        let plugin_path = plugin_path.to_string();
         // Check if already loaded
         if let Ok(plugins) = loaded_plugins().lock()
             && plugins.iter().any(|p| p.path == plugin_path)
@@ -268,7 +269,7 @@ impl PluginLoaderService for ReaperPluginLoader {
         PluginLoadResult::Ok
     }
 
-    async fn list_loaded(&self) -> Vec<LoadedPluginInfo> {
+    fn list_loaded(&self) -> Vec<LoadedPluginInfo> {
         loaded_plugins()
             .lock()
             .ok()
@@ -284,7 +285,7 @@ impl PluginLoaderService for ReaperPluginLoader {
             .unwrap_or_default()
     }
 
-    async fn is_loaded(&self, plugin_path: String) -> bool {
+    fn is_loaded(&self, plugin_path: &str) -> bool {
         loaded_plugins()
             .lock()
             .ok()

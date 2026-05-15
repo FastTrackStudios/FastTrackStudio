@@ -19,16 +19,20 @@
 
 #[cfg(feature = "audio")]
 pub mod audio_engine;
+mod audio_engine_svc;
 mod automation;
+mod dawfile_service;
 mod ext_state;
 mod fx;
 mod fx_chains;
 mod fx_params;
+mod health;
 mod item;
 mod live_midi;
 mod marker;
 mod midi;
 pub(crate) mod platform;
+mod plugin_loader;
 mod position_conversion;
 mod project;
 mod region;
