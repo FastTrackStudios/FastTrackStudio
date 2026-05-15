@@ -219,6 +219,16 @@ pub trait BindAny {
 /// with the trait bounds the underlying RPC dispatcher requires.
 /// [`Mounted`] implements `Bind<B>` for any `B` (returns self,
 /// ignores `B`) so already-bound services compose in the same chain.
+#[diagnostic::on_unimplemented(
+    message = "backend `{B}` cannot serve this service",
+    label = "no `Bind<{B}>` impl — `{Self}` likely does not implement \
+             the underlying RPC trait for `{B}` (or `{B}` is missing a \
+             required bound such as `HasDispatcher` / `Send` / `Sync` / \
+             `'static`).",
+    note = "every service token in a `Layer` must impl `Bind<B>` for \
+            the backend you pass to `.provide(B)`. Check the trait \
+            impls on `{B}` for this service's underlying trait."
+)]
 pub trait Bind<B>: BindAny {
     fn bind(self, backend: B) -> Mounted;
 }
@@ -288,6 +298,13 @@ pub trait Layer: Sized {
     /// `Self: ProvideAll<B>` recursively requires every service in
     /// the chain to implement `Bind<B>`. If any one fails, the error
     /// surfaces here, naming the missing trait.
+    ///
+    /// `B: Clone` is required because each service's `bind(backend)`
+    /// consumes a copy of the backend. For non-`Clone` backends, wrap
+    /// in `Arc<Backend>` and impl the per-service traits on
+    /// `Arc<Backend>` (or use a `&'static` borrow). Zero-sized /
+    /// `Copy` backends like REAPER's stateless `Reaper` token pay
+    /// nothing here.
     fn provide<B>(self, backend: B) -> LayerRouter
     where
         Self: ProvideAll<B>,
@@ -491,8 +508,13 @@ macro_rules! layers {
 /// ```
 pub trait Services: Sized {
     /// Build the deferred bundle for this backend. Returns an opaque
-    /// type that knows how to `.provide(Self)`.
-    fn layers() -> impl Layer + ProvideAll<Self>;
+    /// type carrying enough trait bounds to:
+    ///
+    /// - chain `.merge(...)` for bolt-ons/overrides ([`Layer`])
+    /// - bind via `.provide(self)` ([`ProvideAll<Self>`])
+    /// - introspect with `.descriptors()` before binding
+    ///   ([`Descriptors`])
+    fn layers() -> impl Layer + ProvideAll<Self> + Descriptors;
 
     /// Convenience: build the bundle, bind `self`, return the
     /// terminal router. One-call mount when no overrides are needed.
@@ -502,27 +524,6 @@ pub trait Services: Sized {
     {
         Self::layers().provide(self)
     }
-}
-
-// ── bundle! macro ─────────────────────────────────────────────────────────
-
-/// Combine multiple [`Layer`] values into one via [`Layer::merge`].
-/// Sibling of [`services!`] (which builds a bundle from service
-/// tokens); `bundle!` builds a bundle from already-composed sub-bundles.
-///
-/// ```ignore
-/// let timeline = services![transport, marker, region];
-/// let routing  = services![project, routing, track];
-/// let combined = bundle![timeline, routing];
-/// ```
-#[macro_export]
-macro_rules! bundle {
-    () => { $crate::Empty };
-    ($($l:expr),+ $(,)?) => {{
-        let __l = $crate::Empty;
-        $(let __l = $crate::Layer::merge(__l, $l);)+
-        __l
-    }};
 }
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
@@ -555,6 +556,18 @@ impl LayerRouter {
         H: Handler<DriverReplySink> + Send + Sync + 'static,
     {
         self.register(descriptor, Arc::new(handler));
+        self
+    }
+
+    /// Runtime bolt-on: merge a [`Mounted`] (or anything `Into<Mounted>`,
+    /// like a service's `layer(backend)` result) into this already-built
+    /// router. Parallels [`Layer::merge`] for the
+    /// already-provided-then-extended case, e.g. loading a plugin
+    /// service after the main bundle is mounted. Last-merge wins on
+    /// duplicate method IDs.
+    pub fn merge<M: Into<Mounted>>(mut self, m: M) -> Self {
+        let (descriptor, handler) = m.into().into_parts();
+        self.register(descriptor, handler);
         self
     }
 
