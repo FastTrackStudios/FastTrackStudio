@@ -40,8 +40,9 @@
 //! - [`Empty`] / [`Cons<S, R>`] — type-level list of services.
 //!   Hidden behind `impl Layer` at function return sites.
 //! - [`Layer`] — exposes `merge` / `provide` / `descriptors`.
-//! - [`BindAll<B>`] — bound checked at `.provide(B)`; recursively
-//!   requires `S: Bind<B>` for every service in the chain.
+//!   The `Bind<B>` chain impl is recursive: `Cons<S, R>: Bind<B>`
+//!   requires `S: Bind<B>` and `R: Bind<B>`, so a missing per-service
+//!   impl surfaces at `.provide(B)` naming the trait.
 //! - [`Append<R>`] — type-level concat backing `Layer::merge`.
 //! - [`LayerRouter`] — the terminal sink, implements
 //!   [`vox::Handler<DriverReplySink>`].
@@ -214,11 +215,16 @@ pub trait BindAny {
     fn descriptor(&self) -> &'static ServiceDescriptor;
 }
 
-/// Backend-aware bind — "given backend `B`, produce a [`Mounted`]."
-/// The architect-rpc macro emits an impl of this trait per service,
-/// with the trait bounds the underlying RPC dispatcher requires.
-/// [`Mounted`] implements `Bind<B>` for any `B` (returns self,
-/// ignores `B`) so already-bound services compose in the same chain.
+/// Backend-aware bind — "given backend `B`, register this thing
+/// (service token, pre-mounted service, or whole chain) into a
+/// [`LayerRouter`]."
+///
+/// One trait for every form of binding. The `#[architect::rpc]`
+/// derive emits an impl per service token; [`Empty`] / [`Cons`] /
+/// [`Mounted`] get blanket impls in this crate. The chain impl
+/// walks recursively, requiring each service to impl `Bind<B>` —
+/// the bound check at [`Layer::provide`] cascades through and
+/// surfaces missing impls at the call site.
 #[diagnostic::on_unimplemented(
     message = "backend `{B}` cannot serve this service",
     label = "no `Bind<{B}>` impl — `{Self}` likely does not implement \
@@ -230,7 +236,11 @@ pub trait BindAny {
             impls on `{B}` for this service's underlying trait."
 )]
 pub trait Bind<B>: BindAny {
-    fn bind(self, backend: B) -> Mounted;
+    /// Register self into the router. Per-service tokens build a
+    /// `Mounted` from `backend.clone()` and call `router.add_mounted`;
+    /// chains (`Cons`) walk their elements; `Mounted` registers
+    /// itself directly.
+    fn bind_into(self, backend: &B, router: &mut LayerRouter);
 }
 
 impl BindAny for Mounted {
@@ -240,8 +250,38 @@ impl BindAny for Mounted {
 }
 
 impl<B> Bind<B> for Mounted {
-    fn bind(self, _: B) -> Mounted {
-        self
+    fn bind_into(self, _: &B, router: &mut LayerRouter) {
+        router.add_mounted(self);
+    }
+}
+
+impl BindAny for Empty {
+    fn descriptor(&self) -> &'static ServiceDescriptor {
+        &ServiceDescriptor::EMPTY
+    }
+}
+
+impl<B> Bind<B> for Empty {
+    fn bind_into(self, _: &B, _: &mut LayerRouter) {}
+}
+
+impl<S, R> BindAny for Cons<S, R>
+where
+    S: BindAny,
+{
+    fn descriptor(&self) -> &'static ServiceDescriptor {
+        self.svc.descriptor()
+    }
+}
+
+impl<B, S, R> Bind<B> for Cons<S, R>
+where
+    S: Bind<B>,
+    R: Bind<B>,
+{
+    fn bind_into(self, backend: &B, router: &mut LayerRouter) {
+        self.svc.bind_into(backend, router);
+        self.rest.bind_into(backend, router);
     }
 }
 
@@ -295,23 +335,22 @@ pub trait Layer: Descriptors + Sized {
     }
 
     /// Bind a backend and produce a [`LayerRouter`]. The bound
-    /// `Self: BindAll<B>` recursively requires every service in
-    /// the chain to implement `Bind<B>`. If any one fails, the error
+    /// `Self: Bind<B>` recursively requires every service in this
+    /// chain to implement `Bind<B>`. If any one fails, the error
     /// surfaces here, naming the missing trait.
     ///
-    /// `B: Clone` is required because each service's `bind(backend)`
-    /// consumes a copy of the backend. For non-`Clone` backends, wrap
-    /// in `Arc<Backend>` and impl the per-service traits on
-    /// `Arc<Backend>` (or use a `&'static` borrow). Zero-sized /
-    /// `Copy` backends like REAPER's stateless `Reaper` token pay
-    /// nothing here.
+    /// Per-service `Bind<B>` impls usually require `B: Clone`
+    /// (they clone the backend per service to construct each
+    /// `Mounted`). For non-`Clone` backends, wrap in `Arc<Backend>`
+    /// and impl the per-service traits on `Arc<Backend>` (or use a
+    /// `&'static` borrow). Zero-sized / `Copy` backends like
+    /// REAPER's stateless `Reaper` token pay nothing here.
     fn provide<B>(self, backend: B) -> LayerRouter
     where
-        Self: BindAll<B>,
-        B: Clone,
+        Self: Bind<B>,
     {
         let mut router = LayerRouter::new();
-        self.provide_into(&backend, &mut router);
+        self.bind_into(&backend, &mut router);
         router
     }
 
@@ -334,37 +373,6 @@ where
 {
 }
 impl Layer for Mounted {}
-
-// ── BindAll<B> ─────────────────────────────────────────────────────────
-
-/// Implemented by any chain whose services all implement `Bind<B>`.
-/// The bound check at [`Layer::provide`] uses this — `Self:
-/// BindAll<B>` cascades down into per-service `Bind<B>` checks.
-pub trait BindAll<B>: Layer {
-    fn provide_into(self, backend: &B, router: &mut LayerRouter);
-}
-
-impl<B> BindAll<B> for Empty {
-    fn provide_into(self, _: &B, _: &mut LayerRouter) {}
-}
-
-impl<B, S, R> BindAll<B> for Cons<S, R>
-where
-    B: Clone,
-    S: Bind<B>,
-    R: BindAll<B>,
-{
-    fn provide_into(self, backend: &B, router: &mut LayerRouter) {
-        router.add_mounted(self.svc.bind(backend.clone()));
-        self.rest.provide_into(backend, router);
-    }
-}
-
-impl<B> BindAll<B> for Mounted {
-    fn provide_into(self, _: &B, router: &mut LayerRouter) {
-        router.add_mounted(self);
-    }
-}
 
 // ── Append<R> ─────────────────────────────────────────────────────────────
 
@@ -526,7 +534,7 @@ pub trait Services: Sized {
 
 /// Trait alias for the three bounds every `Services::layers()` return
 /// type carries: composable ([`Layer`]), bindable to backend `B`
-/// ([`BindAll<B>`]), and walkable for introspection
+/// ([`Bind<B>`]), and walkable for introspection
 /// ([`Descriptors`]).
 ///
 /// Lets per-backend `Services` impls write:
@@ -537,12 +545,12 @@ pub trait Services: Sized {
 /// }
 /// ```
 ///
-/// instead of repeating `impl Layer + BindAll<Reaper> + Descriptors`.
+/// instead of repeating `impl Layer + Bind<Reaper>`.
 /// Auto-implemented for every type satisfying the three bounds — you
 /// never write the impl by hand.
-pub trait LayerBundle<B>: Layer + BindAll<B> {}
+pub trait LayerBundle<B>: Layer + Bind<B> {}
 
-impl<T, B> LayerBundle<B> for T where T: Layer + BindAll<B> {}
+impl<T, B> LayerBundle<B> for T where T: Layer + Bind<B> {}
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
 

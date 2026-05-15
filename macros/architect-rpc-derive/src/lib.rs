@@ -248,10 +248,19 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         #[cfg(feature = "vox")]
         impl<S> ::architect::Bind<S> for Service
         where
+            S: ::core::clone::Clone,
             #bounds
         {
-            fn bind(self, backend: S) -> ::architect::Mounted {
-                ::architect::Mounted::new(#descriptor_fn(), serve(backend))
+            fn bind_into(
+                self,
+                backend: &S,
+                router: &mut ::architect::LayerRouter,
+            ) {
+                use ::architect::LayerSink as _;
+                router.add_mounted(::architect::Mounted::new(
+                    #descriptor_fn(),
+                    serve(backend.clone()),
+                ));
             }
         }
 
@@ -283,28 +292,6 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
                 out.push(::architect::BindAny::descriptor(self));
             }
         }
-
-        #[cfg(feature = "vox")]
-        impl<B> ::architect::BindAll<B> for Service
-        where
-            B: ::core::clone::Clone,
-            Service: ::architect::Bind<B>,
-        {
-            fn provide_into(
-                self,
-                backend: &B,
-                router: &mut ::architect::LayerRouter,
-            ) {
-                use ::architect::LayerSink as _;
-                let mounted = ::architect::Bind::bind(self, backend.clone());
-                router.add_mounted(mounted);
-            }
-        }
-
-        // ─ Requirements declaration ─────────────────────────────
-        // Populated from `#[architect::rpc(requires(TraitA, ...))]`
-        // — names which sibling services this one expects to find
-        // in the same router at dispatch time. Default empty.
 
     }
 }
