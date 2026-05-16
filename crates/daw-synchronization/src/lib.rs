@@ -39,9 +39,15 @@
 //! wires `outbound()` → peer connection → `apply_remote()` on the
 //! other side.
 
+pub mod apply;
+pub mod daw_module;
 pub mod drift;
+pub mod engine;
 pub mod heartbeat;
+pub mod subscriptions;
 pub mod suppression;
+
+pub use engine::SynchronizationEngine;
 
 // ── Sync types (formerly sync-proto) ─────────────────────────────────
 //

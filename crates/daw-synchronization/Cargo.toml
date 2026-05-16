@@ -30,11 +30,16 @@ path = "src/lib.rs"
 # `daw::service::*`, streaming events through `daw::service::*` as
 # well. We never reach for daw-proto / daw-reaper directly: that
 # keeps the engine backend-agnostic by construction.
-daw.workspace = true
+daw = { workspace = true, features = ["reaper"] }
 facet.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
 tokio-util = "0.7"
 tracing.workspace = true
+
+[dev-dependencies]
+reaper-test.workspace = true
+eyre.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
 
 [lints]
 workspace = true
