@@ -3,10 +3,11 @@
 //! Discovers a running REAPER instance via its Unix socket, connects via vox,
 //! initializes the DAW singleton, and builds the setlist from open projects.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+use daw::rpc::{Caller, Daw};
 use daw::sync::LocalCaller;
-use daw::{Daw, ErasedCaller};
 use eyre::{Result, bail};
 use session::{
     SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher,
@@ -74,7 +75,7 @@ pub async fn connect_to_reaper() -> Result<()> {
     let setlist = SetlistServiceImpl::new();
 
     let local = LocalCaller::new(SetlistServiceDispatcher::new(setlist)).await?;
-    let client = SetlistServiceClient::new(local.erased_caller());
+    let client = SetlistServiceClient::new(local.caller());
 
     // Build setlist from whatever's open in REAPER
     client
@@ -89,7 +90,7 @@ pub async fn connect_to_reaper() -> Result<()> {
 }
 
 /// Scan `/tmp` for `fts-daw-*.sock` sockets, connect to the first live one.
-async fn discover_and_connect() -> Result<ErasedCaller> {
+async fn discover_and_connect() -> Result<Caller> {
     let sockets = discover_sockets();
     if sockets.is_empty() {
         bail!(
@@ -158,14 +159,17 @@ fn is_process_alive(pid: u32) -> bool {
 ///
 /// Opens a virtual connection on the session (matching what daw-bridge expects)
 /// so that the RoutedHandler can properly dispatch service calls.
-async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
+async fn connect_to_daw(path: &Path) -> eyre::Result<Caller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
     let link = vox_stream::StreamLink::unix(stream);
     let handshake_result = initiator_handshake_result(64);
-    let (_root_caller, session) =
-        vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
-            .establish::<vox::DriverCaller>(())
-            .await?;
+    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
+        .establish::<vox::NoopClient>()
+        .await?;
+    let session = root
+        .session
+        .clone()
+        .ok_or_else(|| eyre::eyre!("DAW root session missing handle"))?;
 
     // Open a virtual connection for DAW services — the daw-bridge's RoutedHandler
     // dispatches service calls on virtual connections, not the root session.
@@ -174,17 +178,18 @@ async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
             vox::ConnectionSettings {
                 parity: vox::Parity::Odd,
                 max_concurrent_requests: 64,
+                initial_channel_credit: 16,
             },
             vec![vox::MetadataEntry {
-                key: "role",
-                value: vox::MetadataValue::String("session-desktop"),
+                key: Cow::Borrowed("role"),
+                value: vox::MetadataValue::String(Cow::Borrowed("session-desktop")),
                 flags: vox::MetadataFlags::NONE,
             }],
         )
         .await?;
 
     let mut driver = vox::Driver::new(conn, ());
-    let caller = ErasedCaller::new(driver.caller());
+    let caller = Caller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
 
     Ok(caller)
@@ -197,16 +202,19 @@ fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeRes
         our_settings: vox::ConnectionSettings {
             parity: vox::Parity::Odd,
             max_concurrent_requests,
+            initial_channel_credit: 16,
         },
         peer_settings: vox::ConnectionSettings {
             parity: vox::Parity::Even,
             max_concurrent_requests,
+            initial_channel_credit: 16,
         },
         peer_supports_retry: true,
         session_resume_key: None,
         peer_resume_key: None,
         our_schema: vec![],
         peer_schema: vec![],
+        peer_metadata: vec![],
     }
 }
 
