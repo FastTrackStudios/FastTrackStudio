@@ -30,6 +30,7 @@ members = [
     "crates/daw-reaper-dioxus-ext",
     "crates/daw-reaper-dioxus-ext-test",
     "crates/daw-synchronization",
+    "crates/daw-network",
     "apps/example-extension",
     "apps/example-plugin",
     "xtask",
