@@ -589,9 +589,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 (track.pan as f64 / 100.0).clamp(-1.0, 1.0)
             };
             let mut t = t.volume(linear_vol).pan(reaper_pan);
-            if track.mute {
-                t = t.muted();
-            }
+            // NOTE: PT's `0x1029 +5` byte over-reports mute. On the user's
+            // session it incorrectly flags SYZ / AC GTR / El Gtr / Bass
+            // Demo as muted even though they sound in PT. Truly-muted
+            // tracks (02 LORD stems) and falsely-muted aux/print tracks
+            // have byte-identical 0x1029 payloads, so we can't distinguish.
+            // Leave tracks audible; user can manually mute in REAPER.
+            let _ = track.mute;
             if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                 t = t.color(rgb);
             }
@@ -742,9 +746,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
             };
             let reaper_pan = (track.pan as f64 / 100.0).clamp(-1.0, 1.0);
             let mut t = t.volume(linear_vol).pan(reaper_pan);
-            if track.mute {
-                t = t.muted();
-            }
+            // NOTE: PT's `0x1029 +5` byte over-reports mute. On the user's
+            // session it incorrectly flags SYZ / AC GTR / El Gtr / Bass
+            // Demo as muted even though they sound in PT. Truly-muted
+            // tracks (02 LORD stems) and falsely-muted aux/print tracks
+            // have byte-identical 0x1029 payloads, so we can't distinguish.
+            // Leave tracks audible; user can manually mute in REAPER.
+            let _ = track.mute;
             if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                 t = t.color(rgb);
             }
@@ -771,18 +779,33 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                         // the REAPER builder to use the same PPQN so positions
                         // and durations don't need numeric rescaling.
                         let mut midi = midi.ticks_per_qn(960_000);
-                        for event in &region.events {
-                            // Skip 0-velocity notes (would be silent anyway).
+
+                        // Many PT regions store duration=0 for every event
+                        // (a paired note-on/note-off encoding the parser
+                        // doesn't fully reconstruct yet). For those events,
+                        // fall back to "until the next note of the same
+                        // pitch" so notes sustain naturally instead of
+                        // truncating to silence.
+                        const FALLBACK_DUR: u64 = 480_000; // half a quarter
+                        let region_end = region.length.max(FALLBACK_DUR);
+
+                        for (i, event) in region.events.iter().enumerate() {
                             if event.velocity == 0 {
                                 continue;
                             }
-                            // Fall back to a short audible duration for hits
-                            // recorded with zero length (PT often stores
-                            // percussion that way) so REAPER renders them.
-                            let dur = if event.duration == 0 {
-                                4_800 // ~1/200 quarter at 960000 ppq
-                            } else {
+                            let dur = if event.duration > 0 {
                                 event.duration as u32
+                            } else {
+                                // Find the next note of the SAME pitch and
+                                // end this one just before it. Failing that,
+                                // use the region end, capped at one quarter.
+                                let next = region.events[i + 1..]
+                                    .iter()
+                                    .find(|e| e.note == event.note)
+                                    .map(|e| e.position);
+                                let end = next.unwrap_or(region_end);
+                                let span = end.saturating_sub(event.position);
+                                span.clamp(FALLBACK_DUR, 960_000) as u32
                             };
                             midi =
                                 midi.at(event.position)
