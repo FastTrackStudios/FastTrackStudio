@@ -43,12 +43,14 @@ fn network_latency_sync() -> Result<()> {
             DawInstanceConfig::new("master")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_SYNC_NO_LINK", "1")
+                .with_env("FTS_SYNC_ENABLED", "1")
                 .with_env("FTS_SYNC_NO_MDNS", "1")
                 .with_fts_config()
                 .with_socket("/tmp/fts-daw-test-netlat-master.sock"),
             DawInstanceConfig::new("follower")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_SYNC_NO_LINK", "1")
+                .with_env("FTS_SYNC_ENABLED", "1")
                 .with_env("FTS_SYNC_NO_MDNS", "1")
                 .with_fts_config()
                 // Latency is injected on the follower only (simulates one-way delay

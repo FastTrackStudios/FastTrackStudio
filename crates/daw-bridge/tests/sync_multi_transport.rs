@@ -23,16 +23,19 @@ fn multi_instance_transport_sync() -> Result<()> {
             DawInstanceConfig::new("inst1")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_SYNC_NO_LINK", "1")
+                .with_env("FTS_SYNC_ENABLED", "1")
                 .with_fts_config()
                 .with_socket("/tmp/fts-daw-test-inst1.sock"),
             DawInstanceConfig::new("inst2")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_SYNC_NO_LINK", "1")
+                .with_env("FTS_SYNC_ENABLED", "1")
                 .with_fts_config()
                 .with_socket("/tmp/fts-daw-test-inst2.sock"),
             DawInstanceConfig::new("inst3")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_SYNC_NO_LINK", "1")
+                .with_env("FTS_SYNC_ENABLED", "1")
                 .with_fts_config()
                 .with_socket("/tmp/fts-daw-test-inst3.sock"),
         ],
@@ -132,14 +135,20 @@ fn multi_instance_transport_sync() -> Result<()> {
                 p1.transport().stop().await?;
                 println!("  [inst1] playback stopped");
 
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                // Poll each instance for up to 5s — stop propagation through the
+                // mesh + apply_transport + local poller can take a moment.
                 for (label, inst) in [("inst1", inst1), ("inst2", inst2), ("inst3", inst3)] {
-                    let project = inst.daw.current_project().await?;
-                    let state = project.transport().get_state().await?;
-                    assert!(
-                        matches!(state.play_state, daw::service::PlayState::Stopped),
-                        "{label} should be stopped"
-                    );
+                    let mut stopped = false;
+                    for _ in 0..10 {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let project = inst.daw.current_project().await?;
+                        let state = project.transport().get_state().await?;
+                        if matches!(state.play_state, daw::service::PlayState::Stopped) {
+                            stopped = true;
+                            break;
+                        }
+                    }
+                    assert!(stopped, "{label} should be stopped within 5s");
                     println!("  [{label}] confirmed stopped");
                 }
 

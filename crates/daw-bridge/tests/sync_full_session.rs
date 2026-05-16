@@ -36,7 +36,7 @@ async fn full_session_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()>
     let follower = ctx.by_label("follower");
 
     // ── Setup: connect sync peers ─────────────────────────────────
-    ctx.connect_sync_peers("FTS_SYNC_EXT").await?;
+    ctx.connect_sync_peers_direct("FTS_SYNC_EXT").await?;
     println!("\n  Sync peers connected\n");
 
     let m_proj = master.daw.current_project().await?;
