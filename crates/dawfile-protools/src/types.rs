@@ -163,6 +163,18 @@ pub struct Track {
     /// unassigned or the block omits a destination (the 61-byte variant
     /// — payload begins `ff ff 01 01 ...`).
     pub output: String,
+    /// Pro Tools color palette byte from `0x200b +163`.
+    ///
+    /// Encodes a (column, row) position in PT's 23-column × 3-row color
+    /// palette. `0` means "no color" / default. Otherwise:
+    ///
+    /// - `(byte - 2) / 24` = row (0 = lightest, 2 = darkest)
+    /// - `(byte - 2) % 24` = hue column (0..22, sweeping the color wheel
+    ///   starting from dark blue)
+    ///
+    /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
+    /// to REAPER's u32 RGB.
+    pub color_byte: u8,
 }
 
 /// A fade region on a track.

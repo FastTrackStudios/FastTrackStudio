@@ -86,6 +86,16 @@ pub enum ContentType {
     /// destination.
     TrackRouting = 0x260e,
 
+    /// Per-colored-track container. Holds `0x261b` (the main per-track
+    /// container) plus `0x200b` whose payload `+163` byte is the track's
+    /// color palette position in PT's 23-column × 3-row palette. Folder
+    /// tracks have no `0x261c`.
+    TrackContainer = 0x261c,
+
+    /// Per-colored-track auxiliary state block. Lives inside `0x261c`.
+    /// Payload byte `+163` = color palette position.
+    TrackAuxState = 0x200b,
+
     /// Per-session list of fade definitions (lengths + curve shape). Wraps
     /// one `FadeDef` (0x262f) per fade-marked track entry.
     FadeDefList = 0x2630,
@@ -218,6 +228,8 @@ impl ContentType {
             0x1029 => Some(Self::TrackMixSettings),
             0x260d => Some(Self::TrackMixWrapper),
             0x260e => Some(Self::TrackRouting),
+            0x261c => Some(Self::TrackContainer),
+            0x200b => Some(Self::TrackAuxState),
             0x2630 => Some(Self::FadeDefList),
             0x262f => Some(Self::FadeDef),
 

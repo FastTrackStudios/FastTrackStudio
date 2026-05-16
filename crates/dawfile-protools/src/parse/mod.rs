@@ -316,6 +316,51 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
+    // Step 12c: Decode per-track color palette byte from 0x200b +163.
+    //
+    // 0x200b is a child of 0x261c (per-colored-track wrapper). The byte at
+    // payload +163 carries the palette position. Folder tracks have no
+    // 0x261c so they receive `color_byte = 0` (= no color).
+    {
+        let data = cursor.data();
+        let containers = collect_blocks_recursive(&blocks, ContentType::TrackContainer);
+        let mut color_by_name: std::collections::HashMap<String, u8> =
+            std::collections::HashMap::new();
+        for c in containers {
+            let Some(name) = find_2619_track_name(c, data) else {
+                continue;
+            };
+            let Some(b200b) = c
+                .children
+                .iter()
+                .find(|x| x.content_type == Some(ContentType::TrackAuxState))
+            else {
+                continue;
+            };
+            let p = b200b.offset + 2 + 163;
+            if p < data.len() {
+                color_by_name.insert(name, data[p]);
+            }
+        }
+        for t in audio_tracks.iter_mut() {
+            if let Some(c) = color_by_name.get(&t.name) {
+                t.color_byte = *c;
+            } else {
+                for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                    if let Some(c) = color_by_name.get(&format!("{}{suffix}", t.name)) {
+                        t.color_byte = *c;
+                        break;
+                    }
+                }
+            }
+        }
+        for t in midi_tracks.iter_mut() {
+            if let Some(c) = color_by_name.get(&t.name) {
+                t.color_byte = *c;
+            }
+        }
+    }
+
     // Step 13: Parse plugins and I/O channels
     let plugins = plugins::parse_plugins(&blocks, &cursor);
     let io_channels = io::parse_io_channels(&blocks, &cursor);
@@ -350,6 +395,34 @@ fn collect_blocks_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Vec<&'a
     }
     walk(blocks, ct, &mut out);
     out
+}
+
+/// Walk a 0x261c block looking for the embedded track name. Path:
+/// `0x261c → 0x261b → 0x102d → 0x2619` (length-prefixed string at
+/// payload +0).
+fn find_2619_track_name(b: &Block, data: &[u8]) -> Option<String> {
+    for c in &b.children {
+        if c.content_type == Some(ContentType::MarkerEntry) {
+            // 0x2619 payload begins at offset + 2 in Block convention
+            let p = c.offset + 2;
+            if p + 4 > data.len() {
+                return None;
+            }
+            let len = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if len == 0 || len > 64 || p + 4 + len > data.len() {
+                return None;
+            }
+            return Some(
+                String::from_utf8_lossy(&data[p + 4..p + 4 + len])
+                    .trim_end_matches('\0')
+                    .to_string(),
+            );
+        }
+        if let Some(n) = find_2619_track_name(c, data) {
+            return Some(n);
+        }
+    }
+    None
 }
 
 /// Find the session sample rate from block type 0x1028.
