@@ -13,6 +13,7 @@
 //! callers that hold a main-thread proof (batch sync dispatcher etc).
 
 use daw_proto::TempoMap;
+use daw_proto::tempo_map::TempoMapEvent;
 use daw_proto::{
     DawError, DawResult, Position, ProjectContext, TempoPoint, TimePosition, TimeSignature,
 };
@@ -47,11 +48,88 @@ pub fn get_tempo_and_time_sig_at_on_main_thread(seconds: f64) -> (f64, i32, i32)
 /// brings it back.
 pub fn init_tempo_map_broadcaster() {}
 
-/// Stub for the timer-tick poll — no-op alongside the retired
-/// broadcaster. Callers (daw-bridge timer callback) still invoke it
-/// during the same tick budget; removing the call sites is a
-/// follow-up cleanup.
-pub fn poll_and_broadcast_tempo_map() {}
+/// Poll REAPER tempo map for every open project, emit
+/// `TempoMapEvent`s for changes. **Main thread only.**
+pub fn poll_and_broadcast_tempo_map() {
+    use reaper_medium::ProjectRef;
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    use crate::project_context::{MAX_PROJECT_TABS, project_guid};
+
+    static TEMPO_CACHE: OnceLock<Mutex<HashMap<String, Vec<TempoPoint>>>> = OnceLock::new();
+    fn cache() -> &'static Mutex<HashMap<String, Vec<TempoPoint>>> {
+        TEMPO_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    let hub = crate::event_hub::hub();
+    if hub.tempo_map_subscriber_count() == 0 {
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let mut cache = cache().lock().expect("tempo cache mutex poisoned");
+
+    let mut seen_projects: Vec<String> = Vec::new();
+
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = reaper_high::Project::new(result.project);
+        let project_guid_str = project_guid(&project);
+        seen_projects.push(project_guid_str.clone());
+
+        let project_ctx = ProjectContext::Project(project_guid_str.clone());
+        let fresh: Vec<TempoPoint> =
+            daw_proto::TempoMap::get_tempo_points(&crate::Reaper, project_ctx);
+
+        let prev = cache.entry(project_guid_str.clone()).or_default();
+        if *prev != fresh {
+            // Tempo map changes are typically wholesale — emit
+            // MapChanged with the whole list. Fine-grained
+            // PointAdded/PointRemoved/PointChanged events would
+            // need a positional diff that isn't worth the
+            // complexity until a consumer needs it.
+            hub.publish_tempo_map(daw_proto::tempo_map::TempoMapStreamEvent {
+                project_guid: project_guid_str.clone(),
+                event: TempoMapEvent::MapChanged(fresh.clone()),
+            });
+            *prev = fresh;
+        }
+    }
+
+    cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
+}
+
+// ── TempoMapStream impl ───────────────────────────────────────────────
+
+impl daw_proto::tempo_map::TempoMapStream for crate::Reaper {
+    async fn subscribe(
+        &self,
+        _project: ProjectContext,
+        tx: vox::Tx<daw_proto::tempo_map::TempoMapStreamEvent>,
+    ) {
+        let mut rx = crate::event_hub::hub().subscribe_tempo_map();
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "tempo_map subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────
 

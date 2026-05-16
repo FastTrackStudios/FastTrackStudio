@@ -20,6 +20,8 @@ use std::sync::OnceLock;
 
 use daw_proto::marker::MarkerStreamEvent;
 use daw_proto::region::RegionStreamEvent;
+use daw_proto::tempo_map::TempoMapStreamEvent;
+use daw_proto::track::TrackStreamEvent;
 use daw_proto::transport::{PositionTick, TransportEvent};
 use tokio::sync::broadcast;
 
@@ -43,6 +45,10 @@ pub struct DawEventHub {
     markers_tx: broadcast::Sender<MarkerStreamEvent>,
     /// Region add/remove/modify events.
     regions_tx: broadcast::Sender<RegionStreamEvent>,
+    /// Track add/remove/modify events.
+    tracks_tx: broadcast::Sender<TrackStreamEvent>,
+    /// Tempo map point add/remove/modify events.
+    tempo_map_tx: broadcast::Sender<TempoMapStreamEvent>,
 
     // ── Continuous ───────────────────────────────────────────────
     /// Position ticks. Pushed at ~30Hz from the REAPER main loop.
@@ -56,6 +62,8 @@ impl DawEventHub {
             transport_state_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             markers_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             regions_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
+            tracks_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
+            tempo_map_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             position_tx: broadcast::channel(CONTINUOUS_BUFFER).0,
         }
     }
@@ -114,6 +122,34 @@ impl DawEventHub {
 
     pub fn regions_subscriber_count(&self) -> usize {
         self.regions_tx.receiver_count()
+    }
+
+    // ── Tracks ───────────────────────────────────────────────────
+
+    pub fn subscribe_tracks(&self) -> broadcast::Receiver<TrackStreamEvent> {
+        self.tracks_tx.subscribe()
+    }
+
+    pub fn publish_track(&self, event: TrackStreamEvent) {
+        let _ = self.tracks_tx.send(event);
+    }
+
+    pub fn tracks_subscriber_count(&self) -> usize {
+        self.tracks_tx.receiver_count()
+    }
+
+    // ── Tempo map ────────────────────────────────────────────────
+
+    pub fn subscribe_tempo_map(&self) -> broadcast::Receiver<TempoMapStreamEvent> {
+        self.tempo_map_tx.subscribe()
+    }
+
+    pub fn publish_tempo_map(&self, event: TempoMapStreamEvent) {
+        let _ = self.tempo_map_tx.send(event);
+    }
+
+    pub fn tempo_map_subscriber_count(&self) -> usize {
+        self.tempo_map_tx.receiver_count()
     }
 }
 

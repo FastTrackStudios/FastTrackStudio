@@ -133,6 +133,9 @@ pub use marker::poll_and_broadcast_markers;
 // Regions polling — sibling of markers.
 pub use region::poll_and_broadcast_regions;
 
+// Tracks polling — coarse Added/Removed only for Phase 2.
+pub use track::poll_and_broadcast_tracks;
+
 // Re-export toolbar deferred ops processor
 pub use toolbar::process_deferred_ops as process_toolbar_ops;
 

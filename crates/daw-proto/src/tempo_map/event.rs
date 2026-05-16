@@ -18,3 +18,11 @@ pub enum TempoMapEvent {
     /// The entire tempo map changed (e.g., project reload)
     MapChanged(Vec<TempoPoint>),
 }
+
+/// Streaming envelope — pairs a [`TempoMapEvent`] with the project
+/// it applies to.
+#[derive(Debug, Clone, Facet)]
+pub struct TempoMapStreamEvent {
+    pub project_guid: String,
+    pub event: TempoMapEvent,
+}

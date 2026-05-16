@@ -44,3 +44,11 @@ pub enum TrackEvent {
 unsafe impl vox_types::Reborrow for TrackEvent {
     type Ref<'a> = TrackEvent;
 }
+
+/// Streaming envelope — pairs a [`TrackEvent`] with the project it
+/// applies to.
+#[derive(Debug, Clone, Facet)]
+pub struct TrackStreamEvent {
+    pub project_guid: String,
+    pub event: TrackEvent,
+}

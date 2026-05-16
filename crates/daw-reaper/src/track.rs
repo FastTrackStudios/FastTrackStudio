@@ -418,3 +418,101 @@ impl Tracks for crate::Reaper {
 // methods reference the bare name.
 #[allow(dead_code)]
 fn _force_project_in_scope(_: &Project) {}
+
+// ── Streaming: poll + broadcast tracks ────────────────────────────────
+//
+// Coarse for Phase 2: emit Added / Removed only. Per-field change
+// events (MuteChanged, VolumeChanged, …) need per-field diff logic
+// that we'll wire alongside the synchronization engine when we know
+// exactly which fields the engine cares about.
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use daw_proto::TrackEvent;
+use daw_proto::track::TrackStreamEvent;
+use reaper_medium::ProjectRef;
+
+use crate::project_context::MAX_PROJECT_TABS;
+
+static TRACK_CACHE: OnceLock<Mutex<HashMap<String, HashMap<String, Track>>>> = OnceLock::new();
+
+fn track_cache() -> &'static Mutex<HashMap<String, HashMap<String, Track>>> {
+    TRACK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Poll REAPER track state for every open project. **Main thread only.**
+pub fn poll_and_broadcast_tracks() {
+    let hub = crate::event_hub::hub();
+    if hub.tracks_subscriber_count() == 0 {
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let mut cache = track_cache().lock().expect("track cache mutex poisoned");
+
+    let mut seen_projects: Vec<String> = Vec::new();
+
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = Project::new(result.project);
+        let project_guid_str = project_guid(&project);
+        seen_projects.push(project_guid_str.clone());
+
+        let project_ctx = ProjectContext::Project(project_guid_str.clone());
+        let fresh: Vec<Track> = Tracks::all(&crate::Reaper, project_ctx);
+        let fresh_by_guid: HashMap<String, Track> =
+            fresh.into_iter().map(|t| (t.guid.clone(), t)).collect();
+
+        let prev = cache.entry(project_guid_str.clone()).or_default();
+
+        for (guid, track) in &fresh_by_guid {
+            if !prev.contains_key(guid) {
+                hub.publish_track(TrackStreamEvent {
+                    project_guid: project_guid_str.clone(),
+                    event: TrackEvent::Added(track.clone()),
+                });
+            }
+        }
+        for guid in prev.keys() {
+            if !fresh_by_guid.contains_key(guid) {
+                hub.publish_track(TrackStreamEvent {
+                    project_guid: project_guid_str.clone(),
+                    event: TrackEvent::Removed(guid.clone()),
+                });
+            }
+        }
+
+        *prev = fresh_by_guid;
+    }
+
+    cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
+}
+
+// ── TracksStream impl ─────────────────────────────────────────────────
+
+impl daw_proto::track::TracksStream for crate::Reaper {
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<TrackStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_tracks();
+
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "tracks subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
+}

@@ -72,6 +72,8 @@ impl Services for Reaper {
             transport::stream::Service,
             marker::stream::Service,
             region::stream::Service,
+            track::stream::Service,
+            tempo_map::stream::Service,
         ]
     }
 }
