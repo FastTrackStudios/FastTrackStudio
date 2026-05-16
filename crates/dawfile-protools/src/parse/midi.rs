@@ -322,6 +322,7 @@ fn parse_midi_tracks(
             alternate_playlists: Vec::new(),
             output: String::new(),
             color_byte: 0,
+            is_folder: false,
         });
     }
 

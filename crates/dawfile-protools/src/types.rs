@@ -175,6 +175,22 @@ pub struct Track {
     /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
     /// to REAPER's u32 RGB.
     pub color_byte: u8,
+    /// Hierarchy / grouping marker decoded from `0x251a` payload byte
+    /// (immediately after the length-prefixed track name).
+    ///
+    /// On the Routing Examples fixture this byte is `0x01` for every
+    /// folder-parent track (nested folder hierarchies) and `0x00` for
+    /// regular audio + leaf aux tracks. PT's `Master 1` is also `0x01`.
+    ///
+    /// On the Lord of the Fight session every track in the "02 LORD OF
+    /// THE FIGHT" stem family ALSO reads `0x01`, even though those are
+    /// flat audio tracks — suggesting the byte tracks "participates in a
+    /// folder / stem-bus grouping" rather than strictly "is the container
+    /// itself".
+    ///
+    /// We surface the raw byte until a `folder-nesting.ptx` ground-truth
+    /// fixture lets us disambiguate `is_folder` vs `is_grouped_child`.
+    pub is_folder: bool,
 }
 
 /// A fade region on a track.

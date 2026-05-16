@@ -361,6 +361,61 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
+    // Step 12d: Decode per-track `is_folder` flag from 0x251a.
+    //
+    // The byte at offset (`0x251a` payload + 4 + len(name)) is `0x01` for
+    // folder/container tracks (including Master), `0x00` otherwise. PT
+    // groups child tracks under their folder parent in a separate block
+    // we haven't decoded yet, but we can at least surface the flag so
+    // REAPER can model the per-track folder marker.
+    {
+        let data = cursor.data();
+        let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
+            .into_iter()
+            .next();
+        let mut folder_by_name: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
+        if let Some(list) = track_list {
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for child in list.find_children(ContentType::MidiTrackInfo) {
+                let name_off = child.offset + 4;
+                if name_off + 4 > data.len() {
+                    continue;
+                }
+                let (name, str_consumed) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() {
+                    continue;
+                }
+                if !seen.insert(name.clone()) {
+                    break;
+                }
+                // is_folder flag is the first byte AFTER the length-
+                // prefixed name within the 0x251a payload.
+                let flag_off = name_off + str_consumed;
+                if flag_off < data.len() {
+                    folder_by_name.insert(name, data[flag_off] != 0);
+                }
+            }
+        }
+        for t in audio_tracks.iter_mut() {
+            if let Some(f) = folder_by_name.get(&t.name) {
+                t.is_folder = *f;
+            } else {
+                for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                    if let Some(f) = folder_by_name.get(&format!("{}{suffix}", t.name)) {
+                        t.is_folder = *f;
+                        break;
+                    }
+                }
+            }
+        }
+        for t in midi_tracks.iter_mut() {
+            if let Some(f) = folder_by_name.get(&t.name) {
+                t.is_folder = *f;
+            }
+        }
+    }
+
     // Step 13: Parse plugins and I/O channels
     let plugins = plugins::parse_plugins(&blocks, &cursor);
     let io_channels = io::parse_io_channels(&blocks, &cursor);
