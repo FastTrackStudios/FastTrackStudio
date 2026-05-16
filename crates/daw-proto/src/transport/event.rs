@@ -1,0 +1,100 @@
+//! Transport streaming event types.
+//!
+//! Two categories, matching the helgobox ProtoHub split:
+//!
+//! - **`TransportEvent`** — *occasional*. Emitted on every discrete
+//!   state transition (play, stop, record, loop toggle, tempo
+//!   change). Every event matters; subscribers shouldn't miss any.
+//!
+//! - **`PositionTick`** — *continuous*. Pushed at ~30Hz from the
+//!   REAPER main thread. Subscribers may drop intermediate ticks
+//!   under backpressure — the next tick is "close enough."
+//!
+//! The two streams are separate so a sleepy web-UI client doesn't
+//! accumulate hundreds of position samples in its queue. See
+//! `docs/streaming-design.md`.
+
+use crate::primitives::{Tempo, TimeSignature};
+use crate::transport::transport::{LoopRegion, PlayState, RecordMode, Transport};
+use facet::Facet;
+
+// ── Occasional: state transitions ────────────────────────────────────
+
+/// A discrete change to transport state. Emitted whenever the user
+/// (or an action) transitions REAPER's transport — play, stop,
+/// record, loop on/off, tempo change, time signature change.
+///
+/// Carries the project the event applies to so a single subscriber
+/// can fan out updates across all open projects.
+#[derive(Clone, Debug, Facet)]
+#[repr(u8)]
+pub enum TransportEvent {
+    /// Play state transitioned (Stopped → Playing → Paused → Recording).
+    PlayStateChanged {
+        project_guid: String,
+        play_state: PlayState,
+    },
+    /// Recording mode toggled.
+    RecordModeChanged {
+        project_guid: String,
+        record_mode: RecordMode,
+    },
+    /// Loop on/off toggled.
+    LoopingChanged { project_guid: String, looping: bool },
+    /// Loop region edited.
+    LoopRegionChanged {
+        project_guid: String,
+        loop_region: Option<LoopRegion>,
+    },
+    /// Time-selection region edited.
+    TimeSelectionChanged {
+        project_guid: String,
+        time_selection: Option<LoopRegion>,
+    },
+    /// Tempo or time signature changed.
+    TempoChanged {
+        project_guid: String,
+        tempo: Tempo,
+        time_signature: TimeSignature,
+    },
+    /// Playrate changed.
+    PlayrateChanged { project_guid: String, playrate: f64 },
+    /// Full state snapshot — emitted on initial subscribe and on
+    /// project switch, so clients can sync without re-querying.
+    Snapshot {
+        project_guid: String,
+        state: Transport,
+    },
+}
+
+// ── Continuous: position ticks ───────────────────────────────────────
+
+/// A position sample. Pushed at ~30Hz by the REAPER main thread.
+/// `playhead_position` is the playback cursor in seconds; the loop
+/// pulls it via `GetPlayPosition()` (or the equivalent for the
+/// project context).
+///
+/// `qn_position` is the same cursor in quarter notes — provided so
+/// musical-time UIs don't need to do their own time-map conversion
+/// on every tick.
+#[derive(Clone, Copy, Debug, Facet)]
+pub struct PositionTick {
+    /// Cursor position in seconds.
+    pub playhead_seconds: f64,
+    /// Cursor position in quarter notes.
+    pub playhead_qn: f64,
+    /// Whether transport is currently playing (so a single subscriber
+    /// can stop drawing the playhead when stopped without subscribing
+    /// to `TransportEvent` separately).
+    pub is_playing: bool,
+}
+
+impl PositionTick {
+    pub fn stopped_at_origin() -> Self {
+        Self {
+            playhead_seconds: 0.0,
+            playhead_qn: 0.0,
+            is_playing: false,
+        }
+    }
+}

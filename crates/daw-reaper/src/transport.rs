@@ -409,3 +409,127 @@ impl Transport for crate::Reaper {
 fn _erase_unused_cstr_import() {
     let _: Option<&CStr> = None;
 }
+
+// ── Streaming: poll + broadcast into DawEventHub ──────────────────────
+//
+// Two outputs per main-thread tick (~30Hz, driven by the bridge's
+// timer callback in daw-bridge/src/lib.rs):
+//
+// - `PositionTick` pushed to the **continuous** channel on every tick
+//   for every open project, regardless of whether it changed. Drop-old
+//   broadcast semantics handle backpressure.
+//
+// - `TransportEvent::Snapshot` pushed to the **occasional** channel
+//   when the cached state for a project differs from the freshly-read
+//   state. Coalesces all per-field changes into one snapshot; we can
+//   split into per-field events (PlayStateChanged, TempoChanged, …)
+//   in a follow-up once a consumer needs the granularity.
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use daw_proto::transport::{PositionTick, TransportEvent};
+use reaper_medium::{ProjectRef, ReaProject};
+
+use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
+
+/// Per-project cache of the last-broadcast `TransportState`. Keyed by
+/// project GUID. Compared against freshly-read state per tick so we
+/// emit `TransportEvent::Snapshot` only on change.
+static TRANSPORT_CACHE: OnceLock<Mutex<HashMap<String, TransportState>>> = OnceLock::new();
+
+fn transport_cache() -> &'static Mutex<HashMap<String, TransportState>> {
+    TRANSPORT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Poll REAPER transport state for ALL open projects and broadcast
+/// changes through the [`crate::event_hub`] hub.
+///
+/// **MUST be called from the REAPER main thread** — typically from
+/// the extension's 30Hz timer callback. Use of `ReaperHigh::get()` /
+/// `medium_reaper()` is main-thread-only.
+pub fn poll_and_broadcast_transport() {
+    let hub = crate::event_hub::hub();
+    let want_state = hub.transport_state_subscriber_count() > 0;
+    let want_position = hub.position_subscriber_count() > 0;
+    if !want_state && !want_position {
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let mut cache = transport_cache()
+        .lock()
+        .expect("transport cache mutex poisoned");
+
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = Project::new(result.project);
+        let project_guid = project_guid_from(&project);
+        let reaper_ctx = ReaperProjectContext::Proj(result.project);
+
+        // Read state once; reuse for both channels.
+        let state = read_transport_state_for_project(&project, reaper_ctx, medium);
+
+        if want_position {
+            let playhead_seconds = state
+                .playhead_position
+                .time
+                .map(|t| t.as_seconds())
+                .unwrap_or(0.0);
+            let qn = position_qn(medium, result.project, playhead_seconds);
+            hub.publish_position(PositionTick {
+                playhead_seconds,
+                playhead_qn: qn,
+                is_playing: state.is_playing(),
+            });
+        }
+
+        if want_state {
+            let changed = cache
+                .get(&project_guid)
+                .map(|prev| !transport_states_equal(prev, &state))
+                .unwrap_or(true);
+            if changed {
+                cache.insert(project_guid.clone(), state.clone());
+                hub.publish_transport_state(TransportEvent::Snapshot {
+                    project_guid: project_guid.clone(),
+                    state,
+                });
+            }
+        }
+    }
+}
+
+/// Quarter-note position for `tpos_seconds` within `project`. Uses
+/// `TimeMap2_timeToBeats` which returns the full-beats value REAPER
+/// considers canonical for the project's tempo map.
+fn position_qn(medium: &reaper_medium::Reaper, project: ReaProject, tpos_seconds: f64) -> f64 {
+    // `PositionInSeconds::new` rejects NaN; fall back to 0 if the
+    // backend hands us something unrepresentable.
+    let Ok(tpos) = PositionInSeconds::new(tpos_seconds) else {
+        return 0.0;
+    };
+    // SAFETY: project came from enum_projects; valid within this tick.
+    let result = unsafe {
+        medium.time_map_2_time_to_beats_unchecked(ReaperProjectContext::Proj(project), tpos)
+    };
+    result.full_beats.get()
+}
+
+/// Cheap equality check tolerating sub-millisecond playhead drift —
+/// position is broadcast on the continuous channel, so the state
+/// channel only fires on "real" changes (transport actions, edits,
+/// tempo, etc.) not every 30Hz position update.
+fn transport_states_equal(a: &TransportState, b: &TransportState) -> bool {
+    a.play_state == b.play_state
+        && a.record_mode == b.record_mode
+        && a.looping == b.looping
+        && a.loop_region == b.loop_region
+        && a.time_selection == b.time_selection
+        && (a.tempo.bpm() - b.tempo.bpm()).abs() < 1e-6
+        && (a.playrate - b.playrate).abs() < 1e-6
+        && a.time_signature == b.time_signature
+}

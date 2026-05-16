@@ -41,6 +41,7 @@ use crate::Reaper;
 impl Services for Reaper {
     fn layers() -> impl Layer<Reaper> {
         layers![
+            // Sync-method services (architect::rpc)
             transport::Service,
             project::Service,
             marker::Service,
@@ -67,6 +68,8 @@ impl Services for Reaper {
             plugin_loader::Service,
             automation::Service,
             batch::Service,
+            // Streaming services (vox::service, sibling traits)
+            transport::stream::Service,
         ]
     }
 }

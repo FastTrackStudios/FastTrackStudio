@@ -424,6 +424,73 @@ fn track_color_round_trip_color_testing_fixture() {
     assert_eq!(c_last_after, 0x48, "last track unchanged");
 }
 
+// =============================================================================
+// Lord of the Fight session — mute pattern ground truth
+// =============================================================================
+
+/// The exact set of tracks the user has confirmed are muted in the
+/// "Lord of the Fight" session in Pro Tools. Everything else must
+/// parse as `mute = false`.
+const LOTF_EXPECTED_MUTED: &[&str] = &[
+    // Audio tracks: ClickPrint and the 02 LORD family stems
+    "ClickPrint",
+    "02 LORD OF THE FIGHT", // .01 active playlist; parser strips suffix
+    "02 LORD OF THE FIGHT_Vocals",
+    "02 LORD OF THE FIGHT_Bass",
+    "02 LORD OF THE FIGHT_Drums",
+    "02 LORD OF THE FIGHT_Guitar",
+    "02 LORD OF THE FIGHT_Other",
+    "02 LORD OF THE FIGHT_Piano",
+    // MIDI Inst stack
+    "Inst 1",
+    "Inst 1.dup1",
+    "Inst 1.dup2",
+    "Inst 1.dup1.02",
+    "Inst 1.dup2.02",
+    "Inst 1.dup2.04",
+    "Inst 1.dup3.02",
+    "Inst 1.dup4.02",
+];
+
+/// Ground-truth mute assertion for the Lord of the Fight session.
+///
+/// User confirmed mute list (`LOTF_EXPECTED_MUTED`). The parser must
+/// produce EXACTLY this set — no over-mutes, no under-mutes.
+#[test]
+fn lord_of_the_fight_mute_pattern() {
+    let path = "/home/cody/Downloads/tombrooksmusic_copy-of-02-lord-of-the-fight-1-5_2026-05-11_0158/Copy of 02 LORD OF THE FIGHT 1.5/Copy of 02 LORD OF THE FIGHT 1.5.ptx";
+    let Ok(session) = dawfile_protools::read_session(path, 0) else {
+        eprintln!("skip: user session not present");
+        return;
+    };
+
+    let mut wrong: Vec<String> = Vec::new();
+    let expected: std::collections::HashSet<&str> = LOTF_EXPECTED_MUTED.iter().copied().collect();
+
+    for t in session.all_tracks() {
+        let want_muted = expected.contains(t.name.as_str());
+        if t.mute != want_muted {
+            wrong.push(format!(
+                "{} kind={:?}: parser mute={} but expected {}",
+                t.name, t.kind, t.mute, want_muted
+            ));
+        }
+    }
+
+    // The parser currently over-mutes a few tracks (SYZ, AC GTR, El Gtr,
+    // Bass Demo) because the 0x1029 +5 byte is byte-identical between
+    // truly-muted and untruly-muted tracks on this session — the real
+    // mute discriminator hasn't been located yet.
+    //
+    // Promote this assertion to strict equality once that's fixed.
+    assert!(
+        wrong.is_empty(),
+        "mute mismatches ({} tracks):\n  {}",
+        wrong.len(),
+        wrong.join("\n  ")
+    );
+}
+
 fn get_track_starts(session: &dawfile_protools::RawSession) -> Vec<usize> {
     let mut out = Vec::new();
     collect_ct(

@@ -111,6 +111,21 @@ pub use tempo_map::{init_tempo_map_broadcaster, poll_and_broadcast_tempo_map};
 // Re-export item broadcaster functions
 pub use item::{init_item_broadcaster, poll_and_broadcast_items};
 
+// Central streaming event hub — owns one broadcast::Sender per
+// streaming domain. See docs/streaming-design.md.
+pub mod event_hub;
+pub use event_hub::{DawEventHub, hub as event_hub, init_event_hub};
+
+// Streaming service impls. Each takes vox::Tx<Event>, subscribes a
+// broadcast::Receiver off the hub, and forwards in a task until
+// either side disconnects.
+pub mod transport_stream;
+
+// Transport state + position polling. Called from the bridge's
+// main-thread timer tick alongside the surviving item / tempo_map
+// pollers.
+pub use transport::poll_and_broadcast_transport;
+
 // Re-export toolbar deferred ops processor
 pub use toolbar::process_deferred_ops as process_toolbar_ops;
 

@@ -589,13 +589,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 (track.pan as f64 / 100.0).clamp(-1.0, 1.0)
             };
             let mut t = t.volume(linear_vol).pan(reaper_pan);
-            // NOTE: PT's `0x1029 +5` byte over-reports mute. On the user's
-            // session it incorrectly flags SYZ / AC GTR / El Gtr / Bass
-            // Demo as muted even though they sound in PT. Truly-muted
-            // tracks (02 LORD stems) and falsely-muted aux/print tracks
-            // have byte-identical 0x1029 payloads, so we can't distinguish.
-            // Leave tracks audible; user can manually mute in REAPER.
-            let _ = track.mute;
+            // Mute via `0x1029 +5`. Accurate for the LORD family stems +
+            // ClickPrint + Inst stack; over-reports on SYZ / AC GTR / El
+            // Gtr / Bass Demo where the byte is set but PT shows audible.
+            // See `lord_of_the_fight_mute_pattern` test for the diff.
+            if track.mute {
+                t = t.muted();
+            }
             if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                 t = t.color(rgb);
             }
@@ -746,13 +746,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
             };
             let reaper_pan = (track.pan as f64 / 100.0).clamp(-1.0, 1.0);
             let mut t = t.volume(linear_vol).pan(reaper_pan);
-            // NOTE: PT's `0x1029 +5` byte over-reports mute. On the user's
-            // session it incorrectly flags SYZ / AC GTR / El Gtr / Bass
-            // Demo as muted even though they sound in PT. Truly-muted
-            // tracks (02 LORD stems) and falsely-muted aux/print tracks
-            // have byte-identical 0x1029 payloads, so we can't distinguish.
-            // Leave tracks audible; user can manually mute in REAPER.
-            let _ = track.mute;
+            // Mute via `0x1029 +5`. Accurate for the LORD family stems +
+            // ClickPrint + Inst stack; over-reports on SYZ / AC GTR / El
+            // Gtr / Bass Demo where the byte is set but PT shows audible.
+            // See `lord_of_the_fight_mute_pattern` test for the diff.
+            if track.mute {
+                t = t.muted();
+            }
             if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                 t = t.color(rgb);
             }

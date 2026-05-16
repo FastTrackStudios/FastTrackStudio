@@ -301,11 +301,12 @@ extern "C" fn timer_callback() {
                 runtime.process_main_thread_tasks();
             }
 
-            // Poll surviving broadcasters. FX / routing / track /
-            // transport broadcasters retired with the architect::rpc
-            // port (streaming subscriptions move to sibling traits).
+            // Poll surviving broadcasters. FX / routing / track
+            // streams will land as DawEventHub channels (Phase 2 of
+            // docs/streaming-design.md) — transport is wired now.
             daw::reaper::poll_and_broadcast_items();
             daw::reaper::poll_and_broadcast_tempo_map();
+            daw::reaper::poll_and_broadcast_transport();
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();

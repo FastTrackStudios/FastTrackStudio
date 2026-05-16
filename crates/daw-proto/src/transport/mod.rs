@@ -9,15 +9,19 @@
 
 pub mod actions;
 pub mod error;
+pub mod event;
 // `service` is `pub mod` so the trait can be reached as
 // `crate::transport::service::Transport` from sync/mod.rs without
 // colliding with the `Transport` struct re-exported below.
 pub mod service;
+pub mod stream;
 #[allow(clippy::module_inception)]
 pub mod transport;
 
 pub use actions::fts_transport_actions;
 pub use error::TransportError;
+pub use event::{PositionTick, TransportEvent};
+pub use stream::TransportStream;
 pub use transport::{
     AllProjectsTransport, LoopRegion, PlayState, ProjectTransportState, RecordMode, Transport,
 };
