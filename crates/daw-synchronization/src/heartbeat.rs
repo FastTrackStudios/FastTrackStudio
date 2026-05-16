@@ -94,6 +94,5 @@ pub fn spawn(
                 Err(_) => debug!("No subscribers for heartbeat"),
             }
         }
-    })
-    .named("sync.heartbeat");
+    });
 }
