@@ -55,7 +55,7 @@ impl Drop for ProjectSubscriptions {
 /// intentionally suppression-free so the engine sees every local event.
 #[allow(clippy::too_many_arguments)]
 pub async fn subscribe_project(
-    _daw: &daw::rpc::Daw,
+    daw: &daw::rpc::Daw,
     _project: &daw::rpc::Project,
     project_guid: String,
     peer_id: String,
@@ -74,7 +74,7 @@ pub async fn subscribe_project(
     };
 
     if config.transport {
-        spawn_transport_forwarder(ctx.clone());
+        spawn_transport_forwarder(ctx.clone(), daw.clone());
     }
     if config.markers {
         spawn_marker_forwarder(ctx.clone());
@@ -137,7 +137,7 @@ impl ForwarderCtx {
     }
 }
 
-fn spawn_transport_forwarder(ctx: ForwarderCtx) {
+fn spawn_transport_forwarder(ctx: ForwarderCtx, daw: daw::rpc::Daw) {
     use daw::service::TransportEvent;
     let mut rx = daw::reaper::event_hub().subscribe_transport_state();
     let target_guid = ctx.project_guid.clone();
@@ -147,18 +147,36 @@ fn spawn_transport_forwarder(ctx: ForwarderCtx) {
                 _ = ctx.cancel.cancelled() => break,
                 result = rx.recv() => match result {
                     Ok(event) => {
-                        // SyncDomain::Transport carries a full Transport snapshot
-                        // today, so only Snapshot variants are forwarded. Delta
-                        // variants (PlayStateChanged, TempoChanged, …) are dropped
-                        // until SyncDomain::Transport is widened to carry the full
-                        // TransportEvent enum (see streaming-design.md gotcha #5).
-                        if let TransportEvent::Snapshot { project_guid, state } = event {
-                            if project_guid != target_guid {
-                                continue;
+                        // Extract project_guid from whatever variant we got.
+                        let event_guid = match &event {
+                            TransportEvent::Snapshot { project_guid, .. }
+                            | TransportEvent::PlayStateChanged { project_guid, .. }
+                            | TransportEvent::RecordModeChanged { project_guid, .. }
+                            | TransportEvent::LoopingChanged { project_guid, .. }
+                            | TransportEvent::LoopRegionChanged { project_guid, .. }
+                            | TransportEvent::TimeSelectionChanged { project_guid, .. }
+                            | TransportEvent::TempoChanged { project_guid, .. }
+                            | TransportEvent::PlayrateChanged { project_guid, .. } => {
+                                project_guid.clone()
                             }
-                            let sync_event = ctx.wrap(project_guid, SyncDomain::Transport(state));
-                            let _ = ctx.event_tx.send(sync_event);
+                        };
+                        if event_guid != target_guid {
+                            continue;
                         }
+                        // SyncDomain::Transport currently carries a full
+                        // snapshot. For non-Snapshot deltas, query current
+                        // state and forward that. This is a snapshot-style
+                        // sync — every transport change publishes the full
+                        // post-change state to peers.
+                        let snapshot = match event {
+                            TransportEvent::Snapshot { state, .. } => state,
+                            _ => match current_transport(&daw).await {
+                                Some(s) => s,
+                                None => continue,
+                            },
+                        };
+                        let sync_event = ctx.wrap(event_guid, SyncDomain::Transport(snapshot));
+                        let _ = ctx.event_tx.send(sync_event);
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -168,6 +186,11 @@ fn spawn_transport_forwarder(ctx: ForwarderCtx) {
             }
         }
     });
+}
+
+async fn current_transport(daw: &daw::rpc::Daw) -> Option<daw::service::Transport> {
+    let project = daw.current_project().await.ok()?;
+    project.transport().get_state().await.ok()
 }
 
 fn spawn_marker_forwarder(ctx: ForwarderCtx) {

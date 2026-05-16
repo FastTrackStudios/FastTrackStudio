@@ -1148,7 +1148,7 @@ impl DawInstanceConfig {
     pub fn with_fts_config(mut self) -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         let ini = std::env::var("FTS_REAPER_CONFIG")
-            .map(|p| format!("{p}/reaper.ini"))
+            .map(|p| format!("{}/reaper.ini", p.replace("$HOME", &home)))
             .unwrap_or_else(|_| format!("{home}/.config/FastTrackStudio/Reaper/reaper.ini"));
         self.args.extend(["-cfgfile".to_string(), ini]);
         self

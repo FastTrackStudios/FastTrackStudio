@@ -6,6 +6,8 @@
 //! in-process instead of routing through this bridge.
 
 mod routed_handler;
+#[cfg(feature = "sync")]
+mod sync_runtime;
 
 use daw::{Layer, Services as _};
 
@@ -323,9 +325,11 @@ extern "C" fn timer_callback() {
 /// REAPER extension entry point.
 #[reaper_extension_plugin]
 fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
-    // Initialize tracing to /tmp/daw-bridge.log
-    let log_file =
-        std::fs::File::create("/tmp/daw-bridge.log").expect("Failed to create /tmp/daw-bridge.log");
+    // Initialize tracing to /tmp/daw-bridge-{pid}.log so multi-instance
+    // tests don't clobber each other's logs.
+    let pid = std::process::id();
+    let log_path = format!("/tmp/daw-bridge-{pid}.log");
+    let log_file = std::fs::File::create(&log_path).expect("Failed to create daw-bridge log file");
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "daw_bridge=info,daw_reaper=info,warn".into());
 
@@ -413,6 +417,25 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     drop(session);
 
     register_window_geometry_actions();
+
+    #[cfg(feature = "sync")]
+    if std::env::var("FTS_SYNC_ENABLED").as_deref() == Ok("1") {
+        let app = APP_INSTANCE.get().expect("App should be initialized").get();
+        let runtime = app.tokio_runtime.handle().clone();
+        // Construct an in-process Daw handle pointing at the REAPER dispatcher
+        // we registered above. Don't rely on the daw::get() facade singleton —
+        // daw-bridge never calls init_from_parts, so it stays None.
+        runtime.spawn(async move {
+            match daw::reaper::build_extension_daw().await {
+                Ok(daw) => {
+                    if let Err(e) = sync_runtime::start(daw).await {
+                        warn!("sync runtime start failed: {e}");
+                    }
+                }
+                Err(e) => warn!("sync runtime: failed to build daw handle: {e}"),
+            }
+        });
+    }
 
     info!("daw-bridge initialized successfully");
     Ok(())

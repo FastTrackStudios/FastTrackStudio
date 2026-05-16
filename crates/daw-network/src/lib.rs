@@ -95,7 +95,7 @@ struct PeerConnection {
 pub struct PeerMesh {
     config: MeshConfig,
     listener_port: u16,
-    peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
+    peers: Arc<tokio::sync::Mutex<HashMap<String, PeerConnection>>>,
     incoming_tx: mpsc::Sender<SyncEvent>,
     peer_event_tx: mpsc::Sender<MeshPeerEvent>,
     cancel: CancellationToken,
@@ -109,7 +109,7 @@ impl PeerMesh {
     pub async fn bind(
         config: MeshConfig,
         event_rx: broadcast::Receiver<SyncEvent>,
-        suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
+        suppression: Arc<tokio::sync::Mutex<SuppressionSet>>,
     ) -> io::Result<(
         Self,
         mpsc::Receiver<SyncEvent>,
@@ -121,8 +121,8 @@ impl PeerMesh {
 
         let (incoming_tx, incoming_rx) = mpsc::channel(4096);
         let (peer_event_tx, peer_event_rx) = mpsc::channel(64);
-        let peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>> =
-            Arc::new(moire::sync::Mutex::new("mesh.peers", HashMap::new()));
+        let peers: Arc<tokio::sync::Mutex<HashMap<String, PeerConnection>>> =
+            Arc::new(tokio::sync::Mutex::new(HashMap::new()));
         let cancel = CancellationToken::new();
 
         let mesh = Self {
@@ -140,7 +140,7 @@ impl PeerMesh {
         let accept_tx = incoming_tx.clone();
         let accept_cancel = cancel.clone();
         let accept_peer_tx = peer_event_tx.clone();
-        moire::task::spawn(async move {
+        tokio::task::spawn(async move {
             accept_loop(
                 listener,
                 accept_config,
@@ -150,16 +150,14 @@ impl PeerMesh {
                 accept_cancel,
             )
             .await;
-        })
-        .named("mesh.accept");
+        });
 
         // Spawn broadcast forwarder — reads from engine broadcast and sends to all peers
         let fwd_peers = Arc::clone(&peers);
         let fwd_cancel = cancel.clone();
-        moire::task::spawn(async move {
+        tokio::task::spawn(async move {
             broadcast_forwarder(event_rx, fwd_peers, fwd_cancel, suppression).await;
-        })
-        .named("mesh.forwarder");
+        });
 
         Ok((mesh, incoming_rx, peer_event_rx))
     }
@@ -192,12 +190,20 @@ impl PeerMesh {
         let peer_event_tx = self.peer_event_tx.clone();
         let cancel = self.cancel.clone();
 
-        moire::task::spawn(async move {
+        tokio::task::spawn(async move {
             match TcpStream::connect(addr).await {
                 Ok(stream) => {
                     info!(addr = %addr, remote = %remote_peer_id, "Outbound connection established");
-                    if let Err(e) =
-                        handle_connection(stream, config, peers, incoming_tx, peer_event_tx, cancel, true).await
+                    if let Err(e) = handle_connection(
+                        stream,
+                        config,
+                        peers,
+                        incoming_tx,
+                        peer_event_tx,
+                        cancel,
+                        true,
+                    )
+                    .await
                     {
                         warn!(addr = %addr, "Outbound connection failed: {e}");
                     }
@@ -206,8 +212,7 @@ impl PeerMesh {
                     warn!(addr = %addr, remote = %remote_peer_id, "Failed to connect: {e}");
                 }
             }
-        })
-        .named("mesh.connect_outbound");
+        });
     }
 
     /// Remove a disconnected peer.
@@ -268,7 +273,7 @@ async fn write_frame(stream: &mut TcpStream, payload: &[u8]) -> io::Result<()> {
 async fn accept_loop(
     listener: TcpListener,
     config: MeshConfig,
-    peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
+    peers: Arc<tokio::sync::Mutex<HashMap<String, PeerConnection>>>,
     incoming_tx: mpsc::Sender<SyncEvent>,
     peer_event_tx: mpsc::Sender<MeshPeerEvent>,
     cancel: CancellationToken,
@@ -285,11 +290,11 @@ async fn accept_loop(
                         let tx = incoming_tx.clone();
                         let ptx = peer_event_tx.clone();
                         let cancel = cancel.clone();
-                        moire::task::spawn(async move {
+                        tokio::task::spawn(async move {
                             if let Err(e) = handle_connection(stream, config, peers, tx, ptx, cancel, false).await {
                                 debug!(addr = %addr, "Inbound connection ended: {e}");
                             }
-                        }).named("mesh.inbound");
+                        });
                     }
                     Err(e) => {
                         warn!("Accept error: {e}");
@@ -398,7 +403,7 @@ async fn calibrate_as_responder(stream: &mut TcpStream) -> io::Result<i64> {
 async fn handle_connection(
     mut stream: TcpStream,
     config: MeshConfig,
-    peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
+    peers: Arc<tokio::sync::Mutex<HashMap<String, PeerConnection>>>,
     incoming_tx: mpsc::Sender<SyncEvent>,
     peer_event_tx: mpsc::Sender<MeshPeerEvent>,
     mesh_cancel: CancellationToken,
@@ -488,7 +493,7 @@ async fn handle_connection(
     // Spawn writer task
     let writer_cancel = peer_cancel.clone();
     let writer_peer_id = remote_peer_id.clone();
-    moire::task::spawn(async move {
+    tokio::task::spawn(async move {
         loop {
             tokio::select! {
                 _ = writer_cancel.cancelled() => break,
@@ -506,8 +511,7 @@ async fn handle_connection(
                 }
             }
         }
-    })
-    .named("mesh.writer");
+    });
 
     // Reader loop (runs on current task)
     let mut read_half = tokio::io::BufReader::new(read_half);
@@ -609,9 +613,9 @@ async fn read_frame_from_buf<R: tokio::io::AsyncRead + Unpin>(
 
 async fn broadcast_forwarder(
     mut event_rx: broadcast::Receiver<SyncEvent>,
-    peers: Arc<moire::sync::Mutex<HashMap<String, PeerConnection>>>,
+    peers: Arc<tokio::sync::Mutex<HashMap<String, PeerConnection>>>,
     cancel: CancellationToken,
-    suppression: Arc<moire::sync::Mutex<SuppressionSet>>,
+    suppression: Arc<tokio::sync::Mutex<SuppressionSet>>,
 ) {
     loop {
         tokio::select! {
@@ -667,11 +671,8 @@ mod tests {
     use daw_synchronization::SyncDomain;
     use tokio::sync::broadcast;
 
-    fn empty_suppression() -> Arc<moire::sync::Mutex<SuppressionSet>> {
-        Arc::new(moire::sync::Mutex::new(
-            "test.suppression",
-            SuppressionSet::new(),
-        ))
+    fn empty_suppression() -> Arc<tokio::sync::Mutex<SuppressionSet>> {
+        Arc::new(tokio::sync::Mutex::new(SuppressionSet::new()))
     }
 
     fn make_event(origin: &str, seq: u64) -> SyncEvent {

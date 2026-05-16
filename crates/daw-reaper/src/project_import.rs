@@ -544,11 +544,52 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         builder = builder.marker(marker.number as i32, pos_secs, &marker.name);
     }
 
+    // Compute folder boundaries from `Track.is_folder` over the linear
+    // emission order (audio tracks with stereo-sibling dedup, then MIDI).
+    //
+    // Heuristic (until `PTXTrackSpec.children` is decoded): each track flagged
+    // `is_folder` opens a new top-level folder; the previous folder (if any)
+    // closes on the track immediately before. The final open folder closes on
+    // the last track. This produces flat, 1-deep folders that surface the
+    // flag in REAPER without inventing nesting that isn't in the source.
+    let folder_end_levels: Vec<i32> = {
+        let mut flags: Vec<bool> = Vec::new();
+        let mut i = 0;
+        while i < session.audio_tracks.len() {
+            let stereo = session
+                .audio_tracks
+                .get(i + 1)
+                .map(|next| next.name == session.audio_tracks[i].name)
+                .unwrap_or(false);
+            flags.push(session.audio_tracks[i].is_folder);
+            i += if stereo { 2 } else { 1 };
+        }
+        for mt in &session.midi_tracks {
+            flags.push(mt.is_folder);
+        }
+        let n = flags.len();
+        let mut ends = vec![0i32; n];
+        let mut depth: i32 = 0;
+        for i in 0..n {
+            if flags[i] {
+                if depth > 0 && i > 0 {
+                    ends[i - 1] += depth;
+                    depth = 0;
+                }
+                depth += 1;
+            }
+        }
+        if depth > 0 && n > 0 {
+            ends[n - 1] += depth;
+        }
+        ends
+    };
+    let mut plan_idx = 0usize;
+
     // Pro Tools stores stereo tracks as TWO consecutive entries (one per
     // channel) sharing the same `name`. They reference the same stereo source
     // file via `.L` / `.R` region siblings. Skip the R-channel sibling so we
-    // emit ONE REAPER track per stereo pair — the L-channel items already
-    // point at the stereo audio file.
+    // emit ONE REAPER track per stereo pair.
     let mut skip_next = false;
     for (i, track) in session.audio_tracks.iter().enumerate() {
         if skip_next {
@@ -570,7 +611,14 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         } else {
             format!("{} → {}", track.name, track.output)
         };
+        let is_folder_start = track.is_folder;
+        let end_levels = folder_end_levels.get(plan_idx).copied().unwrap_or(0);
+        plan_idx += 1;
         builder = builder.track(&display_name, |t| {
+            let mut t = t;
+            if is_folder_start {
+                t = t.folder_start();
+            }
             // Apply per-track mix state from PT's 0x1029 block.
             // Volume is in 0.1 dB units (centibel); ≤ -1440 means -∞.
             // Pan is -100..+100. For STEREO PT tracks the stored "pan" is the
@@ -727,6 +775,9 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     item
                 });
             }
+            if end_levels > 0 {
+                t = t.folder_end(end_levels);
+            }
             t
         });
     }
@@ -738,7 +789,14 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         } else {
             format!("{} → {}", track.name, track.output)
         };
+        let is_folder_start = track.is_folder;
+        let end_levels = folder_end_levels.get(plan_idx).copied().unwrap_or(0);
+        plan_idx += 1;
         builder = builder.track(&display_name, |t| {
+            let mut t = t;
+            if is_folder_start {
+                t = t.folder_start();
+            }
             let linear_vol = if track.volume_centibel <= -1440 {
                 0.0
             } else {
@@ -814,6 +872,9 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                         midi
                     })
                 });
+            }
+            if end_levels > 0 {
+                t = t.folder_end(end_levels);
             }
             t
         });

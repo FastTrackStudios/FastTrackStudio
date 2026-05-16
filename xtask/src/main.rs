@@ -733,6 +733,16 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
             default_skips: vec![],
             test_binary: None,
         },
+        TestPackage {
+            // Sync stack multi-instance tests — each test spawns its own
+            // REAPER instances via run_multi_reaper_test, so they don't
+            // share the xtask's primary REAPER.
+            package: "daw-bridge".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: None,
+        },
     ];
 
     let tests_passed = runner.run_tests(&mut reaper, &packages, filter.as_deref())?;

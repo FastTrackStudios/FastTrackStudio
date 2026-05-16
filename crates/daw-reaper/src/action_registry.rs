@@ -811,6 +811,9 @@ mod tests {
 // MENU_ACTIONS, etc.) — currently stubbed with todo!() pending full port.
 
 impl ActionRegistration for crate::Reaper {
+    // NOTE: these are stubbed (returning a fake non-zero command id / Ok) so
+    // extensions that try to register actions don't panic the host. The full
+    // gaccel/REAPER integration is still pending — see TODO above.
     fn register_action(
         &self,
         _command_name: &str,
@@ -818,27 +821,27 @@ impl ActionRegistration for crate::Reaper {
         _show_in_menu: bool,
         _toggleable: bool,
     ) -> u32 {
-        todo!("action_registry: register_action")
+        1
     }
 
     fn register(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        todo!("action_registry: register")
+        Ok(1)
     }
 
     fn register_in_menu(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        todo!("action_registry: register_in_menu")
+        Ok(1)
     }
 
     fn register_toggle(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        todo!("action_registry: register_toggle")
+        Ok(1)
     }
 
     fn register_toggle_in_menu(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        todo!("action_registry: register_toggle_in_menu")
+        Ok(1)
     }
 
     fn unregister(&self, _cmd_name: &str) -> DawResult<()> {
-        todo!("action_registry: unregister")
+        Ok(())
     }
 
     fn is_registered(&self, _command_name: &str) -> bool {
