@@ -18,3 +18,11 @@ pub enum RegionEvent {
     /// Multiple regions changed (e.g., project reload)
     RegionsChanged(Vec<Region>),
 }
+
+/// Streaming envelope — pairs a [`RegionEvent`] with the project it
+/// applies to. Sibling of [`crate::marker::event::MarkerStreamEvent`].
+#[derive(Debug, Clone, Facet)]
+pub struct RegionStreamEvent {
+    pub project_guid: String,
+    pub event: RegionEvent,
+}

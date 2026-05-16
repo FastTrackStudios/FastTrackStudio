@@ -70,6 +70,8 @@ impl Services for Reaper {
             batch::Service,
             // Streaming services (vox::service, sibling traits)
             transport::stream::Service,
+            marker::stream::Service,
+            region::stream::Service,
         ]
     }
 }

@@ -307,6 +307,8 @@ extern "C" fn timer_callback() {
             daw::reaper::poll_and_broadcast_items();
             daw::reaper::poll_and_broadcast_tempo_map();
             daw::reaper::poll_and_broadcast_transport();
+            daw::reaper::poll_and_broadcast_markers();
+            daw::reaper::poll_and_broadcast_regions();
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();

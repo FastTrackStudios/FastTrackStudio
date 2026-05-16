@@ -211,3 +211,109 @@ impl Regions for crate::Reaper {
         Ok(())
     }
 }
+
+// ── Streaming: poll + broadcast regions ────────────────────────────────
+//
+// Same pattern as markers — per-project HashMap<u32, Region> cache,
+// diff per tick, emit Added/Changed/Removed events through the hub's
+// regions channel. Driven from the bridge's 30Hz timer.
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use daw_proto::RegionEvent;
+use daw_proto::region::RegionStreamEvent;
+use reaper_medium::ProjectRef;
+
+use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
+
+static REGION_CACHE: OnceLock<Mutex<HashMap<String, HashMap<u32, Region>>>> = OnceLock::new();
+
+fn region_cache() -> &'static Mutex<HashMap<String, HashMap<u32, Region>>> {
+    REGION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Poll REAPER region state for every open project. **Main thread only.**
+pub fn poll_and_broadcast_regions() {
+    let hub = crate::event_hub::hub();
+    if hub.regions_subscriber_count() == 0 {
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let mut cache = region_cache().lock().expect("region cache mutex poisoned");
+
+    let mut seen_projects: Vec<String> = Vec::new();
+
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = reaper_high::Project::new(result.project);
+        let project_guid = project_guid_from(&project);
+        seen_projects.push(project_guid.clone());
+
+        let project_ctx = ProjectContext::Project(project_guid.clone());
+        let fresh: Vec<Region> = daw_proto::Regions::all(&crate::Reaper, project_ctx);
+        let fresh_by_id: HashMap<u32, Region> = fresh
+            .into_iter()
+            .filter_map(|r| r.id.map(|id| (id, r)))
+            .collect();
+
+        let prev = cache.entry(project_guid.clone()).or_default();
+
+        for (id, region) in &fresh_by_id {
+            match prev.get(id) {
+                None => hub.publish_region(RegionStreamEvent {
+                    project_guid: project_guid.clone(),
+                    event: RegionEvent::Added(region.clone()),
+                }),
+                Some(old) if old != region => {
+                    hub.publish_region(RegionStreamEvent {
+                        project_guid: project_guid.clone(),
+                        event: RegionEvent::Changed(region.clone()),
+                    });
+                }
+                Some(_) => {}
+            }
+        }
+        for id in prev.keys() {
+            if !fresh_by_id.contains_key(id) {
+                hub.publish_region(RegionStreamEvent {
+                    project_guid: project_guid.clone(),
+                    event: RegionEvent::Removed(*id),
+                });
+            }
+        }
+
+        *prev = fresh_by_id;
+    }
+
+    cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
+}
+
+// ── RegionsStream impl ─────────────────────────────────────────────────
+
+impl daw_proto::region::RegionsStream for crate::Reaper {
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<RegionStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_regions();
+
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "regions subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
+}

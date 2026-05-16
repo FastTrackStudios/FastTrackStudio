@@ -254,3 +254,111 @@ fn _erase_unused() {
     // without a top-of-file `#[allow]`.
     let _: Option<&dyn Any> = None;
 }
+
+// ── Streaming: poll + broadcast markers ────────────────────────────────
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use daw_proto::MarkerEvent;
+use daw_proto::marker::MarkerStreamEvent;
+use reaper_medium::ProjectRef;
+
+use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
+
+static MARKER_CACHE: OnceLock<Mutex<HashMap<String, HashMap<u32, Marker>>>> = OnceLock::new();
+
+fn marker_cache() -> &'static Mutex<HashMap<String, HashMap<u32, Marker>>> {
+    MARKER_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Poll REAPER marker state for every open project and emit
+/// `MarkerEvent`s for additions, removals, and modifications.
+///
+/// **MUST be called from the REAPER main thread.**
+pub fn poll_and_broadcast_markers() {
+    let hub = crate::event_hub::hub();
+    if hub.markers_subscriber_count() == 0 {
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let mut cache = marker_cache().lock().expect("marker cache mutex poisoned");
+
+    let mut seen_projects: Vec<String> = Vec::new();
+
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = reaper_high::Project::new(result.project);
+        let project_guid = project_guid_from(&project);
+        seen_projects.push(project_guid.clone());
+
+        let project_ctx = ProjectContext::Project(project_guid.clone());
+        let fresh: Vec<Marker> = Markers::all(&Reaper, project_ctx);
+        // Drop markers without a stable id — they can't participate
+        // in diffing. REAPER assigns one to every real marker, so in
+        // practice this is a no-op.
+        let fresh_by_id: HashMap<u32, Marker> = fresh
+            .into_iter()
+            .filter_map(|m| m.id.map(|id| (id, m)))
+            .collect();
+
+        let prev = cache.entry(project_guid.clone()).or_default();
+
+        for (id, marker) in &fresh_by_id {
+            match prev.get(id) {
+                None => hub.publish_marker(MarkerStreamEvent {
+                    project_guid: project_guid.clone(),
+                    event: MarkerEvent::Added(marker.clone()),
+                }),
+                Some(old) if old != marker => {
+                    hub.publish_marker(MarkerStreamEvent {
+                        project_guid: project_guid.clone(),
+                        event: MarkerEvent::Changed(marker.clone()),
+                    });
+                }
+                Some(_) => {}
+            }
+        }
+        for id in prev.keys() {
+            if !fresh_by_id.contains_key(id) {
+                hub.publish_marker(MarkerStreamEvent {
+                    project_guid: project_guid.clone(),
+                    event: MarkerEvent::Removed(*id),
+                });
+            }
+        }
+
+        *prev = fresh_by_id;
+    }
+
+    cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
+}
+
+// ── MarkersStream impl ─────────────────────────────────────────────────
+
+impl daw_proto::marker::MarkersStream for Reaper {
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<MarkerStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_markers();
+
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "markers subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
+}

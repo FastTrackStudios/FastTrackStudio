@@ -1,6 +1,8 @@
 //! Marker event types
 //!
-//! Events are emitted when marker state changes.
+//! Events are emitted when marker state changes. Wire shape mirrors
+//! the helgobox occasional-channel pattern: every transition is
+//! delivered, subscribers shouldn't miss any.
 
 use super::Marker;
 use facet::Facet;
@@ -17,4 +19,14 @@ pub enum MarkerEvent {
     Changed(Marker),
     /// Multiple markers changed (e.g., project reload)
     MarkersChanged(Vec<Marker>),
+}
+
+/// Streaming envelope — pairs a [`MarkerEvent`] with the project it
+/// applies to. The streaming hub broadcasts these across all open
+/// projects on a single channel; subscribers filter by `project_guid`
+/// to scope to a specific project.
+#[derive(Debug, Clone, Facet)]
+pub struct MarkerStreamEvent {
+    pub project_guid: String,
+    pub event: MarkerEvent,
 }

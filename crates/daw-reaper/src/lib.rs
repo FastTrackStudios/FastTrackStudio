@@ -126,6 +126,13 @@ pub mod transport_stream;
 // pollers.
 pub use transport::poll_and_broadcast_transport;
 
+// Markers polling. Same shape — diffs against per-project cache,
+// emits Added/Changed/Removed events. Called from the bridge timer.
+pub use marker::poll_and_broadcast_markers;
+
+// Regions polling — sibling of markers.
+pub use region::poll_and_broadcast_regions;
+
 // Re-export toolbar deferred ops processor
 pub use toolbar::process_deferred_ops as process_toolbar_ops;
 
