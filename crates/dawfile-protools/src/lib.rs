@@ -61,4 +61,6 @@ pub use error::{PtError, PtResult};
 pub use io::read_session;
 pub use raw_block::{RawSession, parse_raw};
 pub use types::*;
-pub use write::{set_track_mix_state, set_track_output, write_session};
+pub use write::{
+    get_track_color, set_track_color, set_track_mix_state, set_track_output, write_session,
+};

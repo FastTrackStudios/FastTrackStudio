@@ -383,6 +383,47 @@ fn set_track_mix_state_round_trip_user_session() {
     assert!(click.mute, "ClickPrint mute unchanged");
 }
 
+// =============================================================================
+// Track color round-trip (0x200b +163)
+// =============================================================================
+
+#[test]
+fn track_color_round_trip_color_testing_fixture() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/color-testing.ptx"
+    );
+    let original = std::fs::read(path).expect("color-testing.ptx fixture");
+
+    // Baseline: actual track names in this fixture are `1x1`,
+    // `Audio 1..21`, `Nx1.dup1 1` (alternate playlists in folder x2),
+    // `Nx2.dup1 1` (alternate playlists in folder x3).
+    let raw = dawfile_protools::parse_raw(original.clone()).unwrap();
+    let c_first = dawfile_protools::get_track_color(&raw, "1x1").expect("1x1 color");
+    let c_last = dawfile_protools::get_track_color(&raw, "23x2.dup1 1").expect("last color");
+    let c_mid = dawfile_protools::get_track_color(&raw, "Audio 1").expect("Audio 1 color");
+
+    assert_eq!(c_first, 0x02, "1x1 (palette pos 0)");
+    assert_eq!(c_mid, 0x04, "Audio 1 (third 0x261c block)");
+    assert_eq!(c_last, 0x48, "23x2.dup1 1 (last colored track)");
+
+    // Mutate: set "1x1" to palette-byte 0x10.
+    let mut raw = dawfile_protools::parse_raw(original.clone()).unwrap();
+    assert!(
+        dawfile_protools::set_track_color(&mut raw, "1x1", 0x10),
+        "set_track_color should succeed for 1x1"
+    );
+
+    let encrypted = raw.encrypt();
+    let raw2 = dawfile_protools::parse_raw(encrypted).unwrap();
+    let c_after = dawfile_protools::get_track_color(&raw2, "1x1").expect("1x1 after");
+    assert_eq!(c_after, 0x10, "color survived round-trip");
+
+    // Other tracks unaffected.
+    let c_last_after = dawfile_protools::get_track_color(&raw2, "23x2.dup1 1").expect("last after");
+    assert_eq!(c_last_after, 0x48, "last track unchanged");
+}
+
 fn get_track_starts(session: &dawfile_protools::RawSession) -> Vec<usize> {
     let mut out = Vec::new();
     collect_ct(

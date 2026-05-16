@@ -230,6 +230,114 @@ fn find_track_index(session: &crate::raw_block::RawSession, track_name: &str) ->
     None
 }
 
+/// Overwrite a track's color byte at byte offset +163 within its `0x200b`
+/// state block (a child of the per-colored-track `0x261c` container).
+///
+/// The byte is a single-byte palette identifier in Pro Tools' color
+/// palette space. Per RE on the user's 23×3 Color Testing fixture:
+///
+/// - byte 0x00..0x01 = system / default-color slots
+/// - byte 0x02..0x48 = user-pickable palette positions
+///
+/// **Folder tracks have no `0x261c`** so setting their color via this
+/// function returns `None`.
+///
+/// Returns `true` on success, `false` if the track has no 0x200b
+/// (folder track, or pre-PT12 layout).
+pub fn set_track_color(
+    session: &mut crate::raw_block::RawSession,
+    track_name: &str,
+    color_byte: u8,
+) -> bool {
+    // 1. Walk every 0x261c container. For each, read the inner track name
+    //    (in 0x102d → 0x2619 payload + 0, length-prefixed string).
+    // 2. When we find the matching name, locate the sibling 0x200b inside
+    //    that 0x261c and write byte +163 of its payload.
+    let containers = collect_blocks_ref_raw(&session.blocks, 0x261c);
+    let mut target_offset: Option<usize> = None;
+    for c in containers {
+        let name_in_block = find_2619_name(c, &session.data);
+        if name_in_block.as_deref() == Some(track_name) {
+            // Find sibling 0x200b
+            if let Some(b) = c.children.iter().find(|x| x.content_type_raw == 0x200b) {
+                let payload = b.start + 9;
+                if payload + 164 <= session.data.len() {
+                    target_offset = Some(payload + 163);
+                    break;
+                }
+            }
+        }
+    }
+    let Some(off) = target_offset else {
+        return false;
+    };
+    session.data[off] = color_byte;
+    true
+}
+
+fn collect_blocks_ref_raw(
+    blocks: &[crate::raw_block::RawBlock],
+    ct: u16,
+) -> Vec<&crate::raw_block::RawBlock> {
+    let mut out = Vec::new();
+    fn rec<'a>(
+        blocks: &'a [crate::raw_block::RawBlock],
+        ct: u16,
+        out: &mut Vec<&'a crate::raw_block::RawBlock>,
+    ) {
+        for b in blocks {
+            if b.content_type_raw == ct {
+                out.push(b);
+            }
+            rec(&b.children, ct, out);
+        }
+    }
+    rec(blocks, ct, &mut out);
+    out
+}
+
+fn find_2619_name(b: &crate::raw_block::RawBlock, data: &[u8]) -> Option<String> {
+    for c in &b.children {
+        if c.content_type_raw == 0x2619 {
+            let p = c.start + 9;
+            if p + 4 > data.len() {
+                return None;
+            }
+            let len = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if len > 64 || p + 4 + len > data.len() {
+                return None;
+            }
+            return Some(
+                String::from_utf8_lossy(&data[p + 4..p + 4 + len])
+                    .trim_end_matches('\0')
+                    .to_string(),
+            );
+        }
+        if let Some(n) = find_2619_name(c, data) {
+            return Some(n);
+        }
+    }
+    None
+}
+
+/// Read the color byte for a track. Returns `None` if no `0x261c` /
+/// `0x200b` exists for the named track.
+pub fn get_track_color(session: &crate::raw_block::RawSession, track_name: &str) -> Option<u8> {
+    let containers = collect_blocks_ref_raw(&session.blocks, 0x261c);
+    for c in containers {
+        let name_in_block = find_2619_name(c, &session.data);
+        if name_in_block.as_deref() == Some(track_name) {
+            if let Some(b) = c.children.iter().find(|x| x.content_type_raw == 0x200b) {
+                let payload = b.start + 9;
+                if payload + 164 <= session.data.len() {
+                    return Some(session.data[payload + 163]);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Change a track's output routing destination.
 ///
 /// Locates the per-track `0x260e` (TrackRouting) block matching `track_name`

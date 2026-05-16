@@ -57,12 +57,23 @@ fn collect(blocks: &[RawBlock], ct: u16) -> Vec<&RawBlock> {
 fn find_track_name(b: &RawBlock, data: &[u8]) -> Option<String> {
     // descend looking for 0x102d
     for c in &b.children {
-        if c.content_type == Some(ContentType::AudioTrackList) || c.content_type_raw == 0x261b {
-            if let Some(n) = find_track_name(c, data) {
-                return Some(n);
+        if c.content_type_raw == 0x2619 {
+            // 0x2619 payload: u32 length + chars
+            let p = c.start + 9;
+            if p + 4 > data.len() {
+                return None;
             }
+            let len = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if len > 64 || p + 4 + len > data.len() {
+                return None;
+            }
+            return Some(String::from_utf8_lossy(&data[p + 4..p + 4 + len]).to_string());
         }
-        if c.content_type_raw == 0x102d {
+        if let Some(n) = find_track_name(c, data) {
+            return Some(n);
+        }
+        // legacy duplicate branch (will be reached only if 0x102d wasn't found above)
+        if false && c.content_type_raw == 0x102d {
             // payload + 0 = u32 length, then chars
             let p = c.start + 9;
             if p + 4 > data.len() {
