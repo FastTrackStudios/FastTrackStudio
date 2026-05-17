@@ -80,6 +80,12 @@ pub mod transport;
 pub mod ui;
 pub mod window_geometry;
 
+// Push-based change detection via REAPER's IReaperControlSurface
+// callbacks. Parallel fast path alongside the 30Hz pollers — see
+// `control_surface.rs` for the variant-by-variant mapping.
+pub mod control_surface;
+pub use control_surface::DawControlSurface;
+
 // Per-service `Reaper*` structs retired with the architect::rpc port —
 // every backend trait now impls on the `crate::Reaper` singleton.
 // Mount via `<service>::serve(Reaper)` / `<service>::descriptor()`.

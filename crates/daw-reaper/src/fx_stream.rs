@@ -79,6 +79,45 @@ pub fn subscribe_fx() -> Option<broadcast::Receiver<FxEvent>> {
     FX_BROADCASTER.get().map(|tx| tx.subscribe())
 }
 
+/// Push-published FX event from the control-surface callback path.
+/// For `EnabledChanged` we also update the per-chain cache so the next
+/// poll tick won't re-emit the same diff. `ParameterChanged` and
+/// `PresetChanged` aren't cached (we don't poll params), so callback
+/// is the only path. Main-thread only.
+pub(crate) fn publish_from_callback(event: FxEvent) {
+    let Some(tx) = FX_BROADCASTER.get() else {
+        return;
+    };
+    if let FxEvent::EnabledChanged {
+        context,
+        fx_guid,
+        enabled,
+    } = &event
+    {
+        if let Some(cache_cell) = FX_CACHE.get() {
+            if let Ok(mut cache) = cache_cell.lock() {
+                // Try each known project. We don't have the project guid
+                // here, so iterate and patch any chain whose chain-part
+                // matches the context. There's at most a handful of
+                // chains per project.
+                let chain_part = match context {
+                    FxChainContext::Track(g) => format!("track:{g}"),
+                    FxChainContext::Input(g) => format!("input:{g}"),
+                    FxChainContext::Monitoring => "monitoring".to_string(),
+                };
+                for ((_, cp), chain) in cache.iter_mut() {
+                    if cp == &chain_part {
+                        if let Some(c) = chain.iter_mut().find(|c| &c.guid == fx_guid) {
+                            c.enabled = *enabled;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = tx.send(event);
+}
+
 /// Poll REAPER FX chain state for every open project. **Main thread only.**
 pub fn poll_and_broadcast_fx() {
     let Some(tx) = FX_BROADCASTER.get() else {

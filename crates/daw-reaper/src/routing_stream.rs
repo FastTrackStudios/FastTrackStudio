@@ -72,6 +72,72 @@ pub fn subscribe_routing() -> Option<broadcast::Receiver<RoutingEvent>> {
     ROUTING_BROADCASTER.get().map(|tx| tx.subscribe())
 }
 
+/// Push-published routing event from the control-surface callback path.
+/// Updates the per-route cache so the next poll tick sees no diff and
+/// doesn't re-emit. Main-thread only.
+pub(crate) fn publish_from_callback(event: RoutingEvent) {
+    let Some(tx) = ROUTING_BROADCASTER.get() else {
+        return;
+    };
+    if let Some(cache_cell) = ROUTING_CACHE.get() {
+        if let Ok(mut cache) = cache_cell.lock() {
+            apply_callback_to_cache(&mut cache, &event);
+        }
+    }
+    let _ = tx.send(event);
+}
+
+fn apply_callback_to_cache(cache: &mut HashMap<RouteKey, Vec<CachedRoute>>, event: &RoutingEvent) {
+    match event {
+        RoutingEvent::VolumeChanged {
+            project_guid,
+            source_track_guid,
+            route_type,
+            route_index,
+            volume,
+        } => {
+            if let Some(routes) =
+                cache.get_mut(&(project_guid.clone(), source_track_guid.clone(), *route_type))
+            {
+                if let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) {
+                    r.volume = *volume;
+                }
+            }
+        }
+        RoutingEvent::PanChanged {
+            project_guid,
+            source_track_guid,
+            route_type,
+            route_index,
+            pan,
+        } => {
+            if let Some(routes) =
+                cache.get_mut(&(project_guid.clone(), source_track_guid.clone(), *route_type))
+            {
+                if let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) {
+                    r.pan = *pan;
+                }
+            }
+        }
+        RoutingEvent::MuteChanged {
+            project_guid,
+            source_track_guid,
+            route_type,
+            route_index,
+            muted,
+        } => {
+            if let Some(routes) =
+                cache.get_mut(&(project_guid.clone(), source_track_guid.clone(), *route_type))
+            {
+                if let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) {
+                    r.muted = *muted;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Poll REAPER routing state for every open project. **Main thread only.**
 pub fn poll_and_broadcast_routing() {
     let Some(tx) = ROUTING_BROADCASTER.get() else {

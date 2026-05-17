@@ -326,36 +326,108 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
-    // Step 12c: Decode per-track color palette byte from 0x200b +163.
+    // Step 12c: Decode per-track color palette index from 0x200b +106..+107.
     //
-    // 0x200b is a child of 0x261c (per-colored-track wrapper). The byte at
-    // payload +163 carries the palette position. Folder tracks have no
-    // 0x261c so they receive `color_byte = 0` (= no color).
+    // The color is a 2-byte LE i16: -2 (= 0xfffe) means "default / no
+    // color", any non-negative value is a palette index (mapped to RGB
+    // via the table in `docs/pt-color-palette-ground-truth.md`).
+    //
+    // Verified via RPP→PTX probe + plaintext-diff: a track with
+    // `color(0xd86e41)` set in RPP produces +106..+107 = `18 00` (=24)
+    // in PTX while baseline (no color) shows `fe ff` (=-2). See
+    // `docs/pt-field-map.md`.
+    //
+    // We previously read `+163` which was a different field that
+    // happened to correlate with palette index on Color Testing
+    // (probably a per-track ordinal counter). The +163 reading was
+    // wrong on LotF and other fixtures.
+    //
+    // To resolve which track each 0x200b belongs to, walk upward from
+    // the block through its ancestors and find the nearest `0x2619`
+    // (track name) descendant.
     {
         let data = cursor.data();
-        let containers = collect_blocks_recursive(&blocks, ContentType::TrackContainer);
-        let mut color_by_name: std::collections::HashMap<String, u8> =
+        let mut parents: std::collections::HashMap<usize, Option<&Block>> =
             std::collections::HashMap::new();
-        for c in containers {
-            let Some(name) = find_2619_track_name(c, data) else {
-                continue;
-            };
-            let Some(b200b) = c
-                .children
-                .iter()
-                .find(|x| x.content_type == Some(ContentType::TrackAuxState))
-            else {
-                continue;
-            };
-            let p = b200b.offset + 2 + 163;
-            if p < data.len() {
-                color_by_name.insert(name, data[p]);
+        fn build_parents<'a>(
+            blocks: &'a [Block],
+            parent: Option<&'a Block>,
+            parents: &mut std::collections::HashMap<usize, Option<&'a Block>>,
+        ) {
+            for b in blocks {
+                parents.insert(b.offset, parent);
+                build_parents(&b.children, Some(b), parents);
             }
         }
+        build_parents(&blocks, None, &mut parents);
+
+        fn find_2619_name(b: &Block, data: &[u8]) -> Option<String> {
+            for c in &b.children {
+                if c.content_type == Some(ContentType::MarkerEntry) {
+                    let p = c.offset + 2;
+                    if p + 4 > data.len() {
+                        return None;
+                    }
+                    let len = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+                    if len == 0 || len > 64 || p + 4 + len > data.len() {
+                        return None;
+                    }
+                    return Some(
+                        String::from_utf8_lossy(&data[p + 4..p + 4 + len])
+                            .trim_end_matches('\0')
+                            .to_string(),
+                    );
+                }
+                if let Some(n) = find_2619_name(c, data) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+
+        let mut color_by_name: std::collections::HashMap<String, u8> =
+            std::collections::HashMap::new();
+        let aux_blocks = collect_blocks_recursive(&blocks, ContentType::TrackAuxState);
+        for b in &aux_blocks {
+            // Color is i16 LE at +106..+107 (verified by RPP→PTX diff).
+            // We expose it as a u8 (`color_byte`) since palette indices
+            // observed so far are all < 256; -2/0xfffe (default) maps to 0.
+            let p = b.offset + 2 + 106;
+            let color = if p + 2 <= data.len() {
+                let val = i16::from_le_bytes([data[p], data[p + 1]]);
+                if val < 0 { 0 } else { val as u8 }
+            } else {
+                0
+            };
+
+            // Walk up to 10 ancestors looking for a 0x2619 name anywhere
+            // in the subtree.
+            let mut name: Option<String> = None;
+            let mut anc = parents.get(&b.offset).cloned().flatten();
+            let mut depth = 0;
+            while let Some(a) = anc {
+                if let Some(n) = find_2619_name(a, data) {
+                    name = Some(n);
+                    break;
+                }
+                anc = parents.get(&a.offset).cloned().flatten();
+                depth += 1;
+                if depth > 10 {
+                    break;
+                }
+            }
+            if let Some(n) = name {
+                // First write wins — preserves the earliest (most-likely-live) entry
+                color_by_name.entry(n).or_insert(color);
+            }
+        }
+
         for t in audio_tracks.iter_mut() {
             if let Some(c) = color_by_name.get(&t.name) {
                 t.color_byte = *c;
             } else {
+                // Audio tracks store the base name ("Vocal Split"); 0x2619
+                // may carry the active-playlist name ("Vocal Split.01").
                 for suffix in [".01", ".02", ".03", ".04", ".05"] {
                     if let Some(c) = color_by_name.get(&format!("{}{suffix}", t.name)) {
                         t.color_byte = *c;

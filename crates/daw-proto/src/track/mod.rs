@@ -37,4 +37,4 @@ pub use service::{
 pub use test_utils::{
     TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist, format_tracklist,
 };
-pub use track::{InputMonitoringMode, RecordInput, Track, TrackRef};
+pub use track::{InputMonitoringMode, RecordInput, ReorderTracksBehavior, Track, TrackRef};

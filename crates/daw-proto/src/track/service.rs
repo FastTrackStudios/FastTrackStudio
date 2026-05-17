@@ -6,12 +6,12 @@
 //! `daw-proto/src/marker/service.rs` for the same pattern.
 //!
 //! Scope was trimmed from the previous async `TrackService` to the
-//! verbs the daw-control facade actually drives. Retired surfaces
-//! (track chunks, hierarchy apply, visibility, ext state, input
-//! monitoring, record input, folder depth, channel counts, subscribe)
-//! land on follow-on sibling traits if/when a real consumer needs them.
+//! verbs the daw-control facade actually drives. Broader surfaces
+//! (track chunks, hierarchy apply, ext state, input monitoring,
+//! record input, channel counts, subscribe) land on follow-on sibling
+//! traits if/when a real consumer needs them.
 
-use super::{Track, TrackRef};
+use super::{ReorderTracksBehavior, Track, TrackRef};
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
 
@@ -94,4 +94,38 @@ pub trait Tracks {
     fn rename(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<()>;
 
     fn set_color(&self, project: ProjectContext, track: TrackRef, color: u32) -> DawResult<()>;
+
+    /// Set REAPER folder-depth change for a track.
+    fn set_folder_depth(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        folder_depth: i32,
+    ) -> DawResult<()>;
+
+    /// Move all currently selected tracks to `index`.
+    fn reorder_selected(
+        &self,
+        project: ProjectContext,
+        index: u32,
+        behavior: ReorderTracksBehavior,
+    ) -> DawResult<()>;
+
+    /// Set TCP/MCP visibility for a track.
+    fn set_visibility(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        visible_in_tcp: bool,
+        visible_in_mixer: bool,
+    ) -> DawResult<()>;
+
+    /// Set the TCP height override for a track. `height_pixels = 0` clears the
+    /// override and lets REAPER choose the default height.
+    fn set_tcp_height(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        height_pixels: u32,
+    ) -> DawResult<()>;
 }

@@ -13,9 +13,12 @@
 use std::cell::RefCell;
 
 use daw_proto::Tracks;
-use daw_proto::{DawError, DawResult, ProjectContext, Track, TrackRef};
+use daw_proto::{
+    DawError, DawResult, ProjectContext, ReorderTracksBehavior as ProtoReorderTracksBehavior,
+    Track, TrackRef,
+};
 use reaper_high::{GroupingBehavior, Project, Reaper as ReaperHigh};
-use reaper_medium::{GangBehavior, TrackAttributeKey};
+use reaper_medium::{GangBehavior, ReorderTracksBehavior, TrackAttributeKey};
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
@@ -237,6 +240,39 @@ pub fn set_visibility_on_main_thread(
             })?;
     }
     Ok(())
+}
+
+/// Set a track's arrange-view height override in the current project.
+///
+/// REAPER uses `I_HEIGHTOVERRIDE = 0` to return the track to automatic height.
+pub fn set_tcp_height_on_main_thread(guid: &str, height_pixels: u32) -> DawResult<()> {
+    let proj = ReaperHigh::get().current_project();
+    let track =
+        resolve_track(&proj, &TrackRef::Guid(guid.to_string())).ok_or_else(not_found_track)?;
+    let raw = track.raw().map_err(|_| not_found_track())?;
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    unsafe {
+        medium
+            .set_media_track_info_value(
+                raw,
+                TrackAttributeKey::HeightOverride,
+                height_pixels as f64,
+            )
+            .map_err(|err| DawError::operation_failed(format!("set TCP height failed: {err}")))?;
+    }
+    medium.track_list_adjust_windows_minor();
+    Ok(())
+}
+
+fn reorder_behavior_to_reaper(behavior: ProtoReorderTracksBehavior) -> ReorderTracksBehavior {
+    match behavior {
+        ProtoReorderTracksBehavior::Normal => ReorderTracksBehavior::Normal,
+        ProtoReorderTracksBehavior::MakeChildOfPreviousTrack => {
+            ReorderTracksBehavior::MakeChildOfPreviousTrack
+        }
+        ProtoReorderTracksBehavior::ExtendFolder => ReorderTracksBehavior::ExtendFolder,
+    }
 }
 
 // ── Tracks impl ────────────────────────────────────────────────────────
@@ -467,6 +503,106 @@ impl Tracks for crate::Reaper {
         }
         Ok(())
     }
+
+    fn set_folder_depth(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        folder_depth: i32,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        unsafe {
+            ReaperHigh::get()
+                .medium_reaper()
+                .set_media_track_info_value(
+                    raw,
+                    TrackAttributeKey::FolderDepth,
+                    folder_depth as f64,
+                )
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set folder depth failed: {err}"))
+                })?;
+        }
+        Ok(())
+    }
+
+    fn reorder_selected(
+        &self,
+        project: ProjectContext,
+        index: u32,
+        behavior: ProtoReorderTracksBehavior,
+    ) -> DawResult<()> {
+        let _proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        ReaperHigh::get()
+            .medium_reaper()
+            .reorder_selected_tracks(index, reorder_behavior_to_reaper(behavior))
+            .map_err(|err| DawError::operation_failed(format!("reorder selected failed: {err}")))?;
+        ReaperHigh::get()
+            .medium_reaper()
+            .track_list_adjust_windows_minor();
+        Ok(())
+    }
+
+    fn set_visibility(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        visible_in_tcp: bool,
+        visible_in_mixer: bool,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let medium = ReaperHigh::get().medium_reaper();
+        unsafe {
+            medium
+                .set_media_track_info_value(
+                    raw,
+                    TrackAttributeKey::ShowInTcp,
+                    f64::from(visible_in_tcp),
+                )
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set TCP visibility failed: {err}"))
+                })?;
+            medium
+                .set_media_track_info_value(
+                    raw,
+                    TrackAttributeKey::ShowInMixer,
+                    f64::from(visible_in_mixer),
+                )
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set mixer visibility failed: {err}"))
+                })?;
+        }
+        Ok(())
+    }
+
+    fn set_tcp_height(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        height_pixels: u32,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let medium = ReaperHigh::get().medium_reaper();
+        unsafe {
+            medium
+                .set_media_track_info_value(
+                    raw,
+                    TrackAttributeKey::HeightOverride,
+                    height_pixels as f64,
+                )
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set TCP height failed: {err}"))
+                })?;
+        }
+        medium.track_list_adjust_windows_minor();
+        Ok(())
+    }
 }
 
 // `Project` is used only for the `Project` re-export visibility check
@@ -493,7 +629,11 @@ use crate::project_context::MAX_PROJECT_TABS;
 
 static TRACK_CACHE: OnceLock<Mutex<HashMap<String, HashMap<String, Track>>>> = OnceLock::new();
 
-fn track_cache() -> &'static Mutex<HashMap<String, HashMap<String, Track>>> {
+/// Shared per-project track cache used by `poll_and_broadcast_tracks`.
+/// Exposed to `control_surface.rs` so push-based callbacks can update
+/// the cached field before publishing, preventing the next poll tick
+/// from re-emitting the same diff. Main-thread access only.
+pub(crate) fn track_cache() -> &'static Mutex<HashMap<String, HashMap<String, Track>>> {
     TRACK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

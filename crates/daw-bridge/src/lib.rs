@@ -421,6 +421,31 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     daw::reaper::register_project_importer(&mut session)?;
 
+    // Push-based change-detection via REAPER's IReaperControlSurface
+    // callbacks. Fires the same TrackEvent / TransportEvent / FxEvent /
+    // RoutingEvent the pollers fire, but immediately on change instead
+    // of waiting up to 33ms for the next timer tick. The pollers stay
+    // wired (markers, regions, items, etc. don't fire callbacks).
+    //
+    // The returned RegistrationHandle is leaked: the surface is owned
+    // for the lifetime of the extension, and the ReaperSession destructor
+    // unregisters all surviving csurfs on REAPER shutdown anyway.
+    {
+        use reaper_high::MiddlewareControlSurface;
+        let csurf = MiddlewareControlSurface::new(daw::reaper::DawControlSurface::new());
+        match session.plugin_register_add_csurf_inst(Box::new(csurf)) {
+            Ok(_handle) => {
+                // RegistrationHandle is Copy; dropping it does not
+                // unregister. ReaperSession owns the boxed surface and
+                // cleans up on shutdown.
+                info!("daw control surface registered (push-based change detection)");
+            }
+            Err(e) => {
+                warn!("failed to register daw control surface: {e}");
+            }
+        }
+    }
+
     drop(session);
 
     register_window_geometry_actions();

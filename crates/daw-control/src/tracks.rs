@@ -6,7 +6,7 @@ use crate::Result;
 use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
 use daw_proto::{
     FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent,
-    TrackExtStateRequest, TrackRef,
+    TrackExtStateRequest, TrackRef, track::ReorderTracksBehavior,
 };
 use vox::Rx;
 
@@ -160,6 +160,19 @@ impl Tracks {
     /// Clear selection from all tracks
     pub async fn clear_selection(&self) -> Result<()> {
         self.clients.track.clear_selection(self.context()).await?;
+        Ok(())
+    }
+
+    /// Move all currently selected tracks to `index`.
+    pub async fn reorder_selected(
+        &self,
+        index: u32,
+        behavior: ReorderTracksBehavior,
+    ) -> Result<()> {
+        self.clients
+            .track
+            .reorder_selected(self.context(), index, behavior)
+            .await??;
         Ok(())
     }
 
@@ -505,9 +518,41 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Set REAPER folder-depth change for this track.
+    pub async fn set_folder_depth(&self, folder_depth: i32) -> Result<()> {
+        self.clients
+            .track
+            .set_folder_depth(self.context(), self.track_ref(), folder_depth)
+            .await??;
+        Ok(())
+    }
+
     // =========================================================================
     // Visibility
     // =========================================================================
+
+    /// Set track visibility in the arrange view and mixer.
+    pub async fn set_visibility(&self, visible_in_tcp: bool, visible_in_mixer: bool) -> Result<()> {
+        self.clients
+            .track
+            .set_visibility(
+                self.context(),
+                self.track_ref(),
+                visible_in_tcp,
+                visible_in_mixer,
+            )
+            .await??;
+        Ok(())
+    }
+
+    /// Set the arrange-view track height override in pixels. Use `0` to clear it.
+    pub async fn set_tcp_height(&self, height_pixels: u32) -> Result<()> {
+        self.clients
+            .track
+            .set_tcp_height(self.context(), self.track_ref(), height_pixels)
+            .await??;
+        Ok(())
+    }
 
     // =========================================================================
     // FX Chain Access

@@ -74,8 +74,12 @@ pub fn parse_audio_tracks(
         &fade_defs,
     );
 
-    // Step 3: Remove entries with no active regions
-    entries.retain(|e| !e.track.regions.is_empty());
+    // Keep all defined tracks, including empty ones (no regions). PT
+    // sessions used as palette tests (Color Testing.ptx) or routing-only
+    // skeletons have legitimate empty tracks that still carry color,
+    // routing, and mix state. Filtering them dropped 72/72 tracks on
+    // Color Testing.ptx. If a downstream caller wants only tracks with
+    // content, they can filter on `regions.is_empty()` themselves.
 
     // Step 4: Group alternates under their primary track
     let mut tracks = group_alternate_playlists(entries);

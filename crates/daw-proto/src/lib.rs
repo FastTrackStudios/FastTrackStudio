@@ -107,10 +107,10 @@ pub use toolbar::*;
 #[cfg(feature = "vox")]
 pub use track::TracksClient;
 pub use track::{
-    AddChildren, FolderDepthChange, InputMonitoringMode, RecordInput, Track, TrackError,
-    TrackEvent, TrackExtStateRequest, TrackGroup, TrackHierarchy, TrackHierarchyBuilder, TrackNode,
-    TrackRef, TrackStructureBuilder, Tracks, TracksRpc, assert_tracks_equal, display_tracklist,
-    format_tracklist,
+    AddChildren, FolderDepthChange, InputMonitoringMode, RecordInput, ReorderTracksBehavior, Track,
+    TrackError, TrackEvent, TrackExtStateRequest, TrackGroup, TrackHierarchy,
+    TrackHierarchyBuilder, TrackNode, TrackRef, TrackStructureBuilder, Tracks, TracksRpc,
+    assert_tracks_equal, display_tracklist, format_tracklist,
 };
 pub use transport::*;
 pub use ui::*;
