@@ -111,6 +111,15 @@ pub use tempo_map::{init_tempo_map_broadcaster, poll_and_broadcast_tempo_map};
 // Re-export item broadcaster functions
 pub use item::{init_item_broadcaster, poll_and_broadcast_items, subscribe_items};
 
+// FX / routing / take streaming — own-broadcaster pattern (sibling to
+// item.rs). Each module has init / subscribe / poll_and_broadcast.
+pub mod fx_stream;
+pub mod routing_stream;
+pub mod take_stream;
+pub use fx_stream::{init_fx_broadcaster, poll_and_broadcast_fx, subscribe_fx};
+pub use routing_stream::{init_routing_broadcaster, poll_and_broadcast_routing, subscribe_routing};
+pub use take_stream::{init_take_broadcaster, poll_and_broadcast_takes, subscribe_takes};
+
 // Central streaming event hub — owns one broadcast::Sender per
 // streaming domain. See docs/streaming-design.md.
 pub mod event_hub;

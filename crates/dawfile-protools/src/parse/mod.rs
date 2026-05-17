@@ -178,7 +178,17 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
-                let mute = data[payload + 5] != 0;
+                // Mute discriminator is NOT a per-track byte. Frida-traced the
+                // PT Reaper Converter v1.5.4 on LotF: the converter checks for
+                // a Swift `PTXMutePoint`-class object (Optional<...>) per
+                // track. Only ~2 tracks per session have explicit mute
+                // records; folder children inherit mute via tree walk. The
+                // `0x1029 +5` byte we previously read here was a different PT
+                // flag (likely `inactive`/`bouncedSource`) and produced false
+                // positives on 12/30 LotF tracks. Default mute=false until
+                // the mute-record block ID is located. See
+                // docs/pt-reaper-converter-re.md "2026-05-17 round 2".
+                let mute = false;
                 let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
                 mix_by_name.insert(name, (vol, mute, pan));
             }

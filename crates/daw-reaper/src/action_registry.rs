@@ -15,9 +15,9 @@ use crate::main_thread;
 use daw_control::lock::LockExt;
 use daw_proto::{
     ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest, ActionListResponse,
-    ActionOrigin, ActionRegistration, ActionSection, DawResult,
+    ActionOrigin, ActionRegistration, ActionSection, DawError, DawResult,
 };
-use reaper_high::{Reaper, RegisteredAction};
+use reaper_high::{ActionKind, Reaper, RegisteredAction};
 use reaper_medium::{
     CommandId, Handle, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ReaperStr,
     SectionContext, SectionId,
@@ -28,7 +28,6 @@ use std::ptr::null_mut;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
-use vox::Tx;
 
 /// Owned action keepalive — drops `RegisteredAction` and removes the
 /// manually-registered gaccel when unregistered. `Handle<gaccel_register_t>`
@@ -699,6 +698,184 @@ fn build_extension_menu(hmenu: Hmenu) {
     );
 }
 
+fn action_list_contains(command_id: CommandId) -> bool {
+    Reaper::get()
+        .main_section()
+        .with_raw(|s| {
+            (0..s.action_list_cnt()).any(|i| {
+                s.get_action_by_index(i)
+                    .map(|a| a.cmd() == command_id)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+pub fn register_action_main_thread(
+    command_name: &str,
+    description: &str,
+    show_in_menu: bool,
+    toggleable: bool,
+) -> u32 {
+    if let Some(id) = registered_actions()
+        .lock_recoverable("action_registry")
+        .get(command_name)
+        .copied()
+    {
+        return id;
+    }
+
+    if let Some(command_id) = named_command_lookup(command_name) {
+        let id = command_id.get();
+        registered_actions()
+            .lock_recoverable("action_registry")
+            .insert(command_name.to_string(), id);
+        if show_in_menu {
+            menu_actions()
+                .lock_recoverable("action_registry")
+                .push(MenuActionDef {
+                    command_name: command_name.to_string(),
+                    display_name: description.to_string(),
+                    group: derive_menu_group(command_name),
+                });
+        }
+        return id;
+    }
+
+    let command_for_trigger = command_name.to_string();
+    let kind = if toggleable {
+        let command_for_toggle = command_name.to_string();
+        ActionKind::Toggleable(Box::new(move || read_toggle_state(&command_for_toggle)))
+    } else {
+        ActionKind::NotToggleable
+    };
+    let action = Reaper::get().register_action(
+        command_name.to_string(),
+        description.to_string(),
+        None,
+        move || notify_action_triggered(command_for_trigger.clone()),
+        kind,
+    );
+    let command_id = action.command_id();
+
+    let gaccel_handle = if action_list_contains(command_id) {
+        None
+    } else {
+        let gaccel = OwnedGaccelRegister::without_key_binding(command_id, description.to_string());
+        match Reaper::get()
+            .medium_session()
+            .plugin_register_add_gaccel(gaccel)
+        {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                warn!("Failed to register gaccel for '{command_name}': {err:?}");
+                None
+            }
+        }
+    };
+
+    let id = command_id.get();
+    registered_actions()
+        .lock_recoverable("action_registry")
+        .insert(command_name.to_string(), id);
+    owned_actions().lock_recoverable("action_registry").insert(
+        command_name.to_string(),
+        OwnedAction {
+            action,
+            gaccel_handle,
+        },
+    );
+    if show_in_menu {
+        menu_actions()
+            .lock_recoverable("action_registry")
+            .push(MenuActionDef {
+                command_name: command_name.to_string(),
+                display_name: description.to_string(),
+                group: derive_menu_group(command_name),
+            });
+    }
+
+    id
+}
+
+pub fn unregister_action_main_thread(command_name: &str) -> bool {
+    let removed = owned_actions()
+        .lock_recoverable("action_registry")
+        .remove(command_name);
+    let had_owned = removed.is_some();
+    if let Some(handle) = removed.and_then(|owned| owned.gaccel_handle) {
+        Reaper::get()
+            .medium_session()
+            .plugin_register_remove_gaccel(handle);
+    }
+    registered_actions()
+        .lock_recoverable("action_registry")
+        .remove(command_name)
+        .is_some()
+        || had_owned
+}
+
+fn check_registered(command_id: u32, command_name: &str) -> DawResult<u32> {
+    if command_id > 0 {
+        Ok(command_id)
+    } else {
+        Err(DawError::operation_failed(format!(
+            "register_action returned 0 for '{command_name}'"
+        )))
+    }
+}
+
+fn register_action_threadsafe(
+    command_name: &str,
+    description: &str,
+    show_in_menu: bool,
+    toggleable: bool,
+) -> u32 {
+    if Reaper::get().is_in_main_thread() {
+        return register_action_main_thread(command_name, description, show_in_menu, toggleable);
+    }
+
+    let Some(task_support) = main_thread::task_support() else {
+        return 0;
+    };
+    let command_name = command_name.to_string();
+    let description = description.to_string();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    if task_support
+        .do_later_in_main_thread_asap(move || {
+            let id =
+                register_action_main_thread(&command_name, &description, show_in_menu, toggleable);
+            let _ = tx.send(id);
+        })
+        .is_err()
+    {
+        return 0;
+    }
+    rx.recv().unwrap_or(0)
+}
+
+fn unregister_action_threadsafe(command_name: &str) -> bool {
+    if Reaper::get().is_in_main_thread() {
+        return unregister_action_main_thread(command_name);
+    }
+
+    let Some(task_support) = main_thread::task_support() else {
+        return false;
+    };
+    let command_name = command_name.to_string();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    if task_support
+        .do_later_in_main_thread_asap(move || {
+            let removed = unregister_action_main_thread(&command_name);
+            let _ = tx.send(removed);
+        })
+        .is_err()
+    {
+        return false;
+    }
+    rx.recv().unwrap_or(false)
+}
+
 // ============================================================================
 // Action Registry Service
 // ============================================================================
@@ -811,49 +988,71 @@ mod tests {
 // MENU_ACTIONS, etc.) — currently stubbed with todo!() pending full port.
 
 impl ActionRegistration for crate::Reaper {
-    // NOTE: these are stubbed (returning a fake non-zero command id / Ok) so
-    // extensions that try to register actions don't panic the host. The full
-    // gaccel/REAPER integration is still pending — see TODO above.
     fn register_action(
         &self,
-        _command_name: &str,
-        _description: &str,
-        _show_in_menu: bool,
-        _toggleable: bool,
+        command_name: &str,
+        description: &str,
+        show_in_menu: bool,
+        toggleable: bool,
     ) -> u32 {
-        1
+        register_action_threadsafe(command_name, description, show_in_menu, toggleable)
     }
 
-    fn register(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        Ok(1)
+    fn register(&self, cmd_name: &str, description: &str) -> DawResult<u32> {
+        check_registered(
+            register_action_threadsafe(cmd_name, description, false, false),
+            cmd_name,
+        )
     }
 
-    fn register_in_menu(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        Ok(1)
+    fn register_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32> {
+        check_registered(
+            register_action_threadsafe(cmd_name, description, true, false),
+            cmd_name,
+        )
     }
 
-    fn register_toggle(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        Ok(1)
+    fn register_toggle(&self, cmd_name: &str, description: &str) -> DawResult<u32> {
+        check_registered(
+            register_action_threadsafe(cmd_name, description, false, true),
+            cmd_name,
+        )
     }
 
-    fn register_toggle_in_menu(&self, _cmd_name: &str, _description: &str) -> DawResult<u32> {
-        Ok(1)
+    fn register_toggle_in_menu(&self, cmd_name: &str, description: &str) -> DawResult<u32> {
+        check_registered(
+            register_action_threadsafe(cmd_name, description, true, true),
+            cmd_name,
+        )
     }
 
-    fn unregister(&self, _cmd_name: &str) -> DawResult<()> {
-        Ok(())
+    fn unregister(&self, cmd_name: &str) -> DawResult<()> {
+        if unregister_action_threadsafe(cmd_name) {
+            Ok(())
+        } else {
+            Err(DawError::not_found("Action", cmd_name))
+        }
     }
 
-    fn is_registered(&self, _command_name: &str) -> bool {
-        false
+    fn is_registered(&self, command_name: &str) -> bool {
+        registered_actions()
+            .lock_recoverable("action_registry")
+            .contains_key(command_name)
+            || named_command_lookup(command_name).is_some()
     }
 
-    fn lookup_command_id(&self, _command_name: &str) -> Option<u32> {
-        None
+    fn lookup_command_id(&self, command_name: &str) -> Option<u32> {
+        registered_actions()
+            .lock_recoverable("action_registry")
+            .get(command_name)
+            .copied()
+            .or_else(|| named_command_lookup(command_name).map(|id| id.get()))
     }
 
-    fn is_in_action_list(&self, _command_name: &str) -> bool {
-        false
+    fn is_in_action_list(&self, command_name: &str) -> bool {
+        self.lookup_command_id(command_name)
+            .map(CommandId::new)
+            .is_some_and(action_list_contains)
     }
 
     fn list_actions(&self, _request: ActionListRequest) -> ActionListResponse {

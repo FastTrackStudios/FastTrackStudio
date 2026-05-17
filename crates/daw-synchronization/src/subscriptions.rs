@@ -90,8 +90,15 @@ pub async fn subscribe_project(
     }
     if config.items {
         spawn_item_forwarder(ctx.clone());
+        // Takes follow items config (see `is_domain_enabled`).
+        spawn_take_forwarder(ctx.clone());
     }
-    // TODO: takes, fx, routing once streaming Phase 2 lands.
+    if config.fx {
+        spawn_fx_forwarder(ctx.clone());
+    }
+    if config.routing {
+        spawn_routing_forwarder(ctx.clone());
+    }
 
     Ok(ProjectSubscriptions {
         project_guid,
@@ -314,6 +321,115 @@ fn spawn_item_forwarder(ctx: ForwarderCtx) {
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         debug!("item forwarder lagged {n} events");
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn spawn_fx_forwarder(ctx: ForwarderCtx) {
+    let Some(mut rx) = daw::reaper::subscribe_fx() else {
+        return;
+    };
+    // FxEvent variants don't carry `project_guid` directly — chain
+    // contexts only have track guids. Since the bridge has one
+    // FX broadcaster per process and each daw-bridge serves one
+    // REAPER instance with one active project tab at a time for the
+    // sync use case, wrap every event with this subscription's
+    // target_guid. The apply side resolves chain contexts by track
+    // guid + chain kind, so cross-project leakage is not a concern
+    // in practice; tighten when multi-project sync per peer lands.
+    let target_guid = ctx.project_guid.clone();
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = ctx.cancel.cancelled() => break,
+                result = rx.recv() => match result {
+                    Ok(event) => {
+                        let sync_event = ctx.wrap(target_guid.clone(), SyncDomain::Fx(event));
+                        let _ = ctx.event_tx.send(sync_event);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        debug!("fx forwarder lagged {n} events");
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn spawn_routing_forwarder(ctx: ForwarderCtx) {
+    use daw::service::RoutingEvent;
+    let Some(mut rx) = daw::reaper::subscribe_routing() else {
+        return;
+    };
+    let target_guid = ctx.project_guid.clone();
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = ctx.cancel.cancelled() => break,
+                result = rx.recv() => match result {
+                    Ok(event) => {
+                        let event_guid = match &event {
+                            RoutingEvent::RouteCreated { project_guid, .. }
+                            | RoutingEvent::RouteDeleted { project_guid, .. }
+                            | RoutingEvent::VolumeChanged { project_guid, .. }
+                            | RoutingEvent::PanChanged { project_guid, .. }
+                            | RoutingEvent::MuteChanged { project_guid, .. }
+                            | RoutingEvent::ParentSendChanged { project_guid, .. } => {
+                                project_guid.clone()
+                            }
+                        };
+                        if event_guid != target_guid {
+                            continue;
+                        }
+                        let sync_event = ctx.wrap(event_guid, SyncDomain::Routing(event));
+                        let _ = ctx.event_tx.send(sync_event);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        debug!("routing forwarder lagged {n} events");
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn spawn_take_forwarder(ctx: ForwarderCtx) {
+    use daw::service::TakeEvent;
+    let Some(mut rx) = daw::reaper::subscribe_takes() else {
+        return;
+    };
+    let target_guid = ctx.project_guid.clone();
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = ctx.cancel.cancelled() => break,
+                result = rx.recv() => match result {
+                    Ok(event) => {
+                        let event_guid = match &event {
+                            TakeEvent::Created { project_guid, .. }
+                            | TakeEvent::Deleted { project_guid, .. }
+                            | TakeEvent::NameChanged { project_guid, .. }
+                            | TakeEvent::PitchChanged { project_guid, .. }
+                            | TakeEvent::PlayRateChanged { project_guid, .. }
+                            | TakeEvent::VolumeChanged { project_guid, .. }
+                            | TakeEvent::SourceChanged { project_guid, .. } => {
+                                project_guid.clone()
+                            }
+                        };
+                        if event_guid != target_guid {
+                            continue;
+                        }
+                        let sync_event = ctx.wrap(event_guid, SyncDomain::Take(event));
+                        let _ = ctx.event_tx.send(sync_event);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        debug!("take forwarder lagged {n} events");
                     }
                 }
             }

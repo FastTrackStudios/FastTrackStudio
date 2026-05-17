@@ -451,7 +451,7 @@ fn is_domain_enabled(config: &SyncConfig, domain: &SyncDomain) -> bool {
 /// Check if a sync event should be suppressed based on the suppression set.
 pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> bool {
     use crate::suppression::SuppressionKey;
-    use daw::service::{FxEvent, ItemEvent, TrackEvent};
+    use daw::service::{FxEvent, ItemEvent, RoutingEvent, TakeEvent, TrackEvent};
 
     match &event.domain {
         SyncDomain::Transport(_) => {
@@ -491,22 +491,93 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
             suppression.is_suppressed(&SuppressionKey::track(guid, field))
         }
         SyncDomain::Fx(fe) => {
-            if let FxEvent::ParameterChanged {
-                context,
+            // Apply side (apply.rs) suppresses chain-level FX events with
+            // `SuppressionKey::fx_param(chain_key, fx_guid, 0)` and
+            // parameter changes with the real param_index. Match both
+            // shapes so locally-detected events from `Effects::list`
+            // diffs don't echo back to peers.
+            let (context, fx_guid, param_index) = match fe {
+                FxEvent::ParameterChanged {
+                    context,
+                    fx_guid,
+                    param_index,
+                    ..
+                } => (context, fx_guid.as_str(), *param_index),
+                FxEvent::Added { context, fx } => (context, fx.guid.as_str(), 0),
+                FxEvent::Removed { context, fx_guid }
+                | FxEvent::EnabledChanged {
+                    context, fx_guid, ..
+                }
+                | FxEvent::Moved {
+                    context, fx_guid, ..
+                }
+                | FxEvent::PresetChanged {
+                    context, fx_guid, ..
+                }
+                | FxEvent::WindowChanged {
+                    context, fx_guid, ..
+                } => (context, fx_guid.as_str(), 0),
+                _ => return false,
+            };
+            let context_key = format!("{context:?}");
+            suppression.is_suppressed(&SuppressionKey::fx_param(
+                &context_key,
                 fx_guid,
                 param_index,
-                ..
-            } = fe
-            {
-                let context_key = format!("{context:?}");
-                suppression.is_suppressed(&SuppressionKey::fx_param(
-                    &context_key,
-                    fx_guid,
-                    *param_index,
-                ))
-            } else {
-                false
-            }
+            ))
+        }
+        SyncDomain::Routing(re) => {
+            // Apply side uses `SuppressionKey::routing(track, "{field}:{index}")`
+            // — match exactly.
+            let (track, field) = match re {
+                RoutingEvent::VolumeChanged {
+                    source_track_guid,
+                    route_index,
+                    ..
+                } => (source_track_guid.as_str(), format!("volume:{route_index}")),
+                RoutingEvent::PanChanged {
+                    source_track_guid,
+                    route_index,
+                    ..
+                } => (source_track_guid.as_str(), format!("pan:{route_index}")),
+                RoutingEvent::MuteChanged {
+                    source_track_guid,
+                    route_index,
+                    ..
+                } => (source_track_guid.as_str(), format!("mute:{route_index}")),
+                RoutingEvent::RouteCreated {
+                    source_track_guid,
+                    route,
+                    ..
+                } => (
+                    source_track_guid.as_str(),
+                    format!("created:{}", route.index),
+                ),
+                RoutingEvent::RouteDeleted {
+                    source_track_guid,
+                    route_index,
+                    ..
+                } => (source_track_guid.as_str(), format!("deleted:{route_index}")),
+                RoutingEvent::ParentSendChanged { track_guid, .. } => {
+                    (track_guid.as_str(), "parent_send".to_string())
+                }
+            };
+            suppression.is_suppressed(&SuppressionKey::routing(track, &field))
+        }
+        SyncDomain::Take(te) => {
+            // Apply side uses `SuppressionKey::item(item_guid, "take_{field}")`.
+            let (item_guid, field) = match te {
+                TakeEvent::Created { item_guid, .. } => (item_guid.as_str(), "take_created"),
+                TakeEvent::Deleted { item_guid, .. } => (item_guid.as_str(), "take_deleted"),
+                TakeEvent::NameChanged { item_guid, .. } => (item_guid.as_str(), "take_name"),
+                TakeEvent::PitchChanged { item_guid, .. } => (item_guid.as_str(), "take_pitch"),
+                TakeEvent::PlayRateChanged { item_guid, .. } => {
+                    (item_guid.as_str(), "take_play_rate")
+                }
+                TakeEvent::VolumeChanged { item_guid, .. } => (item_guid.as_str(), "take_volume"),
+                TakeEvent::SourceChanged { item_guid, .. } => (item_guid.as_str(), "take_source"),
+            };
+            suppression.is_suppressed(&SuppressionKey::item(item_guid, field))
         }
         SyncDomain::Item(ie) => {
             let (guid, field) = match ie {

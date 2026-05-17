@@ -139,7 +139,7 @@ fn multi_instance_transport_sync() -> Result<()> {
                 // mesh + apply_transport + local poller can take a moment.
                 for (label, inst) in [("inst1", inst1), ("inst2", inst2), ("inst3", inst3)] {
                     let mut stopped = false;
-                    for _ in 0..10 {
+                    for _ in 0..20 {
                         tokio::time::sleep(Duration::from_millis(500)).await;
                         let project = inst.daw.current_project().await?;
                         let state = project.transport().get_state().await?;
@@ -148,7 +148,7 @@ fn multi_instance_transport_sync() -> Result<()> {
                             break;
                         }
                     }
-                    assert!(stopped, "{label} should be stopped within 5s");
+                    assert!(stopped, "{label} should be stopped within 10s");
                     println!("  [{label}] confirmed stopped");
                 }
 

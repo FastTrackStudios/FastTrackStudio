@@ -142,6 +142,9 @@ async fn register_daw_dispatcher() {
     // architect::rpc port.
     daw::reaper::init_item_broadcaster();
     daw::reaper::init_tempo_map_broadcaster();
+    daw::reaper::init_fx_broadcaster();
+    daw::reaper::init_routing_broadcaster();
+    daw::reaper::init_take_broadcaster();
     info!("Surviving broadcasters initialized");
 
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
@@ -312,6 +315,9 @@ extern "C" fn timer_callback() {
             daw::reaper::poll_and_broadcast_markers();
             daw::reaper::poll_and_broadcast_regions();
             daw::reaper::poll_and_broadcast_tracks();
+            daw::reaper::poll_and_broadcast_fx();
+            daw::reaper::poll_and_broadcast_routing();
+            daw::reaper::poll_and_broadcast_takes();
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();

@@ -195,7 +195,46 @@ pub fn set_folder_depth_on_main_thread(guid: &str, depth: i32) -> DawResult<()> 
     unsafe {
         ReaperHigh::get()
             .medium_reaper()
-            .set_media_track_info_value(raw, TrackAttributeKey::FolderDepth, depth as f64);
+            .set_media_track_info_value(raw, TrackAttributeKey::FolderDepth, depth as f64)
+            .map_err(|err| DawError::operation_failed(format!("set folder depth failed: {err}")))?;
+    }
+    Ok(())
+}
+
+/// Set track visibility in the current project.
+///
+/// This keeps local extension helpers working while the public track facade does
+/// not expose visibility mutations.
+pub fn set_visibility_on_main_thread(
+    guid: &str,
+    visible_in_tcp: bool,
+    visible_in_mixer: bool,
+) -> DawResult<()> {
+    let proj = ReaperHigh::get().current_project();
+    let track =
+        resolve_track(&proj, &TrackRef::Guid(guid.to_string())).ok_or_else(not_found_track)?;
+    let raw = track.raw().map_err(|_| not_found_track())?;
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    unsafe {
+        medium
+            .set_media_track_info_value(
+                raw,
+                TrackAttributeKey::ShowInTcp,
+                f64::from(visible_in_tcp),
+            )
+            .map_err(|err| {
+                DawError::operation_failed(format!("set TCP visibility failed: {err}"))
+            })?;
+        medium
+            .set_media_track_info_value(
+                raw,
+                TrackAttributeKey::ShowInMixer,
+                f64::from(visible_in_mixer),
+            )
+            .map_err(|err| {
+                DawError::operation_failed(format!("set mixer visibility failed: {err}"))
+            })?;
     }
     Ok(())
 }
