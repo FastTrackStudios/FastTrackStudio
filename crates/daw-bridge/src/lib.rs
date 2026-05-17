@@ -336,9 +336,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let pid = std::process::id();
     let log_path = format!("/tmp/daw-bridge-{pid}.log");
     let log_file = std::fs::File::create(&log_path).expect("Failed to create daw-bridge log file");
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        "daw_bridge=info,daw_reaper=info,daw_synchronization=info,daw_network=info,warn".into()
-    });
+    let env_filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
 
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
@@ -433,8 +432,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Push-based control surface (daw_reaper::DawControlSurface). Disabled
     // by default while we investigate a regression where track add events
     // stop propagating through the mesh once it's registered. Set
-    // `FTS_CSURF_ENABLED=1` to opt in.
-    if std::env::var("FTS_CSURF_ENABLED").as_deref() == Ok("1") {
+    // `FTS_CSURF_DISABLED=1` to opt out (default = ON for debugging).
+    if std::env::var("FTS_CSURF_DISABLED").as_deref() != Ok("1") {
         use reaper_high::MiddlewareControlSurface;
         let csurf = MiddlewareControlSurface::new(daw::reaper::DawControlSurface::new());
         match session.plugin_register_add_csurf_inst(Box::new(csurf)) {
