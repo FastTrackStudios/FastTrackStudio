@@ -40,8 +40,18 @@ fn collect_vol_pan_by_track(blocks: &[Block], data: &[u8]) -> HashMap<String, (i
             // 0x2624 is the per-track-mirror block whose 0x102d child holds the
             // track name (in 0x2619).
             if b.content_type_raw == 0x2624 {
+                // Bounds-check against THIS block's size — multi-track
+                // sessions have smaller per-track 0x2624 blocks where
+                // +829 / +919 are past the payload end (would read
+                // adjacent block bytes as garbage). The single-track
+                // baseline probe has a ~8400-byte 0x2624; per-track
+                // 0x2624s in multi-track sessions are shorter.
+                let payload_len = (b.block_size as usize).saturating_sub(2);
+                if payload_len < 921 {
+                    walk_2624(&b.children, data, out);
+                    continue;
+                }
                 let name = find_2619_name(b, data);
-                // Read volume from this block's payload at +829..+830
                 let vol = read_i16(data, b.offset + 2 + 829);
                 let pan = read_i16(data, b.offset + 2 + 919);
                 if let (Some(name), Some(vol), Some(pan)) = (name, vol, pan) {
@@ -101,6 +111,15 @@ pub fn fill_vol_pan_from_2624(
     midi_tracks: &mut [Track],
 ) {
     let data = cursor.data();
+    // The 0x2624 +829/+919 offsets only line up with the FIRST track's
+    // payload — multi-track sessions interleave tracks within the single
+    // 0x2624 in a layout we haven't fully mapped. Skip the fallback if
+    // there's more than one mixable track to avoid corrupting values.
+    let total_tracks = audio_tracks.len() + midi_tracks.len();
+    if total_tracks > 2 {
+        return;
+    }
+
     let vp = collect_vol_pan_by_track(blocks, data);
 
     for t in audio_tracks.iter_mut() {
