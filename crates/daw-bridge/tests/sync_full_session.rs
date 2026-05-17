@@ -49,10 +49,7 @@ async fn full_session_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()>
 
     // Add track on master
     let m_track = m_proj.tracks().add("SyncTestTrack", None).await?;
-    let m_track_guid = {
-        let info = m_track.info().await?;
-        info.guid.clone()
-    };
+    let m_track_guid = m_track.guid().to_string();
     println!("  [master] Added track: {}", &m_track_guid[..8]);
 
     // Wait and verify on follower
@@ -379,10 +376,7 @@ async fn full_session_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()>
 
     // Add a second track for send routing
     let m_track2 = m_proj.tracks().add("SendDest", None).await?;
-    let m_track2_guid = {
-        let info = m_track2.info().await?;
-        info.guid.clone()
-    };
+    let m_track2_guid = m_track2.guid().to_string();
     tokio::time::sleep(SYNC_WAIT).await;
 
     // Add send from RenamedTrack → SendDest

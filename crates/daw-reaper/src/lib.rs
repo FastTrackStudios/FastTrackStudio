@@ -109,7 +109,7 @@ pub use main_thread::set_task_support;
 pub use tempo_map::{init_tempo_map_broadcaster, poll_and_broadcast_tempo_map};
 
 // Re-export item broadcaster functions
-pub use item::{init_item_broadcaster, poll_and_broadcast_items};
+pub use item::{init_item_broadcaster, poll_and_broadcast_items, subscribe_items};
 
 // Central streaming event hub — owns one broadcast::Sender per
 // streaming domain. See docs/streaming-design.md.

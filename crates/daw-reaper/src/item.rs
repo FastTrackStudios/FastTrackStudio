@@ -96,6 +96,11 @@ pub fn init_item_broadcaster() {
     let _ = ITEM_CACHE.set(Mutex::new(HashMap::new()));
 }
 
+/// Subscribe to item events. Returns `None` until [`init_item_broadcaster`] runs.
+pub fn subscribe_items() -> Option<broadcast::Receiver<ItemEvent>> {
+    ITEM_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
 /// Poll REAPER item state for ALL open projects and broadcast changes.
 /// **MUST be called from the main thread** (e.g., from timer callback).
 ///

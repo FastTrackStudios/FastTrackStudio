@@ -469,20 +469,78 @@ pub fn poll_and_broadcast_tracks() {
 
         let prev = cache.entry(project_guid_str.clone()).or_default();
 
+        let publish = |event: TrackEvent| {
+            hub.publish_track(TrackStreamEvent {
+                project_guid: project_guid_str.clone(),
+                event,
+            });
+        };
+
         for (guid, track) in &fresh_by_guid {
-            if !prev.contains_key(guid) {
-                hub.publish_track(TrackStreamEvent {
-                    project_guid: project_guid_str.clone(),
-                    event: TrackEvent::Added(track.clone()),
-                });
+            match prev.get(guid) {
+                None => publish(TrackEvent::Added(track.clone())),
+                Some(p) => {
+                    if p.name != track.name {
+                        publish(TrackEvent::Renamed {
+                            guid: guid.clone(),
+                            name: track.name.clone(),
+                        });
+                    }
+                    if p.muted != track.muted {
+                        publish(TrackEvent::MuteChanged {
+                            guid: guid.clone(),
+                            muted: track.muted,
+                        });
+                    }
+                    if p.soloed != track.soloed {
+                        publish(TrackEvent::SoloChanged {
+                            guid: guid.clone(),
+                            soloed: track.soloed,
+                        });
+                    }
+                    if p.armed != track.armed {
+                        publish(TrackEvent::ArmChanged {
+                            guid: guid.clone(),
+                            armed: track.armed,
+                        });
+                    }
+                    if p.selected != track.selected {
+                        publish(TrackEvent::SelectionChanged {
+                            guid: guid.clone(),
+                            selected: track.selected,
+                        });
+                    }
+                    if (p.volume - track.volume).abs() > f64::EPSILON {
+                        publish(TrackEvent::VolumeChanged {
+                            guid: guid.clone(),
+                            volume: track.volume,
+                        });
+                    }
+                    if (p.pan - track.pan).abs() > f64::EPSILON {
+                        publish(TrackEvent::PanChanged {
+                            guid: guid.clone(),
+                            pan: track.pan,
+                        });
+                    }
+                    if p.color != track.color {
+                        publish(TrackEvent::ColorChanged {
+                            guid: guid.clone(),
+                            color: track.color,
+                        });
+                    }
+                    if p.index != track.index {
+                        publish(TrackEvent::Moved {
+                            guid: guid.clone(),
+                            old_index: p.index,
+                            new_index: track.index,
+                        });
+                    }
+                }
             }
         }
         for guid in prev.keys() {
             if !fresh_by_guid.contains_key(guid) {
-                hub.publish_track(TrackStreamEvent {
-                    project_guid: project_guid_str.clone(),
-                    event: TrackEvent::Removed(guid.clone()),
-                });
+                publish(TrackEvent::Removed(guid.clone()));
             }
         }
 

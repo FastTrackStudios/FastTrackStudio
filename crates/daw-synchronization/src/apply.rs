@@ -68,6 +68,37 @@ fn resolve_guid(remote_guid: &str) -> String {
     map_guid(normalized).unwrap_or_else(|| normalized.to_string())
 }
 
+/// Maps a (project_guid, remote_marker_id) → local_marker_id. Markers don't
+/// expose GUIDs in our control API, so we keep an explicit id translation
+/// for every marker created via sync.
+static MARKER_ID_MAP: Mutex<Option<HashMap<(String, u32), u32>>> = Mutex::new(None);
+
+fn insert_marker_mapping(project_guid: &str, remote_id: u32, local_id: u32) {
+    let mut lock = MARKER_ID_MAP.lock().unwrap();
+    let map = lock.get_or_insert_with(HashMap::new);
+    map.insert((project_guid.to_string(), remote_id), local_id);
+}
+
+fn resolve_marker_id(project_guid: &str, remote_id: u32) -> u32 {
+    MARKER_ID_MAP
+        .lock()
+        .ok()
+        .and_then(|m| {
+            m.as_ref()?
+                .get(&(project_guid.to_string(), remote_id))
+                .copied()
+        })
+        .unwrap_or(remote_id)
+}
+
+fn remove_marker_mapping(project_guid: &str, remote_id: u32) {
+    if let Ok(mut lock) = MARKER_ID_MAP.lock() {
+        if let Some(map) = lock.as_mut() {
+            map.remove(&(project_guid.to_string(), remote_id));
+        }
+    }
+}
+
 /// Apply a remote sync domain event to the local DAW.
 ///
 /// Wraps mutations in a REAPER undo block so Ctrl+Z undoes the entire sync
@@ -532,17 +563,12 @@ async fn apply_track(
                 Ok(new_handle) => {
                     // Map the remote GUID to the local GUID so subsequent
                     // events (rename, volume, etc.) can find this track.
-                    match new_handle.info().await {
-                        Ok(info) => {
-                            // Suppress using the LOCAL guid — that's what the
-                            // subscription will emit when it sees the new track.
-                            suppression.suppress(SuppressionKey::track(&info.guid, "added"));
-                            insert_guid_mapping(track.guid.clone(), info.guid);
-                        }
-                        Err(e) => {
-                            warn!("Failed to get info for newly added track: {e}");
-                        }
-                    }
+                    // Read the guid synchronously off the handle — avoids a
+                    // round-trip and dodges the JIT/schema bug that hits
+                    // Option<Track> responses through the vox local caller.
+                    let local_guid = new_handle.guid().to_string();
+                    suppression.suppress(SuppressionKey::track(&local_guid, "added"));
+                    insert_guid_mapping(track.guid.clone(), local_guid);
                 }
                 Err(e) => {
                     warn!("Failed to add track '{}': {e}", track.name);
@@ -1537,38 +1563,44 @@ async fn apply_marker(
 
     match event {
         MarkerEvent::Added(marker) => {
-            if let Some(id) = marker.id {
-                suppression.suppress(SuppressionKey::marker(project_guid, id));
-            }
             let pos = marker
                 .position
                 .time
                 .as_ref()
                 .map(|t| t.as_seconds())
                 .unwrap_or(0.0);
-            if let Err(e) = markers.add(pos, &marker.name).await {
-                warn!("Failed to add marker '{}': {e}", marker.name);
+            match markers.add(pos, &marker.name).await {
+                Ok(local_id) => {
+                    if let Some(remote_id) = marker.id {
+                        suppression.suppress(SuppressionKey::marker(project_guid, local_id));
+                        insert_marker_mapping(project_guid, remote_id, local_id);
+                    }
+                }
+                Err(e) => warn!("Failed to add marker '{}': {e}", marker.name),
             }
         }
         MarkerEvent::Changed(marker) => {
-            if let Some(id) = marker.id {
-                suppression.suppress(SuppressionKey::marker(project_guid, id));
+            if let Some(remote_id) = marker.id {
+                let local_id = resolve_marker_id(project_guid, remote_id);
+                suppression.suppress(SuppressionKey::marker(project_guid, local_id));
                 let pos = marker
                     .position
                     .time
                     .as_ref()
                     .map(|t| t.as_seconds())
                     .unwrap_or(0.0);
-                let _ = markers.move_to(id, pos).await;
-                let _ = markers.rename(id, &marker.name).await;
+                let _ = markers.move_to(local_id, pos).await;
+                let _ = markers.rename(local_id, &marker.name).await;
                 if let Some(color) = marker.color {
-                    let _ = markers.set_color(id, color).await;
+                    let _ = markers.set_color(local_id, color).await;
                 }
             }
         }
-        MarkerEvent::Removed(id) => {
-            suppression.suppress(SuppressionKey::marker(project_guid, *id));
-            let _ = markers.remove(*id).await;
+        MarkerEvent::Removed(remote_id) => {
+            let local_id = resolve_marker_id(project_guid, *remote_id);
+            suppression.suppress(SuppressionKey::marker(project_guid, local_id));
+            let _ = markers.remove(local_id).await;
+            remove_marker_mapping(project_guid, *remote_id);
         }
         MarkerEvent::MarkersChanged(new_markers) => {
             // Bulk marker replacement — remove all existing, then add new ones

@@ -88,7 +88,10 @@ pub async fn subscribe_project(
     if config.tempo_map {
         spawn_tempo_map_forwarder(ctx.clone());
     }
-    // TODO: items, takes, fx, routing once streaming Phase 2 lands.
+    if config.items {
+        spawn_item_forwarder(ctx.clone());
+    }
+    // TODO: takes, fx, routing once streaming Phase 2 lands.
 
     Ok(ProjectSubscriptions {
         project_guid,
@@ -270,6 +273,47 @@ fn spawn_track_forwarder(ctx: ForwarderCtx) {
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         debug!("track forwarder lagged {n} events");
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn spawn_item_forwarder(ctx: ForwarderCtx) {
+    use daw::service::ItemEvent;
+    let Some(mut rx) = daw::reaper::subscribe_items() else {
+        return;
+    };
+    let target_guid = ctx.project_guid.clone();
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = ctx.cancel.cancelled() => break,
+                result = rx.recv() => match result {
+                    Ok(event) => {
+                        let event_guid = match &event {
+                            ItemEvent::Created { project_guid, .. }
+                            | ItemEvent::Deleted { project_guid, .. }
+                            | ItemEvent::PositionChanged { project_guid, .. }
+                            | ItemEvent::LengthChanged { project_guid, .. }
+                            | ItemEvent::MovedToTrack { project_guid, .. }
+                            | ItemEvent::MuteChanged { project_guid, .. }
+                            | ItemEvent::SelectionChanged { project_guid, .. }
+                            | ItemEvent::VolumeChanged { project_guid, .. }
+                            | ItemEvent::ActiveTakeChanged { project_guid, .. } => {
+                                project_guid.clone()
+                            }
+                        };
+                        if event_guid != target_guid {
+                            continue;
+                        }
+                        let sync_event = ctx.wrap(event_guid, SyncDomain::Item(event));
+                        let _ = ctx.event_tx.send(sync_event);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        debug!("item forwarder lagged {n} events");
                     }
                 }
             }

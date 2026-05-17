@@ -84,13 +84,14 @@ impl Tracks {
 
     /// Get track by GUID
     pub async fn by_guid(&self, guid: &str) -> Result<Option<TrackHandle>> {
-        let track = self
-            .clients
-            .track
-            .get(self.context(), TrackRef::Guid(guid.to_string()))
-            .await?;
-
-        Ok(track.map(|t| TrackHandle::new(t.guid, self.project_id.clone(), self.clients.clone())))
+        // List-and-find dodges the vox JIT/schema issue on `Option<Track>`
+        // responses from `track.get`. `track.all` (returning `Vec<Track>`)
+        // serializes cleanly through both transports.
+        let all = self.clients.track.all(self.context()).await?;
+        Ok(all
+            .into_iter()
+            .find(|t| t.guid == guid)
+            .map(|t| TrackHandle::new(t.guid, self.project_id.clone(), self.clients.clone())))
     }
 
     /// Get track by name (first match)
