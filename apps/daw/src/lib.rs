@@ -22,6 +22,7 @@ use vox::{
 
 pub mod cli_values;
 pub mod ops;
+pub mod sync;
 
 /// A DAW connection that keeps the vox session alive.
 ///
@@ -505,6 +506,13 @@ fn find_built_daw_bridge() -> Option<PathBuf> {
 }
 
 pub fn spawn_reaper(profile: &DawProfile) -> Result<u32> {
+    spawn_reaper_with_env(profile, &[])
+}
+
+/// Like [`spawn_reaper`] but lets the caller inject extra env vars into the
+/// REAPER process (e.g. `FTS_SYNC_ENABLED=1` to enable the daw-bridge sync
+/// runtime).
+pub fn spawn_reaper_with_env(profile: &DawProfile, extra_env: &[(&str, &str)]) -> Result<u32> {
     ensure_reaper_profile_dirs(profile)?;
 
     let mut cmd = if profile.sandboxed {
@@ -533,6 +541,10 @@ pub fn spawn_reaper(profile: &DawProfile) -> Result<u32> {
         .arg("-newinst")
         .arg("-nosplash")
         .arg("-ignoreerrors");
+
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
 
     let child = cmd.spawn().map_err(|e| {
         eyre::eyre!(
