@@ -60,6 +60,11 @@ audio-controls = { path = "crates/audio-controls" }
 daw-allocator = { path = "crates/daw-allocator" }
 # Extension runtime — integrated REAPER extension helpers
 daw-extension-runtime = { path = "crates/daw-extension-runtime" }
+# Sync stack — public sibling crates (cannot be folded under the `daw`
+# facade because each depends on `daw` itself, see lib.rs note).
+daw-synchronization = { path = "crates/daw-synchronization" }
+daw-network = { path = "crates/daw-network" }
+daw-link = { path = "crates/daw-link" }
 # Dev tooling — REAPER extension install/symlink helpers (for xtask use)
 fts-devtools = { path = "crates/fts-devtools" }
 # FTS design system — used by `daw-ui`'s `reaper-test-panels` feature so the

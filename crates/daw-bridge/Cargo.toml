@@ -59,8 +59,8 @@ eyre = "0.6"
 # Sync stack — engine + peer mesh. Default-on so reaper-test multi-instance
 # tests have the runtime available; production users that don't want it can
 # disable the feature.
-daw-synchronization = { path = "../daw-synchronization", optional = true }
-daw-network = { path = "../daw-network", optional = true }
+daw-synchronization = { workspace = true, optional = true }
+daw-network = { workspace = true, optional = true }
 
 [features]
 default = ["sync"]

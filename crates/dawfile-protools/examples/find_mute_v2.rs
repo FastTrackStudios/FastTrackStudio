@@ -38,6 +38,7 @@ fn main() {
     }
     let n_tracks = names.len();
 
+    // Ground truth from PT Reaper Converter v1.5.4 output (Frida-captured).
     let expected_muted: HashSet<&str> = [
         "ClickPrint",
         "02 LORD OF THE FIGHT.01",
@@ -47,15 +48,6 @@ fn main() {
         "02 LORD OF THE FIGHT_Guitar",
         "02 LORD OF THE FIGHT_Other",
         "02 LORD OF THE FIGHT_Piano",
-        "MIDI 1",
-        "Inst 1",
-        "Inst 1.dup1",
-        "Inst 1.dup2",
-        "Inst 1.dup1.02",
-        "Inst 1.dup2.02",
-        "Inst 1.dup2.04",
-        "Inst 1.dup3.02",
-        "Inst 1.dup4.02",
     ]
     .into_iter()
     .collect();

@@ -31,6 +31,10 @@ fn main() {
         names.push(n);
     }
 
+    // Ground truth from PT Reaper Converter v1.5.4 output (Frida-captured RPP
+    // on LotF — see docs/pt-reaper-converter-re.md). Earlier hardcoded list
+    // (incl. Inst*/MIDI 1) was wrong — those tracks show MUTESOLO 0 0 0 in
+    // the converter's output.
     let expected_muted: HashSet<&str> = [
         "ClickPrint",
         "02 LORD OF THE FIGHT.01",
@@ -40,15 +44,6 @@ fn main() {
         "02 LORD OF THE FIGHT_Guitar",
         "02 LORD OF THE FIGHT_Other",
         "02 LORD OF THE FIGHT_Piano",
-        "MIDI 1",
-        "Inst 1",
-        "Inst 1.dup1",
-        "Inst 1.dup2",
-        "Inst 1.dup1.02",
-        "Inst 1.dup2.02",
-        "Inst 1.dup2.04",
-        "Inst 1.dup3.02",
-        "Inst 1.dup4.02",
     ]
     .into_iter()
     .collect();

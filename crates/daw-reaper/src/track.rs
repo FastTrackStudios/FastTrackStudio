@@ -15,7 +15,7 @@ use std::cell::RefCell;
 use daw_proto::Tracks;
 use daw_proto::{DawError, DawResult, ProjectContext, Track, TrackRef};
 use reaper_high::{GroupingBehavior, Project, Reaper as ReaperHigh};
-use reaper_medium::GangBehavior;
+use reaper_medium::{GangBehavior, TrackAttributeKey};
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
@@ -181,6 +181,23 @@ pub fn add_track_on_main_thread(name: &str, at_index: Option<u32>) -> Option<Str
     let new_track = proj.insert_track_at(index).ok()?;
     new_track.set_name(name);
     Some(new_track.guid().to_string_without_braces())
+}
+
+/// Set REAPER's `I_FOLDERDEPTH` for a track in the current project.
+///
+/// This is for callers that already run on REAPER's main thread and need to
+/// build folder structures immediately after inserting tracks.
+pub fn set_folder_depth_on_main_thread(guid: &str, depth: i32) -> DawResult<()> {
+    let proj = ReaperHigh::get().current_project();
+    let track =
+        resolve_track(&proj, &TrackRef::Guid(guid.to_string())).ok_or_else(not_found_track)?;
+    let raw = track.raw().map_err(|_| not_found_track())?;
+    unsafe {
+        ReaperHigh::get()
+            .medium_reaper()
+            .set_media_track_info_value(raw, TrackAttributeKey::FolderDepth, depth as f64);
+    }
+    Ok(())
 }
 
 // ── Tracks impl ────────────────────────────────────────────────────────
