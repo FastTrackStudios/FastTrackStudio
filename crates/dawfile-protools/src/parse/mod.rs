@@ -14,6 +14,7 @@ pub mod audio;
 pub mod io;
 pub mod meter;
 pub mod midi;
+pub mod mix_aux;
 pub mod plugins;
 pub mod regions;
 pub mod solo;
@@ -446,6 +447,10 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
 
     // Step 12c2: Decode per-track solo flag from 0x102d +162.
     solo::apply_solo_state(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
+
+    // Step 12c3: Fall back to 0x2624 vol/pan mirrors for converter-
+    // generated PTX where 0x1029 isn't populated.
+    mix_aux::fill_vol_pan_from_2624(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
 
     // Step 12d: Decode per-track `is_folder` flag from 0x251a.
     //
