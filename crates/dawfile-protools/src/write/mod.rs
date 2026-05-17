@@ -19,7 +19,10 @@
 //! - Adding/removing blocks, tracks, regions
 //! - Changing cross-reference indices
 
+pub mod from_rpp;
 pub mod splice;
+
+pub use from_rpp::{WriteError as RppToPtxError, find_converter_binary, rpp_to_ptx_via_converter};
 
 use crate::content_type::ContentType;
 use crate::raw_block::RawSession;
