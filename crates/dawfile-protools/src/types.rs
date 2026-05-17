@@ -148,6 +148,10 @@ pub struct Track {
     pub volume_centibel: i32,
     /// `true` if the track is muted in PT's Mix window. Decoded from `0x1029` `+5`.
     pub mute: bool,
+    /// `true` if the track is soloed in PT's Mix window. Decoded from
+    /// `0x102d` `+162` (u8). Verified via RPP→PTX probe: `t.soloed()`
+    /// produces `+162 = 0x01`; baseline `0x00`. See `docs/pt-field-map.md`.
+    pub solo: bool,
     /// Pan position. `-100` = full L, `0` = center, `+100` = full R.
     /// Decoded from `0x1029` `+13` (i32 LE).
     pub pan: i32,

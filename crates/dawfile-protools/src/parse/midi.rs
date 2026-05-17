@@ -318,6 +318,7 @@ fn parse_midi_tracks(
             regions: Vec::new(),
             volume_centibel: 0,
             mute: false,
+            solo: false,
             pan: 0,
             alternate_playlists: Vec::new(),
             output: String::new(),

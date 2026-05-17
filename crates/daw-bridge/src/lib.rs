@@ -430,14 +430,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // The returned RegistrationHandle is leaked: the surface is owned
     // for the lifetime of the extension, and the ReaperSession destructor
     // unregisters all surviving csurfs on REAPER shutdown anyway.
-    {
+    // Push-based control surface (daw_reaper::DawControlSurface). Disabled
+    // by default while we investigate a regression where track add events
+    // stop propagating through the mesh once it's registered. Set
+    // `FTS_CSURF_ENABLED=1` to opt in.
+    if std::env::var("FTS_CSURF_ENABLED").as_deref() == Ok("1") {
         use reaper_high::MiddlewareControlSurface;
         let csurf = MiddlewareControlSurface::new(daw::reaper::DawControlSurface::new());
         match session.plugin_register_add_csurf_inst(Box::new(csurf)) {
             Ok(_handle) => {
-                // RegistrationHandle is Copy; dropping it does not
-                // unregister. ReaperSession owns the boxed surface and
-                // cleans up on shutdown.
                 info!("daw control surface registered (push-based change detection)");
             }
             Err(e) => {
