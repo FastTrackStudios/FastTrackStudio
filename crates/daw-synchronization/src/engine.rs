@@ -527,6 +527,30 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
         SyncDomain::TempoMap(_) => {
             suppression.is_suppressed(&SuppressionKey::tempo_map(&event.project_guid))
         }
+        SyncDomain::Marker(me) => {
+            use daw::service::MarkerEvent;
+            let id = match me {
+                MarkerEvent::Added(m) => m.id,
+                MarkerEvent::Removed(id) => Some(*id),
+                MarkerEvent::Changed(m) => m.id,
+                MarkerEvent::MarkersChanged(_) => None,
+            };
+            id.is_some_and(|id| {
+                suppression.is_suppressed(&SuppressionKey::marker(&event.project_guid, id))
+            })
+        }
+        SyncDomain::Region(re) => {
+            use daw::service::RegionEvent;
+            let id = match re {
+                RegionEvent::Added(r) => r.id,
+                RegionEvent::Removed(id) => Some(*id),
+                RegionEvent::Changed(r) => r.id,
+                RegionEvent::RegionsChanged(_) => None,
+            };
+            id.is_some_and(|id| {
+                suppression.is_suppressed(&SuppressionKey::region(&event.project_guid, id))
+            })
+        }
         _ => false,
     }
 }

@@ -175,11 +175,17 @@ impl Markers for Reaper {
         Ok(())
     }
 
-    fn rename(&self, _project: ProjectContext, id: u32, name: &str) -> DawResult<()> {
+    fn rename(&self, project: ProjectContext, id: u32, name: &str) -> DawResult<()> {
+        // REAPER's SetProjectMarker ignores -1.0 sentinels — passing -1.0 for
+        // `pos` actually moves the marker to -1.0s. Read the current position
+        // first so we only update the name.
+        let cur = <Self as Markers>::get(self, project, id)
+            .ok_or_else(|| DawError::operation_failed(format!("marker {id} not found")))?;
+        let pos = cur.position.time.map(|t| t.as_seconds()).unwrap_or(0.0);
         let low = ReaperHigh::get().medium_reaper().low();
         let cname = CString::new(name)
             .map_err(|e| DawError::operation_failed(format!("invalid name: {e}")))?;
-        sw::set_project_marker(low, id as i32, false, -1.0, 0.0, Some(&cname));
+        sw::set_project_marker(low, id as i32, false, pos, 0.0, Some(&cname));
         Ok(())
     }
 

@@ -509,6 +509,77 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
 // reaper-test: Run REAPER integration tests
 // ============================================================================
 
+/// Build an isolated REAPER resources rig under `target/fts-reaper-test/`
+/// so reaper-test runs in a clean environment, free of dev-time extensions
+/// (SWS, ReaPack, fts-extensions, etc.).
+///
+/// Read-only data dirs (ColorThemes, Effects, FXChains, etc.) symlink to
+/// the system rig at `~/.config/FastTrackStudio/Reaper` when available, so
+/// REAPER finds its bundled assets without us re-shipping them. UserPlugins
+/// is a real dir: the test runner is the only thing allowed to install
+/// plugins there.
+fn prepare_isolated_rig(workspace_root: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let rig = workspace_root.join("target").join("fts-reaper-test");
+    std::fs::create_dir_all(&rig)?;
+
+    let source = runner::fts_reaper_resources();
+    // Symlink shared read-only data dirs from the dev rig. If they don't
+    // exist there, REAPER will fall back to its install defaults.
+    let symlink_dirs = [
+        "ColorThemes",
+        "Cursors",
+        "Data",
+        "Effects",
+        "FXChains",
+        "KeyMaps",
+        "LangPack",
+        "MIDINoteNames",
+        "MouseMaps",
+        "OSC",
+        "presets",
+        "TrackTemplates",
+        "Scripts",
+    ];
+    for name in symlink_dirs {
+        let src = source.join(name);
+        let dst = rig.join(name);
+        if dst.exists() {
+            continue;
+        }
+        if src.exists() {
+            std::os::unix::fs::symlink(&src, &dst).ok();
+        }
+    }
+
+    // UserPlugins always lives as a real directory — never symlinked, so we
+    // can install just our test extension(s) here without touching the dev
+    // rig. Wipe it on each run to guarantee no stale third-party plugins.
+    let user_plugins = rig.join("UserPlugins");
+    if user_plugins.exists() {
+        for entry in std::fs::read_dir(&user_plugins)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    } else {
+        std::fs::create_dir_all(&user_plugins)?;
+    }
+
+    // Minimal reaper.ini — `audiodriver=2` is the dummy/null driver so
+    // headless test instances don't fight over the real audio device.
+    let ini = rig.join("reaper.ini");
+    if !ini.exists() {
+        std::fs::write(
+            &ini,
+            "[REAPER]\naudiodriver=2\nautosaveint=0\n[reaper_explorer]\nlastdir=/tmp\n",
+        )?;
+    }
+
+    Ok(rig)
+}
+
 /// Load the daw-test rig's launch.json if it exists.
 /// Returns the config or None if not set up yet.
 fn load_daw_test_rig() -> Option<reaper_launcher::LaunchConfig> {
@@ -525,7 +596,21 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60);
-    let resources_dir = runner::fts_reaper_resources();
+
+    // Build (or refresh) an isolated REAPER rig under target/ so tests don't
+    // pick up extensions (SWS, ReaPack, fts-extensions, etc.) installed in
+    // the dev rig at ~/.config/FastTrackStudio/Reaper. Only daw-bridge +
+    // example-extension live in this rig's UserPlugins/.
+    let resources_dir = prepare_isolated_rig(workspace_root)?;
+    // Propagate to all test child processes (reaper-test's with_fts_config
+    // reads FTS_REAPER_CONFIG to build the -cfgfile path).
+    unsafe {
+        std::env::set_var("FTS_REAPER_CONFIG", &resources_dir);
+    }
+    unsafe {
+        std::env::set_var("FTS_REAPER_RESOURCES", &resources_dir);
+    }
+    println!("  isolated test rig: {}", resources_dir.display());
 
     let runner = TestRunner {
         resources_dir: resources_dir.clone(),

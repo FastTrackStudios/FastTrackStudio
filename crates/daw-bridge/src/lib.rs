@@ -330,8 +330,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let pid = std::process::id();
     let log_path = format!("/tmp/daw-bridge-{pid}.log");
     let log_file = std::fs::File::create(&log_path).expect("Failed to create daw-bridge log file");
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "daw_bridge=info,daw_reaper=info,warn".into());
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "daw_bridge=info,daw_reaper=info,daw_synchronization=info,daw_network=info,warn".into()
+    });
 
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
