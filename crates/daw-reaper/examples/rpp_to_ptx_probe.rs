@@ -51,6 +51,23 @@ fn build_rpp(probe: &str) -> String {
         "marker" => {
             b = b.track("ProbeTrack", |t| t).marker(1, 1.0, "M");
         }
+        "marker_two" => {
+            b = b
+                .track("ProbeTrack", |t| t)
+                .marker(1, 1.0, "M1")
+                .marker(2, 2.5, "M2");
+        }
+        "marker_colored" => {
+            use dawfile_reaper::builder::MarkerBuilder;
+            b = b.track("ProbeTrack", |t| t).add_marker(
+                MarkerBuilder::marker(1, 1.0, "MColor")
+                    .color(0xd86e41 as i32)
+                    .build(),
+            );
+        }
+        "region" => {
+            b = b.track("ProbeTrack", |t| t).region(1, 0.5, 2.5, "R1");
+        }
         "send" => {
             b = b.track("Source", |t| t).track("Dest", |t| t.receive(0));
         }
