@@ -632,6 +632,9 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         out
     };
 
+    let edit_groups = parse_edit_groups(&blocks, data);
+    let stem_mappings = parse_stem_mappings(&blocks, data);
+
     Ok(ProToolsSession {
         version,
         session_sample_rate,
@@ -647,7 +650,113 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         plugins,
         io_channels,
         routing_entries,
+        edit_groups,
+        stem_mappings,
     })
+}
+
+/// Walk a `0x4501` payload tail-region and decode the flat group name list.
+///
+/// Each entry is `[u32 LE namelen][utf-8 name][i16 LE color]`. The
+/// per-track membership table preceding the name list is not yet decoded;
+/// we locate the start of the name list by scanning for the first sane
+/// `[len][ASCII-printable name]` pair.
+///
+/// **Preliminary** — the parser is heuristic and may over-read when the
+/// preceding per-track membership table happens to contain byte patterns
+/// matching the `[len][ASCII]` shape. Caller should treat the list as a
+/// best-effort union of stem-types + edit-groups until the membership
+/// table is decoded and we can bound the name list precisely.
+fn parse_edit_groups(blocks: &[Block], data: &[u8]) -> Vec<crate::types::EditGroup> {
+    let mut out = Vec::new();
+    for b in collect_blocks_recursive(blocks, ContentType::EditGroupList) {
+        // Block payload starts at offset = magic + 9.
+        let payload_start = b.offset.saturating_sub(7) + 9;
+        let block_end = b.offset.saturating_sub(7) + b.block_size as usize;
+        if payload_start >= data.len() || block_end > data.len() {
+            continue;
+        }
+        // Scan from payload_start for the first plausible `[u32 namelen]
+        // [printable ASCII name of that length][i16 color]` triple.
+        let mut p = payload_start;
+        let mut found_start = None;
+        while p + 6 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen >= 2 && nlen <= 64 && p + 4 + nlen + 2 <= block_end {
+                let name = &data[p + 4..p + 4 + nlen];
+                if name.iter().all(|c| (0x20..0x7f).contains(c)) {
+                    found_start = Some(p);
+                    break;
+                }
+            }
+            p += 1;
+        }
+        let Some(mut p) = found_start else { continue };
+        // Read entries until the layout no longer matches.
+        while p + 6 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen < 1 || nlen > 64 || p + 4 + nlen + 2 > block_end {
+                break;
+            }
+            let name_bytes = &data[p + 4..p + 4 + nlen];
+            if !name_bytes.iter().all(|c| (0x20..0x7f).contains(c)) {
+                break;
+            }
+            let name = String::from_utf8_lossy(name_bytes).into_owned();
+            let color_raw =
+                i16::from_le_bytes(data[p + 4 + nlen..p + 4 + nlen + 2].try_into().unwrap());
+            let color = if color_raw == -2 {
+                None
+            } else {
+                Some(color_raw)
+            };
+            out.push(crate::types::EditGroup { name, color });
+            p += 4 + nlen + 2;
+        }
+    }
+    out
+}
+
+/// Decode the flat stem-mapping list inside a `0x4702` block. Same layout
+/// as edit groups but without the trailing `i16` color.
+fn parse_stem_mappings(blocks: &[Block], data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    for b in collect_blocks_recursive(blocks, ContentType::StemMappingList) {
+        let payload_start = b.offset.saturating_sub(7) + 9;
+        let block_end = b.offset.saturating_sub(7) + b.block_size as usize;
+        if payload_start >= data.len() || block_end > data.len() {
+            continue;
+        }
+        // The list starts almost immediately — first u32 namelen sits a
+        // few bytes into the payload. Scan for the first valid entry.
+        let mut p = payload_start;
+        let mut found_start = None;
+        while p + 4 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen >= 2 && nlen <= 64 && p + 4 + nlen <= block_end {
+                let name = &data[p + 4..p + 4 + nlen];
+                if name.iter().all(|c| (0x20..0x7f).contains(c)) {
+                    found_start = Some(p);
+                    break;
+                }
+            }
+            p += 1;
+        }
+        let Some(mut p) = found_start else { continue };
+        while p + 4 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen < 1 || nlen > 64 || p + 4 + nlen > block_end {
+                break;
+            }
+            let name_bytes = &data[p + 4..p + 4 + nlen];
+            if !name_bytes.iter().all(|c| (0x20..0x7f).contains(c)) {
+                break;
+            }
+            out.push(String::from_utf8_lossy(name_bytes).into_owned());
+            p += 4 + nlen;
+        }
+    }
+    out
 }
 
 /// Collect every block (and nested child) of the given content type.

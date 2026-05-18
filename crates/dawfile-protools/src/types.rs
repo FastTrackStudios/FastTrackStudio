@@ -45,6 +45,29 @@ pub struct ProToolsSession {
     /// contain hundreds of entries; filter to `active == true` for the
     /// live routings. See [`RoutingEntry`].
     pub routing_entries: Vec<RoutingEntry>,
+    /// Edit groups (PT 12+) decoded from the session's `0x4501` block.
+    /// Empty when the session has no groups defined. Per-track membership
+    /// not yet decoded — only group names + colors are populated.
+    /// See [`EditGroup`].
+    pub edit_groups: Vec<EditGroup>,
+    /// Stem-mapping classifications (PT 12+) decoded from the session's
+    /// `0x4702` block. Built-in entries start with `Dialog`, `Music`,
+    /// `Effects`, `Narration`. Empty when the session has no mapping.
+    pub stem_mappings: Vec<String>,
+}
+
+/// A Pro Tools edit group (PT 12+).
+///
+/// Decoded from the flat name list inside `0x4501`. Per-track membership
+/// information lives in the same block's prefix and is not yet decoded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditGroup {
+    /// Group name as authored in PT.
+    pub name: String,
+    /// Group color palette index. `Some(-2)` (i.e. `0xFFFE` raw) is the
+    /// default "no color" sentinel used elsewhere in the format. Other
+    /// values index the same palette as `Track.color_byte`.
+    pub color: Option<i16>,
 }
 
 /// An I/O routing entry decoded from a `0x2602` block in the session's
