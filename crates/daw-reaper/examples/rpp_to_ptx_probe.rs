@@ -163,7 +163,7 @@ fn build_rpp(probe: &str) -> String {
         "pan_envelope" => {
             use dawfile_reaper::types::envelope::EnvelopePointShape;
             b = b.track("ProbeTrack", |t| {
-                t.envelope("PANENV2", |e| {
+                t.envelope("PANENV", |e| {
                     e.active()
                         .visible()
                         .point(0.0, 0.0, EnvelopePointShape::Linear)
