@@ -180,38 +180,36 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
-                // Mute = `0x1029 +5` (u8). VERIFIED VIA WRITER ROUND-TRIP:
-                // - When we write +5=1 to a converter-generated PTX
-                //   template, the converter reads it back as
-                //   MUTESOLO 1 0 0 (muted).
-                // - When the converter writes from RPP→PTX with
-                //   t.muted() in REAPER, it produces +5=1.
+                // Mute = `0x1029 +5` (u8) — the stored "mute mix bit".
                 //
-                // CAVEAT FOR REAL PT-GUI-WRITTEN SESSIONS: the +5 byte
-                // is set true for tracks that are EITHER muted OR
-                // marked inactive/bounced. The converter resolves the
-                // ambiguity by checking an explicit "mute object"
-                // (Swift `Optional<PTXMutePoint>`, type-metadata at
-                // heap 0xb500dfc08 per Frida trace) which exists for
-                // only ~2 tracks per session. Folder children inherit
-                // mute from their parent via the converter's tree walk.
+                // Definitively verified by the 10-track probe diff
+                // (2026-05-17): generating an RPP with 10 muted tracks
+                // and another with 10 plain tracks produces PTX files
+                // with IDENTICAL block structure; the diff is purely
+                // byte-level flips at +5 (and mirror locations:
+                // 0x260a[i] +26, 0x260d +14/+447, 0x261b +407/+840,
+                // 0x261c +416/+849, 0x2624 +429/+862).
                 //
-                // Investigation 2026-05-17: byte-level comparison shows
-                // LORD_Bass (truly muted, via inheritance) has
-                // IDENTICAL 0x1029 bytes to Vocal Split (not muted) —
-                // confirming the per-stem mute is NOT a per-byte flag.
-                // On LotF, this byte produces 12 false positives
-                // (SYZ/AC GTR/El Gtr/Bass Demo/Inst* — all `+5=1` but
-                // converter says MUTESOLO 0).
+                // **No separate explicit-mute marker block exists.**
+                // Earlier Frida traces showed the converter constructs
+                // a Swift `Optional<PTXMutePoint>` for ~2 tracks per
+                // session — that object is a RUNTIME construct built
+                // from the stored bits + folder-tree walk +
+                // automation-envelope state. It is NOT serialized as a
+                // distinct PTX block.
                 //
-                // We read the byte verbatim. For converter-generated
-                // PTX (our writer's typical output), this is exact.
-                // For PT-GUI sessions, callers may want to additionally
-                // exclude tracks that are inactive — TBD when we
-                // locate the active/inactive discriminator.
+                // The "over-mutes" on LotF (SYZ/AC GTR/El Gtr/Bass
+                // Demo/Inst* tracks where +5=1 but the converter
+                // outputs MUTESOLO 0) reflect the difference between:
+                //   - STORED state: this byte (what we read)
+                //   - EFFECTIVE playback state: the converter computes
+                //     this by combining stored + automation envelope +
+                //     active/inactive flag
                 //
-                // See docs/pt-reaper-converter-re.md round 2 for the
-                // full investigation.
+                // Our parser exposes the STORED state, which is the
+                // correct representation of what's in the file.
+                // Callers wanting effective-playback semantics need to
+                // ALSO read mute automation + active flag (TBD).
                 let mute = data[payload + 5] != 0;
                 let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
                 mix_by_name.insert(name, (vol, mute, pan));

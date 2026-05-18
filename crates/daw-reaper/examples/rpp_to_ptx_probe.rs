@@ -68,6 +68,18 @@ fn build_rpp(probe: &str) -> String {
         "region" => {
             b = b.track("ProbeTrack", |t| t).region(1, 0.5, 2.5, "R1");
         }
+        "ten_plain" => {
+            for i in 1..=10 {
+                let n = format!("T{i:02}");
+                b = b.track(&n, |t| t);
+            }
+        }
+        "ten_muted" => {
+            for i in 1..=10 {
+                let n = format!("T{i:02}");
+                b = b.track(&n, |t| t.muted());
+            }
+        }
         "send" => {
             b = b.track("Source", |t| t).track("Dest", |t| t.receive(0));
         }
