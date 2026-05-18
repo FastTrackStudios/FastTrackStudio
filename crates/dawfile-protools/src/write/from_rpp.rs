@@ -30,6 +30,14 @@ pub enum WriteError {
     ConverterError(String),
     #[error("output file not produced: {0}")]
     OutputMissing(PathBuf),
+    /// Caller passed an argument outside the valid range or shape.
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+    /// The requested write operation has a documented surface but its
+    /// implementation is blocked on further reverse engineering. The string
+    /// payload describes the specific blocker.
+    #[error("unimplemented write operation: {0}")]
+    Unimplemented(&'static str),
 }
 
 /// Locate the PT Reaper Converter binary. Checks (in order):
