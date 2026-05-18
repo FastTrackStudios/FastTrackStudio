@@ -19,10 +19,12 @@
 
 mod action_registry;
 mod audio_accessor;
-#[cfg(any(feature = "audio", feature = "decode"))]
+#[cfg(any(feature = "audio", feature = "decode", feature = "clap-host"))]
 pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
+mod automation_touch;
+pub use automation_touch::TouchableParam;
 #[cfg(feature = "bootstrap")]
 pub mod bootstrap;
 mod dawfile_service;
@@ -37,6 +39,7 @@ mod input;
 mod item;
 mod live_midi;
 mod marker;
+pub mod media_bay;
 mod midi;
 mod peak;
 pub(crate) mod platform;
@@ -50,6 +53,7 @@ mod resource;
 mod routing;
 mod routing_sync;
 mod screenset;
+pub mod plugin;
 mod services;
 mod shared_state;
 pub mod sync;

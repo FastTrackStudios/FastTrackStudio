@@ -504,6 +504,50 @@ async fn track_channels_round_trip() {
     ));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn playhead_reads_stay_monotonic_under_concurrent_soft_clock() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    Transport::play(&daw, ctx.clone()).unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut readers = Vec::new();
+    for _ in 0..3 {
+        let daw_ = daw.clone();
+        let stop_ = stop.clone();
+        let ctx_ = ctx.clone();
+        readers.push(tokio::spawn(async move {
+            let mut prev = -1.0f64;
+            let mut samples = 0;
+            while !stop_.load(Ordering::Relaxed) {
+                let now = Transport::get_position(&daw_, ctx_.clone());
+                assert!(
+                    now >= prev - 1e-6,
+                    "playhead went backwards: prev={prev}, now={now}"
+                );
+                prev = now;
+                samples += 1;
+                // Let other tasks run.
+                if samples % 64 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            samples
+        }));
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    stop.store(true, Ordering::Relaxed);
+    for h in readers {
+        let n = h.await.unwrap();
+        assert!(n > 100, "reader saw only {n} samples in 200ms");
+    }
+    // Final playhead should be ≥ 100ms.
+    assert!(daw.get_position(ctx) > 0.1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_state_mirrors_engine_playhead() {
     let (daw, _guid) = seeded();

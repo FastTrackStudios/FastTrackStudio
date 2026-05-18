@@ -57,15 +57,24 @@ fn sort_points(points: &mut [EnvelopePoint]) {
     });
 }
 
-/// Resolve the envelope at `loc` to its `(track_guid, key)` identity,
-/// returning `None` if the track can't be found.
+/// Resolve the envelope at `loc` to its `(owner_id, key)` identity.
+/// `owner_id` is the track GUID for track / FxParam / Send / Named
+/// envelopes, or an empty string for `Take` envelopes (the item +
+/// take GUIDs are carried inside the `EnvelopeKey::Take` variant so
+/// the storage key is fully self-identifying).
 fn resolve_envelope_id(
     daw: &Standalone,
     project_guid: &str,
     loc: &EnvelopeLocation,
 ) -> Option<(String, EnvelopeKey)> {
+    let key = EnvelopeKey::from_ref(&loc.envelope);
+    if matches!(key, EnvelopeKey::Take { .. }) {
+        // Take envelopes don't have a track owner — the (item, take)
+        // identity carries everything needed.
+        return Some((String::new(), key));
+    }
     let track_guid = resolve_track_guid(daw, project_guid, &loc.track)?;
-    Some((track_guid, EnvelopeKey::from_ref(&loc.envelope)))
+    Some((track_guid, key))
 }
 
 impl Automation for Standalone {
@@ -213,10 +222,15 @@ impl Automation for Standalone {
                 .envelopes
                 .entry((tg, key))
                 .or_insert_with(EnvelopeData::new);
+            // Note: value is stored unclamped. Different envelope
+            // kinds use different ranges (Volume/Pan/Mute = 0..=1,
+            // Pitch = semitones, FxParam = whatever the plugin
+            // exposes). The renderer / consumer clamps when it
+            // applies the value.
             data.points.push(EnvelopePoint {
                 index: 0, // rewritten by renumber()
                 time: params.time,
-                value: params.value.clamp(0.0, 1.0),
+                value: params.value,
                 shape: params.shape,
                 tension: 0.0,
                 selected: false,
@@ -228,7 +242,7 @@ impl Automation for Standalone {
                 .iter()
                 .position(|pt| {
                     (pt.time.as_seconds() - params.time.as_seconds()).abs() < 1e-12
-                        && (pt.value - params.value.clamp(0.0, 1.0)).abs() < 1e-12
+                        && (pt.value - params.value).abs() < 1e-12
                 })
                 .map(|i| i as u32)
                 .unwrap_or(0)
@@ -271,7 +285,7 @@ impl Automation for Standalone {
                 let i = params.index as usize;
                 if let Some(pt) = data.points.get_mut(i) {
                     pt.time = params.time;
-                    pt.value = params.value.clamp(0.0, 1.0);
+                    pt.value = params.value;
                     pt.shape = params.shape;
                     sort_points(&mut data.points);
                     renumber(&mut data.points);

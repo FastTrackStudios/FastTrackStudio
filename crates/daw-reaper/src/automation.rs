@@ -107,6 +107,17 @@ fn resolve_envelope(
             // (`GetFXEnvelope`); not implemented in Phase 1.
             None
         }
+        EnvelopeRef::Send { .. } => {
+            // Send envelopes need `GetTrackSendInfo_Value` /
+            // `GetTrackSendEnvelope`; not yet ported. Standalone
+            // backend supports them; REAPER backend follow-up.
+            None
+        }
+        EnvelopeRef::Take { .. } => {
+            // Take envelopes need `GetTakeEnvelope` / `GetTakeEnvelopeByName`;
+            // not yet ported. Standalone backend supports them.
+            None
+        }
     }
 }
 

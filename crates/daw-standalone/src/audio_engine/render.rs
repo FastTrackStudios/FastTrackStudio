@@ -26,10 +26,28 @@
 
 use std::sync::Arc;
 
+use daw_proto::automation::{
+    EnvelopePoint, EnvelopeShape, EnvelopeType, SendEnvelopeKind, TakeEnvelopeKind,
+};
+use daw_proto::primitives::AutomationMode;
 use daw_proto::RouteType;
 
+use crate::sync::EnvelopeData;
+
 use super::decoder::DecodedAudio;
-use crate::sync::{ProjectState, Standalone};
+use crate::sync::{EnvelopeKey, ProjectState, Standalone};
+
+/// Honor `EnvelopeData.automation_mode` at snapshot time: return the
+/// points only when the mode is something other than `Off`.
+/// `Touch` / `Latch` / `Write` apply at playback like `Read` —
+/// recording is a separate concern (see touch state on `Standalone`).
+fn active_envelope(data: Option<&EnvelopeData>) -> Option<Vec<EnvelopePoint>> {
+    let d = data?;
+    match d.automation_mode {
+        AutomationMode::Off => None,
+        _ => Some(d.points.clone()),
+    }
+}
 
 /// Stereo render buffer (interleaved L/R/L/R/...).
 #[derive(Debug, Clone)]
@@ -67,6 +85,28 @@ struct TrackSnapshot {
     parent_send: bool,
     sends: Vec<SendSnapshot>,
     items: Vec<ItemSnapshot>,
+    /// FX chain — list of `fx_guid`s in chain order. The renderer
+    /// resolves each one in `Standalone.plugin_instances` and pipes
+    /// the track bus through them in order. `None`/missing entries
+    /// (e.g. synthetic-only FX) are skipped.
+    fx_chain: Vec<String>,
+    /// Per-FX enabled flag from `Fx.enabled`. Matched 1:1 with
+    /// `fx_chain` by index.
+    fx_enabled: Vec<bool>,
+    /// Volume envelope points, sorted by time. Multiplies the
+    /// static `volume` field when present.
+    volume_env: Option<Vec<EnvelopePoint>>,
+    /// Pan envelope points. `0..=1` value range, where 0.5 = center.
+    pan_env: Option<Vec<EnvelopePoint>>,
+    /// Mute envelope. Values > 0.5 mute the track at that time.
+    mute_env: Option<Vec<EnvelopePoint>>,
+    /// Pre-FX volume envelope. Without an FX chain to insert between
+    /// pre/post, this acts as an additional multiplier alongside the
+    /// main volume envelope.
+    volume_prefx_env: Option<Vec<EnvelopePoint>>,
+    /// Pre-FX pan envelope. Blended additively with the static + main
+    /// pan envelope, then clamped.
+    pan_prefx_env: Option<Vec<EnvelopePoint>>,
 }
 
 struct SendSnapshot {
@@ -74,6 +114,11 @@ struct SendSnapshot {
     volume: f64,
     pan: f64,
     muted: bool,
+    /// Optional per-send envelopes. Block-evaluated alongside track
+    /// envelopes; see `effective_send_*` helpers.
+    volume_env: Option<Vec<EnvelopePoint>>,
+    pan_env: Option<Vec<EnvelopePoint>>,
+    mute_env: Option<Vec<EnvelopePoint>>,
 }
 
 struct ItemSnapshot {
@@ -88,6 +133,14 @@ struct ItemSnapshot {
     take_volume: f64,
     play_rate: f64,
     start_offset_seconds: f64,
+    /// Take pitch in semitones (added to envelope-driven pitch).
+    take_pitch_semitones: f64,
+    /// Per-take envelopes. All in item-relative time (0 at item
+    /// start). Evaluated at block midpoint.
+    take_volume_env: Option<Vec<EnvelopePoint>>,
+    take_pan_env: Option<Vec<EnvelopePoint>>,
+    take_mute_env: Option<Vec<EnvelopePoint>>,
+    take_pitch_env: Option<Vec<EnvelopePoint>>,
 }
 
 /// Render a stereo master block.
@@ -118,6 +171,8 @@ impl<'a> ProjectRenderer<'a> {
             Some(s) => s,
             None => return master,
         };
+        let start_seconds = start_frame as f64 / self.sample_rate as f64;
+        let end_seconds = start_seconds + (frames as f64 / self.sample_rate as f64);
         let any_soloed = snapshot.iter().any(|t| t.soloed);
 
         // Allocate per-track stereo buses keyed by guid.
@@ -130,12 +185,11 @@ impl<'a> ProjectRenderer<'a> {
             );
         }
 
-        let start_seconds = start_frame as f64 / self.sample_rate as f64;
-        let end_seconds = start_seconds + (frames as f64 / self.sample_rate as f64);
-
-        // 1) Item playback into per-track buses.
-        for t in &snapshot {
-            if t.muted || (any_soloed && !t.soloed) {
+        // 1) Item playback into per-track buses. Item-level envelopes
+        // (take volume / pan / mute / pitch) are evaluated per-frame
+        // inside mix_item_into_bus via cursors.
+        for t in snapshot.iter() {
+            if (any_soloed && !t.soloed) {
                 continue;
             }
             let bus = buses.get_mut(&t.guid).expect("bus pre-allocated");
@@ -155,24 +209,130 @@ impl<'a> ProjectRenderer<'a> {
             }
         }
 
-        // 2) Apply track gain + pan in place (pre-send, post-fader).
-        for t in &snapshot {
-            if t.muted || (any_soloed && !t.soloed) {
-                continue;
-            }
-            if let Some(bus) = buses.get_mut(&t.guid) {
-                apply_volume_pan(bus, t.volume as f32, t.pan as f32);
+        // 1.5) FX chain: pipe each track's bus through every loaded
+        // plugin in order. The plugin instance map lives separately
+        // from ProjectState so the audio thread doesn't block project
+        // mutations on the proto side. Synthetic / unloaded FX are
+        // skipped — no DSP, no work.
+        {
+            let mut plugins = self
+                .daw
+                .plugin_instances
+                .lock()
+                .expect("plugin_instances poisoned");
+            // Per-block scratch — same shape as the bus's interleaved
+            // f32 stereo. Allocated once per render call, reused per
+            // plugin within a track.
+            let mut in_l = vec![0.0f32; frames];
+            let mut in_r = vec![0.0f32; frames];
+            let mut out_l = vec![0.0f32; frames];
+            let mut out_r = vec![0.0f32; frames];
+            for t in snapshot.iter() {
+                if any_soloed && !t.soloed {
+                    continue;
+                }
+                if t.fx_chain.is_empty() {
+                    continue;
+                }
+                let Some(bus) = buses.get_mut(&t.guid) else {
+                    continue;
+                };
+                for (i, fx_guid) in t.fx_chain.iter().enumerate() {
+                    if !t.fx_enabled.get(i).copied().unwrap_or(true) {
+                        continue;
+                    }
+                    let Some(plugin) = plugins.get_mut(fx_guid) else {
+                        continue; // synthetic / not loaded
+                    };
+                    if !plugin.is_prepared() {
+                        // Lazy prepare on first use. If activation
+                        // fails just bypass this plugin for now.
+                        if plugin
+                            .prepare(self.sample_rate as f64, frames as u32)
+                            .is_err()
+                        {
+                            continue;
+                        }
+                    }
+                    // De-interleave → process → re-interleave.
+                    for f in 0..frames {
+                        in_l[f] = bus.samples[f * 2];
+                        in_r[f] = bus.samples[f * 2 + 1];
+                    }
+                    for v in out_l.iter_mut().chain(out_r.iter_mut()) {
+                        *v = 0.0;
+                    }
+                    if plugin
+                        .process_block(&in_l, &in_r, &mut out_l, &mut out_r, &[])
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    for f in 0..frames {
+                        bus.samples[f * 2] = out_l[f];
+                        bus.samples[f * 2 + 1] = out_r[f];
+                    }
+                }
             }
         }
 
-        // 3) Sends — additive into destination buses. Iterate by index
-        // so we can borrow source + dest disjointly via swap_remove
-        // trick (or just clone the source bus, which is what we do).
-        for t in &snapshot {
-            if t.muted || (any_soloed && !t.soloed) {
+        // 2) Apply track gain + pan in place (pre-send, post-fader).
+        // Per-frame: walk envelopes via cursors so a ramp resolves at
+        // sample resolution rather than block-midpoint.
+        let inv_rate = 1.0 / self.sample_rate as f64;
+        for t in snapshot.iter() {
+            if any_soloed && !t.soloed {
                 continue;
             }
-            // Clone source bus once; sends read from this snapshot.
+            let Some(bus) = buses.get_mut(&t.guid) else {
+                continue;
+            };
+            let mut c_vol = t.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
+            let mut c_pvol = t.volume_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
+            let mut c_pan = t.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
+            let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
+            let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
+            for frame in 0..bus.frames {
+                let time = start_seconds + frame as f64 * inv_rate;
+                let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
+                let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
+                let vol = t.volume * v_main * v_prefx;
+                let p_main = c_pan
+                    .as_mut()
+                    .and_then(|c| c.eval_at(time))
+                    .map(|v| (v - 0.5) * 2.0)
+                    .unwrap_or(0.0);
+                let p_prefx = c_ppan
+                    .as_mut()
+                    .and_then(|c| c.eval_at(time))
+                    .map(|v| (v - 0.5) * 2.0)
+                    .unwrap_or(0.0);
+                let pan = (t.pan + p_main + p_prefx).clamp(-1.0, 1.0);
+                let env_muted = c_mute
+                    .as_mut()
+                    .and_then(|c| c.eval_at(time))
+                    .map(|v| v > 0.5)
+                    .unwrap_or(false);
+                let muted = t.muted || env_muted;
+                if muted {
+                    bus.samples[frame * 2] = 0.0;
+                    bus.samples[frame * 2 + 1] = 0.0;
+                    continue;
+                }
+                let lg = ((1.0 - pan) * 0.5).sqrt() * vol;
+                let rg = ((1.0 + pan) * 0.5).sqrt() * vol;
+                bus.samples[frame * 2] *= lg as f32;
+                bus.samples[frame * 2 + 1] *= rg as f32;
+            }
+        }
+
+        // 3) Sends — additive into destination buses, per-frame.
+        for t in snapshot.iter() {
+            if any_soloed && !t.soloed {
+                continue;
+            }
+            // Read source bus once (clone) so we can mutably borrow
+            // dest buses below.
             let src = match buses.get(&t.guid) {
                 Some(b) => b.samples.clone(),
                 None => continue,
@@ -181,15 +341,42 @@ impl<'a> ProjectRenderer<'a> {
                 if s.muted {
                     continue;
                 }
-                if let Some(dest_bus) = buses.get_mut(&s.dest_guid) {
-                    add_with_volume_pan(dest_bus, &src, s.volume as f32, s.pan as f32);
+                let dest_bus = match buses.get_mut(&s.dest_guid) {
+                    Some(b) => b,
+                    None => continue,
+                };
+                let mut c_vol = s.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_pan = s.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_mute = s.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                for frame in 0..dest_bus.frames {
+                    let time = start_seconds + frame as f64 * inv_rate;
+                    let env_muted = c_mute
+                        .as_mut()
+                        .and_then(|c| c.eval_at(time))
+                        .map(|v| v > 0.5)
+                        .unwrap_or(false);
+                    if env_muted {
+                        continue;
+                    }
+                    let v_env = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
+                    let vol = s.volume * v_env;
+                    let p_off = c_pan
+                        .as_mut()
+                        .and_then(|c| c.eval_at(time))
+                        .map(|v| (v - 0.5) * 2.0)
+                        .unwrap_or(0.0);
+                    let pan = (s.pan + p_off).clamp(-1.0, 1.0);
+                    let lg = (((1.0 - pan) * 0.5).sqrt() * vol) as f32;
+                    let rg = (((1.0 + pan) * 0.5).sqrt() * vol) as f32;
+                    dest_bus.samples[frame * 2] += src[frame * 2] * lg;
+                    dest_bus.samples[frame * 2 + 1] += src[frame * 2 + 1] * rg;
                 }
             }
         }
 
         // 4) Sum to master: tracks with parent_send_enabled go through.
-        for t in &snapshot {
-            if t.muted || (any_soloed && !t.soloed) {
+        for t in snapshot.iter() {
+            if any_soloed && !t.soloed {
                 continue;
             }
             if !t.parent_send {
@@ -227,19 +414,43 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
 
     // Sends: only the Send variant matters (Receives mirror; HW out
     // for v0 also routes to master via parent_send equivalent).
+    // `send_index` is the position in the source track's send list
+    // — also the addressing key for `EnvelopeKey::Send`.
     let sends: Vec<SendSnapshot> = p
         .sends
         .get(&t.guid)
         .map(|v| {
             v.iter()
                 .filter(|r| r.route_type == RouteType::Send)
-                .filter_map(|r| {
+                .enumerate()
+                .filter_map(|(idx, r)| {
                     let dest_guid = r.dest_track_guid.clone()?;
+                    let key = |kind| {
+                        EnvelopeKey::Send {
+                            send_index: idx as u32,
+                            kind,
+                        }
+                    };
+                    let volume_env = active_envelope(
+                        p.envelopes
+                            .get(&(t.guid.clone(), key(SendEnvelopeKind::Volume))),
+                    );
+                    let pan_env = active_envelope(
+                        p.envelopes
+                            .get(&(t.guid.clone(), key(SendEnvelopeKind::Pan))),
+                    );
+                    let mute_env = active_envelope(
+                        p.envelopes
+                            .get(&(t.guid.clone(), key(SendEnvelopeKind::Mute))),
+                    );
                     Some(SendSnapshot {
                         dest_guid,
                         volume: r.volume,
                         pan: r.pan,
                         muted: r.muted,
+                        volume_env,
+                        pan_env,
+                        mute_env,
                     })
                 })
                 .collect()
@@ -260,12 +471,39 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
             let audio = take_guid_opt
                 .as_ref()
                 .and_then(|tg| p.audio_sources.get(tg).cloned());
-            let (take_volume, play_rate, start_offset) = p
+            let (take_volume, play_rate, start_offset, take_pitch) = p
                 .takes
                 .get(ig)
                 .and_then(|tl| tl.takes.get(tl.active_idx as usize))
-                .map(|tk| (tk.volume, tk.play_rate, tk.start_offset.as_seconds()))
-                .unwrap_or((1.0, 1.0, 0.0));
+                .map(|tk| {
+                    (
+                        tk.volume,
+                        tk.play_rate,
+                        tk.start_offset.as_seconds(),
+                        tk.pitch,
+                    )
+                })
+                .unwrap_or((1.0, 1.0, 0.0, 0.0));
+            // Look up each take envelope by `(owner="", EnvelopeKey::Take{..})`
+            // — matches the storage convention in automation.rs.
+            // Capture take_guid first so the closure can reuse it
+            // without moving from `take_guid_opt`.
+            let tg_for_env = take_guid_opt.clone();
+            let take_env = |kind: TakeEnvelopeKind| -> Option<Vec<EnvelopePoint>> {
+                let tg = tg_for_env.as_ref()?;
+                active_envelope(p.envelopes.get(&(
+                    String::new(),
+                    EnvelopeKey::Take {
+                        item_guid: ig.clone(),
+                        take_guid: tg.clone(),
+                        kind,
+                    },
+                )))
+            };
+            let take_volume_env = take_env(TakeEnvelopeKind::Volume);
+            let take_pan_env = take_env(TakeEnvelopeKind::Pan);
+            let take_mute_env = take_env(TakeEnvelopeKind::Mute);
+            let take_pitch_env = take_env(TakeEnvelopeKind::Pitch);
             items.push(ItemSnapshot {
                 take_guid: take_guid_opt,
                 audio,
@@ -276,15 +514,32 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
                 muted: item.muted,
                 item_volume: item.volume,
                 take_volume,
-                play_rate: if play_rate.abs() < 1e-9 {
-                    1.0
-                } else {
-                    play_rate
-                },
+                play_rate: if play_rate.abs() < 1e-9 { 1.0 } else { play_rate },
                 start_offset_seconds: start_offset,
+                take_pitch_semitones: take_pitch,
+                take_volume_env,
+                take_pan_env,
+                take_mute_env,
+                take_pitch_env,
             });
         }
     }
+
+    let track_env = |ty: EnvelopeType| {
+        active_envelope(p.envelopes.get(&(t.guid.clone(), EnvelopeKey::Track(ty))))
+    };
+
+    // FX chain (track-side only — input FX is a future addition).
+    let (fx_chain, fx_enabled): (Vec<String>, Vec<bool>) = p
+        .fx_chains
+        .get(&crate::sync::FxChainKey::Track(t.guid.clone()))
+        .map(|chain| {
+            chain
+                .iter()
+                .map(|e| (e.fx.guid.clone(), e.fx.enabled))
+                .unzip()
+        })
+        .unwrap_or_default();
 
     TrackSnapshot {
         guid: t.guid.clone(),
@@ -296,7 +551,116 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
         parent_send,
         sends,
         items,
+        fx_chain,
+        fx_enabled,
+        volume_env: track_env(EnvelopeType::Volume),
+        pan_env: track_env(EnvelopeType::Pan),
+        mute_env: track_env(EnvelopeType::Mute),
+        volume_prefx_env: track_env(EnvelopeType::VolumePrefx),
+        pan_prefx_env: track_env(EnvelopeType::PanPrefx),
     }
+}
+
+/// Stateful per-frame envelope cursor. `eval_at(t)` advances through
+/// the points list without rescanning from the start each call.
+/// Construct fresh per render block.
+///
+/// Time *must* be monotonically non-decreasing across `eval_at` calls
+/// — meets the audio callback contract where frames march forward.
+struct EnvelopeCursor<'a> {
+    points: &'a [EnvelopePoint],
+    /// Index of the next point ahead of the cursor. Once
+    /// `points[next].time > t`, the active segment is
+    /// `points[next-1]..points[next]`.
+    next: usize,
+}
+
+impl<'a> EnvelopeCursor<'a> {
+    fn new(points: &'a [EnvelopePoint]) -> Self {
+        Self { points, next: 1 }
+    }
+
+    /// Evaluate the envelope at `time_seconds`. Returns `None` only
+    /// if the envelope is empty.
+    fn eval_at(&mut self, time_seconds: f64) -> Option<f64> {
+        if self.points.is_empty() {
+            return None;
+        }
+        // Clamp left of first point.
+        let first = &self.points[0];
+        if time_seconds <= first.time.as_seconds() {
+            return Some(first.value);
+        }
+        // Clamp right of last point.
+        let last = self.points.last().unwrap();
+        if time_seconds >= last.time.as_seconds() {
+            return Some(last.value);
+        }
+        // Advance `next` while it's still in the past.
+        while self.next < self.points.len()
+            && self.points[self.next].time.as_seconds() < time_seconds
+        {
+            self.next += 1;
+        }
+        if self.next == 0 {
+            // Shouldn't happen given the clamp above, but be safe.
+            self.next = 1;
+        }
+        let a = &self.points[self.next - 1];
+        let b = &self.points[self.next];
+        match a.shape {
+            EnvelopeShape::Square => Some(a.value),
+            _ => {
+                let ta = a.time.as_seconds();
+                let tb = b.time.as_seconds();
+                let span = tb - ta;
+                if span <= 0.0 {
+                    return Some(b.value);
+                }
+                let f = (time_seconds - ta) / span;
+                Some(a.value + (b.value - a.value) * f)
+            }
+        }
+    }
+}
+
+/// Linear (or held, for Square) interpolation across an envelope's
+/// points. Returns `None` if the envelope is empty (caller falls back
+/// to the static fader value). Matches the `Automation::value_at`
+/// algorithm in src/automation.rs.
+fn eval_envelope(points: &[EnvelopePoint], time_seconds: f64) -> Option<f64> {
+    if points.is_empty() {
+        return None;
+    }
+    let first = &points[0];
+    if time_seconds <= first.time.as_seconds() {
+        return Some(first.value);
+    }
+    let last = points.last().unwrap();
+    if time_seconds >= last.time.as_seconds() {
+        return Some(last.value);
+    }
+    for i in 0..points.len() - 1 {
+        let a = &points[i];
+        let b = &points[i + 1];
+        let ta = a.time.as_seconds();
+        let tb = b.time.as_seconds();
+        if time_seconds >= ta && time_seconds <= tb {
+            return Some(match a.shape {
+                EnvelopeShape::Square => a.value,
+                _ => {
+                    let span = tb - ta;
+                    if span <= 0.0 {
+                        b.value
+                    } else {
+                        let f = (time_seconds - ta) / span;
+                        a.value + (b.value - a.value) * f
+                    }
+                }
+            });
+        }
+    }
+    None
 }
 
 fn mix_item_into_bus(
@@ -315,10 +679,24 @@ fn mix_item_into_bus(
         return;
     }
 
-    let gain = (item.item_volume * item.take_volume) as f32;
-    if gain == 0.0 {
+    let base_gain = (item.item_volume * item.take_volume) as f32;
+    if base_gain == 0.0 {
         return;
     }
+
+    // Per-frame envelope cursors. All in item-relative time, which
+    // advances monotonically as `frame` increments.
+    let mut c_vol = item
+        .take_volume_env
+        .as_ref()
+        .map(|p| EnvelopeCursor::new(p));
+    let mut c_pan = item.take_pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
+    let mut c_mute = item.take_mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
+    let mut c_pitch = item
+        .take_pitch_env
+        .as_ref()
+        .map(|p| EnvelopeCursor::new(p));
+    let has_take_pan = item.take_pan_env.is_some();
 
     let fade_in = item.fade_in_seconds.max(0.0);
     let fade_out = item.fade_out_seconds.max(0.0);
@@ -332,10 +710,26 @@ fn mix_item_into_bus(
         if block_time < item_start || block_time >= item_end {
             continue;
         }
-        // Time within the item.
         let item_time = block_time - item_start;
-        // Source time, advancing play_rate × wall-time.
-        let source_time = item.start_offset_seconds + item_time * item.play_rate;
+
+        // Mute env first — early-out before paying for source lookup.
+        let env_muted = c_mute
+            .as_mut()
+            .and_then(|c| c.eval_at(item_time))
+            .map(|v| v > 0.5)
+            .unwrap_or(false);
+        if env_muted {
+            continue;
+        }
+
+        // Pitch: static + envelope semitones → rate multiplier.
+        let env_pitch_st = c_pitch
+            .as_mut()
+            .and_then(|c| c.eval_at(item_time))
+            .unwrap_or(0.0);
+        let pitch_mult = 2f64.powf((item.take_pitch_semitones + env_pitch_st) / 12.0);
+
+        let source_time = item.start_offset_seconds + item_time * item.play_rate * pitch_mult;
         if source_time < 0.0 {
             continue;
         }
@@ -351,19 +745,37 @@ fn mix_item_into_bus(
         let i1 = (i0 + 1).min(audio.frame_count().saturating_sub(1));
         let (l, r) = sample_stereo_interp(&audio.samples, audio_channels, i0, i1, frac);
 
-        // Fade in / out shape (linear for v0).
-        let mut env = 1.0f32;
+        // Volume envelope per-frame.
+        let env_vol = c_vol
+            .as_mut()
+            .and_then(|c| c.eval_at(item_time))
+            .unwrap_or(1.0) as f32;
+
+        // Pan envelope per-frame (only engaged if envelope exists).
+        let (pan_lg, pan_rg) = if has_take_pan {
+            let v = c_pan
+                .as_mut()
+                .and_then(|c| c.eval_at(item_time))
+                .unwrap_or(0.5);
+            let p = ((v - 0.5) * 2.0).clamp(-1.0, 1.0) as f32;
+            (((1.0 - p) * 0.5).sqrt(), ((1.0 + p) * 0.5).sqrt())
+        } else {
+            (1.0, 1.0)
+        };
+
+        // Fade in / out (linear).
+        let mut fade = 1.0f32;
         if fade_in > 0.0 && item_time < fade_in {
-            env *= (item_time / fade_in) as f32;
+            fade *= (item_time / fade_in) as f32;
         }
         let time_until_end = item_end - block_time;
         if fade_out > 0.0 && time_until_end < fade_out {
-            env *= (time_until_end / fade_out).max(0.0) as f32;
+            fade *= (time_until_end / fade_out).max(0.0) as f32;
         }
-        let g = gain * env;
+        let g = base_gain * env_vol * fade;
 
-        bus.samples[frame * 2] += l * g;
-        bus.samples[frame * 2 + 1] += r * g;
+        bus.samples[frame * 2] += l * g * pan_lg;
+        bus.samples[frame * 2 + 1] += r * g * pan_rg;
     }
 }
 

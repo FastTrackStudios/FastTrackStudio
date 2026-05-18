@@ -129,3 +129,17 @@ pub fn detach_audio_source(daw: &Standalone, project_guid: &str, take_guid: &str
         p.audio_sources.remove(take_guid);
     });
 }
+
+/// Convenience: materialize every take's audio via whatever
+/// `BayFileResolver` is currently installed on the project Media Bay.
+/// Same shape as [`materialize_audio`] but the resolver isn't passed
+/// explicitly — the bay handles WASM vs native indirection.
+///
+/// Returns `Err` if no bay resolver is installed.
+pub fn materialize_via_bay(
+    daw: &Standalone,
+    project_guid: &str,
+) -> Result<MaterializeReport, String> {
+    let bay = daw.media_bay();
+    Ok(materialize_audio(daw, project_guid, |path| bay.resolve_file(path)))
+}

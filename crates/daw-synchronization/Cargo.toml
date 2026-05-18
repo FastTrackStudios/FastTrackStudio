@@ -26,11 +26,8 @@ authors.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-# `daw` is the only public surface — protocol types come through
-# `daw::service::*`, streaming events through `daw::service::*` as
-# well. We never reach for daw-proto / daw-reaper directly: that
-# keeps the engine backend-agnostic by construction.
 daw = { workspace = true, features = ["reaper"] }
+daw-reaper.workspace = true
 facet.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt"] }
 tokio-util = "0.7"

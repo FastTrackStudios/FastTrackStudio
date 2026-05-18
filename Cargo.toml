@@ -61,6 +61,7 @@ audio-controls = { path = "crates/audio-controls" }
 daw-allocator = { path = "crates/daw-allocator" }
 # Extension runtime — integrated REAPER extension helpers
 daw-extension-runtime = { path = "crates/daw-extension-runtime" }
+daw-reaper = { path = "crates/daw-reaper" }
 # Sync stack — public sibling crates (cannot be folded under the `daw`
 # facade because each depends on `daw` itself, see lib.rs note).
 daw-synchronization = { path = "crates/daw-synchronization" }
@@ -97,6 +98,18 @@ clap = { version = "4", features = ["derive"] }
 
 # Plugin framework
 nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+
+# CLAP plugin hosting (Rust-native CLAP host + extension bindings).
+# Pinned to the prokopyl/clack upstream — same revs as fts-analyzer
+# so workspaces line up.
+clack-host = { git = "https://github.com/prokopyl/clack" }
+clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
+    "clack-host",
+    "audio-ports",
+    "params",
+    "state",
+    "latency",
+] }
 
 # Sibling repos
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }

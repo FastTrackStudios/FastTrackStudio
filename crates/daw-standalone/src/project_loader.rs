@@ -34,6 +34,38 @@ use daw_proto::{Marker, Region, Take, TempoPoint};
 
 use crate::sync::{ItemEntry, Standalone, TakeList, TrackExt};
 
+/// Like [`load_rpp`] but pulls audio bytes through the project's
+/// [`MediaBay`](crate::media_bay::MediaBay) resolver instead of an
+/// inline closure. Caller must install a [`BayFileResolver`](
+/// crate::media_bay::BayFileResolver) on the bay first — native apps
+/// use [`FsFileResolver`](crate::media_bay::FsFileResolver), browser
+/// apps install a JS-backed one.
+///
+/// ```ignore
+/// use daw_standalone::media_bay::FsFileResolver;
+/// use daw_standalone::project_loader::load_rpp_via_bay;
+///
+/// daw.media_bay().set_file_resolver(Box::new(FsFileResolver));
+/// let (proj, audio) = load_rpp_via_bay(&daw, "Song", &path, &rpp_text)?;
+/// ```
+#[cfg(feature = "decode")]
+pub fn load_rpp_via_bay(
+    daw: &Standalone,
+    project_name: &str,
+    project_path: &str,
+    rpp_text: &str,
+) -> Result<
+    (
+        LoadedProject,
+        crate::audio_engine::materialize::MaterializeReport,
+    ),
+    String,
+> {
+    let proj = load_rpp_text(daw, project_name, project_path, rpp_text)?;
+    let audio = crate::audio_engine::materialize::materialize_via_bay(daw, &proj.project_guid)?;
+    Ok((proj, audio))
+}
+
 /// One-shot wrapper that loads structure AND materializes audio.
 ///
 /// Equivalent to `load_rpp_text(...)` followed by

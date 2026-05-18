@@ -27,6 +27,37 @@ pub enum EnvelopeType {
     FxParam = 7,
 }
 
+/// Which property of a send the envelope automates.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Facet)]
+pub enum SendEnvelopeKind {
+    /// Send volume (linear multiplier).
+    #[default]
+    Volume = 0,
+    /// Send pan (0..=1 with 0.5 = center).
+    Pan = 1,
+    /// Send mute (>0.5 = muted).
+    Mute = 2,
+}
+
+/// Which property of a *take* the envelope automates. REAPER models
+/// these as per-take envelopes that operate in item-relative time
+/// (0 at item start, item.length at item end).
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Facet)]
+pub enum TakeEnvelopeKind {
+    /// Take volume (linear multiplier on the item's audio output).
+    #[default]
+    Volume = 0,
+    /// Take pan (0..=1 with 0.5 = center).
+    Pan = 1,
+    /// Take mute (>0.5 = silence the item while in range).
+    Mute = 2,
+    /// Take pitch (semitones, additive on top of `Take.pitch`).
+    /// Converted to a rate multiplier inside the renderer.
+    Pitch = 3,
+}
+
 /// Reference to an envelope
 #[repr(C)]
 #[derive(Clone, Debug, Facet)]
@@ -35,6 +66,20 @@ pub enum EnvelopeRef {
     Type(EnvelopeType),
     /// Reference by FX parameter
     FxParam { fx_guid: String, param_index: u32 },
+    /// Reference by send + automated property. `send_index` is the
+    /// index into the source track's send list.
+    Send {
+        send_index: u32,
+        kind: SendEnvelopeKind,
+    },
+    /// Reference a per-take envelope. `EnvelopeLocation.track` is
+    /// ignored for take envelopes — the take's identity carries
+    /// both the project + track context.
+    Take {
+        item_guid: String,
+        take_guid: String,
+        kind: TakeEnvelopeKind,
+    },
     /// Reference by display name
     ByName(String),
 }

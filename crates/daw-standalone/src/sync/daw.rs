@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use daw_proto::automation::{Envelope, EnvelopePoint, EnvelopeRef, EnvelopeType};
+use daw_proto::automation::{
+    Envelope, EnvelopePoint, EnvelopeRef, EnvelopeType, SendEnvelopeKind, TakeEnvelopeKind,
+};
 use daw_proto::midi::MidiNote;
 use daw_proto::primitives::AutomationMode;
 use daw_proto::{
@@ -76,6 +78,20 @@ pub enum EnvelopeKey {
     Track(EnvelopeType),
     /// An FX parameter automation envelope.
     FxParam { fx_guid: String, param_index: u32 },
+    /// Per-send automation. `send_index` is the index in the source
+    /// track's send list at envelope-creation time; stable until the
+    /// list is reordered.
+    Send {
+        send_index: u32,
+        kind: SendEnvelopeKind,
+    },
+    /// Per-take automation. Keyed by `(item, take, kind)`. The
+    /// owning project + track is implicit (resolved via item lookup).
+    Take {
+        item_guid: String,
+        take_guid: String,
+        kind: TakeEnvelopeKind,
+    },
     /// Free-form by name (rare; ReaScript-style).
     Named(String),
 }
@@ -90,6 +106,19 @@ impl EnvelopeKey {
             } => Self::FxParam {
                 fx_guid: fx_guid.clone(),
                 param_index: *param_index,
+            },
+            EnvelopeRef::Send { send_index, kind } => Self::Send {
+                send_index: *send_index,
+                kind: *kind,
+            },
+            EnvelopeRef::Take {
+                item_guid,
+                take_guid,
+                kind,
+            } => Self::Take {
+                item_guid: item_guid.clone(),
+                take_guid: take_guid.clone(),
+                kind: *kind,
             },
             EnvelopeRef::ByName(n) => Self::Named(n.clone()),
         }
@@ -127,6 +156,36 @@ impl EnvelopeData {
                 Some(fx_guid.clone()),
                 Some(*param_index),
                 format!("FX {}: param {}", fx_guid, param_index),
+            ),
+            EnvelopeKey::Send { send_index, kind } => (
+                // Map send kinds onto the closest track-envelope type
+                // for the snapshot's `envelope_type` discriminator.
+                match kind {
+                    SendEnvelopeKind::Volume => EnvelopeType::Volume,
+                    SendEnvelopeKind::Pan => EnvelopeType::Pan,
+                    SendEnvelopeKind::Mute => EnvelopeType::Mute,
+                },
+                None,
+                None,
+                format!("Send {} {:?}", send_index, kind),
+            ),
+            EnvelopeKey::Take {
+                item_guid: _,
+                take_guid: _,
+                kind,
+            } => (
+                // Take envelope kinds don't map onto track envelope
+                // types cleanly (no Pitch type on the track side).
+                // Surface as Volume + a name suffix so the discriminator
+                // is at least non-FxParam.
+                match kind {
+                    TakeEnvelopeKind::Pan => EnvelopeType::Pan,
+                    TakeEnvelopeKind::Mute => EnvelopeType::Mute,
+                    _ => EnvelopeType::Volume,
+                },
+                None,
+                None,
+                format!("Take {:?}", kind),
             ),
             EnvelopeKey::Named(n) => (EnvelopeType::Volume, None, None, n.clone()),
         };
@@ -195,6 +254,9 @@ pub struct ProjectState {
     pub envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
     /// Global automation override (`None` = no override active).
     pub global_automation_override: Option<AutomationMode>,
+    /// Project Media/FX Bay persistent state (retained paths +
+    /// bay folder layout). `None` until the bay is first used.
+    pub bay_state: Option<crate::media_bay::BayState>,
     /// Decoded audio sources keyed by take GUID. Populated by
     /// `crate::audio_engine::materialize::materialize_audio` (or
     /// directly via `attach_audio_source`). Read by the mixer during
@@ -246,6 +308,7 @@ impl ProjectState {
             midi_notes: HashMap::new(),
             envelopes: HashMap::new(),
             global_automation_override: None,
+            bay_state: None,
             #[cfg(any(feature = "audio", feature = "decode"))]
             audio_sources: HashMap::new(),
             next_region_id: 0,
@@ -303,6 +366,20 @@ pub struct Standalone {
     pub(crate) transport_engines: Arc<
         Mutex<std::collections::HashMap<String, Arc<crate::transport_engine::TransportBundle>>>,
     >,
+    /// Shared file-intake resolver used by `MediaBay`. Single source
+    /// of truth so resolver installs persist across `media_bay()`
+    /// handles and across threads.
+    pub(crate) bay_resolver:
+        Arc<Mutex<Option<Box<dyn crate::media_bay::BayFileResolver>>>>,
+    /// Touch / latch state for realtime automation write modes.
+    pub(crate) automation_touch:
+        Arc<Mutex<crate::automation_touch::AutomationTouchState>>,
+    /// Loaded plugin instances keyed by `fx_guid`. Separate from
+    /// `ProjectState.fx_chains` (which carries proto-serializable
+    /// `FxEntry` metadata only) so the renderer can `lock()` plugins
+    /// independently of project state mutations.
+    pub(crate) plugin_instances:
+        Arc<Mutex<std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>>>,
 }
 
 impl Default for Standalone {
@@ -317,6 +394,11 @@ impl Standalone {
         Self {
             state: Arc::new(Mutex::new(StandaloneState::new())),
             transport_engines: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            bay_resolver: Arc::new(Mutex::new(None)),
+            automation_touch: Arc::new(Mutex::new(
+                crate::automation_touch::AutomationTouchState::default(),
+            )),
+            plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -408,9 +490,37 @@ impl Standalone {
         &self,
         guid: &str,
     ) -> Result<crate::audio_engine::AudioEngine, String> {
-        let bundle = self.transport_engine_for(guid);
-        bundle.disable_soft_clock();
-        crate::audio_engine::AudioEngine::with_shared(bundle.shared.clone())
+        // Project mode: cpal callback renders the full track / item /
+        // routing graph via `ProjectRenderer`. Soft clock disabled
+        // because the audio callback now drives `advance()`.
+        crate::audio_engine::AudioEngine::attached_to(self, guid)
+    }
+
+    /// Whether a loaded plugin instance is backing the given FX
+    /// guid. `false` for synthetic / failed-to-load entries.
+    pub fn has_plugin_instance(&self, fx_guid: &str) -> bool {
+        self.plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned")
+            .contains_key(fx_guid)
+    }
+
+    /// Whether the plugin backing `fx_guid` is currently activated
+    /// (post-`prepare`, pre-`deactivate`). `false` for unloaded /
+    /// missing entries.
+    pub fn plugin_is_prepared(&self, fx_guid: &str) -> bool {
+        self.plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned")
+            .get(fx_guid)
+            .map(|p| p.is_prepared())
+            .unwrap_or(false)
+    }
+
+    /// Project Media/FX Bay handle. Cheap to construct — clones an
+    /// `Arc` over self. See [`crate::media_bay`] for the API.
+    pub fn media_bay(&self) -> crate::media_bay::MediaBay {
+        crate::media_bay::MediaBay::new(self.clone())
     }
 
     /// Read-only access to a project's audio source map. Returns

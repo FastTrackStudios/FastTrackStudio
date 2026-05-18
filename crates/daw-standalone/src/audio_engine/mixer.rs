@@ -18,9 +18,11 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use tracing::{error, info};
 
+use crate::sync::Standalone;
 use crate::transport_engine::{PlayStateRepr, TransportShared};
 
 use super::DecodedAudio;
+use super::render::ProjectRenderer;
 
 /// Handle to a loaded track in the audio engine.
 ///
@@ -144,6 +146,20 @@ impl AudioEngine {
         Self::with_shared(Arc::new(TransportShared::new(48_000, 120.0)))
     }
 
+    /// Create an engine wired to a specific project on `daw`. The
+    /// callback renders via [`ProjectRenderer`] every block, so the
+    /// project's tracks / items / routing / audio sources are heard
+    /// the moment they're loaded — no `add_track` boilerplate needed.
+    ///
+    /// Sample rate, transport shared state, and soft-clock disable are
+    /// all handled here. Drop the returned `AudioEngine` to stop the
+    /// stream.
+    pub fn attached_to(daw: &Standalone, project_guid: &str) -> Result<Self, String> {
+        let bundle = daw.transport_engine_for(project_guid);
+        bundle.disable_soft_clock();
+        Self::with_project(daw.clone(), project_guid.to_string(), bundle.shared.clone())
+    }
+
     /// Create an engine that shares its sample clock with the given
     /// `TransportShared`. The shared sample-rate is rewritten to the
     /// device's actual rate at startup.
@@ -204,6 +220,144 @@ impl AudioEngine {
             shared,
             _stream: stream,
         })
+    }
+
+    /// Project-mode constructor. Same as [`with_shared`](Self::with_shared)
+    /// but the callback renders via [`ProjectRenderer`] for
+    /// `(daw, project_guid)` instead of mixing the engine's private
+    /// track list. Use [`attached_to`](Self::attached_to) for the
+    /// common case where you want to discover/share the
+    /// `TransportShared` from a `Standalone`.
+    pub fn with_project(
+        daw: Standalone,
+        project_guid: String,
+        shared: Arc<TransportShared>,
+    ) -> Result<Self, String> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or("No audio output device found")?;
+        let supported_config = device
+            .default_output_config()
+            .map_err(|e| format!("Failed to get default output config: {e}"))?;
+
+        let sample_rate = supported_config.sample_rate();
+        let channels = supported_config.channels();
+        info!(
+            "Audio engine (project mode): {} channels, {} Hz, format {:?}, guid={}",
+            channels,
+            sample_rate,
+            supported_config.sample_format(),
+            project_guid,
+        );
+        shared.set_sample_rate(sample_rate);
+
+        let state = Arc::new(Mutex::new(MixerState {
+            sample_rate,
+            channels,
+            tracks: Vec::new(),
+            master_gain: 1.0,
+        }));
+
+        let config = StreamConfig {
+            channels,
+            sample_rate,
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        let stream = match supported_config.sample_format() {
+            SampleFormat::F32 => Self::build_project_stream::<f32>(
+                &device,
+                &config,
+                daw.clone(),
+                project_guid.clone(),
+                shared.clone(),
+            )?,
+            SampleFormat::I16 => Self::build_project_stream::<i16>(
+                &device,
+                &config,
+                daw.clone(),
+                project_guid.clone(),
+                shared.clone(),
+            )?,
+            SampleFormat::U16 => Self::build_project_stream::<u16>(
+                &device,
+                &config,
+                daw.clone(),
+                project_guid.clone(),
+                shared.clone(),
+            )?,
+            format => return Err(format!("Unsupported sample format: {format:?}")),
+        };
+        stream
+            .play()
+            .map_err(|e| format!("Failed to start audio stream: {e}"))?;
+        Ok(Self {
+            state,
+            shared,
+            _stream: stream,
+        })
+    }
+
+    fn build_project_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
+        device: &cpal::Device,
+        config: &StreamConfig,
+        daw: Standalone,
+        project_guid: String,
+        shared: Arc<TransportShared>,
+    ) -> Result<Stream, String> {
+        let channels = config.channels as usize;
+        let sample_rate = config.sample_rate;
+        let stream = device
+            .build_output_stream(
+                config,
+                move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                    let num_samples = data.len();
+                    if channels == 0 || num_samples == 0 {
+                        return;
+                    }
+                    let num_frames = num_samples / channels;
+                    let playing = shared.play_state().is_advancing();
+                    if !playing {
+                        for s in data.iter_mut() {
+                            *s = T::from_sample(0.0);
+                        }
+                        return;
+                    }
+                    let start = shared.playhead_samples().0.max(0) as u64;
+
+                    // Snapshot + render. ProjectRenderer briefly
+                    // acquires the project Mutex (Vec snapshot only,
+                    // not the render itself). Future work: lock-free
+                    // RCU snapshot so the callback never blocks.
+                    let block = ProjectRenderer::new(&daw, &project_guid, sample_rate)
+                        .render_block(start, num_frames);
+
+                    // Interleave the stereo block into the cpal
+                    // buffer (handle channel-count mismatch by
+                    // duplicating or summing).
+                    for frame in 0..num_frames {
+                        let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
+                        let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
+                        for ch in 0..channels {
+                            let v = match ch {
+                                0 => l,
+                                1 => r,
+                                _ => (l + r) * 0.5, // surround channels get the mono sum
+                            };
+                            data[frame * channels + ch] = T::from_sample(v);
+                        }
+                    }
+
+                    shared.advance(num_frames as u32);
+                },
+                move |err| {
+                    error!("Audio stream error: {err}");
+                },
+                None,
+            )
+            .map_err(|e| format!("Failed to build output stream: {e}"))?;
+        Ok(stream)
     }
 
     /// Access the shared transport state — useful for wiring into the

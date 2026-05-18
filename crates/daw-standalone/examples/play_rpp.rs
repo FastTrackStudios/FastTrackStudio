@@ -1,6 +1,5 @@
-//! Load an RPP project + decode its audio sources via the unified
-//! `project_loader::load_rpp` path, then render a short stereo block
-//! and print the resulting peak levels.
+//! Load an RPP project, decode its audio sources, and play it through
+//! the default cpal output via `AudioEngine::attached_to`.
 //!
 //! Run with:
 //!
@@ -8,14 +7,20 @@
 //! cargo run -p daw-standalone --features rpp-loader --example play_rpp -- /path/to/song.rpp
 //! ```
 //!
-//! Note: this example does NOT drive the cpal output stream from the
-//! project renderer yet — that integration lives in a follow-up task.
-//! For now it demonstrates the load + materialize + render pipeline.
+//! Pipeline:
+//! 1. `project_loader::load_rpp` parses the file + materializes audio
+//!    sources via a `std::fs::read` resolver.
+//! 2. `Standalone::attach_audio_engine(guid)` builds a cpal output
+//!    stream whose callback drives `ProjectRenderer` every block.
+//! 3. The transport service kicks playback via `Transport::play`.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use daw_standalone::audio_engine::render::ProjectRenderer;
-use daw_standalone::project_loader::load_rpp;
+use daw_proto::ProjectContext;
+use daw_proto::transport::service::Transport;
+use daw_standalone::media_bay::ProjectRelativeResolver;
+use daw_standalone::project_loader::load_rpp_via_bay;
 use daw_standalone::sync::Standalone;
 
 fn main() -> Result<(), String> {
@@ -35,22 +40,19 @@ fn main() -> Result<(), String> {
         .and_then(|s| s.to_str())
         .unwrap_or("project");
 
+    // Install a project-relative filesystem resolver on the bay.
+    // RPP source paths are usually relative to the project dir;
+    // `ProjectRelativeResolver` handles that uniformly. On WASM the
+    // app installs a JS-backed resolver here instead.
+    daw.media_bay()
+        .set_file_resolver(Box::new(ProjectRelativeResolver::new(project_dir.clone())));
+
     println!("Loading {path}...");
-    let (proj, audio) = load_rpp(
+    let (proj, audio) = load_rpp_via_bay(
         &daw,
         project_name,
         rpp_path.to_string_lossy().as_ref(),
         &rpp_text,
-        |file_path| {
-            // Resolve relative paths against the project dir.
-            let pb = PathBuf::from(file_path);
-            let abs = if pb.is_absolute() {
-                pb
-            } else {
-                project_dir.join(pb)
-            };
-            std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
-        },
     )?;
 
     println!(
@@ -73,28 +75,21 @@ fn main() -> Result<(), String> {
         eprintln!("    ! {take}: {err}");
     }
 
-    // Render the first 2 seconds and report peak.
-    let sample_rate = 48_000;
-    let frames = (sample_rate as usize) * 2;
-    let block = ProjectRenderer::new(&daw, &proj.project_guid, sample_rate).render_block(0, frames);
-    let (peak_l, peak_r) = peak_stereo(&block.samples);
-    println!("first 2s peak — L={peak_l:.4}, R={peak_r:.4}");
+    // Attach the cpal audio engine. The output callback now renders
+    // the loaded project every block — no more separate AudioEngine
+    // track list to populate.
+    let _engine = daw.attach_audio_engine(&proj.project_guid)?;
+    let ctx = ProjectContext::Project(proj.project_guid.clone());
+    Transport::play(&daw, ctx.clone()).map_err(|e| format!("play failed: {e:?}"))?;
 
-    Ok(())
-}
-
-fn peak_stereo(samples: &[f32]) -> (f32, f32) {
-    let mut l: f32 = 0.0;
-    let mut r: f32 = 0.0;
-    for (i, s) in samples.iter().enumerate() {
-        let v = s.abs();
-        if i & 1 == 0 {
-            if v > l {
-                l = v;
-            }
-        } else if v > r {
-            r = v;
-        }
+    println!("Playing. Ctrl-C to stop.");
+    // Poll position so the user sees something happen. The cpal stream
+    // is driven from its own thread; we just sleep here.
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        let pos = Transport::get_position(&daw, ctx.clone());
+        print!("\r  pos = {pos:7.3} s");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
     }
-    (l, r)
 }

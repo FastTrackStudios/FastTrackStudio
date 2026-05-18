@@ -1,0 +1,225 @@
+//! CLAP host smoke tests. Verifies the public API compiles + handles
+//! error paths cleanly. Real-plugin tests are gated on a local CLAP
+//! bundle path being set via `DAW_TEST_CLAP_BUNDLE` env var (skipped
+//! otherwise so CI without a plugin installed stays green).
+
+#![cfg(feature = "clap-host")]
+
+use std::path::PathBuf;
+
+use daw_standalone::audio_engine::plugin_host::{ClapHost, ClapHostError};
+
+#[test]
+fn load_from_bogus_path_errors_cleanly() {
+    let host = ClapHost::default();
+    let err = host
+        .list_in_bundle(&PathBuf::from("/definitely/not/a/clap/bundle.clap"))
+        .unwrap_err();
+    assert!(matches!(err, ClapHostError::BundleLoad));
+}
+
+#[test]
+fn host_constructs_with_custom_identity() {
+    let host = ClapHost::new("MyDaw", "com.example.mydaw");
+    let _ = host; // construction must not panic; visible via dropping the value
+}
+
+/// Real-plugin smoke test: list descriptors. Set
+/// `DAW_TEST_CLAP_BUNDLE=/path/to/something.clap` before running.
+#[test]
+fn lists_descriptors_in_a_real_bundle() {
+    let Some(path) = std::env::var_os("DAW_TEST_CLAP_BUNDLE") else {
+        eprintln!("(skip) set DAW_TEST_CLAP_BUNDLE to a .clap bundle path to exercise this test");
+        return;
+    };
+    let descriptors = ClapHost::default()
+        .list_in_bundle(&PathBuf::from(path))
+        .expect("bundle should load");
+    assert!(!descriptors.is_empty(), "bundle should expose ≥1 plugin");
+    let first = &descriptors[0];
+    assert!(!first.id.is_empty(), "plugin should have an id");
+    eprintln!(
+        "loaded {} descriptor(s); first = id={:?} name={:?} vendor={:?} version={:?}",
+        descriptors.len(),
+        first.id,
+        first.name,
+        first.vendor,
+        first.version,
+    );
+}
+
+/// Real-plugin processing smoke test. Activates the plugin, pushes
+/// 4 blocks of audio through it, asserts every output sample is
+/// finite (no NaN/Inf), then deactivates.
+#[test]
+fn processes_audio_through_a_real_plugin() {
+    let Some(path) = std::env::var_os("DAW_TEST_CLAP_BUNDLE") else {
+        eprintln!("(skip) set DAW_TEST_CLAP_BUNDLE to a .clap bundle path to exercise this test");
+        return;
+    };
+    let host = ClapHost::default();
+    let mut plugin = host
+        .load(&PathBuf::from(path), 0)
+        .expect("plugin should instantiate");
+
+    let sample_rate = 48_000.0;
+    let block = 128usize;
+    plugin
+        .prepare(sample_rate, block as u32)
+        .expect("plugin should activate");
+    assert!(plugin.is_prepared());
+    assert_eq!(plugin.sample_rate(), Some(sample_rate));
+    assert_eq!(plugin.block_size(), Some(block as u32));
+
+    // 4 blocks of 1 kHz sine input, push through, capture output.
+    let total = block * 4;
+    let mut input_l = Vec::with_capacity(total);
+    let mut input_r = Vec::with_capacity(total);
+    for i in 0..total {
+        let s = (i as f64 / sample_rate * 1000.0 * std::f64::consts::TAU)
+            .sin() as f32
+            * 0.5;
+        input_l.push(s);
+        input_r.push(s);
+    }
+    let mut out_l = vec![0.0f32; total];
+    let mut out_r = vec![0.0f32; total];
+    for chunk in 0..4 {
+        let start = chunk * block;
+        let end = start + block;
+        plugin
+            .process_block(
+                &input_l[start..end],
+                &input_r[start..end],
+                &mut out_l[start..end],
+                &mut out_r[start..end],
+                &[],
+            )
+            .expect("process_block should succeed");
+    }
+    plugin.deactivate();
+    assert!(!plugin.is_prepared());
+
+    for (i, s) in out_l.iter().chain(out_r.iter()).enumerate() {
+        assert!(s.is_finite(), "non-finite sample at {i}: {s}");
+    }
+}
+
+/// End-to-end render-pipeline test: add a real CLAP plugin to a
+/// track's FX chain via the Effects service, render a block via
+/// ProjectRenderer, assert the plugin saw audio (output is finite
+/// and the chain's `plugin_instances` map carries the plugin).
+#[cfg(feature = "decode")]
+#[test]
+fn clap_plugin_processes_in_render_pipeline() {
+    let Some(path) = std::env::var_os("DAW_TEST_CLAP_BUNDLE") else {
+        eprintln!("(skip) set DAW_TEST_CLAP_BUNDLE to a .clap bundle path to exercise this test");
+        return;
+    };
+    use daw_proto::fx::{Effects, FxChainContext};
+    use daw_proto::midi::Midi;
+    use daw_proto::project::ProjectContext;
+    use daw_proto::{ItemRef, ProjectInfo, TrackRef, Tracks};
+    use daw_standalone::audio_engine::DecodedAudio;
+    use daw_standalone::audio_engine::materialize::attach_audio_source;
+    use daw_standalone::audio_engine::render::ProjectRenderer;
+    use daw_standalone::sync::Standalone;
+
+    let path_str = path.to_string_lossy().into_owned();
+    let daw = Standalone::new();
+    daw.seed_project(ProjectInfo {
+        guid: "p".into(),
+        name: "p".into(),
+        path: String::new(),
+    });
+    let ctx = ProjectContext::Project("p".into());
+    let track_guid = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
+
+    // Add the CLAP plugin to this track's FX chain. The Effects::add
+    // path sniffs the format from the path string (ends in `.clap`).
+    let fx_guid = Effects::add(
+        &daw,
+        ctx.clone(),
+        FxChainContext::Track(track_guid.clone()),
+        &path_str,
+    )
+    .expect("FX add should succeed");
+
+    assert!(
+        daw.has_plugin_instance(&fx_guid),
+        "plugin instance should be stored under fx_guid"
+    );
+
+    // Mint a 1s mono const audio item on the track so there's signal
+    // flowing into the FX chain.
+    let loc = Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track_guid), 0.0, 1.0)
+        .unwrap();
+    let item_guid = match loc.item {
+        ItemRef::Guid(g) => g,
+        _ => panic!(),
+    };
+    let active = daw_proto::Takes::get_active_take(&daw, ctx.clone(), ItemRef::Guid(item_guid))
+        .unwrap();
+    daw.write_project("p", |p| {
+        for tl in p.takes.values_mut() {
+            for t in tl.takes.iter_mut() {
+                if t.guid == active.guid {
+                    t.is_midi = false;
+                    t.source_type = daw_proto::item::SourceType::Audio;
+                }
+            }
+        }
+    });
+    let sample_rate = 48_000;
+    let frames = (sample_rate as usize) / 10;
+    attach_audio_source(
+        &daw,
+        "p",
+        &active.guid,
+        DecodedAudio {
+            samples: vec![0.3f32; sample_rate as usize],
+            channels: 1,
+            sample_rate,
+        },
+    );
+
+    let block = ProjectRenderer::new(&daw, "p", sample_rate).render_block(0, frames);
+    for (i, s) in block.samples.iter().enumerate() {
+        assert!(s.is_finite(), "non-finite sample at {i}: {s}");
+    }
+    assert!(
+        daw.plugin_is_prepared(&fx_guid),
+        "plugin should be prepared after first render block"
+    );
+}
+
+/// Real-plugin smoke test: load + list params + report latency.
+/// Skipped without `DAW_TEST_CLAP_BUNDLE`.
+#[test]
+fn loads_real_plugin_and_inspects_params() {
+    let Some(path) = std::env::var_os("DAW_TEST_CLAP_BUNDLE") else {
+        eprintln!("(skip) set DAW_TEST_CLAP_BUNDLE to a .clap bundle path to exercise this test");
+        return;
+    };
+    let host = ClapHost::default();
+    let mut plugin = host
+        .load(&PathBuf::from(path), 0)
+        .expect("plugin should instantiate");
+    let descriptor = plugin.descriptor().clone();
+    let params = plugin.params();
+    let latency = plugin.latency();
+    eprintln!(
+        "plugin '{}' v{} by '{}' — {} param(s), reported latency = {} samples",
+        descriptor.name,
+        descriptor.version,
+        descriptor.vendor,
+        params.len(),
+        latency,
+    );
+    for p in params.iter().take(5) {
+        eprintln!(
+            "  param #{} '{}' min={} max={} default={}",
+            p.id, p.name, p.min, p.max, p.default
+        );
+    }
+}

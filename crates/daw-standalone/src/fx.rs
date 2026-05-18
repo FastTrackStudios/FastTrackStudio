@@ -176,26 +176,54 @@ impl Effects for Standalone {
     fn add(&self, project: ProjectContext, chain: FxChainContext, name: &str) -> Option<String> {
         let guid = resolve_project(self, &project)?;
         let key: FxChainKey = (&chain).into();
-        self.with_project_mut(&guid, |p| {
+        // Try to load a real plugin first (CLAP today; VST3/LV2 land
+        // when their backends ship). On failure or for synthetic names
+        // fall through to the existing synthetic 8-param entry.
+        let mut real_plugin = crate::plugin::load_plugin(name).ok().flatten();
+        let real_param_count = real_plugin
+            .as_mut()
+            .map(|p| p.params().len() as u32)
+            .unwrap_or(8);
+        let real_descriptor = real_plugin.as_ref().map(|p| p.descriptor());
+        let plugin_format = real_descriptor
+            .as_ref()
+            .map(|d| d.format)
+            .unwrap_or(crate::plugin::PluginFormat::Synthetic);
+
+        let new_guid = self.with_project_mut(&guid, |p| {
             let chain_vec = p.fx_chains.entry(key).or_default();
             let new_index = chain_vec.len() as u32;
             let new_guid = Uuid::new_v4().to_string();
             p.next_fx_counter += 1;
 
             let mut fx = Fx::new(new_guid.clone(), new_index, name.to_string());
-            fx.plugin_name = name.to_string();
-            fx.plugin_type = guess_fx_type(name);
-            fx.parameter_count = 8;
+            fx.plugin_name = real_descriptor
+                .as_ref()
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| name.to_string());
+            fx.plugin_type = match plugin_format {
+                crate::plugin::PluginFormat::Clap => daw_proto::fx::FxType::Clap,
+                crate::plugin::PluginFormat::Vst3 => daw_proto::fx::FxType::Vst3,
+                _ => guess_fx_type(name),
+            };
+            fx.parameter_count = real_param_count;
 
             chain_vec.push(FxEntry {
                 fx,
                 state_chunk: String::new(),
                 params: default_params(),
             });
-            Some(new_guid)
+            new_guid
         })
-        .ok()
-        .flatten()
+        .ok()?;
+        // Stash the loaded plugin instance for the renderer to find.
+        if let Some(plugin) = real_plugin {
+            self.plugin_instances
+                .lock()
+                .expect("plugin_instances poisoned")
+                .insert(new_guid.clone(), plugin);
+        }
+        Some(new_guid)
     }
 
     fn add_at(&self, project: ProjectContext, request: AddFxAtRequest) -> Option<String> {
@@ -233,15 +261,21 @@ impl Effects for Standalone {
     fn remove(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         let key: FxChainKey = (&target.context).into();
-        self.with_project_mut(&guid, |p| {
+        let removed_guid = self.with_project_mut(&guid, |p| {
             let chain = p.fx_chains.get_mut(&key).ok_or_else(not_found_fx)?;
             let i = find_fx_index(chain, &target.fx).ok_or_else(not_found_fx)?;
-            chain.remove(i);
+            let removed = chain.remove(i);
             for (i, e) in chain.iter_mut().enumerate() {
                 e.fx.index = i as u32;
             }
-            Ok::<(), DawError>(())
-        })?
+            Ok::<String, DawError>(removed.fx.guid)
+        })??;
+        // Drop any loaded plugin instance backing this FX entry.
+        self.plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned")
+            .remove(&removed_guid);
+        Ok(())
     }
 
     fn move_to(&self, project: ProjectContext, target: FxTarget, new_index: u32) -> DawResult<()> {
