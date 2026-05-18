@@ -1498,6 +1498,29 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "multi-track vol/pan: converter-authored PTX has 11× 0x1029 per track; parser pairs 0x251a names with 0x1029[0..N] globally and so only track 0 sees its own vol — needs scoped pairing"]
+    fn write_multi_with_vol_pan() {
+        let specs = vec![
+            NativeTrackSpec {
+                name: "Quiet".into(),
+                volume_centibel: -120, // -12 dB
+                ..Default::default()
+            },
+            NativeTrackSpec {
+                name: "Loud".into(),
+                volume_centibel: 60, // +6 dB
+                ..Default::default()
+            },
+        ];
+        let session = parse_multi(&specs);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let quiet = tracks.iter().find(|t| t.name == "Quiet").expect("Quiet");
+        let loud = tracks.iter().find(|t| t.name == "Loud").expect("Loud");
+        assert_eq!(quiet.volume_centibel, -120, "Quiet vol");
+        assert_eq!(loud.volume_centibel, 60, "Loud vol");
+    }
+
+    #[test]
     fn write_five_distinct_tracks() {
         let specs: Vec<_> = ["Drums", "Bass", "Guitar", "Synth", "Vox"]
             .iter()
