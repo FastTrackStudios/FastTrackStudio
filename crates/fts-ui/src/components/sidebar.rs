@@ -16,10 +16,22 @@ pub enum SidebarSide {
 }
 
 /// Shared state provided by [`SidebarProvider`].
+///
+/// `compact` is the "rail" / icon-only state — when true, sidebars
+/// configured with [`SidebarCollapsible::Icon`] shrink to a narrow
+/// icon strip and any [`SidebarLabel`] children render nothing.
 #[derive(Clone, Copy, PartialEq)]
 pub struct SidebarContext {
-    pub collapsed: Signal<bool>,
+    pub compact: Signal<bool>,
     pub side: SidebarSide,
+}
+
+/// Convenience hook — returns the current sidebar `compact` flag
+/// from the surrounding [`SidebarProvider`]. Use this to hide
+/// labels, group titles, or anything else that should disappear in
+/// rail mode.
+pub fn use_sidebar_compact() -> Signal<bool> {
+    use_context::<SidebarContext>().compact
 }
 
 // ---------------------------------------------------------------------------
@@ -28,8 +40,9 @@ pub struct SidebarContext {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SidebarProviderProps {
+    /// Start in compact (icon-rail) mode.
     #[props(default = false)]
-    pub default_collapsed: bool,
+    pub default_compact: bool,
     #[props(default)]
     pub class: String,
     pub children: Element,
@@ -37,9 +50,9 @@ pub struct SidebarProviderProps {
 
 #[component]
 pub fn SidebarProvider(props: SidebarProviderProps) -> Element {
-    let collapsed = use_signal(|| props.default_collapsed);
+    let compact = use_signal(|| props.default_compact);
     let ctx = SidebarContext {
-        collapsed,
+        compact,
         side: SidebarSide::Left,
     };
     use_context_provider(|| ctx);
@@ -91,10 +104,10 @@ pub fn Sidebar(props: SidebarProps) -> Element {
     // Update side in context so children/trigger know which side we are on.
     ctx.side = props.side;
 
-    let collapsed = (ctx.collapsed)();
+    let compact = (ctx.compact)();
     let is_icon = props.collapsible == SidebarCollapsible::Icon;
 
-    let width = if is_icon && collapsed { "w-16" } else { "w-64" };
+    let width = if is_icon && compact { "w-14" } else { "w-64" };
 
     let variant_cls = match props.variant {
         SidebarVariant::Default => {
@@ -111,7 +124,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
         }
     };
 
-    let state = if collapsed { "collapsed" } else { "expanded" };
+    let state = if compact { "compact" } else { "expanded" };
     let variant_attr = match props.variant {
         SidebarVariant::Default => "default",
         SidebarVariant::Floating => "floating",
@@ -437,8 +450,8 @@ pub fn SidebarTrigger(props: SidebarTriggerProps) -> Element {
             class: crate::cn::merge_slice(&["inline-flex items-center justify-center size-8 rounded-lg hover:bg-sidebar-accent transition-colors", props.class.as_str()]),
             r#type: "button",
             onclick: move |_| {
-                let current = (ctx.collapsed)();
-                ctx.collapsed.set(!current);
+                let current = (ctx.compact)();
+                ctx.compact.set(!current);
             },
             svg {
                 class: "size-4",
@@ -453,6 +466,34 @@ pub fn SidebarTrigger(props: SidebarTriggerProps) -> Element {
                 rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
                 path { d: "M9 3v18" }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SidebarLabel — auto-hides in compact mode
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SidebarLabelProps {
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+/// Wrap any text/label that should disappear when the sidebar is in
+/// compact (icon-only / rail) mode. Reads
+/// [`SidebarContext::compact`] from context.
+#[component]
+pub fn SidebarLabel(props: SidebarLabelProps) -> Element {
+    let compact = (use_context::<SidebarContext>().compact)();
+    if compact {
+        return rsx! {};
+    }
+    rsx! {
+        span {
+            class: crate::cn::merge_slice(&["truncate", props.class.as_str()]),
+            {props.children}
         }
     }
 }

@@ -78,8 +78,14 @@ pub enum DropdownSize {
 pub struct DropdownContentProps {
     #[props(default)]
     pub id: Option<String>,
+    /// Cross-axis alignment: `"start"` (default) / `"center"` / `"end"`.
     #[props(default = String::from("start"))]
     pub align: String,
+    /// Which side of the trigger to open on: `"bottom"` (default) /
+    /// `"top"` / `"right"` / `"left"`. Use `"top"` for triggers near the
+    /// bottom of a scroll container so the menu doesn't run off screen.
+    #[props(default = String::from("bottom"))]
+    pub side: String,
     #[props(default = String::from("w-56"))]
     pub width: String,
     #[props(default)]
@@ -89,17 +95,28 @@ pub struct DropdownContentProps {
 
 #[component]
 pub fn DropdownContent(props: DropdownContentProps) -> Element {
-    let align_class = match props.align.as_str() {
-        "end" => "right-0 origin-top-right",
-        "center" => "left-1/2 -translate-x-1/2 origin-top",
-        _ => "left-0 origin-top-left",
+    let anchor = match (props.side.as_str(), props.align.as_str()) {
+        ("bottom", "start") => "top-full mt-2 left-0 origin-top-left",
+        ("bottom", "center") => "top-full mt-2 left-1/2 -translate-x-1/2 origin-top",
+        ("bottom", "end") => "top-full mt-2 right-0 origin-top-right",
+        ("top", "start") => "bottom-full mb-2 left-0 origin-bottom-left",
+        ("top", "center") => "bottom-full mb-2 left-1/2 -translate-x-1/2 origin-bottom",
+        ("top", "end") => "bottom-full mb-2 right-0 origin-bottom-right",
+        ("right", "start") => "left-full ml-2 top-0 origin-top-left",
+        ("right", "center") => "left-full ml-2 top-1/2 -translate-y-1/2 origin-left",
+        ("right", "end") => "left-full ml-2 bottom-0 origin-bottom-left",
+        ("left", "start") => "right-full mr-2 top-0 origin-top-right",
+        ("left", "center") => "right-full mr-2 top-1/2 -translate-y-1/2 origin-right",
+        ("left", "end") => "right-full mr-2 bottom-0 origin-bottom-right",
+        // Unknown combos fall back to bottom-start.
+        _ => "top-full mt-2 left-0 origin-top-left",
     };
 
     rsx! {
         PrimitiveDropdownContent {
             id: props.id,
             class: crate::cn::merge(format!(
-                "absolute z-[100] mt-2 min-w-48 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 {} {align_class} {}",
+                "absolute z-[100] min-w-48 rounded-lg bg-popover text-popover-foreground border border-border shadow-md p-1 {} {anchor} {}",
                 props.width, props.class
             )),
             {props.children}

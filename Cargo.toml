@@ -35,9 +35,27 @@ fts-story-shell     = { path = "../fts-story/crates/fts-story-shell" }
 fts-story-snapshots = { path = "../fts-story/crates/fts-story-snapshots" }
 fts-story-parity    = { path = "../fts-story/crates/fts-story-parity" }
 linkme              = "0.3"
+# fzf-style fuzzy matching — the matcher core extracted from Helix's
+# Nucleo. Used to rank cmdk-style searches in Combobox / Command.
+nucleo-matcher      = "0.3"
 
 [workspace.lints.rust]
 unused = "warn"
+
+# TEMP: local primitives + Blitz checkouts for Select-trace investigation. Remove before commit.
+[patch."https://github.com/DioxusLabs/components"]
+dioxus-primitives = { path = "/home/cody/Development/FastTrackStudio/forks/components/primitives" }
+[patch."https://github.com/FastTrackStudios/blitz"]
+dioxus-native = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/dioxus-native" }
+dioxus-native-dom = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/dioxus-native-dom" }
+blitz-dom = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-dom" }
+blitz-paint = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-paint" }
+blitz-html = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-html" }
+blitz-net = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-net" }
+blitz-shell = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-shell" }
+blitz-traits = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-traits" }
+stylo_taffy = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/stylo_taffy" }
+debug_timer = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/debug_timer" }
 
 [patch.crates-io]
 # Our fork of Stylo with the `hover` / `pointer` / `any-hover` /

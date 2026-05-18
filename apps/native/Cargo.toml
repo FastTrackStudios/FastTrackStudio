@@ -9,7 +9,7 @@ edition.workspace = true
 # library crate independently depends on the real crates.io `dioxus`; both
 # unify on dioxus-core 0.7.x at link time.
 dioxus = { package = "dioxus-native", git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
-fts-ui = { workspace = true, features = ["stories"] }
+fts-ui = { workspace = true }
 fts-story-shell.workspace = true
 
 [lints]
