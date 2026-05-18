@@ -52,3 +52,15 @@ pub struct TrackStreamEvent {
     pub project_guid: String,
     pub event: TrackEvent,
 }
+
+// Trivial Reborrow impls for owned types — lets `SelfRef<T>::get()`
+// hand subscribers `&T` for ergonomic field access. Safe because these
+// types have no borrowed lifetimes.
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::TrackStreamEvent;
+    unsafe impl vox_types::Reborrow for TrackStreamEvent {
+        type Ref<'a> = TrackStreamEvent;
+    }
+}

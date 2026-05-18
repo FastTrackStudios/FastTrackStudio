@@ -1,0 +1,93 @@
+//! Unified event types for the cross-domain `EventBus`.
+//!
+//! `DawEvent` wraps every per-domain stream event variant onto one
+//! channel so consumers like OSC/MIDI bridges, the daw-cli inspector,
+//! and web UIs can subscribe once and receive everything they're
+//! interested in. `BusFilter` toggles each domain on or off so a
+//! subscriber doesn't pay decode/transit cost for events it'll throw
+//! away.
+//!
+//! The per-domain `Tracks::subscribe` / `Markers::subscribe` / etc.
+//! traits remain — they're the right surface when a consumer cares
+//! about exactly one domain.
+
+use crate::marker::MarkerStreamEvent;
+use crate::region::RegionStreamEvent;
+use crate::tempo_map::TempoMapStreamEvent;
+use crate::track::TrackStreamEvent;
+use crate::transport::{PositionTick, TransportEvent};
+use facet::Facet;
+
+/// One event from any subscribed domain. Each variant wraps the
+/// existing per-domain stream type so no information is lost
+/// compared to subscribing per-domain.
+#[derive(Debug, Clone, Facet)]
+#[repr(u8)]
+pub enum DawEvent {
+    Track(TrackStreamEvent),
+    Marker(MarkerStreamEvent),
+    Region(RegionStreamEvent),
+    TempoMap(TempoMapStreamEvent),
+    TransportState(TransportEvent),
+    TransportPosition(PositionTick),
+}
+
+/// Per-subscriber filter. Every flag defaults to off; callers opt in
+/// to the domains they care about. `all()` / `everything_but_position()`
+/// cover the common shapes — OSC bridges typically want everything,
+/// UI inspectors typically skip the 30Hz position firehose.
+#[derive(Clone, Copy, Debug, Default, Facet)]
+pub struct BusFilter {
+    pub tracks: bool,
+    pub markers: bool,
+    pub regions: bool,
+    pub tempo_map: bool,
+    pub transport_state: bool,
+    pub transport_position: bool,
+}
+
+impl BusFilter {
+    pub const fn all() -> Self {
+        Self {
+            tracks: true,
+            markers: true,
+            regions: true,
+            tempo_map: true,
+            transport_state: true,
+            transport_position: true,
+        }
+    }
+
+    pub const fn everything_but_position() -> Self {
+        Self {
+            tracks: true,
+            markers: true,
+            regions: true,
+            tempo_map: true,
+            transport_state: true,
+            transport_position: false,
+        }
+    }
+
+    /// True when at least one domain is enabled.
+    pub const fn any(&self) -> bool {
+        self.tracks
+            || self.markers
+            || self.regions
+            || self.tempo_map
+            || self.transport_state
+            || self.transport_position
+    }
+}
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{BusFilter, DawEvent};
+    unsafe impl vox_types::Reborrow for DawEvent {
+        type Ref<'a> = DawEvent;
+    }
+    unsafe impl vox_types::Reborrow for BusFilter {
+        type Ref<'a> = BusFilter;
+    }
+}

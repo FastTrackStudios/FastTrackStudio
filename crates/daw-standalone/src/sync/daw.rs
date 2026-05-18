@@ -147,6 +147,12 @@ impl StandaloneState {
 #[derive(Clone)]
 pub struct Standalone {
     pub(crate) state: Arc<Mutex<StandaloneState>>,
+    /// Per-project transport engine bundles (sample clock + subscriber pumps).
+    /// Lazily created on first access. WASM-compatible; lock-free on the
+    /// inner [`TransportShared`] atomics.
+    pub(crate) transport_engines: Arc<
+        Mutex<std::collections::HashMap<String, Arc<crate::transport_engine::TransportBundle>>>,
+    >,
 }
 
 impl Default for Standalone {
@@ -160,7 +166,36 @@ impl Standalone {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(StandaloneState::new())),
+            transport_engines: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
+    }
+
+    /// Get or lazily-create the transport engine bundle for `guid`.
+    /// Seeds initial BPM from the project's `Transport.tempo`.
+    pub fn transport_engine_for(
+        &self,
+        guid: &str,
+    ) -> Arc<crate::transport_engine::TransportBundle> {
+        // Fast path: already created.
+        {
+            let engines = self.transport_engines.lock().expect("engines poisoned");
+            if let Some(b) = engines.get(guid) {
+                return b.clone();
+            }
+        }
+        // Slow path: seed from project tempo + insert.
+        let initial_bpm = self
+            .with_project(guid, |p| p.transport.tempo.bpm())
+            .unwrap_or(120.0);
+        let bundle = Arc::new(crate::transport_engine::TransportBundle::spawn(
+            48_000,
+            initial_bpm,
+        ));
+        let mut engines = self.transport_engines.lock().expect("engines poisoned");
+        engines
+            .entry(guid.to_string())
+            .or_insert_with(|| bundle.clone())
+            .clone()
     }
 
     /// Seed an empty project into the state.
@@ -211,6 +246,21 @@ impl Standalone {
             .get(guid)
             .ok_or_else(|| DawError::not_found("Project", guid))?;
         Ok(f(project))
+    }
+
+    /// Attach a cpal-backed [`AudioEngine`](crate::audio_engine::AudioEngine)
+    /// to project `guid`. Disables the project's soft clock so the
+    /// audio callback becomes the sole driver of the playhead.
+    /// Sample-accurate. Returns the engine; drop it to release the
+    /// stream (and re-enable the soft clock manually if desired).
+    #[cfg(feature = "audio")]
+    pub fn attach_audio_engine(
+        &self,
+        guid: &str,
+    ) -> Result<crate::audio_engine::AudioEngine, String> {
+        let bundle = self.transport_engine_for(guid);
+        bundle.disable_soft_clock();
+        crate::audio_engine::AudioEngine::with_shared(bundle.shared.clone())
     }
 
     /// Captured console messages, useful in tests.

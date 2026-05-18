@@ -2,7 +2,7 @@
 
 use super::{CombineSetlistOptions, CombineSetlistResult, ProjectSummary};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait DawFileOps {
     /// Parse the `.RPP` at `path` and return a high-level summary.
     /// `error` field is populated on failure (rather than returning

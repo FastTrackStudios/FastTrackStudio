@@ -84,6 +84,8 @@ pub mod window_geometry;
 // callbacks. Parallel fast path alongside the 30Hz pollers — see
 // `control_surface.rs` for the variant-by-variant mapping.
 pub mod control_surface;
+pub mod diagnostics;
+pub mod event_bus;
 pub use control_surface::{DawControlSurface, Mode as CsurfMode};
 
 // Per-service `Reaper*` structs retired with the architect::rpc port —
@@ -130,11 +132,6 @@ pub use take_stream::{init_take_broadcaster, poll_and_broadcast_takes, subscribe
 // streaming domain. See docs/streaming-design.md.
 pub mod event_hub;
 pub use event_hub::{DawEventHub, hub as event_hub, init_event_hub};
-
-// Streaming service impls. Each takes vox::Tx<Event>, subscribes a
-// broadcast::Receiver off the hub, and forwards in a task until
-// either side disconnects.
-pub mod transport_stream;
 
 // Transport state + position polling. Called from the bridge's
 // main-thread timer tick alongside the surviving item / tempo_map

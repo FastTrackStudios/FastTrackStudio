@@ -266,4 +266,49 @@ impl Tracks for Standalone {
             Ok::<(), DawError>(())
         })?
     }
+
+    fn set_folder_depth(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _folder_depth: i32,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
+    fn reorder_selected(
+        &self,
+        _project: ProjectContext,
+        _index: u32,
+        _behavior: daw_proto::track::ReorderTracksBehavior,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
+    fn set_visibility(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _visible_in_tcp: bool,
+        _visible_in_mixer: bool,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
+    fn set_tcp_height(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _height_pixels: u32,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+        _project: ProjectContext,
+        _tx: vox::Tx<daw_proto::track::TrackStreamEvent>,
+    ) {
+        // Standalone has no event source; subscriber gets nothing.
+    }
 }

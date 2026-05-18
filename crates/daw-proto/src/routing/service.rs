@@ -35,7 +35,7 @@ impl RouteLocation {
     }
 }
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Routing {
     // ── Queries ────────────────────────────────────────────────────
 

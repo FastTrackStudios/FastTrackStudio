@@ -4,7 +4,7 @@ use super::{
     CaptureScreensetRequest, Screenset, ScreensetOptions, ScreensetResult, ScreensetSummary,
 };
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Screensets {
     /// Capture the current managed screenset state into a named entry.
     fn capture(&self, request: CaptureScreensetRequest) -> ScreensetResult;

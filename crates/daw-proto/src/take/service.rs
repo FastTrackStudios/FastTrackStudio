@@ -9,7 +9,7 @@ use crate::item::{
 use crate::primitives::Duration;
 use crate::{DawResult, ProjectContext};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Takes {
     fn get_takes(&self, project: ProjectContext, item: ItemRef) -> Vec<Take>;
 

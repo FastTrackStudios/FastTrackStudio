@@ -47,7 +47,7 @@ impl TimeRangeParams {
     }
 }
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Automation {
     // ── Envelopes ──────────────────────────────────────────────────
 

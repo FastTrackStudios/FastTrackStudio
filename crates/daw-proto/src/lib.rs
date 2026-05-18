@@ -13,10 +13,12 @@ pub mod batch;
 pub mod capability;
 pub mod daw;
 pub mod dawfile_service;
+pub mod diagnostics;
 pub mod dock_host;
 #[cfg(feature = "test-utils")]
 pub mod dock_host_mock;
 pub mod error;
+pub mod event_bus;
 pub mod ext_state;
 pub mod fx;
 pub mod fx_chains;

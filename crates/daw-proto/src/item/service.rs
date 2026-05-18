@@ -9,7 +9,7 @@ use super::{FadeShape, Item, ItemRef};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
 use crate::{DawResult, ProjectContext, TrackRef};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Items {
     // ── Queries ──────────────────────────────────────────────────────
 

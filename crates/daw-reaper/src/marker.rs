@@ -228,6 +228,26 @@ impl Markers for Reaper {
         }
         Ok(())
     }
+
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<MarkerStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_markers();
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "markers subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
 }
 
 // ── Compile-time tripwires ─────────────────────────────────────────────
@@ -342,29 +362,4 @@ pub fn poll_and_broadcast_markers() {
     }
 
     cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
-}
-
-// ── MarkersStream impl ─────────────────────────────────────────────────
-
-impl daw_proto::marker::MarkersStream for Reaper {
-    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<MarkerStreamEvent>) {
-        let mut rx = crate::event_hub::hub().subscribe_markers();
-
-        tokio::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "markers subscriber lagged");
-                    }
-                }
-            }
-        });
-    }
 }

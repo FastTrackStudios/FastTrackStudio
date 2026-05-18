@@ -5,7 +5,7 @@
 use super::{AudioEngineState, AudioInputInfo, AudioLatency};
 use crate::DawResult;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait AudioEngine {
     fn state(&self) -> AudioEngineState;
     fn latency(&self) -> AudioLatency;

@@ -115,6 +115,13 @@ impl Markers {
             .await??;
         Ok(())
     }
+
+    /// Subscribe to marker add/remove/modify events.
+    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::marker::MarkerStreamEvent>> {
+        let (tx, rx) = vox::channel();
+        self.clients.marker.subscribe(self.context(), tx).await?;
+        Ok(rx)
+    }
 }
 
 impl std::fmt::Debug for Markers {

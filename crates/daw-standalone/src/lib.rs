@@ -23,7 +23,11 @@ mod audio_accessor;
 pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
+#[cfg(feature = "bootstrap")]
+pub mod bootstrap;
 mod dawfile_service;
+mod diagnostics;
+mod event_bus;
 mod ext_state;
 mod fx;
 mod fx_chains;
@@ -44,6 +48,7 @@ mod resource;
 mod routing;
 mod routing_sync;
 mod screenset;
+mod services;
 mod shared_state;
 pub mod sync;
 mod take;
@@ -51,7 +56,9 @@ mod tempo_map;
 mod toolbar;
 mod track;
 mod transport;
+pub mod transport_engine;
 mod ui;
+mod window_geometry;
 
 // All per-service impls are on `Standalone` directly post-port.
 // Old `Standalone*` per-service structs retired.

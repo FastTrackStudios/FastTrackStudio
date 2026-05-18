@@ -4,7 +4,7 @@
 use super::{ProjectContext, ProjectInfo};
 use crate::{DawResult, UndoScope};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Projects {
     // ── Per-project handle ──────────────────────────────────────────
     //

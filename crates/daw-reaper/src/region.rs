@@ -210,6 +210,26 @@ impl Regions for crate::Reaper {
         }
         Ok(())
     }
+
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<RegionStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_regions();
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "regions subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
 }
 
 // ── Streaming: poll + broadcast regions ────────────────────────────────
@@ -291,29 +311,4 @@ pub fn poll_and_broadcast_regions() {
     }
 
     cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
-}
-
-// ── RegionsStream impl ─────────────────────────────────────────────────
-
-impl daw_proto::region::RegionsStream for crate::Reaper {
-    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<RegionStreamEvent>) {
-        let mut rx = crate::event_hub::hub().subscribe_regions();
-
-        tokio::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "regions subscriber lagged");
-                    }
-                }
-            }
-        });
-    }
 }

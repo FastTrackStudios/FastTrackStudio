@@ -1,6 +1,6 @@
 //! Health service — connection liveness probe.
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Health {
     /// Returns `true` if the DAW is reachable. Cheapest possible RPC
     /// round-trip — used by fts-control's health-check loop to detect

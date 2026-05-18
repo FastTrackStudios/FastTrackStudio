@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait ResourcePaths {
     /// REAPER resource directory (presets, templates, themes, …).
     fn resource_path(&self) -> PathBuf;

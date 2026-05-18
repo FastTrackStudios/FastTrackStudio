@@ -7,7 +7,7 @@ use crate::primitives::{
     QuarterNotesToMeasureResult, TimeToBeatsResult, TimeToQuarterNotesResult,
 };
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait PositionConversion {
     /// Convert time position to beats. Returns beat position plus
     /// measure context and time signature.

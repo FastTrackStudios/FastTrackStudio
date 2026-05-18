@@ -119,6 +119,13 @@ impl Markers for Standalone {
             Ok::<(), DawError>(())
         })?
     }
+
+    async fn subscribe(
+        &self,
+        _project: ProjectContext,
+        _tx: vox::Tx<daw_proto::marker::MarkerStreamEvent>,
+    ) {
+    }
 }
 
 /// Map a `ProjectContext` onto a concrete guid the standalone state

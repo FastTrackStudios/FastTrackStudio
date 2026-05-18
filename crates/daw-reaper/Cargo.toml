@@ -11,6 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 daw-proto = { path = "../daw-proto" }
+daw-audio-sync = { path = "../daw-audio-sync" }
 architect = { workspace = true, features = ["vox"] }
 vox.workspace = true
 tracing.workspace = true

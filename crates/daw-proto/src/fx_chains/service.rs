@@ -7,7 +7,7 @@
 
 use crate::{DawResult, Fx, FxChainContext};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait FxChains {
     fn list(&self, ctx: FxChainContext) -> Vec<Fx>;
     fn count(&self, ctx: FxChainContext) -> u32;

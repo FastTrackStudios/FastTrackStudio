@@ -140,7 +140,9 @@ pub(crate) use daw_proto::TracksClient;
 pub(crate) use daw_proto::TransportClient;
 pub(crate) use daw_proto::WindowGeometryClient;
 pub(crate) use daw_proto::batch::BatchExecutionClient;
+pub(crate) use daw_proto::diagnostics::DiagnosticsClient;
 pub(crate) use daw_proto::dock_host::DockHostingClient;
+pub(crate) use daw_proto::event_bus::EventBusClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoadingClient;
 pub(crate) use daw_proto::toolbar::ToolbarClient;
 pub use vox::Caller;
@@ -155,7 +157,9 @@ mod audio_engine;
 mod automation;
 pub mod batch;
 mod dawfile;
+mod diagnostics;
 mod dock_host;
+mod event_bus;
 mod ext_state;
 mod fx;
 mod input;
@@ -180,7 +184,9 @@ pub use self::batch::{
     BatchBuilder, BatchExtractError, BatchResponseExt, FromStepOutput, StepHandle,
 };
 pub use self::dawfile::DawFile;
+pub use self::diagnostics::Probes;
 pub use self::dock_host::DockHost;
+pub use self::event_bus::Events;
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::input::Input;
@@ -227,6 +233,8 @@ pub struct DawClients {
     pub(crate) toolbar: ToolbarClient,
     pub(crate) plugin_loader: PluginLoadingClient,
     pub(crate) batch: BatchExecutionClient,
+    pub(crate) diagnostics: DiagnosticsClient,
+    pub(crate) event_bus: EventBusClient,
     /// Original `Caller` kept around so consumers can build additional
     /// service clients on the same in-process channel (e.g.
     /// `keyflow_daw_analysis::MidiChartServiceClient`).
@@ -263,6 +271,8 @@ impl DawClients {
             toolbar: ToolbarClient::new(handle.clone()),
             plugin_loader: PluginLoadingClient::new(handle.clone()),
             batch: BatchExecutionClient::new(handle.clone()),
+            diagnostics: DiagnosticsClient::new(handle.clone()),
+            event_bus: EventBusClient::new(handle.clone()),
             caller: handle,
         }
     }
@@ -320,6 +330,22 @@ impl Daw {
     /// that share the same in-process channel as the daw services.
     pub fn caller(&self) -> &Caller {
         &self.clients.caller
+    }
+
+    /// Cross-domain event-bus handle. Subscribe with a `BusFilter` to
+    /// receive every enabled domain's events on one channel. Per-domain
+    /// `project.tracks().subscribe()` etc. remain — use this when a
+    /// consumer wants several domains at once.
+    pub fn events(&self) -> Events {
+        Events::new(self.clients.clone())
+    }
+
+    /// In-process diagnostic probes (latency, throughput). The probe
+    /// bodies run on REAPER's main thread inside a single dispatched
+    /// closure, so they measure intrinsic backend latency without
+    /// per-sample RPC / IPC overhead.
+    pub fn diagnostics(&self) -> Probes {
+        Probes::new(self.clients.clone())
     }
 
     /// Get the current/active project

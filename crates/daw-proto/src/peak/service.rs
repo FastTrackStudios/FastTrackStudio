@@ -5,7 +5,7 @@ use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Peaks {
     /// Current peak level for a track channel. Peak and peak-hold
     /// values in dB (0.0 = full scale, negative = below).

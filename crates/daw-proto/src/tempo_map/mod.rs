@@ -3,7 +3,6 @@
 mod error;
 mod event;
 mod service;
-pub mod stream;
 mod tempo_point;
 
 pub use error::*;
@@ -14,5 +13,4 @@ pub use service::{
     tempo_map_rpc_service_descriptor as descriptor,
 };
 pub use service::{TempoMap, TempoMapRpc};
-pub use stream::TempoMapStream;
 pub use tempo_point::*;

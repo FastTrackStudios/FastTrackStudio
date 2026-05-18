@@ -4,7 +4,7 @@
 
 use super::{MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait LiveMidi {
     // ── Device enumeration ─────────────────────────────────────────
 

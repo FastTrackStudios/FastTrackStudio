@@ -26,3 +26,15 @@ pub struct RegionStreamEvent {
     pub project_guid: String,
     pub event: RegionEvent,
 }
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{RegionEvent, RegionStreamEvent};
+    unsafe impl vox_types::Reborrow for RegionEvent {
+        type Ref<'a> = RegionEvent;
+    }
+    unsafe impl vox_types::Reborrow for RegionStreamEvent {
+        type Ref<'a> = RegionStreamEvent;
+    }
+}

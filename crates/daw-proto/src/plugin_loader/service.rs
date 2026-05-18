@@ -2,7 +2,7 @@
 
 use super::{LoadedPluginInfo, PluginLoadResult};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait PluginLoading {
     /// Load a plugin from the given filesystem path.
     fn load(&self, path: &str) -> PluginLoadResult;

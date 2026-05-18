@@ -6,7 +6,7 @@
 use super::{ActionExecutionResult, ActionListRequest, ActionListResponse};
 use crate::DawResult;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait ActionRegistration {
     /// Register a new REAPER action. Returns the assigned command ID
     /// (0 on failure).

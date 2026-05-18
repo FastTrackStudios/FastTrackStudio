@@ -91,9 +91,24 @@ impl SuppressionKey {
     }
 }
 
+/// An entry in the suppression set. Carries a timestamp for window
+/// expiry and an optional value fingerprint used by value-aware matching:
+/// `is_suppressed_value` returns true only when the recorded fingerprint
+/// matches the incoming one (so a genuine subsequent change with a
+/// different value isn't dropped).
+#[derive(Clone, Debug)]
+struct Entry {
+    inserted: Instant,
+    /// Bit-pattern of the applied f64 value (or the encoded form for
+    /// non-numeric fields). `None` means "any value matches" — falls
+    /// back to key-only matching for callers that pre-date value-aware
+    /// suppression.
+    value_bits: Option<u64>,
+}
+
 /// Tracks recently-applied remote changes to suppress echoes.
 pub struct SuppressionSet {
-    entries: HashMap<SuppressionKey, Instant>,
+    entries: HashMap<SuppressionKey, Entry>,
     window: Duration,
 }
 
@@ -109,20 +124,63 @@ impl SuppressionSet {
     /// Record that a remote change is about to be applied locally.
     ///
     /// Call this *before* applying the mutation so the next poll cycle
-    /// can find the suppression entry.
+    /// (or callback-driven publish) can find the suppression entry.
+    /// Key-only matching: any subsequent event with this key within the
+    /// window is suppressed.
     pub fn suppress(&mut self, key: SuppressionKey) {
-        self.entries.insert(key, Instant::now());
+        self.entries.insert(
+            key,
+            Entry {
+                inserted: Instant::now(),
+                value_bits: None,
+            },
+        );
+    }
+
+    /// Record a remote change with the value being applied. Subsequent
+    /// events with this key are only suppressed if they carry the same
+    /// value — a genuine local change to a different value still
+    /// broadcasts. Lets us run REAPER's IReaperControlSurface callbacks
+    /// in `Full` mode without echo loops, since REAPER fires the
+    /// callback with the applied value, which matches the recorded
+    /// fingerprint exactly.
+    pub fn suppress_value(&mut self, key: SuppressionKey, value: f64) {
+        self.entries.insert(
+            key,
+            Entry {
+                inserted: Instant::now(),
+                value_bits: Some(value.to_bits()),
+            },
+        );
     }
 
     /// Check if a detected local change should be suppressed (was recently
-    /// applied from a remote peer).
-    ///
-    /// Returns `true` if the change should be suppressed (not re-broadcast).
+    /// applied from a remote peer). Key-only — matches regardless of
+    /// the value carried by the incoming event.
     pub fn is_suppressed(&self, key: &SuppressionKey) -> bool {
-        if let Some(timestamp) = self.entries.get(key) {
-            timestamp.elapsed() < self.window
+        if let Some(entry) = self.entries.get(key) {
+            entry.inserted.elapsed() < self.window
         } else {
             false
+        }
+    }
+
+    /// Value-aware variant of [`Self::is_suppressed`]. Returns true only
+    /// if the recorded entry's value (set via [`Self::suppress_value`])
+    /// matches `value`. If the entry was inserted without a value
+    /// fingerprint (via plain [`Self::suppress`]), falls back to
+    /// key-only matching. This lets the same suppression set serve both
+    /// the value-strict callback path and the key-only poll path.
+    pub fn is_suppressed_value(&self, key: &SuppressionKey, value: f64) -> bool {
+        let Some(entry) = self.entries.get(key) else {
+            return false;
+        };
+        if entry.inserted.elapsed() >= self.window {
+            return false;
+        }
+        match entry.value_bits {
+            None => true, // entry inserted without value fingerprint — match by key
+            Some(bits) => bits == value.to_bits(),
         }
     }
 
@@ -130,7 +188,8 @@ impl SuppressionSet {
     ///
     /// Call this periodically (e.g., once per second) from the engine loop.
     pub fn gc(&mut self) {
-        self.entries.retain(|_, ts| ts.elapsed() < self.window);
+        self.entries
+            .retain(|_, e| e.inserted.elapsed() < self.window);
     }
 }
 

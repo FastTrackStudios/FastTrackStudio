@@ -31,9 +31,10 @@
 
 use architect::{Layer, Services, layers};
 use daw_proto::{
-    action_registry, audio_engine, automation, batch, dawfile_service, ext_state, fx, fx_chains,
-    fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project, region,
-    routing, screenset, take, tempo_map, toolbar, track, transport, window_geometry,
+    action_registry, audio_engine, automation, batch, dawfile_service, diagnostics, event_bus,
+    ext_state, fx, fx_chains, fx_params, health, input, item, live_midi, marker, midi,
+    plugin_loader, project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
+    window_geometry,
 };
 
 use crate::Reaper;
@@ -68,12 +69,8 @@ impl Services for Reaper {
             plugin_loader::Service,
             automation::Service,
             batch::Service,
-            // Streaming services (vox::service, sibling traits)
-            transport::stream::Service,
-            marker::stream::Service,
-            region::stream::Service,
-            track::stream::Service,
-            tempo_map::stream::Service,
+            event_bus::Service,
+            diagnostics::Service,
         ]
     }
 }

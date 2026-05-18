@@ -443,7 +443,10 @@ async fn apply_track(
 
     match event {
         TrackEvent::VolumeChanged { guid, volume } => {
-            suppression.suppress(SuppressionKey::track(&resolve(guid), "volume"));
+            // Value-aware suppression: only matches if the echoed event
+            // carries the same volume bits we just applied. A genuine
+            // local change to a different value still broadcasts.
+            suppression.suppress_value(SuppressionKey::track(&resolve(guid), "volume"), *volume);
             apply_track_mutation(daw, ctx, guid, |handle| {
                 let volume = *volume;
                 Box::pin(async move { handle.set_volume(volume).await })
@@ -451,7 +454,7 @@ async fn apply_track(
             .await;
         }
         TrackEvent::PanChanged { guid, pan } => {
-            suppression.suppress(SuppressionKey::track(&resolve(guid), "pan"));
+            suppression.suppress_value(SuppressionKey::track(&resolve(guid), "pan"), *pan);
             apply_track_mutation(daw, ctx, guid, |handle| {
                 let pan = *pan;
                 Box::pin(async move { handle.set_pan(pan).await })

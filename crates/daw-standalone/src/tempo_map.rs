@@ -4,10 +4,51 @@
 //! ~400-line async impl with parallel state + event streams retired
 //! in favor of operating directly on the canonical project state.
 
+use std::sync::Arc;
+
 use daw_proto::TempoMap;
 use daw_proto::{DawError, DawResult, ProjectContext, TempoPoint};
 
 use crate::sync::Standalone;
+use crate::transport_engine::build_dynamic_from_time_bpm;
+
+/// Rebuild the project's [`DynamicTempoMap`] from its `tempo_points`
+/// and install it on the engine bundle. Call after any mutation that
+/// changes the tempo point list. With 0 or 1 points, clears the
+/// dynamic map (engine falls back to the single BPM in
+/// `transport.tempo`).
+fn refresh_dynamic_tempo(daw: &Standalone, guid: &str) {
+    let pairs: Vec<(f64, f64)> = daw
+        .with_project(guid, |p| {
+            p.tempo_points
+                .iter()
+                .map(|pt| (pt.position_seconds(), pt.bpm))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let bundle = daw.transport_engine_for(guid);
+    if pairs.len() < 2 {
+        // Single-tempo case — let the engine's static BPM handle it.
+        // Also push that single BPM (if any) into the engine.
+        if let Some(&(_, bpm)) = pairs.first() {
+            bundle.shared.set_tempo_bpm(bpm);
+        }
+        bundle.set_dynamic_tempo(None);
+        return;
+    }
+
+    match build_dynamic_from_time_bpm(&pairs) {
+        Ok(map) => bundle.set_dynamic_tempo(Some(Arc::new(map))),
+        Err(e) => {
+            tracing::warn!(
+                ?e,
+                project = %guid,
+                "tempo-map build failed; engine keeps prior dynamic map",
+            );
+        }
+    }
+}
 
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
@@ -82,10 +123,26 @@ impl TempoMap for Standalone {
     }
 
     fn time_to_musical(&self, project: ProjectContext, seconds: f64) -> (i32, i32, f64) {
-        let bpm = <Self as TempoMap>::get_tempo_at(self, project.clone(), seconds);
-        let (num, _denom) = <Self as TempoMap>::get_time_signature_at(self, project, seconds);
-        let beats_per_second = bpm / 60.0;
-        let total_beats = seconds * beats_per_second;
+        let Some(guid) = resolve_project(self, &project) else {
+            return (1, 1, 0.0);
+        };
+        let bundle = self.transport_engine_for(&guid);
+        let total_beats = if let Some(map) = bundle.dynamic_tempo() {
+            // Honor the engine's keyframed map for cross-segment time.
+            let clock = crate::transport_engine::SampleClock::new(bundle.shared.sample_rate());
+            let samples =
+                clock.seconds_to_samples(crate::transport_engine::InstantSeconds(seconds));
+            map.samples_to_musical(samples, 1.0, &clock).0
+        } else {
+            let bpm = <Self as TempoMap>::get_tempo_at(
+                self,
+                ProjectContext::Project(guid.clone()),
+                seconds,
+            );
+            seconds * (bpm / 60.0)
+        };
+        let (num, _denom) =
+            <Self as TempoMap>::get_time_signature_at(self, ProjectContext::Project(guid), seconds);
         let measure = (total_beats / num as f64).floor() as i32 + 1;
         let beat = (total_beats % num as f64).floor() as i32 + 1;
         let fraction = (total_beats % 1.0) - (total_beats % 1.0).floor();
@@ -109,7 +166,7 @@ impl TempoMap for Standalone {
 
     fn add_tempo_point(&self, project: ProjectContext, seconds: f64, bpm: f64) -> DawResult<u32> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let idx = self.with_project_mut(&guid, |p| {
             let idx = p.tempo_points.len() as u32;
             let mut pt = TempoPoint::default();
             pt.position =
@@ -122,12 +179,14 @@ impl TempoMap for Standalone {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             idx
-        })
+        })?;
+        refresh_dynamic_tempo(self, &guid);
+        Ok(idx)
     }
 
     fn remove_tempo_point(&self, project: ProjectContext, index: u32) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let res: DawResult<()> = self.with_project_mut(&guid, |p| {
             let i = index as usize;
             if i < p.tempo_points.len() {
                 p.tempo_points.remove(i);
@@ -135,12 +194,16 @@ impl TempoMap for Standalone {
             } else {
                 Err(DawError::not_found("TempoPoint", &index.to_string()))
             }
-        })?
+        })?;
+        if res.is_ok() {
+            refresh_dynamic_tempo(self, &guid);
+        }
+        res
     }
 
     fn set_tempo_at_point(&self, project: ProjectContext, index: u32, bpm: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let res: DawResult<()> = self.with_project_mut(&guid, |p| {
             let i = index as usize;
             let pt = p
                 .tempo_points
@@ -148,7 +211,11 @@ impl TempoMap for Standalone {
                 .ok_or_else(|| DawError::not_found("TempoPoint", &index.to_string()))?;
             pt.bpm = bpm;
             Ok::<(), DawError>(())
-        })?
+        })?;
+        if res.is_ok() {
+            refresh_dynamic_tempo(self, &guid);
+        }
+        res
     }
 
     fn set_time_signature_at_point(
@@ -175,7 +242,7 @@ impl TempoMap for Standalone {
 
     fn move_tempo_point(&self, project: ProjectContext, index: u32, seconds: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let res: DawResult<()> = self.with_project_mut(&guid, |p| {
             let i = index as usize;
             let pt = p
                 .tempo_points
@@ -189,7 +256,11 @@ impl TempoMap for Standalone {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             Ok::<(), DawError>(())
-        })?
+        })?;
+        if res.is_ok() {
+            refresh_dynamic_tempo(self, &guid);
+        }
+        res
     }
 
     fn get_default_tempo(&self, project: ProjectContext) -> f64 {
@@ -204,7 +275,12 @@ impl TempoMap for Standalone {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         self.with_project_mut(&guid, |p| {
             p.transport.tempo = daw_proto::Tempo::from_bpm(bpm);
-        })
+        })?;
+        // Mirror into the engine: refresh_dynamic_tempo handles the
+        // "0 or 1 points → static" branch, otherwise the multi-point
+        // map remains authoritative.
+        self.transport_engine_for(&guid).shared.set_tempo_bpm(bpm);
+        Ok(())
     }
 
     fn get_default_time_signature(&self, project: ProjectContext) -> (i32, i32) {
@@ -231,5 +307,12 @@ impl TempoMap for Standalone {
             p.transport.time_signature =
                 daw_proto::TimeSignature::new(numerator as u32, denominator as u32);
         })
+    }
+
+    async fn subscribe(
+        &self,
+        _project: ProjectContext,
+        _tx: vox::Tx<daw_proto::tempo_map::TempoMapStreamEvent>,
+    ) {
     }
 }

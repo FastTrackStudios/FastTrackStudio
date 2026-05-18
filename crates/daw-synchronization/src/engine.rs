@@ -457,39 +457,51 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
         SyncDomain::Transport(_) => {
             suppression.is_suppressed(&SuppressionKey::transport(&event.project_guid))
         }
-        SyncDomain::Track(te) => {
-            let guid = match te {
-                TrackEvent::VolumeChanged { guid, .. } => guid,
-                TrackEvent::PanChanged { guid, .. } => guid,
-                TrackEvent::MuteChanged { guid, .. } => guid,
-                TrackEvent::SoloChanged { guid, .. } => guid,
-                TrackEvent::ArmChanged { guid, .. } => guid,
-                TrackEvent::Renamed { guid, .. } => guid,
-                TrackEvent::ColorChanged { guid, .. } => guid,
-                TrackEvent::SelectionChanged { guid, .. } => guid,
-                TrackEvent::TcpVisibilityChanged { guid, .. } => guid,
-                TrackEvent::MixerVisibilityChanged { guid, .. } => guid,
-                TrackEvent::Added(track) => &track.guid,
-                TrackEvent::Removed(guid) => guid,
-                TrackEvent::Moved { guid, .. } => guid,
-            };
-            let field = match te {
-                TrackEvent::VolumeChanged { .. } => "volume",
-                TrackEvent::PanChanged { .. } => "pan",
-                TrackEvent::MuteChanged { .. } => "muted",
-                TrackEvent::SoloChanged { .. } => "soloed",
-                TrackEvent::ArmChanged { .. } => "armed",
-                TrackEvent::Renamed { .. } => "name",
-                TrackEvent::ColorChanged { .. } => "color",
-                TrackEvent::SelectionChanged { .. } => "selected",
-                TrackEvent::TcpVisibilityChanged { .. } => "tcp_visible",
-                TrackEvent::MixerVisibilityChanged { .. } => "mixer_visible",
-                TrackEvent::Added(_) => "added",
-                TrackEvent::Removed(_) => "removed",
-                TrackEvent::Moved { .. } => "moved",
-            };
-            suppression.is_suppressed(&SuppressionKey::track(guid, field))
-        }
+        SyncDomain::Track(te) => match te {
+            // For f64-valued fields prefer value-aware matching so a
+            // genuine local change to a *different* value still broadcasts
+            // even if a recent apply suppressed the key.
+            TrackEvent::VolumeChanged { guid, volume } => {
+                suppression.is_suppressed_value(&SuppressionKey::track(guid, "volume"), *volume)
+            }
+            TrackEvent::PanChanged { guid, pan } => {
+                suppression.is_suppressed_value(&SuppressionKey::track(guid, "pan"), *pan)
+            }
+            // Boolean / discrete fields fall back to key-only matching.
+            TrackEvent::MuteChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "muted"))
+            }
+            TrackEvent::SoloChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "soloed"))
+            }
+            TrackEvent::ArmChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "armed"))
+            }
+            TrackEvent::Renamed { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "name"))
+            }
+            TrackEvent::ColorChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "color"))
+            }
+            TrackEvent::SelectionChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "selected"))
+            }
+            TrackEvent::TcpVisibilityChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "tcp_visible"))
+            }
+            TrackEvent::MixerVisibilityChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "mixer_visible"))
+            }
+            TrackEvent::Added(track) => {
+                suppression.is_suppressed(&SuppressionKey::track(&track.guid, "added"))
+            }
+            TrackEvent::Removed(guid) => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "removed"))
+            }
+            TrackEvent::Moved { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "moved"))
+            }
+        },
         SyncDomain::Fx(fe) => {
             // Apply side (apply.rs) suppresses chain-level FX events with
             // `SuppressionKey::fx_param(chain_key, fx_guid, 0)` and

@@ -107,4 +107,11 @@ impl Regions for Standalone {
             Ok::<(), DawError>(())
         })?
     }
+
+    async fn subscribe(
+        &self,
+        _project: ProjectContext,
+        _tx: vox::Tx<daw_proto::region::RegionStreamEvent>,
+    ) {
+    }
 }

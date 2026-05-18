@@ -106,7 +106,7 @@ impl MidiPitchBendCreate {
     }
 }
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Midi {
     // ── Notes ──────────────────────────────────────────────────────
 

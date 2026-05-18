@@ -8,7 +8,7 @@
 
 use super::KeyFilter;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Input {
     /// Upload a key filter configuration. Replaces the previous one.
     fn set_key_filter(&self, filter: KeyFilter);

@@ -26,3 +26,15 @@ pub struct TempoMapStreamEvent {
     pub project_guid: String,
     pub event: TempoMapEvent,
 }
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{TempoMapEvent, TempoMapStreamEvent};
+    unsafe impl vox_types::Reborrow for TempoMapEvent {
+        type Ref<'a> = TempoMapEvent;
+    }
+    unsafe impl vox_types::Reborrow for TempoMapStreamEvent {
+        type Ref<'a> = TempoMapStreamEvent;
+    }
+}

@@ -15,12 +15,14 @@
 //! trait, `daw_proto::Transport` / `daw_proto::transport::Transport`
 //! for the struct).
 
+use crate::transport::event::{TransportStreamEvent, TransportSubscription};
 use crate::transport::transport::{LoopRegion, PlayState, Transport as TransportState};
 use crate::{DawResult, ProjectContext, TimeSignature};
+use vox::Tx;
 
 /// Operations on the transport of a project. `ProjectContext` flows
 /// through each call so a single backend instance serves every project.
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Transport {
     // ── Playback ────────────────────────────────────────────────────
 
@@ -74,4 +76,17 @@ pub trait Transport {
     fn get_playrate(&self, project: ProjectContext) -> f64;
     fn set_playrate(&self, project: ProjectContext, rate: f64) -> DawResult<()>;
     fn get_time_signature(&self, project: ProjectContext) -> TimeSignature;
+
+    // ── Streaming ───────────────────────────────────────────────────
+
+    /// Subscribe to transport events. `sub` toggles which kinds —
+    /// discrete state (play/stop/tempo/etc.) and/or continuous ~30Hz
+    /// position ticks. Both are multiplexed onto the same `Tx` as
+    /// `TransportStreamEvent::{State, Position}`.
+    async fn subscribe(
+        &self,
+        project: ProjectContext,
+        sub: TransportSubscription,
+        tx: Tx<TransportStreamEvent>,
+    );
 }

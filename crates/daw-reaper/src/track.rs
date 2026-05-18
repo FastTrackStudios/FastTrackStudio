@@ -603,6 +603,26 @@ impl Tracks for crate::Reaper {
         medium.track_list_adjust_windows_minor();
         Ok(())
     }
+
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<TrackStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_tracks();
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "tracks subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
 }
 
 // `Project` is used only for the `Project` re-export visibility check
@@ -746,27 +766,4 @@ pub fn poll_and_broadcast_tracks() {
     cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
 }
 
-// ── TracksStream impl ─────────────────────────────────────────────────
-
-impl daw_proto::track::TracksStream for crate::Reaper {
-    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<TrackStreamEvent>) {
-        let mut rx = crate::event_hub::hub().subscribe_tracks();
-
-        tokio::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "tracks subscriber lagged");
-                    }
-                }
-            }
-        });
-    }
-}
+// ── Tracks::subscribe impl ─────────────────────────────────────────────

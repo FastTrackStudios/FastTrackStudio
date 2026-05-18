@@ -98,3 +98,69 @@ impl PositionTick {
         }
     }
 }
+
+/// Unified event delivered by `Transport::subscribe`. Carries either
+/// a discrete `State` change or a continuous `Position` tick — the
+/// subscription's filter decides which kinds are forwarded.
+#[derive(Clone, Debug, Facet)]
+#[repr(u8)]
+pub enum TransportStreamEvent {
+    State(TransportEvent),
+    Position(PositionTick),
+}
+
+/// Per-subscriber filter for `Transport::subscribe`. Toggle each
+/// kind on or off; defaults to state-only since most consumers care
+/// about transitions but not every tick.
+#[derive(Clone, Copy, Debug, Facet)]
+pub struct TransportSubscription {
+    /// Include discrete transport-state events (play/stop/tempo/etc.).
+    pub state: bool,
+    /// Include continuous ~30Hz position ticks.
+    pub position: bool,
+}
+
+impl Default for TransportSubscription {
+    fn default() -> Self {
+        Self::state_only()
+    }
+}
+
+impl TransportSubscription {
+    pub const fn all() -> Self {
+        Self {
+            state: true,
+            position: true,
+        }
+    }
+    pub const fn state_only() -> Self {
+        Self {
+            state: true,
+            position: false,
+        }
+    }
+    pub const fn position_only() -> Self {
+        Self {
+            state: false,
+            position: true,
+        }
+    }
+}
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{PositionTick, TransportEvent, TransportStreamEvent, TransportSubscription};
+    unsafe impl vox_types::Reborrow for TransportEvent {
+        type Ref<'a> = TransportEvent;
+    }
+    unsafe impl vox_types::Reborrow for PositionTick {
+        type Ref<'a> = PositionTick;
+    }
+    unsafe impl vox_types::Reborrow for TransportStreamEvent {
+        type Ref<'a> = TransportStreamEvent;
+    }
+    unsafe impl vox_types::Reborrow for TransportSubscription {
+        type Ref<'a> = TransportSubscription;
+    }
+}

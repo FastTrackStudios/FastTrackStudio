@@ -5,7 +5,7 @@ use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait AudioAccessors {
     /// Create an audio accessor for a track. Returns opaque handle ID.
     fn create_track_accessor(&self, project: ProjectContext, track: TrackRef) -> Option<String>;

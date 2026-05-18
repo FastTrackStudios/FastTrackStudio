@@ -2,7 +2,7 @@
 
 use super::{ToolbarButton, ToolbarIcon, ToolbarResult, ToolbarTarget, TrackedButton};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Toolbar {
     /// Add a toolbar button. Returns the resolved command ID via
     /// `ToolbarResult`. Idempotent — if the button already exists,

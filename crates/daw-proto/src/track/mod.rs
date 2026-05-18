@@ -14,7 +14,6 @@ mod event;
 mod hierarchy;
 mod hierarchy_builder;
 mod service;
-pub mod stream;
 mod test_utils;
 #[allow(clippy::module_inception)]
 mod track;
@@ -24,7 +23,6 @@ pub use event::{TrackEvent, TrackStreamEvent};
 pub use hierarchy::{FolderDepthChange, TrackHierarchy, TrackNode};
 pub use hierarchy_builder::{AddChildren, TrackHierarchyBuilder};
 pub use service::{TrackExtStateRequest, Tracks, TracksRpc};
-pub use stream::TracksStream;
 
 // vox-emitted names from the architect macro mirror. Aliased to short
 // names so mounting reads `track::descriptor()` + `track::serve(Reaper)`.

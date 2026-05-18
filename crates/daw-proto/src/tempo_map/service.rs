@@ -6,9 +6,11 @@
 //! land on follow-on sibling traits if needed.
 
 use super::TempoPoint;
+use super::event::TempoMapStreamEvent;
 use crate::{DawResult, ProjectContext};
+use vox::Tx;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait TempoMap {
     // ── Queries ─────────────────────────────────────────────────────
 
@@ -65,4 +67,7 @@ pub trait TempoMap {
         numerator: i32,
         denominator: i32,
     ) -> DawResult<()>;
+
+    /// Subscribe to tempo-map changes across all open projects.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<TempoMapStreamEvent>);
 }

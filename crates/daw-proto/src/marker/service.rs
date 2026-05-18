@@ -11,11 +11,13 @@
 //! backend type per runtime (`Reaper`, `Standalone`, `RppFile`, …)
 //! and lets a single mount serve every project a binary touches.
 
+use crate::marker::event::MarkerStreamEvent;
 use crate::{DawResult, Marker, ProjectContext};
+use vox::Tx;
 
 /// Operations on the markers of a project. `ProjectContext` flows
 /// through each call so backends can serve any project.
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Markers {
     /// Every marker in the project, ordered by position.
     fn all(&self, project: ProjectContext) -> Vec<Marker>;
@@ -42,4 +44,8 @@ pub trait Markers {
 
     /// Set the marker's color. `0` clears to the DAW default.
     fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()>;
+
+    /// Subscribe to marker changes across all open projects. Subscribers
+    /// filter by `project_guid` on the envelope.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerStreamEvent>);
 }

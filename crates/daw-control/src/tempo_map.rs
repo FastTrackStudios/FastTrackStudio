@@ -156,6 +156,13 @@ impl TempoMap {
             .await??;
         Ok(())
     }
+
+    /// Subscribe to tempo map changes.
+    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::tempo_map::TempoMapStreamEvent>> {
+        let (tx, rx) = vox::channel();
+        self.clients.tempo_map.subscribe(self.context(), tx).await?;
+        Ok(rx)
+    }
 }
 
 impl std::fmt::Debug for TempoMap {

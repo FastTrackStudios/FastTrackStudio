@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{DawResult, ProjectContext};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Effects {
     // ── Installed plugins ──────────────────────────────────────────
 

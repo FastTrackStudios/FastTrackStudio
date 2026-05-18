@@ -7,7 +7,7 @@
 
 use super::{BatchRequest, BatchResponse};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait BatchExecution {
     /// Execute a batch program and return all results.
     fn execute(&self, request: BatchRequest) -> BatchResponse;

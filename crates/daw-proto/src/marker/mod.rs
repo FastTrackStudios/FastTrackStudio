@@ -14,13 +14,11 @@ mod event;
 #[allow(clippy::module_inception)]
 mod marker;
 mod service;
-pub mod stream;
 
 pub use error::MarkerError;
 pub use event::{MarkerEvent, MarkerStreamEvent};
 pub use marker::Marker;
 pub use service::{Markers, MarkersRpc};
-pub use stream::MarkersStream;
 
 // vox-emitted names from the auto-generated mirror trait. Re-exported
 // with shorter aliases (`descriptor`, `dispatcher`) so consumer

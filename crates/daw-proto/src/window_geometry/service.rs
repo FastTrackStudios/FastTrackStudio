@@ -3,7 +3,7 @@
 use super::{WindowGeometryResult, WindowTarget};
 use crate::{DawResult, ScreensetRect};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait WindowGeometry {
     /// Read the current outer-rect of `target`.
     fn get_rect(&self, target: WindowTarget) -> WindowGeometryResult;

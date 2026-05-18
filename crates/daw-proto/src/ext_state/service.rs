@@ -14,7 +14,7 @@
 use crate::DawResult;
 use crate::project::ProjectContext;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait ExtState {
     /// Get a global value. `None` if unset or empty.
     fn get(&self, section: &str, key: &str) -> Option<String>;

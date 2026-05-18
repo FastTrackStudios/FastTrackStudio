@@ -12,7 +12,6 @@ actions-proto = { workspace = true }
 # architect — provides `#[architect::rpc]`. Enabling the `vox` feature
 # wires the macro's emission through to the workspace's vox stack.
 architect = { workspace = true, features = ["vox"] }
-architect-rpc-derive = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
 
 [features]

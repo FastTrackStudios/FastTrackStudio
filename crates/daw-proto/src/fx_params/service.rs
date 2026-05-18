@@ -6,7 +6,7 @@
 
 use crate::{DawResult, FxChainContext, FxParameter};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait FxParams {
     fn count(&self, ctx: FxChainContext, fx_idx: u32) -> u32;
 

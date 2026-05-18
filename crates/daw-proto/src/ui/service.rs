@@ -3,7 +3,7 @@
 use super::UserInputResult;
 use std::path::PathBuf;
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait UiDialogs {
     /// Multi-input dialog. Returns `None` if cancelled.
     fn get_user_inputs(

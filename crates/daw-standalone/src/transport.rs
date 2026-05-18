@@ -1,11 +1,17 @@
-//! `impl Transport for Standalone` — post-architect::rpc port.
+//! `impl Transport for Standalone` — engine-backed.
 //!
-//! Backed by `ProjectState::transport: TransportState` in the
-//! existing in-memory state. The old async `StandaloneTransport`
-//! (~700 LOC, with timer-driven position advance + broadcaster + mock
-//! data) retired in favor of operating directly on the canonical
-//! state. Position advancement isn't simulated here — callers tick
-//! the clock externally if they need playback simulation.
+//! Every mutation writes through the per-project [`TransportBundle`]
+//! (atomic, lock-free) and is mirrored into the proto `Transport`
+//! struct in `ProjectState` so existing snapshot consumers still see
+//! a consistent view. Reads that are time-sensitive (`get_position`,
+//! `is_playing`) go straight to the engine atomics; reads that need
+//! the full proto struct read `ProjectState`.
+//!
+//! The engine's soft clock drives playhead advance on a wall-clock
+//! tick (see [`crate::transport_engine::bundle`]) — works in headless
+//! tests, native, and WASM. A future mixer integration can flip the
+//! soft clock off and drive `advance()` sample-accurately from the
+//! audio callback.
 
 use daw_proto::transport::service::Transport;
 use daw_proto::{
@@ -15,6 +21,7 @@ use daw_proto::{
 };
 
 use crate::sync::Standalone;
+use crate::transport_engine::{LoopRegionSamples, PlayStateRepr, SampleClock};
 
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
@@ -30,78 +37,111 @@ fn not_found_proj() -> DawError {
     DawError::not_found("Project", "context")
 }
 
+fn play_state_proto(s: PlayStateRepr) -> PlayState {
+    match s {
+        PlayStateRepr::Stopped => PlayState::Stopped,
+        PlayStateRepr::Playing => PlayState::Playing,
+        PlayStateRepr::Paused => PlayState::Paused,
+        PlayStateRepr::Recording => PlayState::Recording,
+    }
+}
+
+fn play_state_repr(s: PlayState) -> PlayStateRepr {
+    match s {
+        PlayState::Stopped => PlayStateRepr::Stopped,
+        PlayState::Playing => PlayStateRepr::Playing,
+        PlayState::Paused => PlayStateRepr::Paused,
+        PlayState::Recording => PlayStateRepr::Recording,
+    }
+}
+
+/// Set engine play-state AND mirror into proto `Transport`.
+fn set_play_state(daw: &Standalone, guid: &str, ps: PlayState) -> DawResult<()> {
+    let bundle = daw.transport_engine_for(guid);
+    bundle.shared.set_play_state(play_state_repr(ps));
+    daw.with_project_mut(guid, |p| p.transport.play_state = ps)
+}
+
+/// Reconcile proto `Transport.playhead_position` from the engine —
+/// callers that hand out the full proto struct should run this first.
+fn sync_playhead_to_proto(daw: &Standalone, guid: &str) {
+    let bundle = daw.transport_engine_for(guid);
+    let snap = bundle.snapshot();
+    let pos = Position::from_time(PositionInSeconds::from_seconds(snap.seconds.0));
+    let _ = daw.with_project_mut(guid, |p| {
+        p.transport.playhead_position = pos.clone();
+        p.transport.play_state = play_state_proto(snap.play_state);
+    });
+}
+
 impl Transport for Standalone {
     fn play(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = PlayState::Playing;
-        })
+        set_play_state(self, &guid, PlayState::Playing)
     }
 
     fn pause(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = PlayState::Paused;
-        })
+        set_play_state(self, &guid, PlayState::Paused)
     }
 
     fn stop(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = PlayState::Stopped;
-        })
+        set_play_state(self, &guid, PlayState::Stopped)
     }
 
     fn play_pause(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = match p.transport.play_state {
-                PlayState::Playing => PlayState::Paused,
-                _ => PlayState::Playing,
-            };
-        })
+        let bundle = self.transport_engine_for(&guid);
+        let next = match bundle.shared.play_state() {
+            PlayStateRepr::Playing => PlayState::Paused,
+            _ => PlayState::Playing,
+        };
+        set_play_state(self, &guid, next)
     }
 
     fn play_stop(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = match p.transport.play_state {
-                PlayState::Playing | PlayState::Recording => PlayState::Stopped,
-                _ => PlayState::Playing,
-            };
-        })
+        let bundle = self.transport_engine_for(&guid);
+        let next = match bundle.shared.play_state() {
+            PlayStateRepr::Playing | PlayStateRepr::Recording => PlayState::Stopped,
+            _ => PlayState::Playing,
+        };
+        set_play_state(self, &guid, next)
     }
 
     fn record(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = PlayState::Recording;
-        })
+        set_play_state(self, &guid, PlayState::Recording)
     }
 
     fn stop_recording(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            if matches!(p.transport.play_state, PlayState::Recording) {
-                p.transport.play_state = PlayState::Stopped;
-            }
-        })
+        let bundle = self.transport_engine_for(&guid);
+        if matches!(bundle.shared.play_state(), PlayStateRepr::Recording) {
+            set_play_state(self, &guid, PlayState::Stopped)?;
+        }
+        Ok(())
     }
 
     fn toggle_recording(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
-            p.transport.play_state = match p.transport.play_state {
-                PlayState::Recording => PlayState::Stopped,
-                _ => PlayState::Recording,
-            };
-        })
+        let bundle = self.transport_engine_for(&guid);
+        let next = match bundle.shared.play_state() {
+            PlayStateRepr::Recording => PlayState::Stopped,
+            _ => PlayState::Recording,
+        };
+        set_play_state(self, &guid, next)
     }
 
     fn set_position(&self, project: ProjectContext, seconds: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let bundle = self.transport_engine_for(&guid);
+        let clock = SampleClock::new(bundle.shared.sample_rate());
+        let samples = clock.seconds_to_samples(crate::transport_engine::InstantSeconds(seconds));
+        bundle.shared.set_playhead(samples);
+        let pos = Position::from_time(PositionInSeconds::from_seconds(seconds));
         self.with_project_mut(&guid, |p| {
-            let pos = Position::from_time(PositionInSeconds::from_seconds(seconds));
             p.transport.playhead_position = pos.clone();
             p.transport.edit_position = pos;
         })
@@ -111,15 +151,7 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return 0.0;
         };
-        self.with_project(&guid, |p| {
-            p.transport
-                .playhead_position
-                .time
-                .as_ref()
-                .map(|t| t.as_seconds())
-                .unwrap_or(0.0)
-        })
-        .unwrap_or(0.0)
+        self.transport_engine_for(&guid).snapshot().seconds.0
     }
 
     fn goto_start(&self, project: ProjectContext) -> DawResult<()> {
@@ -127,8 +159,8 @@ impl Transport for Standalone {
     }
 
     fn goto_end(&self, project: ProjectContext) -> DawResult<()> {
-        // Standalone has no real "end" — approximate with loop end.
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        // Standalone has no real "end" — approximate with loop end.
         let end = self
             .with_project(&guid, |p| {
                 p.transport
@@ -145,6 +177,9 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return TransportState::default();
         };
+        // Engine is the source of truth for playhead + play_state —
+        // mirror before snapshotting so callers see a fresh view.
+        sync_playhead_to_proto(self, &guid);
         self.with_project(&guid, |p| p.transport.clone())
             .unwrap_or_default()
     }
@@ -153,21 +188,26 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return PlayState::Stopped;
         };
-        self.with_project(&guid, |p| p.transport.play_state)
-            .unwrap_or(PlayState::Stopped)
+        play_state_proto(self.transport_engine_for(&guid).shared.play_state())
     }
 
     fn is_playing(&self, project: ProjectContext) -> bool {
-        matches!(
-            <Self as Transport>::get_play_state(self, project),
-            PlayState::Playing | PlayState::Recording
-        )
+        let Some(guid) = resolve_project(self, &project) else {
+            return false;
+        };
+        self.transport_engine_for(&guid)
+            .shared
+            .play_state()
+            .is_advancing()
     }
 
     fn is_recording(&self, project: ProjectContext) -> bool {
+        let Some(guid) = resolve_project(self, &project) else {
+            return false;
+        };
         matches!(
-            <Self as Transport>::get_play_state(self, project),
-            PlayState::Recording
+            self.transport_engine_for(&guid).shared.play_state(),
+            PlayStateRepr::Recording
         )
     }
 
@@ -175,12 +215,12 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return 120.0;
         };
-        self.with_project(&guid, |p| p.transport.tempo.bpm())
-            .unwrap_or(120.0)
+        self.transport_engine_for(&guid).shared.tempo_bpm()
     }
 
     fn set_tempo(&self, project: ProjectContext, bpm: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.transport_engine_for(&guid).shared.set_tempo_bpm(bpm);
         self.with_project_mut(&guid, |p| {
             p.transport.tempo = Tempo::from_bpm(bpm);
         })
@@ -188,8 +228,11 @@ impl Transport for Standalone {
 
     fn toggle_loop(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let bundle = self.transport_engine_for(&guid);
+        let next = !bundle.shared.is_looping();
+        bundle.shared.set_looping(next);
         self.with_project_mut(&guid, |p| {
-            p.transport.looping = !p.transport.looping;
+            p.transport.looping = next;
         })
     }
 
@@ -197,12 +240,12 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return false;
         };
-        self.with_project(&guid, |p| p.transport.looping)
-            .unwrap_or(false)
+        self.transport_engine_for(&guid).shared.is_looping()
     }
 
     fn set_loop(&self, project: ProjectContext, enabled: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.transport_engine_for(&guid).shared.set_looping(enabled);
         self.with_project_mut(&guid, |p| {
             p.transport.looping = enabled;
         })
@@ -222,18 +265,33 @@ impl Transport for Standalone {
         end_seconds: f64,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let bundle = self.transport_engine_for(&guid);
+        let clock = SampleClock::new(bundle.shared.sample_rate());
+        let (lo, hi) = (
+            start_seconds.min(end_seconds),
+            start_seconds.max(end_seconds),
+        );
+        // Time selection acts as the engine loop region — REAPER pairs
+        // them by default and we don't have a separate "loop points"
+        // concept yet.
+        bundle.shared.set_loop_region(Some(LoopRegionSamples {
+            start: clock.seconds_to_samples(crate::transport_engine::InstantSeconds(lo)),
+            end: clock.seconds_to_samples(crate::transport_engine::InstantSeconds(hi)),
+        }));
         self.with_project_mut(&guid, |p| {
-            p.transport.time_selection = Some(LoopRegion::new(
-                start_seconds.min(end_seconds),
-                start_seconds.max(end_seconds),
-            ));
+            p.transport.time_selection = Some(LoopRegion::new(lo, hi));
+            p.transport.loop_region = Some(LoopRegion::new(lo, hi));
         })
     }
 
     fn clear_time_selection(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.transport_engine_for(&guid)
+            .shared
+            .set_loop_region(None);
         self.with_project_mut(&guid, |p| {
             p.transport.time_selection = None;
+            p.transport.loop_region = None;
         })
     }
 
@@ -241,14 +299,16 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return 1.0;
         };
-        self.with_project(&guid, |p| p.transport.playrate)
-            .unwrap_or(1.0)
+        self.transport_engine_for(&guid).shared.playrate()
     }
 
     fn set_playrate(&self, project: ProjectContext, rate: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let bundle = self.transport_engine_for(&guid);
+        bundle.shared.set_playrate(rate);
+        let clamped = bundle.shared.playrate();
         self.with_project_mut(&guid, |p| {
-            p.transport.playrate = rate.clamp(0.25, 4.0);
+            p.transport.playrate = clamped;
         })
     }
 
@@ -258,5 +318,32 @@ impl Transport for Standalone {
         };
         self.with_project(&guid, |p| p.transport.time_signature.clone())
             .unwrap_or_default()
+    }
+
+    async fn subscribe(
+        &self,
+        project: ProjectContext,
+        sub: daw_proto::transport::TransportSubscription,
+        tx: vox::Tx<daw_proto::transport::TransportStreamEvent>,
+    ) {
+        let Some(guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let bundle = self.transport_engine_for(&guid);
+        // Sync proto playhead first so the initial Snapshot event is
+        // fresh.
+        sync_playhead_to_proto(self, &guid);
+        let initial_proto = self
+            .with_project(&guid, |p| p.transport.clone())
+            .unwrap_or_default();
+        // Pump runs as a detached task; it owns the Tx and exits when
+        // the consumer drops it.
+        let _join = crate::transport_engine::spawn_subscriber_pump(
+            guid,
+            bundle.shared.clone(),
+            initial_proto,
+            sub,
+            tx,
+        );
     }
 }

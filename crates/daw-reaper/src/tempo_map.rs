@@ -103,34 +103,6 @@ pub fn poll_and_broadcast_tempo_map() {
     cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
 }
 
-// ── TempoMapStream impl ───────────────────────────────────────────────
-
-impl daw_proto::tempo_map::TempoMapStream for crate::Reaper {
-    async fn subscribe(
-        &self,
-        _project: ProjectContext,
-        tx: vox::Tx<daw_proto::tempo_map::TempoMapStreamEvent>,
-    ) {
-        let mut rx = crate::event_hub::hub().subscribe_tempo_map();
-        tokio::task::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            return;
-                        }
-                    }
-                    Err(RecvError::Closed) => return,
-                    Err(RecvError::Lagged(skipped)) => {
-                        tracing::warn!(skipped, "tempo_map subscriber lagged");
-                    }
-                }
-            }
-        });
-    }
-}
-
 // ── Helpers ────────────────────────────────────────────────────────────
 
 fn marker_to_point(m: &sw::TempoMarkerRaw) -> TempoPoint {
@@ -438,5 +410,29 @@ impl TempoMap for crate::Reaper {
             );
         }
         Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+        _project: ProjectContext,
+        tx: vox::Tx<daw_proto::tempo_map::TempoMapStreamEvent>,
+    ) {
+        let mut rx = crate::event_hub::hub().subscribe_tempo_map();
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "tempo_map subscriber lagged");
+                    }
+                }
+            }
+        });
     }
 }

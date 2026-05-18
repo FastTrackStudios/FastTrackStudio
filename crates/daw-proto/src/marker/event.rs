@@ -30,3 +30,15 @@ pub struct MarkerStreamEvent {
     pub project_guid: String,
     pub event: MarkerEvent,
 }
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{MarkerEvent, MarkerStreamEvent};
+    unsafe impl vox_types::Reborrow for MarkerEvent {
+        type Ref<'a> = MarkerEvent;
+    }
+    unsafe impl vox_types::Reborrow for MarkerStreamEvent {
+        type Ref<'a> = MarkerStreamEvent;
+    }
+}

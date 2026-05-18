@@ -224,6 +224,16 @@ impl Tracks {
     // =========================================================================
     // Streaming
     // =========================================================================
+
+    /// Subscribe to track add/remove/modify events. Returns an `Rx`
+    /// that yields `TrackStreamEvent`s until the server drops the
+    /// subscription. Per-project filtering is up to the caller —
+    /// every event in the project carries the `project_guid` envelope.
+    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::track::TrackStreamEvent>> {
+        let (tx, rx) = vox::channel();
+        self.clients.track.subscribe(self.context(), tx).await?;
+        Ok(rx)
+    }
 }
 
 impl std::fmt::Debug for Tracks {

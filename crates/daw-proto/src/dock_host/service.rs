@@ -6,7 +6,7 @@
 
 use super::{DockHandle, DockKind, PanelPixels, UiEventDto};
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait DockHosting {
     /// Register a dock by stable string id. If already registered,
     /// returns the existing handle.

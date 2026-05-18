@@ -141,6 +141,13 @@ impl Regions {
     // =========================================================================
     // Subscriptions
     // =========================================================================
+
+    /// Subscribe to region add/remove/modify events.
+    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::region::RegionStreamEvent>> {
+        let (tx, rx) = vox::channel();
+        self.clients.region.subscribe(self.context(), tx).await?;
+        Ok(rx)
+    }
 }
 
 impl std::fmt::Debug for Regions {

@@ -285,6 +285,11 @@ fn get_app() -> Option<&'static Fragile<App>> {
 /// tick so REAPER's CLAP scanner has already finished scanning.
 static FX_PLUGINS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Shared audio-thread snapshot cell. Audio hook writes per-buffer
+/// state; main thread / RPC reads via this handle.
+pub static AUDIO_SYNC_CELL: OnceLock<std::sync::Arc<daw_audio_sync::SnapshotCell>> =
+    OnceLock::new();
+
 extern "C" fn timer_callback() {
     // catch_unwind prevents panics from unwinding through the C ABI boundary
     // (which is UB). Any panic inside is logged and the timer keeps running.
@@ -293,6 +298,27 @@ extern "C" fn timer_callback() {
         if !FX_PLUGINS_LOADED.load(std::sync::atomic::Ordering::Relaxed) {
             FX_PLUGINS_LOADED.store(true, std::sync::atomic::Ordering::Relaxed);
             daw::reaper::eager_load_fx_plugins();
+        }
+
+        // Measure REAPER's actual timer tick rate when FTS_TIMER_PROBE=1.
+        // Gives ground truth for what the dispatcher ceiling actually
+        // is — the SDK doc says "roughly 30 times per second" but
+        // observed rate can differ. Logs every 30 ticks.
+        if std::env::var("FTS_TIMER_PROBE").as_deref() == Ok("1") {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::time::Instant;
+            static LAST: std::sync::OnceLock<std::sync::Mutex<Instant>> =
+                std::sync::OnceLock::new();
+            static COUNT: AtomicU64 = AtomicU64::new(0);
+            let last = LAST.get_or_init(|| std::sync::Mutex::new(Instant::now()));
+            let now = Instant::now();
+            let mut guard = last.lock().unwrap();
+            let dt = now.duration_since(*guard);
+            *guard = now;
+            let n = COUNT.fetch_add(1, Ordering::Relaxed);
+            if n % 30 == 0 && n > 0 {
+                tracing::info!(tick = n, "FTS_TIMER_PROBE dt={dt:?}");
+            }
         }
 
         if let Some(app_fragile) = get_app() {
@@ -419,9 +445,55 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let app = APP_INSTANCE.get().expect("App should be initialized").get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
+
+    // Faster main-thread tick — bumps REAPER's internal MISC_TIMER
+    // (id 666) to a higher rate via SWELL's SetTimer. Drives all
+    // plugin_register("timer") callbacks at the new rate, which cuts
+    // architect dispatcher wait (0..tick) for inbound RPCs.
+    //
+    // Same trick as the public `reaper_60fps` extension. Opt-in via
+    // FTS_MISC_TIMER_HZ (e.g. 60, 120, 240). Unix-only for now
+    // (Windows would need User32::SetTimer instead of SWELL).
+    #[cfg(target_family = "unix")]
+    if let Ok(hz) = std::env::var("FTS_MISC_TIMER_HZ")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|hz| hz.clamp(15, 1000))
+        .ok_or(())
+    {
+        // REAPER's misc timer id is 666. Re-arming SetTimer with the
+        // same (hwnd, id) replaces the existing timer's interval.
+        const MISC_TIMER: usize = 666;
+        let rate_ms = (1000 / hz).max(1);
+        let swell = reaper_low::Swell::load(*session.reaper().low().plugin_context());
+        let hwnd = session.reaper().get_main_hwnd();
+        // SAFETY: hwnd from REAPER, timer id matches REAPER's misc
+        // timer slot, null TIMERPROC delegates to REAPER's existing
+        // WM_TIMER handler.
+        unsafe {
+            swell.SetTimer(hwnd.as_ptr(), MISC_TIMER, rate_ms, None);
+        }
+        info!("FTS_MISC_TIMER_HZ={hz} — REAPER misc timer rearmed at {rate_ms}ms");
+    }
+
     daw::reaper::register_extension_menu(&mut session);
 
     daw::reaper::register_project_importer(&mut session)?;
+
+    // Audio-thread observer: writes per-buffer (host_micros, playhead,
+    // sample_rate, len) into a lock-free seqlock cell that the main
+    // thread + sync engine read. Foundation for sample-accurate
+    // multi-machine sync. See `daw-audio-sync`.
+    {
+        let rt_reaper = session.create_real_time_reaper();
+        let (cell, hook) = daw_audio_sync::build_hook(rt_reaper);
+        daw_audio_sync::set_global_cell(cell.clone());
+        let _ = AUDIO_SYNC_CELL.set(cell);
+        match session.audio_reg_hardware_hook_add(Box::new(hook)) {
+            Ok(_) => info!("audio-sync hook registered"),
+            Err(e) => warn!("audio-sync hook registration failed: {e}"),
+        }
+    }
 
     // Push-based change-detection via REAPER's IReaperControlSurface
     // callbacks. Mode is selected by the FTS_CSURF_MODE env var:

@@ -11,8 +11,10 @@
 //! consumer needs them.
 
 use super::Region;
+use super::event::RegionStreamEvent;
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
+use vox::Tx;
 
 /// Lane placement request — kept here so retired batch ops can still
 /// name it without dragging in the full lane surface.
@@ -25,7 +27,7 @@ pub struct AddRegionInLaneRequest {
 }
 
 /// Operations on the regions of a project.
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Regions {
     /// Every region in the project, ordered by position.
     fn all(&self, project: ProjectContext) -> Vec<Region>;
@@ -51,4 +53,8 @@ pub trait Regions {
 
     /// Set the region's color. `0` clears to the DAW default.
     fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()>;
+
+    /// Subscribe to region changes across all open projects. Subscribers
+    /// filter by `project_guid` on the envelope.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionStreamEvent>);
 }

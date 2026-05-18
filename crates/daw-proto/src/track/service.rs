@@ -11,9 +11,11 @@
 //! record input, channel counts, subscribe) land on follow-on sibling
 //! traits if/when a real consumer needs them.
 
-use super::{ReorderTracksBehavior, Track, TrackRef};
+use super::event::TrackStreamEvent;
+use super::{RecordInput, ReorderTracksBehavior, Track, TrackRef};
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
+use vox::Tx;
 
 /// Track-scoped ext state payload — groups section + key + value into
 /// a single Facet struct. Kept here so batch op definitions can name
@@ -25,7 +27,7 @@ pub struct TrackExtStateRequest {
     pub value: String,
 }
 
-#[architect_rpc_derive::rpc]
+#[architect::rpc]
 pub trait Tracks {
     // ── Queries ─────────────────────────────────────────────────────
 
@@ -103,6 +105,22 @@ pub trait Tracks {
         folder_depth: i32,
     ) -> DawResult<()>;
 
+    /// Set the track channel count.
+    fn set_num_channels(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        num_channels: u32,
+    ) -> DawResult<()>;
+
+    /// Set the track record input source.
+    fn set_record_input(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        input: RecordInput,
+    ) -> DawResult<()>;
+
     /// Move all currently selected tracks to `index`.
     fn reorder_selected(
         &self,
@@ -128,4 +146,10 @@ pub trait Tracks {
         track: TrackRef,
         height_pixels: u32,
     ) -> DawResult<()>;
+
+    // ── Streaming ───────────────────────────────────────────────────
+
+    /// Subscribe to track add/remove/modify events across all open
+    /// projects. Subscribers filter by `project_guid` on the envelope.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<TrackStreamEvent>);
 }

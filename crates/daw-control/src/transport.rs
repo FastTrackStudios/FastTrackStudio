@@ -301,6 +301,21 @@ impl Transport {
     // =========================================================================
     // Streaming
     // =========================================================================
+
+    /// Subscribe to transport events. `sub` selects which kinds —
+    /// discrete state changes, continuous position ticks, or both —
+    /// multiplexed onto one `Rx` as `TransportStreamEvent::{State, Position}`.
+    pub async fn subscribe(
+        &self,
+        sub: daw_proto::transport::TransportSubscription,
+    ) -> Result<vox::Rx<daw_proto::transport::TransportStreamEvent>> {
+        let (tx, rx) = vox::channel();
+        self.clients
+            .transport
+            .subscribe(self.context(), sub, tx)
+            .await?;
+        Ok(rx)
+    }
 }
 
 impl std::fmt::Debug for Transport {
