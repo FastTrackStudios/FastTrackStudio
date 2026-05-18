@@ -38,15 +38,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "wrapper [{i}] @ 0x{start:06x}..0x{end:06x} has {} 0x260a children",
                 envs.len()
             );
-            if envs.len() > 1 {
-                let env = envs[1];
+            for (k, env) in envs.iter().enumerate() {
                 println!(
-                    "  env block @ 0x{:06x}..0x{:06x} ({} bytes)",
+                    "  --- [{}] @ 0x{:06x}..0x{:06x} ({} bytes) ---",
+                    k,
                     env.start,
                     env.end,
                     env.end - env.start
                 );
-                let payload_start = env.start + 7; // RawBlock header = 7 bytes
+                let payload_start = env.start + 7;
                 let end = env.end.min(s.data.len());
                 for (j, chunk) in s.data[payload_start..end].chunks(16).enumerate() {
                     print!("    +{:>3}: ", j * 16);

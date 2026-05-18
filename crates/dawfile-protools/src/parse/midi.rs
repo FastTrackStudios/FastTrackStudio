@@ -325,6 +325,7 @@ fn parse_midi_tracks(
             alternate_playlists: Vec::new(),
             output: String::new(),
             color_byte: 0,
+            volume_automation: Vec::new(),
             mute_automation: Vec::new(),
             is_folder: false,
         });

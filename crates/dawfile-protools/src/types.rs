@@ -209,6 +209,13 @@ pub struct Track {
     /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
     /// to REAPER's u32 RGB.
     pub color_byte: u8,
+    /// Volume-automation breakpoints decoded from this track's `0x260a[0]`
+    /// (the first `0x260a` child of the per-track `0x260d` wrapper).
+    ///
+    /// Format: 22-byte header, 6-byte implicit breakpoint at +22, then
+    /// `user_count` breakpoints at +28. Each is
+    /// `u32 LE time_samples + i16 LE value_centibel`.
+    pub volume_automation: Vec<VolumeAutomationBreakpoint>,
     /// Mute-automation breakpoints decoded from this track's `0x260a[1]`
     /// (the second `0x260a` under the per-track `0x260d` wrapper —
     /// position-paired by PT's track-list document order).
@@ -237,6 +244,18 @@ pub struct Track {
     /// We surface the raw byte until a `folder-nesting.ptx` ground-truth
     /// fixture lets us disambiguate `is_folder` vs `is_grouped_child`.
     pub is_folder: bool,
+}
+
+/// A single breakpoint in a volume-automation envelope.
+///
+/// Decoded from `0x260a[0]` per track. Six bytes per point:
+/// `u32 LE time_samples + i16 LE value_centibel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VolumeAutomationBreakpoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// Volume in 0.1 dB units (centibel). `0` = unity; `-60` = -6 dB.
+    pub value_centibel: i16,
 }
 
 /// A single breakpoint in a mute-automation envelope.
