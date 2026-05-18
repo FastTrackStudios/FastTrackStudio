@@ -4,17 +4,17 @@
 //! track, generated once via the converter and embedded in this crate),
 //! patch known field offsets to match the input, re-encrypt.
 //!
-//! Covers (single-track only for now):
-//! - Track name (variable-length splice)
-//! - Track color (`0x200a +97`, `0x200b +106`, `0x2015 +88` — i16 LE)
-//! - Track mute (`0x1029 +5`, `0x260a[1] +26`, ...)
-//! - Track solo (`0x102d +162`)
-//! - Track volume (`0x260a[0] +26` i16 LE centibel)
-//! - Track pan (`0x260a[2] +26` i16 LE)
+//! Single-track covers: name, color, mute, solo, solo-defeat,
+//! inactive, volume, pan, mute automation.
 //!
-//! Multi-track is NOT yet supported — needs per-track block expansion
-//! (the converter's "Phase 3b: reassemble" step that copies the 8
-//! per-track block templates N times).
+//! Multi-track (`write_session_ptx`) currently clones the per-track
+//! `0x261c` block N times — structurally correct, but the parser
+//! reads audio-track count from `0x1014` entries inside the single
+//! top-level `0x1015` (the baseline declares stereo, so a 1-track
+//! baseline already reports 2 audio-channel tracks regardless of
+//! `0x261c` count). To make N PT tracks parser-visible the outer
+//! index lists `0x1015`/`0x1054`/`0x2519`/`0x2107` need extension
+//! too — tracked in GH #26.
 //!
 //! Validation: a test compares native output against converter
 //! shell-out output, ignoring the per-file UID region at `0x261b
