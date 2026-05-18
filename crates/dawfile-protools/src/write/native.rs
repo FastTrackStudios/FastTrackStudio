@@ -7,14 +7,13 @@
 //! Single-track covers: name, color, mute, solo, solo-defeat,
 //! inactive, volume, pan, mute automation.
 //!
-//! Multi-track (`write_session_ptx`) currently clones the per-track
-//! `0x261c` block N times — structurally correct, but the parser
-//! reads audio-track count from `0x1014` entries inside the single
-//! top-level `0x1015` (the baseline declares stereo, so a 1-track
-//! baseline already reports 2 audio-channel tracks regardless of
-//! `0x261c` count). To make N PT tracks parser-visible the outer
-//! index lists `0x1015`/`0x1054`/`0x2519`/`0x2107` need extension
-//! too — tracked in GH #26.
+//! Multi-track (`write_session_ptx`) clones the per-track `0x261c`
+//! block N times and extends outer index lists (`0x1015`, `0x1054`,
+//! `0x2519`) with N entries so the parser sees N distinct PT tracks
+//! with the spec'd names. Per-track color and solo are scoped to
+//! each track's `0x261c` range. Per-track mute on multi-track has
+//! a known issue (parser-side resolver pairing breaks on cloned
+//! files — tracked separately).
 //!
 //! Validation: a test compares native output against converter
 //! shell-out output, ignoring the per-file UID region at `0x261b
