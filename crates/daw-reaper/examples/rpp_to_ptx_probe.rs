@@ -48,6 +48,16 @@ fn build_rpp(probe: &str) -> String {
         "two_tracks" => {
             b = b.track("Alpha", |t| t).track("Beta", |t| t);
         }
+        "one_track_aaa" => {
+            // Single-track baseline with 3-char name, to compare against
+            // two_tracks_eq trk1 (also "AAA").
+            b = b.track("AAA", |t| t);
+        }
+        "two_tracks_eq" => {
+            // Equal-length names to eliminate the name-length byte-shift
+            // when diffing track1-vs-track2 byte ranges.
+            b = b.track("AAA", |t| t).track("BBB", |t| t);
+        }
         "three_tracks" => {
             b = b
                 .track("Alpha", |t| t)
