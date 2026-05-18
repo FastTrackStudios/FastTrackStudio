@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use dioxus_router::Navigator;
 use fts_ui::lucide_dioxus::{
-    BookOpen, FolderKanban, House, Inbox as InboxIcon, Menu, Palette, Settings as SettingsIcon,
+    BookOpen, FolderKanban, House, Inbox as InboxIcon, Menu, Palette, PanelLeft,
+    Settings as SettingsIcon,
 };
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
@@ -205,22 +206,23 @@ fn AppShell() -> Element {
     let current = use_route::<Route>();
 
     rsx! {
-        div { class: "min-h-screen bg-background text-foreground lg:grid lg:h-screen lg:grid-cols-[18rem_1fr] lg:overflow-hidden",
-            div { class: "hidden lg:flex lg:h-screen lg:flex-col lg:overflow-hidden",
-                SidebarProvider {
+        SidebarProvider {
+            default_compact: true,
+            class: "min-h-screen bg-background text-foreground",
+            div { class: "flex w-full min-h-screen lg:h-screen lg:overflow-hidden",
+                div { class: "hidden lg:flex lg:h-screen lg:flex-col lg:overflow-hidden lg:flex-none",
                     DesktopSidebar { orgs: orgs.clone(), current: current.clone() }
                 }
-            }
-
-            div { class: "flex min-h-screen flex-col lg:h-screen lg:min-h-0 lg:overflow-y-auto",
-                MobileHeader {}
-                main { class: "flex-1 pb-24 lg:pb-0",
-                    SuspenseBoundary {
-                        fallback: |_| rsx! { RouteFallback {} },
-                        Outlet::<Route> {}
+                div { class: "flex min-h-screen flex-1 min-w-0 flex-col lg:h-screen lg:min-h-0 lg:overflow-y-auto",
+                    MobileHeader {}
+                    main { class: "flex-1 pb-24 lg:pb-0",
+                        SuspenseBoundary {
+                            fallback: |_| rsx! { RouteFallback {} },
+                            Outlet::<Route> {}
+                        }
                     }
+                    BottomTabBar { current }
                 }
-                BottomTabBar { current }
             }
         }
     }
@@ -321,20 +323,33 @@ fn TabBarItem(tab: NavTab, active: bool) -> Element {
 #[component]
 fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
     let nav = use_navigator();
+    let mut compact = use_sidebar_compact();
     rsx! {
-        Sidebar { class: "flex h-screen w-72 flex-col overflow-hidden",
+        Sidebar {
+            collapsible: SidebarCollapsible::Icon,
+            class: "h-screen overflow-hidden",
             SidebarHeader {
-                HStack { gap: "3", class: "px-2 py-1",
-                    div { class: "flex h-10 w-10 items-center justify-center rounded-xl bg-primary font-black text-primary-foreground", "T" }
-                    div { class: "flex flex-col",
-                        span { class: "text-base font-semibold text-foreground leading-tight", "Task" }
-                        span { class: "text-xs text-muted-foreground", "Local-first command center" }
+                div { class: "flex items-center gap-2 px-1 py-1",
+                    button {
+                        class: "flex h-9 w-9 flex-none items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors",
+                        title: "Toggle sidebar",
+                        onclick: move |_| {
+                            let cur = (compact)();
+                            compact.set(!cur);
+                        },
+                        PanelLeft { size: 18 }
+                    }
+                    SidebarLabel { class: "flex flex-col leading-tight",
+                        span { class: "text-sm font-semibold text-foreground", "Task" }
+                        span { class: "text-[10px] text-muted-foreground", "Local-first command center" }
                     }
                 }
             }
             SidebarSeparator {}
             SidebarGroup {
-                SidebarGroupLabel { "Workspace" }
+                SidebarGroupLabel {
+                    SidebarLabel { "Workspace" }
+                }
                 SidebarGroupContent {
                     SidebarMenu {
                         for tab in nav_tabs() {
@@ -346,10 +361,12 @@ fn DesktopSidebar(orgs: Vec<Organization>, current: Route) -> Element {
             SidebarSeparator {}
             div { class: "flex-1 min-h-0 overflow-y-auto" }
             SidebarFooter {
-                div { class: "px-1 pb-1 pt-2",
+                SidebarLabel { class: "block px-1 pb-1 pt-2",
                     SectionHeader { label: "Organization", size: SectionHeaderSize::Small }
                 }
-                OrgSwitcher { orgs, compact: false }
+                if !(compact)() {
+                    OrgSwitcher { orgs: orgs.clone(), compact: false }
+                }
             }
         }
     }
@@ -367,8 +384,12 @@ fn render_sidebar_item(tab: NavTab, current: &Route, nav: Navigator) -> Element 
                 on_click: move |_| {
                     nav.push(route.clone());
                 },
-                span { class: "flex h-4 w-4 items-center justify-center", {icon()} }
-                span { "{label}" }
+                span {
+                    class: "flex h-4 w-4 items-center justify-center flex-none",
+                    title: label,
+                    {icon()}
+                }
+                SidebarLabel { "{label}" }
             }
         }
     }

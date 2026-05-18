@@ -17,7 +17,7 @@ use crdt::codec::{
 };
 use crdt::{CrdtDoc, EntityCrdt, LoroRepo, codec::TextOp};
 use knowledge_proto::{Block, BlockCreate, BlockList, BlockRepo, BlockUpdate};
-use loro::LoroMap;
+use loro::{Container, LoroMap, LoroText, ValueOrContainer};
 use uuid::Uuid;
 
 pub struct BlockEntity;
@@ -25,17 +25,42 @@ pub struct BlockEntity;
 #[derive(Clone)]
 pub struct BlockRepoLoro {
     inner: LoroRepo<BlockEntity>,
+    /// Cached `CrdtDoc` handle so post-write reindexing can spin
+    /// up sibling repos (BlockRefEdge, BlockPropEdge, Page) over
+    /// the same doc without re-plumbing every call site.
+    crdt_doc: CrdtDoc,
 }
 
 impl BlockRepoLoro {
     pub fn new(doc: &CrdtDoc) -> Self {
-        Self { inner: doc.repo() }
+        Self {
+            inner: doc.repo(),
+            crdt_doc: doc.clone(),
+        }
     }
     pub fn inner(&self) -> &LoroRepo<BlockEntity> {
         &self.inner
     }
     pub fn doc(&self) -> &loro::LoroDoc {
         self.inner.doc()
+    }
+    pub fn crdt_doc(&self) -> &CrdtDoc {
+        &self.crdt_doc
+    }
+
+    /// Return the live `LoroText` handle for a block's `content`
+    /// container, or `None` if the block isn't in the doc yet. Used
+    /// by the awareness layer to mint stable text cursors.
+    pub fn text_handle(&self, block_id: Uuid) -> Option<LoroText> {
+        let root = self.inner.doc().get_map(<BlockEntity as EntityCrdt>::ROOT);
+        let sub = match root.get(&block_id.to_string())? {
+            ValueOrContainer::Container(Container::Map(m)) => m,
+            _ => return None,
+        };
+        match sub.get("content")? {
+            ValueOrContainer::Container(Container::Text(t)) => Some(t),
+            _ => None,
+        }
     }
 
     /// Editor fast path. Apply character-level edits to the block's
@@ -245,12 +270,27 @@ impl BlockRepo for BlockRepoLoro {
         self.inner.list(page, sort, filter).await
     }
     async fn create(&self, input: BlockCreate) -> Result<Block, RepoError> {
-        self.inner.create(input).await
+        let block = self.inner.create(input).await?;
+        // Best-effort reindex — if the index update fails the
+        // block still got created (source of truth is intact). The
+        // index can be rebuilt later via `reindex_block`.
+        if let Err(e) = crate::reindex::reindex_block(&self.crdt_doc, block.id).await {
+            tracing::warn!(?e, %block.id, "block ref/prop reindex failed (post-create)");
+        }
+        Ok(block)
     }
     async fn update(&self, id: Uuid, input: BlockUpdate) -> Result<Block, RepoError> {
-        self.inner.update(id, input).await
+        let block = self.inner.update(id, input).await?;
+        if let Err(e) = crate::reindex::reindex_block(&self.crdt_doc, block.id).await {
+            tracing::warn!(?e, %block.id, "block ref/prop reindex failed (post-update)");
+        }
+        Ok(block)
     }
     async fn delete(&self, id: Uuid) -> Result<(), RepoError> {
-        self.inner.delete(id).await
+        self.inner.delete(id).await?;
+        if let Err(e) = crate::reindex::cascade_delete_block_edges(&self.crdt_doc, id).await {
+            tracing::warn!(?e, %id, "edge cascade-delete failed");
+        }
+        Ok(())
     }
 }

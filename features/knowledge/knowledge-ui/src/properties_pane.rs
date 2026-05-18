@@ -44,16 +44,38 @@ pub fn PropertiesPane(
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
     let schema_kind = schema.kind.clone();
+    // Group: required first, then optional. Skip internal-only
+    // types (LexoRank). Sort within each group preserving the
+    // schema's declared order so authors control display order.
+    let mut required: Vec<PropertyDef> = Vec::new();
+    let mut optional: Vec<PropertyDef> = Vec::new();
+    for prop in &schema.properties {
+        if matches!(prop.ty, PropertyType::LexoRank) {
+            continue;
+        }
+        if prop.required {
+            required.push(prop.clone());
+        } else {
+            optional.push(prop.clone());
+        }
+    }
     rsx! {
         section {
             "data-testid": "properties-pane",
             "data-kind": schema_kind,
-            class: "rounded-md border border-border bg-card p-4 flex flex-col gap-2",
-            HStack { class: "items-baseline justify-between mb-1",
-                Heading { level: HeadingLevel::H3, "Properties" }
-                Text { variant: TextVariant::Muted, "{schema.kind}" }
+            class: "flex flex-col gap-1",
+            for prop in required.iter() {
+                PropertyRow {
+                    key: "{prop.key}",
+                    prop: prop.clone(),
+                    value: parsed.get(&prop.key).cloned().unwrap_or(JsonValue::Null),
+                    on_change,
+                }
             }
-            for prop in schema.properties.iter() {
+            if !required.is_empty() && !optional.is_empty() {
+                div { class: "h-px bg-border/40 my-1" }
+            }
+            for prop in optional.iter() {
                 PropertyRow {
                     key: "{prop.key}",
                     prop: prop.clone(),
@@ -80,13 +102,19 @@ fn PropertyRow(
         .clone()
         .unwrap_or_else(|| prop.key.clone());
     let row_testid = format!("prop-row-{}", prop.key);
+    let required_marker = if prop.required { Some("●") } else { None };
     rsx! {
         div {
             "data-testid": row_testid,
             "data-prop-key": "{prop.key}",
-            class: "grid grid-cols-[10rem_1fr] gap-3 items-center text-sm py-1",
-            div { class: "text-muted-foreground", "{label}" }
-            div {
+            class: "grid grid-cols-[7rem_1fr] gap-2 items-start text-xs py-0.5",
+            div { class: "flex items-center gap-1 text-muted-foreground pt-1.5",
+                if let Some(m) = required_marker {
+                    span { class: "text-amber-500/80 text-[8px]", title: "Required", "{m}" }
+                }
+                span { class: "truncate", title: prop.key.clone(), "{label}" }
+            }
+            div { class: "min-w-0",
                 PropertyEditor {
                     prop: prop.clone(),
                     value,

@@ -50,8 +50,8 @@ use knowledge_proto::{
 };
 use project_crdt::{ProjectRepoLoro, TaskRepoLoro};
 use project_proto::{
-    DocId, ProjectRepoDispatcher, SyncError, TaskRepoDispatcher, UpdateBytes, WorkspaceSync,
-    WorkspaceSyncDispatcher,
+    AwarenessFrame, AwarenessPublish, AwarenessSubscribe, DocId, ProjectRepoDispatcher, SyncError,
+    TaskRepoDispatcher, UpdateBytes, WorkspaceSync, WorkspaceSyncDispatcher,
 };
 use sea_orm::Database;
 use sea_orm_migration::MigratorTrait;
@@ -92,6 +92,16 @@ pub struct OpenDoc {
     /// `subscribe_local_update` fires, so the local-update path
     /// can read it. Phase 10 — drives per-kind filtering.
     pub last_touched_roots: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Per-doc awareness store — holds remote peers' ephemeral
+    /// state (cursors, presence) keyed by `cursor::<peer_uuid>`.
+    /// 30s timeout: peers that stop publishing are eligible for
+    /// `remove_outdated()` purge.
+    pub awareness: Arc<crdt::awareness::EphemeralStore>,
+    /// Fan-out channel for awareness frames. `subscribe_awareness`
+    /// returns a Tx that receives every published frame for this
+    /// doc; `publish_awareness` pushes here after applying to
+    /// the local store.
+    pub awareness_tx: broadcast::Sender<AwarenessFrame>,
     /// Subscription handles must outlive the doc for the broadcast
     /// callbacks to keep firing. Held here; dropped when the doc is
     /// evicted.
@@ -102,6 +112,8 @@ pub struct OpenDoc {
 impl OpenDoc {
     pub fn new(doc: Arc<CrdtDoc>) -> Self {
         let (update_tx, _) = broadcast::channel::<UpdateFrame>(4096);
+        let (awareness_tx, _) = broadcast::channel::<AwarenessFrame>(1024);
+        let awareness = Arc::new(crdt::awareness::EphemeralStore::new(30_000));
         let last_touched_roots = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
 
         // Subscribe to the root — fires BEFORE local-update for any
@@ -136,6 +148,8 @@ impl OpenDoc {
             doc,
             update_tx,
             last_touched_roots,
+            awareness,
+            awareness_tx,
             _local_update_subscription,
             _root_subscription,
         }
@@ -756,6 +770,77 @@ impl WorkspaceSync for WorkspaceSyncImpl {
             None => all,
         };
         Ok(project_proto::DocList { doc_ids: filtered })
+    }
+
+    async fn subscribe_awareness(&self, sub: AwarenessSubscribe, output: vox::Tx<AwarenessFrame>) {
+        if self.check_read(&sub.doc_id).is_err() {
+            tracing::info!(doc = %sub.doc_id.as_str(), "subscribe_awareness: forbidden");
+            let _ = output.close(Default::default()).await;
+            return;
+        }
+        let open = match self.registry.get_or_open(&sub.doc_id).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::warn!(doc = %sub.doc_id.as_str(), ?e, "subscribe_awareness: open failed");
+                let _ = output.close(Default::default()).await;
+                return;
+            }
+        };
+        let mut rx = open.awareness_tx.subscribe();
+        // Snapshot first: every active peer's current state so
+        // late joiners see existing cursors immediately.
+        let snapshot = open.awareness.encode_all();
+        if !snapshot.is_empty() {
+            let _ = output
+                .send(AwarenessFrame {
+                    from_peer: Uuid::nil(),
+                    bytes: snapshot,
+                })
+                .await;
+        }
+        loop {
+            match rx.recv().await {
+                Ok(frame) => {
+                    // Server-side echo suppression — the publisher
+                    // already has its own state locally.
+                    if frame.from_peer == sub.peer_id {
+                        continue;
+                    }
+                    if output.send(frame).await.is_err() {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(doc = %sub.doc_id.as_str(), %n, "awareness lagged; resending snapshot");
+                    let snap = open.awareness.encode_all();
+                    if !snap.is_empty()
+                        && output
+                            .send(AwarenessFrame {
+                                from_peer: Uuid::nil(),
+                                bytes: snap,
+                            })
+                            .await
+                            .is_err()
+                    {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
+    }
+
+    async fn publish_awareness(&self, msg: AwarenessPublish) -> Result<(), SyncError> {
+        self.check_write(&msg.doc_id)?;
+        let open = self.registry.get_or_open(&msg.doc_id).await?;
+        // Apply locally so late joiners get the merged state via
+        // `encode_all()` on subscribe.
+        if let Err(e) = open.awareness.apply(&msg.frame.bytes) {
+            tracing::warn!(doc = %msg.doc_id.as_str(), %e, "awareness apply failed");
+            return Err(SyncError::InvalidUpdate(e.to_string()));
+        }
+        let _ = open.awareness_tx.send(msg.frame);
+        Ok(())
     }
 }
 

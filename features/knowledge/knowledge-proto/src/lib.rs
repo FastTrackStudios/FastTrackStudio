@@ -330,6 +330,169 @@ pub struct KnowledgeTag {
     pub updated_at: DateTime<Utc>,
 }
 
+// ── BlockRefEdge — materialized index over Block.refs_json ────────────
+
+/// A first-class edge from a source block to a target it references.
+///
+/// **Source of truth** is still `Block.refs_json` — this entity is a
+/// derived materialized view that gets re-projected by
+/// `knowledge_crdt::reindex` whenever a block is created/updated/
+/// deleted. The edge is what makes "find every block that
+/// references `[[Foo]]`" a constant-time index lookup instead of
+/// an O(N) scan over every block's `refs_json` blob.
+///
+/// One block can spawn many edges (one per reference in its
+/// content). One target can be referenced by many edges (the
+/// backlinks set).
+///
+/// See `plans/logseq-data-model-alignment.md` for context.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "block_ref_edges", repo)]
+pub struct BlockRefEdge {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable)]
+    pub vault_id: Uuid,
+
+    /// Block whose content produced this edge.
+    #[architect(filterable)]
+    pub source_block_id: Uuid,
+
+    /// Denormalized for fast vault- + page-scoped queries (e.g.
+    /// "list all backlinks landing on page X" doesn't need a
+    /// secondary join).
+    #[architect(filterable)]
+    pub source_page_id: Uuid,
+
+    /// One of `"page" | "block" | "tag" | "entity" | "embed"`.
+    /// Mirrors the `Ref` enum variants in `crate::refs`.
+    #[architect(filterable)]
+    pub target_kind: String,
+
+    /// Lookup key for the target. For pages this is the basename
+    /// (lowercased for case-insensitive match), for tags the path,
+    /// for blocks/entities the UUID stringified. Pages have an
+    /// alternate canonical resolution via [`Self::target_uuid`]
+    /// once we resolve the basename → page id.
+    #[architect(filterable, fulltext)]
+    pub target_str: String,
+
+    /// Resolved target uuid, when known. `Some` for entity refs
+    /// and block refs (their UUIDs are baked into the syntax) and
+    /// for page refs once basename resolution succeeds. `None`
+    /// for unresolved page links and tags.
+    pub target_uuid: Option<Uuid>,
+
+    /// Optional alias text from the wikilink (`[[Page|Alias]]`).
+    /// Preserved so backlink panels can show the surface form.
+    pub alias: Option<String>,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
+// ── BlockPropEdge — materialized index over Block.properties_json ─────
+
+/// A single `key:: value` property attached to a block.
+///
+/// Like [`BlockRefEdge`], this is a derived view — the source of
+/// truth is `Block.properties_json`. Queries like "all blocks
+/// with `priority:: high`" hit this index instead of scanning
+/// every block's JSON blob.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "block_prop_edges", repo)]
+pub struct BlockPropEdge {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable)]
+    pub vault_id: Uuid,
+
+    #[architect(filterable)]
+    pub block_id: Uuid,
+
+    /// Denormalized for vault-scoped property queries.
+    #[architect(filterable)]
+    pub page_id: Uuid,
+
+    /// Property key, lowercased for case-insensitive match.
+    #[architect(filterable, fulltext)]
+    pub key: String,
+
+    /// JSON-serialized value preserving the original type
+    /// (string / number / bool / array / object). Equality
+    /// queries can use this directly; type-aware queries decode.
+    #[architect(filterable)]
+    pub value_json: String,
+
+    /// Resolved canonical type from the kind's `KindSchema`
+    /// (e.g. `"text" | "number" | "checkbox" | "date" |
+    /// "datetime" | "tags" | "aliases" | "link" | "link_list" |
+    /// "enum_with_metadata" | "lexorank" | "json"`). Empty string
+    /// when the property isn't declared by any schema (free-form
+    /// user property).
+    #[architect(filterable)]
+    pub value_type: String,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
+// ── PagePropEdge — materialized index over Page.frontmatter_json ──────
+
+/// First-class edge from a page to one of its frontmatter
+/// properties. Tier 2 of the data-model alignment plan: makes
+/// `find_pages_with_prop("status", "in_progress")` an O(edges)
+/// lookup against an index instead of an O(pages) scan over
+/// every page's frontmatter blob.
+///
+/// The schema mirrors [`BlockPropEdge`] but is keyed by `page_id`
+/// instead of `block_id`. The `Page.frontmatter_json` blob is
+/// still the source of truth — these edges are derived state that
+/// follows page writes via `knowledge_crdt::reindex`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[architect(table_name = "page_prop_edges", repo)]
+pub struct PagePropEdge {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    #[architect(filterable)]
+    pub vault_id: Uuid,
+
+    #[architect(filterable)]
+    pub page_id: Uuid,
+
+    /// Property key, lowercased for case-insensitive match.
+    #[architect(filterable, fulltext)]
+    pub key: String,
+
+    /// JSON-serialized value (same shape as
+    /// [`BlockPropEdge::value_json`]).
+    #[architect(filterable)]
+    pub value_json: String,
+
+    /// Resolved canonical `PropertyType` (see
+    /// [`BlockPropEdge::value_type`]).
+    #[architect(filterable)]
+    pub value_type: String,
+
+    #[architect(exclude(create, update), on_create = Utc::now())]
+    pub created_at: DateTime<Utc>,
+
+    #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
+    pub updated_at: DateTime<Utc>,
+}
+
 // ── Base (.base file from Obsidian Bases) ─────────────────────────────
 
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]

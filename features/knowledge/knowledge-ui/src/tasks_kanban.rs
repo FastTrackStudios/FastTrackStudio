@@ -20,7 +20,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use futures::StreamExt;
 use futures::channel::mpsc::unbounded;
-use knowledge_crdt::{PageRepoLoro, VaultRepoLoro};
+use knowledge_crdt::{IndexedPageRepo, PageRepoLoro, VaultRepoLoro};
 use knowledge_proto::bases::{
     BaseRow, CmpOp, ExecutedView, Expr, FilterNode, ParsedBase, SortDir, SortKey, ViewKind,
     ViewSpec, execute_view,
@@ -62,7 +62,9 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
     let on_move = use_callback(move |drop: super::views::KanbanDrop| {
         let doc = move_doc.clone();
         spawn(async move {
-            let page_repo = PageRepoLoro::new(&doc);
+            // Tier 2: route writes through IndexedPageRepo so the
+            // page-prop index follows status flips.
+            let page_repo = IndexedPageRepo::new(&doc);
             let page = match page_repo.get(drop.page_id).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -138,7 +140,7 @@ pub fn TasksKanbanLive(vox_url: String) -> Element {
                 "status": bucket,
             })
             .to_string();
-            let page_repo = PageRepoLoro::new(&doc);
+            let page_repo = IndexedPageRepo::new(&doc);
             if let Err(e) = page_repo
                 .create(PageCreate {
                     vault_id: vault.id,

@@ -7,9 +7,17 @@
 //! propagate to peers via `apply_update` — the same pattern
 //! `project-ui::TasksByProjectLive` uses.
 
+pub mod awareness;
+#[cfg(target_arch = "wasm32")]
+pub mod idb_persistence;
+pub mod inline_md;
 pub mod live;
+pub mod outliner;
 pub mod properties_pane;
+pub mod query;
 pub mod tasks_kanban;
+pub mod up_tree;
+pub mod view_mode;
 pub mod views;
 
 pub use live::{KnowledgeLive, KnowledgeSnapshot, KnowledgeView};

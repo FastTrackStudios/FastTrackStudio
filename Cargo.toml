@@ -26,6 +26,9 @@ repository = "https://github.com/Codys-Wright/Task"
 [workspace.dependencies]
 async-trait = "0.1"
 chrono = "0.4"
+keybindings = "0.0.2"
+editor-types = "0.0.2"
+vim = { path = "crates/vim" }
 eyre = "0.6"
 futures = "0.3"
 rrule = "0.11"
@@ -106,6 +109,13 @@ rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
 version = "1.12"
 default-features = false
 
+# Loro internals — needed for `EphemeralStore` (awareness/cursor
+# sync) which the public `loro` crate doesn't re-export. Pinned
+# to the same minor as `loro` so the type identities line up.
+[workspace.dependencies.loro-internal]
+version = "1.12"
+default-features = false
+
 # CalDAV/CardDAV/WebDAV-Sync client (RFC 4791 + RFC 6352 + RFC 6578).
 # Picked over `kitchen-fridge` because it actually implements VEVENT
 # (kitchen-fridge's upstream is VTODO-first with VEVENT support
@@ -144,6 +154,9 @@ features = ["lib"]
 version = "0.7.9"
 default-features = false
 
+[workspace.dependencies.dioxus-ssr]
+version = "0.7.9"
+
 # Web-sys / wasm-bindgen — wired only in crates that use them and
 # always behind `#[cfg(target_arch = "wasm32")]` source gates. They
 # do compile on native (stub wrappers in wasm-bindgen-shared) so
@@ -163,6 +176,10 @@ version = "0.3"
 [workspace.dependencies.gloo-timers]
 version = "0.3"
 features = ["futures"]
+
+[workspace.dependencies.indexed_db_futures]
+version = "0.6"
+features = ["serde", "cursors", "indices", "typed-arrays", "async-upgrade", "tx-done", "version-change"]
 
 [workspace.dependencies.futures-channel]
 version = "0.3"

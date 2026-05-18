@@ -124,6 +124,57 @@ pub enum SyncError {
     Forbidden,
 }
 
+/// Awareness payload — encoded `EphemeralStore` bytes from one
+/// peer announcing its current cursor / selection / presence
+/// state. Opaque on the wire; clients decode with the matching
+/// `EphemeralStore::apply()`.
+///
+/// Shipped via [`WorkspaceSync::publish_awareness`] (out) +
+/// [`WorkspaceSync::subscribe_awareness`] (in). Server holds
+/// one `EphemeralStore` per `doc_id` and fans out to every
+/// subscriber for that doc.
+#[derive(Debug, Clone, Facet)]
+pub struct AwarenessFrame {
+    /// Source peer — clients use this to colorize remote
+    /// cursors and to suppress their own echo when they receive
+    /// their own published state back.
+    pub from_peer: ::uuid::Uuid,
+    /// `EphemeralStore` payload (one or more keys' encoded
+    /// bytes). Apply to a local store to merge.
+    pub bytes: Vec<u8>,
+}
+
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for AwarenessFrame {
+    type Ref<'a> = AwarenessFrame;
+}
+
+/// Subscription request — `(doc_id, peer_id)`. Server skips
+/// echoing the subscriber's own published frames back to them.
+#[derive(Debug, Clone, Facet)]
+pub struct AwarenessSubscribe {
+    pub doc_id: DocId,
+    pub peer_id: ::uuid::Uuid,
+}
+
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for AwarenessSubscribe {
+    type Ref<'a> = AwarenessSubscribe;
+}
+
+/// Publish envelope — pairs the awareness frame with the doc
+/// it belongs to.
+#[derive(Debug, Clone, Facet)]
+pub struct AwarenessPublish {
+    pub doc_id: DocId,
+    pub frame: AwarenessFrame,
+}
+
+#[cfg(feature = "vox")]
+unsafe impl vox_types::Reborrow for AwarenessPublish {
+    type Ref<'a> = AwarenessPublish;
+}
+
 #[cfg_attr(feature = "vox", vox::service)]
 pub trait WorkspaceSync {
     /// Push the bytes of a locally-committed update to a specific
@@ -157,4 +208,20 @@ pub trait WorkspaceSync {
     /// a kanban viewing only `tasks` can avoid receiving the
     /// `knowledge_blocks` byte stream from a busy editor.
     async fn subscribe_kinds(&self, filter: KindFilter, output: Tx<UpdateBytes>);
+
+    /// Subscribe to awareness updates for a doc. The server
+    /// forwards every other peer's `AwarenessFrame` for this
+    /// doc as it's published. First send is the current snapshot
+    /// (every active peer's state) so late joiners see the
+    /// existing cursors immediately.
+    ///
+    /// The subscriber's own `peer_id` is filtered server-side
+    /// so clients don't have to suppress their own echo.
+    async fn subscribe_awareness(&self, sub: AwarenessSubscribe, output: Tx<AwarenessFrame>);
+
+    /// Publish a local awareness update to peers subscribed to
+    /// the same doc. Server merges into its per-doc
+    /// `EphemeralStore` (so future joiners see the fresh state)
+    /// and forwards the bytes to every other subscriber.
+    async fn publish_awareness(&self, msg: AwarenessPublish) -> Result<(), SyncError>;
 }

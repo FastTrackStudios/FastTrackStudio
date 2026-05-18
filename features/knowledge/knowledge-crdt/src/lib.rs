@@ -10,16 +10,25 @@
 
 pub mod base;
 pub mod block;
+pub mod block_prop_edge;
+pub mod block_ref_edge;
 pub mod folder;
+pub mod indexed_repos;
 pub mod knowledge_tag;
 pub mod page;
+pub mod page_prop_edge;
+pub mod reindex;
 pub mod vault;
 
 pub use base::*;
 pub use block::*;
+pub use block_prop_edge::*;
+pub use block_ref_edge::*;
 pub use folder::*;
+pub use indexed_repos::IndexedPageRepo;
 pub use knowledge_tag::*;
 pub use page::*;
+pub use page_prop_edge::*;
 pub use vault::*;
 
 pub use crdt::codec::TextOp;

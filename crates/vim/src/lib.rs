@@ -1,0 +1,355 @@
+//! First-class vim editing layer for the Task app.
+//!
+//! Built on top of [`keybindings`](https://docs.rs/keybindings)
+//! and [`editor-types`](https://docs.rs/editor-types) (both
+//! Apache-2.0, both wasm-compatible). We own the binding table,
+//! the key adapter, and the action vocabulary so the same engine
+//! can drive in-block editing today and app-wide navigation
+//! tomorrow.
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use vim::{VimEngine, DioxusKey, VimMode, VimAction};
+//!
+//! let mut engine = VimEngine::default();
+//! assert_eq!(engine.mode(), VimMode::Normal);
+//!
+//! // `i` switches to insert mode and emits an entry action.
+//! let actions = engine.feed(DioxusKey::Char('i'));
+//! assert_eq!(engine.mode(), VimMode::Insert);
+//! assert!(matches!(actions.as_slice(), [VimAction::EnterInsert(_)]));
+//!
+//! // Escape returns to normal.
+//! engine.feed(DioxusKey::Escape);
+//! assert_eq!(engine.mode(), VimMode::Normal);
+//! ```
+
+pub mod action;
+pub mod bindings;
+pub mod cursor;
+pub mod engine;
+pub mod key;
+pub mod mode;
+
+pub use action::{BlockOp, InsertEntry, Motion, VimAction};
+pub use cursor::{Cursor, CursorState, DocView, apply_motion};
+pub use engine::{DefaultBindings, VimEngine, VimMachine};
+pub use key::DioxusKey;
+pub use mode::{VimMode, VimStep};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starts_in_normal() {
+        let engine = VimEngine::default();
+        assert_eq!(engine.mode(), VimMode::Normal);
+    }
+
+    #[test]
+    fn i_enters_insert_then_esc_returns() {
+        let mut e = VimEngine::default();
+        let acts = e.feed(DioxusKey::Char('i'));
+        assert_eq!(e.mode(), VimMode::Insert);
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::EnterInsert(InsertEntry::BeforeCursor))),
+            "expected EnterInsert(BeforeCursor), got {acts:?}"
+        );
+
+        let acts = e.feed(DioxusKey::Escape);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(
+            acts.iter().any(|a| matches!(a, VimAction::EnterNormal)),
+            "expected EnterNormal, got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn hjkl_emits_motions() {
+        let mut e = VimEngine::default();
+        let h = e.feed(DioxusKey::Char('h'));
+        assert!(
+            h.iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::CharLeft)))
+        );
+        let j = e.feed(DioxusKey::Char('j'));
+        assert!(
+            j.iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::LineDown)))
+        );
+    }
+
+    #[test]
+    fn gg_is_a_two_key_sequence() {
+        let mut e = VimEngine::default();
+        // First `g` is pending — no action.
+        let first = e.feed(DioxusKey::Char('g'));
+        assert!(
+            !first
+                .iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::DocStart))),
+            "first `g` should not fire DocStart yet"
+        );
+        // Second `g` completes.
+        let second = e.feed(DioxusKey::Char('g'));
+        assert!(
+            second
+                .iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::DocStart))),
+            "expected DocStart after `gg`, got {second:?}"
+        );
+    }
+
+    #[test]
+    fn dd_deletes_block() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('d'));
+        let acts = e.feed(DioxusKey::Char('d'));
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::Block(BlockOp::DeleteCurrent))),
+            "expected Block(DeleteCurrent), got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn count_buffer_repeats_motion() {
+        let mut e = VimEngine::default();
+        // `3j` should emit three Move(LineDown).
+        let a = e.feed(DioxusKey::Char('3'));
+        assert!(a.is_empty(), "digit alone shouldn't fire an action");
+        assert_eq!(e.pending_count(), Some(3));
+        let a = e.feed(DioxusKey::Char('j'));
+        assert_eq!(a.len(), 3);
+        assert!(
+            a.iter()
+                .all(|x| matches!(x, VimAction::Move(Motion::LineDown)))
+        );
+        assert_eq!(e.pending_count(), None, "count clears after action");
+    }
+
+    #[test]
+    fn multi_digit_count() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('1'));
+        e.feed(DioxusKey::Char('2'));
+        assert_eq!(e.pending_count(), Some(12));
+        let a = e.feed(DioxusKey::Char('k'));
+        assert_eq!(a.len(), 12);
+    }
+
+    #[test]
+    fn bare_zero_is_line_start_not_count() {
+        let mut e = VimEngine::default();
+        let a = e.feed(DioxusKey::Char('0'));
+        assert!(
+            a.iter()
+                .any(|x| matches!(x, VimAction::Move(Motion::LineStart))),
+            "bare 0 should be LineStart, got {a:?}"
+        );
+    }
+
+    #[test]
+    fn zero_extends_existing_count() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('1'));
+        e.feed(DioxusKey::Char('0'));
+        assert_eq!(e.pending_count(), Some(10));
+        let a = e.feed(DioxusKey::Char('j'));
+        assert_eq!(a.len(), 10);
+    }
+
+    #[test]
+    fn escape_clears_pending_count() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('5'));
+        assert_eq!(e.pending_count(), Some(5));
+        e.feed(DioxusKey::Escape);
+        assert_eq!(e.pending_count(), None);
+        // Subsequent j is one motion, not five.
+        let a = e.feed(DioxusKey::Char('j'));
+        assert_eq!(a.len(), 1);
+    }
+
+    #[test]
+    fn count_does_not_multiply_mode_entries() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('3'));
+        let a = e.feed(DioxusKey::Char('i'));
+        assert_eq!(a.len(), 1, "EnterInsert should emit once even with count 3");
+        assert_eq!(e.mode(), VimMode::Insert);
+    }
+
+    #[test]
+    fn count_multiplies_dd() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('2'));
+        e.feed(DioxusKey::Char('d'));
+        let a = e.feed(DioxusKey::Char('d'));
+        assert_eq!(a.len(), 2, "2dd should delete two blocks, got {a:?}");
+        assert!(
+            a.iter()
+                .all(|x| matches!(x, VimAction::Block(BlockOp::DeleteCurrent)))
+        );
+    }
+
+    #[test]
+    fn o_creates_block_below_and_enters_insert() {
+        let mut e = VimEngine::default();
+        let acts = e.feed(DioxusKey::Char('o'));
+        assert_eq!(e.mode(), VimMode::Insert);
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::Block(BlockOp::NewBelow))),
+            "expected Block(NewBelow), got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn cc_changes_block_and_enters_insert() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('c'));
+        let acts = e.feed(DioxusKey::Char('c'));
+        assert_eq!(e.mode(), VimMode::Insert);
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::Block(BlockOp::ChangeCurrent))),
+            "expected Block(ChangeCurrent), got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn capital_j_emits_join_next() {
+        let mut e = VimEngine::default();
+        let acts = e.feed(DioxusKey::Char('J'));
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::Block(BlockOp::JoinNext))),
+            "expected Block(JoinNext), got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn f_then_char_emits_find_forward() {
+        let mut e = VimEngine::default();
+        let pending = e.feed(DioxusKey::Char('f'));
+        assert!(pending.is_empty(), "f waits for next char, got {pending:?}");
+        let acts = e.feed(DioxusKey::Char('x'));
+        assert!(
+            acts.iter().any(|a| matches!(
+                a,
+                VimAction::Move(Motion::FindChar {
+                    ch: 'x',
+                    direction: 1,
+                    till: false
+                })
+            )),
+            "expected Move(FindChar fx), got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn capital_t_emits_find_back_till() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('T'));
+        let acts = e.feed(DioxusKey::Char('z'));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            VimAction::Move(Motion::FindChar {
+                ch: 'z',
+                direction: -1,
+                till: true
+            })
+        )));
+    }
+
+    #[test]
+    fn semicolon_repeats_last_find() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('f'));
+        e.feed(DioxusKey::Char('q'));
+        let acts = e.feed(DioxusKey::Char(';'));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            VimAction::Move(Motion::FindChar {
+                ch: 'q',
+                direction: 1,
+                till: false
+            })
+        )));
+    }
+
+    #[test]
+    fn comma_reverses_last_find() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('f'));
+        e.feed(DioxusKey::Char('q'));
+        let acts = e.feed(DioxusKey::Char(','));
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            VimAction::Move(Motion::FindChar {
+                ch: 'q',
+                direction: -1,
+                till: false
+            })
+        )));
+    }
+
+    #[test]
+    fn m_then_char_emits_set_mark() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('m'));
+        let acts = e.feed(DioxusKey::Char('a'));
+        assert!(acts.iter().any(|a| matches!(a, VimAction::SetMark('a'))));
+    }
+
+    #[test]
+    fn apostrophe_then_char_emits_jump_to_mark() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('\''));
+        let acts = e.feed(DioxusKey::Char('a'));
+        assert!(acts.iter().any(|a| matches!(a, VimAction::JumpToMark('a'))));
+    }
+
+    #[test]
+    fn capital_v_enters_visual_line() {
+        let mut e = VimEngine::default();
+        let acts = e.feed(DioxusKey::Char('V'));
+        assert_eq!(e.mode(), VimMode::VisualLine);
+        assert!(acts.iter().any(|a| matches!(a, VimAction::EnterVisual)));
+    }
+
+    #[test]
+    fn lowercase_v_still_enters_visual() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('v'));
+        assert_eq!(e.mode(), VimMode::Visual);
+    }
+
+    #[test]
+    fn escape_from_visual_line_to_normal() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('V'));
+        e.feed(DioxusKey::Escape);
+        assert_eq!(e.mode(), VimMode::Normal);
+    }
+
+    #[test]
+    fn escape_clears_pending_operator() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('f'));
+        e.feed(DioxusKey::Escape);
+        // Next char should NOT complete the cancelled find.
+        let acts = e.feed(DioxusKey::Char('x'));
+        assert!(
+            !acts
+                .iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::FindChar { .. }))),
+            "escape should cancel pending f, got {acts:?}"
+        );
+    }
+}

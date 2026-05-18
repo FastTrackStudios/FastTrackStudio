@@ -31,5 +31,19 @@ crdt = { workspace = true }
 project-proto = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
+regex = { workspace = true }
+vim = { workspace = true }
+
+# Browser-side debounce timer for the awareness publish path —
+# coalesces cursor moves so we don't ship one frame per keystroke.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true }
+# Local-first persistence: store the Loro snapshot + append-only
+# update log in IndexedDB so reload restores the doc instantly,
+# without a server round-trip.
+indexed_db_futures = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
