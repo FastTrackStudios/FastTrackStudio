@@ -343,6 +343,34 @@ a.wikilink.broken {
   cursor: not-allowed;
 }
 
+/* Block ref chips — render `((uuid))` as a small pill carrying the
+   target block's snippet. Mirrors the live app's BlockRefChip. */
+a.block-ref,
+span.block-ref {
+  display: inline;
+  padding: 0.05em 0.4em;
+  border-radius: 0.4em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9em;
+  max-width: 32em;
+  vertical-align: baseline;
+}
+
+a.block-ref:hover {
+  background: var(--bg-alt);
+  border-color: var(--link);
+  color: var(--link);
+}
+
+span.block-ref.broken {
+  color: var(--strike);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
 code {
   background: var(--code-bg);
   padding: 0.1em 0.35em;

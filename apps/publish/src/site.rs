@@ -12,6 +12,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::components::WikiResolver;
+use crate::graph::build_block_ref_resolver;
 use crate::{feeds, graph, render, search, tags};
 
 const STYLE_CSS: &str = include_str!("style.css");
@@ -59,8 +60,11 @@ pub async fn build(
     }
 
     let mut basename_to_slug: HashMap<String, String> = HashMap::new();
+    let mut id_to_slug: HashMap<Uuid, String> = HashMap::new();
     for p in &pages {
-        basename_to_slug.insert(p.basename.to_lowercase(), slugify(&p.basename));
+        let slug = slugify(&p.basename);
+        basename_to_slug.insert(p.basename.to_lowercase(), slug.clone());
+        id_to_slug.insert(p.id, slug);
     }
     let resolver = WikiResolver(Arc::new(basename_to_slug));
 
@@ -78,6 +82,11 @@ pub async fn build(
 
     // All blocks, flattened — used by graph + search + tags.
     let all_blocks: Vec<Block> = blocks_by_page.values().flatten().cloned().collect();
+
+    // ── Block-ref resolver ───────────────────────────────
+    // UUID → (page_slug, snippet). Lets `((uuid))` chips render
+    // with snippet previews + deep-link hrefs.
+    let block_refs = build_block_ref_resolver(&all_blocks, &id_to_slug);
 
     // ── Graph ────────────────────────────────────────────
     let graph_data = graph::compute(&pages, &all_blocks);
@@ -99,7 +108,15 @@ pub async fn build(
         let slug = slugify(&page.basename);
         let blocks = blocks_by_page.get(&page.id).cloned().unwrap_or_default();
         let bl = backlinks.0.get(&slug).cloned().unwrap_or_default();
-        let html = render::render_page(site_title, page, &blocks, &resolver, &pages, &bl);
+        let html = render::render_page(
+            site_title,
+            page,
+            &blocks,
+            &resolver,
+            &block_refs,
+            &pages,
+            &bl,
+        );
         let dir = out.join(&slug);
         tokio::fs::create_dir_all(&dir).await?;
         tokio::fs::write(dir.join("index.html"), html).await?;

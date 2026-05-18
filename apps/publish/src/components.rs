@@ -31,6 +31,20 @@ use crate::inline;
 #[derive(Clone, Default, PartialEq)]
 pub struct WikiResolver(pub Arc<HashMap<String, String>>);
 
+/// Per-block target metadata: where the block lives + a short
+/// snippet of its content for inline-chip rendering.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockRefTarget {
+    pub page_slug: String,
+    pub snippet: String,
+}
+
+/// Resolution table: block UUID → target page slug + snippet.
+/// Lets `((uuid))` references in any block resolve to a deep link
+/// at parse time, the same way [`WikiResolver`] does for pages.
+#[derive(Clone, Default, PartialEq)]
+pub struct BlockRefResolver(pub Arc<HashMap<uuid::Uuid, BlockRefTarget>>);
+
 /// Outer document. `dioxus-ssr` renders the children as HTML
 /// inside a hand-written `<html>` shell (`crate::render::shell`)
 /// — Dioxus 0.7 doesn't have a first-class `<html>`/`<head>`
@@ -178,18 +192,22 @@ pub fn BlockNode(block: Block) -> Element {
         _ => None,
     };
     let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
-    let inlines = inline::parse(&block.content, &resolver);
+    let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
+    let inlines = inline::parse(&block.content, &resolver, &block_refs);
+    // Block-anchor id — lets `((uuid))` references in other pages
+    // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
+    let anchor = format!("block-{}", block.id.simple());
     match block.kind.as_str() {
         "heading" => {
             let level = block.heading_level.unwrap_or(1).clamp(1, 6) as u8;
             // Dynamic h{1..6} via match — small cost, big clarity.
             match level {
-                1 => rsx! { h1 { Inlines { nodes: inlines } } },
-                2 => rsx! { h2 { Inlines { nodes: inlines } } },
-                3 => rsx! { h3 { Inlines { nodes: inlines } } },
-                4 => rsx! { h4 { Inlines { nodes: inlines } } },
-                5 => rsx! { h5 { Inlines { nodes: inlines } } },
-                _ => rsx! { h6 { Inlines { nodes: inlines } } },
+                1 => rsx! { h1 { id: "{anchor}", Inlines { nodes: inlines } } },
+                2 => rsx! { h2 { id: "{anchor}", Inlines { nodes: inlines } } },
+                3 => rsx! { h3 { id: "{anchor}", Inlines { nodes: inlines } } },
+                4 => rsx! { h4 { id: "{anchor}", Inlines { nodes: inlines } } },
+                5 => rsx! { h5 { id: "{anchor}", Inlines { nodes: inlines } } },
+                _ => rsx! { h6 { id: "{anchor}", Inlines { nodes: inlines } } },
             }
         }
         "code" => {
@@ -206,7 +224,7 @@ pub fn BlockNode(block: Block) -> Element {
             // hex color styles.
             let highlighted = crate::syntax::highlight(&block.content, &lang);
             rsx! {
-                pre { class: "code",
+                pre { id: "{anchor}", class: "code",
                     div { class: "code-lang", "{lang}" }
                     code {
                         dangerous_inner_html: "{highlighted}",
@@ -215,7 +233,7 @@ pub fn BlockNode(block: Block) -> Element {
             }
         }
         "list_item" => rsx! {
-            div { class: "list-item",
+            div { id: "{anchor}", class: "list-item",
                 "• "
                 if let Some((g, struck)) = task_glyph {
                     span { class: if struck { "task-done" } else { "" }, "{g} " }
@@ -224,7 +242,7 @@ pub fn BlockNode(block: Block) -> Element {
             }
         },
         _ => rsx! {
-            p {
+            p { id: "{anchor}",
                 if let Some((g, _)) = task_glyph {
                     span { "{g} " }
                 }
@@ -282,5 +300,31 @@ pub fn InlineNode(node: inline::Node) -> Element {
         Node::ExternalLink { label, url } => rsx! {
             a { class: "ext", href: "{url}", target: "_blank", rel: "noopener", "{label}" }
         },
+        Node::BlockRef {
+            target_id,
+            page_slug,
+            snippet,
+            broken,
+        } => {
+            if broken {
+                rsx! {
+                    span {
+                        class: "block-ref broken",
+                        title: "block not found",
+                        "(({snippet}))"
+                    }
+                }
+            } else {
+                let href = format!("/{page_slug}/#block-{}", target_id.simple());
+                rsx! {
+                    a {
+                        class: "block-ref",
+                        href: "{href}",
+                        title: "{snippet}",
+                        "{snippet}"
+                    }
+                }
+            }
+        }
     }
 }

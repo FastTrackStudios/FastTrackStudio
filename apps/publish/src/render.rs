@@ -4,7 +4,9 @@
 //! themselves live in [`crate::components`]; this module just
 //! drives them and wraps the output in the static `<html>` shell.
 
-use crate::components::{BacklinksPanel, DocBody, PageContent, Sidebar, WikiResolver};
+use crate::components::{
+    BacklinksPanel, BlockRefResolver, DocBody, PageContent, Sidebar, WikiResolver,
+};
 use crate::graph::{BacklinkEntry, GraphView};
 use crate::tags::TagPageEntry;
 use dioxus::prelude::*;
@@ -16,6 +18,7 @@ pub fn render_page(
     page: &Page,
     blocks: &[Block],
     resolver: &WikiResolver,
+    block_refs: &BlockRefResolver,
     all_pages: &[Page],
     backlinks: &[BacklinkEntry],
 ) -> String {
@@ -26,6 +29,7 @@ pub fn render_page(
     let current_id = page.id;
     let journal_day = page.journal_day.clone();
     let resolver_for_root = resolver.clone();
+    let block_refs_for_root = block_refs.clone();
     let backlinks = backlinks.to_vec();
 
     let mut vdom = VirtualDom::new_with_props(
@@ -38,6 +42,7 @@ pub fn render_page(
             current_id,
             journal_day,
             resolver: resolver_for_root,
+            block_refs: block_refs_for_root,
             backlinks,
         },
     );
@@ -207,9 +212,11 @@ fn Root(
     current_id: uuid::Uuid,
     journal_day: Option<String>,
     resolver: WikiResolver,
+    block_refs: BlockRefResolver,
     backlinks: Vec<BacklinkEntry>,
 ) -> Element {
     use_context_provider(|| resolver);
+    use_context_provider(|| block_refs);
     rsx! {
         DocBody {
             site_title: site_title,
@@ -359,7 +366,15 @@ mod tests {
         let p = page("Test");
         let blocks = vec![block("Hello [[Foo]]")];
         let pages = vec![p.clone()];
-        let html = render_page("Site", &p, &blocks, &book(), &pages, &[]);
+        let html = render_page(
+            "Site",
+            &p,
+            &blocks,
+            &book(),
+            &BlockRefResolver::default(),
+            &pages,
+            &[],
+        );
         assert!(html.contains("<!DOCTYPE html>"));
         assert!(html.contains("Test"));
         assert!(html.contains(r#"href="/foo/""#), "{html}");

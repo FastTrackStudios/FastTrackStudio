@@ -18,7 +18,7 @@
 //! simulation. Good enough up to ~500 nodes; bigger vaults can
 //! upgrade to Pixi/D3 in a later phase.
 
-use crate::components::WikiResolver;
+use crate::components::{BlockRefResolver, BlockRefTarget, WikiResolver};
 use crate::inline;
 use crate::site::slugify;
 use dioxus::prelude::*;
@@ -63,27 +63,45 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
         basename_to_slug.insert(p.basename.to_lowercase(), slug);
     }
     let resolver = WikiResolver(Arc::new(basename_to_slug));
+    let block_refs = build_block_ref_resolver(blocks, &id_to_slug);
 
     // Collect per-page outgoing slugs (deduped via a HashSet).
+    // Both `[[Page]]` wikilinks and `((uuid))` block refs become
+    // page→page edges — a block ref to a block on page B is an
+    // outgoing link from the source page to B.
     let mut outgoing: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
     for b in blocks {
         let Some(src) = id_to_slug.get(&b.page_id) else {
             continue;
         };
-        let nodes = inline::parse(&b.content, &resolver);
+        let nodes = inline::parse(&b.content, &resolver, &block_refs);
         for n in walk(&nodes) {
-            if let inline::Node::Wikilink {
-                slug,
-                broken: false,
-                ..
-            } = n
-            {
-                if &slug != src {
-                    outgoing
-                        .entry(src.clone())
-                        .or_default()
-                        .insert(slug.clone());
+            match n {
+                inline::Node::Wikilink {
+                    slug,
+                    broken: false,
+                    ..
+                } => {
+                    if &slug != src {
+                        outgoing
+                            .entry(src.clone())
+                            .or_default()
+                            .insert(slug.clone());
+                    }
                 }
+                inline::Node::BlockRef {
+                    page_slug,
+                    broken: false,
+                    ..
+                } => {
+                    if &page_slug != src {
+                        outgoing
+                            .entry(src.clone())
+                            .or_default()
+                            .insert(page_slug.clone());
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -119,6 +137,42 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
     });
 
     GraphData { nodes, edges }
+}
+
+/// Build a UUID → (page_slug, snippet) lookup so `((uuid))`
+/// refs resolve at parse time. Snippet = block content trimmed +
+/// truncated to 80 chars — same fallback the live app's
+/// `BlockRefChip` uses.
+pub fn build_block_ref_resolver(
+    blocks: &[Block],
+    id_to_slug: &HashMap<Uuid, String>,
+) -> BlockRefResolver {
+    let mut map: HashMap<Uuid, BlockRefTarget> = HashMap::new();
+    for b in blocks {
+        let Some(slug) = id_to_slug.get(&b.page_id) else {
+            continue;
+        };
+        map.insert(
+            b.id,
+            BlockRefTarget {
+                page_slug: slug.clone(),
+                snippet: block_snippet(&b.content),
+            },
+        );
+    }
+    BlockRefResolver(Arc::new(map))
+}
+
+fn block_snippet(content: &str) -> String {
+    // Collapse whitespace, trim, cap at 80 chars (utf-8 safe).
+    let mut s: String = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.chars().count() > 80 {
+        s = s.chars().take(80).collect::<String>() + "…";
+    }
+    if s.is_empty() {
+        s.push('…');
+    }
+    s
 }
 
 /// Flatten an Inline tree to a borrow-iterator of leaf nodes
@@ -157,35 +211,47 @@ pub struct BacklinkEntry {
 pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
     let mut id_to_meta: HashMap<Uuid, (String, String)> = HashMap::new();
     let mut basename_to_slug: HashMap<String, String> = HashMap::new();
+    let mut id_to_slug: HashMap<Uuid, String> = HashMap::new();
     for p in pages {
         let slug = slugify(&p.basename);
         id_to_meta.insert(p.id, (slug.clone(), p.basename.clone()));
-        basename_to_slug.insert(p.basename.to_lowercase(), slug);
+        basename_to_slug.insert(p.basename.to_lowercase(), slug.clone());
+        id_to_slug.insert(p.id, slug);
     }
     let resolver = WikiResolver(Arc::new(basename_to_slug));
+    let block_refs = build_block_ref_resolver(blocks, &id_to_slug);
 
-    // target_slug → set of (source_slug, source_label)
+    // target_slug → set of (source_slug, source_label).
+    // Both wikilinks and block refs contribute backlinks at the
+    // page level — UI today is page-grain, so a `((uuid))` from
+    // page A pointing into page B shows "linked by A" on B.
     let mut by_target: HashMap<String, std::collections::BTreeMap<String, String>> = HashMap::new();
     for b in blocks {
         let Some((src_slug, src_label)) = id_to_meta.get(&b.page_id) else {
             continue;
         };
-        let parsed = inline::parse(&b.content, &resolver);
+        let parsed = inline::parse(&b.content, &resolver, &block_refs);
         for n in walk(&parsed) {
-            if let inline::Node::Wikilink {
-                slug: target,
-                broken: false,
-                ..
-            } = n
-            {
-                if &target == src_slug {
-                    continue;
-                }
-                by_target
-                    .entry(target.clone())
-                    .or_default()
-                    .insert(src_slug.clone(), src_label.clone());
+            let target = match n {
+                inline::Node::Wikilink {
+                    slug,
+                    broken: false,
+                    ..
+                } => slug,
+                inline::Node::BlockRef {
+                    page_slug,
+                    broken: false,
+                    ..
+                } => page_slug,
+                _ => continue,
+            };
+            if &target == src_slug {
+                continue;
             }
+            by_target
+                .entry(target)
+                .or_default()
+                .insert(src_slug.clone(), src_label.clone());
         }
     }
     let map: HashMap<String, Vec<BacklinkEntry>> = by_target
@@ -313,5 +379,33 @@ mod tests {
         let blocks = vec![block(alpha.id, "see [[NotARealPage]]")];
         let g = compute(&[alpha], &blocks);
         assert_eq!(g.edges.len(), 0);
+    }
+
+    #[test]
+    fn block_ref_contributes_page_edge() {
+        let alpha = page("Alpha");
+        let beta = page("Beta");
+        let target = block(beta.id, "target paragraph");
+        let target_id = target.id;
+        let mut src = block(alpha.id, "");
+        src.content = format!("see (({target_id}))");
+        let g = compute(&[alpha, beta], &vec![target, src]);
+        assert_eq!(g.edges.len(), 1, "block ref should add alpha→beta edge");
+        assert_eq!(g.edges[0].source, "alpha");
+        assert_eq!(g.edges[0].target, "beta");
+    }
+
+    #[test]
+    fn block_ref_backlinks_appear() {
+        let alpha = page("Alpha");
+        let beta = page("Beta");
+        let target = block(beta.id, "target paragraph");
+        let target_id = target.id;
+        let mut src = block(alpha.id, "");
+        src.content = format!("see (({target_id}))");
+        let bl = build_backlinks(&[alpha, beta], &vec![target, src]);
+        let entries = bl.0.get("beta").cloned().unwrap_or_default();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].slug, "alpha");
     }
 }
