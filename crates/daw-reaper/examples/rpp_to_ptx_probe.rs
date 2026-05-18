@@ -87,11 +87,11 @@ fn build_rpp(probe: &str) -> String {
             b = b.track("ProbeTrack", |t| t.fx_disabled());
         }
         "mute_envelope" => {
-            // Mute envelope with two breakpoints: muted at t=0,
-            // un-muted at t=1.0.
+            // PT recognizes "MUTEENV" (not "MUTEENV2" — the converter
+            // looks for that exact string per its binary).
             use dawfile_reaper::types::envelope::EnvelopePointShape;
             b = b.track("ProbeTrack", |t| {
-                t.envelope("MUTEENV2", |e| {
+                t.envelope("MUTEENV", |e| {
                     e.active()
                         .visible()
                         .point(0.0, 0.0, EnvelopePointShape::Square)
