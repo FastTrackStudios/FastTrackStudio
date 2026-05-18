@@ -2,7 +2,7 @@
 
 mod service;
 
-pub use service::{AudioSyncSnapshot, Diagnostics, DiagnosticsRpc};
+pub use service::{AudioSyncSnapshot, Diagnostics, DiagnosticsRpc, PeerSummary};
 
 #[cfg(feature = "vox")]
 pub use service::{

@@ -3,7 +3,7 @@
 
 use crate::Standalone;
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics};
+use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, PeerSummary};
 
 impl Diagnostics for Standalone {
     fn hub_publish_latency_us(&self, _project: ProjectContext, _samples: u32) -> Vec<u64> {
@@ -16,5 +16,17 @@ impl Diagnostics for Standalone {
 
     fn audio_sync_observe(&self, _count: u32, _interval_us: u64) -> Vec<AudioSyncSnapshot> {
         Vec::new()
+    }
+
+    fn audio_sync_peers(&self) -> Vec<PeerSummary> {
+        Vec::new()
+    }
+
+    fn audio_sync_self_peer_id(&self) -> String {
+        String::new()
+    }
+
+    fn audio_sync_seed_peer(&self, _peer_id: &str, _addr: &str) -> daw_proto::DawResult<()> {
+        Ok(())
     }
 }

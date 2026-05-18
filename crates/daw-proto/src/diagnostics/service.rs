@@ -6,8 +6,33 @@
 //! csurf / hub / forwarder paths without the cross-process noise the
 //! standard subscribe path picks up.
 
-use crate::ProjectContext;
+use crate::{DawResult, ProjectContext};
 use facet::Facet;
+
+/// Wire-format snapshot of a peer the local ClockSync session knows
+/// about. Mirrors `daw_audio_sync::clock_sync::PeerInfo` but with
+/// owned types (`String` instead of `Instant`/`SocketAddr`) so it
+/// crosses the vox boundary cleanly.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct PeerSummary {
+    /// Stable peer id (UUID string).
+    pub id: String,
+    /// `host:port` of the peer's listen socket.
+    pub addr: String,
+    /// Remote clock − local clock, microseconds.
+    pub offset_us: i64,
+    /// One-way network delay estimate, microseconds.
+    pub delay_us: i64,
+    /// Milliseconds since the last successful round-trip.
+    pub rtt_age_ms: u64,
+    /// Milliseconds since the last announce.
+    pub announce_age_ms: u64,
+    /// Latest broadcast playhead in seconds, if known. `f64::NAN`
+    /// when no position has been received yet.
+    pub remote_playhead_seconds: f64,
+    /// Whether the remote was playing at last broadcast.
+    pub remote_is_playing: bool,
+}
 
 /// Audio-thread snapshot — mirrors `daw_audio_sync::AudioSnapshot` on
 /// the wire so cross-process consumers can observe per-buffer state.
@@ -54,4 +79,23 @@ pub trait Diagnostics {
     /// `interval_us` microseconds apart. Useful for measuring audio
     /// buffer rate from the test side without flooding RPC channels.
     fn audio_sync_observe(&self, count: u32, interval_us: u64) -> Vec<AudioSyncSnapshot>;
+
+    /// Current ClockSync peer table. Empty if the clock-sync layer
+    /// wasn't brought up (FTS_AUDIO_SYNC_PORT not set) or if no
+    /// peers have announced yet. Each entry summarises a peer the
+    /// local session is tracking — clock offset, network delay,
+    /// last-known sample position.
+    fn audio_sync_peers(&self) -> Vec<PeerSummary>;
+
+    /// Local peer id of this ClockSync session, or empty string if
+    /// the layer isn't running. Useful for tests to identify which
+    /// peer is which without having to bind their own session.
+    fn audio_sync_self_peer_id(&self) -> String;
+
+    /// Manually insert a peer into the local ClockSync table. Used
+    /// by tests + by environments where multicast discovery is
+    /// blocked (corporate LANs, CI loopback). The peer id is the
+    /// UUID string the remote reports via `audio_sync_self_peer_id`;
+    /// the addr is `host:port` of the remote's ClockSync socket.
+    fn audio_sync_seed_peer(&self, peer_id: &str, addr: &str) -> DawResult<()>;
 }

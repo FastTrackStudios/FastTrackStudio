@@ -257,6 +257,23 @@ pub fn global_snapshot() -> Option<AudioSnapshot> {
     GLOBAL_CELL.get()?.load()
 }
 
+// ── Process-global ClockSync ───────────────────────────────────────
+//
+// Same pattern as `GLOBAL_CELL`: daw-bridge publishes the live
+// session on startup; consumers (daw-reaper's Diagnostics impl, etc.)
+// read peer-table snapshots without re-binding sockets.
+
+static GLOBAL_CLOCK_SYNC: std::sync::OnceLock<Arc<clock_sync::ClockSync>> =
+    std::sync::OnceLock::new();
+
+pub fn set_global_clock_sync(session: Arc<clock_sync::ClockSync>) {
+    let _ = GLOBAL_CLOCK_SYNC.set(session);
+}
+
+pub fn global_clock_sync() -> Option<&'static Arc<clock_sync::ClockSync>> {
+    GLOBAL_CLOCK_SYNC.get()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

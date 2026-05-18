@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{DawClients, Result};
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::AudioSyncSnapshot;
+use daw_proto::diagnostics::{AudioSyncSnapshot, PeerSummary};
 
 #[derive(Clone)]
 pub struct Probes {
@@ -52,6 +52,31 @@ impl Probes {
             .diagnostics
             .audio_sync_observe(count, interval_us)
             .await?)
+    }
+
+    /// Snapshot of every peer the local ClockSync session is tracking.
+    /// Empty when the audio-sync layer wasn't brought up or no peer
+    /// has announced yet.
+    pub async fn audio_sync_peers(&self) -> Result<Vec<PeerSummary>> {
+        Ok(self.clients.diagnostics.audio_sync_peers().await?)
+    }
+
+    /// Stable id of the local ClockSync session, or empty when the
+    /// layer isn't running.
+    pub async fn audio_sync_self_peer_id(&self) -> Result<String> {
+        Ok(self.clients.diagnostics.audio_sync_self_peer_id().await?)
+    }
+
+    /// Manually seed a remote peer into the local ClockSync table.
+    /// `peer_id` is the remote's UUID string (from
+    /// `audio_sync_self_peer_id`); `addr` is `host:port` of its
+    /// ClockSync socket.
+    pub async fn audio_sync_seed_peer(&self, peer_id: &str, addr: &str) -> Result<()> {
+        self.clients
+            .diagnostics
+            .audio_sync_seed_peer(peer_id.to_string(), addr.to_string())
+            .await??;
+        Ok(())
     }
 }
 

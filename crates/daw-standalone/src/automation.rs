@@ -1,93 +1,347 @@
-//! `impl Automation for Standalone` — every method panics with
-//! `todo!("standalone: …")`. Envelopes / points / automation modes
-//! aren't modeled in `ProjectState` yet.
+//! `impl Automation for Standalone` — envelope storage in
+//! `ProjectState.envelopes`.
+//!
+//! Each envelope is keyed by `(track_guid, EnvelopeKey)` and stores
+//! visibility, arm, automation mode, plus a vec of `EnvelopePoint`s
+//! kept sorted by time. `value_at` interpolates linearly between
+//! adjacent points (or holds for `EnvelopeShape::Square`); non-linear
+//! shapes (SlowStartEnd / FastStart / FastEnd / Bezier) fall back to
+//! linear for now — wire real curves when the audio graph needs them.
 
 use daw_proto::TrackRef;
 use daw_proto::automation::{
-    AddPointParams, Automation, Envelope, EnvelopeLocation, EnvelopePoint, SetPointParams,
-    TimeRangeParams,
+    AddPointParams, Automation, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeShape,
+    SetPointParams, TimeRangeParams,
 };
-use daw_proto::primitives::AutomationMode;
-use daw_proto::primitives::PositionInSeconds;
+use daw_proto::primitives::{AutomationMode, PositionInSeconds};
 use daw_proto::project::ProjectContext;
 
-use crate::sync::Standalone;
+use crate::sync::{EnvelopeData, EnvelopeKey, Standalone};
+
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => {
+            let state = daw.state.lock().ok()?;
+            state.current_project_guid.clone()
+        }
+    }
+}
+
+fn resolve_track_guid(daw: &Standalone, project_guid: &str, track: &TrackRef) -> Option<String> {
+    daw.with_project(project_guid, |p| match track {
+        TrackRef::Guid(g) => p
+            .tracks
+            .iter()
+            .find(|t| t.guid == *g)
+            .map(|t| t.guid.clone()),
+        TrackRef::Index(i) => p.tracks.get(*i as usize).map(|t| t.guid.clone()),
+        TrackRef::Master => Some("master".to_string()),
+    })
+    .ok()
+    .flatten()
+}
+
+fn renumber(points: &mut [EnvelopePoint]) {
+    for (i, p) in points.iter_mut().enumerate() {
+        p.index = i as u32;
+    }
+}
+
+fn sort_points(points: &mut [EnvelopePoint]) {
+    points.sort_by(|a, b| {
+        a.time
+            .as_seconds()
+            .partial_cmp(&b.time.as_seconds())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
+/// Resolve the envelope at `loc` to its `(track_guid, key)` identity,
+/// returning `None` if the track can't be found.
+fn resolve_envelope_id(
+    daw: &Standalone,
+    project_guid: &str,
+    loc: &EnvelopeLocation,
+) -> Option<(String, EnvelopeKey)> {
+    let track_guid = resolve_track_guid(daw, project_guid, &loc.track)?;
+    Some((track_guid, EnvelopeKey::from_ref(&loc.envelope)))
+}
 
 impl Automation for Standalone {
-    fn envelopes(&self, _project: ProjectContext, _track: TrackRef) -> Vec<Envelope> {
-        todo!("standalone: Automation::envelopes — automation lanes not yet modeled")
+    fn envelopes(&self, project: ProjectContext, track: TrackRef) -> Vec<Envelope> {
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        let Some(track_guid) = resolve_track_guid(self, &project_guid, &track) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.envelopes
+                .iter()
+                .filter_map(|((tg, key), data)| {
+                    if tg == &track_guid {
+                        Some(data.to_proto(tg, key))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
     }
-    fn envelope(&self, _project: ProjectContext, _location: EnvelopeLocation) -> Option<Envelope> {
-        todo!("standalone: Automation::envelope")
+
+    fn envelope(&self, project: ProjectContext, location: EnvelopeLocation) -> Option<Envelope> {
+        let project_guid = resolve_project(self, &project)?;
+        let (track_guid, key) = resolve_envelope_id(self, &project_guid, &location)?;
+        self.with_project(&project_guid, |p| {
+            p.envelopes
+                .get(&(track_guid.clone(), key.clone()))
+                .map(|d| d.to_proto(&track_guid, &key))
+        })
+        .ok()
+        .flatten()
     }
-    fn set_visible(&self, _project: ProjectContext, _location: EnvelopeLocation, _visible: bool) {
-        todo!("standalone: Automation::set_visible")
+
+    fn set_visible(&self, project: ProjectContext, location: EnvelopeLocation, visible: bool) {
+        mutate_envelope(self, project, location, |e| e.visible = visible);
     }
-    fn set_armed(&self, _project: ProjectContext, _location: EnvelopeLocation, _armed: bool) {
-        todo!("standalone: Automation::set_armed")
+
+    fn set_armed(&self, project: ProjectContext, location: EnvelopeLocation, armed: bool) {
+        mutate_envelope(self, project, location, |e| e.armed = armed);
     }
+
     fn set_automation_mode(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _mode: AutomationMode,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        mode: AutomationMode,
     ) {
-        todo!("standalone: Automation::set_automation_mode")
+        mutate_envelope(self, project, location, |e| e.automation_mode = mode);
     }
-    fn points(&self, _project: ProjectContext, _location: EnvelopeLocation) -> Vec<EnvelopePoint> {
-        todo!("standalone: Automation::points")
+
+    fn points(&self, project: ProjectContext, location: EnvelopeLocation) -> Vec<EnvelopePoint> {
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.envelopes
+                .get(&(tg, key))
+                .map(|d| d.points.clone())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
+
     fn points_in_range(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _range: TimeRangeParams,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        range: TimeRangeParams,
     ) -> Vec<EnvelopePoint> {
-        todo!("standalone: Automation::points_in_range")
+        let (start, end) = (range.start.as_seconds(), range.end.as_seconds());
+        Automation::points(self, project, location)
+            .into_iter()
+            .filter(|p| {
+                let t = p.time.as_seconds();
+                t >= start && t <= end
+            })
+            .collect()
     }
+
     fn value_at(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _time: PositionInSeconds,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        time: PositionInSeconds,
     ) -> f64 {
-        todo!("standalone: Automation::value_at")
+        let points = Automation::points(self, project, location);
+        if points.is_empty() {
+            return 0.0;
+        }
+        let t = time.as_seconds();
+        let first = &points[0];
+        if t <= first.time.as_seconds() {
+            return first.value;
+        }
+        let last = points.last().unwrap();
+        if t >= last.time.as_seconds() {
+            return last.value;
+        }
+        // Find the segment containing `t`.
+        for i in 0..points.len() - 1 {
+            let a = &points[i];
+            let b = &points[i + 1];
+            let ta = a.time.as_seconds();
+            let tb = b.time.as_seconds();
+            if t >= ta && t <= tb {
+                match a.shape {
+                    EnvelopeShape::Square => return a.value,
+                    // Linear (and all other shapes for now — see file
+                    // doc-comment).
+                    _ => {
+                        let span = tb - ta;
+                        if span <= 0.0 {
+                            return b.value;
+                        }
+                        let f = (t - ta) / span;
+                        return a.value + (b.value - a.value) * f;
+                    }
+                }
+            }
+        }
+        0.0
     }
+
     fn add_point(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _params: AddPointParams,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: AddPointParams,
     ) -> u32 {
-        todo!("standalone: Automation::add_point")
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return u32::MAX;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return u32::MAX;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let data = p
+                .envelopes
+                .entry((tg, key))
+                .or_insert_with(EnvelopeData::new);
+            data.points.push(EnvelopePoint {
+                index: 0, // rewritten by renumber()
+                time: params.time,
+                value: params.value.clamp(0.0, 1.0),
+                shape: params.shape,
+                tension: 0.0,
+                selected: false,
+            });
+            sort_points(&mut data.points);
+            renumber(&mut data.points);
+            // Return the new point's index (post-sort).
+            data.points
+                .iter()
+                .position(|pt| {
+                    (pt.time.as_seconds() - params.time.as_seconds()).abs() < 1e-12
+                        && (pt.value - params.value.clamp(0.0, 1.0)).abs() < 1e-12
+                })
+                .map(|i| i as u32)
+                .unwrap_or(0)
+        })
+        .unwrap_or(u32::MAX)
     }
-    fn delete_point(&self, _project: ProjectContext, _location: EnvelopeLocation, _index: u32) {
-        todo!("standalone: Automation::delete_point")
+
+    fn delete_point(&self, project: ProjectContext, location: EnvelopeLocation, index: u32) {
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(data) = p.envelopes.get_mut(&(tg, key)) {
+                let i = index as usize;
+                if i < data.points.len() {
+                    data.points.remove(i);
+                    renumber(&mut data.points);
+                }
+            }
+        });
     }
+
     fn set_point(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _params: SetPointParams,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        params: SetPointParams,
     ) {
-        todo!("standalone: Automation::set_point")
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(data) = p.envelopes.get_mut(&(tg, key)) {
+                let i = params.index as usize;
+                if let Some(pt) = data.points.get_mut(i) {
+                    pt.time = params.time;
+                    pt.value = params.value.clamp(0.0, 1.0);
+                    pt.shape = params.shape;
+                    sort_points(&mut data.points);
+                    renumber(&mut data.points);
+                }
+            }
+        });
     }
+
     fn delete_points_in_range(
         &self,
-        _project: ProjectContext,
-        _location: EnvelopeLocation,
-        _range: TimeRangeParams,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        range: TimeRangeParams,
     ) {
-        todo!("standalone: Automation::delete_points_in_range")
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return;
+        };
+        let (start, end) = (range.start.as_seconds(), range.end.as_seconds());
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(data) = p.envelopes.get_mut(&(tg, key)) {
+                data.points.retain(|pt| {
+                    let t = pt.time.as_seconds();
+                    !(t >= start && t <= end)
+                });
+                renumber(&mut data.points);
+            }
+        });
     }
-    fn global_automation_override(&self, _project: ProjectContext) -> Option<AutomationMode> {
-        todo!("standalone: Automation::global_automation_override")
+
+    fn global_automation_override(&self, project: ProjectContext) -> Option<AutomationMode> {
+        let project_guid = resolve_project(self, &project)?;
+        self.with_project(&project_guid, |p| p.global_automation_override)
+            .ok()
+            .flatten()
     }
+
     fn set_global_automation_override(
         &self,
-        _project: ProjectContext,
-        _mode: Option<AutomationMode>,
+        project: ProjectContext,
+        mode: Option<AutomationMode>,
     ) {
-        todo!("standalone: Automation::set_global_automation_override")
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            p.global_automation_override = mode;
+        });
     }
+}
+
+fn mutate_envelope(
+    daw: &Standalone,
+    project: ProjectContext,
+    location: EnvelopeLocation,
+    f: impl FnOnce(&mut EnvelopeData),
+) {
+    let Some(project_guid) = resolve_project(daw, &project) else {
+        return;
+    };
+    let Some((tg, key)) = resolve_envelope_id(daw, &project_guid, &location) else {
+        return;
+    };
+    let _ = daw.with_project_mut(&project_guid, |p| {
+        let data = p
+            .envelopes
+            .entry((tg, key))
+            .or_insert_with(EnvelopeData::new);
+        f(data);
+    });
 }

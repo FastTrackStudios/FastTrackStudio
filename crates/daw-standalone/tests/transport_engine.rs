@@ -130,6 +130,278 @@ async fn tempo_map_falls_back_to_static_with_zero_or_one_points() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automation_envelope_round_trip() {
+    use daw_proto::automation::{
+        AddPointParams, Automation, EnvelopeLocation, EnvelopeRef, EnvelopeShape, EnvelopeType,
+    };
+    use daw_proto::primitives::PositionInSeconds;
+    use daw_proto::{TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let tg = Tracks::add(&daw, ctx.clone(), "Vox", None).unwrap();
+    let loc = EnvelopeLocation::new(
+        TrackRef::Guid(tg.clone()),
+        EnvelopeRef::Type(EnvelopeType::Volume),
+    );
+
+    // No points yet → value at any time = 0.
+    assert!(
+        Automation::value_at(
+            &daw,
+            ctx.clone(),
+            loc.clone(),
+            PositionInSeconds::from_seconds(1.0)
+        ) == 0.0
+    );
+
+    Automation::add_point(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        AddPointParams::linear(PositionInSeconds::from_seconds(0.0), 0.0),
+    );
+    Automation::add_point(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        AddPointParams::linear(PositionInSeconds::from_seconds(2.0), 1.0),
+    );
+    // Insert out-of-order, expect sort.
+    Automation::add_point(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        AddPointParams::linear(PositionInSeconds::from_seconds(1.0), 0.5),
+    );
+
+    let points = Automation::points(&daw, ctx.clone(), loc.clone());
+    assert_eq!(points.len(), 3);
+    assert!(points[0].time.as_seconds() < points[1].time.as_seconds());
+    assert!(points[1].time.as_seconds() < points[2].time.as_seconds());
+
+    // Linear interp at t=0.5 between (0, 0) and (1, 0.5) = 0.25.
+    let v = Automation::value_at(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        PositionInSeconds::from_seconds(0.5),
+    );
+    assert!((v - 0.25).abs() < 1e-9, "expected 0.25, got {v}");
+
+    // Square shape on first segment freezes value.
+    Automation::set_point(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        daw_proto::automation::SetPointParams {
+            index: 0,
+            time: PositionInSeconds::from_seconds(0.0),
+            value: 0.0,
+            shape: EnvelopeShape::Square,
+        },
+    );
+    let v = Automation::value_at(
+        &daw,
+        ctx.clone(),
+        loc.clone(),
+        PositionInSeconds::from_seconds(0.5),
+    );
+    assert!(
+        (v - 0.0).abs() < 1e-9,
+        "expected 0.0 (Square hold), got {v}"
+    );
+
+    // Envelope query exposes point count.
+    let env = Automation::envelope(&daw, ctx, loc).unwrap();
+    assert_eq!(env.point_count, 3);
+    assert_eq!(env.track_guid, tg);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fx_add_list_remove_round_trip() {
+    use daw_proto::Tracks;
+    use daw_proto::fx::{Effects, FxChainContext, FxRef, FxTarget, SetParameterRequest};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let track_guid = Tracks::add(&daw, ctx.clone(), "Bus", None).unwrap();
+    let chain = FxChainContext::Track(track_guid.clone());
+
+    assert_eq!(Effects::count(&daw, ctx.clone(), chain.clone()), 0);
+    let fx_a = Effects::add(&daw, ctx.clone(), chain.clone(), "ReaComp").expect("add A");
+    let fx_b = Effects::add(&daw, ctx.clone(), chain.clone(), "VST3: Pro-Q 4").expect("add B");
+    assert_eq!(Effects::count(&daw, ctx.clone(), chain.clone()), 2);
+
+    let list = Effects::list(&daw, ctx.clone(), chain.clone());
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].index, 0);
+    assert_eq!(list[1].index, 1);
+    assert_eq!(list[0].plugin_name, "ReaComp");
+
+    // Set a parameter and read it back.
+    let target_b = FxTarget::new(chain.clone(), FxRef::Guid(fx_b.clone()));
+    Effects::set_parameter(
+        &daw,
+        ctx.clone(),
+        SetParameterRequest {
+            target: target_b.clone(),
+            index: 3,
+            value: 0.75,
+        },
+    )
+    .unwrap();
+    let p = Effects::parameter(&daw, ctx.clone(), target_b.clone(), 3).unwrap();
+    assert!((p.value - 0.75).abs() < 1e-9);
+    assert_eq!(p.name, "Param 4");
+
+    // Move A to index 1.
+    Effects::move_to(
+        &daw,
+        ctx.clone(),
+        FxTarget::new(chain.clone(), FxRef::Guid(fx_a.clone())),
+        1,
+    )
+    .unwrap();
+    let list = Effects::list(&daw, ctx.clone(), chain.clone());
+    assert_eq!(list[0].guid, fx_b);
+    assert_eq!(list[1].guid, fx_a);
+    assert_eq!(list[1].index, 1);
+
+    // Remove B.
+    Effects::remove(
+        &daw,
+        ctx.clone(),
+        FxTarget::new(chain.clone(), FxRef::Guid(fx_b)),
+    )
+    .unwrap();
+    let list = Effects::list(&daw, ctx, chain);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].guid, fx_a);
+    assert_eq!(list[0].index, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fx_state_chunk_round_trip() {
+    use daw_proto::Tracks;
+    use daw_proto::fx::{Effects, FxChainContext, FxRef, FxTarget};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let tg = Tracks::add(&daw, ctx.clone(), "Bus", None).unwrap();
+    let chain = FxChainContext::Track(tg);
+    let fx_guid = Effects::add(&daw, ctx.clone(), chain.clone(), "ReaEQ").unwrap();
+    let target = FxTarget::new(chain, FxRef::Guid(fx_guid));
+
+    Effects::set_state_chunk(&daw, ctx.clone(), target.clone(), b"FOO BAR BAZ".to_vec()).unwrap();
+    let chunk = Effects::state_chunk(&daw, ctx, target).unwrap();
+    assert_eq!(chunk, b"FOO BAR BAZ");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn midi_create_item_and_add_notes() {
+    use daw_proto::midi::{Midi, MidiNoteCreate};
+    use daw_proto::{TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let track_guid = Tracks::add(&daw, ctx.clone(), "MIDI", None).unwrap();
+
+    let loc = Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track_guid), 0.0, 2.0)
+        .expect("MIDI item created");
+
+    assert_eq!(Midi::note_count(&daw, loc.clone()), 0);
+
+    let i1 = Midi::add_note(&daw, loc.clone(), MidiNoteCreate::new(60, 100, 0.0, 1.0));
+    let i2 = Midi::add_note(&daw, loc.clone(), MidiNoteCreate::new(64, 100, 1.0, 1.0));
+    let i3 = Midi::add_note(&daw, loc.clone(), MidiNoteCreate::new(67, 100, 2.0, 1.0));
+    assert_eq!((i1, i2, i3), (0, 1, 2));
+    assert_eq!(Midi::note_count(&daw, loc.clone()), 3);
+
+    // Transpose just index 1 up an octave.
+    Midi::transpose_notes(&daw, loc.clone(), vec![1], 12);
+    let notes = Midi::notes(&daw, loc.clone());
+    assert_eq!(notes[0].pitch, 60);
+    assert_eq!(notes[1].pitch, 76);
+    assert_eq!(notes[2].pitch, 67);
+
+    // Delete middle note; remaining renumber.
+    Midi::delete_note(&daw, loc.clone(), 1);
+    let notes = Midi::notes(&daw, loc.clone());
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0].index, 0);
+    assert_eq!(notes[1].index, 1);
+    assert_eq!(notes[0].pitch, 60);
+    assert_eq!(notes[1].pitch, 67);
+
+    // Range query.
+    let in_range =
+        Midi::notes_in_range(&daw, loc.clone(), daw_proto::midi::PpqRange::new(0.5, 1.5));
+    // After delete: notes are at 0..1 (pitch 60) and 2..3 (pitch 67).
+    // Range 0.5..1.5 overlaps only the first.
+    assert_eq!(in_range.len(), 1);
+    assert_eq!(in_range[0].pitch, 60);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn midi_quantize_snaps_to_grid() {
+    use daw_proto::midi::{Midi, MidiNoteCreate, QuantizeParams};
+    use daw_proto::{TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let tg = Tracks::add(&daw, ctx.clone(), "MIDI", None).unwrap();
+    let loc = Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(tg), 0.0, 4.0).unwrap();
+
+    Midi::add_note(&daw, loc.clone(), MidiNoteCreate::new(60, 100, 0.97, 0.5));
+    Midi::add_note(&daw, loc.clone(), MidiNoteCreate::new(60, 100, 2.05, 0.5));
+
+    Midi::quantize_notes(
+        &daw,
+        loc.clone(),
+        QuantizeParams {
+            indices: vec![0, 1],
+            grid_ppq: 1.0,
+            strength: 1.0, // full snap
+        },
+    );
+    let notes = Midi::notes(&daw, loc);
+    assert!((notes[0].start_ppq - 1.0).abs() < 1e-9);
+    assert!((notes[1].start_ppq - 2.0).abs() < 1e-9);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn track_channels_round_trip() {
+    use daw_proto::{RecordInput, TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let guid = Tracks::add(&daw, ctx.clone(), "Vocals", None).unwrap();
+    let tref = TrackRef::Guid(guid);
+
+    // Default = stereo until set.
+    assert_eq!(daw.track_num_channels(&ctx, &tref), Some(2));
+
+    Tracks::set_num_channels(&daw, ctx.clone(), tref.clone(), 57).unwrap();
+    assert_eq!(daw.track_num_channels(&ctx, &tref), Some(57));
+
+    // Clamped above 128.
+    Tracks::set_num_channels(&daw, ctx.clone(), tref.clone(), 999).unwrap();
+    assert_eq!(daw.track_num_channels(&ctx, &tref), Some(128));
+
+    // Mono allowed.
+    Tracks::set_num_channels(&daw, ctx.clone(), tref.clone(), 1).unwrap();
+    assert_eq!(daw.track_num_channels(&ctx, &tref), Some(1));
+
+    // Record input round-trips.
+    Tracks::set_record_input(&daw, ctx.clone(), tref.clone(), RecordInput::midi_all()).unwrap();
+    assert!(matches!(
+        daw.track_record_input(&ctx, &tref),
+        Some(RecordInput::Midi { .. })
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_state_mirrors_engine_playhead() {
     let (daw, _guid) = seeded();
     let ctx = ProjectContext::Current;

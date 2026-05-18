@@ -10,7 +10,7 @@ use daw_proto::Tracks;
 use daw_proto::{DawError, DawResult, ProjectContext, RecordInput, Track, TrackRef};
 use uuid::Uuid;
 
-use crate::sync::Standalone;
+use crate::sync::{Standalone, TrackExt};
 
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
@@ -278,20 +278,41 @@ impl Tracks for Standalone {
 
     fn set_num_channels(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _num_channels: u32,
+        project: ProjectContext,
+        track: TrackRef,
+        num_channels: u32,
     ) -> DawResult<()> {
-        Ok(())
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        // REAPER caps tracks at 128 channels. Allow any count 1..=128 —
+        // standalone doesn't enforce stereo pairing.
+        let n = num_channels.clamp(1, 128);
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
+            p.track_ext
+                .entry(track_guid)
+                .or_insert_with(TrackExt::default)
+                .num_channels = n;
+            Ok::<(), DawError>(())
+        })?
     }
 
     fn set_record_input(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _input: RecordInput,
+        project: ProjectContext,
+        track: TrackRef,
+        input: RecordInput,
     ) -> DawResult<()> {
-        Ok(())
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
+            p.track_ext
+                .entry(track_guid)
+                .or_insert_with(TrackExt::default)
+                .record_input = input;
+            Ok::<(), DawError>(())
+        })?
     }
 
     fn reorder_selected(
@@ -328,5 +349,49 @@ impl Tracks for Standalone {
         _tx: vox::Tx<daw_proto::track::TrackStreamEvent>,
     ) {
         // Standalone has no event source; subscriber gets nothing.
+    }
+}
+
+// ── Inherent helpers for reading extended track state ────────────────
+//
+// These don't go through the `Tracks` proto trait (it has no
+// `get_num_channels` / `get_record_input` methods today) — routing,
+// mixer code, and tests can call them directly on `Standalone`.
+
+impl Standalone {
+    /// Channel count for a track. Returns 2 (stereo default) if the
+    /// track exists but no override has been set; `None` if the track
+    /// can't be resolved.
+    pub fn track_num_channels(&self, project: &ProjectContext, track: &TrackRef) -> Option<u32> {
+        let guid = resolve_project(self, project)?;
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, track)?;
+            let g = &p.tracks[i].guid;
+            Some(p.track_ext.get(g).map(|e| e.num_channels).unwrap_or(2))
+        })
+        .ok()
+        .flatten()
+    }
+
+    /// Record input for a track. Returns `RecordInput::None` if unset;
+    /// `None` if the track can't be resolved.
+    pub fn track_record_input(
+        &self,
+        project: &ProjectContext,
+        track: &TrackRef,
+    ) -> Option<RecordInput> {
+        let guid = resolve_project(self, project)?;
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, track)?;
+            let g = &p.tracks[i].guid;
+            Some(
+                p.track_ext
+                    .get(g)
+                    .map(|e| e.record_input)
+                    .unwrap_or(RecordInput::None),
+            )
+        })
+        .ok()
+        .flatten()
     }
 }

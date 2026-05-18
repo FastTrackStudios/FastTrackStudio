@@ -1,6 +1,6 @@
 //! Per-project subscriptions that forward local DAW events as `SyncEvent`s.
 //!
-//! Subscribes directly to `daw::reaper::event_hub()` broadcast channels and
+//! Subscribes directly to `daw_reaper::event_hub()` broadcast channels and
 //! wraps every event in a [`SyncEvent`] envelope with this peer's identity.
 //! No vox round-trip — the engine and the hub live in the same process; the
 //! vox streaming clients exist for *out-of-process* consumers, not for us.
@@ -149,7 +149,7 @@ impl ForwarderCtx {
 
 fn spawn_transport_forwarder(ctx: ForwarderCtx, daw: daw::rpc::Daw) {
     use daw::service::TransportEvent;
-    let mut rx = daw::reaper::event_hub().subscribe_transport_state();
+    let mut rx = daw_reaper::event_hub().subscribe_transport_state();
     let target_guid = ctx.project_guid.clone();
     tokio::task::spawn(async move {
         loop {
@@ -204,7 +204,7 @@ async fn current_transport(daw: &daw::rpc::Daw) -> Option<daw::service::Transpor
 }
 
 fn spawn_marker_forwarder(ctx: ForwarderCtx) {
-    let mut rx = daw::reaper::event_hub().subscribe_markers();
+    let mut rx = daw_reaper::event_hub().subscribe_markers();
     let target_guid = ctx.project_guid.clone();
     tokio::task::spawn(async move {
         loop {
@@ -232,7 +232,7 @@ fn spawn_marker_forwarder(ctx: ForwarderCtx) {
 }
 
 fn spawn_region_forwarder(ctx: ForwarderCtx) {
-    let mut rx = daw::reaper::event_hub().subscribe_regions();
+    let mut rx = daw_reaper::event_hub().subscribe_regions();
     let target_guid = ctx.project_guid.clone();
     tokio::task::spawn(async move {
         loop {
@@ -260,7 +260,7 @@ fn spawn_region_forwarder(ctx: ForwarderCtx) {
 }
 
 fn spawn_track_forwarder(ctx: ForwarderCtx) {
-    let mut rx = daw::reaper::event_hub().subscribe_tracks();
+    let mut rx = daw_reaper::event_hub().subscribe_tracks();
     let target_guid = ctx.project_guid.clone();
     tokio::task::spawn(async move {
         loop {
@@ -289,7 +289,7 @@ fn spawn_track_forwarder(ctx: ForwarderCtx) {
 
 fn spawn_item_forwarder(ctx: ForwarderCtx) {
     use daw::service::ItemEvent;
-    let Some(mut rx) = daw::reaper::subscribe_items() else {
+    let Some(mut rx) = daw_reaper::subscribe_items() else {
         return;
     };
     let target_guid = ctx.project_guid.clone();
@@ -329,7 +329,7 @@ fn spawn_item_forwarder(ctx: ForwarderCtx) {
 }
 
 fn spawn_fx_forwarder(ctx: ForwarderCtx) {
-    let Some(mut rx) = daw::reaper::subscribe_fx() else {
+    let Some(mut rx) = daw_reaper::subscribe_fx() else {
         return;
     };
     // FxEvent variants don't carry `project_guid` directly — chain
@@ -362,7 +362,7 @@ fn spawn_fx_forwarder(ctx: ForwarderCtx) {
 
 fn spawn_routing_forwarder(ctx: ForwarderCtx) {
     use daw::service::RoutingEvent;
-    let Some(mut rx) = daw::reaper::subscribe_routing() else {
+    let Some(mut rx) = daw_reaper::subscribe_routing() else {
         return;
     };
     let target_guid = ctx.project_guid.clone();
@@ -400,7 +400,7 @@ fn spawn_routing_forwarder(ctx: ForwarderCtx) {
 
 fn spawn_take_forwarder(ctx: ForwarderCtx) {
     use daw::service::TakeEvent;
-    let Some(mut rx) = daw::reaper::subscribe_takes() else {
+    let Some(mut rx) = daw_reaper::subscribe_takes() else {
         return;
     };
     let target_guid = ctx.project_guid.clone();
@@ -438,7 +438,7 @@ fn spawn_take_forwarder(ctx: ForwarderCtx) {
 }
 
 fn spawn_tempo_map_forwarder(ctx: ForwarderCtx) {
-    let mut rx = daw::reaper::event_hub().subscribe_tempo_map();
+    let mut rx = daw_reaper::event_hub().subscribe_tempo_map();
     let target_guid = ctx.project_guid.clone();
     tokio::task::spawn(async move {
         loop {

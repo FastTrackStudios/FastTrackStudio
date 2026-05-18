@@ -3,9 +3,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+use daw_proto::automation::{Envelope, EnvelopePoint, EnvelopeRef, EnvelopeType};
+use daw_proto::midi::MidiNote;
+use daw_proto::primitives::AutomationMode;
 use daw_proto::{
-    Daw, DawError, DawResult, Fx, FxChainContext, Item, LastTouchedFx, Marker, ProjectInfo, Region,
-    Take, TempoPoint, Track, TrackRoute, Transport as TransportState,
+    Daw, DawError, DawResult, Fx, FxChainContext, Item, LastTouchedFx, Marker, ProjectInfo,
+    RecordInput, Region, Take, TempoPoint, Track, TrackRoute, Transport as TransportState,
 };
 
 /// Hashable key derived from `FxChainContext` for use as a HashMap key.
@@ -49,6 +52,127 @@ pub struct FxEntry {
     pub params: HashMap<u32, f64>,
 }
 
+/// Per-track properties that aren't carried on the proto `Track` struct.
+/// REAPER models these as `I_NCHAN`, `I_RECINPUT`, etc.; we store them
+/// alongside the proto `Track` so routing/recording code can read them.
+#[derive(Clone, Debug)]
+pub struct TrackExt {
+    /// Channel count. REAPER caps at 128. Standalone allows any
+    /// `1..=128` (not constrained to stereo pairs). Default = 2.
+    pub num_channels: u32,
+    /// Record input source. `RecordInput::None` if none configured.
+    pub record_input: RecordInput,
+    /// Whether this track sends its output to the master/parent track
+    /// (REAPER's `B_MAINSEND`). Default = true.
+    pub parent_send_enabled: bool,
+}
+
+/// Stable hashable identity for an envelope on a track. Lifts
+/// `EnvelopeRef`'s string-y / nested shape into something usable as a
+/// `HashMap` key.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub enum EnvelopeKey {
+    /// One of the predefined track envelopes (volume/pan/etc).
+    Track(EnvelopeType),
+    /// An FX parameter automation envelope.
+    FxParam { fx_guid: String, param_index: u32 },
+    /// Free-form by name (rare; ReaScript-style).
+    Named(String),
+}
+
+impl EnvelopeKey {
+    pub fn from_ref(env_ref: &EnvelopeRef) -> Self {
+        match env_ref {
+            EnvelopeRef::Type(t) => Self::Track(*t),
+            EnvelopeRef::FxParam {
+                fx_guid,
+                param_index,
+            } => Self::FxParam {
+                fx_guid: fx_guid.clone(),
+                param_index: *param_index,
+            },
+            EnvelopeRef::ByName(n) => Self::Named(n.clone()),
+        }
+    }
+}
+
+/// Per-envelope state. Points are kept sorted by time.
+#[derive(Clone, Debug)]
+pub struct EnvelopeData {
+    pub visible: bool,
+    pub armed: bool,
+    pub automation_mode: AutomationMode,
+    pub points: Vec<EnvelopePoint>,
+}
+
+impl EnvelopeData {
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            armed: false,
+            automation_mode: AutomationMode::TrimRead,
+            points: Vec::new(),
+        }
+    }
+
+    /// Build a proto `Envelope` snapshot for this data + identity.
+    pub fn to_proto(&self, track_guid: &str, key: &EnvelopeKey) -> Envelope {
+        let (envelope_type, fx_guid, param_index, name) = match key {
+            EnvelopeKey::Track(t) => (*t, None, None, envelope_default_name(*t).to_string()),
+            EnvelopeKey::FxParam {
+                fx_guid,
+                param_index,
+            } => (
+                EnvelopeType::FxParam,
+                Some(fx_guid.clone()),
+                Some(*param_index),
+                format!("FX {}: param {}", fx_guid, param_index),
+            ),
+            EnvelopeKey::Named(n) => (EnvelopeType::Volume, None, None, n.clone()),
+        };
+        Envelope {
+            track_guid: track_guid.to_string(),
+            envelope_type,
+            name,
+            fx_guid,
+            param_index,
+            visible: self.visible,
+            armed: self.armed,
+            automation_mode: self.automation_mode,
+            point_count: self.points.len() as u32,
+        }
+    }
+}
+
+impl Default for EnvelopeData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn envelope_default_name(t: EnvelopeType) -> &'static str {
+    match t {
+        EnvelopeType::Volume => "Volume",
+        EnvelopeType::VolumePrefx => "Volume (Pre-FX)",
+        EnvelopeType::Pan => "Pan",
+        EnvelopeType::PanPrefx => "Pan (Pre-FX)",
+        EnvelopeType::Width => "Width",
+        EnvelopeType::WidthPrefx => "Width (Pre-FX)",
+        EnvelopeType::Mute => "Mute",
+        EnvelopeType::FxParam => "FX Param",
+    }
+}
+
+impl Default for TrackExt {
+    fn default() -> Self {
+        Self {
+            num_channels: 2,
+            record_input: RecordInput::None,
+            parent_send_enabled: true,
+        }
+    }
+}
+
 /// Per-project in-memory state.
 pub struct ProjectState {
     pub info: ProjectInfo,
@@ -57,6 +181,20 @@ pub struct ProjectState {
     pub markers: BTreeMap<u32, Marker>,
     pub tempo_points: Vec<TempoPoint>,
     pub tracks: Vec<Track>,
+    /// Per-track extended properties (channel count, record input) keyed
+    /// by track GUID. Lazily populated on first mutation; missing keys
+    /// resolve to `TrackExt::default()`.
+    pub track_ext: HashMap<String, TrackExt>,
+    /// MIDI note data keyed by take GUID. Only populated for MIDI takes.
+    /// Notes are stored in insertion order; the `index` field on
+    /// each `MidiNote` mirrors its position in the vec (rewritten on
+    /// add/delete to keep references stable within a single read).
+    pub midi_notes: HashMap<String, Vec<MidiNote>>,
+    /// Automation envelopes keyed by `(track_guid, EnvelopeKey)`. Points
+    /// are kept sorted by time within each envelope.
+    pub envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
+    /// Global automation override (`None` = no override active).
+    pub global_automation_override: Option<AutomationMode>,
     pub next_region_id: u32,
     pub next_marker_id: u32,
     /// Per-track ext state keyed by `(track_guid, section, key)`.
@@ -98,6 +236,10 @@ impl ProjectState {
             markers: BTreeMap::new(),
             tempo_points: Vec::new(),
             tracks: Vec::new(),
+            track_ext: HashMap::new(),
+            midi_notes: HashMap::new(),
+            envelopes: HashMap::new(),
+            global_automation_override: None,
             next_region_id: 0,
             next_marker_id: 0,
             track_ext_state: HashMap::new(),

@@ -2272,6 +2272,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
  "vox 0.5.0",
 ]
 
@@ -2388,6 +2389,7 @@ name = "daw-synchronization"
 version = "0.1.0"
 dependencies = [
  "daw",
+ "daw-reaper",
  "eyre",
  "facet",
  "reaper-test",
@@ -7477,6 +7479,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8887,6 +8895,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

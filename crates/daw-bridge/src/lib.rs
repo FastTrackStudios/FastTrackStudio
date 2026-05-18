@@ -290,6 +290,12 @@ static FX_PLUGINS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 pub static AUDIO_SYNC_CELL: OnceLock<std::sync::Arc<daw_audio_sync::SnapshotCell>> =
     OnceLock::new();
 
+/// Live clock-sync session. `None` until the bound task succeeds; held
+/// here so the Diagnostics RPC can read the peer table without
+/// re-binding sockets.
+pub static CLOCK_SYNC: OnceLock<std::sync::Arc<daw_audio_sync::clock_sync::ClockSync>> =
+    OnceLock::new();
+
 extern "C" fn timer_callback() {
     // catch_unwind prevents panics from unwinding through the C ABI boundary
     // (which is UB). Any panic inside is logged and the timer keeps running.
@@ -484,15 +490,53 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // sample_rate, len) into a lock-free seqlock cell that the main
     // thread + sync engine read. Foundation for sample-accurate
     // multi-machine sync. See `daw-audio-sync`.
-    {
+    let audio_sync_cell = {
         let rt_reaper = session.create_real_time_reaper();
         let (cell, hook) = daw_audio_sync::build_hook(rt_reaper);
         daw_audio_sync::set_global_cell(cell.clone());
-        let _ = AUDIO_SYNC_CELL.set(cell);
+        let _ = AUDIO_SYNC_CELL.set(cell.clone());
         match session.audio_reg_hardware_hook_add(Box::new(hook)) {
             Ok(_) => info!("audio-sync hook registered"),
             Err(e) => warn!("audio-sync hook registration failed: {e}"),
         }
+        cell
+    };
+
+    // ClockSync — UDP peer discovery + PTP-style offset estimation +
+    // sample-position broadcast. Opt-in via FTS_AUDIO_SYNC_PORT so
+    // existing test rigs and single-instance setups don't bind random
+    // sockets. Default port is 7777 when env var is set without a
+    // numeric value.
+    if let Ok(raw) = std::env::var("FTS_AUDIO_SYNC_PORT") {
+        let port = raw
+            .parse::<u16>()
+            .unwrap_or(daw_audio_sync::clock_sync::DEFAULT_PORT);
+        let cell_for_sync = audio_sync_cell.clone();
+        // Use the bridge's own tokio runtime (plugin_main runs from a
+        // C ABI thread without an ambient runtime — Handle::current
+        // panics, try_current returns None).
+        let handle = app.tokio_runtime.handle().clone();
+        handle.spawn(async move {
+            match daw_audio_sync::clock_sync::ClockSync::bind(
+                port,
+                daw_audio_sync::clock_sync::DEFAULT_MULTICAST,
+                Some(cell_for_sync),
+            )
+            .await
+            {
+                Ok(cs) => {
+                    info!(
+                        peer_id = ?cs.peer_id,
+                        port,
+                        "clock-sync bound; multicast peer discovery + position broadcast active"
+                    );
+                    let arc = std::sync::Arc::new(cs);
+                    daw_audio_sync::set_global_clock_sync(arc.clone());
+                    let _ = CLOCK_SYNC.set(arc);
+                }
+                Err(e) => warn!(?e, "clock-sync bind failed"),
+            }
+        });
     }
 
     // Push-based change-detection via REAPER's IReaperControlSurface

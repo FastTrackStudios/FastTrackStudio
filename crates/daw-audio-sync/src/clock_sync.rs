@@ -281,6 +281,10 @@ impl PeerTable {
 pub struct ClockSync {
     pub peer_id: PeerId,
     pub peers: Arc<PeerTable>,
+    /// Tokio runtime handle the session was bound on. Stored so
+    /// `seed_peer_sync` can be called from a non-async context
+    /// (architect-dispatched main-thread closures).
+    pub runtime: tokio::runtime::Handle,
     /// Most recent local "audio host clock" reading. Updated by the
     /// announce + ping tasks before sending so the wire timestamps
     /// reflect a consistent clock view. Microseconds.
@@ -393,11 +397,39 @@ impl ClockSync {
         Ok(Self {
             peer_id,
             peers,
+            runtime: tokio::runtime::Handle::current(),
             local_clock,
             cell,
             _socket: socket,
             tasks,
         })
+    }
+
+    /// Blocking sibling of [`Self::seed_peer`] — schedules the table
+    /// update on the session's runtime and waits for it. Safe to
+    /// call from non-async contexts (architect-dispatched main-thread
+    /// closures, REAPER actions, etc.).
+    pub fn seed_peer_sync(&self, id: PeerId, addr: SocketAddr) {
+        let peers = self.peers.clone();
+        self.runtime.block_on(async move {
+            let mut guard = peers.inner.write().await;
+            let now = Instant::now();
+            guard
+                .entry(id)
+                .and_modify(|p| {
+                    p.addr = addr;
+                    p.last_announce_at = now;
+                })
+                .or_insert_with(|| Peer {
+                    id,
+                    addr,
+                    offset_window: RollingWindow::new(SMOOTHING_WINDOW),
+                    delay_window: RollingWindow::new(SMOOTHING_WINDOW),
+                    last_rtt_at: now,
+                    last_announce_at: now,
+                    position: None,
+                });
+        });
     }
 
     pub fn local_clock_micros(&self) -> u64 {

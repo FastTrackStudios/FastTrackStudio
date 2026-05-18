@@ -6,7 +6,7 @@
 //! tokio `broadcast` send/recv.
 
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics};
+use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, PeerSummary};
 use daw_proto::track::{TrackEvent, TrackStreamEvent};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::TryRecvError;
@@ -77,6 +77,57 @@ impl Diagnostics for crate::Reaper {
 
     fn audio_sync_snapshot(&self) -> Option<AudioSyncSnapshot> {
         daw_audio_sync::global_snapshot().map(audio_snapshot_to_wire)
+    }
+
+    fn audio_sync_peers(&self) -> Vec<PeerSummary> {
+        // Runs on the main thread — peer table snapshot needs the
+        // tokio runtime to acquire its RwLock. Use the ClockSync's
+        // stored runtime handle instead of try_current (architect's
+        // main-thread dispatch isn't inside a tokio context).
+        let Some(cs) = daw_audio_sync::global_clock_sync() else {
+            return Vec::new();
+        };
+        let peers = cs.runtime.block_on(cs.peers.peers_snapshot());
+        let now = Instant::now();
+        peers
+            .into_iter()
+            .map(|p| {
+                let (playhead, playing) = match p.position {
+                    Some(pos) => (pos.playhead_seconds, pos.is_playing),
+                    None => (f64::NAN, false),
+                };
+                PeerSummary {
+                    id: p.id.0.to_string(),
+                    addr: p.addr.to_string(),
+                    offset_us: p.offset_us,
+                    delay_us: p.delay_us,
+                    rtt_age_ms: now.duration_since(p.last_rtt_at).as_millis() as u64,
+                    announce_age_ms: now.duration_since(p.last_announce_at).as_millis() as u64,
+                    remote_playhead_seconds: playhead,
+                    remote_is_playing: playing,
+                }
+            })
+            .collect()
+    }
+
+    fn audio_sync_self_peer_id(&self) -> String {
+        daw_audio_sync::global_clock_sync()
+            .map(|cs| cs.peer_id.0.to_string())
+            .unwrap_or_default()
+    }
+
+    fn audio_sync_seed_peer(&self, peer_id: &str, addr: &str) -> daw_proto::DawResult<()> {
+        use daw_proto::DawError;
+        let Some(cs) = daw_audio_sync::global_clock_sync() else {
+            return Err(DawError::operation_failed("audio-sync not running"));
+        };
+        let uuid = uuid::Uuid::parse_str(peer_id)
+            .map_err(|e| DawError::operation_failed(format!("bad peer_id: {e}")))?;
+        let addr: std::net::SocketAddr = addr
+            .parse()
+            .map_err(|e| DawError::operation_failed(format!("bad addr: {e}")))?;
+        cs.seed_peer_sync(daw_audio_sync::clock_sync::PeerId(uuid), addr);
+        Ok(())
     }
 
     fn audio_sync_observe(&self, count: u32, interval_us: u64) -> Vec<AudioSyncSnapshot> {
