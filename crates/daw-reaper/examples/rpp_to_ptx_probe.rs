@@ -250,6 +250,22 @@ fn build_rpp(probe: &str) -> String {
                 })
             });
         }
+        "clip_playrate_quarter" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 4.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .playrate(0.25)
+                })
+            });
+        }
+        "clip_playrate_double" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.5, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .playrate(2.0)
+                })
+            });
+        }
         "clip_selected" => {
             b = b.track("ProbeTrack", |t| {
                 t.item(0.0, 1.0, |i| {
