@@ -87,8 +87,7 @@ fn build_rpp(probe: &str) -> String {
             b = b.track("ProbeTrack", |t| t.fx_disabled());
         }
         "mute_envelope" => {
-            // PT recognizes "MUTEENV" (not "MUTEENV2" — the converter
-            // looks for that exact string per its binary).
+            // 2 breakpoints: mute on at t=0, off at t=1.0.
             use dawfile_reaper::types::envelope::EnvelopePointShape;
             b = b.track("ProbeTrack", |t| {
                 t.envelope("MUTEENV", |e| {
@@ -96,6 +95,41 @@ fn build_rpp(probe: &str) -> String {
                         .visible()
                         .point(0.0, 0.0, EnvelopePointShape::Square)
                         .point(1.0, 1.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "mute_envelope_1pt" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "mute_envelope_3pt" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                        .point(1.0, 1.0, EnvelopePointShape::Square)
+                        .point(2.0, 0.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "mute_envelope_4pt" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                        .point(1.0, 1.0, EnvelopePointShape::Square)
+                        .point(2.0, 0.0, EnvelopePointShape::Square)
+                        .point(3.0, 1.0, EnvelopePointShape::Square)
                 })
             });
         }
