@@ -948,11 +948,14 @@ async fn apply_item(
                         daw::service::primitives::Duration::from_seconds(item.length.as_seconds());
                     match track.items().add(pos, len).await {
                         Ok(new_item) => {
-                            // Map remote item GUID to local item GUID
-                            if let Ok(info) = new_item.info().await {
-                                suppression.suppress(SuppressionKey::item(&info.guid, "created"));
-                                insert_guid_mapping(item.guid.clone(), info.guid);
-                            }
+                            // Use the handle's local guid synchronously
+                            // instead of calling info().await — saves an RPC
+                            // round-trip in a hot path and avoids the
+                            // Option<Item> response type that's expensive
+                            // to JIT compile on first use.
+                            let local_guid = new_item.guid().to_string();
+                            suppression.suppress(SuppressionKey::item(&local_guid, "created"));
+                            insert_guid_mapping(item.guid.clone(), local_guid);
                         }
                         Err(e) => {
                             warn!("Failed to add item on track {local_track_guid}: {e}");

@@ -58,30 +58,21 @@ impl DawControlSurface {
 impl ControlSurfaceMiddleware for DawControlSurface {
     fn handle_event(&self, event: ControlSurfaceEvent) -> bool {
         use ControlSurfaceEvent::*;
+        // Only enable handlers for genuinely push-only events (no poller exists
+        // for them yet). For the rest (track/transport/routing scalars), the
+        // 30Hz timer poll already covers them; running csurf callbacks in
+        // parallel produces a feedback loop where each peer keeps re-firing
+        // the other's volume/pan/etc updates through the mesh, starving the
+        // apply pipeline so item / fx_param / marker events behind the queue
+        // never get processed in time.
         match event {
-            SetTrackListChange => {
-                // No-op: rely on the timer-driven poller (next tick ≤33 ms).
-                // Reentering Tracks::all from inside the callback was racy.
-                false
-            }
-            SetSurfaceVolume(args) => on_surface_volume(args),
-            SetSurfacePan(args) => on_surface_pan(args),
-            SetSurfaceMute(args) => on_surface_mute(args),
-            SetSurfaceSelected(args) => on_surface_selected(args),
-            SetSurfaceSolo(args) => on_surface_solo(args),
-            SetSurfaceRecArm(args) => on_surface_rec_arm(args),
-            SetTrackTitle(args) => on_track_title(args),
-            SetPlayState(args) => on_play_state(args),
-            SetRepeatState(args) => on_repeat_state(args),
-            ExtSetBpmAndPlayRate(args) => on_bpm_or_playrate(args),
+            // FxEvent::ParameterChanged has no poller — push-only path.
+            // This is the headline win for CSI-class apps.
             ExtSetFxParam(args) => on_fx_param(args, false),
             ExtSetFxParamRecFx(args) => on_fx_param(args, true),
-            ExtSetFxEnabled(args) => on_fx_enabled(args),
-            ExtSetFxChange(args) => on_fx_change(args),
-            ExtSetSendVolume(args) => on_send_volume(args),
-            ExtSetSendPan(args) => on_send_pan(args),
-            ExtSetRecvVolume(args) => on_recv_volume(args),
-            ExtSetRecvPan(args) => on_recv_pan(args),
+            // Marker / region changes also have no per-change callback in
+            // the poller path (the poller diffs every tick, not on demand),
+            // so the project-marker callback is a useful nudge to refresh.
             ExtSetProjectMarkerChange(_) => {
                 crate::poll_and_broadcast_markers();
                 crate::poll_and_broadcast_regions();
