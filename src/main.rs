@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     ArrowLeft, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Circle, Code, ExternalLink,
     FileCode, FileText, Github, ListMusic, Music, PenLine, PenTool, Play, SkipBack, SkipForward,
-    Square, User, Users,
+    Square, Users,
 };
 use fts_ui::prelude::*;
 
@@ -985,10 +985,10 @@ fn LandingDocsCard(
 // =============================================================================
 
 /// Number of cards in the showcase
-const SHOWCASE_CARD_COUNT: usize = 5;
+const SHOWCASE_CARD_COUNT: usize = 4;
 
 /// Individual card widths in pixels
-const CARD_WIDTHS: [i32; 5] = [724, 480, 480, 480, 480];
+const CARD_WIDTHS: [i32; 4] = [724, 480, 480, 480];
 
 /// Gap between cards in pixels
 const CARD_GAP: i32 = 24;
@@ -1042,8 +1042,7 @@ fn ShowcaseCarousel(
                                                 },
                                                 1 => rsx! { DesktopShowcaseCard {} },
                                                 2 => rsx! { ReaperShowcaseCard {} },
-                                                3 => rsx! { PluginsShowcaseCard {} },
-                                                _ => rsx! { CollaborationShowcaseCard {} },
+                                                _ => rsx! { PluginsShowcaseCard {} },
                                             }
                                         }
                                     }
@@ -1143,8 +1142,8 @@ fn DesktopShowcaseCard() -> Element {
                 div { class: "w-3 h-3 rounded-full bg-red-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "FastTrackStudio" }
-                span { class: "ml-auto text-xs text-blue-500 font-medium px-2 py-0.5 rounded bg-blue-500/10", "Desktop" }
+                span { class: "ml-4 text-sm text-muted-foreground", "Session" }
+                span { class: "ml-auto text-xs text-blue-500 font-medium px-2 py-0.5 rounded bg-blue-500/10", "Session" }
             }
 
             div {
@@ -1191,7 +1190,7 @@ fn ReaperShowcaseCard() -> Element {
                 div { class: "w-3 h-3 rounded-full bg-red-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "REAPER" }
+                span { class: "ml-4 text-sm text-muted-foreground", "Reaper" }
                 span { class: "ml-auto text-xs text-violet-500 font-medium px-2 py-0.5 rounded bg-violet-500/10", "Extension" }
             }
 
@@ -1264,7 +1263,7 @@ fn PluginsShowcaseCard() -> Element {
                 div { class: "w-3 h-3 rounded-full bg-red-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "fts-gain" }
+                span { class: "ml-4 text-sm text-muted-foreground", "FST-EQ" }
                 span { class: "ml-auto text-xs text-amber-500 font-medium px-2 py-0.5 rounded bg-amber-500/10", "VST3 / CLAP" }
             }
 
@@ -1299,68 +1298,6 @@ fn PluginsShowcaseCard() -> Element {
                             span { class: "text-xs text-muted-foreground", "{channel}" }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-/// P2P Collaboration showcase card
-#[component]
-fn CollaborationShowcaseCard() -> Element {
-    rsx! {
-        div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
-            style: "height: 600px;",
-
-            div {
-                class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
-                div { class: "w-3 h-3 rounded-full bg-red-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
-                div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "Session" }
-                span { class: "ml-auto text-xs text-cyan-500 font-medium px-2 py-0.5 rounded bg-cyan-500/10", "P2P Sync" }
-            }
-
-            div {
-                class: "relative h-[calc(100%-3rem)] bg-zinc-900 p-6",
-                div {
-                    class: "flex items-center justify-center gap-8 mb-8",
-                    div {
-                        class: "relative w-64 h-64",
-                        div {
-                            class: "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center",
-                            User { class: "w-8 h-8 text-primary" }
-                        }
-                        div {
-                            class: "absolute left-1/2 top-0 -translate-x-1/2 w-12 h-12 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center",
-                            User { class: "w-6 h-6 text-emerald-500" }
-                        }
-                        div {
-                            class: "absolute right-0 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-violet-500/20 border-2 border-violet-500 flex items-center justify-center",
-                            User { class: "w-6 h-6 text-violet-500" }
-                        }
-                        div {
-                            class: "absolute left-0 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-amber-500/20 border-2 border-amber-500 flex items-center justify-center",
-                            User { class: "w-6 h-6 text-amber-500" }
-                        }
-                        svg {
-                            class: "absolute inset-0 w-full h-full",
-                            view_box: "0 0 256 256",
-                            line { x1: "128", y1: "128", x2: "128", y2: "48", stroke: "currentColor", stroke_opacity: "0.2", stroke_width: "2", stroke_dasharray: "4 4", class: "text-emerald-500" }
-                            line { x1: "128", y1: "128", x2: "208", y2: "128", stroke: "currentColor", stroke_opacity: "0.2", stroke_width: "2", stroke_dasharray: "4 4", class: "text-violet-500" }
-                            line { x1: "128", y1: "128", x2: "48", y2: "128", stroke: "currentColor", stroke_opacity: "0.2", stroke_width: "2", stroke_dasharray: "4 4", class: "text-amber-500" }
-                        }
-                    }
-                }
-                div {
-                    class: "absolute bottom-4 left-4 right-4 flex items-center justify-between text-sm",
-                    div {
-                        class: "flex items-center gap-2 text-emerald-500",
-                        div { class: "w-2 h-2 rounded-full bg-emerald-500 animate-pulse" }
-                        "3 peers connected"
-                    }
-                    div { class: "text-muted-foreground", "iroh • encrypted" }
                 }
             }
         }
