@@ -143,6 +143,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     volume_centibel: 0,
                     mute: false,
                     solo: false,
+                    solo_defeat: false,
                     pan: 0,
                     alternate_playlists: Vec::new(),
                     output: String::new(),

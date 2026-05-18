@@ -80,6 +80,47 @@ fn build_rpp(probe: &str) -> String {
                 b = b.track(&n, |t| t.muted());
             }
         }
+        "solo_defeat" => {
+            b = b.track("ProbeTrack", |t| t.solo_defeated());
+        }
+        "fx_disabled" => {
+            b = b.track("ProbeTrack", |t| t.fx_disabled());
+        }
+        "mute_envelope" => {
+            // Mute envelope with two breakpoints: muted at t=0,
+            // un-muted at t=1.0.
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV2", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                        .point(1.0, 1.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "vol_envelope" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("VOLENV2", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 1.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
+        "pan_envelope" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("PANENV2", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
         "send" => {
             b = b.track("Source", |t| t).track("Dest", |t| t.receive(0));
         }

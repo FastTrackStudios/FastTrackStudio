@@ -153,6 +153,14 @@ pub struct Track {
     /// `t.soloed()` produces `+162 = 0x01`; baseline `0x00`.
     /// See `docs/pt-field-map.md`.
     pub solo: bool,
+    /// `true` if the track has solo-defeat set (track ignores other
+    /// tracks' solo state — i.e. always plays even when something else
+    /// is soloed).
+    ///
+    /// Decoded from `0x200b` `+268` (u8). Verified via RPP→PTX probe:
+    /// `t.solo_defeated()` produces `+268 = 0x01`; baseline `0x00`.
+    /// Mirror also at `0x200a +259`. See `docs/pt-field-map.md`.
+    pub solo_defeat: bool,
     /// Pan position. `-100` = full L, `0` = center, `+100` = full R.
     /// Decoded from `0x1029` `+13` (i32 LE).
     pub pan: i32,
