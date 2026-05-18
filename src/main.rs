@@ -394,17 +394,16 @@ fn Home() -> Element {
 
                         h1 {
                             class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
-                            "Open-Source Professional "
                             span {
                                 class: "text-primary",
                                 "Workflow-Driven"
                             }
-                            " Software."
+                            " \u{2014} Made for Professionals."
                         }
 
                         p {
                             class: "mx-auto my-8 max-w-2xl text-lg md:text-xl text-muted-foreground",
-                            "An open standard for music production \u{2014} polished, cross-platform tools on Linux, macOS, and Windows, built for the audio community at large."
+                            "Open-source audio software on Linux, macOS, and Windows. An open standard for music production, built for the audio community at large."
                         }
 
                         div {
