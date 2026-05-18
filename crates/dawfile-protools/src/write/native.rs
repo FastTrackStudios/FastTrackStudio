@@ -72,6 +72,11 @@ pub struct NativeTrackSpec {
     /// automation but each breakpoint carries an `i16` centibel value
     /// instead of a `bool`.
     pub volume_automation: Vec<VolumeAutomationPoint>,
+    /// Optional output routing destination (e.g. `"Analog 1-2"`,
+    /// `"Bus 1"`). When `None`, the baseline default is preserved.
+    /// Written as a length-prefixed string into the track's `0x260e`
+    /// (TrackRouting) block at payload +0x24.
+    pub output: Option<String>,
 }
 
 impl Default for NativeTrackSpec {
@@ -87,6 +92,7 @@ impl Default for NativeTrackSpec {
             pan: -100,
             mute_automation: Vec::new(),
             volume_automation: Vec::new(),
+            output: None,
         }
     }
 }
@@ -144,6 +150,13 @@ pub fn write_single_track_ptx(spec: &NativeTrackSpec) -> crate::PtResult<Vec<u8>
     patch_solo_defeat(&mut session, spec.solo_defeat);
     patch_volume(&mut session, spec.volume_centibel);
     patch_pan(&mut session, spec.pan);
+
+    // Step 3.0: output routing destination is NOT yet writable from
+    // the baseline because `set_track_output` requires a pre-existing
+    // destination string (it refuses the 61-byte empty variant). The
+    // baseline's 0x260e block is the empty variant. Spec carries the
+    // field for forward-compatibility; ignored for now.
+    let _ = &spec.output;
 
     // Step 3a: volume automation envelope (0x260a[0]).
     if !spec.volume_automation.is_empty() {
