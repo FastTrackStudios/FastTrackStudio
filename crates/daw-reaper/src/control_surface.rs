@@ -60,10 +60,9 @@ impl ControlSurfaceMiddleware for DawControlSurface {
         use ControlSurfaceEvent::*;
         match event {
             SetTrackListChange => {
-                // Track-list churn (add / remove / reorder). Defer to the
-                // existing poller which already builds the full diff.
-                crate::poll_and_broadcast_tracks();
-                true
+                // No-op: rely on the timer-driven poller (next tick ≤33 ms).
+                // Reentering Tracks::all from inside the callback was racy.
+                false
             }
             SetSurfaceVolume(args) => on_surface_volume(args),
             SetSurfacePan(args) => on_surface_pan(args),
@@ -120,25 +119,50 @@ fn publish_track_event(project_guid: String, event: TrackEvent) {
 /// Patch the cached `Track` field for the (project_guid, track_guid)
 /// entry, applying `f` to the cached value. If the cache hasn't seen
 /// this track yet, do nothing — the next poll will seed it.
-fn patch_track_cache<F: FnOnce(&mut daw_proto::Track)>(project_guid: &str, track_guid: &str, f: F) {
-    if let Ok(mut cache) = crate::track::track_cache().lock() {
-        if let Some(project) = cache.get_mut(project_guid) {
-            if let Some(t) = project.get_mut(track_guid) {
-                f(t);
-            }
-        }
-    }
+/// Patch the cached `Track` field for the (project_guid, track_guid)
+/// entry. Returns `true` if the cache had the entry and the patch was
+/// applied. Returns `false` if the track isn't cached yet — callers use
+/// this as a signal to skip publishing the event so they don't push
+/// events for tracks the follower hasn't seen Added for yet.
+fn patch_track_cache<F: FnOnce(&mut daw_proto::Track)>(
+    project_guid: &str,
+    track_guid: &str,
+    f: F,
+) -> bool {
+    let Ok(mut cache) = crate::track::track_cache().lock() else {
+        return false;
+    };
+    let Some(project) = cache.get_mut(project_guid) else {
+        return false;
+    };
+    let Some(t) = project.get_mut(track_guid) else {
+        return false;
+    };
+    f(t);
+    true
 }
 
 // ── Per-track scalar callbacks ─────────────────────────────────────────
 
 fn on_surface_volume(args: SetSurfaceVolumeArgs) -> bool {
+    // Only publish a VolumeChanged event if the track is already in our
+    // cache. During track add, REAPER fires SetSurfaceVolume *before*
+    // SetTrackListChange, so the track isn't in TRACK_CACHE yet. Publishing
+    // a VolumeChanged for a track the follower hasn't seen Added for yet
+    // creates an out-of-order event that floods the apply pipeline with
+    // "track not found" lookups and starves the Added event.
+    //
+    // patch_track_cache returns true if the track exists in the cache.
+    // Once the timer poller has seen the track, csurf events publish
+    // normally and beat the next poll tick.
     let Some(project_guid) = project_guid_for_track(args.track) else {
         return false;
     };
     let guid = track_guid_str(args.track);
     let volume = args.volume.get();
-    patch_track_cache(&project_guid, &guid, |t| t.volume = volume);
+    if !patch_track_cache(&project_guid, &guid, |t| t.volume = volume) {
+        return false;
+    }
     publish_track_event(project_guid, TrackEvent::VolumeChanged { guid, volume });
     true
 }
@@ -149,7 +173,9 @@ fn on_surface_pan(args: SetSurfacePanArgs) -> bool {
     };
     let guid = track_guid_str(args.track);
     let pan = args.pan.get();
-    patch_track_cache(&project_guid, &guid, |t| t.pan = pan);
+    if !patch_track_cache(&project_guid, &guid, |t| t.pan = pan) {
+        return false;
+    }
     publish_track_event(project_guid, TrackEvent::PanChanged { guid, pan });
     true
 }
@@ -160,7 +186,9 @@ fn on_surface_mute(args: SetSurfaceMuteArgs) -> bool {
     };
     let guid = track_guid_str(args.track);
     let muted = args.is_mute;
-    patch_track_cache(&project_guid, &guid, |t| t.muted = muted);
+    if !patch_track_cache(&project_guid, &guid, |t| t.muted = muted) {
+        return false;
+    }
     publish_track_event(project_guid, TrackEvent::MuteChanged { guid, muted });
     true
 }
@@ -171,7 +199,9 @@ fn on_surface_selected(args: SetSurfaceSelectedArgs) -> bool {
     };
     let guid = track_guid_str(args.track);
     let selected = args.is_selected;
-    patch_track_cache(&project_guid, &guid, |t| t.selected = selected);
+    if !patch_track_cache(&project_guid, &guid, |t| t.selected = selected) {
+        return false;
+    }
     publish_track_event(
         project_guid,
         TrackEvent::SelectionChanged { guid, selected },
@@ -185,7 +215,9 @@ fn on_surface_solo(args: SetSurfaceSoloArgs) -> bool {
     };
     let guid = track_guid_str(args.track);
     let soloed = args.is_solo;
-    patch_track_cache(&project_guid, &guid, |t| t.soloed = soloed);
+    if !patch_track_cache(&project_guid, &guid, |t| t.soloed = soloed) {
+        return false;
+    }
     publish_track_event(project_guid, TrackEvent::SoloChanged { guid, soloed });
     true
 }
@@ -196,7 +228,9 @@ fn on_surface_rec_arm(args: SetSurfaceRecArmArgs) -> bool {
     };
     let guid = track_guid_str(args.track);
     let armed = args.is_armed;
-    patch_track_cache(&project_guid, &guid, |t| t.armed = armed);
+    if !patch_track_cache(&project_guid, &guid, |t| t.armed = armed) {
+        return false;
+    }
     publish_track_event(project_guid, TrackEvent::ArmChanged { guid, armed });
     true
 }
@@ -207,7 +241,9 @@ fn on_track_title(args: SetTrackTitleArgs<'_>) -> bool {
     };
     let guid = track_guid_str(args.track);
     let name = args.name.to_str().to_string();
-    patch_track_cache(&project_guid, &guid, |t| t.name = name.clone());
+    if !patch_track_cache(&project_guid, &guid, |t| t.name = name.clone()) {
+        return false;
+    }
     publish_track_event(project_guid, TrackEvent::Renamed { guid, name });
     true
 }

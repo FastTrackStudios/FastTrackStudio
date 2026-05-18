@@ -81,9 +81,15 @@ pub fn subscribe_fx() -> Option<broadcast::Receiver<FxEvent>> {
 
 /// Push-published FX event from the control-surface callback path.
 /// For `EnabledChanged` we also update the per-chain cache so the next
-/// poll tick won't re-emit the same diff. `ParameterChanged` and
-/// `PresetChanged` aren't cached (we don't poll params), so callback
-/// is the only path. Main-thread only.
+/// poll tick won't re-emit the same diff. Skips publish if the affected
+/// fx isn't cached yet — the follower hasn't seen the Added event for
+/// it, so emitting EnabledChanged ahead of the create floods the apply
+/// pipeline with not-found lookups and starves the create event. The
+/// next poll tick picks up both the FX + its initial state in order.
+///
+/// `ParameterChanged` and `PresetChanged` aren't cached (we don't poll
+/// params), so they always go out — callback is the only path.
+/// Main-thread only.
 pub(crate) fn publish_from_callback(event: FxEvent) {
     let Some(tx) = FX_BROADCASTER.get() else {
         return;
@@ -94,25 +100,31 @@ pub(crate) fn publish_from_callback(event: FxEvent) {
         enabled,
     } = &event
     {
-        if let Some(cache_cell) = FX_CACHE.get() {
-            if let Ok(mut cache) = cache_cell.lock() {
-                // Try each known project. We don't have the project guid
-                // here, so iterate and patch any chain whose chain-part
-                // matches the context. There's at most a handful of
-                // chains per project.
+        let Some(cache_cell) = FX_CACHE.get() else {
+            return;
+        };
+        let cached = match cache_cell.lock() {
+            Ok(mut cache) => {
                 let chain_part = match context {
                     FxChainContext::Track(g) => format!("track:{g}"),
                     FxChainContext::Input(g) => format!("input:{g}"),
                     FxChainContext::Monitoring => "monitoring".to_string(),
                 };
+                let mut found = false;
                 for ((_, cp), chain) in cache.iter_mut() {
                     if cp == &chain_part {
                         if let Some(c) = chain.iter_mut().find(|c| &c.guid == fx_guid) {
                             c.enabled = *enabled;
+                            found = true;
                         }
                     }
                 }
+                found
             }
+            Err(_) => false,
+        };
+        if !cached {
+            return;
         }
     }
     let _ = tx.send(event);

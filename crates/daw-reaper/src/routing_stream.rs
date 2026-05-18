@@ -73,21 +73,35 @@ pub fn subscribe_routing() -> Option<broadcast::Receiver<RoutingEvent>> {
 }
 
 /// Push-published routing event from the control-surface callback path.
-/// Updates the per-route cache so the next poll tick sees no diff and
-/// doesn't re-emit. Main-thread only.
+/// Skips publish if the affected route isn't in our cache yet — the
+/// follower hasn't seen the RouteCreated event for it, so emitting field
+/// changes ahead of the create just floods the apply pipeline with
+/// "route not found" lookups and starves the create event. The next
+/// poll tick picks up both the route + its initial state in order.
 pub(crate) fn publish_from_callback(event: RoutingEvent) {
     let Some(tx) = ROUTING_BROADCASTER.get() else {
         return;
     };
-    if let Some(cache_cell) = ROUTING_CACHE.get() {
-        if let Ok(mut cache) = cache_cell.lock() {
-            apply_callback_to_cache(&mut cache, &event);
-        }
+    let Some(cache_cell) = ROUTING_CACHE.get() else {
+        return;
+    };
+    let cached = match cache_cell.lock() {
+        Ok(mut cache) => apply_callback_to_cache(&mut cache, &event),
+        Err(_) => false,
+    };
+    if !cached {
+        return;
     }
     let _ = tx.send(event);
 }
 
-fn apply_callback_to_cache(cache: &mut HashMap<RouteKey, Vec<CachedRoute>>, event: &RoutingEvent) {
+/// Returns true if the cache had the affected route (and the patch
+/// was applied), false otherwise. Callers use this as a signal to skip
+/// publishing — see `publish_from_callback`.
+fn apply_callback_to_cache(
+    cache: &mut HashMap<RouteKey, Vec<CachedRoute>>,
+    event: &RoutingEvent,
+) -> bool {
     match event {
         RoutingEvent::VolumeChanged {
             project_guid,
@@ -96,13 +110,16 @@ fn apply_callback_to_cache(cache: &mut HashMap<RouteKey, Vec<CachedRoute>>, even
             route_index,
             volume,
         } => {
-            if let Some(routes) =
+            let Some(routes) =
                 cache.get_mut(&(project_guid.clone(), source_track_guid.clone(), *route_type))
-            {
-                if let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) {
-                    r.volume = *volume;
-                }
-            }
+            else {
+                return false;
+            };
+            let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) else {
+                return false;
+            };
+            r.volume = *volume;
+            true
         }
         RoutingEvent::PanChanged {
             project_guid,
@@ -111,13 +128,16 @@ fn apply_callback_to_cache(cache: &mut HashMap<RouteKey, Vec<CachedRoute>>, even
             route_index,
             pan,
         } => {
-            if let Some(routes) =
+            let Some(routes) =
                 cache.get_mut(&(project_guid.clone(), source_track_guid.clone(), *route_type))
-            {
-                if let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) {
-                    r.pan = *pan;
-                }
-            }
+            else {
+                return false;
+            };
+            let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) else {
+                return false;
+            };
+            r.pan = *pan;
+            true
         }
         RoutingEvent::MuteChanged {
             project_guid,
@@ -126,15 +146,18 @@ fn apply_callback_to_cache(cache: &mut HashMap<RouteKey, Vec<CachedRoute>>, even
             route_index,
             muted,
         } => {
-            if let Some(routes) =
+            let Some(routes) =
                 cache.get_mut(&(project_guid.clone(), source_track_guid.clone(), *route_type))
-            {
-                if let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) {
-                    r.muted = *muted;
-                }
-            }
+            else {
+                return false;
+            };
+            let Some(r) = routes.iter_mut().find(|r| r.index == *route_index) else {
+                return false;
+            };
+            r.muted = *muted;
+            true
         }
-        _ => {}
+        _ => true,
     }
 }
 

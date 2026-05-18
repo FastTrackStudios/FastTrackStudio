@@ -336,8 +336,11 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let pid = std::process::id();
     let log_path = format!("/tmp/daw-bridge-{pid}.log");
     let log_file = std::fs::File::create(&log_path).expect("Failed to create daw-bridge log file");
-    let env_filter =
-        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Suppress cranelift / wgpu noise; keep our crates + dependencies
+        // we care about at info.
+        "info,cranelift_jit=warn,cranelift_codegen=warn,wgpu=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn".into()
+    });
 
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
