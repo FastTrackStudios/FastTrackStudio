@@ -24,7 +24,18 @@ path = "src/lib.rs"
 [dependencies]
 reaper-medium = { workspace = true }
 reaper-low = { workspace = true }
+tokio = { workspace = true, features = ["net", "sync", "time", "rt", "macros"] }
 tracing.workspace = true
+# Stable peer identifiers across restarts of the same machine.
+uuid = { version = "1", features = ["v4", "serde"] }
+# Wire format for the clock-sync protocol. postcard is small + facet-
+# free so we don't drag in vox here.
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+socket2 = { version = "0.5", features = ["all"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
 
 [lints]
 workspace = true

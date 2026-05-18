@@ -26,6 +26,8 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
+pub mod clock_sync;
+
 use reaper_medium::{
     OnAudioBuffer, OnAudioBufferArgs, ProjectContext, RealTimeAudioThreadScope,
     Reaper as MediumReaper,

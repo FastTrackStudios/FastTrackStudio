@@ -14,8 +14,8 @@ use std::cell::RefCell;
 
 use daw_proto::Tracks;
 use daw_proto::{
-    DawError, DawResult, ProjectContext, ReorderTracksBehavior as ProtoReorderTracksBehavior,
-    Track, TrackRef,
+    DawError, DawResult, ProjectContext, RecordInput,
+    ReorderTracksBehavior as ProtoReorderTracksBehavior, Track, TrackRef,
 };
 use reaper_high::{GroupingBehavior, Project, Reaper as ReaperHigh};
 use reaper_medium::{GangBehavior, ReorderTracksBehavior, TrackAttributeKey};
@@ -275,6 +275,19 @@ fn reorder_behavior_to_reaper(behavior: ProtoReorderTracksBehavior) -> ReorderTr
     }
 }
 
+fn record_input_to_raw(input: RecordInput) -> i32 {
+    match input {
+        RecordInput::None => -1,
+        RecordInput::Midi { device_id, channel } => {
+            const ALL_MIDI_DEVICES_ID: u32 = 63;
+            let device_high = device_id.map(u32::from).unwrap_or(ALL_MIDI_DEVICES_ID);
+            let channel_low = channel.map(|ch| u32::from(ch) + 1).unwrap_or(0);
+            (4096 + (device_high * 32 + channel_low)) as i32
+        }
+        RecordInput::Raw(value) => value,
+    }
+}
+
 // ── Tracks impl ────────────────────────────────────────────────────────
 
 fn not_found_proj() -> DawError {
@@ -523,6 +536,51 @@ impl Tracks for crate::Reaper {
                 )
                 .map_err(|err| {
                     DawError::operation_failed(format!("set folder depth failed: {err}"))
+                })?;
+        }
+        Ok(())
+    }
+
+    fn set_num_channels(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        num_channels: u32,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let num_channels = num_channels.max(2);
+        unsafe {
+            ReaperHigh::get()
+                .medium_reaper()
+                .set_media_track_info_value(raw, TrackAttributeKey::Nchan, num_channels as f64)
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set track channel count failed: {err}"))
+                })?;
+        }
+        Ok(())
+    }
+
+    fn set_record_input(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        input: RecordInput,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        unsafe {
+            ReaperHigh::get()
+                .medium_reaper()
+                .set_media_track_info_value(
+                    raw,
+                    TrackAttributeKey::RecInput,
+                    record_input_to_raw(input) as f64,
+                )
+                .map_err(|err| {
+                    DawError::operation_failed(format!("set record input failed: {err}"))
                 })?;
         }
         Ok(())

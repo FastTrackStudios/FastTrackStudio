@@ -7,7 +7,7 @@
 //! canonical state — fewer places for state to drift.
 
 use daw_proto::Tracks;
-use daw_proto::{DawError, DawResult, ProjectContext, Track, TrackRef};
+use daw_proto::{DawError, DawResult, ProjectContext, RecordInput, Track, TrackRef};
 use uuid::Uuid;
 
 use crate::sync::Standalone;
@@ -272,6 +272,24 @@ impl Tracks for Standalone {
         _project: ProjectContext,
         _track: TrackRef,
         _folder_depth: i32,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
+    fn set_num_channels(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _num_channels: u32,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
+    fn set_record_input(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _input: RecordInput,
     ) -> DawResult<()> {
         Ok(())
     }

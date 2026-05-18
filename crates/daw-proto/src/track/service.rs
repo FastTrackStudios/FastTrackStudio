@@ -8,8 +8,8 @@
 //! Scope was trimmed from the previous async `TrackService` to the
 //! verbs the daw-control facade actually drives. Broader surfaces
 //! (track chunks, hierarchy apply, ext state, input monitoring,
-//! record input, channel counts, subscribe) land on follow-on sibling
-//! traits if/when a real consumer needs them.
+//! subscribe) land on follow-on sibling traits if/when a real consumer
+//! needs them.
 
 use super::event::TrackStreamEvent;
 use super::{RecordInput, ReorderTracksBehavior, Track, TrackRef};
