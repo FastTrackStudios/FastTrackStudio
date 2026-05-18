@@ -358,6 +358,10 @@ pub struct Marker {
     pub tick_pos: u64,
     /// Position in samples at the session's target sample rate.
     pub sample_pos: u64,
+    /// Marker color as RGB. `None` = default / uncolored. Decoded from
+    /// the per-marker `0x4826` block at payload `+2..+8` (three u16 LE
+    /// triplets, low byte = component).
+    pub color_rgb: Option<(u8, u8, u8)>,
 }
 
 /// A plugin / insert registered in the session's global plugin list.

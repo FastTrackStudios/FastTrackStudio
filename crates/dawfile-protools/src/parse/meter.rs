@@ -211,6 +211,9 @@ pub fn parse_markers(
             // Position encoding in 0x2619 blocks is not yet decoded.
             tick_pos: 0,
             sample_pos: 0,
+            // 0x4826 color sub-block is PT12-specific; pre-PT12 markers
+            // don't carry it via this path.
+            color_rgb: None,
         });
     }
 
@@ -282,15 +285,18 @@ fn parse_markers_v12(
     // lands on bar 3 in the export (not bar 1).
     const MARKER_BASELINE: u64 = (1u64 << 62) + ZERO_TICKS;
 
+    // Also collect per-entry color from the inner 0x4826 sub-block.
     let mut markers = Vec::with_capacity(raw.len());
-    for (i, (encoded, name)) in raw.into_iter().enumerate() {
+    for (i, ((encoded, name), entry)) in raw.into_iter().zip(entries.iter()).enumerate() {
         let tick_pos = encoded.saturating_sub(MARKER_BASELINE);
         let sample_pos = tick_to_sample(tick_pos, tempo_map, target_sample_rate);
+        let color_rgb = decode_marker_color_v12(entry, data);
         markers.push(Marker {
             name,
             number: (i as u32) + 1,
             tick_pos,
             sample_pos,
+            color_rgb,
         });
     }
 
@@ -308,6 +314,43 @@ fn collect_marker_section_entries<'a>(blocks: &'a [Block], out: &mut Vec<&'a Blo
         }
         collect_marker_section_entries(&b.children, out);
     }
+}
+
+/// Decode a per-marker color from its `0x4826` sub-block.
+///
+/// Discovered via Frida byte-read tracing on the converter: the
+/// `marker_colored` probe (REAPER color `0xD86E41`) produces reads at
+/// payload `+2`, `+4`, `+6` of the inner `0x4826` block with values
+/// `0xD8`, `0x6E`, `0x41` — i.e. each component is the LOW BYTE of a
+/// u16 LE triplet at those offsets.
+///
+/// Returns `None` when no `0x4826` is present (uncolored marker).
+fn decode_marker_color_v12(entry: &Block, data: &[u8]) -> Option<(u8, u8, u8)> {
+    // Find the first 0x4826 child anywhere in the entry's subtree.
+    fn find_4826<'a>(b: &'a Block) -> Option<&'a Block> {
+        if b.content_type_raw == 0x4826 {
+            return Some(b);
+        }
+        for c in &b.children {
+            if let Some(f) = find_4826(c) {
+                return Some(f);
+            }
+        }
+        None
+    }
+    let color_block = find_4826(entry)?;
+    let payload = color_block.offset + 2;
+    if payload + 8 > data.len() {
+        return None;
+    }
+    let r = data[payload + 2];
+    let g = data[payload + 4];
+    let b = data[payload + 6];
+    // Uncolored markers store all-zeros in this field; treat that as None.
+    if r == 0 && g == 0 && b == 0 {
+        return None;
+    }
+    Some((r, g, b))
 }
 
 fn find_block_recursive(blocks: &[Block], ct: ContentType) -> Option<&Block> {
