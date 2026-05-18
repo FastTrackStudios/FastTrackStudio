@@ -34,6 +34,15 @@ pub struct MuteAutomationPoint {
     pub muted: bool,
 }
 
+/// A single breakpoint in a volume automation envelope.
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeAutomationPoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// Volume in 0.1 dB units (centibel). `0` = unity; `-60` = -6 dB.
+    pub value_centibel: i16,
+}
+
 /// Single-track PTX writer parameters.
 #[derive(Debug, Clone)]
 pub struct NativeTrackSpec {
@@ -59,6 +68,10 @@ pub struct NativeTrackSpec {
     /// default-unmuted state), so don't include a (0, false) point —
     /// it'll either be discarded or merged into the default.
     pub mute_automation: Vec<MuteAutomationPoint>,
+    /// Optional volume automation envelope. Same shape as mute
+    /// automation but each breakpoint carries an `i16` centibel value
+    /// instead of a `bool`.
+    pub volume_automation: Vec<VolumeAutomationPoint>,
 }
 
 impl Default for NativeTrackSpec {
@@ -73,6 +86,7 @@ impl Default for NativeTrackSpec {
             volume_centibel: 0,
             pan: -100,
             mute_automation: Vec::new(),
+            volume_automation: Vec::new(),
         }
     }
 }
@@ -131,7 +145,12 @@ pub fn write_single_track_ptx(spec: &NativeTrackSpec) -> crate::PtResult<Vec<u8>
     patch_volume(&mut session, spec.volume_centibel);
     patch_pan(&mut session, spec.pan);
 
-    // Step 3: mute automation (variable-length splice into 0x260a[1]).
+    // Step 3a: volume automation envelope (0x260a[0]).
+    if !spec.volume_automation.is_empty() {
+        write_volume_automation(&mut session, &spec.volume_automation);
+    }
+
+    // Step 3b: mute automation (variable-length splice into 0x260a[1]).
     if !spec.mute_automation.is_empty() {
         write_mute_automation(&mut session, &spec.mute_automation);
     }
@@ -1153,6 +1172,58 @@ fn write_mute_automation(session: &mut RawSession, points: &[MuteAutomationPoint
     splice(session, splice_at, 0, &bp);
 }
 
+/// Symmetric writer for the volume automation envelope at `0x260a[0]`.
+/// Same layout as the mute envelope (`0x260a[1]`) but each breakpoint
+/// is `u32 time + i16 centibel value` (no shape/byte pad).
+fn write_volume_automation(session: &mut RawSession, points: &[VolumeAutomationPoint]) {
+    let envelope = {
+        let wrappers = collect_by_raw_ct(&session.blocks, 0x260d);
+        let Some(wrap) = wrappers.first() else {
+            return;
+        };
+        let mut children_260a = Vec::new();
+        for c in &wrap.children {
+            if c.content_type_raw == 0x260a {
+                children_260a.push((c.start, c.end));
+            }
+        }
+        let Some(&entry) = children_260a.first() else {
+            return;
+        };
+        entry
+    };
+    let (block_start, _block_end) = envelope;
+    let payload_start = block_start + 9;
+    let n = points.len() as u8;
+    let total = n.saturating_add(1);
+    let cnt_total = payload_start + 10;
+    let cnt_user = payload_start + 16;
+    if cnt_total < session.data.len() {
+        session.data[cnt_total] = total;
+    }
+    if cnt_user < session.data.len() {
+        session.data[cnt_user] = n;
+    }
+    let mut bp = Vec::with_capacity(points.len() * 6);
+    for pt in points {
+        bp.extend_from_slice(&pt.time_samples.to_le_bytes());
+        bp.extend_from_slice(&pt.value_centibel.to_le_bytes());
+    }
+    let size_off = payload_start + 4;
+    if size_off + 4 <= session.data.len() {
+        let cur = u32::from_le_bytes([
+            session.data[size_off],
+            session.data[size_off + 1],
+            session.data[size_off + 2],
+            session.data[size_off + 3],
+        ]);
+        let new = cur.wrapping_add(bp.len() as u32);
+        session.data[size_off..size_off + 4].copy_from_slice(&new.to_le_bytes());
+    }
+    let splice_at = payload_start + 28;
+    splice(session, splice_at, 0, &bp);
+}
+
 fn patch_solo(session: &mut RawSession, solo: bool) {
     let v: u8 = if solo { 1 } else { 0 };
     // 0x102d +162
@@ -1362,6 +1433,35 @@ mod tests {
         let tracks: Vec<_> = session.all_tracks().collect();
         let t = tracks.iter().find(|t| t.name == spec.name).expect("track");
         assert!(t.solo_defeat, "solo_defeat should round-trip");
+    }
+
+    #[test]
+    fn write_with_volume_automation_round_trip() {
+        let spec = NativeTrackSpec {
+            name: "VolEnvTrack".to_string(),
+            volume_automation: vec![
+                VolumeAutomationPoint {
+                    time_samples: 48000,
+                    value_centibel: -60,
+                },
+                VolumeAutomationPoint {
+                    time_samples: 96000,
+                    value_centibel: 60,
+                },
+            ],
+            ..NativeTrackSpec::default()
+        };
+        let session = parse_native(&spec);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let t = tracks
+            .iter()
+            .find(|t| t.name == "VolEnvTrack")
+            .expect("track");
+        assert_eq!(t.volume_automation.len(), 2);
+        assert_eq!(t.volume_automation[0].time_samples, 48000);
+        assert_eq!(t.volume_automation[0].value_centibel, -60);
+        assert_eq!(t.volume_automation[1].time_samples, 96000);
+        assert_eq!(t.volume_automation[1].value_centibel, 60);
     }
 
     #[test]
