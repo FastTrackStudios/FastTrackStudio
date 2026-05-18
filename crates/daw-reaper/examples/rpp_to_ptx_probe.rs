@@ -186,6 +186,54 @@ fn build_rpp(probe: &str) -> String {
             // Track with one item
             b = b.track("ProbeTrack", |t| t.item(0.0, 1.0, |i| i.name("Clip")));
         }
+        "clip_with_wav" => {
+            // Track with one item referencing a real WAV file. Converter
+            // requires real audio source to actually emit clip metadata.
+            b = b.track("ProbeTrack", |t| {
+                t.wave_item(0.0, 1.0, "/tmp/pt-re/input/clip_probe.wav")
+            });
+        }
+        "clip_muted" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").muted()
+                })
+            });
+        }
+        "clip_colored" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .color(0x6e41d8)
+                })
+            });
+        }
+        "clip_named" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .name("MyClip")
+                })
+            });
+        }
+        "clip_fadein" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_in(0.25, FadeCurveType::Linear)
+                })
+            });
+        }
+        "clip_fadeout" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_out(0.25, FadeCurveType::Linear)
+                })
+            });
+        }
         _ => panic!("unknown probe: {probe}"),
     }
 

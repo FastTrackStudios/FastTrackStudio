@@ -201,6 +201,7 @@ fn assign_regions_old(
                 region_index: raw_index,
                 start_pos: region.start_pos,
                 clip_flag_53: false,
+                clip_muted: false,
                 clip_color: None,
             });
         }
@@ -294,21 +295,24 @@ fn collect_slot_regions(
             let magic = track_entry.offset.saturating_sub(7);
             data.get(magic + 53).copied().unwrap_or(0) != 0
         };
-        // Per-clip color from inner 0x104f sub-block (raw CT 0x104f).
-        // We expect the color at 0x104f payload +16..+17 (= magic +25..+26).
-        let clip_color = {
+        // Per-clip state from inner 0x104f sub-block. Verified via
+        // Frida probe-and-diff:
+        //   - clip mute at `0x104f +9` u8
+        //   - clip color (palette index) at `0x104f +25..+26` i16 LE
+        let (clip_color, clip_muted) = {
             let mut color: Option<i16> = None;
+            let mut muted = false;
             for child in &track_entry.children {
                 if child.content_type_raw == 0x104f {
                     let magic = child.offset.saturating_sub(7);
                     if magic + 27 <= data.len() {
-                        let v = i16::from_le_bytes([data[magic + 25], data[magic + 26]]);
-                        color = Some(v);
+                        muted = data[magic + 9] != 0;
+                        color = Some(i16::from_le_bytes([data[magic + 25], data[magic + 26]]));
                     }
                     break;
                 }
             }
-            color
+            (color, muted)
         };
 
         for sub_entry in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
@@ -369,6 +373,7 @@ fn collect_slot_regions(
                     start_pos: start,
                     clip_flag_53,
                     clip_color,
+                    clip_muted,
                 });
             }
         }

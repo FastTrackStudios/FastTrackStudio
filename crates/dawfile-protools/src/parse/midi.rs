@@ -371,6 +371,7 @@ fn parse_midi_tracks(
                 region_index: raw_index,
                 start_pos: start,
                 clip_flag_53: false,
+                clip_muted: false,
                 clip_color: None,
             });
         }

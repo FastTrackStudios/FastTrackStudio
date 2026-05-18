@@ -362,11 +362,14 @@ pub struct TrackRegion {
     pub start_pos: u64,
     /// Per-clip flag from `0x1050 +53` (u8 boolean). Semantics not
     /// fully verified — observed value `1` on rare clips and `0` on
-    /// most. Hypothesis: this is the **clip-mute** flag (or possibly
-    /// clip-gain-non-zero indicator). Discovered via Frida byte-read
-    /// trace on LotF (92 reads, only 2 had value 1).
+    /// most. Discovered via Frida byte-read trace on LotF.
     /// See `docs/converter-frida-discovered-offsets.md`.
     pub clip_flag_53: bool,
+    /// Per-clip mute state from `0x104f +9` u8. `true` = muted clip.
+    /// Verified via Frida byte-read trace: `clip_muted` probe
+    /// (REAPER item with `.muted()` + real WAV source) produces
+    /// `1` at this byte; `clip_with_wav` produces `0`.
+    pub clip_muted: bool,
     /// Per-clip color palette index from the inner `0x104f` sub-block
     /// at payload `+16..+17` (i16 LE). `None` = no `0x104f` child
     /// present. `Some(-2)` = default/no color. Other values map to
