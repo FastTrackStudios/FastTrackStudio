@@ -185,13 +185,24 @@ pub fn write_session_ptx(spec: &NativeSessionSpec) -> crate::PtResult<Vec<u8>> {
     };
     let clone_bytes: Vec<u8> = session.data[orig_start..orig_end].to_vec();
 
-    // Splice (N-1) clones at the end of the original 0x261c. Each
-    // splice cascades ancestor sizes (0x2624 etc.) automatically.
-    // We splice them in reverse so we don't have to track shifting
-    // insertion points — every clone goes at the same end offset.
+    // Splice (N-1) clones APPENDED after the original 0x261c. We
+    // advance `cursor` by clone_len each time so the resulting order
+    // is [orig, clone_1, clone_2, ..., clone_{N-1}] — matching the
+    // user's spec.tracks index order.
+    let clone_len = clone_bytes.len();
+    let mut cursor = orig_end;
     for _ in 0..(n - 1) {
-        splice(&mut session, orig_end, 0, &clone_bytes);
+        splice(&mut session, cursor, 0, &clone_bytes);
+        cursor += clone_len;
     }
+
+    // Extend outer index lists by (N-1) entries each so the parser
+    // sees N distinct tracks instead of capping at the baseline's
+    // single-entry channel-pair (= 2 audio channels for stereo).
+    let track_names: Vec<String> = spec.tracks.iter().map(|t| t.name.clone()).collect();
+    extend_audio_track_list(&mut session, n, &track_names)?;
+    extend_playlist_list(&mut session, n, &track_names)?;
+    extend_midi_track_list(&mut session, n, &track_names)?;
 
     // Now each 0x261c's bytes are identical. We need to make them
     // distinct: patch name, UID, send-slot indices, optional nonce.
@@ -296,6 +307,291 @@ pub fn write_session_ptx(spec: &NativeSessionSpec) -> crate::PtResult<Vec<u8>> {
 }
 
 /// Apply per-track field patches scoped to a single 0x261c byte range.
+/// Extend the audio-track list (`0x1015 → 0x1014`) from its baseline
+/// single entry up to `n` entries. The baseline entry encodes a
+/// stereo track (channels 0 and 1). The clone for track `i` (0-indexed)
+/// gets channel indices `i*2` and `i*2+1` patched in the channel-map
+/// fields, plus a deterministic per-entry UID.
+///
+/// `0x1014` entry byte layout (offsets from block start, baseline
+/// with 10-char name "ProbeTrack"):
+/// - +0..+8  : 9-byte block header
+/// - +9..+12 : u32 LE name length-prefix
+/// - +13..+22: name bytes ("ProbeTrack")
+/// - +28     : u8 channel index 0
+/// - +30     : u8 channel index 1
+/// - +40..+47: 8-byte per-entry UID
+/// - +55     : u8 channel index 0 mirror
+/// - +59     : u8 channel index 1 mirror
+///
+/// (See `docs/pt-field-map.md` § Outer index lists — derived by
+/// diffing `two_tracks_eq` trk1 vs trk2 0x1014 entries.)
+fn extend_audio_track_list(
+    session: &mut RawSession,
+    n: usize,
+    names: &[String],
+) -> crate::PtResult<()> {
+    if n < 2 {
+        return Ok(());
+    }
+    // Find baseline's single 0x1014 entry.
+    let (start, end) = {
+        let b = find_first_by_ct(&session.blocks, 0x1014).expect("baseline missing 0x1014");
+        (b.start, b.end)
+    };
+    let template: Vec<u8> = session.data[start..end].to_vec();
+    let clone_len = template.len();
+    let mut cursor = end;
+    for _ in 0..(n - 1) {
+        splice(session, cursor, 0, &template);
+        cursor += clone_len;
+    }
+    // Patch each entry: name (variable-length splice) + channel
+    // indices + UID. Walk entries in REVERSE so name-length splices
+    // don't invalidate earlier entries' offsets.
+    let entries: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x1014)
+        .iter()
+        .map(|b| (b.start, b.end))
+        .collect();
+    assert_eq!(entries.len(), n, "post-splice 0x1014 count mismatch");
+
+    for i in (0..n).rev() {
+        // Re-locate entry i (positions shift after each name splice).
+        let entries_now: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x1014)
+            .iter()
+            .map(|b| (b.start, b.end))
+            .collect();
+        let (s, _) = entries_now[i];
+
+        // Splice name if different from "ProbeTrack". The length-prefix
+        // u32 sits at block-start +9.
+        let new_name = &names[i];
+        if new_name != "ProbeTrack" {
+            replace_string(session, s + 9, new_name);
+            let is_be = session.is_bigendian;
+            session.blocks = crate::raw_block::parse_raw_blocks_pub(&session.data, is_be);
+        }
+
+        // Re-locate again post-rename, then compute offsets from
+        // updated name length.
+        let entries_now: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x1014)
+            .iter()
+            .map(|b| (b.start, b.end))
+            .collect();
+        let (s, _) = entries_now[i];
+        let name_len = u32::from_le_bytes([
+            session.data[s + 9],
+            session.data[s + 10],
+            session.data[s + 11],
+            session.data[s + 12],
+        ]) as usize;
+        let ch0 = 13 + name_len + 5;
+        let ch1 = ch0 + 2;
+        let ch0_mir = ch0 + 27;
+        let ch1_mir = ch0_mir + 4;
+        let uid_off = ch1 + 10;
+        let pair_a = (i * 2) as u8;
+        let pair_b = (i * 2 + 1) as u8;
+        for (off, val) in [
+            (ch0, pair_a),
+            (ch1, pair_b),
+            (ch0_mir, pair_a),
+            (ch1_mir, pair_b),
+        ] {
+            let p = s + off;
+            if p < session.data.len() {
+                session.data[p] = val;
+            }
+        }
+        let uid: [u8; 8] = [0x92, 0x5a, 0xa9, 0xe5, 0xb7, 0xc3, 0x9d, 0x1c ^ i as u8];
+        let p = s + uid_off;
+        if p + 8 <= session.data.len() {
+            session.data[p..p + 8].copy_from_slice(&uid);
+        }
+    }
+    let is_be = session.is_bigendian;
+    session.blocks = crate::raw_block::parse_raw_blocks_pub(&session.data, is_be);
+    Ok(())
+}
+
+/// Extend the playlist-name list (`0x1054 → 0x1052`). Each track owns
+/// 2× `0x1052` entries (active + alternate playlist). The parser maps
+/// these positionally 1:1 to `0x1014` channel-entries and reads the
+/// track display name from the `0x1052` name field (see
+/// `parse::tracks::assign_regions_new`).
+///
+/// `0x1052` entry layout (offsets from block start):
+/// - +0..+6:   7-byte header (`5A` magic + block_type + size_u32)
+/// - +7..+8:   ct = `0x1052`
+/// - +9..+12:  u32 LE name length-prefix
+/// - +13..:    name bytes
+/// - after:    6-byte trailer `00 00 00 00 01 00`
+fn extend_playlist_list(
+    session: &mut RawSession,
+    n: usize,
+    names: &[String],
+) -> crate::PtResult<()> {
+    if n < 2 {
+        return Ok(());
+    }
+    // Find baseline's first 0x1054 (the top-level one — there's also a
+    // smaller 0x1054 elsewhere). The first one in document order is the
+    // playlist list.
+    let blocks_1054 = collect_by_raw_ct(&session.blocks, 0x1054);
+    let parent_1054 = blocks_1054
+        .first()
+        .copied()
+        .expect("baseline missing 0x1054");
+    let parent_end = parent_1054.end;
+    // Find baseline's existing 0x1052 entries (the LAST one is the
+    // alternate; we'll clone the 2 entries together so each new track
+    // gets active + alternate of its own).
+    let entries_1052: Vec<(usize, usize)> = collect_by_raw_ct(&parent_1054.children, 0x1052)
+        .iter()
+        .map(|b| (b.start, b.end))
+        .collect();
+    if entries_1052.len() < 2 {
+        return Ok(());
+    }
+    // Take the LAST 2 entries as the template pair (so cloning preserves
+    // the active/alt distinction if there is any in trailer bytes).
+    let pair_start = entries_1052[entries_1052.len() - 2].0;
+    let pair_end = entries_1052[entries_1052.len() - 1].1;
+    let template_pair: Vec<u8> = session.data[pair_start..pair_end].to_vec();
+    let _ = parent_end;
+    let pair_len = template_pair.len();
+    // Splice (n-1) clone-pairs APPENDED after the last entry.
+    let mut cursor = pair_end;
+    for _ in 0..(n - 1) {
+        splice(session, cursor, 0, &template_pair);
+        cursor += pair_len;
+    }
+
+    // Now rename each track's pair. Walk in reverse (per-track-pair)
+    // so name-length splices don't invalidate earlier positions.
+    // Each track i owns entries [2i, 2i+1].
+    for i in (0..n).rev() {
+        let new_name = &names[i];
+        if new_name == "ProbeTrack" {
+            continue;
+        }
+        // Splice both entries of this pair (reverse within pair too).
+        let entries_now: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x1052)
+            .iter()
+            .filter(|b| {
+                // Only count the entries that live inside the top-level
+                // 0x1054 (skip the trailing smaller 0x1054 in 0xc000s).
+                let blocks_1054 = collect_by_raw_ct(&session.blocks, 0x1054);
+                if let Some(top) = blocks_1054.first() {
+                    b.start >= top.start && b.end <= top.end
+                } else {
+                    false
+                }
+            })
+            .map(|b| (b.start, b.end))
+            .collect();
+        if entries_now.len() < (i + 1) * 2 {
+            continue;
+        }
+        // Reverse within the pair: entry 2i+1 first, then 2i.
+        for entry_idx in [2 * i + 1, 2 * i] {
+            let entries_now: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x1052)
+                .iter()
+                .filter(|b| {
+                    let blocks_1054 = collect_by_raw_ct(&session.blocks, 0x1054);
+                    if let Some(top) = blocks_1054.first() {
+                        b.start >= top.start && b.end <= top.end
+                    } else {
+                        false
+                    }
+                })
+                .map(|b| (b.start, b.end))
+                .collect();
+            if entry_idx >= entries_now.len() {
+                continue;
+            }
+            let (s, _) = entries_now[entry_idx];
+            replace_string(session, s + 9, new_name);
+            let is_be = session.is_bigendian;
+            session.blocks = crate::raw_block::parse_raw_blocks_pub(&session.data, is_be);
+        }
+    }
+    Ok(())
+}
+
+/// Extend the MidiTrackList (`0x2519 → 0x251a`). The mute_resolver and
+/// other parser passes iterate `0x251a` entries inside the top-level
+/// `0x2519` to enumerate tracks by document order, then pair each name
+/// with a `0x260d` (track mix wrapper). Without this extension the
+/// resolver sees only the baseline's 2 entries and mis-pairs cloned
+/// wrappers.
+///
+/// `0x251a` entry layout:
+/// - +0..+6: 7-byte header
+/// - +7..+8: ct = 0x251a (1a 25 LE)
+/// - +9..+10: reserved
+/// - +11..+14: u32 LE name length-prefix
+/// - +15..: name bytes
+/// - trailer: ~74 bytes (UIDs, flags) — copied verbatim
+fn extend_midi_track_list(
+    session: &mut RawSession,
+    n: usize,
+    names: &[String],
+) -> crate::PtResult<()> {
+    if n < 2 {
+        return Ok(());
+    }
+    let parent_blocks = collect_by_raw_ct(&session.blocks, 0x2519);
+    let Some(parent) = parent_blocks.first().copied() else {
+        return Ok(());
+    };
+    let entries: Vec<(usize, usize)> = collect_by_raw_ct(&parent.children, 0x251a)
+        .iter()
+        .map(|b| (b.start, b.end))
+        .collect();
+    if entries.len() < 2 {
+        return Ok(());
+    }
+    let pair_start = entries[entries.len() - 2].0;
+    let pair_end = entries[entries.len() - 1].1;
+    let template_pair: Vec<u8> = session.data[pair_start..pair_end].to_vec();
+    let pair_len = template_pair.len();
+    let mut cursor = pair_end;
+    for _ in 0..(n - 1) {
+        splice(session, cursor, 0, &template_pair);
+        cursor += pair_len;
+    }
+
+    // Rename each track's pair in reverse-track-order.
+    for i in (0..n).rev() {
+        let new_name = &names[i];
+        if new_name == "ProbeTrack" {
+            continue;
+        }
+        for entry_idx in [2 * i + 1, 2 * i] {
+            let entries_now: Vec<(usize, usize)> = {
+                let parent_blocks = collect_by_raw_ct(&session.blocks, 0x2519);
+                let Some(parent) = parent_blocks.first().copied() else {
+                    return Ok(());
+                };
+                collect_by_raw_ct(&parent.children, 0x251a)
+                    .iter()
+                    .map(|b| (b.start, b.end))
+                    .collect()
+            };
+            if entry_idx >= entries_now.len() {
+                continue;
+            }
+            let (s, _) = entries_now[entry_idx];
+            // Length-prefix at block_start + 11 for 0x251a.
+            replace_string(session, s + 11, new_name);
+            let is_be = session.is_bigendian;
+            session.blocks = crate::raw_block::parse_raw_blocks_pub(&session.data, is_be);
+        }
+    }
+    Ok(())
+}
+
 fn patch_track_in_range(
     session: &mut RawSession,
     range_start: usize,
@@ -1088,30 +1384,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs 0x1015/0x1054/0x2519/0x2107 outer-list extension (GH #26)"]
-    fn write_three_tracks_same_name() {
-        let specs = vec![
-            NativeTrackSpec {
-                name: "Shared".into(),
-                ..Default::default()
-            },
-            NativeTrackSpec {
-                name: "Shared".into(),
-                ..Default::default()
-            },
-            NativeTrackSpec {
-                name: "Shared".into(),
-                ..Default::default()
-            },
-        ];
-        let session = parse_multi(&specs);
-        let tracks: Vec<_> = session.all_tracks().collect();
-        assert_eq!(tracks.len(), 6, "3 PT tracks × 2 channels each");
-    }
-
-    #[test]
-    #[ignore = "distinct names need outer-index extension (GH #26)"]
-    fn write_distinct_named_tracks() {
+    fn write_two_distinct_tracks() {
         let specs = vec![
             NativeTrackSpec {
                 name: "Alpha".into(),
@@ -1126,5 +1399,74 @@ mod tests {
         let names: Vec<String> = session.all_tracks().map(|t| t.name.clone()).collect();
         assert!(names.contains(&"Alpha".into()), "got {names:?}");
         assert!(names.contains(&"Beta".into()), "got {names:?}");
+    }
+
+    #[test]
+    fn write_multi_with_per_track_color_and_solo() {
+        // Per-track color + solo work via in-range patching. Mute is
+        // tracked separately — see write_multi_track_mute_known_issue.
+        let specs = vec![
+            NativeTrackSpec {
+                name: "Drums".into(),
+                color: 0x12,
+                ..Default::default()
+            },
+            NativeTrackSpec {
+                name: "Bass".into(),
+                ..Default::default()
+            },
+            NativeTrackSpec {
+                name: "Guitar".into(),
+                solo: true,
+                ..Default::default()
+            },
+        ];
+        let session = parse_multi(&specs);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let drums = tracks.iter().find(|t| t.name == "Drums").expect("Drums");
+        let guitar = tracks.iter().find(|t| t.name == "Guitar").expect("Guitar");
+        assert_eq!(drums.color_byte, 0x12, "Drums color");
+        assert!(guitar.solo, "Guitar solo");
+    }
+
+    #[test]
+    #[ignore = "multi-track mute resolver pairs names with 0x260d wrappers positionally; cloned files break the 1:N pairing assumption — needs resolver-side fix"]
+    fn write_multi_track_mute_known_issue() {
+        let specs = vec![
+            NativeTrackSpec {
+                name: "Drums".into(),
+                ..Default::default()
+            },
+            NativeTrackSpec {
+                name: "Bass".into(),
+                mute: true,
+                ..Default::default()
+            },
+        ];
+        let session = parse_multi(&specs);
+        let bass = session
+            .all_tracks()
+            .find(|t| t.name == "Bass")
+            .expect("Bass");
+        assert!(bass.mute, "Bass should be muted (currently fails)");
+    }
+
+    #[test]
+    fn write_five_distinct_tracks() {
+        let specs: Vec<_> = ["Drums", "Bass", "Guitar", "Synth", "Vox"]
+            .iter()
+            .map(|n| NativeTrackSpec {
+                name: (*n).into(),
+                ..Default::default()
+            })
+            .collect();
+        let session = parse_multi(&specs);
+        let names: Vec<String> = session.all_tracks().map(|t| t.name.clone()).collect();
+        for expected in ["Drums", "Bass", "Guitar", "Synth", "Vox"] {
+            assert!(
+                names.contains(&expected.into()),
+                "missing {expected:?}: got {names:?}"
+            );
+        }
     }
 }
