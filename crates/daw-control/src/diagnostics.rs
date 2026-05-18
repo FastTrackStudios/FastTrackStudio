@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use crate::{DawClients, Result};
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, DriftDecisionSummary, PeerSummary};
+use daw_proto::diagnostics::{
+    AudioSyncSnapshot, DriftDecisionSummary, LocalProjectSnapshot, PeerProjectPosition, PeerSummary,
+};
 
 #[derive(Clone)]
 pub struct Probes {
@@ -83,6 +85,25 @@ impl Probes {
     /// and `drift_seconds = NaN` when the corrector isn't running.
     pub async fn audio_sync_drift_decision(&self) -> Result<DriftDecisionSummary> {
         Ok(self.clients.diagnostics.audio_sync_drift_decision().await?)
+    }
+
+    /// Every project a specific peer is broadcasting. Empty when the
+    /// peer is unknown or hasn't broadcast yet.
+    pub async fn audio_sync_peer_projects(
+        &self,
+        peer_id: &str,
+    ) -> Result<Vec<PeerProjectPosition>> {
+        Ok(self
+            .clients
+            .diagnostics
+            .audio_sync_peer_projects(peer_id.to_string())
+            .await?)
+    }
+
+    /// LOCAL multi-project registry — one entry per open project tab
+    /// that the audio thread has observed.
+    pub async fn audio_sync_local_projects(&self) -> Result<Vec<LocalProjectSnapshot>> {
+        Ok(self.clients.diagnostics.audio_sync_local_projects().await?)
     }
 }
 

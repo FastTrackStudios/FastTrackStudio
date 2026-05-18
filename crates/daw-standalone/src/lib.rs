@@ -19,7 +19,7 @@
 
 mod action_registry;
 mod audio_accessor;
-#[cfg(feature = "audio")]
+#[cfg(any(feature = "audio", feature = "decode"))]
 pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
@@ -43,7 +43,7 @@ pub(crate) mod platform;
 mod plugin_loader;
 mod position_conversion;
 mod project;
-#[cfg(feature = "rpp-project")]
+#[cfg(any(feature = "rpp-project", feature = "rpp-project-wasm"))]
 pub mod project_loader;
 mod region;
 mod resource;

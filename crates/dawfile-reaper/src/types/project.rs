@@ -1,5 +1,6 @@
 //! REAPER project data structures and parsing
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -1326,98 +1327,112 @@ impl ReaperProject {
             }
         }
 
+        // Parallel parsing requires the `parallel` feature (rayon).
+        // WASM builds always take the serial branch.
+        #[cfg(feature = "parallel")]
         let can_parallelize = rpp_project.blocks.len() >= 16;
+        #[cfg(not(feature = "parallel"))]
+        let can_parallelize = false;
         if can_parallelize {
-            if options.parse_tracks {
-                let mut track_results: Vec<(usize, Result<Track, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::Track {
-                            return None;
+            #[cfg(not(feature = "parallel"))]
+            unreachable!("parallel branch entered without rayon feature");
+            #[cfg(feature = "parallel")]
+            {
+                if options.parse_tracks {
+                    let mut track_results: Vec<(usize, Result<Track, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::Track {
+                                return None;
+                            }
+                            Some((
+                                idx,
+                                Track::from_block_with_options(block, options.track_options),
+                            ))
+                        })
+                        .collect();
+                    track_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in track_results {
+                        match result {
+                            Ok(track) => project.tracks.push(track),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse track at block {idx}: {e}")
+                            }
                         }
-                        Some((
-                            idx,
-                            Track::from_block_with_options(block, options.track_options),
-                        ))
-                    })
-                    .collect();
-                track_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in track_results {
-                    match result {
-                        Ok(track) => project.tracks.push(track),
-                        Err(e) => eprintln!("Warning: Failed to parse track at block {idx}: {e}"),
                     }
                 }
-            }
 
-            if options.parse_project_items {
-                let mut item_results: Vec<(usize, Result<Item, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::Item {
-                            return None;
+                if options.parse_project_items {
+                    let mut item_results: Vec<(usize, Result<Item, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::Item {
+                                return None;
+                            }
+                            Some((idx, Item::from_block(block)))
+                        })
+                        .collect();
+                    item_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in item_results {
+                        match result {
+                            Ok(item) => project.items.push(item),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse item at block {idx}: {e}")
+                            }
                         }
-                        Some((idx, Item::from_block(block)))
-                    })
-                    .collect();
-                item_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in item_results {
-                    match result {
-                        Ok(item) => project.items.push(item),
-                        Err(e) => eprintln!("Warning: Failed to parse item at block {idx}: {e}"),
                     }
                 }
-            }
 
-            if options.parse_project_envelopes {
-                let mut envelope_results: Vec<(usize, Result<Envelope, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::Envelope {
-                            return None;
-                        }
-                        Some((idx, Envelope::from_block(block)))
-                    })
-                    .collect();
-                envelope_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in envelope_results {
-                    match result {
-                        Ok(envelope) => project.envelopes.push(envelope),
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse envelope at block {idx}: {e}")
+                if options.parse_project_envelopes {
+                    let mut envelope_results: Vec<(usize, Result<Envelope, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::Envelope {
+                                return None;
+                            }
+                            Some((idx, Envelope::from_block(block)))
+                        })
+                        .collect();
+                    envelope_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in envelope_results {
+                        match result {
+                            Ok(envelope) => project.envelopes.push(envelope),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse envelope at block {idx}: {e}")
+                            }
                         }
                     }
                 }
-            }
 
-            if options.parse_project_fxchains {
-                let mut fx_results: Vec<(usize, Result<FxChain, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::FxChain {
-                            return None;
-                        }
-                        Some((idx, FxChain::from_block(block)))
-                    })
-                    .collect();
-                fx_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in fx_results {
-                    match result {
-                        Ok(fx) => project.fx_chains.push(fx),
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse FX chain at block {idx}: {e}")
+                if options.parse_project_fxchains {
+                    let mut fx_results: Vec<(usize, Result<FxChain, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::FxChain {
+                                return None;
+                            }
+                            Some((idx, FxChain::from_block(block)))
+                        })
+                        .collect();
+                    fx_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in fx_results {
+                        match result {
+                            Ok(fx) => project.fx_chains.push(fx),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse FX chain at block {idx}: {e}")
+                            }
                         }
                     }
                 }
-            }
+            } // end #[cfg(feature = "parallel")] block
         } else {
             for block in &rpp_project.blocks {
                 match block.block_type {

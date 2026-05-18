@@ -6,10 +6,21 @@
 //! tokio `broadcast` send/recv.
 
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, DriftDecisionSummary, PeerSummary};
+use daw_proto::diagnostics::{
+    AudioSyncSnapshot, Diagnostics, DriftDecisionSummary, LocalProjectSnapshot,
+    PeerProjectPosition, PeerSummary,
+};
 use daw_proto::track::{TrackEvent, TrackStreamEvent};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::TryRecvError;
+
+fn hex_id(bytes: &[u8; 16]) -> String {
+    let mut s = String::with_capacity(32);
+    for b in bytes {
+        s.push_str(&format!("{:02x}", b));
+    }
+    s
+}
 
 fn audio_snapshot_to_wire(s: daw_audio_sync::AudioSnapshot) -> AudioSyncSnapshot {
     AudioSyncSnapshot {
@@ -92,10 +103,14 @@ impl Diagnostics for crate::Reaper {
         peers
             .into_iter()
             .map(|p| {
-                let (playhead, playing) = match p.position {
-                    Some(pos) => (pos.playhead_seconds, pos.is_playing),
-                    None => (f64::NAN, false),
-                };
+                // Summarise the FIRST broadcast position. Full
+                // per-project visibility is available via the
+                // separate audio_sync_peer_projects RPC (next).
+                let (playhead, playing) = p
+                    .positions
+                    .first()
+                    .map(|pos| (pos.playhead_seconds, pos.is_playing))
+                    .unwrap_or((f64::NAN, false));
                 PeerSummary {
                     id: p.id.0.to_string(),
                     addr: p.addr.to_string(),
@@ -128,6 +143,47 @@ impl Diagnostics for crate::Reaper {
             .map_err(|e| DawError::operation_failed(format!("bad addr: {e}")))?;
         cs.seed_peer_sync(daw_audio_sync::clock_sync::PeerId(uuid), addr);
         Ok(())
+    }
+
+    fn audio_sync_peer_projects(&self, peer_id: &str) -> Vec<PeerProjectPosition> {
+        let Some(cs) = daw_audio_sync::global_clock_sync() else {
+            return Vec::new();
+        };
+        let Ok(uuid) = uuid::Uuid::parse_str(peer_id) else {
+            return Vec::new();
+        };
+        let target = daw_audio_sync::clock_sync::PeerId(uuid);
+        let peers = cs.runtime.block_on(cs.peers.peers_snapshot());
+        let Some(peer) = peers.into_iter().find(|p| p.id == target) else {
+            return Vec::new();
+        };
+        let now = Instant::now();
+        peer.positions
+            .into_iter()
+            .map(|pos| PeerProjectPosition {
+                project_id_hex: hex_id(&pos.project_id),
+                host_micros: pos.host_micros,
+                playhead_seconds: pos.playhead_seconds,
+                sample_rate: pos.sample_rate,
+                playrate: pos.playrate,
+                is_playing: pos.is_playing,
+                received_age_ms: now.duration_since(pos.received_at).as_millis() as u64,
+            })
+            .collect()
+    }
+
+    fn audio_sync_local_projects(&self) -> Vec<LocalProjectSnapshot> {
+        let Some(registry) = daw_audio_sync::registry::global_registry() else {
+            return Vec::new();
+        };
+        registry
+            .snapshots()
+            .into_iter()
+            .map(|(_idx, snap)| LocalProjectSnapshot {
+                project_id_hex: hex_id(&snap.project_id),
+                snapshot: audio_snapshot_to_wire(snap),
+            })
+            .collect()
     }
 
     fn audio_sync_drift_decision(&self) -> DriftDecisionSummary {

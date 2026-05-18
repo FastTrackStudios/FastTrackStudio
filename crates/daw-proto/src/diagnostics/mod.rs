@@ -3,7 +3,8 @@
 mod service;
 
 pub use service::{
-    AudioSyncSnapshot, Diagnostics, DiagnosticsRpc, DriftDecisionSummary, PeerSummary,
+    AudioSyncSnapshot, Diagnostics, DiagnosticsRpc, DriftDecisionSummary, LocalProjectSnapshot,
+    PeerProjectPosition, PeerSummary,
 };
 
 #[cfg(feature = "vox")]

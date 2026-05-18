@@ -183,7 +183,19 @@ impl DriftCorrector {
                     continue;
                 };
 
-                let position = leader.position.expect("elected leader has a position");
+                // Use the leader's playing position; the elector
+                // already guaranteed at least one playing entry.
+                // Multi-project drift (one corrector per project)
+                // can be wired by passing a project-id filter into
+                // config; for now we lock to the leader's first
+                // playing project, which matches single-project
+                // behavior.
+                let position = leader
+                    .positions
+                    .iter()
+                    .find(|p| p.is_playing)
+                    .copied()
+                    .expect("elected leader has a playing position");
                 let offset_us = leader.offset_us;
 
                 // Project leader's playhead into OUR clock domain:
@@ -260,11 +272,13 @@ fn elect_leader(
     let mut best: Option<&crate::clock_sync::PeerInfo> = None;
     let mut best_id: Option<uuid::Uuid> = None;
     for peer in peers {
-        let Some(pos) = peer.position else { continue };
-        if !pos.is_playing {
-            continue;
-        }
-        if pos.received_at.elapsed() > max_age {
+        // A peer is eligible if it has at least one playing,
+        // recently-broadcast position frame.
+        let has_active = peer
+            .positions
+            .iter()
+            .any(|pos| pos.is_playing && pos.received_at.elapsed() <= max_age);
+        if !has_active {
             continue;
         }
         if peer.id == local_peer_id {
@@ -289,7 +303,7 @@ fn elect_leader(
     {
         return None;
     }
-    best.copied()
+    best.cloned()
 }
 
 /// Lock-free single-writer / multi-reader cell for the latest
@@ -399,14 +413,15 @@ mod tests {
             delay_us: 0,
             last_rtt_at: Instant::now(),
             last_announce_at: Instant::now(),
-            position: Some(RemotePosition {
+            positions: vec![RemotePosition {
+                project_id: [0u8; 16],
                 host_micros: host_us,
                 playhead_seconds: playhead,
                 sample_rate: 48_000.0,
                 playrate: 1.0,
                 is_playing: playing,
                 received_at: Instant::now(),
-            }),
+            }],
         }
     }
 

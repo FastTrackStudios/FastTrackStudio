@@ -195,6 +195,12 @@ pub struct ProjectState {
     pub envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
     /// Global automation override (`None` = no override active).
     pub global_automation_override: Option<AutomationMode>,
+    /// Decoded audio sources keyed by take GUID. Populated by
+    /// `crate::audio_engine::materialize::materialize_audio` (or
+    /// directly via `attach_audio_source`). Read by the mixer during
+    /// playback. Wrapped in `Arc` so the mixer can hold cheap refs.
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    pub audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::DecodedAudio>>,
     pub next_region_id: u32,
     pub next_marker_id: u32,
     /// Per-track ext state keyed by `(track_guid, section, key)`.
@@ -240,6 +246,8 @@ impl ProjectState {
             midi_notes: HashMap::new(),
             envelopes: HashMap::new(),
             global_automation_override: None,
+            #[cfg(any(feature = "audio", feature = "decode"))]
+            audio_sources: HashMap::new(),
             next_region_id: 0,
             next_marker_id: 0,
             track_ext_state: HashMap::new(),
@@ -403,6 +411,46 @@ impl Standalone {
         let bundle = self.transport_engine_for(guid);
         bundle.disable_soft_clock();
         crate::audio_engine::AudioEngine::with_shared(bundle.shared.clone())
+    }
+
+    /// Read-only access to a project's audio source map. Returns
+    /// `None` if the project doesn't exist. The decoded PCM is wrapped
+    /// in `Arc`, so cloning the inner refs is cheap.
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    pub fn audio_source(
+        &self,
+        project_guid: &str,
+        take_guid: &str,
+    ) -> Option<std::sync::Arc<crate::audio_engine::DecodedAudio>> {
+        self.with_project(project_guid, |p| p.audio_sources.get(take_guid).cloned())
+            .ok()
+            .flatten()
+    }
+
+    /// Count of decoded audio sources for a project (diagnostic).
+    #[cfg(any(feature = "audio", feature = "decode"))]
+    pub fn audio_source_count(&self, project_guid: &str) -> usize {
+        self.with_project(project_guid, |p| p.audio_sources.len())
+            .unwrap_or(0)
+    }
+
+    /// Visit a project's state via a read-only closure. Test/debug
+    /// hook; production code should go through the proto trait surface.
+    pub fn read_project<R>(&self, guid: &str, f: impl FnOnce(&ProjectState) -> R) -> Option<R> {
+        let s = self.state.lock().ok()?;
+        s.projects.get(guid).map(f)
+    }
+
+    /// Visit a project's state via a mutable closure. Test/debug hook
+    /// — production mutations should go through the proto trait
+    /// surface so invariants stay consistent.
+    pub fn write_project<R>(
+        &self,
+        guid: &str,
+        f: impl FnOnce(&mut ProjectState) -> R,
+    ) -> Option<R> {
+        let mut s = self.state.lock().ok()?;
+        s.projects.get_mut(guid).map(f)
     }
 
     /// Captured console messages, useful in tests.

@@ -9,6 +9,22 @@
 use crate::{DawResult, ProjectContext};
 use facet::Facet;
 
+/// One per-project position frame received from a peer. Mirrors
+/// `daw_audio_sync::clock_sync::RemotePosition` on the wire.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct PeerProjectPosition {
+    /// Hex-encoded 16-byte project id (process-local on the peer).
+    pub project_id_hex: String,
+    /// Peer's audio host clock when broadcast (microseconds).
+    pub host_micros: i64,
+    pub playhead_seconds: f64,
+    pub sample_rate: f64,
+    pub playrate: f64,
+    pub is_playing: bool,
+    /// Milliseconds since this frame was received locally.
+    pub received_age_ms: u64,
+}
+
 /// Wire-format snapshot of a peer the local ClockSync session knows
 /// about. Mirrors `daw_audio_sync::clock_sync::PeerInfo` but with
 /// owned types (`String` instead of `Instant`/`SocketAddr`) so it
@@ -28,7 +44,10 @@ pub struct PeerSummary {
     /// Milliseconds since the last announce.
     pub announce_age_ms: u64,
     /// Latest broadcast playhead in seconds, if known. `f64::NAN`
-    /// when no position has been received yet.
+    /// when no position has been received yet. For multi-project
+    /// peers this is whatever frame arrived first (typically the
+    /// peer's current project); use `audio_sync_peer_projects` for
+    /// the full per-project list.
     pub remote_playhead_seconds: f64,
     /// Whether the remote was playing at last broadcast.
     pub remote_is_playing: bool,
@@ -104,6 +123,28 @@ pub trait Diagnostics {
     /// running (FTS_AUDIO_SYNC_DRIFT not set, or controller hasn't
     /// ticked yet).
     fn audio_sync_drift_decision(&self) -> DriftDecisionSummary;
+
+    /// Every per-project position frame the local ClockSync has
+    /// received from a given peer. Empty when the peer is unknown
+    /// or hasn't broadcast yet. Use this when FTS-session needs to
+    /// see every project a peer is tracking, not just one.
+    fn audio_sync_peer_projects(&self, peer_id: &str) -> Vec<PeerProjectPosition>;
+
+    /// Per-project snapshots from the LOCAL multi-project registry.
+    /// Each entry is (project_id_hex, AudioSyncSnapshot). Empty
+    /// when the multi-project hook hasn't observed any project
+    /// yet (REAPER not playing, or no audio engine).
+    fn audio_sync_local_projects(&self) -> Vec<LocalProjectSnapshot>;
+}
+
+/// One entry in `audio_sync_local_projects` — the LOCAL multi-project
+/// registry's per-project snapshot. Use this to see what the local
+/// audio thread is observing for each open project tab.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct LocalProjectSnapshot {
+    /// Hex-encoded 16-byte project id assigned by the bridge.
+    pub project_id_hex: String,
+    pub snapshot: AudioSyncSnapshot,
 }
 
 /// Wire-format mirror of `daw_audio_sync::drift::DriftDecision`.

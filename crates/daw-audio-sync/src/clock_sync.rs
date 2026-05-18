@@ -109,11 +109,15 @@ enum Message {
         t2: i64,
         t3: i64,
     },
-    /// Sample position broadcast — Phase C. Sent at audio-buffer
-    /// rate (or thereabouts) so peers can extrapolate "where is
-    /// remote *right now*" via the clock-sync offset.
+    /// Sample position broadcast — sent at audio-buffer rate per
+    /// project. Multi-project peers send one frame per active
+    /// project per tick; receivers index by `project_id`.
     Position {
         from: PeerId,
+        /// Project this frame describes. `[0; 16]` is the sentinel
+        /// "current project" for backward-compat with single-project
+        /// senders.
+        project_id: crate::ProjectId,
         /// Local audio host clock when the snapshot was taken (µs).
         host_micros: i64,
         /// Playhead in seconds at that moment.
@@ -127,9 +131,9 @@ enum Message {
     },
 }
 
-/// Per-peer state exposed to readers. Cheap to clone — all fields are
-/// values.
-#[derive(Clone, Copy, Debug)]
+/// Per-peer state exposed to readers. Clone-only (positions is a
+/// small Vec, ≤16 entries).
+#[derive(Clone, Debug)]
 pub struct PeerInfo {
     pub id: PeerId,
     pub addr: SocketAddr,
@@ -142,9 +146,17 @@ pub struct PeerInfo {
     pub last_rtt_at: Instant,
     /// Last announce (for TTL expiry).
     pub last_announce_at: Instant,
-    /// Latest sample-position broadcast from this peer. `None` until
+    /// Latest per-project sample-position broadcasts. Empty until
     /// the first Position frame arrives.
-    pub position: Option<RemotePosition>,
+    pub positions: Vec<RemotePosition>,
+}
+
+impl PeerInfo {
+    /// Convenience: return the position frame for a specific
+    /// project, or `None` if no recent frame.
+    pub fn position_for(&self, project_id: crate::ProjectId) -> Option<&RemotePosition> {
+        self.positions.iter().find(|p| p.project_id == project_id)
+    }
 }
 
 /// Snapshot of a peer's transport at a known instant in their clock
@@ -152,6 +164,8 @@ pub struct PeerInfo {
 /// clock.
 #[derive(Clone, Copy, Debug)]
 pub struct RemotePosition {
+    /// Project this position describes.
+    pub project_id: crate::ProjectId,
     /// Their audio host clock when they sent the broadcast (µs).
     pub host_micros: i64,
     /// Playhead in seconds at that moment.
@@ -191,7 +205,10 @@ struct Peer {
     delay_window: RollingWindow,
     last_rtt_at: Instant,
     last_announce_at: Instant,
-    position: Option<RemotePosition>,
+    /// Map of project_id → latest position. Vec instead of HashMap
+    /// since N is small (≤16) and linear scan beats hashing at this
+    /// size.
+    positions: Vec<RemotePosition>,
 }
 
 impl Peer {
@@ -203,7 +220,19 @@ impl Peer {
             delay_us: self.delay_window.average() as i64,
             last_rtt_at: self.last_rtt_at,
             last_announce_at: self.last_announce_at,
-            position: self.position,
+            positions: self.positions.clone(),
+        }
+    }
+
+    fn upsert_position(&mut self, pos: RemotePosition) {
+        if let Some(slot) = self
+            .positions
+            .iter_mut()
+            .find(|p| p.project_id == pos.project_id)
+        {
+            *slot = pos;
+        } else {
+            self.positions.push(pos);
         }
     }
 }
@@ -321,7 +350,7 @@ impl ClockSync {
                 delay_window: RollingWindow::new(SMOOTHING_WINDOW),
                 last_rtt_at: now,
                 last_announce_at: now,
-                position: None,
+                positions: Vec::new(),
             });
     }
 
@@ -427,7 +456,7 @@ impl ClockSync {
                     delay_window: RollingWindow::new(SMOOTHING_WINDOW),
                     last_rtt_at: now,
                     last_announce_at: now,
-                    position: None,
+                    positions: Vec::new(),
                 });
         });
     }
@@ -533,26 +562,47 @@ fn spawn_position_broadcaster(
         let mut tick = tokio::time::interval(POSITION_INTERVAL);
         loop {
             tick.tick().await;
-            let Some(snap) = cell.load() else { continue };
-            let msg = Message::Position {
-                from: peer_id,
-                host_micros: snap.host_micros as i64,
-                playhead_seconds: snap.playhead_seconds,
-                sample_rate: snap.sample_rate,
-                playrate: 1.0, // Phase C2 will read real playrate.
-                is_playing: snap.is_playing,
-            };
-            let buf = match bincode::serialize(&msg) {
-                Ok(b) => b,
-                Err(e) => {
-                    warn!(?e, "position serialize failed");
-                    continue;
+            // Collect every project's latest snapshot. When the
+            // single-cell hook is in use, this is one frame for the
+            // sentinel project_id [0; 16]. When the multi-project
+            // hook is in use, also pull from the global registry.
+            let mut frames: Vec<crate::AudioSnapshot> = Vec::new();
+            if let Some(snap) = cell.load() {
+                frames.push(snap);
+            }
+            if let Some(reg) = crate::registry::global_registry() {
+                for (_idx, snap) in reg.snapshots() {
+                    if frames.iter().any(|f| f.project_id == snap.project_id) {
+                        continue;
+                    }
+                    frames.push(snap);
                 }
-            };
+            }
+            if frames.is_empty() {
+                continue;
+            }
             let snapshot = peers.peers_snapshot().await;
-            for peer in snapshot {
-                if let Err(e) = socket.send_to(&buf, peer.addr).await {
-                    debug!(?e, peer = ?peer.id, "position send failed");
+            for snap in &frames {
+                let msg = Message::Position {
+                    from: peer_id,
+                    project_id: snap.project_id,
+                    host_micros: snap.host_micros as i64,
+                    playhead_seconds: snap.playhead_seconds,
+                    sample_rate: snap.sample_rate,
+                    playrate: 1.0, // future: read REAPER playrate
+                    is_playing: snap.is_playing,
+                };
+                let buf = match bincode::serialize(&msg) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!(?e, "position serialize failed");
+                        continue;
+                    }
+                };
+                for peer in &snapshot {
+                    if let Err(e) = socket.send_to(&buf, peer.addr).await {
+                        debug!(?e, peer = ?peer.id, "position send failed");
+                    }
                 }
             }
         }
@@ -603,7 +653,7 @@ fn spawn_receiver(
                             delay_window: RollingWindow::new(SMOOTHING_WINDOW),
                             last_rtt_at: now,
                             last_announce_at: now,
-                            position: None,
+                            positions: Vec::new(),
                         });
                 }
                 Message::Ping { from, t1 } => {
@@ -631,6 +681,7 @@ fn spawn_receiver(
                 }
                 Message::Position {
                     from,
+                    project_id,
                     host_micros,
                     playhead_seconds,
                     sample_rate,
@@ -641,6 +692,7 @@ fn spawn_receiver(
                         continue;
                     }
                     let pos = RemotePosition {
+                        project_id,
                         host_micros,
                         playhead_seconds,
                         sample_rate,
@@ -650,7 +702,7 @@ fn spawn_receiver(
                     };
                     let mut guard = peers.inner.write().await;
                     if let Some(peer) = guard.get_mut(&from) {
-                        peer.position = Some(pos);
+                        peer.upsert_position(pos);
                     }
                 }
                 Message::Pong { from, t1, t2, t3 } => {
@@ -781,6 +833,7 @@ mod tests {
         // A reports playing at 12.345s, 48kHz.
         cell_a.store(&crate::AudioSnapshot {
             sequence: 1,
+            project_id: [0u8; 16],
             host_micros: 1_000_000,
             playhead_seconds: 12.345,
             sample_rate: 48_000.0,
@@ -793,7 +846,7 @@ mod tests {
             let pb = b.peers.peers_snapshot().await;
             let from_a = pb.iter().find(|p| p.id == a.peer_id);
             if let Some(p) = from_a
-                && let Some(pos) = p.position
+                && let Some(pos) = p.positions.first().copied()
                 && (pos.playhead_seconds - 12.345).abs() < 1e-6
             {
                 assert!(pos.is_playing, "expected is_playing=true");
@@ -814,6 +867,7 @@ mod tests {
     #[test]
     fn project_playhead_extrapolates_during_playback() {
         let pos = RemotePosition {
+            project_id: [0u8; 16],
             host_micros: 1_000_000,
             playhead_seconds: 10.0,
             sample_rate: 48_000.0,

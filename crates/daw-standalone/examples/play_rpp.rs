@@ -1,185 +1,100 @@
-//! Load and play a REAPER project file.
+//! Load an RPP project + decode its audio sources via the unified
+//! `project_loader::load_rpp` path, then render a short stereo block
+//! and print the resulting peak levels.
 //!
-//! Usage:
-//!   cargo run -p daw-standalone --features rpp-loader --example play_rpp -- "/path/to/project.RPP"
+//! Run with:
 //!
-//! Controls:
-//!   SPACE = play/pause
-//!   S     = stop (reset to start)
-//!   LEFT  = seek back 5s
-//!   RIGHT = seek forward 5s
-//!   Q     = quit
-//!   1-9   = toggle mute on track 1-9
-//!   M     = unmute all
+//! ```bash
+//! cargo run -p daw-standalone --features rpp-loader --example play_rpp -- /path/to/song.rpp
+//! ```
+//!
+//! Note: this example does NOT drive the cpal output stream from the
+//! project renderer yet — that integration lives in a follow-up task.
+//! For now it demonstrates the load + materialize + render pipeline.
 
-use daw_standalone::audio_engine::{AudioEngine, rpp_loader};
-use std::io::{Read, Write, stdin, stdout};
+use std::path::PathBuf;
 
-fn main() {
-    tracing_subscriber::fmt::init();
+use daw_standalone::audio_engine::render::ProjectRenderer;
+use daw_standalone::project_loader::load_rpp;
+use daw_standalone::sync::Standalone;
 
-    let rpp_path = std::env::args().nth(1).unwrap_or_else(|| {
-        eprintln!("Usage: play_rpp <path-to-rpp>");
-        eprintln!("Example: play_rpp \"/Users/codywright/Music/Projects/Live Tracks/Just Friends/Vienna - Couch/Vienna - Couch.RPP\"");
-        std::process::exit(1);
-    });
+fn main() -> Result<(), String> {
+    let path = std::env::args()
+        .nth(1)
+        .ok_or("usage: play_rpp <rpp-file>")?;
+    let rpp_path = PathBuf::from(&path);
+    let rpp_text = std::fs::read_to_string(&rpp_path).map_err(|e| e.to_string())?;
+    let project_dir = rpp_path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
 
-    println!("Initializing audio engine...");
-    let engine = AudioEngine::new().expect("Failed to create audio engine");
+    let daw = Standalone::new();
+    let project_name = rpp_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("project");
 
-    println!("Loading RPP: {rpp_path}");
-    let rpp_text = std::fs::read_to_string(&rpp_path).expect("Failed to read RPP file");
-    let rpp_dir = std::path::Path::new(&rpp_path).parent().unwrap();
+    println!("Loading {path}...");
+    let (proj, audio) = load_rpp(
+        &daw,
+        project_name,
+        rpp_path.to_string_lossy().as_ref(),
+        &rpp_text,
+        |file_path| {
+            // Resolve relative paths against the project dir.
+            let pb = PathBuf::from(file_path);
+            let abs = if pb.is_absolute() {
+                pb
+            } else {
+                project_dir.join(pb)
+            };
+            std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
+        },
+    )?;
 
-    let project = rpp_loader::load_rpp(&engine, &rpp_text, |file_path| {
-        // Resolve relative paths against the RPP directory
-        let path = if std::path::Path::new(file_path).is_absolute() {
-            std::path::PathBuf::from(file_path)
-        } else {
-            rpp_dir.join(file_path)
-        };
-        std::fs::read(&path).ok()
-    })
-    .expect("Failed to load RPP project");
-
-    println!("\n=== Loaded Project ===");
-    println!("Sample rate: {} Hz", project.sample_rate);
     println!(
-        "Duration: {:.1}s ({:.0}:{:04.1})",
-        project.duration,
-        (project.duration / 60.0).floor(),
-        project.duration % 60.0
+        "  tracks={} items={} takes={} markers={} regions={} tempo_points={} hw_outs={}",
+        proj.track_count,
+        proj.item_count,
+        proj.take_count,
+        proj.marker_count,
+        proj.region_count,
+        proj.tempo_point_count,
+        proj.hw_output_count,
     );
-    println!("Tracks: {}", project.tracks.len());
-
-    for (i, track) in project.tracks.iter().enumerate() {
-        println!(
-            "  [{}] {} — {} items, {:.1}s",
-            i + 1,
-            track.track_name,
-            track.item_count,
-            track.audio_duration,
-        );
+    println!(
+        "  decoded {} audio sources ({} failed, {} no source)",
+        audio.loaded,
+        audio.failed.len(),
+        audio.skipped_no_source,
+    );
+    for (take, err) in &audio.failed {
+        eprintln!("    ! {take}: {err}");
     }
 
-    if !project.failed.is_empty() {
-        println!("\nFailed to load:");
-        for (file, reason) in &project.failed {
-            println!("  {file} — {reason}");
-        }
-    }
+    // Render the first 2 seconds and report peak.
+    let sample_rate = 48_000;
+    let frames = (sample_rate as usize) * 2;
+    let block = ProjectRenderer::new(&daw, &proj.project_guid, sample_rate).render_block(0, frames);
+    let (peak_l, peak_r) = peak_stereo(&block.samples);
+    println!("first 2s peak — L={peak_l:.4}, R={peak_r:.4}");
 
-    println!("\n=== Controls ===");
-    println!("  ENTER = play/pause");
-    println!("  s     = stop");
-    println!("  ,     = seek -5s");
-    println!("  .     = seek +5s");
-    println!("  1-9   = toggle mute on track");
-    println!("  m     = unmute all");
-    println!("  q     = quit");
-    println!();
+    Ok(())
+}
 
-    // Start playback
-    engine.play();
-    println!("Playing...");
-
-    // Set terminal to raw mode for single-char input
-    enable_raw_mode();
-
-    let mut buf = [0u8; 1];
-    loop {
-        // Show position
-        let pos = engine.position_seconds();
-        let state = if engine.is_playing() {
-            "PLAYING"
-        } else {
-            "PAUSED "
-        };
-        print!(
-            "\r  {state} {:.0}:{:04.1} / {:.0}:{:04.1}  ",
-            (pos / 60.0).floor(),
-            pos % 60.0,
-            (project.duration / 60.0).floor(),
-            project.duration % 60.0
-        );
-        stdout().flush().ok();
-
-        // Non-blocking read with timeout
-        if stdin().read(&mut buf).is_ok() {
-            match buf[0] {
-                b'q' | 3 => break, // q or Ctrl+C
-                b'\n' | b'\r' | b' ' => {
-                    if engine.is_playing() {
-                        engine.pause();
-                    } else {
-                        engine.play();
-                    }
-                }
-                b's' => {
-                    engine.stop();
-                    println!("\r  Stopped.                              ");
-                }
-                b',' => {
-                    let pos = engine.position_seconds();
-                    engine.seek((pos - 5.0).max(0.0));
-                }
-                b'.' => {
-                    let pos = engine.position_seconds();
-                    engine.seek(pos + 5.0);
-                }
-                b'm' => {
-                    for track in &project.tracks {
-                        engine.set_track_muted(track.handle, false);
-                    }
-                    println!("\r  Unmuted all tracks.                   ");
-                }
-                c @ b'1'..=b'9' => {
-                    let idx = (c - b'1') as usize;
-                    if let Some(track) = project.tracks.get(idx) {
-                        // Toggle mute (we don't track state here, just toggle via gain)
-                        let current = engine.track_gain(track.handle);
-                        if current > 0.0 {
-                            engine.set_track_muted(track.handle, true);
-                            println!(
-                                "\r  Muted: {}                             ",
-                                track.track_name
-                            );
-                        } else {
-                            engine.set_track_muted(track.handle, false);
-                            println!(
-                                "\r  Unmuted: {}                           ",
-                                track.track_name
-                            );
-                        }
-                    }
-                }
-                _ => {}
+fn peak_stereo(samples: &[f32]) -> (f32, f32) {
+    let mut l: f32 = 0.0;
+    let mut r: f32 = 0.0;
+    for (i, s) in samples.iter().enumerate() {
+        let v = s.abs();
+        if i & 1 == 0 {
+            if v > l {
+                l = v;
             }
+        } else if v > r {
+            r = v;
         }
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-
-    disable_raw_mode();
-    println!("\nDone.");
-}
-
-// Simple terminal raw mode for macOS/Linux
-fn enable_raw_mode() {
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        Command::new("stty")
-            .args(["-icanon", "-echo", "min", "0", "time", "1"])
-            .status()
-            .ok();
-    }
-}
-
-fn disable_raw_mode() {
-    #[cfg(unix)]
-    {
-        use std::process::Command;
-        Command::new("stty").args(["icanon", "echo"]).status().ok();
-    }
+    (l, r)
 }

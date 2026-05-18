@@ -28,19 +28,52 @@ use std::sync::Arc;
 
 pub mod clock_sync;
 pub mod drift;
+pub mod registry;
+
+#[inline]
+pub(crate) fn split_project_id(id: ProjectId) -> (u64, u64) {
+    let mut hi = [0u8; 8];
+    let mut lo = [0u8; 8];
+    hi.copy_from_slice(&id[0..8]);
+    lo.copy_from_slice(&id[8..16]);
+    (u64::from_le_bytes(hi), u64::from_le_bytes(lo))
+}
+
+#[inline]
+pub(crate) fn combine_project_id(hi: u64, lo: u64) -> ProjectId {
+    let mut out = [0u8; 16];
+    out[0..8].copy_from_slice(&hi.to_le_bytes());
+    out[8..16].copy_from_slice(&lo.to_le_bytes());
+    out
+}
 
 use reaper_medium::{
     OnAudioBuffer, OnAudioBufferArgs, ProjectContext, RealTimeAudioThreadScope,
     Reaper as MediumReaper,
 };
 
-/// One audio-buffer observation. Written by the audio thread, read by
-/// anyone. All fields are values at the start of the buffer.
+/// 16-byte project identifier. Each open REAPER project gets a stable
+/// id assigned at first observation; the id is process-local (resets
+/// on extension reload) — for FTS-session matching, callers should
+/// pair this with a longer-lived identifier (project file path or
+/// REAPER project GUID) at the management layer.
+///
+/// `[0u8; 16]` is the sentinel "no project" / "current project" value
+/// for backward compat with single-project consumers.
+pub type ProjectId = [u8; 16];
+
+/// One audio-buffer observation for a single project. Written by the
+/// audio thread, read by anyone. All fields are values at the start
+/// of the buffer.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AudioSnapshot {
     /// Monotonic counter — increments once per audio buffer. Readers
     /// can use deltas to detect "did we miss a tick".
     pub sequence: u64,
+    /// Project this snapshot describes. Distinct from REAPER's
+    /// internal project GUID; assigned by the bridge's project
+    /// registry. Single-project consumers can ignore this.
+    pub project_id: ProjectId,
     /// REAPER's audio-clock host time at the start of this buffer
     /// (microseconds). Same time domain as `mLink.clock().micros()` on
     /// reablink — a high-resolution monotonic clock anchored to the
@@ -68,6 +101,8 @@ pub struct AudioSnapshot {
 pub struct SnapshotCell {
     seq: AtomicU64,
     snapshot_seq: AtomicU64,
+    project_id_hi: AtomicU64,
+    project_id_lo: AtomicU64,
     host_micros: AtomicU64,
     playhead_bits: AtomicU64,
     sample_rate_bits: AtomicU64,
@@ -80,6 +115,8 @@ impl SnapshotCell {
         Self {
             seq: AtomicU64::new(0),
             snapshot_seq: AtomicU64::new(0),
+            project_id_hi: AtomicU64::new(0),
+            project_id_lo: AtomicU64::new(0),
             host_micros: AtomicU64::new(0),
             playhead_bits: AtomicU64::new(0),
             sample_rate_bits: AtomicU64::new(0),
@@ -105,6 +142,9 @@ impl SnapshotCell {
         let in_progress = prev.wrapping_add(1);
         self.seq.store(in_progress, Ordering::Release);
         self.snapshot_seq.store(snap.sequence, Ordering::Relaxed);
+        let (hi, lo) = split_project_id(snap.project_id);
+        self.project_id_hi.store(hi, Ordering::Relaxed);
+        self.project_id_lo.store(lo, Ordering::Relaxed);
         self.host_micros.store(snap.host_micros, Ordering::Relaxed);
         self.playhead_bits
             .store(snap.playhead_seconds.to_bits(), Ordering::Relaxed);
@@ -133,6 +173,10 @@ impl SnapshotCell {
                 continue;
             }
             let snapshot_seq = self.snapshot_seq.load(Ordering::Relaxed);
+            let project_id = combine_project_id(
+                self.project_id_hi.load(Ordering::Relaxed),
+                self.project_id_lo.load(Ordering::Relaxed),
+            );
             let host_micros = self.host_micros.load(Ordering::Relaxed);
             let playhead = f64::from_bits(self.playhead_bits.load(Ordering::Relaxed));
             let sr = f64::from_bits(self.sample_rate_bits.load(Ordering::Relaxed));
@@ -142,6 +186,7 @@ impl SnapshotCell {
             if s1 == s2 {
                 return Some(AudioSnapshot {
                     sequence: snapshot_seq,
+                    project_id,
                     host_micros,
                     playhead_seconds: playhead,
                     sample_rate: sr,
@@ -215,6 +260,7 @@ impl OnAudioBuffer for AudioSyncHook {
 
         self.cell.store(&AudioSnapshot {
             sequence: self.counter,
+            project_id: [0u8; 16],
             host_micros,
             playhead_seconds: pos_value,
             sample_rate: args.srate.get(),
@@ -299,6 +345,7 @@ mod tests {
         let cell = SnapshotCell::new();
         let snap = AudioSnapshot {
             sequence: 42,
+            project_id: [7u8; 16],
             host_micros: 1_000_000,
             playhead_seconds: 3.5,
             sample_rate: 48000.0,
@@ -324,6 +371,7 @@ mod tests {
             for i in 0..10_000 {
                 writer_cell.store(&AudioSnapshot {
                     sequence: i,
+                    project_id: [0u8; 16],
                     host_micros: i * 1000,
                     playhead_seconds: i as f64 * 0.01,
                     sample_rate: 48000.0,

@@ -17,7 +17,7 @@
 //! compatible due to rayon). For browser use cases, build the
 //! project state directly via the proto trait methods.
 
-#![cfg(feature = "rpp-project")]
+#![cfg(any(feature = "rpp-project", feature = "rpp-project-wasm"))]
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -33,6 +33,43 @@ use daw_proto::track::Track;
 use daw_proto::{Marker, Region, Take, TempoPoint};
 
 use crate::sync::{ItemEntry, Standalone, TakeList, TrackExt};
+
+/// One-shot wrapper that loads structure AND materializes audio.
+///
+/// Equivalent to `load_rpp_text(...)` followed by
+/// `materialize_audio(...)`, returning both reports. Available when
+/// the `decode` feature is on (so symphonia is available).
+///
+/// ```ignore
+/// use daw_standalone::project_loader::load_rpp;
+///
+/// let (proj, audio) = load_rpp(&daw, "Song", "/tmp/song.rpp", &rpp_text, |path| {
+///     std::fs::read(path).map_err(|e| e.to_string())
+/// })?;
+/// eprintln!("loaded {} tracks, {} audio sources", proj.track_count, audio.loaded);
+/// ```
+#[cfg(feature = "decode")]
+pub fn load_rpp<F>(
+    daw: &Standalone,
+    project_name: &str,
+    project_path: &str,
+    rpp_text: &str,
+    resolver: F,
+) -> Result<
+    (
+        LoadedProject,
+        crate::audio_engine::materialize::MaterializeReport,
+    ),
+    String,
+>
+where
+    F: FnMut(&str) -> Result<Vec<u8>, String>,
+{
+    let proj = load_rpp_text(daw, project_name, project_path, rpp_text)?;
+    let audio =
+        crate::audio_engine::materialize::materialize_audio(daw, &proj.project_guid, resolver);
+    Ok((proj, audio))
+}
 
 /// Summary of what was loaded.
 #[derive(Debug, Default)]

@@ -26,11 +26,18 @@
 //!                    └────────────────────────────┘
 //! ```
 
-mod decoder;
+pub mod decoder;
+pub mod materialize;
+#[cfg(feature = "audio")]
 mod mixer;
-#[cfg(feature = "rpp-loader")]
-pub mod rpp_loader;
+pub mod render;
+// Legacy mixer-direct RPP loader retired in favor of
+// `crate::project_loader::load_rpp`, which populates the full
+// `ProjectState` and routes audio through the renderer. Keep the
+// gate so old `rpp-loader` consumers still compile (now a no-op).
+#[cfg(feature = "audio")]
 pub mod test_tone;
 
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
+#[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};

@@ -6,6 +6,7 @@
 use super::block::{BlockType, RppBlock, RppBlockContent};
 use super::project::RppProject;
 use super::token::{Token, parse_token_line};
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 fn parse_hex_u8(s: &str) -> Option<u8> {
@@ -487,6 +488,9 @@ fn parse_rpp_fast_parallel(content: &str, force_parallel: bool) -> Result<RppPro
     // Conservative activation criteria for optional parallel mode.
     // Keep single-thread processing unless we have a top-block-heavy file
     // and enough worker threads to amortize rayon overhead.
+    // Parallel parsing is opt-in via the `parallel` feature. When
+    // disabled (e.g. WASM builds), this branch is dead code.
+    #[cfg(feature = "parallel")]
     let parse_parallel = if force_parallel {
         true
     } else {
@@ -494,16 +498,28 @@ fn parse_rpp_fast_parallel(content: &str, force_parallel: bool) -> Result<RppPro
             && content.len() >= (32 * 1024 * 1024)
             && rayon::current_num_threads() > 1
     };
+    #[cfg(not(feature = "parallel"))]
+    let parse_parallel = false;
+    #[cfg(not(feature = "parallel"))]
+    let _ = force_parallel; // suppress unused warning when parallel is off
+
     let parsed_blocks: Vec<(usize, Result<RppBlock, String>)> = if parse_parallel {
-        block_ranges
-            .par_iter()
-            .enumerate()
-            .map(|(order, (start, end))| {
-                let slice = &all_lines[*start..=*end];
-                let base = *start + 2;
-                (order, parse_single_block_lines(slice, base))
-            })
-            .collect()
+        #[cfg(feature = "parallel")]
+        {
+            block_ranges
+                .par_iter()
+                .enumerate()
+                .map(|(order, (start, end))| {
+                    let slice = &all_lines[*start..=*end];
+                    let base = *start + 2;
+                    (order, parse_single_block_lines(slice, base))
+                })
+                .collect()
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            unreachable!("parse_parallel is false when feature is off")
+        }
     } else {
         block_ranges
             .iter()

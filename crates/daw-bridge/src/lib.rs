@@ -290,6 +290,12 @@ static FX_PLUGINS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 pub static AUDIO_SYNC_CELL: OnceLock<std::sync::Arc<daw_audio_sync::SnapshotCell>> =
     OnceLock::new();
 
+/// Multi-project registry — one snapshot cell per open project,
+/// populated by the multi-project audio hook + the main-thread
+/// updater that maps `enum_projects` → slot.
+pub static PROJECT_REGISTRY: OnceLock<std::sync::Arc<daw_audio_sync::registry::ProjectRegistry>> =
+    OnceLock::new();
+
 /// Live clock-sync session. `None` until the bound task succeeds; held
 /// here so the Diagnostics RPC can read the peer table without
 /// re-binding sockets.
@@ -300,6 +306,79 @@ pub static CLOCK_SYNC: OnceLock<std::sync::Arc<daw_audio_sync::clock_sync::Clock
 /// unload) stops the controller.
 pub static DRIFT_CORRECTOR: OnceLock<std::sync::Arc<daw_audio_sync::drift::DriftCorrector>> =
     OnceLock::new();
+
+/// Refresh `ProjectRegistry` slot assignments from REAPER's open
+/// projects. Runs on the main thread every timer tick. New projects
+/// get a fresh UUID; vanished projects have their slot cleared.
+///
+/// State: a per-process map (`PROJECT_ID_MAP`) keyed by ReaProject
+/// pointer (as `usize`) → assigned `[u8; 16]` id, so the same
+/// project keeps the same id across timer ticks and across slot
+/// reshuffles when other projects close.
+fn refresh_audio_sync_registry(registry: &daw_audio_sync::registry::ProjectRegistry) {
+    use reaper_medium::{ProjectRef, ReaProject};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static PROJECT_ID_MAP: std::sync::OnceLock<Mutex<HashMap<usize, [u8; 16]>>> =
+        std::sync::OnceLock::new();
+    let id_map = PROJECT_ID_MAP.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Enumerate open projects.
+    let reaper = reaper_high::Reaper::get().medium_reaper();
+    let mut seen: Vec<(ReaProject, [u8; 16])> = Vec::new();
+    for tab in 0..=daw_audio_sync::registry::MAX_PROJECTS {
+        match reaper.enum_projects(ProjectRef::Tab(tab as u32), 0) {
+            Some(res) => {
+                let ptr_key = res.project.as_ptr() as usize;
+                let id = {
+                    let mut map = match id_map.lock() {
+                        Ok(g) => g,
+                        Err(_) => return,
+                    };
+                    *map.entry(ptr_key).or_insert_with(|| {
+                        let id = uuid::Uuid::new_v4();
+                        *id.as_bytes()
+                    })
+                };
+                seen.push((res.project, id));
+            }
+            None => break,
+        }
+    }
+
+    // Assign each seen project to a slot. Try to keep the existing
+    // mapping (find_slot); fall back to find_vacant.
+    for (project, id) in &seen {
+        let slot_idx = registry
+            .find_slot(*project)
+            .or_else(|| registry.find_vacant());
+        if let Some(idx) = slot_idx
+            && let Some(slot) = registry.slot(idx)
+        {
+            slot.assign(*project, *id);
+        }
+    }
+
+    // Clear slots for projects no longer open.
+    for idx in 0..daw_audio_sync::registry::MAX_PROJECTS {
+        let Some(slot) = registry.slot(idx) else {
+            continue;
+        };
+        let Some((current_project, _)) = slot.current() else {
+            continue;
+        };
+        let still_open = seen
+            .iter()
+            .any(|(p, _)| p.as_ptr() == current_project.as_ptr());
+        if !still_open {
+            slot.clear();
+            // Also clean the id map.
+            if let Ok(mut map) = id_map.lock() {
+                map.remove(&(current_project.as_ptr() as usize));
+            }
+        }
+    }
+}
 
 extern "C" fn timer_callback() {
     // catch_unwind prevents panics from unwinding through the C ABI boundary
@@ -358,6 +437,13 @@ extern "C" fn timer_callback() {
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();
+
+            // Refresh the multi-project audio-sync slot assignments.
+            // Cheap (one enum_projects loop) and lets the audio
+            // hook observe newly-opened tabs / clear closed ones.
+            if let Some(registry) = PROJECT_REGISTRY.get() {
+                refresh_audio_sync_registry(registry);
+            }
         }
     });
     if let Err(e) = result {
@@ -494,18 +580,33 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Audio-thread observer: writes per-buffer (host_micros, playhead,
     // sample_rate, len) into a lock-free seqlock cell that the main
     // thread + sync engine read. Foundation for sample-accurate
-    // multi-machine sync. See `daw-audio-sync`.
+    // multi-machine sync.
+    //
+    // Two hooks register together so single-project consumers
+    // (DriftCorrector, default Diagnostics RPCs) keep working while
+    // multi-project consumers (FTS-session, per-project drift) get
+    // independent per-project snapshots via the registry.
     let audio_sync_cell = {
         let rt_reaper = session.create_real_time_reaper();
         let (cell, hook) = daw_audio_sync::build_hook(rt_reaper);
         daw_audio_sync::set_global_cell(cell.clone());
         let _ = AUDIO_SYNC_CELL.set(cell.clone());
         match session.audio_reg_hardware_hook_add(Box::new(hook)) {
-            Ok(_) => info!("audio-sync hook registered"),
-            Err(e) => warn!("audio-sync hook registration failed: {e}"),
+            Ok(_) => info!("audio-sync single-project hook registered"),
+            Err(e) => warn!("audio-sync single-project hook failed: {e}"),
         }
         cell
     };
+    {
+        let rt_reaper = session.create_real_time_reaper();
+        let (registry, hook) = daw_audio_sync::registry::build_multi_project_hook(rt_reaper);
+        daw_audio_sync::registry::set_global_registry(registry.clone());
+        let _ = PROJECT_REGISTRY.set(registry);
+        match session.audio_reg_hardware_hook_add(Box::new(hook)) {
+            Ok(_) => info!("audio-sync multi-project hook registered"),
+            Err(e) => warn!("audio-sync multi-project hook failed: {e}"),
+        }
+    }
 
     // ClockSync — UDP peer discovery + PTP-style offset estimation +
     // sample-position broadcast. Opt-in via FTS_AUDIO_SYNC_PORT so

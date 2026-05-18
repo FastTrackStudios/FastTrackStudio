@@ -158,6 +158,62 @@ fn audio_sync_peers() -> Result<()> {
                                 "alpha rate should be 1.0 when stopped, got {}",
                                 alpha_dec.target_rate
                             );
+
+                            // Multi-project: each peer's local
+                            // registry should have at least one
+                            // project (REAPER always has one open
+                            // when running). And each side should
+                            // see at least one project frame from
+                            // the other via audio_sync_peer_projects.
+                            let alpha_local =
+                                alpha.daw.diagnostics().audio_sync_local_projects().await?;
+                            let bravo_local =
+                                bravo.daw.diagnostics().audio_sync_local_projects().await?;
+                            println!(
+                                "  alpha local projects: {} | bravo local projects: {}",
+                                alpha_local.len(),
+                                bravo_local.len()
+                            );
+                            for p in &alpha_local {
+                                println!(
+                                    "    alpha[{}]: playhead={} playing={}",
+                                    p.project_id_hex,
+                                    p.snapshot.playhead_seconds,
+                                    p.snapshot.is_playing
+                                );
+                            }
+                            for p in &bravo_local {
+                                println!(
+                                    "    bravo[{}]: playhead={} playing={}",
+                                    p.project_id_hex,
+                                    p.snapshot.playhead_seconds,
+                                    p.snapshot.is_playing
+                                );
+                            }
+                            eyre::ensure!(
+                                !alpha_local.is_empty(),
+                                "alpha multi-project registry empty — updater not running?"
+                            );
+                            eyre::ensure!(
+                                !bravo_local.is_empty(),
+                                "bravo multi-project registry empty — updater not running?"
+                            );
+
+                            let alpha_sees_bravo_projects = alpha
+                                .daw
+                                .diagnostics()
+                                .audio_sync_peer_projects(&bravo_id)
+                                .await?;
+                            let bravo_sees_alpha_projects = bravo
+                                .daw
+                                .diagnostics()
+                                .audio_sync_peer_projects(&alpha_id)
+                                .await?;
+                            println!(
+                                "  alpha sees {} bravo project(s), bravo sees {} alpha project(s)",
+                                alpha_sees_bravo_projects.len(),
+                                bravo_sees_alpha_projects.len()
+                            );
                             return Ok(());
                         }
                     }
