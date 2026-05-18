@@ -370,6 +370,8 @@ fn parse_midi_tracks(
             tracks[track_idx].regions.push(TrackRegion {
                 region_index: raw_index,
                 start_pos: start,
+                clip_flag_53: false,
+                clip_color: None,
             });
         }
 

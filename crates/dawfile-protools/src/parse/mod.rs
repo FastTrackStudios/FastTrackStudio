@@ -595,6 +595,43 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     let plugins = plugins::parse_plugins(&blocks, &cursor);
     let io_channels = io::parse_io_channels(&blocks, &cursor);
 
+    // Step 14: Parse `0x2602` routing entries. Each entry is a u8-flag
+    // record. The active flag at +10 distinguishes live entries from
+    // template/unused ones. See `docs/converter-frida-discovered-offsets.md`.
+    let routing_entries = {
+        fn collect_recursive<'a>(blocks: &'a [Block], ct_raw: u16, out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == ct_raw {
+                    out.push(b);
+                }
+                collect_recursive(&b.children, ct_raw, out);
+            }
+        }
+        let mut entries = Vec::new();
+        collect_recursive(&blocks, 0x2602, &mut entries);
+        let data = cursor.data();
+        let mut out = Vec::with_capacity(entries.len());
+        for b in entries {
+            let magic = b.offset.saturating_sub(7);
+            if magic + 53 > data.len() {
+                continue;
+            }
+            let active = data[magic + 10] != 0;
+            let flag_33 = data[magic + 33];
+            let flag_36 = data[magic + 36];
+            let mut destination_uid = [0u8; 6];
+            destination_uid.copy_from_slice(&data[magic + 47..magic + 53]);
+            out.push(crate::types::RoutingEntry {
+                block_start: magic,
+                active,
+                flag_33,
+                flag_36,
+                destination_uid,
+            });
+        }
+        out
+    };
+
     Ok(ProToolsSession {
         version,
         session_sample_rate,
@@ -609,6 +646,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         midi_tracks,
         plugins,
         io_channels,
+        routing_entries,
     })
 }
 

@@ -200,6 +200,8 @@ fn assign_regions_old(
             tracks[track_idx].regions.push(TrackRegion {
                 region_index: raw_index,
                 start_pos: region.start_pos,
+                clip_flag_53: false,
+                clip_color: None,
             });
         }
 
@@ -283,6 +285,32 @@ fn collect_slot_regions(
         let is_fade =
             track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01;
 
+        // Per-clip flag at 0x1050 +53 (u8). Discovered via Frida.
+        // 0x1050 is the parent (the track_entry itself).
+        // `track_entry.offset` points at content_type (= magic + 7),
+        // so +53 from offset = +46 from payload start in our parser's
+        // terms = file offset block.offset.saturating_sub(7) + 53.
+        let clip_flag_53 = {
+            let magic = track_entry.offset.saturating_sub(7);
+            data.get(magic + 53).copied().unwrap_or(0) != 0
+        };
+        // Per-clip color from inner 0x104f sub-block (raw CT 0x104f).
+        // We expect the color at 0x104f payload +16..+17 (= magic +25..+26).
+        let clip_color = {
+            let mut color: Option<i16> = None;
+            for child in &track_entry.children {
+                if child.content_type_raw == 0x104f {
+                    let magic = child.offset.saturating_sub(7);
+                    if magic + 27 <= data.len() {
+                        let v = i16::from_le_bytes([data[magic + 25], data[magic + 26]]);
+                        color = Some(v);
+                    }
+                    break;
+                }
+            }
+            color
+        };
+
         for sub_entry in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
             let raw_offset = sub_entry.offset + 4;
             if raw_offset + 4 > data.len() {
@@ -339,6 +367,8 @@ fn collect_slot_regions(
                 slot_regions.push(TrackRegion {
                     region_index: raw_index,
                     start_pos: start,
+                    clip_flag_53,
+                    clip_color,
                 });
             }
         }

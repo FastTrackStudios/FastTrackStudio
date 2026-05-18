@@ -41,6 +41,37 @@ pub struct ProToolsSession {
     pub plugins: Vec<PluginEntry>,
     /// I/O channels configured in the session's Hardware Setup and I/O Setup.
     pub io_channels: Vec<IoChannel>,
+    /// I/O routing entries from `0x2602` blocks. PT sessions typically
+    /// contain hundreds of entries; filter to `active == true` for the
+    /// live routings. See [`RoutingEntry`].
+    pub routing_entries: Vec<RoutingEntry>,
+}
+
+/// An I/O routing entry decoded from a `0x2602` block in the session's
+/// routing list. Each entry records one source→destination assignment.
+///
+/// Discovered via Frida byte-read trace on `routing-examples.ptx` and
+/// the LotF session. The block has hundreds of entries on a typical
+/// session — `+10` is the "active" flag (1 = used, 0 = unused); only
+/// entries with `+10 == 1` represent live routings.
+///
+/// Other fields here are surfaced as raw bytes pending semantic
+/// verification (see `docs/converter-frida-discovered-offsets.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutingEntry {
+    /// File offset of the `0x2602` block (block magic position). Useful
+    /// for cross-referencing with raw block tooling.
+    pub block_start: usize,
+    /// `0x2602 +10` u8 boolean — 1 means the routing entry is in use.
+    pub active: bool,
+    /// `0x2602 +33` u8 — secondary flag (varies; semantics TBD).
+    pub flag_33: u8,
+    /// `0x2602 +36` u8 — observed 0/1 alongside active entries.
+    pub flag_36: u8,
+    /// `0x2602 +47..+52` (6 bytes) — suspected destination UID.
+    /// Pattern matches the source-file UID style seen in regions:
+    /// each entry has a distinct 6-byte value when active.
+    pub destination_uid: [u8; 6],
 }
 
 /// A reference to an audio file used in the session.
@@ -329,6 +360,22 @@ pub struct TrackRegion {
     pub region_index: u16,
     /// Start position override (if the track assignment overrides the region's start).
     pub start_pos: u64,
+    /// Per-clip flag from `0x1050 +53` (u8 boolean). Semantics not
+    /// fully verified — observed value `1` on rare clips and `0` on
+    /// most. Hypothesis: this is the **clip-mute** flag (or possibly
+    /// clip-gain-non-zero indicator). Discovered via Frida byte-read
+    /// trace on LotF (92 reads, only 2 had value 1).
+    /// See `docs/converter-frida-discovered-offsets.md`.
+    pub clip_flag_53: bool,
+    /// Per-clip color palette index from the inner `0x104f` sub-block
+    /// at payload `+16..+17` (i16 LE). `None` = no `0x104f` child
+    /// present. `Some(-2)` = default/no color. Other values map to
+    /// the same 23×3 PT palette as `Track.color_byte`.
+    ///
+    /// Discovered via Frida byte-read trace; `0x104f` lives at start
+    /// of `0x1050` payload. Field locations within `0x104f` partly
+    /// verified (+25/+26 read as i16 LE `FE FF` = -2 for default).
+    pub clip_color: Option<i16>,
 }
 
 /// A single constant-tempo segment on the session timeline.
