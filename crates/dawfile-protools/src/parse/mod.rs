@@ -15,6 +15,7 @@ pub mod io;
 pub mod meter;
 pub mod midi;
 pub mod mix_aux;
+pub mod mute_resolver;
 pub mod plugins;
 pub mod regions;
 pub mod solo;
@@ -180,7 +181,27 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
-                // Mute = `0x1029 +5` (u8) — the stored "mute mix bit".
+                // Mute = `0x1029 +5` AND `0x260a[0] +8 == 0`.
+                //
+                // The `+5` byte alone is the STORED mute-mix bit, but
+                // it's also set for inactive/bounced-source tracks. The
+                // converter discriminates by ALSO checking
+                // `0x260a[0] +8` — the "send routing enabled" flag:
+                //
+                // - +5=1 AND +8=0 → user clicked mute → effective mute
+                // - +5=1 AND +8=1 → bounced/inactive (send routes,
+                //                   stored mute is incidental) → NOT effective mute
+                // - +5=0 → not muted regardless of +8
+                //
+                // Verified on LotF (2026-05-17): this rule correctly
+                // identifies exactly the 8 tracks the converter emits
+                // as MUTESOLO 1 (ClickPrint + 7 LORD family stems),
+                // excluding the 12 over-muted tracks (SYZ, AC GTR x2,
+                // El Gtr 1, Bass Demo, MIDI 1, Inst*).
+                //
+                // We compute the effective mute below in the second
+                // pass once the 0x260a sibling block is reachable.
+                // For now, store the stored bit.
                 //
                 // Definitively verified by the 10-track probe diff
                 // (2026-05-17): generating an RPP with 10 muted tracks
@@ -467,6 +488,14 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
 
     // Step 12c2: Decode per-track solo flag from 0x102d +162.
     solo::apply_solo_state(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
+
+    // Step 12c2.5: Resolve effective mute. The +5 byte we read above
+    // is the stored mix-bit, but PT also sets it for inactive/
+    // bounced-source tracks. The converter discriminates via the
+    // `0x260a[0] +8` "send routing enabled" flag — if non-zero, the
+    // track isn't user-muted, just inactive. See
+    // docs/pt-field-map.md "Effective mute" + parse/mute_resolver.rs.
+    mute_resolver::resolve_effective_mute(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
 
     // Step 12c3: Fall back to 0x2624 vol/pan mirrors for converter-
     // generated PTX where 0x1029 isn't populated.
