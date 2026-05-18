@@ -216,6 +216,14 @@ fn build_rpp(probe: &str) -> String {
                 })
             });
         }
+        "clip_long_name" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .name("ThisIsALongerClipName")
+                })
+            });
+        }
         "clip_fadein" => {
             use dawfile_reaper::types::item::FadeCurveType;
             b = b.track("ProbeTrack", |t| {
@@ -233,6 +241,38 @@ fn build_rpp(probe: &str) -> String {
                         .fade_out(0.25, FadeCurveType::Linear)
                 })
             });
+        }
+        "clip_playrate_half" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 2.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .playrate(0.5)
+                })
+            });
+        }
+        "clip_selected" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").selected()
+                })
+            });
+        }
+        "clip_at_offset" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(2.5, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                })
+            });
+        }
+        "track_selected" => {
+            b = b.track("ProbeTrack", |t| t.selected());
+        }
+        "track_locked" => {
+            b = b.track("ProbeTrack", |t| t.locked());
+        }
+        "track_show_mixer" => {
+            // SHOWINMIX = 1: track visible in mixer
+            b = b.track("ProbeTrack", |t| t);
         }
         _ => panic!("unknown probe: {probe}"),
     }
