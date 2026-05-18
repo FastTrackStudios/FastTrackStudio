@@ -139,12 +139,17 @@ pub fn resolve_effective_mute(
                 .iter()
                 .any(|s| routed.contains(&format!("{}{s}", t.name)));
         if matched {
+            // Track had `+5=1 AND +8=1` — stored mute set, but send
+            // still routed. This is PT's inactive/bouncedSource state,
+            // not user-mute. Clear effective mute, mark inactive.
             t.mute = false;
+            t.inactive = true;
         }
     }
     for t in midi_tracks.iter_mut() {
         if t.mute && routed.contains(&t.name) {
             t.mute = false;
+            t.inactive = true;
         }
     }
 }

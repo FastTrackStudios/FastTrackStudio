@@ -161,6 +161,27 @@ pub struct Track {
     /// `t.solo_defeated()` produces `+268 = 0x01`; baseline `0x00`.
     /// Mirror also at `0x200a +259`. See `docs/pt-field-map.md`.
     pub solo_defeat: bool,
+    /// `true` if the track appears to be in PT's "Inactive"/bounced-source
+    /// state.
+    ///
+    /// Heuristic: `(0x1029 +5 == 1) AND (0x260a[0] +8 == 1)`. PT sets
+    /// the stored-mute bit AND keeps the send routing enabled for
+    /// tracks that have been marked inactive (e.g. via "Make Inactive"
+    /// menu or "Bounce to Disk → New Track"). Truly user-muted tracks
+    /// have `+5=1 AND +8=0` (send cleared too).
+    ///
+    /// This is the COMPLEMENT of the `mute_resolver` filter: any
+    /// track filtered OUT of `mute=true` because its `+8` was non-zero
+    /// is reported here as `inactive`.
+    ///
+    /// Verified on LotF: the 12 tracks the converter reports as
+    /// MUTESOLO 0 despite +5=1 (SYZ, AC GTR x2, El Gtr 1, Bass Demo,
+    /// MIDI 1, Inst 1 + dups + .02 variants) all match this pattern.
+    ///
+    /// CAVEAT: ground-truth verification requires a PT-authored
+    /// session that we know has explicit inactive tracks. Until then
+    /// this is our best inference of PT's `PTXTrackStateSpec.active`.
+    pub inactive: bool,
     /// Pan position. `-100` = full L, `0` = center, `+100` = full R.
     /// Decoded from `0x1029` `+13` (i32 LE).
     pub pan: i32,
