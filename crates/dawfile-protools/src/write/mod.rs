@@ -20,9 +20,11 @@
 //! - Changing cross-reference indices
 
 pub mod from_rpp;
+pub mod native;
 pub mod splice;
 
 pub use from_rpp::{WriteError as RppToPtxError, find_converter_binary, rpp_to_ptx_via_converter};
+pub use native::{NativeTrackSpec, write_single_track_ptx};
 
 use crate::content_type::ContentType;
 use crate::raw_block::RawSession;
