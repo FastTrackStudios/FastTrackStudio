@@ -296,6 +296,11 @@ pub static AUDIO_SYNC_CELL: OnceLock<std::sync::Arc<daw_audio_sync::SnapshotCell
 pub static CLOCK_SYNC: OnceLock<std::sync::Arc<daw_audio_sync::clock_sync::ClockSync>> =
     OnceLock::new();
 
+/// Live drift corrector. Holds the spawned task; dropping (extension
+/// unload) stops the controller.
+pub static DRIFT_CORRECTOR: OnceLock<std::sync::Arc<daw_audio_sync::drift::DriftCorrector>> =
+    OnceLock::new();
+
 extern "C" fn timer_callback() {
     // catch_unwind prevents panics from unwinding through the C ABI boundary
     // (which is UB). Any panic inside is logged and the timer keeps running.
@@ -517,6 +522,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         // panics, try_current returns None).
         let handle = app.tokio_runtime.handle().clone();
         handle.spawn(async move {
+            let cell_for_drift = cell_for_sync.clone();
             match daw_audio_sync::clock_sync::ClockSync::bind(
                 port,
                 daw_audio_sync::clock_sync::DEFAULT_MULTICAST,
@@ -532,6 +538,34 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
                     );
                     let arc = std::sync::Arc::new(cs);
                     daw_audio_sync::set_global_clock_sync(arc.clone());
+
+                    // Drift corrector: dispatches CSurf_OnPlayRateChange
+                    // via TaskSupport when local position diverges from
+                    // the elected leader's projected position. Off by
+                    // default — opt in via FTS_AUDIO_SYNC_DRIFT=1
+                    // (still safe to enable: actuator is a no-op
+                    // when leader is None / drift below deadband).
+                    if std::env::var("FTS_AUDIO_SYNC_DRIFT").as_deref() == Ok("1") {
+                        let ts = Global::task_support();
+                        let corrector = daw_audio_sync::drift::DriftCorrector::spawn(
+                            cell_for_drift,
+                            arc.clone(),
+                            daw_audio_sync::drift::DriftConfig::default(),
+                            move |rate| {
+                                use reaper_medium::PlaybackSpeedFactor;
+                                let _ = ts.do_later_in_main_thread_asap(move || {
+                                    let reaper = reaper_high::Reaper::get();
+                                    let speed = PlaybackSpeedFactor::new(rate);
+                                    reaper.medium_reaper().csurf_on_play_rate_change(speed);
+                                });
+                            },
+                        );
+                        let arc_corrector = std::sync::Arc::new(corrector);
+                        daw_audio_sync::set_global_drift_corrector(arc_corrector.clone());
+                        let _ = DRIFT_CORRECTOR.set(arc_corrector);
+                        info!("drift correction enabled — proportional, ±1% cap");
+                    }
+
                     let _ = CLOCK_SYNC.set(arc);
                 }
                 Err(e) => warn!(?e, "clock-sync bind failed"),

@@ -98,4 +98,21 @@ pub trait Diagnostics {
     /// UUID string the remote reports via `audio_sync_self_peer_id`;
     /// the addr is `host:port` of the remote's ClockSync socket.
     fn audio_sync_seed_peer(&self, peer_id: &str, addr: &str) -> DawResult<()>;
+
+    /// Latest decision from the drift corrector. Returns the empty
+    /// struct (all zero, no leader) when the corrector isn't
+    /// running (FTS_AUDIO_SYNC_DRIFT not set, or controller hasn't
+    /// ticked yet).
+    fn audio_sync_drift_decision(&self) -> DriftDecisionSummary;
+}
+
+/// Wire-format mirror of `daw_audio_sync::drift::DriftDecision`.
+/// `leader_peer_id` is an empty string when no leader is elected;
+/// `drift_seconds` is `f64::NAN` when no leader.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct DriftDecisionSummary {
+    pub sequence: u64,
+    pub leader_peer_id: String,
+    pub drift_seconds: f64,
+    pub target_rate: f64,
 }

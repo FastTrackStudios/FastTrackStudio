@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{DawClients, Result};
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, PeerSummary};
+use daw_proto::diagnostics::{AudioSyncSnapshot, DriftDecisionSummary, PeerSummary};
 
 #[derive(Clone)]
 pub struct Probes {
@@ -77,6 +77,12 @@ impl Probes {
             .audio_sync_seed_peer(peer_id.to_string(), addr.to_string())
             .await??;
         Ok(())
+    }
+
+    /// Latest decision from the drift corrector. Empty `leader_peer_id`
+    /// and `drift_seconds = NaN` when the corrector isn't running.
+    pub async fn audio_sync_drift_decision(&self) -> Result<DriftDecisionSummary> {
+        Ok(self.clients.diagnostics.audio_sync_drift_decision().await?)
     }
 }
 

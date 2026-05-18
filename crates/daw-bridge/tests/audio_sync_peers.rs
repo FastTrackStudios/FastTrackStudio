@@ -33,11 +33,13 @@ fn audio_sync_peers() -> Result<()> {
             DawInstanceConfig::new("alpha")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_AUDIO_SYNC_PORT", &PORT_A.to_string())
+                .with_env("FTS_AUDIO_SYNC_DRIFT", "1")
                 .with_fts_config()
                 .with_socket("/tmp/fts-daw-test-audio-sync-alpha.sock"),
             DawInstanceConfig::new("bravo")
                 .with_env("DISPLAY", "")
                 .with_env("FTS_AUDIO_SYNC_PORT", &PORT_B.to_string())
+                .with_env("FTS_AUDIO_SYNC_DRIFT", "1")
                 .with_fts_config()
                 .with_socket("/tmp/fts-daw-test-audio-sync-bravo.sock"),
         ],
@@ -123,6 +125,39 @@ fn audio_sync_peers() -> Result<()> {
                         let pos_arrived = !b.remote_playhead_seconds.is_nan()
                             && !a.remote_playhead_seconds.is_nan();
                         if pos_arrived {
+                            // Drift corrector should now be ticking on
+                            // both sides. Verify each side's decision
+                            // has a sequence > 0 (controller ran at
+                            // least once). Drift value itself depends
+                            // on whether transport is playing; both
+                            // are stopped here, so target_rate should
+                            // be 1.0 and drift_seconds is NaN.
+                            let alpha_dec =
+                                alpha.daw.diagnostics().audio_sync_drift_decision().await?;
+                            let bravo_dec =
+                                bravo.daw.diagnostics().audio_sync_drift_decision().await?;
+                            println!(
+                                "  alpha drift: seq={} leader={:?} rate={}",
+                                alpha_dec.sequence, alpha_dec.leader_peer_id, alpha_dec.target_rate
+                            );
+                            println!(
+                                "  bravo drift: seq={} leader={:?} rate={}",
+                                bravo_dec.sequence, bravo_dec.leader_peer_id, bravo_dec.target_rate
+                            );
+                            eyre::ensure!(
+                                alpha_dec.sequence > 0,
+                                "alpha drift corrector never ticked"
+                            );
+                            eyre::ensure!(
+                                bravo_dec.sequence > 0,
+                                "bravo drift corrector never ticked"
+                            );
+                            // Transport stopped → no leader → rate held at 1.0
+                            eyre::ensure!(
+                                (alpha_dec.target_rate - 1.0).abs() < 1e-9,
+                                "alpha rate should be 1.0 when stopped, got {}",
+                                alpha_dec.target_rate
+                            );
                             return Ok(());
                         }
                     }

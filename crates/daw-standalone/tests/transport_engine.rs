@@ -130,6 +130,109 @@ async fn tempo_map_falls_back_to_static_with_zero_or_one_points() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn routing_send_mirrors_to_dest_receive() {
+    use daw_proto::{RouteLocation, RouteRef, RouteType, Routing, TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let src = Tracks::add(&daw, ctx.clone(), "Drums", None).unwrap();
+    let dest = Tracks::add(&daw, ctx.clone(), "Drum Bus", None).unwrap();
+
+    let i = Routing::add_send(
+        &daw,
+        ctx.clone(),
+        TrackRef::Guid(src.clone()),
+        TrackRef::Guid(dest.clone()),
+    )
+    .expect("send created");
+    assert_eq!(i, 0);
+
+    let sends = Routing::sends(&daw, ctx.clone(), TrackRef::Guid(src.clone()));
+    assert_eq!(sends.len(), 1);
+    assert_eq!(sends[0].dest_track_guid.as_deref(), Some(dest.as_str()));
+    assert_eq!(sends[0].route_type, RouteType::Send);
+
+    // Receive auto-mirrored on the destination.
+    let receives = Routing::receives(&daw, ctx.clone(), TrackRef::Guid(dest.clone()));
+    assert_eq!(receives.len(), 1);
+    assert_eq!(receives[0].source_track_guid, src);
+    assert_eq!(receives[0].route_type, RouteType::Receive);
+
+    // Mutating the send propagates to the mirror.
+    Routing::set_volume(
+        &daw,
+        ctx.clone(),
+        RouteLocation {
+            track: TrackRef::Guid(src.clone()),
+            route_type: RouteType::Send,
+            route: RouteRef::Index(0),
+        },
+        0.5,
+    )
+    .unwrap();
+    let mirror = &Routing::receives(&daw, ctx.clone(), TrackRef::Guid(dest.clone()))[0];
+    assert!((mirror.volume - 0.5).abs() < 1e-9);
+
+    // Removing the send also removes the receive mirror.
+    Routing::remove_route(
+        &daw,
+        ctx.clone(),
+        RouteLocation {
+            track: TrackRef::Guid(src.clone()),
+            route_type: RouteType::Send,
+            route: RouteRef::Index(0),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        Routing::send_count(&daw, ctx.clone(), TrackRef::Guid(src)),
+        0
+    );
+    assert_eq!(Routing::receive_count(&daw, ctx, TrackRef::Guid(dest)), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn routing_send_inherits_source_channel_count() {
+    use daw_proto::{Routing, TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let src = Tracks::add(&daw, ctx.clone(), "8ch", None).unwrap();
+    let dest = Tracks::add(&daw, ctx.clone(), "16ch", None).unwrap();
+    Tracks::set_num_channels(&daw, ctx.clone(), TrackRef::Guid(src.clone()), 8).unwrap();
+    Tracks::set_num_channels(&daw, ctx.clone(), TrackRef::Guid(dest.clone()), 16).unwrap();
+
+    Routing::add_send(
+        &daw,
+        ctx.clone(),
+        TrackRef::Guid(src.clone()),
+        TrackRef::Guid(dest.clone()),
+    )
+    .unwrap();
+    let sends = Routing::sends(&daw, ctx, TrackRef::Guid(src));
+    assert_eq!(sends[0].source_channels.num_channels, 8);
+    assert_eq!(sends[0].dest_channels.num_channels, 16);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn routing_parent_send_toggles() {
+    use daw_proto::{Routing, TrackRef, Tracks};
+
+    let (daw, _guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let g = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
+
+    // Default is enabled.
+    assert!(Routing::parent_send_enabled(
+        &daw,
+        ctx.clone(),
+        TrackRef::Guid(g.clone())
+    ));
+    Routing::set_parent_send_enabled(&daw, ctx.clone(), TrackRef::Guid(g.clone()), false).unwrap();
+    assert!(!Routing::parent_send_enabled(&daw, ctx, TrackRef::Guid(g)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn automation_envelope_round_trip() {
     use daw_proto::automation::{
         AddPointParams, Automation, EnvelopeLocation, EnvelopeRef, EnvelopeShape, EnvelopeType,

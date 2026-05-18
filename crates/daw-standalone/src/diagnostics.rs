@@ -3,7 +3,7 @@
 
 use crate::Standalone;
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, PeerSummary};
+use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, DriftDecisionSummary, PeerSummary};
 
 impl Diagnostics for Standalone {
     fn hub_publish_latency_us(&self, _project: ProjectContext, _samples: u32) -> Vec<u64> {
@@ -28,5 +28,12 @@ impl Diagnostics for Standalone {
 
     fn audio_sync_seed_peer(&self, _peer_id: &str, _addr: &str) -> daw_proto::DawResult<()> {
         Ok(())
+    }
+
+    fn audio_sync_drift_decision(&self) -> DriftDecisionSummary {
+        DriftDecisionSummary {
+            drift_seconds: f64::NAN,
+            ..Default::default()
+        }
     }
 }

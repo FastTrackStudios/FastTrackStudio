@@ -27,6 +27,7 @@ use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 pub mod clock_sync;
+pub mod drift;
 
 use reaper_medium::{
     OnAudioBuffer, OnAudioBufferArgs, ProjectContext, RealTimeAudioThreadScope,
@@ -272,6 +273,19 @@ pub fn set_global_clock_sync(session: Arc<clock_sync::ClockSync>) {
 
 pub fn global_clock_sync() -> Option<&'static Arc<clock_sync::ClockSync>> {
     GLOBAL_CLOCK_SYNC.get()
+}
+
+// ── Process-global DriftCorrector ──────────────────────────────────
+
+static GLOBAL_DRIFT_CORRECTOR: std::sync::OnceLock<Arc<drift::DriftCorrector>> =
+    std::sync::OnceLock::new();
+
+pub fn set_global_drift_corrector(corrector: Arc<drift::DriftCorrector>) {
+    let _ = GLOBAL_DRIFT_CORRECTOR.set(corrector);
+}
+
+pub fn global_drift_corrector() -> Option<&'static Arc<drift::DriftCorrector>> {
+    GLOBAL_DRIFT_CORRECTOR.get()
 }
 
 #[cfg(test)]

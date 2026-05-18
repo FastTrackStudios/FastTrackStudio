@@ -6,7 +6,7 @@
 //! tokio `broadcast` send/recv.
 
 use daw_proto::ProjectContext;
-use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, PeerSummary};
+use daw_proto::diagnostics::{AudioSyncSnapshot, Diagnostics, DriftDecisionSummary, PeerSummary};
 use daw_proto::track::{TrackEvent, TrackStreamEvent};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::TryRecvError;
@@ -128,6 +128,27 @@ impl Diagnostics for crate::Reaper {
             .map_err(|e| DawError::operation_failed(format!("bad addr: {e}")))?;
         cs.seed_peer_sync(daw_audio_sync::clock_sync::PeerId(uuid), addr);
         Ok(())
+    }
+
+    fn audio_sync_drift_decision(&self) -> DriftDecisionSummary {
+        let Some(corrector) = daw_audio_sync::global_drift_corrector() else {
+            return DriftDecisionSummary {
+                drift_seconds: f64::NAN,
+                ..Default::default()
+            };
+        };
+        let Some(d) = corrector.last_decision() else {
+            return DriftDecisionSummary {
+                drift_seconds: f64::NAN,
+                ..Default::default()
+            };
+        };
+        DriftDecisionSummary {
+            sequence: d.sequence,
+            leader_peer_id: d.leader.map(|p| p.0.to_string()).unwrap_or_default(),
+            drift_seconds: d.drift_seconds.unwrap_or(f64::NAN),
+            target_rate: d.target_rate,
+        }
     }
 
     fn audio_sync_observe(&self, count: u32, interval_us: u64) -> Vec<AudioSyncSnapshot> {

@@ -43,6 +43,8 @@ pub(crate) mod platform;
 mod plugin_loader;
 mod position_conversion;
 mod project;
+#[cfg(feature = "rpp-project")]
+pub mod project_loader;
 mod region;
 mod resource;
 mod routing;
