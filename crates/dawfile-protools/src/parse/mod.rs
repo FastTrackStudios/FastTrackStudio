@@ -148,16 +148,40 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
             .into_iter()
             .next();
-        let mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
+        // Detect format: converter-authored PTX nests 11× 0x1029 per
+        // 0x261c (TrackContainer). PT-authored sessions have a flatter
+        // structure with ≈1 0x1029 per logical track. If the ratio
+        // (mix-blocks / containers) is ≥ 8, use per-container scoping
+        // so each track maps to its OWN first 0x1029.
+        let containers = collect_blocks_recursive(&blocks, ContentType::TrackContainer);
+        let all_mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
+        let mix_blocks: Vec<&crate::block::Block> =
+            if !containers.is_empty() && all_mix_blocks.len() >= containers.len() * 8 {
+                containers
+                    .iter()
+                    .filter_map(|c| c.find_all(ContentType::TrackMixSettings).first().copied())
+                    .collect()
+            } else {
+                all_mix_blocks
+            };
 
         // Iterate 0x251a entries that have a mix block.
         let mut mix_by_name: std::collections::HashMap<String, (i32, bool, i32)> =
             std::collections::HashMap::new();
         if let Some(list) = track_list {
             let mut mix_idx = 0usize;
-            // 0x251a entries are duplicated in the file (2× the 30 logical
-            // tracks); the second copy mirrors the first, so we only take
-            // the first run by stopping once names start to repeat.
+            // 0x251a entries may be duplicated in the file:
+            // - PT-authored sessions interleave a 2× full-list copy
+            //   AT THE END (block-by-block), so seen-duplicates appear
+            //   only after the first complete pass.
+            // - Converter-authored multi-track PTX interleaves
+            //   [active_t0, alt_t0, active_t1, alt_t1, ...] so seen
+            //   duplicates appear EARLIER, mid-list.
+            // To handle both: track the LAST mix_idx we advanced. If
+            // we've already used the same number of mix blocks as we
+            // have unique names AND we hit a duplicate, treat that as
+            // the start of the 2× copy and stop. Otherwise skip the
+            // duplicate and keep walking.
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             for child in list.find_children(ContentType::MidiTrackInfo) {
                 // name @ child.offset + 4 (length-prefixed string)
@@ -170,8 +194,14 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 if !seen.insert(name.clone()) {
-                    // Hit the second copy of the list — stop.
-                    break;
+                    // Already saw this name. If we've consumed all
+                    // mix blocks already, the 2× copy has started —
+                    // stop. Otherwise it's a multi-track interleave;
+                    // skip and continue.
+                    if mix_idx >= mix_blocks.len() {
+                        break;
+                    }
+                    continue;
                 }
                 let Some(b) = mix_blocks.get(mix_idx) else {
                     break;

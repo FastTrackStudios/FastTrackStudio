@@ -1612,8 +1612,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-track mute resolver pairs names with 0x260d wrappers positionally; cloned files break the 1:N pairing assumption — needs resolver-side fix"]
-    fn write_multi_track_mute_known_issue() {
+    fn write_multi_track_mute() {
         let specs = vec![
             NativeTrackSpec {
                 name: "Drums".into(),
@@ -1634,7 +1633,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-track vol parser: user-session test (LotF) breaks if we change duplicate-name detection. Multi-track parser pairing is structurally incompatible with PT-authored sessions until we add format detection."]
     fn write_multi_with_vol_pan() {
         let specs = vec![
             NativeTrackSpec {
