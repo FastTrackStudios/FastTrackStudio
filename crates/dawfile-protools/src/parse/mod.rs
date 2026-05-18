@@ -180,17 +180,39 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
-                // Mute discriminator is NOT a per-track byte. Frida-traced the
-                // PT Reaper Converter v1.5.4 on LotF: the converter checks for
-                // a Swift `PTXMutePoint`-class object (Optional<...>) per
-                // track. Only ~2 tracks per session have explicit mute
-                // records; folder children inherit mute via tree walk. The
-                // `0x1029 +5` byte we previously read here was a different PT
-                // flag (likely `inactive`/`bouncedSource`) and produced false
-                // positives on 12/30 LotF tracks. Default mute=false until
-                // the mute-record block ID is located. See
-                // docs/pt-reaper-converter-re.md "2026-05-17 round 2".
-                let mute = false;
+                // Mute = `0x1029 +5` (u8). VERIFIED VIA WRITER ROUND-TRIP:
+                // - When we write +5=1 to a converter-generated PTX
+                //   template, the converter reads it back as
+                //   MUTESOLO 1 0 0 (muted).
+                // - When the converter writes from RPP→PTX with
+                //   t.muted() in REAPER, it produces +5=1.
+                //
+                // CAVEAT FOR REAL PT-GUI-WRITTEN SESSIONS: the +5 byte
+                // is set true for tracks that are EITHER muted OR
+                // marked inactive/bounced. The converter resolves the
+                // ambiguity by checking an explicit "mute object"
+                // (Swift `Optional<PTXMutePoint>`, type-metadata at
+                // heap 0xb500dfc08 per Frida trace) which exists for
+                // only ~2 tracks per session. Folder children inherit
+                // mute from their parent via the converter's tree walk.
+                //
+                // Investigation 2026-05-17: byte-level comparison shows
+                // LORD_Bass (truly muted, via inheritance) has
+                // IDENTICAL 0x1029 bytes to Vocal Split (not muted) —
+                // confirming the per-stem mute is NOT a per-byte flag.
+                // On LotF, this byte produces 12 false positives
+                // (SYZ/AC GTR/El Gtr/Bass Demo/Inst* — all `+5=1` but
+                // converter says MUTESOLO 0).
+                //
+                // We read the byte verbatim. For converter-generated
+                // PTX (our writer's typical output), this is exact.
+                // For PT-GUI sessions, callers may want to additionally
+                // exclude tracks that are inactive — TBD when we
+                // locate the active/inactive discriminator.
+                //
+                // See docs/pt-reaper-converter-re.md round 2 for the
+                // full investigation.
+                let mute = data[payload + 5] != 0;
                 let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
                 mix_by_name.insert(name, (vol, mute, pan));
             }
