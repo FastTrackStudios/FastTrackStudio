@@ -3,8 +3,9 @@
 use dioxus::prelude::*;
 use dioxus_primitives::select::{
     Select as PrimitiveSelect, SelectGroup as PrimitiveSelectGroup, SelectItemIndicator,
-    SelectList as PrimitiveSelectList, SelectOption as PrimitiveSelectOption,
-    SelectTrigger as PrimitiveSelectTrigger, SelectValue as PrimitiveSelectValue,
+    SelectList as PrimitiveSelectList, SelectMulti as PrimitiveSelectMulti,
+    SelectOption as PrimitiveSelectOption, SelectTrigger as PrimitiveSelectTrigger,
+    SelectValue as PrimitiveSelectValue,
 };
 use fts_story_runtime::story;
 use lucide_dioxus::{Check, ChevronsUpDown};
@@ -211,6 +212,69 @@ pub fn SelectLabel(props: SelectLabelProps) -> Element {
         div {
             id: props.id,
             class: crate::cn::merge_slice(&["px-2 py-1.5 text-xs font-medium text-muted-foreground", props.class.as_str()]),
+            {props.children}
+        }
+    }
+}
+
+// ── SelectMulti ─────────────────────────────────────────────────────────────
+//
+// Multi-value variant added upstream in PR #224. Same sub-components
+// (`SelectTrigger`, `SelectContent`, `SelectItem`, ...) compose under it.
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SelectMultiWrapperProps {
+    /// The currently selected values (two-way bound).
+    pub values: Signal<Vec<String>>,
+    #[props(default)]
+    pub on_change: Option<Callback<Vec<String>>>,
+    #[props(default = "Select...".to_string())]
+    pub placeholder: String,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default = true)]
+    pub roving_loop: bool,
+    #[props(default)]
+    pub class: String,
+    pub children: Element,
+}
+
+#[component]
+pub fn SelectMulti(props: SelectMultiWrapperProps) -> Element {
+    let mut values = props.values;
+    let selected: ReadSignal<Option<Vec<String>>> = use_memo(move || Some(values())).into();
+
+    rsx! {
+        document::Style {
+            r#"
+                .fts-select-item[aria-selected="true"] {{
+                    background: var(--accent);
+                    color: var(--accent-foreground);
+                }}
+
+                .fts-select-item:focus {{
+                    background: var(--accent);
+                    color: var(--accent-foreground);
+                }}
+
+                .fts-select-item[aria-disabled="true"] {{
+                    pointer-events: none;
+                    opacity: 0.5;
+                }}
+            "#
+        }
+        PrimitiveSelectMulti::<String> {
+            values: selected,
+            disabled: props.disabled,
+            roving_loop: props.roving_loop,
+            on_values_change: move |next: Vec<String>| {
+                values.set(next.clone());
+                if let Some(callback) = &props.on_change {
+                    callback.call(next);
+                }
+            },
+            class: crate::cn::merge_slice(&["relative w-full", props.class.as_str()]),
+            SelectTrigger { placeholder: props.placeholder.clone() }
             {props.children}
         }
     }

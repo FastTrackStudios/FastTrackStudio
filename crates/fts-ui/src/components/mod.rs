@@ -110,11 +110,13 @@ pub use table::*;
 pub use toggle::*;
 pub use toggle_group::*;
 
+mod color_picker;
 mod radio_group;
 mod select;
 mod slider;
 mod tooltip;
 
+pub use color_picker::*;
 pub use radio_group::*;
 pub use select::*;
 pub use slider::*;

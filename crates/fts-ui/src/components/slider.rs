@@ -1,8 +1,12 @@
 //! Slider — shadcn v4 maia style range slider.
 
 use dioxus::prelude::*;
-use dioxus_primitives::slider::{Slider as PrimitiveSlider, SliderRange, SliderThumb, SliderTrack};
+use dioxus_primitives::slider::{
+    RangeSlider as PrimitiveRangeSlider, Slider as PrimitiveSlider, SliderRange, SliderThumb,
+    SliderTrack,
+};
 use fts_story_runtime::story;
+use std::ops::Range;
 
 // ---------------------------------------------------------------------------
 // Slider
@@ -63,6 +67,72 @@ pub fn Slider(props: SliderProps) -> Element {
                     class: "absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RangeSlider — two-thumb (start, end) variant from upstream PR #225.
+// ---------------------------------------------------------------------------
+
+#[derive(Props, Clone, PartialEq)]
+pub struct RangeSliderProps {
+    /// The current (start, end) range (two-way bound).
+    pub value: Signal<Range<f64>>,
+    #[props(default = 0.0)]
+    pub min: f64,
+    #[props(default = 100.0)]
+    pub max: f64,
+    #[props(default = 1.0)]
+    pub step: f64,
+    #[props(default = false)]
+    pub disabled: bool,
+    #[props(default)]
+    pub class: String,
+}
+
+/// shadcn v4 maia: two-thumb range slider
+#[component]
+pub fn RangeSlider(props: RangeSliderProps) -> Element {
+    let mut value = props.value;
+
+    rsx! {
+        PrimitiveRangeSlider {
+            value: Some(value()),
+            min: props.min,
+            max: props.max,
+            step: props.step,
+            disabled: props.disabled,
+            label: None::<String>,
+            class: crate::cn::merge_slice(&["relative flex w-full touch-none select-none items-center", props.class.as_str()]),
+            on_value_change: move |next: Range<f64>| {
+                value.set(next);
+            },
+            SliderTrack {
+                class: "relative h-3 w-full rounded-full bg-muted overflow-hidden",
+                SliderRange {
+                    class: "absolute h-full bg-primary rounded-full",
+                }
+                SliderThumb {
+                    index: 0usize,
+                    class: "absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+                }
+                SliderThumb {
+                    index: 1usize,
+                    class: "absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary bg-background shadow transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+                }
+            }
+        }
+    }
+}
+
+/// Two-thumb range slider with a start and end value.
+#[story(category = "Slider", name = "range two-thumb")]
+pub fn range_slider_default() -> Element {
+    let value = use_signal(|| 25.0..75.0);
+    rsx! {
+        div { class: "p-6 bg-background text-foreground w-72",
+            RangeSlider { value }
         }
     }
 }

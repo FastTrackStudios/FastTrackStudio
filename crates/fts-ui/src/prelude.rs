@@ -32,7 +32,7 @@ pub use crate::components::{
     AlertVariant, AspectRatio, Avatar, AvatarFallback, AvatarImage, AvatarSize, Breadcrumb,
     BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator, Calendar,
     Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious, Combobox,
-    ComboboxContent, ComboboxEmpty, ComboboxItem, ComboboxTrigger, CommandDialog, CommandEmpty,
+    ComboboxEmpty, ComboboxInput, ComboboxList, ComboboxOption, CommandDialog, CommandEmpty,
     CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut,
     DatePicker, DatePickerCalendar, DatePickerContent, DatePickerInput, DatePickerPopover,
     DatePickerTrigger, Drawer, DrawerDescription, DrawerFooter, DrawerHandle, DrawerHeader,
@@ -49,13 +49,12 @@ pub use crate::components::{
     SidebarContent, SidebarContext, SidebarFooter, SidebarGroup, SidebarGroupContent,
     SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarLabel, SidebarMenu, SidebarMenuBadge,
     SidebarMenuButton, SidebarMenuButtonSize, SidebarMenuButtonVariant, SidebarMenuItem,
-    SidebarProvider, SidebarSeparator, SidebarSide, SidebarTrigger, SidebarVariant,
-    use_sidebar_compact, Skeleton,
+    SidebarProvider, SidebarSeparator, SidebarSide, SidebarTrigger, SidebarVariant, Skeleton,
     SkeletonCircle, SkeletonText, Slider, Spinner, SpinnerSize, Table, TableBody, TableCaption,
     TableCell, TableContainer, TableFooter, TableHead, TableHeader, TableRow, Textarea, Toast,
     ToastOptions, ToastProvider, ToastType, Toggle, ToggleGroup, ToggleGroupItem, ToggleSize,
     ToggleVariant, Toolbar, ToolbarButton, ToolbarSeparator, Tooltip, TooltipContent, TooltipSide,
-    TooltipTrigger, use_toast,
+    TooltipTrigger, use_sidebar_compact, use_toast,
 };
 
 #[cfg(feature = "router")]
