@@ -393,12 +393,15 @@ fn Home() -> Element {
                         class: "relative z-10 mx-auto max-w-2xl text-center",
 
                         h1 {
-                            class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
-                            span {
-                                class: "text-primary",
+                            class: "text-balance",
+                            div {
+                                class: "text-5xl md:text-6xl lg:text-7xl font-semibold text-primary tracking-tight",
                                 "Workflow-Driven"
                             }
-                            " \u{2014} Made for Professionals."
+                            div {
+                                class: "mt-2 text-3xl md:text-4xl lg:text-5xl font-light text-muted-foreground tracking-tight",
+                                "Made for Professionals."
+                            }
                         }
 
                         p {
