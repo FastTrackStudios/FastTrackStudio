@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 solo: true,
                 volume_centibel: -60,
                 pan: 50,
+                ..NativeTrackSpec::default()
             },
         ),
     ];
