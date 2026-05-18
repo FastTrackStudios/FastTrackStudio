@@ -9,29 +9,47 @@ crate-type = ["cdylib"]
 name = "reaper_fts_extensions"
 path = "src/lib.rs"
 
-[dependencies]
-# FTS Launcher — search/workflow engine
-fts-launcher = { workspace = true }
+[features]
+# All subsystems off by default. Bisect by enabling one at a time.
+default = []
 
 # Modules — each implements daw::DawModule
-dynamic-template = { workspace = true }
-dynamic-template-proto = { workspace = true }
-session = { workspace = true }
-sync = { workspace = true }
-sync-proto = { workspace = true }
-reaper-input = { workspace = true }
-keyflow = { workspace = true }
+mod-launcher = ["dep:fts-launcher"]
+mod-session = ["dep:session"]
+mod-sync = ["dep:daw-synchronization"]
+mod-input = ["dep:reaper-input"]
 
-# DAW API. `reaper-ui` pulls in the Dioxus panel rendering host.
-# `daw-extension-runtime` is a public sibling of daw (not a daw feature)
-# because folding it in would cycle through daw-reaper.
-daw = { workspace = true, features = ["reaper", "sync", "reaper-ui"] }
+# Dioxus dock host (panels, ui_test_panel, dock_state restore, update_panels tick)
+ui-dock = ["daw/reaper-ui"]
+
+# Per-frame DAW state polling + broadcast (items, tempo, transport, markers, regions, tracks)
+poll-broadcast = []
+
+# FastTrackStudio extensions menu hook + REAPER project importer registration
+host-hooks = []
+
+[dependencies]
+# FTS Launcher — search/workflow engine
+fts-launcher = { workspace = true, optional = true }
+
+# Modules — each implements daw::DawModule
+session = { workspace = true, optional = true }
+# `default-features = false` disables `overlay-prewarm` so reaper-input
+# doesn't try to allocate wgpu/Vello surfaces during plugin_main, where
+# the REAPER host window isn't ready yet and surface creation OOMs.
+# Declared directly (not via `workspace = true`) because workspace
+# inheritance forbids overriding `default-features`. The path is the same
+# one the workspace's `[patch]` table redirects to.
+reaper-input = { path = "../../../input/crates/reaper-input", optional = true, default-features = false }
+daw-synchronization = { workspace = true, optional = true }
+
+# DAW API. `reaper-ui` pulls in the Dioxus panel rendering host and is gated
+# behind the `ui-dock` feature. `daw-extension-runtime` is a public sibling
+# of daw (not a daw feature) because folding it in would cycle through
+# daw-reaper.
+daw = { workspace = true, features = ["reaper"] }
+daw-reaper.workspace = true
 daw-extension-runtime = { workspace = true }
-
-# Keyflow chart/chord analysis service. fts-extensions composes this
-# with the daw bridge handler so chart data is available over the
-# same in-process RPC channel as the daw services.
-keyflow-daw-analysis = { workspace = true }
 
 # FTS design system (shadcn-ui clone for Dioxus)
 fts-ui = { workspace = true }

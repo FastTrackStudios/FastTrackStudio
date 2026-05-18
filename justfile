@@ -9,29 +9,37 @@ profile        := "debug"
 input_dir      := justfile_directory() / "../input"
 launcher_dir   := justfile_directory() / "../fts-launcher"
 
+# Comma-separated cargo features for fts-extensions. Override per-invocation:
+#   just features=mod-input,ui-dock install-release
+# Available: mod-launcher, mod-session, mod-sync, mod-input, ui-dock,
+#            poll-broadcast, host-hooks
+features := ""
+
 # Build the extension
 build *args:
-    cargo build -p fts-extensions {{args}}
+    cargo build -p fts-extensions --no-default-features --features "{{features}}" {{args}}
 
 # Build in release mode
 release:
-    cargo build -p fts-extensions --release
+    cargo build -p fts-extensions --release --no-default-features --features "{{features}}"
 
 # Build and check
 check:
-    cargo check -p fts-extensions
+    cargo check -p fts-extensions --no-default-features --features "{{features}}"
 
 # Symlink the built extension into REAPER's UserPlugins
 install: build install-config
     mkdir -p {{reaper_plugins}}
     ln -sf "{{justfile_directory()}}/target/{{profile}}/lib{{lib_name}}.so" "{{reaper_plugins}}/{{lib_name}}.so"
     @echo "Symlinked -> {{reaper_plugins}}/{{lib_name}}.so"
+    @echo "Features: {{features}}"
 
 # Build release and symlink
 install-release: release install-config
     mkdir -p {{reaper_plugins}}
     ln -sf "{{justfile_directory()}}/target/release/lib{{lib_name}}.so" "{{reaper_plugins}}/{{lib_name}}.so"
     @echo "Symlinked -> {{reaper_plugins}}/{{lib_name}}.so"
+    @echo "Features: {{features}}"
 
 # Remove the symlink from REAPER's UserPlugins
 uninstall:

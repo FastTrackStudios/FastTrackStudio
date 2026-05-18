@@ -1,7 +1,7 @@
 //! FTS Extensions — unified REAPER extension.
 //!
-//! Loads all FTS modules in-process: launcher, dynamic template, session,
-//! sync, input, keyflow. Each module implements `daw::DawModule` and
+//! Loads all FTS modules in-process: launcher, session,
+//! DAW sync, and input. Each module implements `daw::DawModule` and
 //! registers its own actions and event subscriptions.
 //!
 //! This file is the host — it collects modules, initializes them, and
@@ -13,9 +13,9 @@ use std::error::Error;
 use std::sync::{Arc, OnceLock};
 
 use crossbeam_channel::{Receiver, Sender};
-use daw::Daw;
 use daw::module::{self, DawModule, ModuleContext};
-use daw::service::ActionEvent;
+use daw::rpc::Daw;
+use daw::service::ActionRegistration;
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, MainThreadTask, Reaper as HighReaper, TaskSupport};
 use reaper_low::PluginContext;
@@ -79,6 +79,7 @@ mod item_actions;
 mod menu;
 mod reaper_utils;
 mod tempo;
+#[cfg(feature = "ui-dock")]
 mod ui_test_panel;
 
 // ── Timer callback ───────────────────────────────────────────────────────────
@@ -96,6 +97,21 @@ fn catch_panic(label: &str, f: impl FnOnce() + std::panic::UnwindSafe) {
     }
 }
 
+#[cfg(feature = "mod-input")]
+static INPUT_PREWARM_TICKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+// ~2s @ 30Hz: wait this long after plugin load before touching wgpu so
+// REAPER's main HWND is fully realised. Below this tick count, the
+// swapchain configure call returns "invalid surface".
+#[cfg(feature = "mod-input")]
+const INPUT_PREWARM_TICK_TARGET: u32 = 60;
+
+// Tracks whether we've enqueued the prefix list yet. Set on the first tick
+// >= TARGET; from then on we drain one overlay per tick until done.
+#[cfg(feature = "mod-input")]
+static INPUT_PREWARM_QUEUED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 extern "C" fn timer_callback() {
     if let Some(app_fragile) = APP.get() {
         let app = app_fragile.get();
@@ -103,15 +119,69 @@ extern "C" fn timer_callback() {
             "process_tasks",
             std::panic::AssertUnwindSafe(|| app.process_tasks()),
         );
-        catch_panic("poll_and_broadcast", daw::reaper::poll_and_broadcast);
-        catch_panic(
-            "poll_and_broadcast_tracks",
-            daw::reaper::poll_and_broadcast_tracks,
-        );
+        // Deferred, paced prewarm: wait ~2s for REAPER's main HWND, then
+        // enqueue the prefix list and build a handful of overlays per tick.
+        // Each overlay build now only allocates its own surface + Vello
+        // renderer because Instance/Adapter/Device are shared (warmed in
+        // the background from plugin_main), so per-tick cost is much lower
+        // and we can drain the queue faster without locking the host.
+        #[cfg(feature = "mod-input")]
+        {
+            // Root-only prewarm: each overlay is ~80ms on the main thread.
+            // 1 per tick = one missed frame per overlay, imperceptible. A
+            // typical config has ~10 root prefixes so the queue drains in
+            // ~10 ticks (~330ms at 30Hz) without any visible hitching.
+            const OVERLAYS_PER_TICK: usize = 1;
+            let tick = INPUT_PREWARM_TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if tick >= INPUT_PREWARM_TICK_TARGET {
+                if !INPUT_PREWARM_QUEUED.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                    catch_panic(
+                        "enqueue_which_key_overlay_prewarm",
+                        reaper_input::enqueue_which_key_overlay_prewarm,
+                    );
+                }
+                catch_panic("prewarm_which_key_overlay_step", || {
+                    for _ in 0..OVERLAYS_PER_TICK {
+                        if !reaper_input::prewarm_which_key_overlay_step() {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+        #[cfg(feature = "poll-broadcast")]
+        {
+            catch_panic(
+                "poll_and_broadcast_items",
+                daw_reaper::poll_and_broadcast_items,
+            );
+            catch_panic(
+                "poll_and_broadcast_tempo_map",
+                daw_reaper::poll_and_broadcast_tempo_map,
+            );
+            catch_panic(
+                "poll_and_broadcast_transport",
+                daw_reaper::poll_and_broadcast_transport,
+            );
+            catch_panic(
+                "poll_and_broadcast_markers",
+                daw_reaper::poll_and_broadcast_markers,
+            );
+            catch_panic(
+                "poll_and_broadcast_regions",
+                daw_reaper::poll_and_broadcast_regions,
+            );
+            catch_panic(
+                "poll_and_broadcast_tracks",
+                daw_reaper::poll_and_broadcast_tracks,
+            );
+        }
+        catch_panic("_fire_timer_callbacks", daw::_fire_timer_callbacks);
         catch_panic(
             "process_pending_actions",
             std::panic::AssertUnwindSafe(|| process_pending_actions(app)),
         );
+        #[cfg(feature = "ui-dock")]
         catch_panic("update_panels", daw::ui::dock::update_panels);
     }
 }
@@ -132,27 +202,17 @@ fn process_pending_actions(app: &App) {
 // ── Initialisation ───────────────────────────────────────────────────────────
 
 fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> {
-    use daw::reaper::{RoutedHandler, build_extension_daw_with, create_daw_handler};
-    use keyflow_daw_analysis::{
-        KeyflowMidiAnalysis, MidiChartServiceDispatcher, midi_chart_service_service_descriptor,
-    };
+    use daw_reaper::{build_extension_daw_with, create_daw_handler};
 
     tokio_runtime
         .block_on(async {
-            // The keyflow chart service needs a `Daw` handle of its own to
-            // call back into the daw client API while serving requests.
-            // Build a temporary dual: first construct a "naked" daw on the
-            // stock handler so KeyflowMidiAnalysis has a Daw to read from,
-            // then re-build the real `Daw` on a handler that ALSO carries
-            // the keyflow dispatcher. The naked-daw's caller is leaked
-            // alongside the LocalCaller in build_extension_daw_with.
-            let inner_daw = daw::reaper::build_extension_daw().await?;
-            let keyflow = KeyflowMidiAnalysis::new(inner_daw);
-
-            let handler: RoutedHandler = create_daw_handler().with(
-                midi_chart_service_service_descriptor(),
-                MidiChartServiceDispatcher::new(keyflow),
-            );
+            // Session owns DAW-adjacent session services such as MIDI chart
+            // hydration. Those services resolve the global DAW lazily at call
+            // time so startup only creates one in-process service graph.
+            let handler = create_daw_handler();
+            #[cfg(feature = "mod-session")]
+            let handler =
+                session::daw_services::layer_services_with_daw(handler, daw_reaper::Reaper);
             build_extension_daw_with(handler).await
         })
         .map_err(|e| eyre::eyre!("Failed to initialise in-process DAW: {e}"))
@@ -169,124 +229,96 @@ fn register_actions_sync(
     panels: Vec<module::PanelDef>,
 ) {
     let g = Global::get();
-    let daw = g.daw.clone();
     let runtime = g.tokio_runtime.clone();
     let defs = defs.clone();
     let action_count = defs.len();
     let panel_count = panels.len();
-    let daw_for_subscription = daw.clone();
     let runtime_for_module_subscriptions = runtime.clone();
     let task_support = &g.task_support;
 
-    runtime.spawn(async move {
-        let registry = daw.action_registry();
-
-        for (command_id, display_name, _handler, show_in_menu, toggleable) in defs {
-            let description = display_name.as_str();
-            let result = match (show_in_menu, toggleable) {
-                (true, true) => {
-                    registry
-                        .register_toggle_in_menu(&command_id, description)
-                        .await
-                }
-                (true, false) => registry.register_in_menu(&command_id, description).await,
-                (false, true) => registry.register_toggle(&command_id, description).await,
-                (false, false) => registry.register(&command_id, description).await,
-            };
-
-            match result {
-                Ok(cmd_id) if cmd_id > 0 => {
-                    info!(command_id = %command_id, cmd_id, "Registered action");
-
-                    if matches!(
-                        command_id.as_str(),
-                        "FTS_INPUT_TOGGLE"
-                            | "FTS_INPUT_TOGGLE_PASSTHROUGH"
-                            | "FTS_INPUT_TOGGLE_DEBUG_LOGGING"
-                            | "FTS_INPUT_PROFILE_SELECTOR"
-                            | "FTS_INPUT_WORKFLOW_SELECTOR"
-                            | "FTS_INPUT_TOGGLE_ACTIONS_PANEL"
-                            | "FTS_INPUT_TOGGLE_KEYBOARD_PANEL"
-                            | "FTS_INPUT_TOGGLE_STATUS_PANEL"
-                    ) {
-                        match registry.is_in_action_list(&command_id).await {
-                            Ok(true) => info!(
-                                command_id = %command_id,
-                                "Input action list probe: present immediately after registration"
-                            ),
-                            Ok(false) => warn!(
-                                command_id = %command_id,
-                                "Input action list probe: missing immediately after registration"
-                            ),
-                            Err(e) => warn!(
-                                command_id = %command_id,
-                                "Input action list probe failed after registration: {e}"
-                            ),
-                        }
-                    }
-                }
-                Ok(_) => warn!("Failed to register action: {command_id}"),
-                Err(e) => warn!("Error registering action {command_id}: {e}"),
-            }
-        }
-        info!(actions = action_count, "Action registration completed");
-
-        if let Err(err) = task_support.do_later_in_main_thread_asap(move || {
-            info!(panels = panels.len(), "Panel definitions collected");
-            for panel in &panels {
-                daw::ui::dock::register_panel_from_service(panel);
-            }
-            daw::ui::dock::restore_dock_state();
-            info!(panels = panels.len(), "Panel registration completed");
-        }) {
-            warn!("Failed to schedule panel registration: {err}");
-        }
-
-        let module_ctx = ModuleContext::new(runtime_for_module_subscriptions);
-        for module in &modules {
-            tracing::info!(
-                module = module.name(),
-                "Subscribing {}",
-                module.display_name()
-            );
-            module.subscribe(&module_ctx);
-        }
-        info!(modules = modules.len(), "All modules subscribed");
-        info!(
-            modules = modules.len(),
-            actions = action_count,
-            panels = panel_count,
-            "FTS Extensions ready"
+    for (command_id, display_name, _handler, show_in_menu, toggleable) in &defs {
+        let cmd_id = daw_reaper::action_registry::register_action_main_thread(
+            command_id,
+            display_name,
+            *show_in_menu,
+            *toggleable,
         );
-    });
+
+        if cmd_id > 0 {
+            info!(command_id = %command_id, cmd_id, "Registered action");
+        } else {
+            warn!("Failed to register action: {command_id}");
+        }
+    }
+    info!(actions = action_count, "Action registration completed");
+
+    #[cfg(feature = "mod-input")]
+    for (command_id, _, _, _, _) in &defs {
+        if matches!(
+            command_id.as_str(),
+            "FTS_INPUT_TOGGLE"
+                | "FTS_INPUT_TOGGLE_PASSTHROUGH"
+                | "FTS_INPUT_TOGGLE_DEBUG_LOGGING"
+                | "FTS_INPUT_PROFILE_SELECTOR"
+                | "FTS_INPUT_WORKFLOW_SELECTOR"
+                | "FTS_INPUT_TOGGLE_ACTIONS_PANEL"
+                | "FTS_INPUT_TOGGLE_KEYBOARD_PANEL"
+                | "FTS_INPUT_TOGGLE_STATUS_PANEL"
+        ) {
+            if daw_reaper::Reaper.is_in_action_list(command_id) {
+                info!(
+                    command_id = %command_id,
+                    "Input action list probe: present immediately after registration"
+                );
+            } else {
+                warn!(
+                    command_id = %command_id,
+                    "Input action list probe: missing immediately after registration"
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "ui-dock")]
+    if let Err(err) = task_support.do_later_in_main_thread_asap(move || {
+        info!(panels = panels.len(), "Panel definitions collected");
+        for panel in &panels {
+            daw::ui::dock::register_panel_from_service(panel);
+        }
+        daw::ui::dock::restore_dock_state();
+        info!(panels = panels.len(), "Panel registration completed");
+    }) {
+        warn!("Failed to schedule panel registration: {err}");
+    }
+    #[cfg(not(feature = "ui-dock"))]
+    let _ = (task_support, panels);
+
+    let module_ctx = ModuleContext::new(runtime_for_module_subscriptions);
+    for module in &modules {
+        tracing::info!(
+            module = module.name(),
+            "Subscribing {}",
+            module.display_name()
+        );
+        module.subscribe(&module_ctx);
+    }
+    info!(modules = modules.len(), "All modules subscribed");
+    info!(
+        modules = modules.len(),
+        actions = action_count,
+        panels = panel_count,
+        "FTS Extensions ready"
+    );
 
     let (tx, _) = action_channel();
     let tx = tx.clone();
     runtime.spawn(async move {
-        let registry = daw_for_subscription.action_registry();
-        let Ok(mut rx) = registry.subscribe_actions().await else {
-            warn!("Failed to subscribe to action trigger events");
-            return;
-        };
-
+        let mut rx = daw_reaper::action_registry::subscribe_action_broadcasts();
         info!("Subscribed to action trigger events");
         loop {
             match rx.recv().await {
-                Ok(Some(event_ref)) => {
-                    let mut event = None;
-                    let _ = event_ref.map(|value| {
-                        event = Some(value);
-                    });
-                    let event = event.expect("SelfRef::map ran");
-                    match event {
-                        ActionEvent::Triggered { ref command_name } => {
-                            let _ = tx.send(command_name.clone());
-                        }
-                    }
-                }
-                Ok(None) => {
-                    info!("Action trigger stream closed");
-                    break;
+                Ok(command_name) => {
+                    let _ = tx.send(command_name);
                 }
                 Err(e) => {
                     warn!("Action trigger stream error: {e:?}");
@@ -325,12 +357,19 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     info!("FTS Extensions starting…");
 
+    // Kick off the wgpu Instance/Adapter/Device build on a worker thread
+    // so the heavy GPU init runs in parallel with the rest of plugin_main
+    // and with REAPER's own startup. No window/surface is touched here,
+    // so this is safe to call before REAPER's main loop is running.
+    #[cfg(feature = "mod-input")]
+    reaper_input::prewarm_gpu_in_background();
+
     // Low-level REAPER and SWELL APIs must be available globally before
     // any Reaper::get() / Swell::get() calls (needed for menus, panels, etc.)
     let _ = reaper_low::Reaper::make_available_globally(reaper_low::Reaper::load(context));
     let _ = reaper_low::Swell::make_available_globally(reaper_low::Swell::load(context));
 
-    daw::reaper::set_plugin_context(context);
+    daw_reaper::set_plugin_context(context);
 
     match HighReaper::load(context).setup() {
         Ok(_) => {
@@ -367,19 +406,22 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     let g = Global::get();
     let _ = daw::init_from_parts(g.daw.clone(), g.tokio_runtime.clone());
-    daw::reaper::set_task_support(&g.task_support);
+    daw_reaper::set_task_support(&g.task_support);
 
     let task_middleware = MainTaskMiddleware::new(g.task_sender.clone(), g.task_receiver.clone());
 
     // ── Collect modules ──────────────────────────────────────────────────
-    // Each library implements daw::DawModule and exports module().
+    // Each library implements daw::DawModule and exports module(). Modules
+    // are gated by per-module cargo features so we can bisect startup cost.
     let modules: Vec<Box<dyn DawModule>> = vec![
+        #[cfg(feature = "mod-launcher")]
         fts_launcher::daw_module::module(),
-        dynamic_template::daw_module::module(),
+        #[cfg(feature = "mod-session")]
         session::daw_module::module(),
-        sync::daw_module::module(),
+        #[cfg(feature = "mod-sync")]
+        daw_synchronization::daw_module::module(),
+        #[cfg(feature = "mod-input")]
         reaper_input::daw_module::module(),
-        keyflow::daw_module::module(),
     ];
     let module_count = modules.len();
 
@@ -413,6 +455,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     for (id, _, handler, _, _) in &module_actions {
         all_actions.insert(id.clone(), handler.clone());
     }
+    #[cfg(feature = "ui-dock")]
     for action in ui_test_panel::action_defs() {
         let (id, _, handler, _, _) = action.into_tuple();
         all_actions.insert(id, handler);
@@ -432,13 +475,16 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             (id, display_name, handler, show_in_menu, toggleable)
         },
     ));
+    #[cfg(feature = "ui-dock")]
     all_defs.extend(
         ui_test_panel::action_defs()
             .into_iter()
             .map(|a| a.into_tuple()),
     );
 
+    #[allow(unused_mut)]
     let mut panels = module::collect_panels(&modules);
+    #[cfg(feature = "ui-dock")]
     panels.extend(ui_test_panel::panel_defs());
 
     let session = ReaperSession::load(context);
@@ -450,38 +496,46 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
 
-    daw::ui::dock::init_service();
-    daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
+    #[cfg(feature = "ui-dock")]
+    {
+        daw::ui::dock::init_service();
+        daw::ui::dock::init_dock(reaper_low::Reaper::get(), reaper_low::Swell::get());
+    }
 
     register_actions_sync(&all_defs, modules, panels);
 
     let app = APP.get().unwrap().get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
-    daw::reaper::register_project_importer(&mut session)?;
+    #[cfg(feature = "host-hooks")]
+    daw_reaper::register_project_importer(&mut session)?;
 
     drop(session);
 
-    // ── Extensions → FastTrackStudio menu ────────────────────────────────
-    // Collect menu entries from all action defs that have show_in_menu=true.
-    let menu_entries: Vec<(String, String)> = all_defs
-        .iter()
-        .filter(|(_, _, _, show_in_menu, _)| *show_in_menu)
-        .map(|(id, display_name, _, _, _)| (id.clone(), display_name.clone()))
-        .collect();
-    info!(menu_entries = menu_entries.len(), "Menu entries collected");
-    menu::set_menu_entries(menu_entries);
-
-    // Register the menu hook using the high-level Reaper session (like helgobox).
-    info!("Registering Extensions menu hook...");
-    HighReaper::get().medium_reaper().add_extensions_main_menu();
-    match HighReaper::get()
-        .medium_session()
-        .plugin_register_add_hook_custom_menu::<menu::FtsMenuHook>()
+    #[cfg(feature = "host-hooks")]
     {
-        Ok(()) => info!("Extensions menu hook registered successfully"),
-        Err(e) => warn!("Extensions menu hook registration FAILED: {:?}", e),
+        // ── Extensions → FastTrackStudio menu ────────────────────────────
+        // Collect menu entries from all action defs with show_in_menu=true.
+        let menu_entries: Vec<(String, String)> = all_defs
+            .iter()
+            .filter(|(_, _, _, show_in_menu, _)| *show_in_menu)
+            .map(|(id, display_name, _, _, _)| (id.clone(), display_name.clone()))
+            .collect();
+        info!(menu_entries = menu_entries.len(), "Menu entries collected");
+        menu::set_menu_entries(menu_entries);
+
+        info!("Registering Extensions menu hook...");
+        HighReaper::get().medium_reaper().add_extensions_main_menu();
+        match HighReaper::get()
+            .medium_session()
+            .plugin_register_add_hook_custom_menu::<menu::FtsMenuHook>()
+        {
+            Ok(()) => info!("Extensions menu hook registered successfully"),
+            Err(e) => warn!("Extensions menu hook registration FAILED: {:?}", e),
+        }
     }
+    #[cfg(not(feature = "host-hooks"))]
+    let _ = &all_defs;
 
     info!(modules = module_count, "FTS Extensions startup scheduled");
     Ok(())

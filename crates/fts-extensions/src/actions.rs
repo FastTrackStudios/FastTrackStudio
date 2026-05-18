@@ -7,7 +7,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::Global;
 use crate::continuous_action::start_continuous_action;
 #[allow(unused_imports)]
 use crate::item_actions;
@@ -16,6 +15,7 @@ use crate::tempo::{
     snap_grid_to_transient_constrained_handler, snap_grid_to_transient_fully_constrained_handler,
     snap_grid_to_transient_handler,
 };
+use daw::service::ActionRegistration;
 use reaper_high::Reaper;
 
 pub type ActionDefs = Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool, bool)>;
@@ -27,18 +27,7 @@ fn show(msg: impl Into<String>) {
 static TEST_TOGGLE_STATE: AtomicBool = AtomicBool::new(false);
 
 fn sync_toggle_state(command_id: &str, is_on: bool) {
-    let Some(daw) = Global::try_daw() else {
-        return;
-    };
-
-    let daw = daw.clone();
-    let command_id = command_id.to_string();
-    Global::get().tokio_runtime.spawn(async move {
-        let _ = daw
-            .action_registry()
-            .set_toggle_state(&command_id, is_on)
-            .await;
-    });
+    daw_reaper::Reaper.set_toggle_state(command_id, is_on);
 }
 
 fn toggle_test_toggle_handler() {
@@ -50,6 +39,48 @@ fn toggle_test_toggle_handler() {
         if new_state { "on" } else { "off" }
     ));
     sync_toggle_state("FTS_TEST_TOGGLE", new_state);
+}
+
+fn move_cursor_creating_time_selection_by_measure(action_id: i32) {
+    let low = reaper_low::Reaper::get();
+
+    let previous_cursor = low.GetCursorPosition();
+    let mut selection_start = 0.0;
+    let mut selection_end = 0.0;
+    unsafe {
+        low.GetSet_LoopTimeRange(
+            false,
+            false,
+            &mut selection_start,
+            &mut selection_end,
+            false,
+        );
+    }
+
+    low.Main_OnCommand(action_id, 0);
+    let new_cursor = low.GetCursorPosition();
+
+    let has_selection = selection_end > selection_start;
+    let epsilon = 0.000_001;
+    let (start, end) = if has_selection && (previous_cursor - selection_start).abs() < epsilon {
+        (new_cursor.min(selection_end), new_cursor.max(selection_end))
+    } else if has_selection && (previous_cursor - selection_end).abs() < epsilon {
+        (
+            selection_start.min(new_cursor),
+            selection_start.max(new_cursor),
+        )
+    } else {
+        (
+            previous_cursor.min(new_cursor),
+            previous_cursor.max(new_cursor),
+        )
+    };
+
+    let mut start = start;
+    let mut end = end;
+    unsafe {
+        low.GetSet_LoopTimeRange(true, false, &mut start, &mut end, false);
+    }
 }
 
 /// Build the list of all FTS utility actions.
@@ -130,6 +161,17 @@ pub fn build_action_defs() -> ActionDefs {
             "Snap closest measure grid line to next transient — fully constrained",
             snap_grid_to_transient_fully_constrained_handler,
         ),
+        // ── Navigation ───────────────────────────────────────────────────────
+        action(
+            "FTS_MOVE_CURSOR_LEFT_CREATING_TIME_SELECTION_BY_MEASURE",
+            "Move cursor left creating time selection by measure",
+            || move_cursor_creating_time_selection_by_measure(40838),
+        ),
+        action(
+            "FTS_MOVE_CURSOR_RIGHT_CREATING_TIME_SELECTION_BY_MEASURE",
+            "Move cursor right creating time selection by measure",
+            || move_cursor_creating_time_selection_by_measure(40837),
+        ),
         // ── Item editing ─────────────────────────────────────────────────────
         action(
             "FTS_SPLIT_ITEMS_CROSSFADE_LEFT",
@@ -147,7 +189,7 @@ pub fn build_action_defs() -> ActionDefs {
         }),
     ];
 
-    // Module actions (launcher, dynamic-template, session, sync, input, keyflow)
+    // Module actions (launcher, session-owned template/keyflow, sync, input)
     // are collected via daw::module::collect_actions() in lib.rs — not here.
 
     defs

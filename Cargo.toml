@@ -16,13 +16,8 @@ version = "0.1.0"
 # manifests. The local-development patch sections below redirect these packages
 # back to sibling checkouts while iterating across repos.
 fts-launcher = { git = "https://github.com/FastTrackStudios/fts-launcher.git", rev = "698a29121c2d20c24cba5a58d608c6f5da0f56a0", features = ["native"] }
-dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", rev = "d4467d3807b970476c09641d6c240321653f5148" }
-dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-template.git", rev = "d4467d3807b970476c09641d6c240321653f5148" }
 session = { git = "https://github.com/FastTrackStudios/session.git", rev = "189f942bd9fc07513ed913c488b36871f661849d" }
-sync = { git = "https://github.com/FastTrackStudios/sync.git", rev = "7830a5a0b46afff799d6cfb18a0d9834f35a3d3f" }
-sync-proto = { git = "https://github.com/FastTrackStudios/sync.git", rev = "7830a5a0b46afff799d6cfb18a0d9834f35a3d3f" }
 reaper-input = { git = "https://github.com/FastTrackStudios/input.git", rev = "7f06a6acf027956c94b6fa2cab5b50c425ca1067" }
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", rev = "c57b122ec309a8aade59b07b84041bc98a195a85", default-features = false }
 crossbeam-channel = "0.5"
 once_cell = "1"
 eyre = "0.6"
@@ -32,7 +27,9 @@ reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch
 reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-synchronization = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 keyflow-daw-analysis = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
@@ -52,12 +49,12 @@ fts-launcher = { path = "../fts-launcher" }
 daw = { path = "../daw/crates/daw" }
 daw-proto = { path = "../daw/crates/daw-proto" }
 daw-control = { path = "../daw/crates/daw-control" }
-daw-control-sync = { path = "../daw/crates/daw-control-sync" }
 daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
 daw-module = { path = "../daw/crates/daw-module" }
 daw-reaper = { path = "../daw/crates/daw-reaper" }
 daw-reaper-dioxus = { path = "../daw/crates/daw-reaper-dioxus" }
 daw-reaper-embed = { path = "../daw/crates/daw-reaper-embed" }
+daw-synchronization = { path = "../daw/crates/daw-synchronization" }
 dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
 dawfile-ableton = { path = "../daw/crates/dawfile-ableton" }
 reaper-test = { path = "../daw/crates/reaper-test" }
@@ -87,23 +84,8 @@ dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-p
 session = { path = "../session/crates/session" }
 session-ui = { path = "../session/crates/session-ui" }
 
-[patch."https://github.com/FastTrackStudios/sync.git"]
-sync = { path = "../sync/crates/sync" }
-sync-proto = { path = "../sync/crates/sync-proto" }
-sync-ui = { path = "../sync/crates/sync-ui" }
-
 [patch."https://github.com/FastTrackStudios/fts-ui.git"]
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
-
-[patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
-vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "ccb46b5416100d38430cb082d71bf0377428c241" }
 
 # Unify Blitz: upstream DioxusLabs/blitz -> FastTrackStudios/blitz fork.
 [patch."https://github.com/DioxusLabs/blitz.git"]
@@ -131,11 +113,11 @@ blitz-traits = { path = "../blitz/packages/blitz-traits" }
 stylo_taffy = { path = "../blitz/packages/stylo_taffy" }
 
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire = { path = "../moire/crates/moire" }
+moire-macros-noop = { path = "../moire/crates/moire-macros-noop" }
+moire-runtime = { path = "../moire/crates/moire-runtime" }
+moire-tokio = { path = "../moire/crates/moire-tokio" }
+moire-trace-capture = { path = "../moire/crates/moire-trace-capture" }
 
 [patch.crates-io]
 dioxus = { path = "/home/cody/Development/Dioxus/dioxus/packages/dioxus" }
@@ -161,11 +143,11 @@ generational-box = { path = "/home/cody/Development/Dioxus/dioxus/packages/gener
 manganis = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis" }
 manganis-core = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-core" }
 manganis-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-macro" }
-moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire = { path = "../moire/crates/moire" }
+moire-macros-noop = { path = "../moire/crates/moire-macros-noop" }
+moire-runtime = { path = "../moire/crates/moire-runtime" }
+moire-tokio = { path = "../moire/crates/moire-tokio" }
+moire-trace-capture = { path = "../moire/crates/moire-trace-capture" }
 anyrender = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
 anyrender_vello = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
 anyrender_vello_cpu = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
