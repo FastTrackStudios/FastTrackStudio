@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 fts-ui = { path = "crates/fts-ui" }
 fts-ui-audio = { path = "crates/fts-ui-audio" }
 clsx = "0.1.1"
-dioxus = { version = "0.7.6", default-features = false, features = ["lib"] }
+dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
 # Blitz / dioxus-native pulled from our fork's `fts/integration` branch.
 # That branch is rebased on upstream `DioxusLabs/blitz` main and stacks any
 # in-flight bug-fix branches we have not yet upstreamed. See
