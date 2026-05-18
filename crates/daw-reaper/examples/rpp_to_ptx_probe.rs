@@ -242,6 +242,24 @@ fn build_rpp(probe: &str) -> String {
                 })
             });
         }
+        "clip_fadein_long" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_in(0.5, FadeCurveType::Linear)
+                })
+            });
+        }
+        "clip_fadein_xlong" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_in(0.75, FadeCurveType::Linear)
+                })
+            });
+        }
         "clip_playrate_half" => {
             b = b.track("ProbeTrack", |t| {
                 t.item(0.0, 2.0, |i| {
