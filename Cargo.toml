@@ -19,6 +19,7 @@ members = [
     "crates/reaper-test-macro",
     "crates/reaper-launcher",
     "crates/daw-allocator",
+    "crates/daw-audio-sync",
     "crates/daw-bridge",
     "crates/daw-perf-test",
     "crates/fts-audio-proto",
