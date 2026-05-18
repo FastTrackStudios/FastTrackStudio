@@ -27,6 +27,16 @@ pub fn register(m: &mut VimMachine) {
         (Some(VimAction::EnterVisual), Some(VimMode::VisualLine)),
     );
 
+    // : — enter Command mode. The mode change rides on this
+    // binding; the engine seeds the empty buffer when it sees `:`
+    // in Normal (see `engine::feed`).
+    bind(
+        m,
+        VimMode::Normal,
+        &[ch(':')],
+        (None, Some(VimMode::Command)),
+    );
+
     // Esc — Insert/Visual/VisualLine → Normal.
     bind(
         m,

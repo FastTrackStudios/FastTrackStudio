@@ -32,7 +32,7 @@ pub mod engine;
 pub mod key;
 pub mod mode;
 
-pub use action::{BlockOp, InsertEntry, Motion, VimAction};
+pub use action::{BlockOp, InsertEntry, Motion, VimAction, VimCommand};
 pub use cursor::{Cursor, CursorState, DocView, apply_motion};
 pub use engine::{DefaultBindings, VimEngine, VimMachine};
 pub use key::DioxusKey;
@@ -365,6 +365,98 @@ mod tests {
         e.feed(DioxusKey::Char('V'));
         e.feed(DioxusKey::Escape);
         assert_eq!(e.mode(), VimMode::Normal);
+    }
+
+    #[test]
+    fn colon_enters_command_mode_with_empty_buffer() {
+        let mut e = VimEngine::default();
+        let acts = e.feed(DioxusKey::Char(':'));
+        assert_eq!(e.mode(), VimMode::Command);
+        assert_eq!(e.command_buffer(), Some(""));
+        // Mode-only transitions emit `NoOp` (or nothing) — neither
+        // should produce a meaningful action.
+        assert!(
+            acts.iter().all(|a| matches!(a, VimAction::NoOp)),
+            "expected only NoOps; got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn command_buffer_accumulates_chars() {
+        let mut e = VimEngine::default();
+        for c in ":wq".chars() {
+            e.feed(DioxusKey::Char(c));
+        }
+        assert_eq!(e.mode(), VimMode::Command);
+        assert_eq!(e.command_buffer(), Some("wq"));
+    }
+
+    #[test]
+    fn enter_submits_known_command_and_returns_to_normal() {
+        let mut e = VimEngine::default();
+        for c in ":wq".chars() {
+            e.feed(DioxusKey::Char(c));
+        }
+        let acts = e.feed(DioxusKey::Enter);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert_eq!(e.command_buffer(), None);
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::SubmitCommand(VimCommand::SaveQuit))),
+            "expected SaveQuit, got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn enter_drops_unknown_command_silently() {
+        let mut e = VimEngine::default();
+        for c in ":xyzzy".chars() {
+            e.feed(DioxusKey::Char(c));
+        }
+        let acts = e.feed(DioxusKey::Enter);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(acts.is_empty(), "unknown command, got {acts:?}");
+    }
+
+    #[test]
+    fn escape_cancels_command_mode() {
+        let mut e = VimEngine::default();
+        for c in ":wq".chars() {
+            e.feed(DioxusKey::Char(c));
+        }
+        e.feed(DioxusKey::Escape);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert_eq!(e.command_buffer(), None);
+    }
+
+    #[test]
+    fn backspace_pops_then_exits() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char(':'));
+        e.feed(DioxusKey::Char('w'));
+        e.feed(DioxusKey::Backspace);
+        assert_eq!(e.command_buffer(), Some(""));
+        // Empty + Backspace → exit Command.
+        e.feed(DioxusKey::Backspace);
+        assert_eq!(e.mode(), VimMode::Normal);
+    }
+
+    #[test]
+    fn command_aliases_parse() {
+        for (input, expected) in [
+            ("w", VimCommand::Save),
+            ("write", VimCommand::Save),
+            ("q", VimCommand::Quit),
+            ("quit", VimCommand::Quit),
+            ("wq", VimCommand::SaveQuit),
+            ("x", VimCommand::SaveQuit),
+            ("help", VimCommand::Help),
+            ("h", VimCommand::Help),
+            ("noh", VimCommand::NoHighlight),
+        ] {
+            assert_eq!(VimCommand::parse(input), Some(expected), "parse {input}");
+        }
+        assert_eq!(VimCommand::parse("garbage"), None);
     }
 
     #[test]

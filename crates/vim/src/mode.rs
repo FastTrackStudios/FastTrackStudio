@@ -6,9 +6,6 @@ use crate::action::VimAction;
 use crate::key::DioxusKey;
 
 /// The set of editing modes the vim engine recognizes.
-///
-/// More modes (Replace, Select, Command, OperationPending) follow
-/// in later phases. v1 covers the everyday triad.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum VimMode {
     /// Default. Keys are interpreted as commands; the buffer is
@@ -27,6 +24,11 @@ pub enum VimMode {
     /// whole-block (or whole-line within a block) rather than
     /// per-character.
     VisualLine,
+    /// Ex-style command line (`:`). The engine accumulates keys
+    /// into [`VimEngine::command_buffer`] until Enter (submit)
+    /// or Esc (cancel). Hosts render the buffer as a status-line
+    /// echo so the user sees what they're typing.
+    Command,
 }
 
 impl Mode<VimAction, EmptyKeyState> for VimMode {
@@ -37,6 +39,7 @@ impl Mode<VimAction, EmptyKeyState> for VimMode {
                 VimMode::Insert => "INSERT",
                 VimMode::Visual => "VISUAL",
                 VimMode::VisualLine => "V-LINE",
+                VimMode::Command => "COMMAND",
             }
             .to_string(),
         )

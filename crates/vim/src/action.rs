@@ -129,6 +129,44 @@ pub enum VimAction {
     /// `'{a-z}` — jump to a previously-set mark. Host looks up
     /// the cursor stored under the char and applies it.
     JumpToMark(char),
+
+    /// `:cmd<Enter>` — the user submitted an ex-style command. The
+    /// engine pre-parses the buffer into a closed [`VimCommand`]
+    /// set so hosts can `match` on it without re-parsing. Unknown
+    /// commands emit no action (engine silently drops them).
+    SubmitCommand(VimCommand),
+}
+
+/// Closed set of ex-style commands the engine recognizes. Hosts
+/// implement the effects (save snapshot, navigate away, show help
+/// panel, etc.) and ignore variants they don't support.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum VimCommand {
+    /// `:w` / `:write` — host should flush state.
+    Save,
+    /// `:q` / `:quit` — host should close the current view.
+    Quit,
+    /// `:wq` / `:x` — save then quit.
+    SaveQuit,
+    /// `:help` / `:h` — open the help overlay.
+    Help,
+    /// `:noh` / `:nohlsearch` — clear the active search highlight.
+    NoHighlight,
+}
+
+impl VimCommand {
+    /// Parse a buffer string into a known command. Returns `None`
+    /// for empty or unrecognized input.
+    pub fn parse(buf: &str) -> Option<Self> {
+        match buf.trim() {
+            "w" | "write" => Some(Self::Save),
+            "q" | "quit" => Some(Self::Quit),
+            "wq" | "x" => Some(Self::SaveQuit),
+            "help" | "h" => Some(Self::Help),
+            "noh" | "nohlsearch" => Some(Self::NoHighlight),
+            _ => None,
+        }
+    }
 }
 
 impl Default for VimAction {

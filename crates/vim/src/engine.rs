@@ -12,7 +12,7 @@
 
 use keybindings::{BindingMachine, EmptyKeyState, InputBindings, ModalMachine};
 
-use crate::action::{Motion, VimAction};
+use crate::action::{Motion, VimAction, VimCommand};
 use crate::bindings;
 use crate::key::DioxusKey;
 use crate::mode::{VimMode, VimStep};
@@ -69,6 +69,9 @@ pub struct VimEngine {
     /// Last successful find — drives `;` (repeat) and `,`
     /// (reverse-repeat).
     last_find: Option<(char, i8, bool)>,
+    /// Ex-command buffer. `Some(_)` while in [`VimMode::Command`];
+    /// reset to `None` on submit (Enter) or cancel (Esc).
+    command_buffer: Option<String>,
 }
 
 impl Default for VimEngine {
@@ -78,6 +81,7 @@ impl Default for VimEngine {
             count: None,
             pending_op: None,
             last_find: None,
+            command_buffer: None,
         }
     }
 }
@@ -94,6 +98,13 @@ impl VimEngine {
         self.count
     }
 
+    /// The current ex-command buffer contents, if the engine is in
+    /// [`VimMode::Command`]. Status-line renderers display this
+    /// preceded by `:` so the user sees their input.
+    pub fn command_buffer(&self) -> Option<&str> {
+        self.command_buffer.as_deref()
+    }
+
     /// Feed a key into the machine and return any actions the
     /// machine produced as a result. Multi-step sequences (`gg`,
     /// `dd`, `>>`) emit nothing on the first key and the action
@@ -108,6 +119,25 @@ impl VimEngine {
         if matches!(key, DioxusKey::Escape) {
             self.count = None;
             self.pending_op = None;
+        }
+
+        // Command mode owns every keystroke — bypass the modal
+        // machine entirely so `:wq` doesn't accidentally invoke a
+        // Normal-mode binding mid-input.
+        if matches!(self.mode(), VimMode::Command) {
+            return self.handle_command_key(key);
+        }
+
+        // Seed the command buffer before the `:` binding fires the
+        // mode transition. We can't set the mode directly (the
+        // `keybindings` crate only exposes `reset_mode`), so the
+        // mode change rides on a binding registered in
+        // `bindings::modes`; here we just initialize the buffer
+        // when we see `:` in Normal mode.
+        if matches!(self.mode(), VimMode::Normal) {
+            if let DioxusKey::Char(':') = key {
+                self.command_buffer = Some(String::new());
+            }
         }
 
         // Complete a pending operator (`f`/`F`/`t`/`T`/`m`/`'`)
@@ -241,6 +271,46 @@ impl VimEngine {
     #[allow(dead_code)]
     fn ctx(&self) -> EmptyKeyState {
         EmptyKeyState::default()
+    }
+
+    /// Handle a keystroke while in [`VimMode::Command`]. Returns
+    /// any actions to apply (typically empty until Enter submits)
+    /// and mutates the command buffer + mode in-place.
+    fn handle_command_key(&mut self, key: DioxusKey) -> Vec<VimAction> {
+        match key {
+            DioxusKey::Escape => {
+                // Cancel: drop the buffer + return to Normal.
+                self.command_buffer = None;
+                self.machine.reset_mode();
+                vec![]
+            }
+            DioxusKey::Enter => {
+                let buf = self.command_buffer.take().unwrap_or_default();
+                self.machine.reset_mode();
+                match VimCommand::parse(&buf) {
+                    Some(cmd) => vec![VimAction::SubmitCommand(cmd)],
+                    None => vec![],
+                }
+            }
+            DioxusKey::Backspace => {
+                if let Some(buf) = self.command_buffer.as_mut() {
+                    if buf.pop().is_none() {
+                        // Empty buffer + Backspace cancels back to Normal,
+                        // mirroring vim's behavior.
+                        self.command_buffer = None;
+                        self.machine.reset_mode();
+                    }
+                }
+                vec![]
+            }
+            DioxusKey::Char(c) => {
+                if let Some(buf) = self.command_buffer.as_mut() {
+                    buf.push(c);
+                }
+                vec![]
+            }
+            _ => vec![],
+        }
     }
 }
 
