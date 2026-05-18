@@ -380,47 +380,7 @@ fn Home() -> Element {
         div {
             class: "relative pt-24",
 
-            // Decorative gradient overlays - diagonal beams like reference
-            div {
-                aria_hidden: "true",
-                class: "z-[2] absolute inset-0 pointer-events-none isolate hidden lg:block overflow-hidden",
-
-                // Main beam - upper left
-                div {
-                    class: "absolute left-0 top-0 rounded-full",
-                    style: "width: 35rem; height: 80rem; transform: translateY(-87.5%) rotate(-45deg); background: radial-gradient(68.54% 68.72% at 55.02% 31.46%, hsla(0,0%,85%,.04) 0, hsla(0,0%,55%,.01) 50%, hsla(0,0%,45%,0) 80%);"
-                }
-
-                // Secondary beam
-                div {
-                    class: "absolute left-0 top-0 rounded-full",
-                    style: "width: 14rem; height: 80rem; transform: translate(5%, -50%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.03) 0, hsla(0,0%,45%,.01) 80%, transparent 100%);"
-                }
-
-                // Third beam
-                div {
-                    class: "absolute left-0 top-0 rounded-full",
-                    style: "width: 14rem; height: 80rem; transform: translateY(-87.5%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.02) 0, hsla(0,0%,45%,.01) 80%, transparent 100%);"
-                }
-
-                // Additional beam - center
-                div {
-                    class: "absolute rounded-full",
-                    style: "width: 20rem; height: 60rem; left: 30%; top: 0; transform: translateY(-60%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.025) 0, hsla(0,0%,45%,.008) 80%, transparent 100%);"
-                }
-
-                // Additional beam - right side
-                div {
-                    class: "absolute rounded-full",
-                    style: "width: 18rem; height: 50rem; right: 10%; top: 0; transform: translateY(-40%) rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.02) 0, hsla(0,0%,45%,.006) 80%, transparent 100%);"
-                }
-
-                // Subtle beam - lower
-                div {
-                    class: "absolute rounded-full",
-                    style: "width: 12rem; height: 40rem; left: 50%; top: 30%; transform: rotate(-45deg); background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,.015) 0, transparent 80%);"
-                }
-            }
+            DecorativeBeams {}
 
             // Hero section
             section {
@@ -497,63 +457,28 @@ fn Home() -> Element {
                             to: Route::DocsKeyflow {},
                             title: "Keyflow",
                             description: "Chart notation language with GPU rendering",
-                            icon: rsx! { FileText { class: "w-6 h-6" } },
-                            color: "emerald"
+                            icon: rsx! { FileText { class: "w-6 h-6" } }
                         }
 
                         LandingDocsCard {
                             to: Route::DocsReaper {},
                             title: "REAPER Extension",
                             description: "Deep DAW integration and transport sync",
-                            icon: rsx! { Music { class: "w-6 h-6" } },
-                            color: "violet"
+                            icon: rsx! { Music { class: "w-6 h-6" } }
                         }
 
                         LandingDocsCard {
                             to: Route::DocsDesktop {},
                             title: "Desktop App",
                             description: "Setlists, lyrics, and live performance",
-                            icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-6 h-6" } },
-                            color: "blue"
+                            icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-6 h-6" } }
                         }
 
                         LandingDocsCard {
                             to: Route::DocsPlugins {},
                             title: "Audio Plugins",
                             description: "CLAP and VST3 with nih-plug",
-                            icon: rsx! { fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-6 h-6" } },
-                            color: "amber"
-                        }
-                    }
-                }
-            }
-
-            // Features highlights section
-            section {
-                class: "relative z-10 py-16 border-t border-border/30",
-
-                div {
-                    class: "mx-auto max-w-5xl px-6",
-
-                    div {
-                        class: "grid md:grid-cols-3 gap-8",
-
-                        HomeFeature {
-                            title: "REAPER Integration",
-                            description: "Deep DAW integration for transport control, MIDI routing, and real-time state synchronization.",
-                            icon: rsx! { Music { class: "w-8 h-8" } }
-                        }
-
-                        HomeFeature {
-                            title: "Keyflow Notation",
-                            description: "Intuitive chart syntax with smart chord memory, section numbering, and GPU-accelerated rendering.",
-                            icon: rsx! { FileText { class: "w-8 h-8" } }
-                        }
-
-                        HomeFeature {
-                            title: "P2P Collaboration",
-                            description: "Real-time collaboration powered by iroh for seamless peer-to-peer networking.",
-                            icon: rsx! { Users { class: "w-8 h-8" } }
+                            icon: rsx! { fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-6 h-6" } }
                         }
                     }
                 }
@@ -579,6 +504,34 @@ fn Home() -> Element {
                     }
 
                     SetlistPreviewCard {}
+                }
+            }
+        }
+    }
+}
+
+/// Diagonal radial-gradient beams behind the home hero. Decorative only.
+#[component]
+fn DecorativeBeams() -> Element {
+    // (width, height, position-css, transform-css, opacity_main, opacity_mid)
+    // position-css is the corner anchor (e.g. "left-0 top-0" or arbitrary).
+    let beams: &[(&str, &str, &str, &str, &str, &str)] = &[
+        ("35rem", "80rem", "left: 0; top: 0;", "translateY(-87.5%) rotate(-45deg)", ".04", ".01"),
+        ("14rem", "80rem", "left: 0; top: 0;", "translate(5%, -50%) rotate(-45deg)", ".03", ".01"),
+        ("14rem", "80rem", "left: 0; top: 0;", "translateY(-87.5%) rotate(-45deg)", ".02", ".01"),
+        ("20rem", "60rem", "left: 30%; top: 0;", "translateY(-60%) rotate(-45deg)", ".025", ".008"),
+        ("18rem", "50rem", "right: 10%; top: 0;", "translateY(-40%) rotate(-45deg)", ".02", ".006"),
+        ("12rem", "40rem", "left: 50%; top: 30%;", "rotate(-45deg)", ".015", "0"),
+    ];
+
+    rsx! {
+        div {
+            aria_hidden: "true",
+            class: "z-[2] absolute inset-0 pointer-events-none isolate hidden lg:block overflow-hidden",
+            for (w, h, pos, transform, op_main, op_mid) in beams.iter().copied() {
+                div {
+                    class: "absolute rounded-full",
+                    style: "width: {w}; height: {h}; {pos} transform: {transform}; background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,{op_main}) 0, hsla(0,0%,45%,{op_mid}) 80%, transparent 100%);"
                 }
             }
         }
@@ -997,46 +950,21 @@ fn LandingDocsCard(
     title: &'static str,
     description: &'static str,
     icon: Element,
-    color: &'static str,
 ) -> Element {
-    let (bg_color, border_color, text_color) = match color {
-        "emerald" => (
-            "bg-emerald-500/10",
-            "hover:border-emerald-500/50 hover:shadow-emerald-500/5",
-            "text-emerald-500",
-        ),
-        "violet" => (
-            "bg-violet-500/10",
-            "hover:border-violet-500/50 hover:shadow-violet-500/5",
-            "text-violet-500",
-        ),
-        "blue" => (
-            "bg-blue-500/10",
-            "hover:border-blue-500/50 hover:shadow-blue-500/5",
-            "text-blue-500",
-        ),
-        "amber" => (
-            "bg-amber-500/10",
-            "hover:border-amber-500/50 hover:shadow-amber-500/5",
-            "text-amber-500",
-        ),
-        _ => ("bg-primary/10", "hover:border-primary/50", "text-primary"),
-    };
-
     rsx! {
         Link {
             to: to,
-            class: "group flex items-center gap-4 p-5 rounded-xl border border-border/50 bg-card/30 transition-all {border_color} hover:shadow-lg hover:bg-card/50",
+            class: "group flex items-center gap-4 p-5 rounded-xl border border-border/50 bg-card/30 transition-all hover:border-primary/40 hover:shadow-lg hover:bg-card/50",
 
             div {
-                class: "shrink-0 rounded-lg p-2.5 {bg_color} {text_color}",
+                class: "shrink-0 rounded-lg p-2.5 bg-primary/10 text-primary",
                 {icon}
             }
 
             div {
                 class: "min-w-0",
                 h3 {
-                    class: "font-semibold text-foreground group-hover:{text_color} transition-colors",
+                    class: "font-semibold text-foreground group-hover:text-primary transition-colors",
                     "{title}"
                 }
                 p {
@@ -1097,49 +1025,58 @@ fn ShowcaseCarousel(
     let mut offset = use_signal(|| 0.0_f64);
     let px = *offset.read() as i32;
 
-    // Set up a window scroll listener to drive the carousel position.
-    // The listener reads the section element's position relative to viewport
-    // and computes how far through the "runway" we've scrolled.
+    // Scroll listener that drives carousel position from section's viewport rect.
+    // Closure is owned by a hook so it lives exactly as long as the component;
+    // use_drop tears the listener down on unmount.
     #[cfg(target_arch = "wasm32")]
-    use_effect(move || {
+    {
+        use std::rc::Rc;
         use wasm_bindgen::JsCast;
         use wasm_bindgen::prelude::*;
 
-        let window = web_sys::window().unwrap();
-        let document = window.document().unwrap();
+        let closure: Rc<Closure<dyn FnMut()>> = use_hook(|| {
+            Rc::new(Closure::<dyn FnMut()>::new(move || {
+                let Some(window) = web_sys::window() else { return };
+                let Some(document) = window.document() else { return };
+                let Some(section) = document.get_element_by_id("showcase-scroll-section")
+                else { return };
+                let rect = section.get_bounding_client_rect();
+                let section_height = rect.height();
+                let Ok(viewport_h_js) = window.inner_height() else { return };
+                let Some(viewport_h) = viewport_h_js.as_f64() else { return };
 
-        let closure = Closure::<dyn FnMut()>::new(move || {
-            let Some(window) = web_sys::window() else {
-                return;
-            };
-            let Some(document) = window.document() else {
-                return;
-            };
-            let Some(section) = document.get_element_by_id("showcase-scroll-section") else {
-                return;
-            };
-            let rect = section.get_bounding_client_rect();
-            let section_height = rect.height();
-            let viewport_h = window.inner_height().unwrap().as_f64().unwrap();
+                let runway = section_height - viewport_h;
+                if runway <= 0.0 {
+                    return;
+                }
 
-            let runway = section_height - viewport_h;
-            if runway <= 0.0 {
-                return;
-            }
-
-            let scrolled = -rect.top();
-            let progress = (scrolled / runway).clamp(0.0, 1.0);
-
-            offset.set(-(progress * CAROUSEL_TRAVEL as f64));
+                let scrolled = -rect.top();
+                let progress = (scrolled / runway).clamp(0.0, 1.0);
+                offset.set(-(progress * CAROUSEL_TRAVEL as f64));
+            }))
         });
 
-        // add_event_listener accepts &Function — FnMut closures work via as_ref()
-        let _ = window.add_event_listener_with_callback("scroll", closure.as_ref().unchecked_ref());
+        use_hook({
+            let closure = closure.clone();
+            move || {
+                if let Some(window) = web_sys::window() {
+                    let _ = window.add_event_listener_with_callback(
+                        "scroll",
+                        (*closure).as_ref().unchecked_ref(),
+                    );
+                }
+            }
+        });
 
-        // Keep closure alive for the component's lifetime
-        // (it'll be dropped when the component unmounts and the effect re-runs)
-        std::mem::forget(closure);
-    });
+        use_drop(move || {
+            if let Some(window) = web_sys::window() {
+                let _ = window.remove_event_listener_with_callback(
+                    "scroll",
+                    (*closure).as_ref().unchecked_ref(),
+                );
+            }
+        });
+    }
 
     // Section height = viewport + runway. A shorter runway means the carousel
     // scrolls through faster, keeping the hero text and content below visible.
