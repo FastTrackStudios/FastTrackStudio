@@ -260,6 +260,52 @@ fn build_rpp(probe: &str) -> String {
                 })
             });
         }
+        "clip_pitch_up_2" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").pitch(2.0)
+                })
+            });
+        }
+        "clip_pitch_up_7" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").pitch(7.0)
+                })
+            });
+        }
+        "clip_pitch_down_3" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").pitch(-3.0)
+                })
+            });
+        }
+        "clip_slip_quarter" => {
+            // Item plays last 0.75s of source, starting at source-offset 0.25s
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.75, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .slip_offset(0.25)
+                })
+            });
+        }
+        "clip_slip_half" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.5, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .slip_offset(0.5)
+                })
+            });
+        }
+        "clip_slip_eighth" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.875, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .slip_offset(0.125)
+                })
+            });
+        }
         "clip_playrate_half" => {
             b = b.track("ProbeTrack", |t| {
                 t.item(0.0, 2.0, |i| {
