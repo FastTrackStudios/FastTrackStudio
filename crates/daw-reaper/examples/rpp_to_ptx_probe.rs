@@ -298,6 +298,37 @@ fn build_rpp(probe: &str) -> String {
                 })
             });
         }
+        "midi_one_note" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).note(0, 0, 60, 96, 480))
+                })
+            });
+        }
+        "midi_cc1_only" => {
+            // MIDI item with only a single CC#1 (modwheel) event, no notes
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).cc(0, 0, 1, 64))
+                })
+            });
+        }
+        "midi_cc1_value127" => {
+            // Same as midi_cc1_only but value 127
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).cc(0, 0, 1, 127))
+                })
+            });
+        }
+        "midi_cc7_volume" => {
+            // CC#7 (volume), value 100
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).cc(0, 0, 7, 100))
+                })
+            });
+        }
         "clip_slip_eighth" => {
             b = b.track("ProbeTrack", |t| {
                 t.item(0.0, 0.875, |i| {
