@@ -84,7 +84,7 @@ pub mod window_geometry;
 // callbacks. Parallel fast path alongside the 30Hz pollers — see
 // `control_surface.rs` for the variant-by-variant mapping.
 pub mod control_surface;
-pub use control_surface::DawControlSurface;
+pub use control_surface::{DawControlSurface, Mode as CsurfMode};
 
 // Per-service `Reaper*` structs retired with the architect::rpc port —
 // every backend trait now impls on the `crate::Reaper` singleton.

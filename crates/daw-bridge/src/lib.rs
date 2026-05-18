@@ -424,24 +424,30 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     daw::reaper::register_project_importer(&mut session)?;
 
     // Push-based change-detection via REAPER's IReaperControlSurface
-    // callbacks. Fires the same TrackEvent / TransportEvent / FxEvent /
-    // RoutingEvent the pollers fire, but immediately on change instead
-    // of waiting up to 33ms for the next timer tick. The pollers stay
-    // wired (markers, regions, items, etc. don't fire callbacks).
+    // callbacks. Mode is selected by the FTS_CSURF_MODE env var:
     //
-    // The returned RegistrationHandle is leaked: the surface is owned
-    // for the lifetime of the extension, and the ReaperSession destructor
-    // unregisters all surviving csurfs on REAPER shutdown anyway.
-    // Push-based control surface (daw_reaper::DawControlSurface). Disabled
-    // by default while we investigate a regression where track add events
-    // stop propagating through the mesh once it's registered. Set
-    // `FTS_CSURF_DISABLED=1` to opt out (default = ON for debugging).
+    //   FTS_CSURF_MODE=full       — publish every callback (sub-tick push
+    //                               for read-only subscribers like web UIs
+    //                               and MIDI/OSC surface adapters). Don't
+    //                               combine with the bidirectional sync
+    //                               runtime: applies → REAPER → callback
+    //                               → publish creates echo loops.
+    //   FTS_CSURF_MODE=push-only  — default. Publish only events that have
+    //                               no equivalent in the 30 Hz poller (FX
+    //                               params, marker nudges). Safe to pair
+    //                               with bidirectional sync.
+    //   FTS_CSURF_MODE=off        — register but no-op every callback.
+    //   FTS_CSURF_DISABLED=1      — skip registration entirely (back-compat).
+    //
+    // The returned RegistrationHandle is dropped; ReaperSession owns the
+    // boxed surface and unregisters on REAPER shutdown.
     if std::env::var("FTS_CSURF_DISABLED").as_deref() != Ok("1") {
         use reaper_high::MiddlewareControlSurface;
-        let csurf = MiddlewareControlSurface::new(daw::reaper::DawControlSurface::new());
+        let mode = daw::reaper::CsurfMode::from_env();
+        let csurf = MiddlewareControlSurface::new(daw::reaper::DawControlSurface::with_mode(mode));
         match session.plugin_register_add_csurf_inst(Box::new(csurf)) {
             Ok(_handle) => {
-                info!("daw control surface registered (push-based change detection)");
+                info!("daw control surface registered (mode={mode:?})");
             }
             Err(e) => {
                 warn!("failed to register daw control surface: {e}");

@@ -43,41 +43,102 @@ use crate::transport::read_transport_state_for_project;
 /// Middleware adapter that maps each REAPER control-surface callback to
 /// our internal event hub / per-domain broadcasters.
 ///
-/// Stateless: the per-domain caches live in their respective modules
-/// (`track::track_cache`, `routing_stream`, `fx_stream`). Instantiated
-/// once at extension load time and registered with `ReaperSession`.
+/// How aggressively the surface translates REAPER callbacks into event-hub
+/// publishes.
+///
+/// - [`Mode::Full`] — publish every callback (volume, pan, mute, FX params,
+///   transport, sends/receives, the lot). Genuine sub-tick push for every
+///   subscriber. Use this when nothing on the receive side is going to
+///   *apply* the published events back to REAPER (web UIs, MIDI/OSC surface
+///   adapters, telemetry — all read-only). With a bidirectional sync
+///   forwarder on the same hub you'll get echo loops; pick `PushOnly` then.
+/// - [`Mode::PushOnly`] — publish only the callbacks that have no
+///   equivalent in the 30 Hz poller path (FX parameter changes, marker /
+///   region nudges). Everything else falls back to the poller, which gives
+///   33 ms latency but no echo problem for bidirectional sync. This is
+///   what the multi-instance sync test uses.
+/// - [`Mode::Off`] — middleware registers but every callback returns
+///   `false`. Equivalent to not registering at all; kept so the surface
+///   can be hot-toggled without re-registering with REAPER.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    Full,
+    #[default]
+    PushOnly,
+    Off,
+}
+
+impl Mode {
+    /// Parse from `FTS_CSURF_MODE` env: `"full"`, `"push-only"`, `"off"`.
+    /// Anything else (or unset) returns the default `PushOnly`.
+    pub fn from_env() -> Self {
+        match std::env::var("FTS_CSURF_MODE").as_deref() {
+            Ok("full") => Self::Full,
+            Ok("push-only") => Self::PushOnly,
+            Ok("off") => Self::Off,
+            _ => Self::default(),
+        }
+    }
+}
+
+/// Stateless other than the dispatch mode: the per-domain caches live in
+/// their respective modules (`track::track_cache`, `routing_stream`,
+/// `fx_stream`). Instantiated once at extension load time and registered
+/// with `ReaperSession`.
 #[derive(Debug, Default)]
-pub struct DawControlSurface;
+pub struct DawControlSurface {
+    mode: Mode,
+}
 
 impl DawControlSurface {
+    /// Build a surface in [`Mode::PushOnly`] — the default for bidirectional
+    /// sync hosts. Use [`Self::with_mode`] for `Full` (sub-tick push for
+    /// read-only subscribers like a web UI feed) or `Off`.
     pub fn new() -> Self {
-        Self
+        Self::with_mode(Mode::default())
+    }
+
+    pub fn with_mode(mode: Mode) -> Self {
+        Self { mode }
     }
 }
 
 impl ControlSurfaceMiddleware for DawControlSurface {
     fn handle_event(&self, event: ControlSurfaceEvent) -> bool {
         use ControlSurfaceEvent::*;
-        // Only enable handlers for genuinely push-only events (no poller exists
-        // for them yet). For the rest (track/transport/routing scalars), the
-        // 30Hz timer poll already covers them; running csurf callbacks in
-        // parallel produces a feedback loop where each peer keeps re-firing
-        // the other's volume/pan/etc updates through the mesh, starving the
-        // apply pipeline so item / fx_param / marker events behind the queue
-        // never get processed in time.
+        if self.mode == Mode::Off {
+            return false;
+        }
+        let full = self.mode == Mode::Full;
         match event {
-            // FxEvent::ParameterChanged has no poller — push-only path.
-            // This is the headline win for CSI-class apps.
+            // ── Push-only events (no poller equivalent) — handled in both modes
             ExtSetFxParam(args) => on_fx_param(args, false),
             ExtSetFxParamRecFx(args) => on_fx_param(args, true),
-            // Marker / region changes also have no per-change callback in
-            // the poller path (the poller diffs every tick, not on demand),
-            // so the project-marker callback is a useful nudge to refresh.
             ExtSetProjectMarkerChange(_) => {
                 crate::poll_and_broadcast_markers();
                 crate::poll_and_broadcast_regions();
                 true
             }
+            // ── Full-mode handlers — duplicate the 30 Hz poller with sub-tick
+            //    latency. The cache-membership guard on each handler still
+            //    skips publishes for entities the poller hasn't seen yet,
+            //    so on-track-init churn doesn't flood the event hub.
+            SetSurfaceVolume(args) if full => on_surface_volume(args),
+            SetSurfacePan(args) if full => on_surface_pan(args),
+            SetSurfaceMute(args) if full => on_surface_mute(args),
+            SetSurfaceSelected(args) if full => on_surface_selected(args),
+            SetSurfaceSolo(args) if full => on_surface_solo(args),
+            SetSurfaceRecArm(args) if full => on_surface_rec_arm(args),
+            SetTrackTitle(args) if full => on_track_title(args),
+            SetPlayState(args) if full => on_play_state(args),
+            SetRepeatState(args) if full => on_repeat_state(args),
+            ExtSetBpmAndPlayRate(args) if full => on_bpm_or_playrate(args),
+            ExtSetFxEnabled(args) if full => on_fx_enabled(args),
+            ExtSetFxChange(args) if full => on_fx_change(args),
+            ExtSetSendVolume(args) if full => on_send_volume(args),
+            ExtSetSendPan(args) if full => on_send_pan(args),
+            ExtSetRecvVolume(args) if full => on_recv_volume(args),
+            ExtSetRecvPan(args) if full => on_recv_pan(args),
             _ => false,
         }
     }
