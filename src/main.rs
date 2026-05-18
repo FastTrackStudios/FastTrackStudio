@@ -993,28 +993,7 @@ const CARD_WIDTHS: [i32; 5] = [724, 480, 480, 480, 480];
 /// Gap between cards in pixels
 const CARD_GAP: i32 = 24;
 
-/// Total horizontal travel distance for the carousel strip (px).
-const CAROUSEL_TRAVEL: i32 = {
-    let mut w = 0;
-    let mut i = 0;
-    while i < SHOWCASE_CARD_COUNT {
-        w += CARD_WIDTHS[i];
-        if i < SHOWCASE_CARD_COUNT - 1 {
-            w += CARD_GAP;
-        }
-        i += 1;
-    }
-    w - CARD_WIDTHS[0]
-};
-
-/// Horizontal showcase strip driven by page scroll position.
-///
-/// The section is taller than the viewport — the extra height is "scroll runway."
-/// The visible carousel is `position: sticky` so it stays pinned while you scroll
-/// through the section. A window scroll listener maps the section's scroll
-/// progress (0..1) to the strip's horizontal translateX.
-///
-/// When you scroll past the section, normal page scrolling continues seamlessly.
+/// Horizontal showcase strip. Native horizontal scroll — does not hijack page scroll.
 #[component]
 fn ShowcaseCarousel(
     source: Signal<String>,
@@ -1022,119 +1001,49 @@ fn ShowcaseCarousel(
     charts: Vec<String>,
 ) -> Element {
     let n = SHOWCASE_CARD_COUNT;
-    let mut offset = use_signal(|| 0.0_f64);
-    let px = *offset.read() as i32;
-
-    // Scroll listener that drives carousel position from section's viewport rect.
-    // Closure is owned by a hook so it lives exactly as long as the component;
-    // use_drop tears the listener down on unmount.
-    #[cfg(target_arch = "wasm32")]
-    {
-        use std::rc::Rc;
-        use wasm_bindgen::JsCast;
-        use wasm_bindgen::prelude::*;
-
-        let closure: Rc<Closure<dyn FnMut()>> = use_hook(|| {
-            Rc::new(Closure::<dyn FnMut()>::new(move || {
-                let Some(window) = web_sys::window() else { return };
-                let Some(document) = window.document() else { return };
-                let Some(section) = document.get_element_by_id("showcase-scroll-section")
-                else { return };
-                let rect = section.get_bounding_client_rect();
-                let section_height = rect.height();
-                let Ok(viewport_h_js) = window.inner_height() else { return };
-                let Some(viewport_h) = viewport_h_js.as_f64() else { return };
-
-                let runway = section_height - viewport_h;
-                if runway <= 0.0 {
-                    return;
-                }
-
-                let scrolled = -rect.top();
-                let progress = (scrolled / runway).clamp(0.0, 1.0);
-                offset.set(-(progress * CAROUSEL_TRAVEL as f64));
-            }))
-        });
-
-        use_hook({
-            let closure = closure.clone();
-            move || {
-                if let Some(window) = web_sys::window() {
-                    let _ = window.add_event_listener_with_callback(
-                        "scroll",
-                        (*closure).as_ref().unchecked_ref(),
-                    );
-                }
-            }
-        });
-
-        use_drop(move || {
-            if let Some(window) = web_sys::window() {
-                let _ = window.remove_event_listener_with_callback(
-                    "scroll",
-                    (*closure).as_ref().unchecked_ref(),
-                );
-            }
-        });
-    }
-
-    // Section height = viewport + runway. A shorter runway means the carousel
-    // scrolls through faster, keeping the hero text and content below visible.
-    let runway_px = CAROUSEL_TRAVEL / 2;
-    let section_style = format!("height: calc(100vh + {runway_px}px);");
 
     rsx! {
+        // Outer wrapper hosts native horizontal scroll. No height runway, no sticky,
+        // no scroll hijack — user controls vertical scroll, can pan horizontally if curious.
         div {
-            id: "showcase-scroll-section",
-            class: "-mt-8 relative w-full",
-            style: "{section_style}",
+            class: "relative w-full overflow-x-auto overflow-y-hidden",
+            style: "-webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%); mask-image: linear-gradient(to bottom, black 40%, transparent 100%);",
 
-            // Sticky container — pinned with vertical centering offset
             div {
-                class: "sticky top-[15vh] w-full overflow-hidden",
+                style: "perspective: 1200px;",
 
-                // Cards with bottom + right fade masks
                 div {
-                    class: "w-full",
-                    style: "-webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%); mask-image: linear-gradient(to bottom, black 40%, transparent 100%);",
+                    class: "pl-8 md:pl-16 lg:pl-32 pr-8",
+                    style: "transform: rotateX(20deg) skewX(0.36rad);",
 
                     div {
-                        style: "perspective: 1200px; -webkit-mask-image: linear-gradient(to right, black 50%, transparent 100%); mask-image: linear-gradient(to right, black 50%, transparent 100%);",
+                        class: "h-[44rem] lg:h-[52rem]",
 
                         div {
-                            class: "pl-8 md:pl-16 lg:pl-32",
-                            style: "transform: rotateX(20deg) skewX(0.36rad);",
+                            class: "flex",
+                            style: "gap: {CARD_GAP}px;",
 
-                            div {
-                                class: "h-[44rem] lg:h-[52rem]",
+                            for i in 0..n {
+                                {
+                                    let card_width = CARD_WIDTHS[i];
+                                    rsx! {
+                                        div {
+                                            key: "{i}",
+                                            class: "shrink-0",
+                                            style: "width: {card_width}px;",
 
-                                div {
-                                    class: "flex",
-                                    style: "gap: {CARD_GAP}px; transform: translateX({px}px);",
-
-                                    for i in 0..n {
-                                        {
-                                            let card_width = CARD_WIDTHS[i];
-                                            rsx! {
-                                                div {
-                                                    key: "{i}",
-                                                    class: "shrink-0",
-                                                    style: "width: {card_width}px;",
-
-                                                    match i {
-                                                        0 => rsx! {
-                                                            KeyflowShowcaseCard {
-                                                                source: source,
-                                                                preview_mode: preview_mode,
-                                                                charts: charts.clone()
-                                                            }
-                                                        },
-                                                        1 => rsx! { DesktopShowcaseCard {} },
-                                                        2 => rsx! { ReaperShowcaseCard {} },
-                                                        3 => rsx! { PluginsShowcaseCard {} },
-                                                        _ => rsx! { CollaborationShowcaseCard {} },
+                                            match i {
+                                                0 => rsx! {
+                                                    KeyflowShowcaseCard {
+                                                        source: source,
+                                                        preview_mode: preview_mode,
+                                                        charts: charts.clone()
                                                     }
-                                                }
+                                                },
+                                                1 => rsx! { DesktopShowcaseCard {} },
+                                                2 => rsx! { ReaperShowcaseCard {} },
+                                                3 => rsx! { PluginsShowcaseCard {} },
+                                                _ => rsx! { CollaborationShowcaseCard {} },
                                             }
                                         }
                                     }
