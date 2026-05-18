@@ -48,6 +48,12 @@ fn build_rpp(probe: &str) -> String {
         "two_tracks" => {
             b = b.track("Alpha", |t| t).track("Beta", |t| t);
         }
+        "three_tracks" => {
+            b = b
+                .track("Alpha", |t| t)
+                .track("Beta", |t| t)
+                .track("Gamma", |t| t);
+        }
         "marker" => {
             b = b.track("ProbeTrack", |t| t).marker(1, 1.0, "M");
         }

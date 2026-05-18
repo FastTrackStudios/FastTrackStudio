@@ -24,7 +24,16 @@
 //! See `docs/pt-field-map.md` for the byte-level field map.
 
 use crate::raw_block::RawSession;
-use crate::write::splice::replace_string;
+use crate::write::splice::{replace_string, splice};
+
+/// A single breakpoint in a mute automation envelope.
+#[derive(Debug, Clone, Copy)]
+pub struct MuteAutomationPoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// `true` = muted at this time, `false` = un-muted.
+    pub muted: bool,
+}
 
 /// Single-track PTX writer parameters.
 #[derive(Debug, Clone)]
@@ -32,12 +41,25 @@ pub struct NativeTrackSpec {
     pub name: String,
     /// PT palette index, or 0 for default.
     pub color: u8,
+    /// `true` writes the stored mute bit AND clears the send-routing
+    /// flag, producing what the converter reads as effective-muted.
     pub mute: bool,
     pub solo: bool,
+    /// Solo-defeat (track ignores other tracks' solo state).
+    pub solo_defeat: bool,
+    /// PT "Make Inactive"/bouncedSource state. Sets the mute bit AND
+    /// KEEPS the send-routing flag (the inverse of `mute`). Mutually
+    /// exclusive with `mute`: if both are true, `mute` wins.
+    pub inactive: bool,
     /// Track volume in 0.1 dB units. 0 = unity.
     pub volume_centibel: i16,
     /// Pan -100..+100. -100 = full L (the default).
     pub pan: i16,
+    /// Optional mute automation envelope. Breakpoints in time order.
+    /// PT drops a redundant t=0 user point (matching its implicit
+    /// default-unmuted state), so don't include a (0, false) point —
+    /// it'll either be discarded or merged into the default.
+    pub mute_automation: Vec<MuteAutomationPoint>,
 }
 
 impl Default for NativeTrackSpec {
@@ -47,8 +69,11 @@ impl Default for NativeTrackSpec {
             color: 0,
             mute: false,
             solo: false,
+            solo_defeat: false,
+            inactive: false,
             volume_centibel: 0,
             pan: -100,
+            mute_automation: Vec::new(),
         }
     }
 }
@@ -90,12 +115,29 @@ pub fn write_single_track_ptx(spec: &NativeTrackSpec) -> crate::PtResult<Vec<u8>
 
     // Step 2: patch numeric fields. These are all fixed-size so no splicing.
     patch_color(&mut session, spec.color);
-    patch_mute(&mut session, spec.mute);
+    // `mute` and `inactive` are mutually-exclusive — both set the
+    // +5 mix bit, but only `mute` clears the send-routing flag
+    // (+8 in 0x260a[0]). If both are requested, mute wins.
+    if spec.mute {
+        patch_mute_bit(&mut session, true);
+        patch_send_routing(&mut session, false);
+    } else if spec.inactive {
+        patch_mute_bit(&mut session, true);
+        patch_send_routing(&mut session, true); // baseline default; explicit for clarity
+    } else {
+        patch_mute_bit(&mut session, false);
+    }
     patch_solo(&mut session, spec.solo);
+    patch_solo_defeat(&mut session, spec.solo_defeat);
     patch_volume(&mut session, spec.volume_centibel);
     patch_pan(&mut session, spec.pan);
 
-    // Step 3: re-encrypt
+    // Step 3: mute automation (variable-length splice into 0x260a[1]).
+    if !spec.mute_automation.is_empty() {
+        write_mute_automation(&mut session, &spec.mute_automation);
+    }
+
+    // Step 4: re-encrypt
     Ok(session.encrypt())
 }
 
@@ -143,7 +185,12 @@ fn patch_color(session: &mut RawSession, color: u8) {
     }
 }
 
-fn patch_mute(session: &mut RawSession, mute: bool) {
+/// Patch the stored mute bit (the +5 mix-byte and all wrapper mirrors).
+///
+/// This bit is set by BOTH user-mute and Make-Inactive. It does NOT
+/// alone determine effective mute — see `patch_send_routing` for the
+/// discriminator.
+fn patch_mute_bit(session: &mut RawSession, mute: bool) {
     let v: u8 = if mute { 1 } else { 0 };
     // 0x1029 +5
     for b in collect_by_raw_ct(&session.blocks, 0x1029) {
@@ -188,6 +235,99 @@ fn patch_mute(session: &mut RawSession, mute: bool) {
             }
         }
     }
+}
+
+/// Patch the send-routing enabled flag (`0x260a[0] +8`).
+///
+/// User-mute clears this byte (effective mute). Make-Inactive leaves
+/// it set (the track is silent but routing still nominally active).
+fn patch_send_routing(session: &mut RawSession, enabled: bool) {
+    let v: u8 = if enabled { 1 } else { 0 };
+    let blocks_260a = collect_by_raw_ct(&session.blocks, 0x260a);
+    if let Some(b) = blocks_260a.first() {
+        let p = b.start + 9 + 8;
+        if p < session.data.len() {
+            session.data[p] = v;
+        }
+    }
+}
+
+/// Patch solo-defeat (`0x200b +268`, with `0x200a +259` mirror).
+fn patch_solo_defeat(session: &mut RawSession, defeat: bool) {
+    let v: u8 = if defeat { 1 } else { 0 };
+    for b in collect_by_raw_ct(&session.blocks, 0x200b) {
+        let p = b.start + 9 + 268;
+        if p < session.data.len() {
+            session.data[p] = v;
+        }
+    }
+    for b in collect_by_raw_ct(&session.blocks, 0x200a) {
+        let p = b.start + 9 + 259;
+        if p < session.data.len() {
+            session.data[p] = v;
+        }
+    }
+}
+
+/// Write a mute automation envelope into `0x260a[1]`.
+///
+/// Block layout for the automation child:
+/// - 28-byte header
+///   - +4..+8 u32 LE: payload size (header tail + breakpoints)
+///   - +10 u8: total breakpoint count (1 implicit + N user points)
+///   - +16 u8: user breakpoint count (N)
+/// - N × 6 bytes: each breakpoint is `u32 LE time_samples + u8 value + u8 shape`
+///
+/// We splice the breakpoint payload at the end of `0x260a[1]` and
+/// patch the header counters/size in place. Ancestor block sizes
+/// cascade through `splice`.
+fn write_mute_automation(session: &mut RawSession, points: &[MuteAutomationPoint]) {
+    let blocks_260a = collect_by_raw_ct(&session.blocks, 0x260a);
+    let Some(b) = blocks_260a.get(1) else {
+        return;
+    };
+    let payload_start = b.start + 9;
+    let block_end = b.end;
+    let header_size_off = b.start + 3 + 4; // header u32 size lives where splice expects it; for our payload counter we use +4 inside payload
+    let _ = header_size_off; // not used: splice handles block_size cascade
+    let n = points.len() as u8;
+    let total = n.saturating_add(1);
+    // Patch in-payload counters (these are u8 fields per the field map).
+    let cnt_total = payload_start + 10;
+    let cnt_user = payload_start + 16;
+    if cnt_total < session.data.len() {
+        session.data[cnt_total] = total;
+    }
+    if cnt_user < session.data.len() {
+        session.data[cnt_user] = n;
+    }
+
+    // Build the breakpoint bytes (6 per point).
+    let mut bp = Vec::with_capacity(points.len() * 6);
+    for pt in points {
+        bp.extend_from_slice(&pt.time_samples.to_le_bytes());
+        bp.push(if pt.muted { 1 } else { 0 });
+        bp.push(0); // shape: square/step
+    }
+
+    // Patch the in-payload size field at +4 (u32 LE). Treat the
+    // current value as authoritative for the baseline and add
+    // `bp.len()` to it.
+    let size_off = payload_start + 4;
+    if size_off + 4 <= session.data.len() {
+        let cur = u32::from_le_bytes([
+            session.data[size_off],
+            session.data[size_off + 1],
+            session.data[size_off + 2],
+            session.data[size_off + 3],
+        ]);
+        let new = cur.wrapping_add(bp.len() as u32);
+        session.data[size_off..size_off + 4].copy_from_slice(&new.to_le_bytes());
+    }
+
+    // Splice the breakpoint bytes at the end of the block's payload.
+    // Ancestor `block_size` fields cascade via `splice`.
+    splice(session, block_end, 0, &bp);
 }
 
 fn patch_solo(session: &mut RawSession, solo: bool) {
@@ -352,6 +492,53 @@ mod tests {
             .find(|t| t.name == spec.name)
             .expect("track present");
         assert!(t.solo, "solo should round-trip");
+    }
+
+    #[test]
+    fn write_with_mute() {
+        let spec = NativeTrackSpec {
+            mute: true,
+            name: "MutedTrack".to_string(),
+            ..NativeTrackSpec::default()
+        };
+        let session = parse_native(&spec);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let t = tracks.iter().find(|t| t.name == spec.name).expect("track");
+        assert!(t.mute, "mute should round-trip as effective-mute");
+        assert!(
+            !t.inactive,
+            "user-mute should NOT set inactive (send routing cleared)"
+        );
+    }
+
+    #[test]
+    fn write_with_inactive() {
+        let spec = NativeTrackSpec {
+            inactive: true,
+            name: "InactiveTrack".to_string(),
+            ..NativeTrackSpec::default()
+        };
+        let session = parse_native(&spec);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let t = tracks.iter().find(|t| t.name == spec.name).expect("track");
+        assert!(t.inactive, "inactive should round-trip");
+        assert!(
+            !t.mute,
+            "inactive (with send routing kept) is not effective-mute"
+        );
+    }
+
+    #[test]
+    fn write_with_solo_defeat() {
+        let spec = NativeTrackSpec {
+            solo_defeat: true,
+            name: "DefeatTrack".to_string(),
+            ..NativeTrackSpec::default()
+        };
+        let session = parse_native(&spec);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let t = tracks.iter().find(|t| t.name == spec.name).expect("track");
+        assert!(t.solo_defeat, "solo_defeat should round-trip");
     }
 
     #[test]
