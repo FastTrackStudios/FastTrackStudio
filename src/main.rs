@@ -394,7 +394,7 @@ fn Home() -> Element {
 
                         h1 {
                             class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
-                            "Open, Professional, "
+                            "Open-Source Professional "
                             span {
                                 class: "text-primary",
                                 "Workflow-Driven"
