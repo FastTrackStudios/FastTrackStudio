@@ -171,6 +171,35 @@ fn build_rpp(probe: &str) -> String {
                 })
             });
         }
+        "pan_envelope_2" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("PANENV2", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
+        "pan_envelope_lr" => {
+            // Some REAPER versions use separate L/R envelopes for stereo pan
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("PANENV2L", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+                .envelope("PANENV2R", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, -0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
         "send" => {
             b = b.track("Source", |t| t).track("Dest", |t| t.receive(0));
         }
