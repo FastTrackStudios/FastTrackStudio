@@ -66,14 +66,14 @@ fn parse_single_region(
 
     let (start, sample_offset, length) = cursor::parse_three_point(cursor, three_point_offset);
 
-    // Audio file index is a u32 at (block.offset + block.block_size)
-    // This is right at the end of the block's payload
-    let findex_offset = block.offset + block.block_size as usize;
-    let audio_file_index = if findex_offset + 4 <= data.len() {
-        cursor.u32_at(findex_offset) as u16
-    } else {
-        0
-    };
+    // Audio file index in the new (`0x2629`) region format has not
+    // been reliably located inside the payload. The previous read
+    // formula (`block.offset + block.block_size`) landed past the
+    // end of the block in the next block's magic byte and returned
+    // garbage. We deliberately return `0` here so downstream code
+    // falls back to name-stem heuristic. See `pt-parity-roadmap.md`
+    // §3 + §16 — tracked as a known unobservable.
+    let audio_file_index = 0u16;
 
     Some(AudioRegion {
         name,

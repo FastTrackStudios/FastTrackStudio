@@ -907,6 +907,14 @@ fn patch_volume_in_range(s: &mut RawSession, rs: usize, re: usize, vol: i16) {
 fn patch_pan_in_range(s: &mut RawSession, rs: usize, re: usize, pan: i16) {
     let bytes = pan.to_le_bytes();
     let blocks = s.blocks.clone();
+    // Parser reads pan from `0x1029 +13..+17` (i32 LE).
+    let pan_i32 = (pan as i32).to_le_bytes();
+    for_blocks_in_range(&blocks, rs, re, 0x1029, |b| {
+        let p = b.start + 9 + 13;
+        if p + 4 <= s.data.len() {
+            s.data[p..p + 4].copy_from_slice(&pan_i32);
+        }
+    });
     let mut nth_260a = 0;
     for_blocks_in_range(&blocks, rs, re, 0x260a, |b| {
         if nth_260a == 2 {
