@@ -4,7 +4,7 @@
 
 use dioxus::dioxus_core::Task;
 use dioxus::prelude::*;
-use fts_ui::prelude::dropdown::*;
+use fts_ui::prelude::*;
 use keyflow::highlighting::{HighlightKind, Highlighter};
 
 // =============================================================================
@@ -152,22 +152,26 @@ pub fn ChartEditor() -> Element {
                                 fts_ui::lucide_dioxus::ChevronDown { class: "w-3 h-3" }
                             }
                             DropdownContent { width: "w-72".to_string(),
-                                DropdownItem::<String> {
+                                DropdownItem {
                                     value: "empty".to_string(),
+                                    index: 0,
                                     on_select: move |_: String| source.set(EMPTY_CHART.to_string()),
                                     "New (Empty)"
                                 }
-                                DropdownItem::<String> {
+                                DropdownItem {
                                     value: "thriller".to_string(),
+                                    index: 1,
                                     on_select: move |_: String| source.set(EXAMPLE_THRILLER.to_string()),
                                     "Thriller - Dirty Loops, Cory Wong"
                                 }
                             }
                         }
 
-                        button {
-                            class: "text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md hover:bg-accent transition-colors border border-border",
-                            onclick: move |_| source.set(DEFAULT_CHART.to_string()),
+                        Button {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Small,
+                            class: "text-xs text-muted-foreground hover:text-foreground".to_string(),
+                            on_click: move |_| source.set(DEFAULT_CHART.to_string()),
                             "Reset"
                         }
                     }
@@ -211,24 +215,20 @@ pub fn ChartEditor() -> Element {
                         div {
                             class: "flex items-center gap-1 bg-muted rounded-lg p-1",
 
-                            button {
-                                class: if is_snippet {
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
-                                } else {
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                                },
-                                onclick: move |_| preview_mode.set(PreviewMode::Snippet),
+                            Button {
+                                variant: if is_snippet { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                                size: ButtonSize::Small,
+                                class: "text-xs".to_string(),
+                                on_click: move |_| preview_mode.set(PreviewMode::Snippet),
                                 lucide_dioxus::Scissors { class: "w-3.5 h-3.5" }
                                 "Snippet"
                             }
 
-                            button {
-                                class: if !is_snippet {
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-background text-foreground shadow-sm"
-                                } else {
-                                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                                },
-                                onclick: move |_| preview_mode.set(PreviewMode::Page),
+                            Button {
+                                variant: if !is_snippet { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                                size: ButtonSize::Small,
+                                class: "text-xs".to_string(),
+                                on_click: move |_| preview_mode.set(PreviewMode::Page),
                                 lucide_dioxus::FileText { class: "w-3.5 h-3.5" }
                                 "Page (A4)"
                             }
@@ -261,38 +261,78 @@ pub fn ChartEditor() -> Element {
 /// Gracefully handles invalid/incomplete source by keeping the last valid render
 /// or showing a blank white page. This allows smooth typewriter animations without
 /// flashing error states.
+/// Renders a chart as a static SVG image.
+///
+/// Generates the SVG once on mount from the initial `source` value and displays
+/// it as an `<img>`. Content changes do not trigger re-renders — this is
+/// intentional for use in chart browsers and preview cards.
+///
+/// TODO: swap back to the WebGPU canvas renderer once Vulkan/WebGPU is confirmed
+/// working in Brave (flip `wgpu_failed` to `false` in renderer.rs and restore
+/// the canvas-based StaticChartCanvas approach).
 #[component]
 pub fn StaticChartRenderer(
     source: Signal<String>,
     mode: Signal<PreviewMode>,
     canvas_id: Option<String>,
-    /// Fixed width for layout calculations (ignores container width from CSS).
-    /// Useful when container is transformed (skewed) and bounding rect is distorted.
     fixed_layout_width: Option<f64>,
 ) -> Element {
-    // Use provided canvas_id or default
-    let canvas_id = canvas_id.unwrap_or_else(|| "static-chart-canvas".to_string());
+    let _ = canvas_id; // unused in SVG path
+    let svg_url: Signal<Option<String>> = use_signal(|| None);
 
-    // Always render the canvas - StaticChartCanvas handles invalid source gracefully
+    use_effect(move || {
+        // peek() — no reactive subscription, so this only runs once on mount
+        let source_text = source.peek().clone();
+        let is_snippet = *mode.peek() == PreviewMode::Snippet;
+        let layout_width = fixed_layout_width.unwrap_or(800.0);
+        let mut url_out = svg_url;
+
+        spawn(async move {
+            let svg = (|| -> Result<String, String> {
+                use crate::renderer::ChartLayoutManager;
+                let mut manager = ChartLayoutManager::new()?;
+                let chart = if source_text.trim().is_empty() {
+                    None
+                } else {
+                    keyflow::parse(&source_text)
+                        .ok()
+                        .filter(|c| !c.sections.is_empty())
+                };
+                if let Some(chart) = chart {
+                    manager.layout_chart_for_export(&chart, layout_width, is_snippet);
+                    manager.export_to_svg()
+                } else {
+                    Ok(r#"<svg xmlns="http://www.w3.org/2000/svg" width="595" height="50"><rect width="100%" height="100%" fill="white"/></svg>"#.to_string())
+                }
+            })();
+
+            #[cfg(target_arch = "wasm32")]
+            if let Ok(svg_str) = svg {
+                use wasm_bindgen::JsValue;
+                use web_sys::{Blob, BlobPropertyBag, Url};
+                let parts = js_sys::Array::new();
+                parts.push(&JsValue::from_str(&svg_str));
+                let mut opts = BlobPropertyBag::new();
+                opts.type_("image/svg+xml;charset=utf-8");
+                if let Ok(blob) = Blob::new_with_str_sequence_and_options(&parts, &opts) {
+                    if let Ok(url) = Url::create_object_url_with_blob(&blob) {
+                        url_out.set(Some(url));
+                    }
+                }
+            }
+        });
+    });
+
     rsx! {
         div {
             class: "relative w-full h-full",
-
-            // Canvas for WebGPU rendering - fills container, chart scales to fit
-            // White background ensures blank page when content is invalid
-            canvas {
-                id: "{canvas_id}",
-                class: "w-full h-full",
-                style: "touch-action: none; background: white;",
-            }
-
-            // WebGPU rendering - static (no pan/zoom)
-            // Handles parse errors gracefully without reinitializing
-            StaticChartCanvas {
-                source: source,
-                mode: mode,
-                canvas_id: canvas_id.clone(),
-                fixed_layout_width: fixed_layout_width
+            style: "background: white;",
+            if let Some(url) = svg_url.read().as_ref() {
+                img {
+                    src: "{url}",
+                    class: "w-full h-full object-contain",
+                    alt: "Chart preview",
+                }
             }
         }
     }

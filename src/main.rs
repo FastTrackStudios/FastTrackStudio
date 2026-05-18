@@ -32,6 +32,10 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     Home {},
+    #[route("/mission")]
+    Mission {},
+    #[route("/projects")]
+    Projects {},
     #[route("/docs")]
     DocsHome {},
     #[route("/keyflow/chart")]
@@ -103,10 +107,15 @@ fn main() {
 /// Root application component
 #[component]
 fn App() -> Element {
+    let theme_state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
+
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        Router::<Route> {}
+        ThemeProvider {
+            state: theme_state,
+            Router::<Route> {}
+        }
     }
 }
 
@@ -162,6 +171,8 @@ fn Layout() -> Element {
                             {
                                 let section = match route {
                                     Route::ChartEditor {} => Some("Keyflow Editor"),
+                                    Route::Mission {} => Some("Our Mission"),
+                                    Route::Projects {} => Some("Projects"),
                                     Route::DocsHome {}
                                     | Route::DocsKeyflow {}
                                     | Route::DocsReaper {}
@@ -190,6 +201,18 @@ fn Layout() -> Element {
                     // Center navigation (hidden on mobile)
                     div {
                         class: "hidden md:flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-muted/50",
+
+                        NavLink {
+                            to: Route::Mission {},
+                            icon: rsx! { Users { class: "w-4 h-4" } },
+                            label: "Mission"
+                        }
+
+                        NavLink {
+                            to: Route::Projects {},
+                            icon: rsx! { Code { class: "w-4 h-4" } },
+                            label: "Projects"
+                        }
 
                         NavLink {
                             to: Route::DocsHome {},
@@ -411,12 +434,16 @@ fn Home() -> Element {
 
                         h1 {
                             class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
-                            "Fast-Efficient Workflow"
+                            "Professional Audio Tools, "
+                            span {
+                                class: "text-primary",
+                                "Pleasant Experience"
+                            }
                         }
 
                         p {
                             class: "mx-auto my-8 max-w-2xl text-lg md:text-xl text-muted-foreground",
-                            "A complete music production toolset built in Rust. Seamless REAPER integration, powerful chart notation, and real-time P2P collaboration."
+                            "High-quality music production tools built on open standards. Designed for Linux, macOS, and Windows \u{2014} advancing the audio production space for everyone."
                         }
 
                         div {
@@ -429,9 +456,9 @@ fn Home() -> Element {
                             }
 
                             Link {
-                                to: Route::DocsHome {},
+                                to: Route::Mission {},
                                 class: "inline-flex items-center justify-center gap-2 border border-border bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8 rounded-md font-medium transition-colors",
-                                "Read the Docs"
+                                "Our Mission"
                             }
                         }
                     }
@@ -552,6 +579,348 @@ fn Home() -> Element {
                     }
 
                     SetlistPreviewCard {}
+                }
+            }
+        }
+    }
+}
+
+/// Mission / About Us page
+#[component]
+fn Mission() -> Element {
+    rsx! {
+        div {
+            class: "relative pt-24 pb-16",
+
+            // Page header
+            section {
+                class: "relative mx-auto max-w-3xl px-6 py-16 text-center",
+
+                h1 {
+                    class: "text-4xl font-semibold md:text-5xl text-foreground mb-6",
+                    "Our Mission"
+                }
+
+                p {
+                    class: "text-xl text-muted-foreground",
+                    "Why we build FastTrackStudio, and who we build it for."
+                }
+            }
+
+            // Main content
+            article {
+                class: "mx-auto max-w-3xl px-6 space-y-12",
+
+                // The Problem
+                section {
+                    class: "space-y-4",
+
+                    h2 {
+                        class: "text-2xl font-semibold text-foreground",
+                        "The Problem We See"
+                    }
+
+                    p {
+                        class: "text-lg leading-relaxed text-muted-foreground",
+                        "Music production software has long been fragmented along platform lines. High-quality, thoughtfully designed tools are often locked to a single operating system, leaving musicians on Linux \u{2014} and increasingly macOS and Windows \u{2014} choosing between powerful software with poor user experience, or pleasant software that only runs on one platform."
+                    }
+
+                    p {
+                        class: "text-lg leading-relaxed text-muted-foreground",
+                        "Meanwhile, the formats and protocols that connect these tools remain proprietary, making interoperability an afterthought rather than a foundation."
+                    }
+                }
+
+                // Our Approach
+                section {
+                    class: "space-y-4",
+
+                    h2 {
+                        class: "text-2xl font-semibold text-foreground",
+                        "What We Believe"
+                    }
+
+                    div {
+                        class: "space-y-6",
+
+                        MissionPrinciple {
+                            title: "Quality and Craft Are Not Optional",
+                            body: "Every interaction should feel intentional. We invest in GPU-accelerated rendering, sub-frame latency, and refined typography not because they are trendy, but because musicians deserve tools that respect their craft with the same seriousness they bring to their art."
+                        }
+
+                        MissionPrinciple {
+                            title: "Open Standards Move the Whole Industry Forward",
+                            body: "Keyflow is an open chart notation format. Our protocols are documented. Our rendering pipeline is built on open GPU standards. When one tool improves, the ecosystem benefits \u{2014} not just our users, but anyone building for musicians."
+                        }
+
+                        MissionPrinciple {
+                            title: "Every Platform, First-Class",
+                            body: "Linux, macOS, and Windows are equal citizens. We don\u{2019}t port an afterthought \u{2014} we build cross-platform from day one using Rust, ensuring native performance and consistent behavior everywhere musicians work."
+                        }
+
+                        MissionPrinciple {
+                            title: "Pleasant Experience Is a Feature",
+                            body: "Powerful tools don\u{2019}t have to be hostile. We believe the best software disappears into the workflow \u{2014} fast enough that you never wait, intuitive enough that you rarely reach for the manual, and beautiful enough that you enjoy opening it."
+                        }
+                    }
+                }
+
+                // What We're Building
+                section {
+                    class: "space-y-4",
+
+                    h2 {
+                        class: "text-2xl font-semibold text-foreground",
+                        "What We\u{2019}re Building"
+                    }
+
+                    p {
+                        class: "text-lg leading-relaxed text-muted-foreground",
+                        "FastTrackStudio is a suite of audio production tools: a chart notation language and renderer (Keyflow), deep REAPER DAW integration, a desktop performance app, audio plugins, and real-time peer-to-peer collaboration. Everything is built in Rust for reliability and performance, and designed to work together seamlessly or stand alone."
+                    }
+
+                    p {
+                        class: "text-lg leading-relaxed text-muted-foreground",
+                        "We\u{2019}re not trying to replace your DAW. We\u{2019}re building the tools that sit alongside it \u{2014} the chart on your music stand, the setlist on your iPad, the shared session with your bandmate across town \u{2014} and making them as good as they can possibly be."
+                    }
+                }
+
+                // Call to action
+                section {
+                    class: "pt-8 pb-4 border-t border-border/30 text-center space-y-6",
+
+                    p {
+                        class: "text-lg text-muted-foreground",
+                        "Want to see what we\u{2019}re building? Try the chart editor or explore the documentation."
+                    }
+
+                    div {
+                        class: "flex flex-col sm:flex-row items-center justify-center gap-3",
+
+                        Link {
+                            to: Route::ChartEditor {},
+                            class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
+                            "Try the Editor"
+                        }
+
+                        Link {
+                            to: Route::DocsHome {},
+                            class: "inline-flex items-center justify-center gap-2 border border-border bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8 rounded-md font-medium transition-colors",
+                            "Read the Docs"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A single mission principle with title and body text
+#[component]
+fn MissionPrinciple(title: &'static str, body: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "pl-4 border-l-2 border-primary/40",
+
+            h3 {
+                class: "text-lg font-medium text-foreground mb-2",
+                "{title}"
+            }
+
+            p {
+                class: "text-base leading-relaxed text-muted-foreground",
+                "{body}"
+            }
+        }
+    }
+}
+
+/// Projects overview page
+#[component]
+fn Projects() -> Element {
+    rsx! {
+        div {
+            class: "relative pt-24 pb-24",
+
+            // Page header
+            section {
+                class: "relative mx-auto max-w-5xl px-6 pt-16 pb-12 text-center",
+
+                p {
+                    class: "text-sm font-medium tracking-widest uppercase text-primary mb-4",
+                    "Open Source"
+                }
+
+                h1 {
+                    class: "text-4xl font-semibold md:text-5xl text-foreground mb-6",
+                    "Projects"
+                }
+
+                p {
+                    class: "text-lg text-muted-foreground max-w-xl mx-auto",
+                    "Professional Workflow, Open Ecosystem."
+                }
+            }
+
+            // Project grid
+            div {
+                class: "mx-auto max-w-5xl px-6 grid md:grid-cols-2 gap-5",
+
+                ProjectCard {
+                    name: "Keyflow",
+                    tagline: "Chart Notation & Rendering",
+                    description: "Plain-text notation for lead sheets, chord charts, and rhythm charts. Parses to a structured model, lays out with sub-millisecond passes, and renders publication-quality output via Vello\u{2019}s GPU pipeline.",
+                    tags: vec!["notation", "rendering", "vello", "open-format"],
+                    github: "https://github.com/FastTrackStudios/keyflow",
+                    icon: rsx! { FileText { class: "w-5 h-5" } },
+                    accent: "emerald",
+                }
+
+                ProjectCard {
+                    name: "Session",
+                    tagline: "Transport & State Coordination",
+                    description: "The synchronization layer. Manages transport state, playback position, and shared session data across every tool in the ecosystem \u{2014} local or networked.",
+                    tags: vec!["session", "transport", "sync", "protocol"],
+                    github: "https://github.com/FastTrackStudios/session",
+                    icon: rsx! { Music { class: "w-5 h-5" } },
+                    accent: "violet",
+                }
+
+                ProjectCard {
+                    name: "Signal",
+                    tagline: "Audio Plugins & DSP",
+                    description: "Instruments and effects targeting CLAP and VST3 from a single Rust codebase via nih-plug. Custom GPU-accelerated UIs built with the FTS design system.",
+                    tags: vec!["audio", "plugins", "clap", "vst3", "nih-plug"],
+                    github: "https://github.com/FastTrackStudios/signal",
+                    icon: rsx! { fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-5 h-5" } },
+                    accent: "amber",
+                }
+
+                ProjectCard {
+                    name: "DAW",
+                    tagline: "REAPER Integration",
+                    description: "Deep DAW bridge for REAPER. Bidirectional transport control, marker-driven chart navigation, MIDI routing, and real-time state broadcast over the FTS protocol.",
+                    tags: vec!["reaper", "daw", "midi", "extension"],
+                    github: "https://github.com/FastTrackStudios/daw",
+                    icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } },
+                    accent: "blue",
+                }
+
+                ProjectCard {
+                    name: "Input",
+                    tagline: "Keyboard Design & Ergonomics",
+                    description: "A wiki and design journal documenting keyboard layout decisions for REAPER and the fts-input system. Exploring efficient, ergonomic input mappings for professional audio workflows.",
+                    tags: vec!["keyboard", "ergonomics", "reaper", "input", "wiki"],
+                    github: "https://github.com/FastTrackStudios/input",
+
+                    icon: rsx! { PenTool { class: "w-5 h-5" } },
+                    accent: "cyan",
+                }
+            }
+
+            // Bottom note
+            section {
+                class: "mx-auto max-w-5xl px-6 mt-16 text-center",
+
+                p {
+                    class: "text-sm text-muted-foreground/70",
+                    "Built in Rust. Contributions welcome."
+                }
+            }
+        }
+    }
+}
+
+/// A project card for the Projects grid
+#[component]
+fn ProjectCard(
+    name: &'static str,
+    tagline: &'static str,
+    description: &'static str,
+    tags: Vec<&'static str>,
+    github: &'static str,
+    icon: Element,
+    accent: &'static str,
+) -> Element {
+    let accent_glow = match accent {
+        "emerald" => "group-hover:shadow-emerald-500/5",
+        "violet" => "group-hover:shadow-violet-500/5",
+        "blue" => "group-hover:shadow-blue-500/5",
+        "amber" => "group-hover:shadow-amber-500/5",
+        "cyan" => "group-hover:shadow-cyan-500/5",
+        _ => "group-hover:shadow-primary/5",
+    };
+    let accent_icon_bg = match accent {
+        "emerald" => "bg-emerald-500/10 text-emerald-400",
+        "violet" => "bg-violet-500/10 text-violet-400",
+        "blue" => "bg-blue-500/10 text-blue-400",
+        "amber" => "bg-amber-500/10 text-amber-400",
+        "cyan" => "bg-cyan-500/10 text-cyan-400",
+        _ => "bg-primary/10 text-primary",
+    };
+    let accent_tag = match accent {
+        "emerald" => "text-emerald-400/60",
+        "violet" => "text-violet-400/60",
+        "blue" => "text-blue-400/60",
+        "amber" => "text-amber-400/60",
+        "cyan" => "text-cyan-400/60",
+        _ => "text-primary/60",
+    };
+
+    rsx! {
+        a {
+            href: "{github}",
+            target: "_blank",
+            class: "group rounded-2xl border border-border/50 bg-card/30 hover:bg-card/60 hover:border-border transition-all duration-200 shadow-lg shadow-black/5 {accent_glow} flex flex-col overflow-hidden",
+
+            // Card body
+            div {
+                class: "p-7 flex-1 flex flex-col",
+
+                // Icon bubble + name row
+                div {
+                    class: "flex items-center gap-4 mb-5",
+
+                    div {
+                        class: "w-10 h-10 rounded-xl {accent_icon_bg} flex items-center justify-center shrink-0",
+                        {icon}
+                    }
+
+                    div {
+                        h3 {
+                            class: "text-lg font-semibold text-foreground group-hover:text-foreground transition-colors",
+                            "{name}"
+                        }
+                        p {
+                            class: "text-xs font-medium tracking-wide uppercase text-muted-foreground/70",
+                            "{tagline}"
+                        }
+                    }
+                }
+
+                // Description
+                p {
+                    class: "text-sm leading-relaxed text-muted-foreground mb-6 flex-1",
+                    "{description}"
+                }
+
+                // Tags row
+                div {
+                    class: "flex flex-wrap gap-x-3 gap-y-1 mb-5",
+                    for tag in tags.iter() {
+                        span {
+                            class: "text-xs font-mono {accent_tag}",
+                            "#{tag}"
+                        }
+                    }
+                }
+
+                // Footer: GitHub
+                div {
+                    class: "flex items-center gap-2 pt-4 border-t border-border/30 text-sm text-muted-foreground/60 group-hover:text-muted-foreground transition-colors",
+                    Github { class: "w-4 h-4" }
+                    span { class: "flex-1", "View on GitHub" }
+                    ExternalLink { class: "w-3.5 h-3.5 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" }
                 }
             }
         }

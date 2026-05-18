@@ -38,6 +38,9 @@ pub struct ChartLayoutManager {
     /// WebGPU renderer (WASM only)
     #[cfg(target_arch = "wasm32")]
     wgpu_renderer: Option<wasm::WebGpuRenderer>,
+    /// True when WebGPU is unavailable and we've fallen back to SVG/2D rendering (WASM only)
+    #[cfg(target_arch = "wasm32")]
+    wgpu_failed: bool,
 }
 
 impl ChartLayoutManager {
@@ -57,6 +60,9 @@ impl ChartLayoutManager {
             last_chart_hash: 0,
             #[cfg(target_arch = "wasm32")]
             wgpu_renderer: None,
+            // TODO: switch back to `false` once WebGPU/Vulkan is confirmed working in Brave
+            #[cfg(target_arch = "wasm32")]
+            wgpu_failed: true,
         })
     }
 
@@ -303,10 +309,23 @@ impl ChartLayoutManager {
     ) -> Result<(), String> {
         use wasm::WebGpuRenderer;
 
+        // SVG fallback: render at fit-to-canvas scale (pan/zoom not preserved)
+        if self.wgpu_failed {
+            let svg = self.export_to_svg()?;
+            return wasm::render_svg_to_canvas_2d(canvas, &svg).await;
+        }
+
         // Initialize renderer if needed
         if self.wgpu_renderer.is_none() {
-            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
-            self.wgpu_renderer = Some(renderer);
+            match WebGpuRenderer::new(canvas.clone()).await {
+                Ok(r) => self.wgpu_renderer = Some(r),
+                Err(e) => {
+                    tracing::warn!("WebGPU unavailable, falling back to SVG rendering: {}", e);
+                    self.wgpu_failed = true;
+                    let svg = self.export_to_svg()?;
+                    return wasm::render_svg_to_canvas_2d(canvas, &svg).await;
+                }
+            }
         }
 
         // Get canvas dimensions first
@@ -469,10 +488,23 @@ impl ChartLayoutManager {
     ) -> Result<(), String> {
         use wasm::WebGpuRenderer;
 
+        // If WebGPU previously failed, use SVG fallback immediately
+        if self.wgpu_failed {
+            let svg = self.export_to_svg()?;
+            return wasm::render_svg_to_canvas_2d(canvas, &svg).await;
+        }
+
         // Initialize renderer if needed
         if self.wgpu_renderer.is_none() {
-            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
-            self.wgpu_renderer = Some(renderer);
+            match WebGpuRenderer::new(canvas.clone()).await {
+                Ok(r) => self.wgpu_renderer = Some(r),
+                Err(e) => {
+                    tracing::warn!("WebGPU unavailable, falling back to SVG rendering: {}", e);
+                    self.wgpu_failed = true;
+                    let svg = self.export_to_svg()?;
+                    return wasm::render_svg_to_canvas_2d(canvas, &svg).await;
+                }
+            }
         }
 
         // Get canvas dimensions first
@@ -631,10 +663,21 @@ impl ChartLayoutManager {
     ) -> Result<(), String> {
         use wasm::WebGpuRenderer;
 
+        // If WebGPU previously failed, fill white with 2D canvas
+        if self.wgpu_failed {
+            return wasm::fill_canvas_white(canvas);
+        }
+
         // Initialize renderer if needed
         if self.wgpu_renderer.is_none() {
-            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
-            self.wgpu_renderer = Some(renderer);
+            match WebGpuRenderer::new(canvas.clone()).await {
+                Ok(r) => self.wgpu_renderer = Some(r),
+                Err(e) => {
+                    tracing::warn!("WebGPU unavailable, falling back to 2D rendering: {}", e);
+                    self.wgpu_failed = true;
+                    return wasm::fill_canvas_white(canvas);
+                }
+            }
         }
 
         // Get canvas dimensions
@@ -686,10 +729,20 @@ impl ChartLayoutManager {
         const A4_WIDTH: f64 = 595.0;
         const A4_HEIGHT: f64 = 842.0;
 
+        if self.wgpu_failed {
+            return wasm::fill_canvas_white(canvas);
+        }
+
         // Initialize renderer if needed
         if self.wgpu_renderer.is_none() {
-            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
-            self.wgpu_renderer = Some(renderer);
+            match WebGpuRenderer::new(canvas.clone()).await {
+                Ok(r) => self.wgpu_renderer = Some(r),
+                Err(e) => {
+                    tracing::warn!("WebGPU unavailable, falling back to 2D rendering: {}", e);
+                    self.wgpu_failed = true;
+                    return wasm::fill_canvas_white(canvas);
+                }
+            }
         }
 
         // Get canvas dimensions
@@ -1134,10 +1187,22 @@ impl ChartLayoutManager {
     ) -> Result<(), String> {
         use wasm::WebGpuRenderer;
 
+        if self.wgpu_failed {
+            let svg = self.export_to_svg()?;
+            return wasm::render_svg_to_canvas_2d(canvas, &svg).await;
+        }
+
         // Initialize renderer if needed
         if self.wgpu_renderer.is_none() {
-            let renderer = WebGpuRenderer::new(canvas.clone()).await?;
-            self.wgpu_renderer = Some(renderer);
+            match WebGpuRenderer::new(canvas.clone()).await {
+                Ok(r) => self.wgpu_renderer = Some(r),
+                Err(e) => {
+                    tracing::warn!("WebGPU unavailable, falling back to SVG rendering: {}", e);
+                    self.wgpu_failed = true;
+                    let svg = self.export_to_svg()?;
+                    return wasm::render_svg_to_canvas_2d(canvas, &svg).await;
+                }
+            }
         }
 
         // Get canvas dimensions
@@ -1402,6 +1467,10 @@ pub mod wasm {
 
     impl WebGpuRenderer {
         /// Create a new WebGPU renderer from a canvas element.
+        ///
+        /// Probes adapter availability BEFORE calling `create_surface` so that if WebGPU
+        /// is unavailable, the canvas context slot is not consumed and can still be used
+        /// for 2D-canvas SVG fallback rendering.
         pub async fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
             // Get canvas dimensions
             let width = canvas.width().max(1);
@@ -1413,27 +1482,62 @@ pub mod wasm {
                 ..Default::default()
             });
 
-            // Create surface from canvas
+            // --- Pre-flight adapter probe (no surface) ---
+            // Must happen BEFORE create_surface because calling create_surface on a canvas
+            // binds the canvas to the "webgpu" context type; after that, getContext("2d")
+            // returns null. By checking adapter availability first we avoid locking the
+            // canvas when WebGPU is not available (e.g. Brave fingerprint protection).
+            let probe = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::None,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await;
+            let probe = match probe {
+                Ok(_) => Ok(()),
+                Err(_) => instance
+                    .request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::None,
+                        compatible_surface: None,
+                        force_fallback_adapter: true,
+                    })
+                    .await
+                    .map(|_| ()),
+            };
+            probe.map_err(|e| format!("No WebGPU adapter available: {e}"))?;
+
+            // --- Surface creation (locks canvas to "webgpu" context) ---
             let surface = instance
                 .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
                 .map_err(|e| format!("Failed to create surface: {e}"))?;
 
-            // Request adapter
-            let adapter = instance
+            // Request adapter with surface compatibility — try hardware first, then software
+            let adapter = match instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
                     compatible_surface: Some(&surface),
                     force_fallback_adapter: false,
                 })
                 .await
-                .map_err(|e| format!("Failed to find suitable GPU adapter: {e}"))?;
+            {
+                Ok(a) => a,
+                Err(_) => instance
+                    .request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::None,
+                        compatible_surface: Some(&surface),
+                        force_fallback_adapter: true,
+                    })
+                    .await
+                    .map_err(|e| format!("Failed to find suitable GPU adapter: {e}"))?,
+            };
 
             // Request device
             let (device, queue) = adapter
                 .request_device(&wgpu::DeviceDescriptor {
                     label: Some("Docsite Chart Renderer"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    required_limits: wgpu::Limits::default(),
                     ..Default::default()
                 })
                 .await
@@ -1574,5 +1678,75 @@ pub mod wasm {
         pub fn dimensions(&self) -> (u32, u32) {
             (self.width, self.height)
         }
+    }
+
+    /// Fill a canvas element with solid white using the 2D Canvas API.
+    ///
+    /// Used as a lightweight fallback when WebGPU is unavailable.
+    pub fn fill_canvas_white(canvas: &web_sys::HtmlCanvasElement) -> Result<(), String> {
+        use wasm_bindgen::JsCast;
+        use web_sys::CanvasRenderingContext2d;
+
+        let ctx = canvas
+            .get_context("2d")
+            .map_err(|e| format!("{e:?}"))?
+            .ok_or("Failed to get 2D canvas context")?
+            .dyn_into::<CanvasRenderingContext2d>()
+            .map_err(|_| "Canvas context is not CanvasRenderingContext2d")?;
+
+        ctx.set_fill_style_str("white");
+        ctx.fill_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
+        Ok(())
+    }
+
+    /// Render an SVG string to a canvas element using the 2D Canvas API.
+    ///
+    /// This is the fallback rendering path when WebGPU is unavailable. It:
+    /// 1. Creates a Blob URL from the SVG string
+    /// 2. Loads it into an HTMLImageElement via `decode()`
+    /// 3. Draws it to the canvas scaled to fill the canvas dimensions
+    ///
+    /// Works in all browsers that support SVG rendering (all modern browsers).
+    pub async fn render_svg_to_canvas_2d(
+        canvas: &web_sys::HtmlCanvasElement,
+        svg: &str,
+    ) -> Result<(), String> {
+        use wasm_bindgen::JsCast;
+        use web_sys::{Blob, BlobPropertyBag, CanvasRenderingContext2d, HtmlImageElement, Url};
+
+        let w = canvas.width() as f64;
+        let h = canvas.height() as f64;
+
+        // Get 2D context — no pre-clear needed, SVG has white background
+        let ctx = canvas
+            .get_context("2d")
+            .map_err(|e| format!("{e:?}"))?
+            .ok_or("Failed to get 2D canvas context")?
+            .dyn_into::<CanvasRenderingContext2d>()
+            .map_err(|_| "Canvas context is not CanvasRenderingContext2d")?;
+
+        // Create a Blob URL from the SVG string
+        let parts = js_sys::Array::new();
+        parts.push(&wasm_bindgen::JsValue::from_str(svg));
+        let mut opts = BlobPropertyBag::new();
+        opts.type_("image/svg+xml;charset=utf-8");
+        let blob =
+            Blob::new_with_str_sequence_and_options(&parts, &opts).map_err(|e| format!("{e:?}"))?;
+        let url = Url::create_object_url_with_blob(&blob).map_err(|e| format!("{e:?}"))?;
+
+        // Load SVG into an image element and await decode
+        let img = HtmlImageElement::new().map_err(|e| format!("{e:?}"))?;
+        img.set_src(&url);
+        wasm_bindgen_futures::JsFuture::from(img.decode())
+            .await
+            .map_err(|e| format!("SVG image decode failed: {e:?}"))?;
+
+        // Draw image stretched to fill canvas
+        ctx.draw_image_with_html_image_element_and_dw_and_dh(&img, 0.0, 0.0, w, h)
+            .map_err(|e| format!("{e:?}"))?;
+
+        // Release the blob URL
+        Url::revoke_object_url(&url).ok();
+        Ok(())
     }
 }
