@@ -15,6 +15,7 @@ pub mod io;
 pub mod meter;
 pub mod midi;
 pub mod mix_aux;
+pub mod mute_automation;
 pub mod mute_resolver;
 pub mod plugins;
 pub mod regions;
@@ -496,6 +497,10 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     // track isn't user-muted, just inactive. See
     // docs/pt-field-map.md "Effective mute" + parse/mute_resolver.rs.
     mute_resolver::resolve_effective_mute(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
+
+    // Step 12c2.6: Decode per-track mute-automation envelope from the
+    // second 0x260a child under each 0x260d wrapper.
+    mute_automation::apply_mute_automation(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
 
     // Step 12c3: Fall back to 0x2624 vol/pan mirrors for converter-
     // generated PTX where 0x1029 isn't populated.

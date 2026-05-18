@@ -209,6 +209,18 @@ pub struct Track {
     /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
     /// to REAPER's u32 RGB.
     pub color_byte: u8,
+    /// Mute-automation breakpoints decoded from this track's `0x260a[1]`
+    /// (the second `0x260a` under the per-track `0x260d` wrapper —
+    /// position-paired by PT's track-list document order).
+    ///
+    /// Format: 28-byte header, then `N × 6` breakpoint bytes. Each
+    /// breakpoint is `u32 LE time_samples + u8 muted (0/1) + u8 shape`.
+    /// Header `+10` is total count (`1 + user_count`), `+16` is user
+    /// count, `+4` is payload size. See `docs/pt-field-map.md` §
+    /// "Additional probe findings — mute_envelope".
+    ///
+    /// Empty when the track has no automation envelope.
+    pub mute_automation: Vec<MuteAutomationBreakpoint>,
     /// Hierarchy / grouping marker decoded from `0x251a` payload byte
     /// (immediately after the length-prefixed track name).
     ///
@@ -225,6 +237,22 @@ pub struct Track {
     /// We surface the raw byte until a `folder-nesting.ptx` ground-truth
     /// fixture lets us disambiguate `is_folder` vs `is_grouped_child`.
     pub is_folder: bool,
+}
+
+/// A single breakpoint in a mute-automation envelope.
+///
+/// Decoded from `0x260a[1]` per track. Six bytes per point:
+/// `u32 LE time_samples + u8 muted + u8 shape`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MuteAutomationBreakpoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// `true` = muted at this time, `false` = un-muted.
+    pub muted: bool,
+    /// Shape byte. `0` = step/square; values verified against REAPER
+    /// `MUTEENV` Square shape only — non-zero shapes are passed
+    /// through verbatim but their semantics are not yet decoded.
+    pub shape: u8,
 }
 
 /// A fade region on a track.

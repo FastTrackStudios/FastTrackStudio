@@ -1074,17 +1074,29 @@ fn patch_solo_defeat(session: &mut RawSession, defeat: bool) {
 /// patch the header counters/size in place. Ancestor block sizes
 /// cascade through `splice`.
 fn write_mute_automation(session: &mut RawSession, points: &[MuteAutomationPoint]) {
-    let blocks_260a = collect_by_raw_ct(&session.blocks, 0x260a);
-    let Some(b) = blocks_260a.get(1) else {
-        return;
+    // The mute-automation envelope lives in the SECOND 0x260a child
+    // of the first 0x260d wrapper (the per-track mix wrapper). Use
+    // the nested lookup so the writer matches the parser's view.
+    let envelope = {
+        let wrappers = collect_by_raw_ct(&session.blocks, 0x260d);
+        let Some(wrap) = wrappers.first() else {
+            return;
+        };
+        let mut children_260a = Vec::new();
+        for c in &wrap.children {
+            if c.content_type_raw == 0x260a {
+                children_260a.push((c.start, c.end));
+            }
+        }
+        let Some(&entry) = children_260a.get(1) else {
+            return;
+        };
+        entry
     };
-    let payload_start = b.start + 9;
-    let block_end = b.end;
-    let header_size_off = b.start + 3 + 4; // header u32 size lives where splice expects it; for our payload counter we use +4 inside payload
-    let _ = header_size_off; // not used: splice handles block_size cascade
+    let (block_start, block_end) = envelope;
+    let payload_start = block_start + 9;
     let n = points.len() as u8;
     let total = n.saturating_add(1);
-    // Patch in-payload counters (these are u8 fields per the field map).
     let cnt_total = payload_start + 10;
     let cnt_user = payload_start + 16;
     if cnt_total < session.data.len() {
@@ -1094,7 +1106,6 @@ fn write_mute_automation(session: &mut RawSession, points: &[MuteAutomationPoint
         session.data[cnt_user] = n;
     }
 
-    // Build the breakpoint bytes (6 per point).
     let mut bp = Vec::with_capacity(points.len() * 6);
     for pt in points {
         bp.extend_from_slice(&pt.time_samples.to_le_bytes());
@@ -1102,9 +1113,7 @@ fn write_mute_automation(session: &mut RawSession, points: &[MuteAutomationPoint
         bp.push(0); // shape: square/step
     }
 
-    // Patch the in-payload size field at +4 (u32 LE). Treat the
-    // current value as authoritative for the baseline and add
-    // `bp.len()` to it.
+    // Patch in-payload size at +4 (u32 LE).
     let size_off = payload_start + 4;
     if size_off + 4 <= session.data.len() {
         let cur = u32::from_le_bytes([
@@ -1117,9 +1126,14 @@ fn write_mute_automation(session: &mut RawSession, points: &[MuteAutomationPoint
         session.data[size_off..size_off + 4].copy_from_slice(&new.to_le_bytes());
     }
 
-    // Splice the breakpoint bytes at the end of the block's payload.
-    // Ancestor `block_size` fields cascade via `splice`.
-    splice(session, block_end, 0, &bp);
+    // Splice at the exact payload offset the parser reads from
+    // (`payload_start + 28`). This is inside the block (so splice()
+    // updates the 0x260a[1] block_size) and matches the converter's
+    // user-breakpoint location. Pushes the trailing pad bytes forward
+    // but parser stops at user_count.
+    let splice_at = payload_start + 28;
+    let _ = block_end;
+    splice(session, splice_at, 0, &bp);
 }
 
 fn patch_solo(session: &mut RawSession, solo: bool) {
@@ -1331,6 +1345,39 @@ mod tests {
         let tracks: Vec<_> = session.all_tracks().collect();
         let t = tracks.iter().find(|t| t.name == spec.name).expect("track");
         assert!(t.solo_defeat, "solo_defeat should round-trip");
+    }
+
+    #[test]
+    fn write_with_mute_automation_round_trip() {
+        // Single-track + two mute breakpoints. Parser surfaces them as
+        // Track.mute_automation; spec values should round-trip.
+        let spec = NativeTrackSpec {
+            name: "EnvTrack".to_string(),
+            mute_automation: vec![
+                MuteAutomationPoint {
+                    time_samples: 48000,
+                    muted: true,
+                },
+                MuteAutomationPoint {
+                    time_samples: 96000,
+                    muted: false,
+                },
+            ],
+            ..NativeTrackSpec::default()
+        };
+        let session = parse_native(&spec);
+        let tracks: Vec<_> = session.all_tracks().collect();
+        let t = tracks.iter().find(|t| t.name == "EnvTrack").expect("track");
+        assert_eq!(
+            t.mute_automation.len(),
+            2,
+            "expected 2 breakpoints, got {}",
+            t.mute_automation.len()
+        );
+        assert_eq!(t.mute_automation[0].time_samples, 48000);
+        assert!(t.mute_automation[0].muted);
+        assert_eq!(t.mute_automation[1].time_samples, 96000);
+        assert!(!t.mute_automation[1].muted);
     }
 
     #[test]

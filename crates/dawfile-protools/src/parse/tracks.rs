@@ -149,6 +149,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     alternate_playlists: Vec::new(),
                     output: String::new(),
                     color_byte: 0,
+                    mute_automation: Vec::new(),
                     is_folder: false,
                 },
                 channel_pos: ch,
