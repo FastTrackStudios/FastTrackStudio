@@ -69,6 +69,12 @@ pub struct AudioRegion {
     pub length: u64,
     /// Index of the source audio file in [`ProToolsSession::audio_files`].
     pub audio_file_index: u16,
+    /// 6-byte UID identifying the source audio file. Regions that
+    /// reference the same WAV share this UID. Decoded from payload
+    /// `+54..+60` of the region's inner `0x2628` sub-block —
+    /// discovered via Frida byte-read trace on the LotF user session.
+    /// See `docs/converter-frida-discovered-offsets.md`.
+    pub source_file_uid: Option<[u8; 6]>,
 }
 
 /// A MIDI event within a MIDI region.

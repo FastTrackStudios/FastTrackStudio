@@ -66,14 +66,36 @@ fn parse_single_region(
 
     let (start, sample_offset, length) = cursor::parse_three_point(cursor, three_point_offset);
 
-    // Audio file index in the new (`0x2629`) region format has not
-    // been reliably located inside the payload. The previous read
-    // formula (`block.offset + block.block_size`) landed past the
-    // end of the block in the next block's magic byte and returned
-    // garbage. We deliberately return `0` here so downstream code
-    // falls back to name-stem heuristic. See `pt-parity-roadmap.md`
-    // §3 + §16 — tracked as a known unobservable.
+    // Audio file index: legacy zero placeholder. The real region→file
+    // link is the 6-byte UID at payload `+54..+60` of the inner
+    // `0x2628` sub-block (discovered via Frida byte-read trace on
+    // the LotF session — see `docs/converter-frida-discovered-offsets.md`).
     let audio_file_index = 0u16;
+
+    // Extract the 6-byte source-file UID from the inner 0x2628.
+    // The UID lives at block-magic offset +54 (= block.offset + 47,
+    // since block.offset = magic + 7). NOTE: the +54 is offset from
+    // the 0x5A magic byte, NOT from payload start.
+    let mut source_file_uid: Option<[u8; 6]> = None;
+    fn find_2628_magic(b: &Block) -> Option<usize> {
+        if b.content_type_raw == 0x2628 {
+            return Some(b.offset.saturating_sub(7));
+        }
+        for c in &b.children {
+            if let Some(p) = find_2628_magic(c) {
+                return Some(p);
+            }
+        }
+        None
+    }
+    if let Some(magic) = find_2628_magic(block) {
+        let uid_at = magic + 54;
+        if uid_at + 6 <= data.len() {
+            let mut uid = [0u8; 6];
+            uid.copy_from_slice(&data[uid_at..uid_at + 6]);
+            source_file_uid = Some(uid);
+        }
+    }
 
     Some(AudioRegion {
         name,
@@ -82,6 +104,7 @@ fn parse_single_region(
         sample_offset: (sample_offset as f64 * rate_factor) as u64,
         length: (length as f64 * rate_factor) as u64,
         audio_file_index,
+        source_file_uid,
     })
 }
 
