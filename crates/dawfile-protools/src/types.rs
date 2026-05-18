@@ -54,6 +54,27 @@ pub struct ProToolsSession {
     /// `0x4702` block. Built-in entries start with `Dialog`, `Music`,
     /// `Effects`, `Narration`. Empty when the session has no mapping.
     pub stem_mappings: Vec<String>,
+    /// Internal (non-audio) tracks of the session — aux returns, internal
+    /// buses, the master fader, the click metronome track. PT stores these
+    /// separately from the audio/MIDI track lists. Decoded from `0x261e`
+    /// blocks; see [`InternalTrack`].
+    pub internal_tracks: Vec<InternalTrack>,
+}
+
+/// An "internal" PT track — anything that's not an audio or MIDI playback
+/// track. Covers Aux Input, Internal Bus, Master Fader, and the Click track.
+///
+/// Decoded from per-session `0x261e` blocks. Name lives at payload offset
+/// `+0x24` (length-prefixed string). A 6-byte routing UID at `+0x32..+0x37`
+/// links to a `0x2602` routing entry. The kind (aux/bus/master/click) is
+/// not yet decoded — needs more probes to enumerate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InternalTrack {
+    /// Track name as authored in PT (e.g. `"Master"`, `"DRUMS"`, `"Click 1"`).
+    pub name: String,
+    /// 6-byte routing UID. Maps to the `destination_uid` of a
+    /// [`RoutingEntry`] when this track is a routing target.
+    pub routing_uid: [u8; 6],
 }
 
 /// A Pro Tools edit group (PT 12+).

@@ -634,6 +634,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
 
     let edit_groups = parse_edit_groups(&blocks, data);
     let stem_mappings = parse_stem_mappings(&blocks, data);
+    let internal_tracks = parse_internal_tracks(&blocks, data);
 
     Ok(ProToolsSession {
         version,
@@ -652,7 +653,61 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         routing_entries,
         edit_groups,
         stem_mappings,
+        internal_tracks,
     })
+}
+
+/// Decode the session's internal/aux/bus track list from `0x261e` blocks.
+///
+/// Each block carries a length-prefixed track name at payload `+0x1d`
+/// (= magic + `0x24`) and a 6-byte routing UID at payload `+0x29..+0x2e`
+/// (= magic + `0x32..+0x37`). The kind (Aux / Internal Bus / Master
+/// Fader / Click) is not yet decoded.
+fn parse_internal_tracks(blocks: &[Block], data: &[u8]) -> Vec<crate::types::InternalTrack> {
+    let mut out = Vec::new();
+    for b in collect_blocks_recursive(blocks, ContentType::InternalTrackEntry) {
+        let magic = b.offset.saturating_sub(7);
+        let block_end = magic + 9 + b.block_size as usize;
+        if magic + 9 >= data.len() || block_end > data.len() {
+            continue;
+        }
+        // Scan forward from payload start for the first `[u32 namelen]
+        // [printable ASCII name of that length]` triple. The block has a
+        // nested header chain (0x261b → 0x102d → 0x2619) whose exact byte
+        // count varies; the name itself is reliably the first sane
+        // length-prefixed string in the payload.
+        let mut name: Option<(usize, String)> = None;
+        let mut p = magic + 9;
+        while p + 4 < block_end && p + 4 < data.len() {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if (2..=64).contains(&nlen) && p + 4 + nlen <= block_end && p + 4 + nlen <= data.len() {
+                let candidate = &data[p + 4..p + 4 + nlen];
+                if candidate.iter().all(|c| (0x20..0x7f).contains(c)) {
+                    name = Some((p, String::from_utf8_lossy(candidate).into_owned()));
+                    break;
+                }
+            }
+            p += 1;
+        }
+        let Some((name_pos, name)) = name else {
+            continue;
+        };
+        // Routing UID: the 6 bytes appear ~14 bytes after the name end,
+        // preceded by `2a 00 00 00` (the same `0x2a` marker seen in source
+        // file UID encoding). Scan for that signature.
+        let uid_search_start = name_pos + 4 + name.len();
+        let mut routing_uid = [0u8; 6];
+        let mut q = uid_search_start;
+        while q + 10 < block_end && q + 10 < data.len() {
+            if data[q] == 0x2a && data[q + 1] == 0 && data[q + 2] == 0 && data[q + 3] == 0 {
+                routing_uid.copy_from_slice(&data[q + 4..q + 10]);
+                break;
+            }
+            q += 1;
+        }
+        out.push(crate::types::InternalTrack { name, routing_uid });
+    }
+    out
 }
 
 /// Walk a `0x4501` payload tail-region and decode the flat group name list.

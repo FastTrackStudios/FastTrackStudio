@@ -203,6 +203,12 @@ pub enum ContentType {
     /// `Dialog`/`Music`/`Effects`/`Narration`. Used to categorize tracks
     /// for stem export.
     StemMappingList = 0x4702,
+
+    /// Internal (non-audio) track entry — Aux Input / Internal Bus / Master
+    /// Fader / Click track. One block per internal track. Name lives at
+    /// payload `+0x1d` (= magic + `0x24`) as a length-prefixed string;
+    /// 6-byte routing UID at `+0x29..+0x2e`.
+    InternalTrackEntry = 0x261e,
 }
 
 impl ContentType {
@@ -287,6 +293,7 @@ impl ContentType {
 
             0x4501 => Some(Self::EditGroupList),
             0x4702 => Some(Self::StemMappingList),
+            0x261e => Some(Self::InternalTrackEntry),
 
             _ => None,
         }
