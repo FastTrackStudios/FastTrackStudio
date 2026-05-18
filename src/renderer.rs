@@ -1477,9 +1477,9 @@ pub mod wasm {
             let height = canvas.height().max(1);
 
             // Create wgpu instance
-            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL,
-                ..Default::default()
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
 
             // --- Pre-flight adapter probe (no surface) ---
@@ -1629,10 +1629,25 @@ pub mod wasm {
             scene: &Scene,
             base_color: Color,
         ) -> Result<(), String> {
-            let surface_texture = self
-                .surface
-                .get_current_texture()
-                .map_err(|e| format!("Failed to get surface texture: {e}"))?;
+            let surface_texture = match self.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(texture)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+                wgpu::CurrentSurfaceTexture::Timeout => {
+                    return Err("Timed out while getting surface texture".to_string());
+                }
+                wgpu::CurrentSurfaceTexture::Occluded => {
+                    return Err("Surface is occluded".to_string());
+                }
+                wgpu::CurrentSurfaceTexture::Outdated => {
+                    return Err("Surface configuration is outdated".to_string());
+                }
+                wgpu::CurrentSurfaceTexture::Lost => {
+                    return Err("Surface was lost".to_string());
+                }
+                wgpu::CurrentSurfaceTexture::Validation => {
+                    return Err("Surface validation failed".to_string());
+                }
+            };
 
             // Create views for rendering
             let render_view = self

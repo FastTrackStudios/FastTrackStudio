@@ -1,0 +1,11 @@
+[package]
+name = "daw-module"
+version = "0.1.0"
+edition = "2024"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+description = "Module-system primitives - DawModule trait, ActionDef, PanelDef."
+
+[dependencies]
+tokio = { version = "1.48", default-features = false, features = ["rt"] }
+tracing = { version = "0.1", features = ["std"] }

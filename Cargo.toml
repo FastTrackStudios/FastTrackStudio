@@ -7,9 +7,6 @@ resolver = "2"
 [workspace.lints.clippy]
 
 [workspace.dependencies]
-# Vox crates
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
-
 # Keyflow/Engraver
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 
@@ -22,7 +19,7 @@ lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3
 
 # Anyrender / Vello rendering
 anyrender_vello = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
-vello = { version = "0.8", features = ["wgpu"] }
+vello = { version = "0.9", features = ["wgpu"] }
 peniko = "0.6"
 
 [package]
@@ -68,9 +65,6 @@ zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 # Logging
 tracing = "0.1"
-
-# Vox context
-vox = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # Override fontique to disable system feature (not available on WASM)
@@ -122,7 +116,7 @@ web-sys = { version = "0.3", features = [
 ] }
 
 # Graphics rendering (WASM) - version must match vello 0.7's wgpu dependency
-wgpu = { version = "28", features = ["webgpu", "webgl"] }
+wgpu = { version = "29", features = ["webgpu", "webgl"] }
 
 # Async runtime for WASM
 tokio = { version = "1.0", default-features = false, features = ["sync"] }
@@ -156,3 +150,7 @@ engraver-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates
 keyflow-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-proto" }
 keyflow-text = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-text" }
 keyflow-ui = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-ui" }
+
+[patch."https://github.com/FastTrackStudios/daw.git"]
+daw-proto = { path = "vendor/daw-proto" }
+daw-module = { path = "vendor/daw-module" }
