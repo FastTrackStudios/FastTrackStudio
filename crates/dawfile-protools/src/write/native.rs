@@ -870,6 +870,15 @@ fn patch_solo_defeat_in_range(s: &mut RawSession, rs: usize, re: usize, defeat: 
 fn patch_volume_in_range(s: &mut RawSession, rs: usize, re: usize, vol: i16) {
     let bytes = vol.to_le_bytes();
     let blocks = s.blocks.clone();
+    // Write the i32 LE volume into every 0x1029 in range — the parser
+    // reads from `0x1029 +1..+5` (in payload bytes, = `b.start + 9 + 1`).
+    let vol_i32_bytes = (vol as i32).to_le_bytes();
+    for_blocks_in_range(&blocks, rs, re, 0x1029, |b| {
+        let p = b.start + 9 + 1;
+        if p + 4 <= s.data.len() {
+            s.data[p..p + 4].copy_from_slice(&vol_i32_bytes);
+        }
+    });
     let mut first_260a = true;
     for_blocks_in_range(&blocks, rs, re, 0x260a, |b| {
         if first_260a {
@@ -1399,7 +1408,13 @@ mod tests {
             tracks: specs.to_vec(),
         };
         let bytes = write_session_ptx(&session_spec).unwrap();
-        let tmp = std::env::temp_dir().join(format!("native_multi_{}.ptx", specs.len()));
+        // Unique temp file per test invocation to avoid parallel collisions.
+        let id: String = specs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join("_");
+        let tmp = std::env::temp_dir().join(format!("native_multi_{}_{}.ptx", specs.len(), id));
         std::fs::write(&tmp, &bytes).unwrap();
         crate::read_session(tmp.to_str().unwrap(), 48000).unwrap()
     }
@@ -1498,7 +1513,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "multi-track vol/pan: converter-authored PTX has 11× 0x1029 per track; parser pairs 0x251a names with 0x1029[0..N] globally and so only track 0 sees its own vol — needs scoped pairing"]
+    #[ignore = "multi-track vol parser: user-session test (LotF) breaks if we change duplicate-name detection. Multi-track parser pairing is structurally incompatible with PT-authored sessions until we add format detection."]
     fn write_multi_with_vol_pan() {
         let specs = vec![
             NativeTrackSpec {

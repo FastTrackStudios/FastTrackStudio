@@ -155,11 +155,9 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             std::collections::HashMap::new();
         if let Some(list) = track_list {
             let mut mix_idx = 0usize;
-            // 0x251a entries are duplicated in the file (PT stores each
-            // logical track as an active/alternate pair). We skip the
-            // duplicate entries but DON'T stop — multi-track sessions
-            // interleave [active_t0, alt_t0, active_t1, alt_t1, ...] so
-            // breaking on a duplicate would lose all but the first track.
+            // 0x251a entries are duplicated in the file (2× the 30 logical
+            // tracks); the second copy mirrors the first, so we only take
+            // the first run by stopping once names start to repeat.
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             for child in list.find_children(ContentType::MidiTrackInfo) {
                 // name @ child.offset + 4 (length-prefixed string)
@@ -172,8 +170,8 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 if !seen.insert(name.clone()) {
-                    // Already saw this name — skip but keep walking.
-                    continue;
+                    // Hit the second copy of the list — stop.
+                    break;
                 }
                 let Some(b) = mix_blocks.get(mix_idx) else {
                     break;
