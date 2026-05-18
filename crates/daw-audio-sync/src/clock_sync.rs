@@ -64,6 +64,11 @@ pub const DEFAULT_PORT: u16 = 7777;
 const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(1);
 /// How often each peer pings every other peer (unicast).
 const PING_INTERVAL: Duration = Duration::from_millis(100);
+/// How often each peer broadcasts its sample position (unicast to
+/// every known peer). Higher than ping rate because position is what
+/// the drift corrector consumes directly. 20Hz = every audio buffer
+/// at typical 256/48k settings.
+const POSITION_INTERVAL: Duration = Duration::from_millis(50);
 /// Drop a peer from the table after this long without an announce.
 const PEER_TTL: Duration = Duration::from_secs(5);
 /// Rolling window size for offset / delay smoothing. ~3s @ 10Hz.
@@ -87,7 +92,7 @@ impl Default for PeerId {
     }
 }
 
-/// Wire frame. `Announce` is multicast; `Ping`/`Pong` are unicast.
+/// Wire frame. `Announce` is multicast; `Ping`/`Pong`/`Position` are unicast.
 #[derive(Debug, Serialize, Deserialize)]
 enum Message {
     Announce {
@@ -103,6 +108,22 @@ enum Message {
         t1: i64,
         t2: i64,
         t3: i64,
+    },
+    /// Sample position broadcast — Phase C. Sent at audio-buffer
+    /// rate (or thereabouts) so peers can extrapolate "where is
+    /// remote *right now*" via the clock-sync offset.
+    Position {
+        from: PeerId,
+        /// Local audio host clock when the snapshot was taken (µs).
+        host_micros: i64,
+        /// Playhead in seconds at that moment.
+        playhead_seconds: f64,
+        /// REAPER reported sample rate (Hz).
+        sample_rate: f64,
+        /// REAPER reported playrate (1.0 = nominal).
+        playrate: f64,
+        /// Was transport playing at that moment.
+        is_playing: bool,
     },
 }
 
@@ -121,6 +142,44 @@ pub struct PeerInfo {
     pub last_rtt_at: Instant,
     /// Last announce (for TTL expiry).
     pub last_announce_at: Instant,
+    /// Latest sample-position broadcast from this peer. `None` until
+    /// the first Position frame arrives.
+    pub position: Option<RemotePosition>,
+}
+
+/// Snapshot of a peer's transport at a known instant in their clock
+/// domain. Combine with `PeerInfo::offset_us` to project onto our
+/// clock.
+#[derive(Clone, Copy, Debug)]
+pub struct RemotePosition {
+    /// Their audio host clock when they sent the broadcast (µs).
+    pub host_micros: i64,
+    /// Playhead in seconds at that moment.
+    pub playhead_seconds: f64,
+    pub sample_rate: f64,
+    pub playrate: f64,
+    pub is_playing: bool,
+    /// Local time we received the broadcast (for staleness checks).
+    pub received_at: Instant,
+}
+
+impl RemotePosition {
+    /// Extrapolate "where is the peer playing *right now*" by adding
+    /// elapsed local time to their last broadcast position. Doesn't
+    /// account for clock drift between the two machines — Phase B's
+    /// `offset_us` carries that — but does account for the time
+    /// between their broadcast and our query.
+    ///
+    /// `now_local_micros` is the current LOCAL audio host clock; the
+    /// caller is expected to subtract `offset_us` first to project
+    /// into the peer's clock domain.
+    pub fn project_playhead(&self, now_in_peer_clock_micros: i64) -> f64 {
+        if !self.is_playing {
+            return self.playhead_seconds;
+        }
+        let elapsed_secs = (now_in_peer_clock_micros - self.host_micros) as f64 * 1e-6;
+        self.playhead_seconds + elapsed_secs * self.playrate
+    }
 }
 
 /// Per-peer mutable state held inside the table. Owns the rolling
@@ -132,6 +191,7 @@ struct Peer {
     delay_window: RollingWindow,
     last_rtt_at: Instant,
     last_announce_at: Instant,
+    position: Option<RemotePosition>,
 }
 
 impl Peer {
@@ -143,6 +203,7 @@ impl Peer {
             delay_us: self.delay_window.average() as i64,
             last_rtt_at: self.last_rtt_at,
             last_announce_at: self.last_announce_at,
+            position: self.position,
         }
     }
 }
@@ -224,6 +285,10 @@ pub struct ClockSync {
     /// announce + ping tasks before sending so the wire timestamps
     /// reflect a consistent clock view. Microseconds.
     local_clock: Arc<AtomicU64>,
+    /// Audio snapshot source for sample-position broadcasts. None
+    /// disables position broadcasting (useful for tests / standalone
+    /// peers that don't host a DAW).
+    cell: Option<Arc<SnapshotCell>>,
     /// Bound socket — kept alive for the lifetime of the session.
     _socket: Arc<UdpSocket>,
     tasks: Vec<JoinHandle<()>>,
@@ -252,6 +317,7 @@ impl ClockSync {
                 delay_window: RollingWindow::new(SMOOTHING_WINDOW),
                 last_rtt_at: now,
                 last_announce_at: now,
+                position: None,
             });
     }
 
@@ -295,8 +361,8 @@ impl ClockSync {
 
         let multicast_addr = SocketAddr::V4(SocketAddrV4::new(multicast, port));
 
-        let mut tasks = Vec::with_capacity(3);
-        tasks.push(spawn_clock_sampler(local_clock.clone(), cell));
+        let mut tasks = Vec::with_capacity(5);
+        tasks.push(spawn_clock_sampler(local_clock.clone(), cell.clone()));
         tasks.push(spawn_announcer(
             socket.clone(),
             peer_id,
@@ -315,11 +381,20 @@ impl ClockSync {
             local_clock.clone(),
             peers.clone(),
         ));
+        if let Some(c) = cell.clone() {
+            tasks.push(spawn_position_broadcaster(
+                socket.clone(),
+                peer_id,
+                c,
+                peers.clone(),
+            ));
+        }
 
         Ok(Self {
             peer_id,
             peers,
             local_clock,
+            cell,
             _socket: socket,
             tasks,
         })
@@ -416,6 +491,42 @@ fn spawn_pinger(
     })
 }
 
+fn spawn_position_broadcaster(
+    socket: Arc<UdpSocket>,
+    peer_id: PeerId,
+    cell: Arc<SnapshotCell>,
+    peers: Arc<PeerTable>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(POSITION_INTERVAL);
+        loop {
+            tick.tick().await;
+            let Some(snap) = cell.load() else { continue };
+            let msg = Message::Position {
+                from: peer_id,
+                host_micros: snap.host_micros as i64,
+                playhead_seconds: snap.playhead_seconds,
+                sample_rate: snap.sample_rate,
+                playrate: 1.0, // Phase C2 will read real playrate.
+                is_playing: snap.is_playing,
+            };
+            let buf = match bincode::serialize(&msg) {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!(?e, "position serialize failed");
+                    continue;
+                }
+            };
+            let snapshot = peers.peers_snapshot().await;
+            for peer in snapshot {
+                if let Err(e) = socket.send_to(&buf, peer.addr).await {
+                    debug!(?e, peer = ?peer.id, "position send failed");
+                }
+            }
+        }
+    })
+}
+
 fn spawn_receiver(
     socket: Arc<UdpSocket>,
     peer_id: PeerId,
@@ -460,6 +571,7 @@ fn spawn_receiver(
                             delay_window: RollingWindow::new(SMOOTHING_WINDOW),
                             last_rtt_at: now,
                             last_announce_at: now,
+                            position: None,
                         });
                 }
                 Message::Ping { from, t1 } => {
@@ -483,6 +595,30 @@ fn spawn_receiver(
                     };
                     if let Err(e) = socket.send_to(&buf, from_addr).await {
                         debug!(?e, "pong send failed");
+                    }
+                }
+                Message::Position {
+                    from,
+                    host_micros,
+                    playhead_seconds,
+                    sample_rate,
+                    playrate,
+                    is_playing,
+                } => {
+                    if from == peer_id {
+                        continue;
+                    }
+                    let pos = RemotePosition {
+                        host_micros,
+                        playhead_seconds,
+                        sample_rate,
+                        playrate,
+                        is_playing,
+                        received_at: Instant::now(),
+                    };
+                    let mut guard = peers.inner.write().await;
+                    if let Some(peer) = guard.get_mut(&from) {
+                        peer.position = Some(pos);
                     }
                 }
                 Message::Pong { from, t1, t2, t3 } => {
@@ -587,5 +723,88 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    #[tokio::test]
+    async fn position_broadcast_round_trip() {
+        // Wire two peers, each with its own audio snapshot cell.
+        // Stuff a known position into A's cell; B should observe it
+        // via the Position message within ~200ms (2× POSITION_INTERVAL
+        // plus tolerance).
+        let cell_a = Arc::new(SnapshotCell::new());
+        let cell_b = Arc::new(SnapshotCell::new());
+
+        let a = ClockSync::bind(17780, DEFAULT_MULTICAST, Some(cell_a.clone()))
+            .await
+            .expect("bind a");
+        let b = ClockSync::bind(17781, DEFAULT_MULTICAST, Some(cell_b.clone()))
+            .await
+            .expect("bind b");
+
+        a.seed_peer(b.peer_id, "127.0.0.1:17781".parse().unwrap())
+            .await;
+        b.seed_peer(a.peer_id, "127.0.0.1:17780".parse().unwrap())
+            .await;
+
+        // A reports playing at 12.345s, 48kHz.
+        cell_a.store(&crate::AudioSnapshot {
+            sequence: 1,
+            host_micros: 1_000_000,
+            playhead_seconds: 12.345,
+            sample_rate: 48_000.0,
+            buffer_len: 256,
+            is_playing: true,
+        });
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let pb = b.peers.peers_snapshot().await;
+            let from_a = pb.iter().find(|p| p.id == a.peer_id);
+            if let Some(p) = from_a
+                && let Some(pos) = p.position
+                && (pos.playhead_seconds - 12.345).abs() < 1e-6
+            {
+                assert!(pos.is_playing, "expected is_playing=true");
+                assert_eq!(pos.sample_rate, 48_000.0);
+                eprintln!(
+                    "B observed A's position: playhead={:.6}s sr={} host_us={}",
+                    pos.playhead_seconds, pos.sample_rate, pos.host_micros
+                );
+                return;
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("B never observed A's position");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    #[test]
+    fn project_playhead_extrapolates_during_playback() {
+        let pos = RemotePosition {
+            host_micros: 1_000_000,
+            playhead_seconds: 10.0,
+            sample_rate: 48_000.0,
+            playrate: 1.0,
+            is_playing: true,
+            received_at: Instant::now(),
+        };
+        // 500ms later in peer's clock → playhead should be 10.5s.
+        let projected = pos.project_playhead(1_500_000);
+        assert!((projected - 10.5).abs() < 1e-9);
+
+        // Playrate 0.5 → 10.25s.
+        let pos_slow = RemotePosition {
+            playrate: 0.5,
+            ..pos
+        };
+        assert!((pos_slow.project_playhead(1_500_000) - 10.25).abs() < 1e-9);
+
+        // Stopped → no extrapolation.
+        let pos_stopped = RemotePosition {
+            is_playing: false,
+            ..pos
+        };
+        assert!((pos_stopped.project_playhead(1_500_000) - 10.0).abs() < 1e-9);
     }
 }

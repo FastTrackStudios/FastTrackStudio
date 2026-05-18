@@ -4,9 +4,10 @@
 
 use daw_proto::TrackRef;
 use daw_proto::automation::{
-    AddPointParams, Automation, AutomationMode, Envelope, EnvelopeLocation, EnvelopePoint,
-    SetPointParams, TimeRangeParams,
+    AddPointParams, Automation, Envelope, EnvelopeLocation, EnvelopePoint, SetPointParams,
+    TimeRangeParams,
 };
+use daw_proto::primitives::AutomationMode;
 use daw_proto::primitives::PositionInSeconds;
 use daw_proto::project::ProjectContext;
 

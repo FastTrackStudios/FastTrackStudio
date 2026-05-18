@@ -16,9 +16,9 @@
 
 use architect::{Layer, Services, layers};
 use daw_proto::{
-    action_registry, audio_engine, dawfile_service, event_bus, ext_state, fx_chains, fx_params,
-    health, input, item, marker, plugin_loader, project, region, routing, screenset, take,
-    tempo_map, toolbar, track, transport, window_geometry,
+    action_registry, audio_engine, automation, dawfile_service, event_bus, ext_state, fx,
+    fx_chains, fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project,
+    region, routing, screenset, take, tempo_map, toolbar, track, transport, window_geometry,
 };
 
 use crate::sync::Standalone;
@@ -32,8 +32,16 @@ impl Services for Standalone {
             region::Service,
             tempo_map::Service,
             audio_engine::Service,
+            // Stub services — methods panic with todo!("standalone: …").
+            // Listed here so the in-proc Daw client routes their method
+            // calls (and panics loudly) instead of failing with a
+            // routing error.
+            midi::Service,
+            fx::Service,
             fx_chains::Service,
             fx_params::Service,
+            live_midi::Service,
+            automation::Service,
             track::Service,
             routing::Service,
             ext_state::Service,
