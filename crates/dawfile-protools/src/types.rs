@@ -471,6 +471,15 @@ pub struct IoChannel {
     pub io_class: u8,
     /// Number of audio channels (1 = mono, 2 = stereo).
     pub channel_count: u8,
+    /// 6-byte UID at `0x1021 +46`. Routing entries (`RoutingEntry`)
+    /// reference channels by this UID via their `destination_uid`
+    /// field — match by `IoChannel.uid == RoutingEntry.destination_uid`
+    /// to resolve a routing assignment to a hardware channel.
+    ///
+    /// Discovered via Frida byte-read trace on LotF — the routing
+    /// dest UIDs were found also occurring inside `0x1021` blocks
+    /// at this offset.
+    pub uid: Option<[u8; 6]>,
 }
 
 /// Strongly-typed view of [`IoChannel::io_class`].
@@ -499,6 +508,25 @@ impl ProToolsSession {
     /// Iterate over every track in the session, audio first then MIDI.
     pub fn all_tracks(&self) -> impl Iterator<Item = &Track> {
         self.audio_tracks.iter().chain(self.midi_tracks.iter())
+    }
+
+    /// Resolve a `RoutingEntry`'s destination UID to the matching
+    /// `IoChannel`. Returns `None` if no channel has a matching UID
+    /// (the entry may point at a bus or internal target not yet
+    /// surfaced).
+    ///
+    /// Verified on LotF: routing entry[0] (`dest_uid=5ecac0f83a49`)
+    /// resolves to `"Analog 1-2"`, entry[1] to `"Analog 3-4"`, etc.
+    pub fn resolve_routing_destination(&self, entry: &RoutingEntry) -> Option<&IoChannel> {
+        self.io_channels
+            .iter()
+            .find(|ch| ch.uid == Some(entry.destination_uid))
+    }
+
+    /// Iterate only the ACTIVE routing entries (those with
+    /// `RoutingEntry.active == true`).
+    pub fn active_routings(&self) -> impl Iterator<Item = &RoutingEntry> {
+        self.routing_entries.iter().filter(|r| r.active)
     }
 
     /// Total active region placements across every audio + MIDI track.
