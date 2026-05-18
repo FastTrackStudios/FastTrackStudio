@@ -141,7 +141,10 @@ impl VimEngine {
 
         // Capture digit prefix in Normal / Visual modes only —
         // Insert mode passes everything to the textarea.
-        if matches!(self.mode(), VimMode::Normal | VimMode::Visual) {
+        if matches!(
+            self.mode(),
+            VimMode::Normal | VimMode::Visual | VimMode::VisualLine
+        ) {
             if let DioxusKey::Char(c) = key {
                 if c.is_ascii_digit() {
                     let d = c.to_digit(10).expect("digit");
@@ -157,7 +160,10 @@ impl VimEngine {
         }
 
         // Intercept the operators that take a next-char parameter.
-        if matches!(self.mode(), VimMode::Normal | VimMode::Visual) {
+        if matches!(
+            self.mode(),
+            VimMode::Normal | VimMode::Visual | VimMode::VisualLine
+        ) {
             if let DioxusKey::Char(c) = key {
                 let op = match c {
                     'f' => Some(PendingOp::FindChar {

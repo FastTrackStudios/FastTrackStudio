@@ -1,4 +1,4 @@
-//! Cursor / block motions — Normal and Visual.
+//! Cursor / block motions — Normal, Visual, VisualLine.
 //!
 //! Vocabulary mirrors the reference plugin's `up.ts` / `down.ts` /
 //! `wordForward.ts` etc.
@@ -10,7 +10,7 @@ use crate::mode::VimMode;
 use super::{bind, ch};
 
 pub fn register(m: &mut VimMachine) {
-    for mode in [VimMode::Normal, VimMode::Visual] {
+    for mode in [VimMode::Normal, VimMode::Visual, VimMode::VisualLine] {
         // hjkl — char/line motions.
         bind(
             m,

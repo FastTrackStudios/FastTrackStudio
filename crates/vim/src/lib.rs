@@ -331,6 +331,35 @@ mod tests {
     }
 
     #[test]
+    fn motion_in_visual_line_stays_in_visual_line() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('V'));
+        assert_eq!(e.mode(), VimMode::VisualLine);
+        let acts = e.feed(DioxusKey::Char('j'));
+        assert_eq!(e.mode(), VimMode::VisualLine);
+        assert!(
+            acts.iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::LineDown))),
+            "expected LineDown, got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn count_prefix_works_in_visual_line() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('V'));
+        e.feed(DioxusKey::Char('3'));
+        let acts = e.feed(DioxusKey::Char('j'));
+        assert_eq!(
+            acts.iter()
+                .filter(|a| matches!(a, VimAction::Move(Motion::LineDown)))
+                .count(),
+            3,
+            "3j in V-LINE should emit 3 LineDowns, got {acts:?}"
+        );
+    }
+
+    #[test]
     fn escape_from_visual_line_to_normal() {
         let mut e = VimEngine::default();
         e.feed(DioxusKey::Char('V'));
