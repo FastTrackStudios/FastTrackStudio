@@ -390,7 +390,7 @@ fn Home() -> Element {
                     class: "relative mx-auto max-w-5xl px-6 py-28 lg:py-24",
 
                     div {
-                        class: "relative z-10 mx-auto max-w-2xl text-center",
+                        class: "relative z-10 mx-auto max-w-4xl text-center",
 
                         h1 {
                             class: "text-balance",
@@ -404,9 +404,28 @@ fn Home() -> Element {
                             }
                         }
 
-                        p {
-                            class: "mx-auto my-8 max-w-2xl text-lg md:text-xl text-muted-foreground",
-                            "Open-source audio software on Linux, macOS, and Windows. An open standard for music production, built for the audio community at large."
+                        div {
+                            class: "mx-auto my-10 grid gap-4 text-left md:grid-cols-2",
+
+                            PillarCard {
+                                title: "Open Source",
+                                body: "Licensing practices in the audio software space are heavily anti-consumer. We need highly capable, pleasant tools that respect their users."
+                            }
+
+                            PillarCard {
+                                title: "Cross-Platform",
+                                body: "Designed for Linux, macOS, Windows, and embedded use cases. The fracture of available software is degrading quality everywhere."
+                            }
+
+                            PillarCard {
+                                title: "Cross-DAW",
+                                body: "Built around Reaper today, on a core that extends to any DAW exposing the needed APIs. Your workflow shouldn\u{2019}t be locked to one vendor."
+                            }
+
+                            PillarCard {
+                                title: "Open Format",
+                                body: "Charts, project state, and protocols are documented and free to implement. Interoperability as a foundation, not an afterthought."
+                            }
                         }
 
                         div {
@@ -942,6 +961,25 @@ fn HomeFeature(title: &'static str, description: &'static str, icon: Element) ->
             Heading { level: HeadingLevel::H5, class: "text-foreground mb-2", "{title}" }
 
             Text { variant: TextVariant::Muted, class: "leading-relaxed", "{description}" }
+        }
+    }
+}
+
+/// One of the four hero-pillar cards sitting beneath the tagline.
+/// Short title in primary, body in muted text, low-key border.
+#[component]
+fn PillarCard(title: &'static str, body: &'static str) -> Element {
+    rsx! {
+        div {
+            class: "rounded-lg border border-border/50 bg-card/30 p-5",
+            h3 {
+                class: "text-base font-semibold text-primary mb-1.5",
+                "{title}"
+            }
+            p {
+                class: "text-sm text-muted-foreground leading-relaxed",
+                "{body}"
+            }
         }
     }
 }
