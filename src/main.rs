@@ -405,42 +405,34 @@ fn Home() -> Element {
                         }
 
                         div {
-                            class: "mx-auto my-10 grid gap-4 text-left md:grid-cols-2",
+                            class: "mx-auto mt-12 grid gap-5 text-left md:grid-cols-2",
 
                             PillarCard {
+                                number: "01",
                                 title: "Open Source",
-                                body: "Licensing practices in the audio software space are heavily anti-consumer. We need highly capable, pleasant tools that respect their users."
+                                body: "Licensing practices in the audio software space are heavily anti-consumer. We need highly capable, pleasant tools that respect their users.",
+                                icon: rsx! { Github { class: "w-5 h-5" } }
                             }
 
                             PillarCard {
+                                number: "02",
                                 title: "Cross-Platform",
-                                body: "Designed for Linux, macOS, Windows, and embedded use cases. The fracture of available software is degrading quality everywhere."
+                                body: "Designed for Linux, macOS, Windows, and embedded use cases. The fracture of available software is degrading quality everywhere.",
+                                icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } }
                             }
 
                             PillarCard {
+                                number: "03",
                                 title: "Cross-DAW",
-                                body: "Built around Reaper today, on a core that extends to any DAW exposing the needed APIs. Your workflow shouldn\u{2019}t be locked to one vendor."
+                                body: "Built around Reaper today, on a core that extends to any DAW exposing the needed APIs. Your workflow shouldn\u{2019}t be locked to one vendor.",
+                                icon: rsx! { Music { class: "w-5 h-5" } }
                             }
 
                             PillarCard {
+                                number: "04",
                                 title: "Open Format",
-                                body: "Charts, project state, and protocols are documented and free to implement. Interoperability as a foundation, not an afterthought."
-                            }
-                        }
-
-                        div {
-                            class: "flex flex-col sm:flex-row items-center justify-center gap-3",
-
-                            Link {
-                                to: Route::ChartEditor {},
-                                class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
-                                "Try the Editor"
-                            }
-
-                            Link {
-                                to: Route::Mission {},
-                                class: "inline-flex items-center justify-center gap-2 border border-border bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8 rounded-md font-medium transition-colors",
-                                "Our Mission"
+                                body: "Charts, project state, and protocols are documented and free to implement. Interoperability as a foundation, not an afterthought.",
+                                icon: rsx! { FileCode { class: "w-5 h-5" } }
                             }
                         }
                     }
@@ -966,18 +958,44 @@ fn HomeFeature(title: &'static str, description: &'static str, icon: Element) ->
 }
 
 /// One of the four hero-pillar cards sitting beneath the tagline.
-/// Short title in primary, body in muted text, low-key border.
+/// Numbered manifesto-style card with icon, animated top accent, hover lift.
 #[component]
-fn PillarCard(title: &'static str, body: &'static str) -> Element {
+fn PillarCard(
+    number: &'static str,
+    title: &'static str,
+    body: &'static str,
+    icon: Element,
+) -> Element {
     rsx! {
         div {
-            class: "rounded-lg border border-border/50 bg-card/30 p-5",
+            class: "group relative overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-card/50 to-card/10 p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:from-card/70 hover:to-card/20 hover:shadow-xl hover:shadow-primary/5",
+
+            // Animated top accent line — fades in on hover
+            div {
+                class: "absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100",
+            }
+
+            div {
+                class: "mb-5 flex items-center justify-between",
+
+                div {
+                    class: "inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors duration-300 group-hover:bg-primary/20",
+                    {icon}
+                }
+
+                span {
+                    class: "font-mono text-xs tracking-[0.2em] text-muted-foreground/50",
+                    "{number}"
+                }
+            }
+
             h3 {
-                class: "text-base font-semibold text-primary mb-1.5",
+                class: "mb-2 text-lg font-semibold text-foreground transition-colors duration-300 group-hover:text-primary",
                 "{title}"
             }
+
             p {
-                class: "text-sm text-muted-foreground leading-relaxed",
+                class: "text-sm leading-relaxed text-muted-foreground",
                 "{body}"
             }
         }
