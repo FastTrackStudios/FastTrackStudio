@@ -91,7 +91,8 @@ pub fn parse_audio_files(blocks: &[Block], cursor: &Cursor<'_>, version: u16) ->
         files.push(AudioFile {
             filename,
             index,
-            length: 0, // filled in below
+            length: 0,        // filled in below
+            source_uid: None, // filled in below
         });
         index += 1;
     }
@@ -105,6 +106,37 @@ pub fn parse_audio_files(blocks: &[Block], cursor: &Cursor<'_>, version: u16) ->
             if info_block.offset + 16 <= data.len() {
                 files[i].length = cursor.u64_at(info_block.offset + 8);
             }
+        }
+    }
+
+    // File entry UIDs (raw CT 0x1003 — `AudioFileEntry`). Each entry
+    // has a 6-byte UID at magic-byte +45..+50, bracketed by sentinels
+    // `0x2A` at +44 and `0x80` at +51. Discovered via Frida byte-read
+    // trace on the LotF session — see
+    // `docs/converter-frida-discovered-offsets.md`.
+    fn collect_recursive<'a>(blocks: &'a [Block], ct_raw: u16, out: &mut Vec<&'a Block>) {
+        for b in blocks {
+            if b.content_type_raw == ct_raw {
+                out.push(b);
+            }
+            collect_recursive(&b.children, ct_raw, out);
+        }
+    }
+    let mut file_entry_blocks: Vec<&Block> = Vec::new();
+    collect_recursive(blocks, 0x1003, &mut file_entry_blocks);
+    for (i, b) in file_entry_blocks.iter().enumerate() {
+        if i >= files.len() {
+            break;
+        }
+        let magic = b.offset.saturating_sub(7);
+        let uid_at = magic + 45;
+        if uid_at + 6 <= data.len()
+            && data.get(magic + 44) == Some(&0x2A)
+            && data.get(magic + 51) == Some(&0x80)
+        {
+            let mut uid = [0u8; 6];
+            uid.copy_from_slice(&data[uid_at..uid_at + 6]);
+            files[i].source_uid = Some(uid);
         }
     }
 

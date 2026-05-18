@@ -52,6 +52,12 @@ pub struct AudioFile {
     pub index: u16,
     /// Length in samples.
     pub length: u64,
+    /// 6-byte UID of the file entry (`0x1003` block payload `+38..+44`
+    /// — i.e. `+45..+51` from block magic, between sentinels `0x2A`
+    /// and `0x80`). Discovered via Frida byte-read trace on the LotF
+    /// session — each file entry has a stable 6-byte UID. Used for
+    /// region → file resolution alongside `AudioRegion.source_file_uid`.
+    pub source_uid: Option<[u8; 6]>,
 }
 
 /// An audio region on the timeline.
