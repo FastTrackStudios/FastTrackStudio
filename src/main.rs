@@ -394,16 +394,17 @@ fn Home() -> Element {
 
                         h1 {
                             class: "text-balance text-4xl font-semibold md:text-5xl lg:text-6xl text-foreground",
-                            "Professional Audio Tools, "
+                            "Open, Professional, "
                             span {
                                 class: "text-primary",
-                                "Pleasant Experience"
+                                "Workflow-Driven"
                             }
+                            " Software."
                         }
 
                         p {
                             class: "mx-auto my-8 max-w-2xl text-lg md:text-xl text-muted-foreground",
-                            "High-quality music production tools built on open standards. Designed for Linux, macOS, and Windows \u{2014} advancing the audio production space for everyone."
+                            "An open standard for music production \u{2014} polished, cross-platform tools on Linux, macOS, and Windows, built for the audio community at large."
                         }
 
                         div {
@@ -1263,7 +1264,7 @@ fn PluginsShowcaseCard() -> Element {
                 div { class: "w-3 h-3 rounded-full bg-red-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-yellow-500/80" }
                 div { class: "w-3 h-3 rounded-full bg-green-500/80" }
-                span { class: "ml-4 text-sm text-muted-foreground", "FST-EQ" }
+                span { class: "ml-4 text-sm text-muted-foreground", "FTS-EQ" }
                 span { class: "ml-auto text-xs text-amber-500 font-medium px-2 py-0.5 rounded bg-amber-500/10", "VST3 / CLAP" }
             }
 
