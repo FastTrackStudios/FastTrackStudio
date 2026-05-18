@@ -1,3 +1,30 @@
+[workspace]
+members = [".", ]
+resolver = "2"
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
+
+[workspace.dependencies]
+# Vox crates
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+
+# Keyflow/Engraver
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
+
+# DAW / audio-controls
+audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+
+# FTS design system
+fts-ui = { path = "../fts-ui/crates/fts-ui" }
+lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
+
+# Anyrender / Vello rendering
+anyrender_vello = { git = "https://github.com/DioxusLabs/anyrender.git", branch = "main" }
+vello = { version = "0.8", features = ["wgpu"] }
+peniko = "0.6"
+
 [package]
 name = "fasttrackstudio-web"
 version = "0.1.0"
@@ -7,10 +34,9 @@ description = "FastTrackStudio Web App - Documentation, chart browser, and more"
 
 [dependencies]
 # Dioxus web framework
-dioxus = { version = "0.7.3", features = ["router"] }
+dioxus = { version = "0.7.9", features = ["router"] }
 
 # UI component library (shadcn-inspired, Tailwind-styled)
-lumen-blocks = { workspace = true }
 lucide-dioxus = { workspace = true }
 
 # Chart parsing and layout
@@ -72,11 +98,6 @@ web-sys = { version = "0.3", features = [
     "Element",
     "HtmlCanvasElement",
     "Navigator",
-    "Gpu",
-    "GpuAdapter",
-    "GpuDevice",
-    "GpuCanvasContext",
-    "GpuTextureFormat",
     "CanvasRenderingContext2d",
     "Performance",
     "Location",
@@ -96,10 +117,12 @@ web-sys = { version = "0.3", features = [
     "BlobPropertyBag",
     "Url",
     "HtmlAnchorElement",
+    # SVG fallback rendering
+    "HtmlImageElement",
 ] }
 
 # Graphics rendering (WASM) - version must match vello 0.7's wgpu dependency
-wgpu = { version = "27", features = ["webgpu", "webgl"] }
+wgpu = { version = "28", features = ["webgpu", "webgl"] }
 
 # Async runtime for WASM
 tokio = { version = "1.0", default-features = false, features = ["sync"] }
@@ -114,6 +137,10 @@ getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] 
 tokio = { version = "1.0", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[profile.dev]
+# opt-level 1 prevents "too many locals" WASM errors caused by unoptimized debug builds
+opt-level = 1
+
 [features]
 default = ["web"]
 web = ["dioxus/web"]
@@ -121,3 +148,11 @@ desktop = ["dioxus/desktop"]
 
 [lints]
 workspace = true
+
+[patch."https://github.com/FastTrackStudios/keyflow.git"]
+keyflow = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow" }
+engraver = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver" }
+engraver-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver-proto" }
+keyflow-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-proto" }
+keyflow-text = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-text" }
+keyflow-ui = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-ui" }
