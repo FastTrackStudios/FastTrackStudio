@@ -19,7 +19,6 @@ use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
     ChevronRight, CircleAlert, CircleCheck, Copy, Info, Lightbulb, Quote, TriangleAlert,
 };
-use fts_ui::prelude::*;
 use knowledge_proto::Block;
 use uuid::Uuid;
 use vim::{DioxusKey as VimKey, VimMode};
@@ -422,7 +421,7 @@ fn OutlinerNode(
 fn BlockEditor(block: Block, ops: OutlinerOps, editing_id: Signal<Option<Uuid>>) -> Element {
     let id = block.id;
     let area_testid = format!("outliner-textarea-{id}");
-    let kind = block.kind.clone();
+    let _kind = block.kind.clone();
     let content = block.content.clone();
     let content_for_keys = content.clone();
     let is_single_line = !content_for_keys.contains('\n');

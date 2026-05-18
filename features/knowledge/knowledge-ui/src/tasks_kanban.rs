@@ -38,8 +38,8 @@ const BASELINE_BUCKETS: &[&str] = &["todo", "in_progress", "done"];
 #[component]
 pub fn TasksKanbanLive(vox_url: String) -> Element {
     let local_doc: Signal<Arc<CrdtDoc>> = use_signal(|| Arc::new(CrdtDoc::ephemeral()));
-    let mut version: Signal<u64> = use_signal(|| 0u64);
-    let mut last_error: Signal<Option<String>> = use_signal(|| None::<String>);
+    let version: Signal<u64> = use_signal(|| 0u64);
+    let last_error: Signal<Option<String>> = use_signal(|| None::<String>);
 
     let url_for_hook = vox_url.clone();
     let doc_for_hook = local_doc.read().clone();
@@ -386,34 +386,6 @@ async fn compute_drop_rank(
             })
         }
     }
-}
-
-async fn tail_rank_in_bucket(
-    doc: &CrdtDoc,
-    bucket: &str,
-) -> Result<Option<String>, knowledge_proto::architect::RepoError> {
-    let page_repo = PageRepoLoro::new(doc);
-    let pages = page_repo.list(big_page(), None, None).await?;
-    let mut max_rank: Option<String> = None;
-    for p in pages.items {
-        let fm: serde_json::Value =
-            serde_json::from_str(&p.frontmatter_json).unwrap_or(serde_json::Value::Null);
-        let status = fm.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        if status != bucket {
-            continue;
-        }
-        let rank = fm
-            .get("sort_order")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        if let Some(r) = rank {
-            match &max_rank {
-                Some(cur) if cur.as_str() >= r.as_str() => {}
-                _ => max_rank = Some(r),
-            }
-        }
-    }
-    Ok(max_rank)
 }
 
 async fn run_kanban_sync_loop(

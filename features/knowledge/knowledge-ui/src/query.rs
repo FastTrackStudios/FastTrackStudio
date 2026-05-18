@@ -89,10 +89,10 @@ pub fn evaluate(
 ) -> Vec<QueryHit> {
     let mut out: Vec<QueryHit> = Vec::new();
     let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-    let mut push = |id: Uuid,
-                    page: Uuid,
-                    out: &mut Vec<QueryHit>,
-                    seen: &mut std::collections::HashSet<Uuid>| {
+    let push = |id: Uuid,
+                page: Uuid,
+                out: &mut Vec<QueryHit>,
+                seen: &mut std::collections::HashSet<Uuid>| {
         if seen.insert(id) {
             out.push(QueryHit {
                 block_id: id,

@@ -14,7 +14,7 @@ use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use futures::StreamExt;
 use futures::channel::mpsc::unbounded;
-use knowledge_crdt::{BlockRepoLoro, PageRepoLoro, VaultRepoLoro};
+use knowledge_crdt::{BlockRepoLoro, VaultRepoLoro};
 use knowledge_proto::{
     Block, BlockCreate, BlockRepo, BlockUpdate, Page, PageCreate, PageRepo, Vault, VaultRepo,
     lexorank,
@@ -84,8 +84,8 @@ impl<'a> DocView for SnapshotDocView<'a> {
 #[component]
 pub fn KnowledgeLive(vox_url: String) -> Element {
     let local_doc: Signal<Arc<CrdtDoc>> = use_signal(|| Arc::new(CrdtDoc::ephemeral()));
-    let mut version: Signal<u64> = use_signal(|| 0u64);
-    let mut last_error: Signal<Option<String>> = use_signal(|| None::<String>);
+    let version: Signal<u64> = use_signal(|| 0u64);
+    let last_error: Signal<Option<String>> = use_signal(|| None::<String>);
     let mut selected_page: Signal<Option<Uuid>> = use_signal(|| None);
     // Online/offline status for the route. Drives the small
     // status chip in the header. Provided as context so the chip
@@ -95,12 +95,12 @@ pub fn KnowledgeLive(vox_url: String) -> Element {
 
     // Per-route view mode (Edit / View / Source). Provided as
     // context so descendants can read + toggle.
-    let view_mode: Signal<ViewMode> = use_context_provider(|| Signal::new(ViewMode::Edit));
+    let _view_mode: Signal<ViewMode> = use_context_provider(|| Signal::new(ViewMode::Edit));
     // Stack of page IDs pinned to the right sidebar — survives
     // page navigation. New entries get pushed on shift-click of
     // a `[[wikilink]]`. Provided as a Signal for direct
     // mutation by panes' close buttons.
-    let pinned_panes: Signal<Vec<Uuid>> = use_context_provider(|| Signal::new(Vec::new()));
+    let _pinned_panes: Signal<Vec<Uuid>> = use_context_provider(|| Signal::new(Vec::new()));
 
     // Awareness hub — one per route, holds the local
     // EphemeralStore + our peer identity. Provided as context so
@@ -1496,7 +1496,7 @@ fn PageBody(
         .unwrap_or_default();
 
     // Schema lookup for the kind-specific properties pane.
-    let schema = page.as_ref().and_then(|p| {
+    let _schema = page.as_ref().and_then(|p| {
         let fm: serde_json::Value =
             serde_json::from_str(&p.frontmatter_json).unwrap_or(serde_json::Value::Null);
         let kind = fm.get("kind").and_then(|v| v.as_str())?;
@@ -2385,7 +2385,7 @@ fn SidebarSection(label: String, icon_kind: String, children: Element) -> Elemen
 /// the per-route view-mode signal from context.
 #[component]
 fn ViewModeToggle() -> Element {
-    let mut mode = crate::view_mode::use_view_mode();
+    let mode = crate::view_mode::use_view_mode();
     let current = *mode.read();
     let btn = |label: &'static str, kind: ViewMode, icon: Element, mut mode: Signal<ViewMode>| {
         let active = current == kind;

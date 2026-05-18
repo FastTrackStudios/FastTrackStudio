@@ -26,7 +26,6 @@
 //! Caller (`KnowledgeLive`) writes the change into the local doc.
 
 use dioxus::prelude::*;
-use fts_ui::prelude::*;
 use knowledge_proto::property_schema::{EnumOption, KindSchema, PropertyDef, PropertyType};
 use serde_json::Value as JsonValue;
 

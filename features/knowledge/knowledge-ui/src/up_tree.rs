@@ -14,7 +14,6 @@ use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{ChevronDown, ChevronRight};
-use fts_ui::prelude::*;
 use knowledge_proto::Page;
 use uuid::Uuid;
 
