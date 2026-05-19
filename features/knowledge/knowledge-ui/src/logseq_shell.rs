@@ -474,6 +474,7 @@ pub enum LeftPanel {
     AllPages,
     Cards,
     Graph,
+    Tasks,
 }
 
 /// Newtype wrapper so we can pass `Arc<CrdtDoc>` as a Dioxus
@@ -1202,8 +1203,74 @@ fn format_duration(secs: i64) -> String {
     }
 }
 
+/// Replace the body of the first `:LOGBOOK:` drawer inside a
+/// block's content with `new_body`. If no drawer exists, append a
+/// fresh one. Returns the modified content.
+pub(crate) fn replace_logbook_body(content: &str, new_body: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut start: Option<usize> = None;
+    let mut end: Option<usize> = None;
+    for (i, l) in lines.iter().enumerate() {
+        let t = l.trim();
+        if start.is_none() && t.eq_ignore_ascii_case(":logbook:") {
+            start = Some(i);
+        } else if start.is_some() && end.is_none() && t.eq_ignore_ascii_case(":end:") {
+            end = Some(i);
+            break;
+        }
+    }
+    let new_trimmed = new_body.trim_end_matches('\n');
+    match (start, end) {
+        (Some(s), Some(e)) => {
+            let mut out = Vec::with_capacity(lines.len());
+            out.extend(lines[..=s].iter().copied());
+            let body_owned: Vec<String> = new_trimmed.lines().map(String::from).collect();
+            for line in &body_owned {
+                out.push(line.as_str());
+            }
+            out.extend(lines[e..].iter().copied());
+            out.join("\n")
+        }
+        _ => {
+            let mut out = content.to_string();
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(":LOGBOOK:\n");
+            out.push_str(new_trimmed);
+            if !new_trimmed.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(":END:");
+            out
+        }
+    }
+}
+
+fn render_logbook_body(entries: &[LogbookEntry]) -> String {
+    entries
+        .iter()
+        .map(|e| {
+            let s = e.start.format("%Y-%m-%d %a %H:%M:%S");
+            match e.end {
+                Some(end) => {
+                    let mins = (end - e.start).num_minutes();
+                    let h = mins / 60;
+                    let m = mins % 60;
+                    format!(
+                        "CLOCK: [{s}]--[{}] =>  {h}:{m:02}",
+                        end.format("%Y-%m-%d %a %H:%M:%S")
+                    )
+                }
+                None => format!("CLOCK: [{s}]"),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[component]
-fn LogbookView(body: String) -> Element {
+fn LogbookView(body: String, block_id: Uuid, block_content: String) -> Element {
     let entries = parse_logbook(&body);
     // Tick once a second while there's an open entry, so the live
     // duration on the running clock updates. When everything is
@@ -1250,6 +1317,35 @@ fn LogbookView(body: String) -> Element {
                         "● running · {format_duration(s)}"
                     }
                 }
+                {
+                    let entries_for_click = entries.clone();
+                    let content_for_click = block_content.clone();
+                    let has_running = open_secs.is_some();
+                    let ops = try_use_context::<BlockOps>();
+                    let label = if has_running { "Clock out" } else { "Clock in" };
+                    rsx! {
+                        button {
+                            style: "padding: 0.15em 0.5em; border-radius: 3px; border: 1px solid var(--ls-border-color); background: var(--ls-tertiary-background-color); color: var(--ls-primary-text-color); cursor: pointer; font-size: 0.75rem;",
+                            onclick: move |_| {
+                                let now = chrono::Local::now().naive_local();
+                                let mut updated = entries_for_click.clone();
+                                if has_running {
+                                    if let Some(last) = updated.iter_mut().rev().find(|e| e.end.is_none()) {
+                                        last.end = Some(now);
+                                    }
+                                } else {
+                                    updated.push(LogbookEntry { start: now, end: None });
+                                }
+                                let new_body = render_logbook_body(&updated);
+                                let new_content = replace_logbook_body(&content_for_click, &new_body);
+                                if let Some(ops) = ops.as_ref() {
+                                    ops.update_content.call((block_id, new_content));
+                                }
+                            },
+                            "{label}"
+                        }
+                    }
+                }
                 span { style: "margin-left: auto; color: var(--ls-secondary-text-color); font-variant-numeric: tabular-nums;",
                     "total {format_duration(total_secs)}"
                 }
@@ -1288,6 +1384,158 @@ fn LogbookView(body: String) -> Element {
             }
         }
     }
+}
+
+/// Set or update the SRS scheduling properties on a card block:
+/// `card-last-interval`, `card-last-reviewed`,
+/// `card-next-schedule-date`. Properties are stored as inline
+/// `key:: value` lines (Logseq's convention), inserted right after
+/// the first content line so they sit at the top of the block.
+pub(crate) fn schedule_card(
+    content: &str,
+    interval_days: i64,
+    next_due: chrono::NaiveDate,
+) -> String {
+    let today = chrono::Local::now().date_naive();
+    let new_props: Vec<(&str, String)> = vec![
+        ("card-last-interval", interval_days.to_string()),
+        ("card-last-reviewed", today.format("%Y-%m-%d").to_string()),
+        (
+            "card-next-schedule-date",
+            next_due.format("%Y-%m-%d").to_string(),
+        ),
+    ];
+    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+    let mut handled = std::collections::HashSet::new();
+    // Replace any existing matching property lines in place.
+    for line in lines.iter_mut() {
+        for (k, v) in &new_props {
+            let prefix = format!("{k}::");
+            if line.trim_start().starts_with(&prefix) {
+                let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                *line = format!("{indent}{k}:: {v}");
+                handled.insert(*k);
+            }
+        }
+    }
+    // Anything that wasn't already present: append after the first
+    // non-empty line. If the block is empty, just emit them.
+    let to_add: Vec<String> = new_props
+        .iter()
+        .filter(|(k, _)| !handled.contains(*k))
+        .map(|(k, v)| format!("{k}:: {v}"))
+        .collect();
+    if !to_add.is_empty() {
+        let insert_after = lines
+            .iter()
+            .position(|l| !l.trim().is_empty())
+            .map(|i| i + 1)
+            .unwrap_or(lines.len());
+        for (offset, line) in to_add.into_iter().enumerate() {
+            lines.insert(insert_after + offset, line);
+        }
+    }
+    lines.join("\n")
+}
+
+/// Compute a Fruchterman-Reingold-style layout for the page graph.
+/// Returns a map of page id → `(x, y)` in the [0, width]×[0, height]
+/// box. Deterministic seeding from page id so the layout is stable
+/// across renders. Iterates a fixed budget so even huge graphs
+/// remain responsive — quality just degrades gracefully.
+pub(crate) fn force_directed_layout(
+    pages: &[Page],
+    edges: &[(Uuid, Uuid)],
+    width: f32,
+    height: f32,
+) -> std::collections::HashMap<Uuid, (f32, f32)> {
+    use std::collections::HashMap;
+    let n = pages.len();
+    if n == 0 {
+        return HashMap::new();
+    }
+    let area = width * height;
+    let k = (area / n as f32).sqrt().max(20.0);
+    let mut pos: Vec<(f32, f32)> = Vec::with_capacity(n);
+    // Deterministic radial seed: scatter pages around a circle plus
+    // a small jitter derived from the id so coincident pages don't
+    // share a position exactly (the repulsion term divides by zero).
+    for (i, p) in pages.iter().enumerate() {
+        let theta = (i as f32) / (n as f32) * std::f32::consts::TAU;
+        let r = (width.min(height)) * 0.35;
+        let hash = p.id.as_u128() as u32;
+        let jitter_x = ((hash & 0xFF) as f32 - 128.0) / 32.0;
+        let jitter_y = (((hash >> 8) & 0xFF) as f32 - 128.0) / 32.0;
+        pos.push((
+            width * 0.5 + r * theta.cos() + jitter_x,
+            height * 0.5 + r * theta.sin() + jitter_y,
+        ));
+    }
+    let idx: HashMap<Uuid, usize> = pages.iter().enumerate().map(|(i, p)| (p.id, i)).collect();
+    let edge_idx: Vec<(usize, usize)> = edges
+        .iter()
+        .filter_map(|(a, b)| idx.get(a).and_then(|ai| idx.get(b).map(|bi| (*ai, *bi))))
+        .collect();
+    let iter_budget = if n > 200 { 60 } else { 120 };
+    let mut t = width.max(height) * 0.1;
+    for _ in 0..iter_budget {
+        let mut disp = vec![(0.0_f32, 0.0_f32); n];
+        // Repulsion (all-pairs).
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = pos[i].0 - pos[j].0;
+                let dy = pos[i].1 - pos[j].1;
+                let d2 = dx * dx + dy * dy;
+                let d = d2.sqrt().max(0.5);
+                let f = k * k / d;
+                let ux = dx / d;
+                let uy = dy / d;
+                disp[i].0 += ux * f;
+                disp[i].1 += uy * f;
+                disp[j].0 -= ux * f;
+                disp[j].1 -= uy * f;
+            }
+        }
+        // Attraction along edges.
+        for (a, b) in &edge_idx {
+            let dx = pos[*a].0 - pos[*b].0;
+            let dy = pos[*a].1 - pos[*b].1;
+            let d = (dx * dx + dy * dy).sqrt().max(0.5);
+            let f = d * d / k;
+            let ux = dx / d;
+            let uy = dy / d;
+            disp[*a].0 -= ux * f;
+            disp[*a].1 -= uy * f;
+            disp[*b].0 += ux * f;
+            disp[*b].1 += uy * f;
+        }
+        // Apply with temperature-limited step + box-clamp.
+        for i in 0..n {
+            let (dx, dy) = disp[i];
+            let mag = (dx * dx + dy * dy).sqrt().max(0.0001);
+            let lim = mag.min(t);
+            pos[i].0 = (pos[i].0 + dx / mag * lim).clamp(20.0, width - 20.0);
+            pos[i].1 = (pos[i].1 + dy / mag * lim).clamp(20.0, height - 20.0);
+        }
+        t *= 0.95;
+    }
+    pages
+        .iter()
+        .zip(pos.into_iter())
+        .map(|(p, xy)| (p.id, xy))
+        .collect()
+}
+
+/// Rewrite the leading task marker on a block's content. Returns
+/// `None` when the content doesn't currently have a marker, so
+/// callers can decide whether to skip or add one.
+pub(crate) fn rewrite_task_marker(
+    content: &str,
+    target: publish_core::TaskMarker,
+) -> Option<String> {
+    let (cur, rest) = publish_core::peel_task_marker(content);
+    cur?;
+    Some(format!("{} {}", target.label(), rest))
 }
 
 fn peel_table(content: &str) -> Option<Vec<Vec<String>>> {
@@ -1456,6 +1704,12 @@ fn LeftSidebar(
                 onclick: move |_| on_set_panel.call(LeftPanel::Cards),
                 span { class: "ls-nav-icon", "♠" }
                 "Cards"
+            }
+            div {
+                class: if panel_cur == LeftPanel::Tasks { "ls-nav-item active" } else { "ls-nav-item" },
+                onclick: move |_| on_set_panel.call(LeftPanel::Tasks),
+                span { class: "ls-nav-icon", "▦" }
+                "Tasks"
             }
             {
                 let recents = try_use_context::<RecentsState>().map(|r| r.0.read().clone()).unwrap_or_default();
@@ -1739,6 +1993,13 @@ fn MainArea(
                 }
             }
         },
+        LeftPanel::Tasks => rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    TasksKanban { vault: vault.clone(), on_pick_page }
+                }
+            }
+        },
         LeftPanel::Graph => rsx! {
             main { class: "ls-main",
                 div { class: "ls-main-inner",
@@ -1857,7 +2118,17 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
     // front is the block content (with `#card` stripped); the back
     // is the direct-child blocks' content. Shuffle order each entry
     // so reviews don't fall into a fixed pattern.
-    let mut deck: Vec<(Uuid, String, Vec<String>, Uuid)> = Vec::new();
+    let today = chrono::Local::now().date_naive();
+    #[derive(Clone)]
+    struct Card {
+        block_id: Uuid,
+        page_id: Uuid,
+        front: String,
+        back: Vec<String>,
+        interval_days: i64,
+        full_content: String,
+    }
+    let mut deck: Vec<Card> = Vec::new();
     let mut children_by_parent: std::collections::HashMap<Uuid, Vec<&Block>> =
         std::collections::HashMap::new();
     for b in &vault.blocks {
@@ -1877,6 +2148,25 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
         if !has {
             continue;
         }
+        // Honor scheduling — skip cards whose due date is in the
+        // future. Reads `card-next-schedule-date::` from inline
+        // block properties.
+        let (props_json, _rest) = publish_core::peel_block_properties(&b.content);
+        let props_val: serde_json::Value =
+            serde_json::from_str(&props_json).unwrap_or(serde_json::Value::Null);
+        let next_due = props_val
+            .get("card-next-schedule-date")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        if let Some(due) = next_due {
+            if due > today {
+                continue;
+            }
+        }
+        let interval_days = props_val
+            .get("card-last-interval")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(1);
         let front = b
             .content
             .lines()
@@ -1892,7 +2182,14 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
             .get(&b.id)
             .map(|cs| cs.iter().map(|c| c.content.clone()).collect())
             .unwrap_or_default();
-        deck.push((b.id, front, back, b.page_id));
+        deck.push(Card {
+            block_id: b.id,
+            page_id: b.page_id,
+            front,
+            back,
+            interval_days,
+            full_content: b.content.clone(),
+        });
     }
 
     let total = deck.len();
@@ -1914,17 +2211,17 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
                 "{total_label}"
             }
         }
-        if let Some((bid, front, back, page_id)) = card {
+        if let Some(card) = card {
             div { style: "max-width: 540px; margin: 0 auto; border: 1px solid var(--ls-border-color); border-radius: 8px; background: var(--ls-secondary-background-color); padding: 1.2em 1.4em;",
                 div { style: "color: var(--ls-secondary-text-color); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em;",
                     "{cur_idx + 1} / {total}"
                 }
                 div { style: "font-size: 1.1rem; margin-top: 0.6em; white-space: pre-wrap;",
-                    "{front}"
+                    "{card.front}"
                 }
                 if is_flipped {
                     div { style: "margin-top: 1em; padding-top: 0.8em; border-top: 1px dashed var(--ls-border-color); white-space: pre-wrap; color: var(--ls-secondary-text-color);",
-                        for (i, line) in back.iter().enumerate() {
+                        for (i, line) in card.back.iter().enumerate() {
                             div { key: "{i}", "{line}" }
                         }
                     }
@@ -1937,31 +2234,60 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
                 }
                 div { style: "display: flex; gap: 0.4em; margin-top: 1em; flex-wrap: wrap;",
                     if is_flipped {
-                        button {
-                            style: "padding: 0.4em 0.9em; background: #5b5d72; color: white; border: 0; border-radius: 4px; cursor: pointer;",
-                            onclick: move |_| {
-                                flipped.set(false);
-                                let n = *idx.peek();
-                                idx.set((n + 1) % total.max(1));
-                            },
-                            "Again"
-                        }
-                        button {
-                            style: "padding: 0.4em 0.9em; background: #2f7d4f; color: white; border: 0; border-radius: 4px; cursor: pointer;",
-                            onclick: move |_| {
-                                flipped.set(false);
-                                let n = *idx.peek();
-                                idx.set((n + 1) % total.max(1));
-                            },
-                            "Good"
+                        {
+                            let ops = try_use_context::<BlockOps>();
+                            let card_full = card.full_content.clone();
+                            let card_id = card.block_id;
+                            let prev_interval = card.interval_days;
+                            let again_ops = ops.clone();
+                            let card_full_again = card_full.clone();
+                            let good_ops = ops.clone();
+                            rsx! {
+                                button {
+                                    style: "padding: 0.4em 0.9em; background: #5b5d72; color: white; border: 0; border-radius: 4px; cursor: pointer;",
+                                    title: "Schedule for tomorrow",
+                                    onclick: move |_| {
+                                        let new_due = today + chrono::Duration::days(1);
+                                        let new_content = schedule_card(&card_full_again, 1, new_due);
+                                        if let Some(ops) = again_ops.as_ref() {
+                                            ops.update_content.call((card_id, new_content));
+                                        }
+                                        flipped.set(false);
+                                        let n = *idx.peek();
+                                        idx.set((n + 1) % total.max(1));
+                                    },
+                                    "Again (1d)"
+                                }
+                                {
+                                    // SM-2 lite: next interval = 2× previous,
+                                    // clamped to a sane range. Logseq users
+                                    // typically tune this via plugin settings;
+                                    // for compat we just double until 365.
+                                    let next_interval = (prev_interval * 2).clamp(1, 365);
+                                    rsx! {
+                                        button {
+                                            style: "padding: 0.4em 0.9em; background: #2f7d4f; color: white; border: 0; border-radius: 4px; cursor: pointer;",
+                                            title: "Schedule for {next_interval} days",
+                                            onclick: move |_| {
+                                                let new_due = today + chrono::Duration::days(next_interval);
+                                                let new_content = schedule_card(&card_full, next_interval, new_due);
+                                                if let Some(ops) = good_ops.as_ref() {
+                                                    ops.update_content.call((card_id, new_content));
+                                                }
+                                                flipped.set(false);
+                                                let n = *idx.peek();
+                                                idx.set((n + 1) % total.max(1));
+                                            },
+                                            "Good ({next_interval}d)"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     button {
                         style: "padding: 0.4em 0.9em; background: transparent; border: 1px solid var(--ls-border-color); border-radius: 4px; cursor: pointer; color: var(--ls-secondary-text-color); margin-left: auto;",
-                        onclick: move |_| {
-                            let _ = bid;
-                            on_pick_page.call(page_id);
-                        },
+                        onclick: move |_| on_pick_page.call(card.page_id),
                         "Open page"
                     }
                 }
@@ -1970,6 +2296,138 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
             div { class: "ls-block-empty",
                 style: "text-align: center; padding: 2em;",
                 "No cards yet. Add ", code { "#card" }, " to a block to make it reviewable."
+            }
+        }
+    }
+}
+
+/// Logseq-style kanban: every block with a task marker, bucketed
+/// by its marker. Columns: LATER | NOW | TODO | DOING | WAITING |
+/// DONE | CANCELLED. Clicking a card focuses the source block in
+/// its page. The marker buttons on each card rewrite the task
+/// marker via update_content (so the change round-trips to disk
+/// via the same path inline edits use).
+#[component]
+fn TasksKanban(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+    use publish_core::TaskMarker;
+    #[derive(Clone)]
+    struct Card {
+        block_id: Uuid,
+        page_id: Uuid,
+        page_name: String,
+        marker: TaskMarker,
+        body: String,
+        full_content: String,
+    }
+    let mut cards: Vec<Card> = Vec::new();
+    for b in &vault.blocks {
+        let (marker, rest) = publish_core::peel_task_marker(&b.content);
+        if let Some(marker) = marker {
+            let page_name = vault
+                .pages
+                .iter()
+                .find(|p| p.id == b.page_id)
+                .map(|p| p.basename.clone())
+                .unwrap_or_else(|| "(unknown)".into());
+            cards.push(Card {
+                block_id: b.id,
+                page_id: b.page_id,
+                page_name,
+                marker,
+                body: rest.lines().next().unwrap_or(rest).to_string(),
+                full_content: b.content.clone(),
+            });
+        }
+    }
+    let columns: &[(TaskMarker, &str)] = &[
+        (TaskMarker::Later, "LATER"),
+        (TaskMarker::Now, "NOW"),
+        (TaskMarker::Todo, "TODO"),
+        (TaskMarker::Doing, "DOING"),
+        (TaskMarker::Waiting, "WAITING"),
+        (TaskMarker::Done, "DONE"),
+        (TaskMarker::Cancelled, "CANCELLED"),
+    ];
+    let zoom_state = try_use_context::<ZoomState>();
+    let ops = try_use_context::<BlockOps>();
+    rsx! {
+        h1 { class: "ls-page-title", "Tasks" }
+        div { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin-bottom: 0.8em;",
+            "{cards.len()} tasks across {vault.pages.len()} pages"
+        }
+        div { style: "display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6em; overflow-x: auto;",
+            for (marker, label) in columns.iter().copied() {
+                {
+                    let bucket: Vec<Card> = cards.iter().filter(|c| c.marker == marker).cloned().collect();
+                    let header_color = match marker {
+                        TaskMarker::Done | TaskMarker::Cancelled => "var(--ls-secondary-text-color)",
+                        TaskMarker::Doing | TaskMarker::Now => "var(--ls-active-primary-color)",
+                        _ => "var(--ls-primary-text-color)",
+                    };
+                    rsx! {
+                        section { key: "{label}",
+                            style: "background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 6px; padding: 0.5em; display: flex; flex-direction: column; min-height: 200px;",
+                            div { style: "font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: {header_color}; margin-bottom: 0.4em; display: flex; justify-content: space-between;",
+                                span { "{label}" }
+                                span { style: "color: var(--ls-secondary-text-color);", "{bucket.len()}" }
+                            }
+                            div { style: "display: flex; flex-direction: column; gap: 0.35em;",
+                                for card in bucket {
+                                    {
+                                        let cur_marker = card.marker;
+                                        let block_id = card.block_id;
+                                        let page_id = card.page_id;
+                                        let full = card.full_content.clone();
+                                        let mut zoom_w = zoom_state;
+                                        let ops_c = ops.clone();
+                                        rsx! {
+                                            div { key: "{card.block_id}",
+                                                style: "background: var(--ls-tertiary-background-color); border: 1px solid var(--ls-border-color); border-radius: 4px; padding: 0.4em 0.5em; font-size: 0.85rem; cursor: pointer;",
+                                                onclick: move |_| {
+                                                    on_pick_page.call(page_id);
+                                                    if let Some(z) = zoom_w.as_mut() { z.0.set(Some(block_id)); }
+                                                },
+                                                div { "{card.body}" }
+                                                div { style: "color: var(--ls-secondary-text-color); font-size: 0.7rem; margin-top: 0.2em;",
+                                                    "{card.page_name}"
+                                                }
+                                                div { style: "display: flex; gap: 0.2em; margin-top: 0.3em; flex-wrap: wrap;",
+                                                    {
+                                                        let next = match cur_marker {
+                                                            TaskMarker::Later => Some(TaskMarker::Now),
+                                                            TaskMarker::Now | TaskMarker::Todo => Some(TaskMarker::Doing),
+                                                            TaskMarker::Doing => Some(TaskMarker::Done),
+                                                            TaskMarker::Waiting => Some(TaskMarker::Doing),
+                                                            _ => None,
+                                                        };
+                                                        let full_clone = full.clone();
+                                                        let ops_clone = ops_c.clone();
+                                                        rsx! {
+                                                            if let Some(target) = next {
+                                                                button {
+                                                                    style: "background: transparent; border: 1px solid var(--ls-border-color); border-radius: 3px; color: var(--ls-secondary-text-color); padding: 0.1em 0.4em; cursor: pointer; font-size: 0.7rem;",
+                                                                    onclick: move |e: Event<MouseData>| {
+                                                                        e.stop_propagation();
+                                                                        if let Some(rewritten) = rewrite_task_marker(&full_clone, target) {
+                                                                            if let Some(ops) = ops_clone.as_ref() {
+                                                                                ops.update_content.call((block_id, rewritten));
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    "→ {target.label()}"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1984,22 +2442,8 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
 fn GraphView(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
     let mut pages: Vec<Page> = vault.pages.clone();
     pages.sort_by(|a, b| a.basename.cmp(&b.basename));
-    let n = pages.len().max(1) as f32;
-    let cx = 400.0_f32;
-    let cy = 300.0_f32;
-    let r = 230.0_f32;
-    let positions: std::collections::HashMap<Uuid, (f32, f32)> = pages
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let theta = (i as f32) / n * std::f32::consts::TAU;
-            (p.id, (cx + r * theta.cos(), cy + r * theta.sin()))
-        })
-        .collect();
 
-    // Edges: every wikilink target the block content references.
-    // We do a cheap substring scan since the parser results aren't
-    // cached for raw block content in this view.
+    // Edges drive the simulation, so compute them first.
     let basename_lower: std::collections::HashMap<String, Uuid> = pages
         .iter()
         .map(|p| (p.basename.to_lowercase(), p.id))
@@ -2026,6 +2470,10 @@ fn GraphView(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
     }
     edges.sort();
     edges.dedup();
+
+    let cx = 400.0_f32;
+    let cy = 300.0_f32;
+    let positions = force_directed_layout(&pages, &edges, 800.0, 600.0);
 
     rsx! {
         h1 { class: "ls-page-title", "Graph" }
@@ -2883,7 +3331,7 @@ fn LogseqBlockBody(block: Block) -> Element {
             }
             for (i, drawer) in drawers.into_iter().enumerate() {
                 if drawer.name.eq_ignore_ascii_case("logbook") {
-                    LogbookView { key: "{i}", body: drawer.body.clone() }
+                    LogbookView { key: "{i}", body: drawer.body.clone(), block_id: block_id, block_content: block.content.clone() }
                 } else {
                     details {
                         key: "{i}",
@@ -4533,6 +4981,83 @@ mod tests {
             (entries[0].end.unwrap() - entries[0].start).num_minutes(),
             45
         );
+    }
+
+    #[test]
+    fn force_layout_places_every_page_in_box() {
+        let now = chrono::Utc::now();
+        let mk = |name: &str| Page {
+            id: Uuid::new_v4(),
+            vault_id: Uuid::nil(),
+            folder_id: None,
+            path: format!("{name}.md"),
+            basename: name.into(),
+            ext: "md".into(),
+            aliases: Vec::new(),
+            frontmatter_json: "{}".into(),
+            stat_ctime: now,
+            stat_mtime: now,
+            stat_size: 0,
+            is_journal: false,
+            journal_day: None,
+            shadow_for_kind: None,
+            shadow_for_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let pages = vec![mk("A"), mk("B"), mk("C")];
+        let edges = vec![(pages[0].id, pages[1].id), (pages[1].id, pages[2].id)];
+        let pos = force_directed_layout(&pages, &edges, 200.0, 200.0);
+        for p in &pages {
+            let (x, y) = pos[&p.id];
+            assert!(x >= 20.0 && x <= 180.0, "x out of box: {x}");
+            assert!(y >= 20.0 && y <= 180.0, "y out of box: {y}");
+        }
+    }
+
+    #[test]
+    fn schedule_card_inserts_props() {
+        let due = chrono::NaiveDate::from_ymd_opt(2026, 5, 26).unwrap();
+        let out = schedule_card("What is the capital of France? #card", 7, due);
+        assert!(out.contains("card-last-interval:: 7"));
+        assert!(out.contains("card-next-schedule-date:: 2026-05-26"));
+        assert!(out.contains("card-last-reviewed:: "));
+    }
+
+    #[test]
+    fn schedule_card_updates_existing() {
+        let due = chrono::NaiveDate::from_ymd_opt(2026, 5, 26).unwrap();
+        let initial = schedule_card(
+            "Q #card",
+            1,
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        );
+        let updated = schedule_card(&initial, 14, due);
+        assert!(updated.contains("card-last-interval:: 14"));
+        assert!(updated.contains("card-next-schedule-date:: 2026-05-26"));
+        // Should not duplicate the property line.
+        assert_eq!(updated.matches("card-last-interval:: ").count(), 1);
+    }
+
+    #[test]
+    fn replace_logbook_round_trip() {
+        let original = "Some task\n:LOGBOOK:\nCLOCK: [2026-05-19 Tue 10:00:00]\n:END:";
+        let updated = replace_logbook_body(
+            original,
+            "CLOCK: [2026-05-19 Tue 10:00:00]--[2026-05-19 Tue 11:00:00] =>  1:00",
+        );
+        assert!(updated.contains("1:00"));
+        assert!(updated.contains(":LOGBOOK:"));
+        assert!(updated.contains(":END:"));
+        // Header line preserved.
+        assert!(updated.starts_with("Some task"));
+    }
+
+    #[test]
+    fn replace_logbook_creates_when_missing() {
+        let result = replace_logbook_body("TODO buy milk", "CLOCK: [2026-05-19 Tue 10:00:00]");
+        assert!(result.contains(":LOGBOOK:"));
+        assert!(result.contains("CLOCK: [2026-05-19 Tue 10:00:00]"));
     }
 
     #[test]
