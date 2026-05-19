@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code)]
 use dawfile_protools::raw_block::RawBlock;
 fn main() {
     let path = std::env::args().nth(1).expect("path");

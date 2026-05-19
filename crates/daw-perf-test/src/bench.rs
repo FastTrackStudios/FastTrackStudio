@@ -241,10 +241,7 @@ async fn native_remove_all_markers() {
         let rctx = reaper_medium::ProjectContext::CurrentProject;
         let mut ids = Vec::new();
         let mut idx = 0;
-        loop {
-            let Some(result) = markers_sw::enum_project_markers(low, idx) else {
-                break;
-            };
+        while let Some(result) = markers_sw::enum_project_markers(low, idx) {
             idx += 1;
             if !result.is_region {
                 ids.push(result.marker_idx);

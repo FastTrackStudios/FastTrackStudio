@@ -72,3 +72,6 @@ sync = ["dep:daw-synchronization", "dep:daw-network"]
 eyre = "0.6"
 reaper-test.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

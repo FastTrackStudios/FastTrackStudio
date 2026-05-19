@@ -355,7 +355,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_volume(self.context(), self.location(), volume)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -369,7 +369,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_pan(self.context(), self.location(), pan)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -382,7 +382,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_muted(self.context(), self.location(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -391,7 +391,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_muted(self.context(), self.location(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -405,7 +405,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_mono(self.context(), self.location(), mono)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -414,7 +414,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_phase(self.context(), self.location(), inverted)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -435,7 +435,7 @@ impl RouteHandle {
                 self.route_ref.clone(),
                 mode,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -451,7 +451,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_source_channels(self.context(), self.location(), start_channel, num_channels)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -462,7 +462,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_dest_channels(self.context(), self.location(), start_channel, num_channels)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -475,7 +475,7 @@ impl RouteHandle {
         self.clients
             .routing
             .remove_route(self.context(), self.location())
-            .await?;
+            .await??;
         Ok(())
     }
 }

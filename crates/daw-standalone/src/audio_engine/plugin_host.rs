@@ -73,7 +73,6 @@ impl HostLogImpl for DawHostShared {
             LogSeverity::PluginMisbehaving => {
                 tracing::error!(target: "clap_plugin", "PLUGIN_MISBEHAVING: {message}");
             }
-            _ => tracing::info!(target: "clap_plugin", "{message}"),
         }
     }
 }

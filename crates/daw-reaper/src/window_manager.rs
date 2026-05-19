@@ -12,6 +12,12 @@
 //! produced by plugin-registered `screenset_register` callbacks and
 //! aren't safe to round-trip from outside REAPER.
 
+// `reaper-low` exposes `extern "C"` bindings via the `Reaper::get()`
+// singleton; calling them does not require `unsafe` in current bindings,
+// but historical call sites here still wrap them. Suppress the resulting
+// `clippy::unnecessary_unsafe` / `not_unsafe_ptr_arg_deref` noise.
+#![allow(unused_unsafe, clippy::not_unsafe_ptr_arg_deref, dead_code)]
+
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::PathBuf;

@@ -243,7 +243,7 @@ impl ProjectItems {
         self.clients
             .item
             .select_all_items(self.context(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -252,7 +252,7 @@ impl ProjectItems {
         self.clients
             .item
             .select_all_items(self.context(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -344,7 +344,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_position(self.context(), self.item_ref(), position)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -358,7 +358,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_length(self.context(), self.item_ref(), length)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -371,7 +371,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_muted(self.context(), self.item_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -380,7 +380,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_muted(self.context(), self.item_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -389,7 +389,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_color(self.context(), self.item_ref(), color)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -398,7 +398,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_selected(self.context(), self.item_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -407,7 +407,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_selected(self.context(), self.item_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -416,7 +416,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_locked(self.context(), self.item_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -425,7 +425,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_locked(self.context(), self.item_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -443,7 +443,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_volume(self.context(), self.item_ref(), volume)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -452,7 +452,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_fade_in(self.context(), self.item_ref(), length, shape)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -461,7 +461,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_fade_out(self.context(), self.item_ref(), length, shape)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -474,7 +474,7 @@ impl ItemHandle {
         self.clients
             .item
             .move_to_track(self.context(), self.item_ref(), track)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -483,7 +483,7 @@ impl ItemHandle {
         self.clients
             .item
             .delete_item(self.context(), self.item_ref())
-            .await?;
+            .await??;
         Ok(())
     }
 

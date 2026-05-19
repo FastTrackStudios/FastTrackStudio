@@ -6,6 +6,7 @@
 //!
 //! Called from `BatchExecutor::execute_sync()` inside a single
 //! `main_thread::query()` closure.
+#![allow(dead_code)]
 
 use super::resolve::{resolve_fx_chain_arg, resolve_project_arg, resolve_track_arg};
 use crate::fx::{

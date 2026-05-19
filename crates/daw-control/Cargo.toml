@@ -16,3 +16,6 @@ facet-json = { workspace = true }
 # get a structured warning when a Mutex/RwLock is recovered.
 tracing = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
+
+[lints]
+workspace = true

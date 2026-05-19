@@ -65,7 +65,7 @@ impl Transport {
     ///
     /// Starts playback from the current playhead position.
     pub async fn play(&self) -> Result<()> {
-        self.clients.transport.play(self.context()).await?;
+        self.clients.transport.play(self.context()).await??;
         Ok(())
     }
 
@@ -73,7 +73,7 @@ impl Transport {
     ///
     /// Maintains the playhead position so playback can be resumed.
     pub async fn pause(&self) -> Result<()> {
-        self.clients.transport.pause(self.context()).await?;
+        self.clients.transport.pause(self.context()).await??;
         Ok(())
     }
 
@@ -81,19 +81,19 @@ impl Transport {
     ///
     /// Stops playback and typically resets to the edit cursor or start position.
     pub async fn stop(&self) -> Result<()> {
-        self.clients.transport.stop(self.context()).await?;
+        self.clients.transport.stop(self.context()).await??;
         Ok(())
     }
 
     /// Toggle between play and pause
     pub async fn play_pause(&self) -> Result<()> {
-        self.clients.transport.play_pause(self.context()).await?;
+        self.clients.transport.play_pause(self.context()).await??;
         Ok(())
     }
 
     /// Toggle between play and stop
     pub async fn play_stop(&self) -> Result<()> {
-        self.clients.transport.play_stop(self.context()).await?;
+        self.clients.transport.play_stop(self.context()).await??;
         Ok(())
     }
 
@@ -103,7 +103,7 @@ impl Transport {
 
     /// Start recording
     pub async fn record(&self) -> Result<()> {
-        self.clients.transport.record(self.context()).await?;
+        self.clients.transport.record(self.context()).await??;
         Ok(())
     }
 
@@ -112,7 +112,7 @@ impl Transport {
         self.clients
             .transport
             .stop_recording(self.context())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -121,7 +121,7 @@ impl Transport {
         self.clients
             .transport
             .toggle_recording(self.context())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -134,7 +134,7 @@ impl Transport {
         self.clients
             .transport
             .set_position(self.context(), seconds)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -146,13 +146,13 @@ impl Transport {
 
     /// Go to the start of the project (position 0)
     pub async fn goto_start(&self) -> Result<()> {
-        self.clients.transport.goto_start(self.context()).await?;
+        self.clients.transport.goto_start(self.context()).await??;
         Ok(())
     }
 
     /// Go to the end of the project
     pub async fn goto_end(&self) -> Result<()> {
-        self.clients.transport.goto_end(self.context()).await?;
+        self.clients.transport.goto_end(self.context()).await??;
         Ok(())
     }
 
@@ -203,7 +203,7 @@ impl Transport {
         self.clients
             .transport
             .set_tempo(self.context(), bpm)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -213,7 +213,7 @@ impl Transport {
 
     /// Toggle loop mode on/off
     pub async fn toggle_loop(&self) -> Result<()> {
-        self.clients.transport.toggle_loop(self.context()).await?;
+        self.clients.transport.toggle_loop(self.context()).await??;
         Ok(())
     }
 
@@ -228,7 +228,7 @@ impl Transport {
         self.clients
             .transport
             .set_loop(self.context(), enabled)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -247,7 +247,7 @@ impl Transport {
         self.clients
             .transport
             .set_time_selection(self.context(), start_seconds, end_seconds)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -256,7 +256,7 @@ impl Transport {
         self.clients
             .transport
             .clear_time_selection(self.context())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -275,7 +275,7 @@ impl Transport {
         self.clients
             .transport
             .set_playrate(self.context(), rate)
-            .await?;
+            .await??;
         Ok(())
     }
 

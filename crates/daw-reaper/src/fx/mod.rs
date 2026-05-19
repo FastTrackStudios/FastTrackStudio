@@ -61,10 +61,7 @@ impl Effects for crate::Reaper {
         let low = reaper.medium_reaper().low();
         let mut results = Vec::new();
         let mut index = 0i32;
-        loop {
-            let Some((name, ident)) = fx_sw::enum_installed_fx(low, index) else {
-                break;
-            };
+        while let Some((name, ident)) = fx_sw::enum_installed_fx(low, index) {
             results.push(InstalledFx { name, ident });
             index += 1;
         }

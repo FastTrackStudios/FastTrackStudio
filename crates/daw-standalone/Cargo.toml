@@ -95,3 +95,6 @@ web = ["decode", "dep:wasm-bindgen", "dep:js-sys"]
 [[example]]
 name = "play_rpp"
 required-features = ["rpp-loader"]
+
+[lints]
+workspace = true

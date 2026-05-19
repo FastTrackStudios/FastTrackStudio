@@ -66,7 +66,7 @@ pub fn discover_socket() -> Option<PathBuf> {
         .collect();
 
     // Sort by PID (most recent process likely has highest PID)
-    sockets.sort_by(|a, b| b.0.cmp(&a.0));
+    sockets.sort_by_key(|s| std::cmp::Reverse(s.0));
     sockets.into_iter().next().map(|(_, path)| path)
 }
 
@@ -89,7 +89,7 @@ pub fn discover_all_sockets() -> Vec<(u32, PathBuf)> {
             if alive { Some((pid, path)) } else { None }
         })
         .collect();
-    sockets.sort_by(|a, b| b.0.cmp(&a.0));
+    sockets.sort_by_key(|s| std::cmp::Reverse(s.0));
     sockets
 }
 

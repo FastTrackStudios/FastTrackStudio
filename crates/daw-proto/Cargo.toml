@@ -26,3 +26,6 @@ vox = []
 # need REAPER / GPU. Enable from a consumer's dev-dependencies:
 #   daw-proto = { path = "...", features = ["test-utils"] }
 test-utils = []
+
+[lints]
+workspace = true

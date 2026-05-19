@@ -7,3 +7,6 @@ authors.workspace = true
 description = "Shared dev tooling for FTS repos — REAPER extension install, symlink helpers"
 
 [dependencies]
+
+[lints]
+workspace = true

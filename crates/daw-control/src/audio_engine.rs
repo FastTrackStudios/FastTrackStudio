@@ -69,13 +69,13 @@ impl AudioEngine {
     /// If devices are already open this is a no-op. After calling this,
     /// `is_running()` should return `true`.
     pub async fn init(&self) -> crate::Result<()> {
-        self.clients.audio_engine.init().await?;
+        self.clients.audio_engine.init().await??;
         Ok(())
     }
 
     /// Close all audio and MIDI devices.
     pub async fn quit(&self) -> crate::Result<()> {
-        self.clients.audio_engine.quit().await?;
+        self.clients.audio_engine.quit().await??;
         Ok(())
     }
 }

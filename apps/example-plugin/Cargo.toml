@@ -19,3 +19,6 @@ daw = { path = "../../crates/daw", features = ["reaper"] }
 reaper-test.workspace = true
 tokio = { workspace = true, features = ["time"] }
 eyre = "0.6"
+
+[lints]
+workspace = true

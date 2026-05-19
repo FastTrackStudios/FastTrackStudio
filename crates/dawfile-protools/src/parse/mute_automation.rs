@@ -6,8 +6,7 @@
 //!
 //! - 28-byte header
 //!   - `+4..+8`   u32 LE: payload size (excluding 28-byte header? format
-//!                        is "bytes-after-+4"; updated via the splice
-//!                        cascade on write)
+//!     is "bytes-after-+4"; updated via the splice cascade on write)
 //!   - `+10`     u8: total breakpoint count (= `1 + user_count`)
 //!   - `+16`     u8: user breakpoint count
 //! - `N × 6` breakpoint bytes — each is

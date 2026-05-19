@@ -762,7 +762,7 @@ fn populate_fx_chains(
     project: &ReaperProject,
     summary: &mut LoadedProject,
 ) {
-    use daw_proto::fx::{Effects, FxChainContext};
+    use daw_proto::fx::FxChainContext;
     use daw_proto::project::ProjectContext;
 
     // Build (track_guid, fx_chain) pairs. Tracks were added in order

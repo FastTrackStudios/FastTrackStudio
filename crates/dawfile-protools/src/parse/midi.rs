@@ -184,7 +184,7 @@ fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
                 events,
                 // The legacy u40 form of zero_ticks is no longer used for
                 // arithmetic, but downstream may inspect it for debugging.
-                zero_ticks: zero_ticks_u64 & 0x000000_ffff_ffff_ffff,
+                zero_ticks: zero_ticks_u64 & 0x0000_0000_ffff_ffff_ffff,
                 max_pos,
             });
         }

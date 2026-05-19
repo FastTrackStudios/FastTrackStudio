@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code)]
 //! For every content type that has ~track-count instances, print all payload
 //! byte positions where values vary AND the distinct values present.
 //!

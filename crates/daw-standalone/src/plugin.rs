@@ -233,9 +233,13 @@ mod thread_serialized {
     pub struct ThreadSerialized<T>(T);
 
     impl<T> ThreadSerialized<T> {
-        /// SAFETY: caller must guarantee that the wrapped value is only
-        /// ever accessed from one thread at a time. The DAW enforces
-        /// this by storing instances inside `Mutex<HashMap<..>>`.
+        /// Construct a `ThreadSerialized<T>` wrapper.
+        ///
+        /// # Safety
+        ///
+        /// The caller must guarantee that the wrapped value is only ever
+        /// accessed from one thread at a time. The DAW enforces this by
+        /// storing instances inside `Mutex<HashMap<..>>`.
         pub unsafe fn new(value: T) -> Self {
             Self(value)
         }

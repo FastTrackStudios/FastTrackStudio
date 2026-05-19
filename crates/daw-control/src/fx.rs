@@ -201,7 +201,7 @@ impl FxChain {
         self.clients
             .fx
             .set_chain_state(self.project_context(), self.context.clone(), chunks)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -281,7 +281,7 @@ impl FxChain {
         self.clients
             .fx
             .move_to_container(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -295,7 +295,7 @@ impl FxChain {
         self.clients
             .fx
             .move_from_container(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -313,7 +313,7 @@ impl FxChain {
                 container_id.clone(),
                 mode,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -349,7 +349,7 @@ impl FxChain {
         self.clients
             .fx
             .set_container_channel_config(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -380,7 +380,7 @@ impl FxChain {
                 self.context.clone(),
                 container_id.clone(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -394,7 +394,7 @@ impl FxChain {
                 container_id.clone(),
                 name.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -427,7 +427,7 @@ impl FxChain {
                 self.context.clone(),
                 chunk_text.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 }
@@ -540,7 +540,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_enabled(self.project_context(), self.target(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -549,7 +549,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_enabled(self.project_context(), self.target(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -559,7 +559,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_enabled(self.project_context(), self.target(), !info.enabled)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -625,7 +625,7 @@ impl FxHandle {
         self.clients
             .fx
             .next_preset(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -634,7 +634,7 @@ impl FxHandle {
         self.clients
             .fx
             .prev_preset(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -643,7 +643,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_preset(self.project_context(), self.target(), index)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -656,7 +656,7 @@ impl FxHandle {
         self.clients
             .fx
             .open_ui(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -665,7 +665,7 @@ impl FxHandle {
         self.clients
             .fx
             .close_ui(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -674,7 +674,7 @@ impl FxHandle {
         self.clients
             .fx
             .toggle_ui(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -687,7 +687,7 @@ impl FxHandle {
         self.clients
             .fx
             .remove(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -696,7 +696,7 @@ impl FxHandle {
         self.clients
             .fx
             .move_to(self.project_context(), self.target(), index)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -739,7 +739,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_state_chunk(self.project_context(), self.target(), chunk)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -761,7 +761,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_state_chunk_encoded(self.project_context(), self.target(), encoded)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -797,7 +797,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_named_config(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -825,7 +825,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_channel_config(self.project_context(), self.target(), config)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -853,7 +853,7 @@ impl FxHandle {
         self.clients
             .fx
             .restore_output(self.project_context(), self.target(), saved)
-            .await?;
+            .await??;
         Ok(())
     }
 }
@@ -1003,7 +1003,7 @@ impl FxParamHandle {
                 self.clients
                     .fx
                     .set_parameter(self.project_context(), request)
-                    .await?;
+                    .await??;
             }
             ParamRef::Name(name) => {
                 let request = SetParameterByNameRequest {
@@ -1014,7 +1014,7 @@ impl FxParamHandle {
                 self.clients
                     .fx
                     .set_parameter_by_name(self.project_context(), request)
-                    .await?;
+                    .await??;
             }
         }
         Ok(())

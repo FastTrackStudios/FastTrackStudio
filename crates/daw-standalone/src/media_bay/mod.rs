@@ -40,7 +40,6 @@ use std::collections::HashMap;
 
 use daw_proto::{DawError, DawResult, ProjectContext};
 
-use self::state::BayStateExt as _;
 use crate::sync::Standalone;
 
 /// Handle on the project Media/FX Bay. Cheap to clone — internally

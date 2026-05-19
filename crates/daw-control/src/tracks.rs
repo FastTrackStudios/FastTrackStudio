@@ -137,25 +137,25 @@ impl Tracks {
 
     /// Clear solo from all tracks
     pub async fn clear_solo(&self) -> Result<()> {
-        self.clients.track.clear_all_solo(self.context()).await?;
+        self.clients.track.clear_all_solo(self.context()).await??;
         Ok(())
     }
 
     /// Mute all tracks
     pub async fn mute_all(&self) -> Result<()> {
-        self.clients.track.mute_all(self.context()).await?;
+        self.clients.track.mute_all(self.context()).await??;
         Ok(())
     }
 
     /// Unmute all tracks
     pub async fn unmute_all(&self) -> Result<()> {
-        self.clients.track.unmute_all(self.context()).await?;
+        self.clients.track.unmute_all(self.context()).await??;
         Ok(())
     }
 
     /// Clear selection from all tracks
     pub async fn clear_selection(&self) -> Result<()> {
-        self.clients.track.clear_selection(self.context()).await?;
+        self.clients.track.clear_selection(self.context()).await??;
         Ok(())
     }
 
@@ -207,13 +207,13 @@ impl Tracks {
 
     /// Remove a track from the project by GUID, index, or master reference.
     pub async fn remove(&self, track: daw_proto::TrackRef) -> Result<()> {
-        self.clients.track.remove(self.context(), track).await?;
+        self.clients.track.remove(self.context(), track).await??;
         Ok(())
     }
 
     /// Remove all tracks from the project (excluding master).
     pub async fn remove_all(&self) -> Result<()> {
-        self.clients.track.remove_all(self.context()).await?;
+        self.clients.track.remove_all(self.context()).await??;
         Ok(())
     }
 
@@ -328,7 +328,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_muted(self.context(), self.track_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -337,7 +337,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_muted(self.context(), self.track_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -347,7 +347,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_muted(self.context(), self.track_ref(), !info.muted)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -365,7 +365,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_soloed(self.context(), self.track_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -374,7 +374,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_soloed(self.context(), self.track_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -384,7 +384,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_soloed(self.context(), self.track_ref(), !info.soloed)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -393,7 +393,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_solo_exclusive(self.context(), self.track_ref())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -411,7 +411,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_armed(self.context(), self.track_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -420,7 +420,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_armed(self.context(), self.track_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -430,7 +430,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_armed(self.context(), self.track_ref(), !info.armed)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -453,7 +453,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_volume(self.context(), self.track_ref(), volume)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -467,7 +467,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_pan(self.context(), self.track_ref(), pan)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -480,7 +480,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_selected(self.context(), self.track_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -489,7 +489,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_selected(self.context(), self.track_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -498,7 +498,7 @@ impl TrackHandle {
         self.clients
             .track
             .select_exclusive(self.context(), self.track_ref())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -511,7 +511,7 @@ impl TrackHandle {
         self.clients
             .track
             .rename(self.context(), self.track_ref(), name.to_string())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -520,7 +520,7 @@ impl TrackHandle {
         self.clients
             .track
             .set_color(self.context(), self.track_ref(), color)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -607,7 +607,7 @@ impl TrackHandle {
         self.clients
             .routing
             .set_parent_send_enabled(self.context(), self.track_ref(), enabled)
-            .await?;
+            .await??;
         Ok(())
     }
 

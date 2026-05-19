@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code)]
 //! Print every 0x1029 payload byte-by-byte across all tracks so we can
 //! visually diff varying fields (looking for track color).
 

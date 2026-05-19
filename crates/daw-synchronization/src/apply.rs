@@ -105,6 +105,7 @@ fn remove_marker_mapping(project_guid: &str, remote_id: u32) {
 /// operation as a single step (not individual API calls).
 ///
 /// The caller is responsible for inserting suppression keys into the suppression set.
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_remote_event(
     daw: &Daw,
     project_guid: &str,
@@ -222,6 +223,7 @@ fn domain_label(domain: &SyncDomain) -> &'static str {
 
 // ── Transport ────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_transport(
     daw: &Daw,
     _ctx: &ProjectContext,

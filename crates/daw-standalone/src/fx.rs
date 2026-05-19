@@ -372,7 +372,7 @@ impl Effects for Standalone {
                 .insert(request.index, request.value.clamp(0.0, 1.0));
             // Update last_touched.
             Ok::<(), DawError>(())
-        })?;
+        })??;
         // Update last-touched FX.
         let (track_guid, is_input_fx) = match &request.target.context {
             FxChainContext::Track(g) => (g.clone(), false),

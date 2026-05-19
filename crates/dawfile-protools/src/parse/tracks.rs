@@ -215,6 +215,7 @@ fn assign_regions_old(
 /// All `0x1052` entries map 1:1 to `entries` by position — both active and
 /// alternate playlists are in the same flat list. Grouping into alternates
 /// happens later in `group_alternate_playlists`.
+#[allow(clippy::too_many_arguments)]
 fn assign_regions_new(
     blocks: &[Block],
     cursor: &Cursor<'_>,

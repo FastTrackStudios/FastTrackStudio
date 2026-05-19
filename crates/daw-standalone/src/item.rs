@@ -1,8 +1,8 @@
 //! `impl Items for Standalone` — post-architect::rpc port.
 //!
-//! Backed by `ProjectState::items` (HashMap<item_guid, ItemEntry>)
-//! + `ProjectState::items_by_track` (ordering per track). The old
-//! `StandaloneItem` async service struct + parallel item state
+//! Backed by `ProjectState::items` (HashMap<item_guid, ItemEntry>) plus
+//! `ProjectState::items_by_track` (ordering per track). The old
+//! `StandaloneItem` async service struct and parallel item state were
 //! retired with the port.
 
 use daw_proto::Items;

@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code)]
 //! Brute-force search for any byte in any per-track block that
 //! perfectly matches the user-provided mute list for Lord of the Fight.
 

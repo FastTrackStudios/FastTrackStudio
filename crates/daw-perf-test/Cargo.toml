@@ -40,3 +40,6 @@ moire.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 eyre = "0.6"
+
+[lints]
+workspace = true

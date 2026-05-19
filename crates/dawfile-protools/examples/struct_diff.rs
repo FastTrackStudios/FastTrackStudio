@@ -1,3 +1,4 @@
+#![allow(clippy::all, dead_code)]
 //! Walk every `0x102d` (per-track display block), align inner children by
 //! content_type, and report payload bytes that vary across tracks.
 //!

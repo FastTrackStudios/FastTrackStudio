@@ -1,8 +1,8 @@
-//! [`DockHostService`] implementation backed by the REAPER docker + Dioxus
+//! [`DockHosting`] implementation backed by the REAPER docker + Dioxus
 //! dock module.
 //!
 //! Wraps the imperative `dock::*` helpers behind the platform-portable
-//! `DockHostService` trait so callers (tests, RPC clients) can drive the
+//! `DockHosting` trait so callers (tests, RPC clients) can drive the
 //! dock host without knowing it's REAPER underneath.
 //!
 //! Lifetime model: panels are still registered through
@@ -129,7 +129,7 @@ fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> 
     })
 }
 
-/// REAPER-backed [`DockHostService`] adapter.
+/// REAPER-backed [`DockHosting`] adapter.
 ///
 /// Stateless wrapper — all dock state lives in a process-wide
 /// `OnceLock<Mutex<HostState>>` (matches the static-state pattern used by

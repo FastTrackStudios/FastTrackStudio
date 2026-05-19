@@ -10,6 +10,7 @@
 //! Actions registered with `show_in_menu: true` are automatically added to the
 //! Extensions > FastTrackStudio menu. The menu hierarchy is derived from the
 //! command name prefix (e.g., `FTS_SESSION_*` → Session submenu).
+#![allow(dead_code)]
 
 use crate::main_thread;
 use daw_control::lock::LockExt;

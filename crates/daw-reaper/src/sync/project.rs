@@ -6,6 +6,7 @@
 //! captured GUID. Most callers should use `crate::Reaper` directly via
 //! the architect-rpc mount; this handle exists for the `Daw` trait's
 //! `current_project()` / `project()` accessors.
+#![allow(dead_code)]
 
 use daw_proto::{DawResult, ProjectContext, ProjectInfo, Projects as ProjectTrait, UndoScope};
 

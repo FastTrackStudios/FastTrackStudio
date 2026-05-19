@@ -16,6 +16,15 @@
 //! This allows testing the full fts-control-web experience without a real DAW.
 
 #![deny(unsafe_code)]
+// Stylistic lints kept tolerant on this crate; standalone is the
+// reference/mock implementation and uses ergonomic patterns
+// (`let mut x = Default::default(); x.field = ...`) extensively.
+#![allow(
+    clippy::field_reassign_with_default,
+    clippy::manual_clamp,
+    clippy::needless_range_loop,
+    dead_code
+)]
 
 mod action_registry;
 mod audio_accessor;

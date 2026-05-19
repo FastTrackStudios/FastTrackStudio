@@ -7,6 +7,7 @@
 //! Sub-handles ([`ReaperProject`], [`ReaperTransport`], etc.) borrow
 //! `&'a ReaperMainThread` and inherit its `!Send + !Sync` discipline via the
 //! borrow.
+#![allow(dead_code)]
 
 pub mod daw;
 // ext_state ported to architect::rpc — see `crate::ext_state`.

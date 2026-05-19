@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Network latency simulation test for cross-machine sync validation.
 //!
 //! Simulates LAN conditions (1-50ms one-way latency with jitter) between
