@@ -536,6 +536,51 @@ aside.query .query-results li {
   color: var(--muted);
 }
 
+/* Namespace macro — `{{namespace foo/bar}}` lists child pages. */
+aside.namespace {
+  margin: 0.75em 0;
+  padding: 0.6em 0.85em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 0 0.4em 0.4em 0;
+}
+aside.namespace .namespace-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.4em;
+}
+aside.namespace .namespace-expr {
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+aside.namespace .namespace-results {
+  list-style: disc inside;
+  margin: 0;
+  padding: 0;
+}
+aside.namespace .namespace-results li {
+  margin: 0.15em 0;
+}
+aside.namespace .namespace-empty {
+  margin: 0.2em 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Mermaid diagram block — no syntect chrome. Mermaid renders
+   to SVG inside the <pre>; we size + center. */
+pre.mermaid {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 0.4em;
+  padding: 1em;
+  margin: 1em 0;
+  text-align: center;
+  overflow-x: auto;
+}
+
 aside.query .query-empty {
   margin: 0.2em 0;
   color: var(--muted);

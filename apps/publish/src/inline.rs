@@ -8,7 +8,7 @@
 //! snippet directly.
 
 use crate::components::{
-    BlockRefResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver,
+    BlockRefResolver, NamespaceResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver,
 };
 use uuid::Uuid;
 
@@ -62,6 +62,13 @@ pub enum Node {
         results: Vec<QueryHit>,
         broken: bool,
     },
+    /// `{{namespace foo/bar}}` — list every page whose basename
+    /// starts with `foo/bar/`. Resolved at parse time against a
+    /// [`NamespaceResolver`].
+    Namespace {
+        prefix: String,
+        results: Vec<QueryHit>,
+    },
 }
 
 pub fn parse(
@@ -70,12 +77,31 @@ pub fn parse(
     blocks: &BlockRefResolver,
     page_embeds: &PageEmbedResolver,
     queries: &QueryResolver,
+    namespaces: &NamespaceResolver,
 ) -> Vec<Node> {
     let mut out = Vec::new();
     let mut buf = String::new();
     let bytes = s.as_bytes();
     let mut i = 0usize;
     while i < s.len() {
+        // {{namespace <prefix>}} — list pages under a namespace.
+        if s[i..].starts_with("{{namespace") {
+            if let Some(end) = s[i + 11..].find("}}") {
+                let raw = s[i + 11..i + 11 + end].trim();
+                let results = namespaces
+                    .0
+                    .get(&raw.to_lowercase())
+                    .cloned()
+                    .unwrap_or_default();
+                flush(&mut buf, &mut out);
+                out.push(Node::Namespace {
+                    prefix: raw.to_string(),
+                    results,
+                });
+                i += 11 + end + 2;
+                continue;
+            }
+        }
         // {{query <expr>}} — embedded live query. Match before
         // emphasis / brackets so the literal sigil wins.
         if s[i..].starts_with("{{query") {
@@ -189,6 +215,7 @@ pub fn parse(
                     blocks,
                     page_embeds,
                     queries,
+                    namespaces,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Bold(inner));
@@ -205,6 +232,7 @@ pub fn parse(
                     blocks,
                     page_embeds,
                     queries,
+                    namespaces,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Strikethrough(inner));
@@ -221,6 +249,7 @@ pub fn parse(
                     blocks,
                     page_embeds,
                     queries,
+                    namespaces,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Highlight(inner));
@@ -237,6 +266,7 @@ pub fn parse(
                     blocks,
                     page_embeds,
                     queries,
+                    namespaces,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Italic(inner));
@@ -330,6 +360,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -345,6 +376,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -360,6 +392,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         assert!(matches!(
             n.first().unwrap(),
@@ -375,6 +408,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let bold = match n.first().unwrap() {
             Node::Bold(c) => c,
@@ -393,6 +427,7 @@ mod tests {
             &resolver,
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef {
@@ -418,6 +453,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef { broken, .. } => Some(*broken),
@@ -440,6 +476,7 @@ mod tests {
             &empty_blocks(),
             &er,
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let pe = n.iter().find_map(|x| match x {
             Node::PageEmbed {
@@ -483,6 +520,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &qr,
+            &NamespaceResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::Query {
@@ -501,6 +539,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let broken = n
             .iter()
@@ -516,6 +555,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let broken = n
             .iter()
@@ -533,6 +573,7 @@ mod tests {
             &empty_blocks(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::BlockRef { .. })));
         let txt: String = n

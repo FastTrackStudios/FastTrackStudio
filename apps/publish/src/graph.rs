@@ -19,7 +19,8 @@
 //! upgrade to Pixi/D3 in a later phase.
 
 use crate::components::{
-    BlockRefResolver, BlockRefTarget, PageEmbedResolver, QueryResolver, WikiResolver,
+    BlockRefResolver, BlockRefTarget, NamespaceResolver, PageEmbedResolver, QueryResolver,
+    WikiResolver,
 };
 use crate::inline;
 use crate::site::slugify;
@@ -82,6 +83,7 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
             &block_refs,
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         for n in walk(&nodes) {
             match n {
@@ -252,6 +254,7 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
             &block_refs,
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         let snippet = block_snippet(&b.content);
         for n in walk(&parsed) {

@@ -69,6 +69,13 @@ pub struct QueryHit {
 #[derive(Clone, Default, PartialEq)]
 pub struct QueryResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
 
+/// Resolution table: lowercased namespace prefix → matching child
+/// pages. Lets `{{namespace foo/bar}}` block content list every
+/// page under that namespace (alphabetical). Mirrors Logseq's
+/// `{{namespace}}` macro.
+#[derive(Clone, Default, PartialEq)]
+pub struct NamespaceResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
+
 /// Outer document. `dioxus-ssr` renders the children as HTML
 /// inside a hand-written `<html>` shell (`crate::render::shell`)
 /// — Dioxus 0.7 doesn't have a first-class `<html>`/`<head>`
@@ -326,7 +333,15 @@ pub fn BlockNode(block: Block) -> Element {
     // Also strip SCHEDULED:/DEADLINE: planning lines and surface
     // them as date pills under the block body.
     let (plan, body_content) = peel_planning(body_content);
-    let inlines = inline::parse(body_content, &resolver, &block_refs, &page_embeds, &queries);
+    let namespaces = try_use_context::<NamespaceResolver>().unwrap_or_default();
+    let inlines = inline::parse(
+        body_content,
+        &resolver,
+        &block_refs,
+        &page_embeds,
+        &queries,
+        &namespaces,
+    );
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
     let anchor = format!("block-{}", block.id.simple());
@@ -347,6 +362,7 @@ pub fn BlockNode(block: Block) -> Element {
             &empty_blocks,
             &empty_embeds,
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
         );
         return rsx! {
             aside { id: "{anchor}", class: "block-embed",
@@ -378,18 +394,29 @@ pub fn BlockNode(block: Block) -> Element {
                 .clone()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "plain".into());
-            // Server-side syntax highlighting via syntect. The
-            // output is raw HTML (`<span style=…>` per token);
-            // Dioxus needs `dangerous_inner_html` to embed it
-            // verbatim. Safe because the input is the user's own
-            // vault content + syntect generates only spans with
-            // hex color styles.
-            let highlighted = crate::syntax::highlight(&block.content, &lang);
-            rsx! {
-                pre { id: "{anchor}", class: "code",
-                    div { class: "code-lang", "{lang}" }
-                    code {
-                        dangerous_inner_html: "{highlighted}",
+            // Mermaid diagram blocks — bypass syntect and emit a
+            // `<pre class="mermaid">` with raw source. The bundled
+            // mermaid loader (see site.rs assets) initializes
+            // these client-side via CDN, lazy-loaded only when
+            // the page actually has a diagram.
+            if lang.eq_ignore_ascii_case("mermaid") {
+                rsx! {
+                    pre { id: "{anchor}", class: "mermaid", "{block.content}" }
+                }
+            } else {
+                // Server-side syntax highlighting via syntect. The
+                // output is raw HTML (`<span style=…>` per token);
+                // Dioxus needs `dangerous_inner_html` to embed it
+                // verbatim. Safe because the input is the user's own
+                // vault content + syntect generates only spans with
+                // hex color styles.
+                let highlighted = crate::syntax::highlight(&block.content, &lang);
+                rsx! {
+                    pre { id: "{anchor}", class: "code",
+                        div { class: "code-lang", "{lang}" }
+                        code {
+                            dangerous_inner_html: "{highlighted}",
+                        }
                     }
                 }
             }
@@ -698,6 +725,34 @@ pub fn InlineNode(node: inline::Node) -> Element {
         Node::ExternalLink { label, url } => rsx! {
             a { class: "ext", href: "{url}", target: "_blank", rel: "noopener", "{label}" }
         },
+        Node::Namespace { prefix, results } => {
+            rsx! {
+                aside { class: "namespace",
+                    div { class: "namespace-header",
+                        span { class: "namespace-expr", "{{ namespace {prefix} }}" }
+                        span { class: "namespace-count", "{results.len()} page",
+                            if results.len() != 1 { "s" }
+                        }
+                    }
+                    if results.is_empty() {
+                        p { class: "namespace-empty", "no pages under this namespace" }
+                    } else {
+                        ul { class: "namespace-results",
+                            for hit in results {
+                                {
+                                    let href = format!("/{}/", hit.slug);
+                                    rsx! {
+                                        li { key: "{hit.slug}",
+                                            a { href: "{href}", "{hit.title}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Node::Query {
             expr,
             results,
@@ -772,6 +827,7 @@ pub fn InlineNode(node: inline::Node) -> Element {
                             &empty_blocks,
                             &empty_embeds,
                             &QueryResolver::default(),
+                            &NamespaceResolver::default(),
                         )
                     })
                     .collect();

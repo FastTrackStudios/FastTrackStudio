@@ -11,7 +11,9 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::components::{PageEmbedResolver, QueryHit, QueryResolver, WikiResolver};
+use crate::components::{
+    NamespaceResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver,
+};
 use crate::graph::build_block_ref_resolver;
 use crate::{feeds, graph, render, search, tags};
 
@@ -19,6 +21,7 @@ const STYLE_CSS: &str = include_str!("style.css");
 const GRAPH_JS: &str = include_str!("graph.js");
 const SEARCH_JS: &str = include_str!("search.js");
 const KATEX_LOADER_JS: &str = include_str!("katex_loader.js");
+const MERMAID_LOADER_JS: &str = include_str!("mermaid_loader.js");
 
 pub async fn build(
     snapshot: &[u8],
@@ -87,6 +90,7 @@ pub async fn build(
     tokio::fs::write(out.join("assets/graph.js"), GRAPH_JS).await?;
     tokio::fs::write(out.join("assets/search.js"), SEARCH_JS).await?;
     tokio::fs::write(out.join("assets/katex_loader.js"), KATEX_LOADER_JS).await?;
+    tokio::fs::write(out.join("assets/mermaid_loader.js"), MERMAID_LOADER_JS).await?;
 
     // All blocks, flattened — used by graph + search + tags.
     let all_blocks: Vec<Block> = blocks_by_page.values().flatten().cloned().collect();
@@ -151,6 +155,29 @@ pub async fn build(
     }
     let queries = QueryResolver(Arc::new(query_map));
 
+    // Build the NamespaceResolver — namespace prefix → child
+    // pages. A page `area/project/note` belongs to namespaces
+    // `area` AND `area/project`. Lookup is case-insensitive.
+    let mut ns_map: HashMap<String, Vec<QueryHit>> = HashMap::new();
+    for p in &pages {
+        if !p.basename.contains('/') {
+            continue;
+        }
+        let parts: Vec<&str> = p.basename.split('/').collect();
+        let slug = slugify(&p.basename);
+        for depth in 1..parts.len() {
+            let prefix = parts[..depth].join("/").to_lowercase();
+            ns_map.entry(prefix).or_default().push(QueryHit {
+                slug: slug.clone(),
+                title: p.basename.clone(),
+            });
+        }
+    }
+    for hits in ns_map.values_mut() {
+        hits.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    }
+    let namespaces = NamespaceResolver(Arc::new(ns_map));
+
     // ── Per-page HTML ────────────────────────────────────
     for page in &pages {
         let slug = slugify(&page.basename);
@@ -164,6 +191,7 @@ pub async fn build(
             &block_refs,
             &page_embeds,
             &queries,
+            &namespaces,
             &pages,
             &bl,
         );

@@ -5,8 +5,8 @@
 //! drives them and wraps the output in the static `<html>` shell.
 
 use crate::components::{
-    BacklinksPanel, BlockRefResolver, DocBody, PageContent, PageEmbedResolver, QueryResolver,
-    Sidebar, WikiResolver,
+    BacklinksPanel, BlockRefResolver, DocBody, NamespaceResolver, PageContent, PageEmbedResolver,
+    QueryResolver, Sidebar, WikiResolver,
 };
 use crate::graph::{BacklinkEntry, GraphView};
 use crate::tags::TagPageEntry;
@@ -22,6 +22,7 @@ pub fn render_page(
     block_refs: &BlockRefResolver,
     page_embeds: &PageEmbedResolver,
     queries: &QueryResolver,
+    namespaces: &NamespaceResolver,
     all_pages: &[Page],
     backlinks: &[BacklinkEntry],
 ) -> String {
@@ -36,6 +37,7 @@ pub fn render_page(
     let block_refs_for_root = block_refs.clone();
     let page_embeds_for_root = page_embeds.clone();
     let queries_for_root = queries.clone();
+    let namespaces_for_root = namespaces.clone();
     let backlinks = backlinks.to_vec();
 
     let mut vdom = VirtualDom::new_with_props(
@@ -52,6 +54,7 @@ pub fn render_page(
             block_refs: block_refs_for_root,
             page_embeds: page_embeds_for_root,
             queries: queries_for_root,
+            namespaces: namespaces_for_root,
             backlinks,
         },
     );
@@ -291,12 +294,14 @@ fn Root(
     block_refs: BlockRefResolver,
     page_embeds: PageEmbedResolver,
     queries: QueryResolver,
+    namespaces: NamespaceResolver,
     backlinks: Vec<BacklinkEntry>,
 ) -> Element {
     use_context_provider(|| resolver);
     use_context_provider(|| block_refs);
     use_context_provider(|| page_embeds);
     use_context_provider(|| queries);
+    use_context_provider(|| namespaces);
     rsx! {
         DocBody {
             site_title: site_title,
@@ -364,6 +369,7 @@ fn shell(page_title: &str, body: String, extra_head: &str) -> String {
 <body>
 {body}
 <script src="/assets/katex_loader.js" defer></script>
+<script src="/assets/mermaid_loader.js" defer></script>
 </body>
 </html>
 "##,
@@ -458,6 +464,7 @@ mod tests {
             &BlockRefResolver::default(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
             &pages,
             &[],
         );
@@ -500,6 +507,7 @@ mod tests {
             &BlockRefResolver(Arc::new(refs)),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
             &[target_page.clone(), host_page.clone()],
             &[],
         );
@@ -551,6 +559,7 @@ mod tests {
             &BlockRefResolver::default(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
             &[p.clone()],
             &[],
         );
@@ -574,6 +583,7 @@ mod tests {
             &BlockRefResolver::default(),
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
+            &NamespaceResolver::default(),
             &[p.clone()],
             &[],
         );
