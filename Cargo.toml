@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "audio-gui",
-    "fts-dsp",
-    "fts-meter/meter-dsp",
-    "fts-meter/meter-plugin",
-    "fts-meter/meter-ui",
-    "fts-modulation",
-    "fts-plugin-core",
-    "fts-sample",
-    "fts-themes",
+    "apps/meter-plugin",
+    "crates/audio-gui",
+    "crates/fts-dsp",
+    "crates/fts-modulation",
+    "crates/fts-plugin-core",
+    "crates/fts-sample",
+    "crates/fts-themes",
+    "crates/meter-dsp",
+    "crates/meter-ui",
 ]
 
 [workspace.package]
@@ -20,14 +20,14 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Internal crates (local paths)
-audio-gui = { path = "audio-gui" }
-fts-plugin-core = { path = "fts-plugin-core" }
-fts-dsp = { path = "fts-dsp" }
-fts-themes = { path = "fts-themes" }
-fts-modulation = { path = "fts-modulation" }
-fts-sample = { path = "fts-sample" }
-meter-dsp = { path = "fts-meter/meter-dsp" }
-meter-ui = { path = "fts-meter/meter-ui" }
+audio-gui = { path = "crates/audio-gui" }
+fts-plugin-core = { path = "crates/fts-plugin-core" }
+fts-dsp = { path = "crates/fts-dsp" }
+fts-themes = { path = "crates/fts-themes" }
+fts-modulation = { path = "crates/fts-modulation" }
+fts-sample = { path = "crates/fts-sample" }
+meter-dsp = { path = "crates/meter-dsp" }
+meter-ui = { path = "crates/meter-ui" }
 
 # External deps
 nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
