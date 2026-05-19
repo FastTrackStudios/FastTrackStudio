@@ -1126,20 +1126,13 @@ fn ProjectTile(theme: ProjectTheme) -> Element {
                 BgKind::Plugins => rsx! { BgPlugins { color: theme.accent } },
             }
 
-            // Top row: project number + version (left), glyph (right)
+            // Top row: version (left), glyph (right)
             div {
                 class: "relative z-10 flex items-start justify-between mb-8 lg:mb-10",
                 div {
-                    class: "flex flex-col gap-1",
-                    div {
-                        class: "font-mono text-[0.65rem] lg:text-xs uppercase tracking-[0.25em] text-muted-foreground",
-                        "Project {theme.num}"
-                    }
-                    div {
-                        class: "font-mono text-[0.6rem] lg:text-[0.65rem] uppercase tracking-[0.25em]",
-                        style: "color: {theme.accent}; opacity: 0.75;",
-                        "{theme.version}"
-                    }
+                    class: "font-mono text-[0.6rem] lg:text-[0.65rem] uppercase tracking-[0.25em]",
+                    style: "color: {theme.accent}; opacity: 0.75;",
+                    "{theme.version}"
                 }
                 div {
                     class: "font-mono text-lg lg:text-xl tracking-tight opacity-80",
