@@ -461,6 +461,19 @@ pub fn LogseqShell() -> Element {
                 run_persistence_loop(doc).await;
             });
         });
+
+        // Disk-writer loop — mirrors every commit out to
+        // `<vault.root_path>/pages/*.md` and
+        // `<vault.root_path>/journals/*.md` for vaults that
+        // have an on-disk home. Ephemeral vaults (seed-only)
+        // skip the write because their root_path is None.
+        let doc_for_writer = doc.read().clone();
+        use_hook(move || {
+            let doc = doc_for_writer.clone();
+            spawn(async move {
+                crate::graph_writer::run_disk_writer_loop(doc).await;
+            });
+        });
     }
 
     // Seed the doc with demo data the first time we render. Same

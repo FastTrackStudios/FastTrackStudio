@@ -9,6 +9,7 @@
 
 pub mod awareness;
 pub mod graph_loader;
+pub mod graph_writer;
 #[cfg(target_arch = "wasm32")]
 pub mod idb_persistence;
 pub mod inline_md;
