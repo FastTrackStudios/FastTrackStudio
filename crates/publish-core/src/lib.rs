@@ -21,8 +21,11 @@
 //! without changing the contract.
 
 pub mod components;
+pub mod edit_html;
 pub mod parser;
 pub mod syntax;
+
+pub use edit_html::{escape_html, render_edit_html};
 
 pub use components::{
     AssetBaseResolver, BacklinkEntry, BacklinksPanel, BlockNode, BlockRefNavigator,

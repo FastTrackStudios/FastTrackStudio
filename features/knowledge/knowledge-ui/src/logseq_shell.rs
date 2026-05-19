@@ -327,6 +327,34 @@ html, body {
 .ls-shell .ls-block-content .wikilink-wrap:hover .wikilink-preview {
     opacity: 1;
 }
+/* Atomic editor — keep syntax markers visible but styled while
+ * editing. Mirrors Logseq's behavior; classes are emitted by
+ * publish_core::render_edit_html. */
+.ls-shell .ls-edit { caret-color: var(--ls-active-primary-color); }
+.ls-shell .ls-edit .ce-bracket { color: var(--ls-secondary-text-color); opacity: 0.6; }
+.ls-shell .ls-edit .ce-wikilink { color: var(--ls-link-text-color); }
+.ls-shell .ls-edit .ce-blockref { color: var(--ls-link-text-color); font-family: monospace; font-size: 0.9em; }
+.ls-shell .ls-edit .ce-marker { color: var(--ls-secondary-text-color); opacity: 0.6; }
+.ls-shell .ls-edit .ce-bold { font-weight: 600; }
+.ls-shell .ls-edit .ce-italic { font-style: italic; }
+.ls-shell .ls-edit .ce-strike { text-decoration: line-through; opacity: 0.7; }
+.ls-shell .ls-edit .ce-highlight { background: var(--ls-highlight-color-1, rgba(255, 220, 0, 0.25)); }
+.ls-shell .ls-edit .ce-code {
+    font-family: monospace;
+    background: var(--ls-tertiary-background-color);
+    padding: 0.05em 0.25em;
+    border-radius: 0.2em;
+    font-size: 0.9em;
+}
+.ls-shell .ls-edit .ce-tag { color: var(--ls-tag-text-color); }
+.ls-shell .ls-edit .ce-macro {
+    color: var(--ls-secondary-text-color);
+    background: var(--ls-tertiary-background-color);
+    padding: 0.05em 0.3em;
+    border-radius: 0.2em;
+    font-size: 0.9em;
+}
+.ls-shell .ls-edit .ce-heading-mark { color: var(--ls-secondary-text-color); opacity: 0.5; font-weight: 400; }
 .ls-shell .ls-block-content .tag {
     display: inline-block;
     color: var(--ls-tag-text-color);
@@ -3487,23 +3515,32 @@ fn EditableBlock(block: Block) -> Element {
     let page_search_w = page_search_state;
     let block_ref_w = block_ref_state;
     let tag_search_w = tag_search_state;
-    let on_input = move |e: Event<FormData>| {
-        let v = e.value();
-        content_w.set(v.clone());
-        if let Some(ops) = ops_for_input.as_ref() {
-            ops.update_content.call((block_id, v.clone()));
-        }
-        // Detect all four popup triggers in one pass — first
-        // match wins. Order matters: longer literal sigils
-        // (`[[`, `((`) before single chars (`/`, `#`).
+    let on_input = move |_e: Event<FormData>| {
+        // contenteditable: read textContent + caret offset via eval,
+        // then push the new source through the signal. Dioxus will
+        // reapply the styled innerHTML on the next render; the
+        // caret restore happens in requestAnimationFrame so it
+        // lands after that reflow.
         let id_str = id_str_input.clone();
-        let content = v.clone();
+        let mut content_w_inner = content_w;
+        let ops_clone = ops_for_input.clone();
         let mut slash = slash_w;
         let mut page_search = page_search_w;
         let mut block_ref = block_ref_w;
         let mut tag_search = tag_search_w;
+        let id_str_for_caret = id_str.clone();
         spawn(async move {
-            let off = read_selection_start(&id_str).await.unwrap_or(content.len());
+            let (off, _) = read_selection(&id_str).await.unwrap_or((0, 0));
+            let v = read_editor_text(&id_str).await.unwrap_or_default();
+            content_w_inner.set(v.clone());
+            if let Some(ops) = ops_clone.as_ref() {
+                ops.update_content.call((block_id, v.clone()));
+            }
+            set_caret(&id_str_for_caret, off);
+            // Detect all four popup triggers in one pass — first
+            // match wins. Order matters: longer literal sigils
+            // (`[[`, `((`) before single chars (`/`, `#`).
+            let content = v;
             let before = &content[..off.min(content.len())];
 
             let close_all = |slash: &mut Option<SlashState>,
@@ -3820,9 +3857,14 @@ fn EditableBlock(block: Block) -> Element {
 
     let value_str = content_signal.read().clone();
     let id_attr = block_id.simple().to_string();
-    // Auto-grow row count from content. Cap at 12 so a giant
-    // block doesn't push the whole outliner around.
-    let row_count = value_str.lines().count().max(1).min(12).to_string();
+    // Logseq-style "atomic editor": render the current source as
+    // HTML with semantic spans so tokens (wikilinks, refs, bold)
+    // appear styled while the user types, but syntax markers stay
+    // visible. The contenteditable's `textContent` is the canonical
+    // source — `oninput` reads it and updates the signal, after
+    // which Dioxus reapplies the innerHTML and `set_caret` restores
+    // the caret position on the next frame.
+    let rendered_html = publish_core::render_edit_html(&value_str);
     let slash_open = slash_state
         .as_ref()
         .and_then(|s| s.0.read().clone())
@@ -3847,11 +3889,12 @@ fn EditableBlock(block: Block) -> Element {
     rsx! {
         div { style: "flex: 1; min-width: 0; position: relative;",
             "data-edit-block": "{id_attr}",
-            textarea {
-                class: "ls-block-content",
-                style: "background: transparent; border: 0; resize: none; width: 100%; min-height: 1.5em; color: inherit; font: inherit; outline: none;",
-                rows: "{row_count}",
-                value: "{value_str}",
+            div {
+                class: "ls-block-content ls-edit",
+                style: "background: transparent; border: 0; width: 100%; min-height: 1.5em; color: inherit; font: inherit; outline: none; white-space: pre-wrap; word-break: break-word;",
+                contenteditable: "true",
+                spellcheck: "true",
+                dangerous_inner_html: "{rendered_html}",
                 oninput: on_input,
                 onkeydown: on_keydown,
                 onblur: on_blur,
@@ -4180,18 +4223,29 @@ pub(crate) fn trigger_after_boundary(before: &str, ch: char) -> Option<usize> {
 /// so the same code path works on desktop (Tao webview) and web
 /// (browser). Returns `None` when the element is absent or the
 /// eval fails — callers should fall back to a default offset.
-/// Read the textarea's `selectionStart` and `selectionEnd` for an
-/// editing block. Returns `(start, end)` so callers know whether
-/// the user has a selection or just a caret.
+/// Read the contenteditable's selection range as character offsets
+/// into its `textContent`. Returns `(start, end)`; equal when the
+/// user has a caret rather than a selection.
 async fn read_selection(block_simple_id: &str) -> Option<(usize, usize)> {
     let script = format!(
         r#"
         (function() {{
             const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
             if (!wrap) return [0, 0];
-            const ta = wrap.querySelector('textarea');
-            if (!ta) return [0, 0];
-            return [ta.selectionStart || 0, ta.selectionEnd || 0];
+            const ed = wrap.querySelector('[contenteditable]');
+            if (!ed) return [0, 0];
+            const sel = window.getSelection();
+            if (!sel || !sel.rangeCount) return [0, 0];
+            const range = sel.getRangeAt(0);
+            const measure = function(node, off) {{
+                const pre = document.createRange();
+                pre.selectNodeContents(ed);
+                pre.setEnd(node, off);
+                return pre.toString().length;
+            }};
+            const s = measure(range.startContainer, range.startOffset);
+            const e = measure(range.endContainer, range.endOffset);
+            return [s, e];
         }})()
         "#
     );
@@ -4206,19 +4260,67 @@ async fn read_selection(block_simple_id: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// Move the textarea caret to `offset`. Runs after a microtask so
-/// it lands after Dioxus has reapplied the textarea's `value`
-/// attribute on the next render cycle.
+/// Read the `textContent` of the contenteditable. The user's typed
+/// source — used to drive signal updates on every input.
+async fn read_editor_text(block_simple_id: &str) -> Option<String> {
+    let script = format!(
+        r#"
+        (function() {{
+            const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
+            if (!wrap) return "";
+            const ed = wrap.querySelector('[contenteditable]');
+            if (!ed) return "";
+            return ed.textContent || "";
+        }})()
+        "#
+    );
+    let mut handle = document::eval(&script);
+    match handle.recv::<serde_json::Value>().await {
+        Ok(serde_json::Value::String(s)) => Some(s),
+        _ => None,
+    }
+}
+
+/// Move the contenteditable caret to character `offset` (relative
+/// to the editor's `textContent`). Walks the editor's text nodes to
+/// find the matching position, then sets the Selection. Runs inside
+/// `requestAnimationFrame` so it lands after Dioxus reapplies the
+/// `dangerous_inner_html` on the next render cycle.
 fn set_caret(block_simple_id: &str, offset: usize) {
     let script = format!(
         r#"
         requestAnimationFrame(function() {{
             const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
             if (!wrap) return;
-            const ta = wrap.querySelector('textarea');
-            if (!ta) return;
-            ta.setSelectionRange({offset}, {offset});
-            ta.focus();
+            const ed = wrap.querySelector('[contenteditable]');
+            if (!ed) return;
+            let remaining = {offset};
+            const walker = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT, null);
+            let node = walker.nextNode();
+            let target = null;
+            let target_off = 0;
+            while (node) {{
+                const len = node.textContent.length;
+                if (remaining <= len) {{
+                    target = node;
+                    target_off = remaining;
+                    break;
+                }}
+                remaining -= len;
+                node = walker.nextNode();
+            }}
+            const range = document.createRange();
+            if (target) {{
+                range.setStart(target, target_off);
+            }} else {{
+                range.selectNodeContents(ed);
+                range.collapse(false);
+            }}
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            ed.focus();
         }});
         "#
     );
@@ -4226,22 +4328,7 @@ fn set_caret(block_simple_id: &str, offset: usize) {
 }
 
 async fn read_selection_start(block_simple_id: &str) -> Option<usize> {
-    let script = format!(
-        r#"
-        (function() {{
-            const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
-            if (!wrap) return 0;
-            const ta = wrap.querySelector('textarea');
-            if (!ta) return 0;
-            return ta.selectionStart || 0;
-        }})()
-        "#
-    );
-    let mut handle = document::eval(&script);
-    match handle.recv::<serde_json::Value>().await {
-        Ok(serde_json::Value::Number(n)) => n.as_u64().map(|v| v as usize),
-        _ => None,
-    }
+    read_selection(block_simple_id).await.map(|(s, _)| s)
 }
 
 #[component]
