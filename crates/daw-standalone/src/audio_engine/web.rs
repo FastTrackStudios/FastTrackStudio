@@ -87,13 +87,9 @@ impl WebRenderer {
         // Replace the project entirely so reloads are clean.
         // (For incremental updates, callers should use the trait
         // surface directly.)
-        let summary = crate::project_loader::load_rpp_text(
-            &self.daw,
-            "web",
-            "/web/in-memory.rpp",
-            rpp_text,
-        )
-        .map_err(|e| JsValue::from_str(&e))?;
+        let summary =
+            crate::project_loader::load_rpp_text(&self.daw, "web", "/web/in-memory.rpp", rpp_text)
+                .map_err(|e| JsValue::from_str(&e))?;
         let _ = summary; // counts available via separate accessors below
         Ok(JsValue::NULL)
     }
@@ -137,7 +133,9 @@ impl WebRenderer {
     pub fn paths_to_resolve(&self) -> Vec<JsValue> {
         self.daw
             .media_bay()
-            .paths_to_resolve(daw_proto::ProjectContext::Project(self.project_guid.clone()))
+            .paths_to_resolve(daw_proto::ProjectContext::Project(
+                self.project_guid.clone(),
+            ))
             .into_iter()
             .map(|s| JsValue::from_str(&s))
             .collect()

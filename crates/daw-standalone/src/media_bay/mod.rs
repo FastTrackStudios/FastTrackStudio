@@ -29,9 +29,9 @@ mod resolver;
 mod state;
 mod types;
 
-pub use resolver::{BayFileResolver, FsFileResolver, InMemoryResolver, ProjectRelativeResolver};
 #[cfg(feature = "http-resolver")]
 pub use resolver::HttpBaseUrlResolver;
+pub use resolver::{BayFileResolver, FsFileResolver, InMemoryResolver, ProjectRelativeResolver};
 pub use state::BayState;
 pub(crate) use state::BayStateExt;
 pub use types::{BayFolder, BayView, MediaBayEntry, ReplaceScope, SourceUsage};
@@ -109,12 +109,7 @@ impl MediaBay {
 
     /// List entries for a view. `filter` is a case-insensitive
     /// substring matched against `name` and `path` (any field).
-    pub fn list(
-        &self,
-        project: ProjectContext,
-        view: BayView,
-        filter: &str,
-    ) -> Vec<MediaBayEntry> {
+    pub fn list(&self, project: ProjectContext, view: BayView, filter: &str) -> Vec<MediaBayEntry> {
         let Some(guid) = self.resolve_project(&project) else {
             return Vec::new();
         };
@@ -129,12 +124,7 @@ impl MediaBay {
     }
 
     /// Look up a single entry by id.
-    pub fn get(
-        &self,
-        project: ProjectContext,
-        view: BayView,
-        id: &str,
-    ) -> Option<MediaBayEntry> {
+    pub fn get(&self, project: ProjectContext, view: BayView, id: &str) -> Option<MediaBayEntry> {
         let guid = self.resolve_project(&project)?;
         self.daw.read_project(&guid, |p| match view {
             BayView::SourceMedia => Self::derive_source_entries(p, "")
@@ -290,9 +280,7 @@ impl MediaBay {
         // iteration order during the rewrite.
         let usages = self.usages(ProjectContext::Project(guid.clone()), old_path);
         let target_take_guids: Vec<String> = match scope {
-            ReplaceScope::AllInstances => {
-                usages.into_iter().map(|u| u.take_guid).collect()
-            }
+            ReplaceScope::AllInstances => usages.into_iter().map(|u| u.take_guid).collect(),
             ReplaceScope::SingleInstance { ordinal } => usages
                 .into_iter()
                 .find(|u| u.ordinal == ordinal)
@@ -541,20 +529,11 @@ impl MediaBay {
     fn resolve_project(&self, ctx: &ProjectContext) -> Option<String> {
         match ctx {
             ProjectContext::Project(g) => Some(g.clone()),
-            ProjectContext::Current => self
-                .daw
-                .state
-                .lock()
-                .ok()?
-                .current_project_guid
-                .clone(),
+            ProjectContext::Current => self.daw.state.lock().ok()?.current_project_guid.clone(),
         }
     }
 
-    fn derive_source_entries(
-        p: &crate::sync::ProjectState,
-        filter_l: &str,
-    ) -> Vec<MediaBayEntry> {
+    fn derive_source_entries(p: &crate::sync::ProjectState, filter_l: &str) -> Vec<MediaBayEntry> {
         // Tally usages per source path.
         let mut counts: HashMap<String, u32> = HashMap::new();
         let mut all_muted: HashMap<String, bool> = HashMap::new();
@@ -597,9 +576,7 @@ impl MediaBay {
                 }
                 let bay_folder = folders.and_then(|fm| {
                     fm.iter().find_map(|((view, fname), f)| {
-                        if *view == BayView::SourceMedia
-                            && f.entries.iter().any(|e| e == &path)
-                        {
+                        if *view == BayView::SourceMedia && f.entries.iter().any(|e| e == &path) {
                             Some(fname.clone())
                         } else {
                             None
@@ -612,7 +589,11 @@ impl MediaBay {
                     path: Some(path.clone()),
                     usage_count: n,
                     retained: retained.contains(&path),
-                    all_muted: if n == 0 { None } else { all_muted.get(&path).copied() },
+                    all_muted: if n == 0 {
+                        None
+                    } else {
+                        all_muted.get(&path).copied()
+                    },
                     bay_folder,
                 })
             })
@@ -621,10 +602,7 @@ impl MediaBay {
         out
     }
 
-    fn derive_item_entries(
-        p: &crate::sync::ProjectState,
-        filter_l: &str,
-    ) -> Vec<MediaBayEntry> {
+    fn derive_item_entries(p: &crate::sync::ProjectState, filter_l: &str) -> Vec<MediaBayEntry> {
         let folders = p.bay_state.as_ref().map(|b| &b.folders);
         let mut out = Vec::new();
         for t in &p.tracks {
@@ -632,7 +610,9 @@ impl MediaBay {
                 continue;
             };
             for ig in item_guids {
-                let Some(entry) = p.items.get(ig) else { continue };
+                let Some(entry) = p.items.get(ig) else {
+                    continue;
+                };
                 let take_name = p
                     .takes
                     .get(ig)
@@ -669,10 +649,7 @@ impl MediaBay {
         out
     }
 
-    fn derive_fx_entries(
-        p: &crate::sync::ProjectState,
-        filter_l: &str,
-    ) -> Vec<MediaBayEntry> {
+    fn derive_fx_entries(p: &crate::sync::ProjectState, filter_l: &str) -> Vec<MediaBayEntry> {
         let folders = p.bay_state.as_ref().map(|b| &b.folders);
         let mut out = Vec::new();
         for chain in p.fx_chains.values() {

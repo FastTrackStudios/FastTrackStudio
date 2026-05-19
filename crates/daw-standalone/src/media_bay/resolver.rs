@@ -137,11 +137,7 @@ impl HttpBaseUrlResolver {
 #[cfg(feature = "http-resolver")]
 impl BayFileResolver for HttpBaseUrlResolver {
     fn resolve(&self, path: &str) -> Result<Vec<u8>, String> {
-        let url = format!(
-            "{}{}",
-            self.base_url,
-            url_escape_path(path)
-        );
+        let url = format!("{}{}", self.base_url, url_escape_path(path));
         let agent = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_millis(self.timeout_ms))
             .build();
@@ -165,14 +161,9 @@ fn url_escape_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     for b in path.bytes() {
         match b {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'_'
-            | b'.'
-            | b'~'
-            | b'/' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char)
+            }
             _ => {
                 use std::fmt::Write as _;
                 let _ = write!(&mut out, "%{:02X}", b);

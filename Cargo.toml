@@ -106,10 +106,22 @@ clack-host = { git = "https://github.com/prokopyl/clack" }
 clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
     "clack-host",
     "audio-ports",
+    "note-ports",
     "params",
     "state",
     "latency",
+    "gui",
+    "timer",
+    "log",
+    "thread-check",
+    "tail",
 ] }
+
+# VST3 plugin hosting (auto-generated COM bindings from the official
+# Steinberg SDK headers). MIT/Apache-2.0 — does NOT contaminate with
+# GPL the way RustAudio's vst3-sys would.
+vst3 = "0.3"
+libloading = "0.8"
 
 # Sibling repos
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }

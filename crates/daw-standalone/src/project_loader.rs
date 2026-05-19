@@ -147,6 +147,7 @@ pub fn load_rpp_text(
     populate_markers_regions(daw, &project_guid, &project, &mut summary);
     populate_tempo(daw, &project_guid, &project, &mut summary);
     populate_routing(daw, &project_guid, &project, &mut summary);
+    populate_fx_chains(daw, &project_guid, &project, &mut summary);
 
     Ok(summary)
 }
@@ -285,6 +286,42 @@ fn populate_tracks(
                 let mut takes_out = Vec::with_capacity(ri.takes.len().max(1));
                 for (take_idx, rt_take) in ri.takes.iter().enumerate() {
                     let take = build_take(&item_guid, take_idx as u32, rt_take, summary);
+                    // If this is a MIDI take, decode its event stream
+                    // into MidiNote entries on `p.midi_notes`. The
+                    // renderer reads from this map to feed VST3i /
+                    // CLAPi at playback.
+                    if take.is_midi {
+                        if let Some(src) = rt_take.source.as_ref() {
+                            if let Some(midi) = src.midi_data.as_ref() {
+                                let decoded = decode_midi_source(midi);
+                                if !decoded.notes.is_empty() {
+                                    p.midi_notes.insert(take.guid.clone(), decoded.notes);
+                                }
+                                if !decoded.ccs.is_empty() {
+                                    p.midi_ccs.insert(take.guid.clone(), decoded.ccs);
+                                }
+                                if !decoded.pitch_bends.is_empty() {
+                                    p.midi_pitch_bends
+                                        .insert(take.guid.clone(), decoded.pitch_bends);
+                                }
+                                if !decoded.program_changes.is_empty() {
+                                    p.midi_program_changes
+                                        .insert(take.guid.clone(), decoded.program_changes);
+                                }
+                                if !decoded.sysex.is_empty() {
+                                    p.midi_sysex.insert(take.guid.clone(), decoded.sysex);
+                                }
+                                if !decoded.channel_pressures.is_empty() {
+                                    p.midi_channel_pressures
+                                        .insert(take.guid.clone(), decoded.channel_pressures);
+                                }
+                                if !decoded.poly_pressures.is_empty() {
+                                    p.midi_poly_pressures
+                                        .insert(take.guid.clone(), decoded.poly_pressures);
+                                }
+                            }
+                        }
+                    }
                     takes_out.push(take);
                 }
                 let active_idx = ri
@@ -314,6 +351,193 @@ fn populate_tracks(
     });
 
     let _ = ITEM_COUNTER; // silence unused-warning when this file is the only consumer
+}
+
+/// All MIDI event types decoded from an RPP `MidiSource`.
+struct DecodedMidiSource {
+    notes: Vec<daw_proto::midi::MidiNote>,
+    ccs: Vec<daw_proto::midi::MidiCC>,
+    pitch_bends: Vec<daw_proto::midi::MidiPitchBend>,
+    program_changes: Vec<daw_proto::midi::MidiProgramChange>,
+    sysex: Vec<daw_proto::midi::MidiSysEx>,
+    channel_pressures: Vec<daw_proto::midi::MidiChannelPressure>,
+    poly_pressures: Vec<daw_proto::midi::MidiPolyPressure>,
+}
+
+/// Walk a parsed RPP `MidiSource`, demultiplex the delta-tick event
+/// stream into the proto's typed per-take collections (notes, CCs,
+/// pitch bends, program changes, SysEx). The renderer reads from
+/// these collections and feeds them per-block to the track's
+/// instrument plugin.
+///
+/// Time conversion: REAPER's MIDI source stores deltas at
+/// `ticks_per_qn` (typically 960). All proto types use *quarter notes*
+/// for `start_ppq` / `position_ppq`, so we divide accumulated ticks
+/// by `ticks_per_qn`.
+///
+/// Aftertouch (channel pressure) and poly-pressure are currently
+/// dropped — they need their own proto vectors before we can route
+/// them. SysEx is preserved verbatim including the leading 0xF0 /
+/// trailing 0xF7 framing bytes (REAPER's `E` lines store the raw
+/// MIDI bytes per the spec).
+fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> DecodedMidiSource {
+    use daw_proto::midi::{
+        MidiCC, MidiChannelPressure, MidiNote, MidiPitchBend, MidiPolyPressure, MidiProgramChange,
+        MidiSysEx,
+    };
+    let tpq = midi.ticks_per_qn.max(1) as f64;
+    let mut notes: Vec<MidiNote> = Vec::new();
+    let mut ccs: Vec<MidiCC> = Vec::new();
+    let mut pitch_bends: Vec<MidiPitchBend> = Vec::new();
+    let mut program_changes: Vec<MidiProgramChange> = Vec::new();
+    let mut sysex: Vec<MidiSysEx> = Vec::new();
+    let mut channel_pressures: Vec<MidiChannelPressure> = Vec::new();
+    let mut poly_pressures: Vec<MidiPolyPressure> = Vec::new();
+    // (channel, pitch) → (start_tick, velocity, index_into_notes)
+    let mut pending_notes: std::collections::HashMap<(u8, u8), (u64, u8, usize)> =
+        std::collections::HashMap::new();
+    let mut tick: u64 = 0;
+    let mut next_note_idx: u32 = 0;
+    let to_ppq = |t: u64| (t as f64) / tpq;
+
+    for ev in &midi.events {
+        tick = tick.saturating_add(ev.delta_ticks as u64);
+        let Some(&status) = ev.bytes.first() else {
+            continue;
+        };
+        let typ = status & 0xF0;
+        let channel = status & 0x0F;
+        match typ {
+            0x90 => {
+                let pitch = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let velocity = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                if velocity == 0 {
+                    if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch)) {
+                        if let Some(n) = notes.get_mut(idx) {
+                            n.length_ppq = to_ppq(tick.saturating_sub(start_tick));
+                            n.velocity = vel;
+                        }
+                    }
+                } else {
+                    let idx = notes.len();
+                    notes.push(MidiNote {
+                        index: next_note_idx,
+                        channel,
+                        pitch,
+                        velocity,
+                        start_ppq: to_ppq(tick),
+                        length_ppq: 0.0,
+                        selected: false,
+                        muted: false,
+                    });
+                    next_note_idx += 1;
+                    pending_notes.insert((channel, pitch), (tick, velocity, idx));
+                }
+            }
+            0x80 => {
+                let pitch = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch)) {
+                    if let Some(n) = notes.get_mut(idx) {
+                        n.length_ppq = to_ppq(tick.saturating_sub(start_tick));
+                        n.velocity = vel;
+                    }
+                }
+            }
+            0xB0 => {
+                // Control Change.
+                let controller = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let value = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let idx = ccs.len() as u32;
+                ccs.push(MidiCC {
+                    index: idx,
+                    channel,
+                    controller,
+                    value,
+                    position_ppq: to_ppq(tick),
+                    selected: false,
+                });
+            }
+            0xC0 => {
+                // Program Change.
+                let program = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let idx = program_changes.len() as u32;
+                program_changes.push(MidiProgramChange {
+                    index: idx,
+                    channel,
+                    program,
+                    position_ppq: to_ppq(tick),
+                });
+            }
+            0xE0 => {
+                // Pitch Bend: LSB then MSB, both 7-bit, combine to
+                // a 14-bit unsigned then subtract 8192 for signed.
+                let lsb = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let msb = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let unsigned = ((msb as u16) << 7) | lsb as u16;
+                let signed = (unsigned as i32 - 8192) as i16;
+                let idx = pitch_bends.len() as u32;
+                pitch_bends.push(MidiPitchBend {
+                    index: idx,
+                    channel,
+                    value: signed,
+                    position_ppq: to_ppq(tick),
+                    selected: false,
+                });
+            }
+            0xF0 => {
+                // SysEx (status 0xF0) — store the entire frame
+                // verbatim including the trailing 0xF7. Other 0xFn
+                // realtime / system messages (clock, start, stop,
+                // active sensing) aren't currently routed.
+                if status == 0xF0 {
+                    let idx = sysex.len() as u32;
+                    sysex.push(MidiSysEx {
+                        index: idx,
+                        position_ppq: to_ppq(tick),
+                        data: ev.bytes.clone(),
+                    });
+                }
+            }
+            0xA0 => {
+                // Poly Pressure (per-note aftertouch).
+                let note = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let pressure = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
+                let idx = poly_pressures.len() as u32;
+                poly_pressures.push(MidiPolyPressure {
+                    index: idx,
+                    channel,
+                    note,
+                    pressure,
+                    position_ppq: to_ppq(tick),
+                    selected: false,
+                });
+            }
+            0xD0 => {
+                // Channel Pressure (mono aftertouch).
+                let pressure = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
+                let idx = channel_pressures.len() as u32;
+                channel_pressures.push(MidiChannelPressure {
+                    index: idx,
+                    channel,
+                    pressure,
+                    position_ppq: to_ppq(tick),
+                    selected: false,
+                });
+            }
+            _ => {
+                // 0xF1-0xFE realtime / system messages — drop.
+            }
+        }
+    }
+    DecodedMidiSource {
+        notes,
+        ccs,
+        pitch_bends,
+        program_changes,
+        sysex,
+        channel_pressures,
+        poly_pressures,
+    }
 }
 
 fn fade_curve_to_shape(curve: dawfile_reaper::types::item::FadeCurveType) -> FadeShape {
@@ -523,4 +747,226 @@ fn populate_routing(
             }
         }
     });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// FX chain population
+// ────────────────────────────────────────────────────────────────────
+
+/// Walk each track's `<FXCHAIN>` and (in REAPER 7+) `<CONTAINER>`
+/// nodes, instantiate the plugin through [`daw_proto::fx::Effects`],
+/// and apply state via [`crate::rpp_state`] + [`Standalone::apply_plugin_state`].
+///
+/// Unsupported nodes (JS scripts, AU, video, plugins whose bundle
+/// can't be resolved on this host) are recorded as warnings on
+/// [`LoadedProject`] and skipped — the track still loads with its
+/// audio + automation intact.
+fn populate_fx_chains(
+    daw: &Standalone,
+    project_guid: &str,
+    project: &ReaperProject,
+    summary: &mut LoadedProject,
+) {
+    use daw_proto::fx::{Effects, FxChainContext};
+    use daw_proto::project::ProjectContext;
+    use dawfile_reaper::types::fx_chain::{FxChainNode, PluginType};
+
+    // Build (track_guid, fx_chain) pairs. Tracks were added in order
+    // so we can correlate by index against the source project.
+    let track_guids: Vec<String> = daw
+        .read_project(project_guid, |p| {
+            p.tracks.iter().map(|t| t.guid.clone()).collect()
+        })
+        .unwrap_or_default();
+
+    let ctx = ProjectContext::Project(project_guid.to_string());
+
+    for (idx, rt) in project.tracks.iter().enumerate() {
+        let Some(track_guid) = track_guids.get(idx).cloned() else {
+            continue;
+        };
+        let Some(fxc) = rt.fx_chain.as_ref() else {
+            continue;
+        };
+        for node in &fxc.nodes {
+            apply_fx_node(
+                daw,
+                &ctx,
+                FxChainContext::Track(track_guid.clone()),
+                node,
+                summary,
+            );
+        }
+    }
+}
+
+fn apply_fx_node(
+    daw: &Standalone,
+    ctx: &daw_proto::project::ProjectContext,
+    chain_ctx: daw_proto::fx::FxChainContext,
+    node: &dawfile_reaper::types::fx_chain::FxChainNode,
+    summary: &mut LoadedProject,
+) {
+    use dawfile_reaper::types::fx_chain::{FxChainNode, PluginType};
+    match node {
+        FxChainNode::Plugin(p) => {
+            // Skip plugin formats we don't host yet (or never will,
+            // like Video). JS would need a JSFX engine.
+            match p.plugin_type {
+                PluginType::Vst3 | PluginType::Clap | PluginType::Vst => {}
+                _ => {
+                    summary.warnings.push(format!(
+                        "FX skipped: '{}' (unsupported format {:?})",
+                        p.name, p.plugin_type
+                    ));
+                    return;
+                }
+            }
+            // Resolve the bundle on disk. RPP stores just the
+            // filename ("MUtility.vst3") so we walk standard plugin
+            // search paths.
+            let Some(path) = resolve_plugin_path(&p.file, &p.plugin_type) else {
+                summary.warnings.push(format!(
+                    "FX skipped: '{}' (bundle '{}' not found in plugin search paths)",
+                    p.name, p.file
+                ));
+                return;
+            };
+            // Stand-up the plugin via the existing Effects::add
+            // path (which dispatches by file extension into the
+            // CLAP / VST3 host).
+            let Some(fx_guid) =
+                daw_proto::fx::Effects::add(daw, ctx.clone(), chain_ctx.clone(), path.as_str())
+            else {
+                summary.warnings.push(format!(
+                    "FX add failed: '{}' (load_plugin returned no instance)",
+                    p.name
+                ));
+                return;
+            };
+            // Restore state if the RPP carried any.
+            if !p.state_data.is_empty() {
+                let decode = match p.plugin_type {
+                    PluginType::Clap => crate::rpp_state::reaper_clap_to_state(&p.state_data),
+                    _ => crate::rpp_state::reaper_vst3_to_daw_state(&p.state_data),
+                };
+                match decode {
+                    Ok(blob) => {
+                        if let Err(e) = daw.apply_plugin_state(&fx_guid, &blob) {
+                            summary
+                                .warnings
+                                .push(format!("FX state apply failed for '{}': {e}", p.name));
+                        }
+                    }
+                    Err(e) => summary
+                        .warnings
+                        .push(format!("FX state decode failed for '{}': {e}", p.name)),
+                }
+            }
+            // REAPER bypass = `enabled=false`. Effects::add starts
+            // enabled so only call when we need to flip it off.
+            if p.bypassed {
+                let _ = daw_proto::fx::Effects::set_enabled(
+                    daw,
+                    ctx.clone(),
+                    daw_proto::fx::FxTarget {
+                        context: chain_ctx.clone(),
+                        fx: daw_proto::fx::FxRef::Guid(fx_guid.clone()),
+                    },
+                    false,
+                );
+            }
+            if p.offline {
+                let _ = daw_proto::fx::Effects::set_offline(
+                    daw,
+                    ctx.clone(),
+                    daw_proto::fx::FxTarget {
+                        context: chain_ctx.clone(),
+                        fx: daw_proto::fx::FxRef::Guid(fx_guid.clone()),
+                    },
+                    true,
+                );
+            }
+        }
+        FxChainNode::Container(c) => {
+            // REAPER 7 FX containers. The proto layer doesn't have a
+            // first-class container yet — flatten children into the
+            // parent chain. State + routing within the container is
+            // lost; record a warning so users know.
+            summary.warnings.push(format!(
+                "FX container '{}' flattened (REAPER 7 container layout not yet modeled)",
+                c.name
+            ));
+            for child in &c.children {
+                apply_fx_node(daw, ctx, chain_ctx.clone(), child, summary);
+            }
+        }
+    }
+}
+
+/// Find a plugin bundle on disk given just a filename. Walks the
+/// usual VST3 / CLAP search dirs:
+///
+/// - `$HOME/.vst3`, `/usr/lib/vst3`, `/usr/local/lib/vst3` (Linux)
+/// - `~/Library/Audio/Plug-Ins/VST3`, `/Library/Audio/Plug-Ins/VST3` (macOS)
+/// - `$HOME/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap` (Linux)
+///
+/// Returns the absolute path if found. Bare filenames in `.rpp`
+/// files are how REAPER refers to plugins; the host resolves them
+/// against the same dirs the OS DAW would.
+fn resolve_plugin_path(
+    filename: &str,
+    plugin_type: &dawfile_reaper::types::fx_chain::PluginType,
+) -> Option<String> {
+    use dawfile_reaper::types::fx_chain::PluginType;
+    use std::path::PathBuf;
+
+    // If the file is already an absolute path that exists, take it.
+    let direct = PathBuf::from(filename);
+    if direct.is_absolute() && direct.exists() {
+        return Some(filename.to_string());
+    }
+
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut roots: Vec<PathBuf> = Vec::new();
+    match plugin_type {
+        PluginType::Vst3 => {
+            if let Some(h) = &home {
+                roots.push(h.join(".vst3"));
+                #[cfg(target_os = "macos")]
+                roots.push(h.join("Library/Audio/Plug-Ins/VST3"));
+            }
+            roots.push(PathBuf::from("/usr/lib/vst3"));
+            roots.push(PathBuf::from("/usr/local/lib/vst3"));
+            #[cfg(target_os = "macos")]
+            roots.push(PathBuf::from("/Library/Audio/Plug-Ins/VST3"));
+        }
+        PluginType::Clap => {
+            if let Some(h) = &home {
+                roots.push(h.join(".clap"));
+                #[cfg(target_os = "macos")]
+                roots.push(h.join("Library/Audio/Plug-Ins/CLAP"));
+            }
+            roots.push(PathBuf::from("/usr/lib/clap"));
+            roots.push(PathBuf::from("/usr/local/lib/clap"));
+            #[cfg(target_os = "macos")]
+            roots.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
+        }
+        PluginType::Vst => {
+            if let Some(h) = &home {
+                roots.push(h.join(".vst"));
+            }
+            roots.push(PathBuf::from("/usr/lib/vst"));
+            roots.push(PathBuf::from("/usr/local/lib/vst"));
+        }
+        _ => return None,
+    }
+
+    for root in roots {
+        let candidate = root.join(filename);
+        if candidate.exists() {
+            return candidate.to_str().map(|s| s.to_string());
+        }
+    }
+    None
 }

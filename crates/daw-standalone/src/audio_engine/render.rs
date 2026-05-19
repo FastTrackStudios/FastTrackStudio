@@ -26,11 +26,11 @@
 
 use std::sync::Arc;
 
+use daw_proto::RouteType;
 use daw_proto::automation::{
     EnvelopePoint, EnvelopeShape, EnvelopeType, SendEnvelopeKind, TakeEnvelopeKind,
 };
 use daw_proto::primitives::AutomationMode;
-use daw_proto::RouteType;
 
 use crate::sync::EnvelopeData;
 
@@ -141,6 +141,44 @@ struct ItemSnapshot {
     take_pan_env: Option<Vec<EnvelopePoint>>,
     take_mute_env: Option<Vec<EnvelopePoint>>,
     take_pitch_env: Option<Vec<EnvelopePoint>>,
+    /// Sorted absolute-time MIDI notes on this item (only populated
+    /// for MIDI takes — empty Vec for audio items). Each entry is
+    /// `(start_seconds, length_seconds, channel, pitch, velocity)`
+    /// in project time, already converted from PPQ at snapshot time
+    /// using the project's static tempo. Per-block note events fall
+    /// out by intersecting these against the render window.
+    midi_notes: Vec<MidiNoteSnapshot>,
+    /// Sorted absolute-time CC / pitch-bend / program-change /
+    /// sysex events. Emitted to the plugin per-block as raw MIDI
+    /// messages, in the same stream as the note events.
+    midi_other: Vec<MidiOtherSnapshot>,
+    /// Per-note expression points (MPE-style). Translated to
+    /// `PluginNoteExpression` per block.
+    note_expressions: Vec<NoteExpressionSnapshot>,
+}
+
+#[derive(Clone, Copy)]
+struct NoteExpressionSnapshot {
+    time_seconds: f64,
+    channel: u8,
+    note: u8,
+    dimension: daw_proto::midi::NoteExpressionDim,
+    value: f64,
+}
+
+#[derive(Clone, Copy)]
+struct MidiNoteSnapshot {
+    start_seconds: f64,
+    length_seconds: f64,
+    channel: u8,
+    pitch: u8,
+    velocity: u8,
+}
+
+#[derive(Clone)]
+struct MidiOtherSnapshot {
+    time_seconds: f64,
+    message: daw_proto::MidiMessage,
 }
 
 /// Render a stereo master block.
@@ -237,6 +275,21 @@ impl<'a> ProjectRenderer<'a> {
                 let Some(bus) = buses.get_mut(&t.guid) else {
                     continue;
                 };
+                // Collect MIDI + note-expression events for this
+                // block. Both lists are delivered to every plugin in
+                // the chain (REAPER's default) — plugins that don't
+                // consume MIDI just ignore them. Limiting MIDI to
+                // plugin[0] is a different mode the user can switch
+                // to via a future per-track flag.
+                let midi_events =
+                    collect_midi_events(t, start_seconds, end_seconds, self.sample_rate, frames);
+                let note_expr_events = collect_note_expressions(
+                    t,
+                    start_seconds,
+                    end_seconds,
+                    self.sample_rate,
+                    frames,
+                );
                 for (i, fx_guid) in t.fx_chain.iter().enumerate() {
                     if !t.fx_enabled.get(i).copied().unwrap_or(true) {
                         continue;
@@ -262,8 +315,16 @@ impl<'a> ProjectRenderer<'a> {
                     for v in out_l.iter_mut().chain(out_r.iter_mut()) {
                         *v = 0.0;
                     }
+                    let events = crate::plugin::PluginEvents {
+                        params: &[],
+                        midi: &midi_events,
+                        note_expressions: &note_expr_events,
+                    };
+                    let _ = i; // index is preserved for future
+                    // "first-FX-only" mode toggle; currently every
+                    // FX in the chain sees the same MIDI stream.
                     if plugin
-                        .process_block(&in_l, &in_r, &mut out_l, &mut out_r, &[])
+                        .process_block(&in_l, &in_r, &mut out_l, &mut out_r, &events)
                         .is_err()
                     {
                         continue;
@@ -396,16 +457,110 @@ impl<'a> ProjectRenderer<'a> {
 
     fn snapshot_tracks(&self) -> Option<Vec<TrackSnapshot>> {
         self.daw.read_project(self.project_guid, |p| {
+            let tempo_map = TempoMap::from_state(p);
             let mut tracks = Vec::with_capacity(p.tracks.len());
             for t in &p.tracks {
-                tracks.push(snapshot_track(p, t));
+                tracks.push(snapshot_track(p, t, &tempo_map));
             }
             tracks
         })
     }
 }
 
-fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
+/// Cumulative tempo-map: sorted list of `(time_seconds, beat, bpm)`
+/// segment starts. Each segment runs at constant BPM until the next
+/// entry; the final segment extends forever. Built once per
+/// `snapshot_track` call from `p.tempo_points`.
+///
+/// The `beat` field is the project-time beat (quarter notes from the
+/// origin) at which the segment begins — i.e. the PPQ of the segment
+/// boundary. PPQ values on `MidiNote.start_ppq` are *project-time*
+/// quarter notes when the source is a tempo-locked take.
+struct TempoMap {
+    segments: Vec<TempoSegment>,
+}
+
+#[derive(Clone, Copy)]
+struct TempoSegment {
+    /// Time in seconds at the segment start.
+    start_seconds: f64,
+    /// Beat (quarter notes from origin) at the segment start.
+    start_beat: f64,
+    /// Tempo within this segment (constant BPM).
+    bpm: f64,
+}
+
+impl TempoMap {
+    /// Build from `ProjectState`. Always returns at least one
+    /// segment — a fallback `(0, 0, project_bpm)` covers projects
+    /// with no tempo points.
+    fn from_state(p: &ProjectState) -> Self {
+        let default_bpm = p.transport.tempo.bpm().max(1.0);
+        let mut pts: Vec<(f64, f64)> = p
+            .tempo_points
+            .iter()
+            .map(|tp| (tp.position_seconds(), tp.bpm.max(1.0)))
+            .collect();
+        pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        // Drop duplicates at the same time (keep the last write).
+        pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
+
+        let mut segments: Vec<TempoSegment> = Vec::new();
+        // Always seed with a segment at time=0 so any PPQ before
+        // the first tempo point still resolves to a number.
+        if pts.first().map(|p| p.0 > 1e-9).unwrap_or(true) {
+            segments.push(TempoSegment {
+                start_seconds: 0.0,
+                start_beat: 0.0,
+                bpm: pts.first().map(|p| p.1).unwrap_or(default_bpm),
+            });
+        }
+        for (time_seconds, bpm) in pts {
+            // Beat at this segment start = previous beat + (time delta) * prev_bpm / 60.
+            let start_beat = segments
+                .last()
+                .map(|prev| prev.start_beat + (time_seconds - prev.start_seconds) * prev.bpm / 60.0)
+                .unwrap_or(0.0);
+            segments.push(TempoSegment {
+                start_seconds: time_seconds,
+                start_beat,
+                bpm,
+            });
+        }
+        Self { segments }
+    }
+
+    /// Convert seconds to project-time beats (inverse of `beat_to_seconds`).
+    fn seconds_to_beat(&self, seconds: f64) -> f64 {
+        let mut idx = 0usize;
+        for (i, s) in self.segments.iter().enumerate() {
+            if s.start_seconds <= seconds {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+        let seg = self.segments[idx];
+        seg.start_beat + (seconds - seg.start_seconds) * seg.bpm / 60.0
+    }
+
+    /// Convert project-time beats (= PPQ in quarter notes) to seconds.
+    fn beat_to_seconds(&self, beat: f64) -> f64 {
+        // Find the segment whose start_beat ≤ beat.
+        let mut idx = 0usize;
+        for (i, s) in self.segments.iter().enumerate() {
+            if s.start_beat <= beat {
+                idx = i;
+            } else {
+                break;
+            }
+        }
+        let seg = self.segments[idx];
+        seg.start_seconds + (beat - seg.start_beat) * 60.0 / seg.bpm
+    }
+}
+
+fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) -> TrackSnapshot {
     let parent_send = p
         .track_ext
         .get(&t.guid)
@@ -425,11 +580,9 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
                 .enumerate()
                 .filter_map(|(idx, r)| {
                     let dest_guid = r.dest_track_guid.clone()?;
-                    let key = |kind| {
-                        EnvelopeKey::Send {
-                            send_index: idx as u32,
-                            kind,
-                        }
+                    let key = |kind| EnvelopeKey::Send {
+                        send_index: idx as u32,
+                        kind,
                     };
                     let volume_env = active_envelope(
                         p.envelopes
@@ -504,6 +657,153 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
             let take_pan_env = take_env(TakeEnvelopeKind::Pan);
             let take_mute_env = take_env(TakeEnvelopeKind::Mute);
             let take_pitch_env = take_env(TakeEnvelopeKind::Pitch);
+
+            // PPQ → seconds via the project tempo map. PPQ on a take
+            // is *relative* to the item's start (REAPER stores notes
+            // local to the source). Convert by:
+            //   1. Locate the item start as an absolute beat via
+            //      the inverse tempo-map (seconds→beat).
+            //   2. Compose: absolute beat = item_start_beat + note_ppq.
+            //   3. Tempo-map that absolute beat back to seconds.
+            // For constant-tempo projects this collapses to the old
+            // formula `item_pos + ppq / qn_per_sec`.
+            let item_pos = item.position.as_seconds();
+            let item_start_beat = tempo_map.seconds_to_beat(item_pos);
+            let to_seconds = |ppq: f64| tempo_map.beat_to_seconds(item_start_beat + ppq);
+
+            let midi_other: Vec<MidiOtherSnapshot> = take_guid_opt
+                .as_ref()
+                .map(|tg| {
+                    use daw_proto::MidiMessage;
+                    let mut out: Vec<MidiOtherSnapshot> = Vec::new();
+                    if let Some(ccs) = p.midi_ccs.get(tg) {
+                        for cc in ccs {
+                            out.push(MidiOtherSnapshot {
+                                time_seconds: to_seconds(cc.position_ppq),
+                                message: MidiMessage::ControlChange {
+                                    channel: cc.channel,
+                                    controller: cc.controller,
+                                    value: cc.value,
+                                },
+                            });
+                        }
+                    }
+                    if let Some(pbs) = p.midi_pitch_bends.get(tg) {
+                        for pb in pbs {
+                            out.push(MidiOtherSnapshot {
+                                time_seconds: to_seconds(pb.position_ppq),
+                                message: MidiMessage::PitchBend {
+                                    channel: pb.channel,
+                                    value: pb.value,
+                                },
+                            });
+                        }
+                    }
+                    if let Some(pcs) = p.midi_program_changes.get(tg) {
+                        for pc in pcs {
+                            out.push(MidiOtherSnapshot {
+                                time_seconds: to_seconds(pc.position_ppq),
+                                message: MidiMessage::ProgramChange {
+                                    channel: pc.channel,
+                                    program: pc.program,
+                                },
+                            });
+                        }
+                    }
+                    if let Some(sx) = p.midi_sysex.get(tg) {
+                        for s in sx {
+                            out.push(MidiOtherSnapshot {
+                                time_seconds: to_seconds(s.position_ppq),
+                                message: MidiMessage::SysEx(s.data.clone()),
+                            });
+                        }
+                    }
+                    if let Some(cps) = p.midi_channel_pressures.get(tg) {
+                        for cp in cps {
+                            out.push(MidiOtherSnapshot {
+                                time_seconds: to_seconds(cp.position_ppq),
+                                message: MidiMessage::ChannelPressure {
+                                    channel: cp.channel,
+                                    pressure: cp.pressure,
+                                },
+                            });
+                        }
+                    }
+                    if let Some(pps) = p.midi_poly_pressures.get(tg) {
+                        for pp in pps {
+                            out.push(MidiOtherSnapshot {
+                                time_seconds: to_seconds(pp.position_ppq),
+                                message: MidiMessage::PolyPressure {
+                                    channel: pp.channel,
+                                    note: pp.note,
+                                    pressure: pp.pressure,
+                                },
+                            });
+                        }
+                    }
+                    out.sort_by(|a, b| {
+                        a.time_seconds
+                            .partial_cmp(&b.time_seconds)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    out
+                })
+                .unwrap_or_default();
+
+            let note_expressions_snap: Vec<NoteExpressionSnapshot> = take_guid_opt
+                .as_ref()
+                .and_then(|tg| p.midi_note_expressions.get(tg))
+                .map(|ne_list| {
+                    let mut out: Vec<NoteExpressionSnapshot> = ne_list
+                        .iter()
+                        .map(|n| NoteExpressionSnapshot {
+                            time_seconds: to_seconds(n.position_ppq),
+                            channel: n.channel,
+                            note: n.note,
+                            dimension: n.dimension,
+                            value: n.value,
+                        })
+                        .collect();
+                    out.sort_by(|a, b| {
+                        a.time_seconds
+                            .partial_cmp(&b.time_seconds)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    out
+                })
+                .unwrap_or_default();
+
+            let midi_notes: Vec<MidiNoteSnapshot> = take_guid_opt
+                .as_ref()
+                .and_then(|tg| p.midi_notes.get(tg))
+                .map(|notes| {
+                    let mut out: Vec<MidiNoteSnapshot> = notes
+                        .iter()
+                        .filter(|n| !n.muted && n.velocity > 0)
+                        .map(|n| {
+                            // PPQ length is also tempo-dependent —
+                            // compute end via the tempo map and
+                            // subtract.
+                            let start = to_seconds(n.start_ppq);
+                            let end = to_seconds(n.start_ppq + n.length_ppq);
+                            MidiNoteSnapshot {
+                                start_seconds: start,
+                                length_seconds: (end - start).max(0.0),
+                                channel: n.channel,
+                                pitch: n.pitch,
+                                velocity: n.velocity,
+                            }
+                        })
+                        .collect();
+                    out.sort_by(|a, b| {
+                        a.start_seconds
+                            .partial_cmp(&b.start_seconds)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    out
+                })
+                .unwrap_or_default();
+
             items.push(ItemSnapshot {
                 take_guid: take_guid_opt,
                 audio,
@@ -514,13 +814,20 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
                 muted: item.muted,
                 item_volume: item.volume,
                 take_volume,
-                play_rate: if play_rate.abs() < 1e-9 { 1.0 } else { play_rate },
+                play_rate: if play_rate.abs() < 1e-9 {
+                    1.0
+                } else {
+                    play_rate
+                },
                 start_offset_seconds: start_offset,
                 take_pitch_semitones: take_pitch,
                 take_volume_env,
                 take_pan_env,
                 take_mute_env,
                 take_pitch_env,
+                midi_notes,
+                midi_other,
+                note_expressions: note_expressions_snap,
             });
         }
     }
@@ -559,6 +866,118 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track) -> TrackSnapshot {
         volume_prefx_env: track_env(EnvelopeType::VolumePrefx),
         pan_prefx_env: track_env(EnvelopeType::PanPrefx),
     }
+}
+
+/// Walk every MIDI note on the track's items, emit NoteOn / NoteOff
+/// events whose timestamps fall inside `[start_seconds, end_seconds)`.
+/// Returns events sorted by sample offset — VST3's `IEventList`
+/// (and most CLAP hosts) want note events monotonically ordered.
+fn collect_midi_events(
+    track: &TrackSnapshot,
+    start_seconds: f64,
+    end_seconds: f64,
+    sample_rate: u32,
+    frames: usize,
+) -> Vec<crate::plugin::PluginMidiEvent> {
+    use daw_proto::live_midi::MidiMessage;
+
+    let mut out: Vec<crate::plugin::PluginMidiEvent> = Vec::new();
+    let to_sample = |t_seconds: f64| -> u32 {
+        let frame = ((t_seconds - start_seconds) * sample_rate as f64).floor() as i64;
+        frame.clamp(0, (frames as i64).saturating_sub(1)) as u32
+    };
+    for item in &track.items {
+        if item.muted {
+            continue;
+        }
+        // Quick bail-out: skip items that can't possibly overlap.
+        // MIDI events can fire from notes already started before
+        // start_seconds (only their NoteOff matters), so we use the
+        // full item span [position, position+length) plus the
+        // outstanding-tail length already encoded in start_seconds.
+        let item_end = item.position_seconds + item.length_seconds;
+        if item_end < start_seconds || item.position_seconds >= end_seconds + 0.0 {
+            // Note: items entirely before the block window may still
+            // have notes that *end* during the block — but if the
+            // item itself ends before start_seconds, no on-going note
+            // can survive past it.
+            if item_end < start_seconds {
+                continue;
+            }
+        }
+        for n in &item.midi_notes {
+            // NoteOn falls in this block?
+            if n.start_seconds >= start_seconds && n.start_seconds < end_seconds {
+                out.push(crate::plugin::PluginMidiEvent {
+                    offset: to_sample(n.start_seconds),
+                    message: MidiMessage::NoteOn {
+                        channel: n.channel,
+                        note: n.pitch,
+                        velocity: n.velocity,
+                    },
+                });
+            }
+            // NoteOff falls in this block?
+            let end = n.start_seconds + n.length_seconds;
+            if end >= start_seconds && end < end_seconds {
+                out.push(crate::plugin::PluginMidiEvent {
+                    offset: to_sample(end),
+                    message: MidiMessage::NoteOff {
+                        channel: n.channel,
+                        note: n.pitch,
+                        velocity: 0,
+                    },
+                });
+            }
+        }
+        // CC / pitch bend / program change / sysex — all delivered at
+        // their `time_seconds`, clamped into the block window.
+        for ev in &item.midi_other {
+            if ev.time_seconds >= start_seconds && ev.time_seconds < end_seconds {
+                out.push(crate::plugin::PluginMidiEvent {
+                    offset: to_sample(ev.time_seconds),
+                    message: ev.message.clone(),
+                });
+            }
+        }
+    }
+    out.sort_by_key(|e| e.offset);
+    out
+}
+
+/// Walk every per-note expression point on the track's items and
+/// emit those that fall inside `[start_seconds, end_seconds)` as
+/// `PluginNoteExpression`s with sample offsets clamped to the block.
+fn collect_note_expressions(
+    track: &TrackSnapshot,
+    start_seconds: f64,
+    end_seconds: f64,
+    sample_rate: u32,
+    frames: usize,
+) -> Vec<crate::plugin::PluginNoteExpression> {
+    let mut out: Vec<crate::plugin::PluginNoteExpression> = Vec::new();
+    let to_sample = |t_seconds: f64| -> u32 {
+        let frame = ((t_seconds - start_seconds) * sample_rate as f64).floor() as i64;
+        frame.clamp(0, (frames as i64).saturating_sub(1)) as u32
+    };
+    for item in &track.items {
+        if item.muted {
+            continue;
+        }
+        for ev in &item.note_expressions {
+            if ev.time_seconds >= start_seconds && ev.time_seconds < end_seconds {
+                out.push(crate::plugin::PluginNoteExpression {
+                    offset: to_sample(ev.time_seconds),
+                    channel: ev.channel,
+                    note: ev.note,
+                    dimension: ev.dimension,
+                    value: ev.value,
+                });
+            }
+        }
+    }
+    out.sort_by_key(|e| e.offset);
+    out
 }
 
 /// Stateful per-frame envelope cursor. `eval_at(t)` advances through
@@ -692,10 +1111,7 @@ fn mix_item_into_bus(
         .map(|p| EnvelopeCursor::new(p));
     let mut c_pan = item.take_pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
     let mut c_mute = item.take_mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-    let mut c_pitch = item
-        .take_pitch_env
-        .as_ref()
-        .map(|p| EnvelopeCursor::new(p));
+    let mut c_pitch = item.take_pitch_env.as_ref().map(|p| EnvelopeCursor::new(p));
     let has_take_pan = item.take_pan_env.is_some();
 
     let fade_in = item.fade_in_seconds.max(0.0);

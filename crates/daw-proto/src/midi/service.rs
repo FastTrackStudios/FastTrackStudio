@@ -3,7 +3,10 @@
 //!
 //! For realtime MIDI I/O see `LiveMidi`.
 
-use super::{MidiCC, MidiNote, MidiNoteCreate, MidiPitchBend, MidiProgramChange, MidiSysEx};
+use super::{
+    MidiCC, MidiChannelPressure, MidiNote, MidiNoteCreate, MidiNoteExpression, MidiPitchBend,
+    MidiPolyPressure, MidiProgramChange, MidiSysEx, NoteExpressionDim,
+};
 use crate::TrackRef;
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
@@ -96,6 +99,107 @@ pub struct MidiPitchBendCreate {
     pub position_ppq: f64,
 }
 
+/// Parameters for creating a new Program Change event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiProgramChangeCreate {
+    pub channel: u8,
+    pub program: u8,
+    pub position_ppq: f64,
+}
+
+impl MidiProgramChangeCreate {
+    pub fn new(channel: u8, program: u8, position_ppq: f64) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            program: program & 0x7F,
+            position_ppq,
+        }
+    }
+}
+
+/// Parameters for creating a new System Exclusive event. The `data`
+/// vector should include the leading `0xF0` and trailing `0xF7`
+/// framing bytes — the standalone impl stores them verbatim and the
+/// renderer hands them straight to the plugin's MIDI input port.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiSysExCreate {
+    pub data: Vec<u8>,
+    pub position_ppq: f64,
+}
+
+impl MidiSysExCreate {
+    pub fn new(data: Vec<u8>, position_ppq: f64) -> Self {
+        Self { data, position_ppq }
+    }
+}
+
+/// Parameters for creating a channel-pressure (mono aftertouch) event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiChannelPressureCreate {
+    pub channel: u8,
+    pub pressure: u8,
+    pub position_ppq: f64,
+}
+
+impl MidiChannelPressureCreate {
+    pub fn new(channel: u8, pressure: u8, position_ppq: f64) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            pressure: pressure & 0x7F,
+            position_ppq,
+        }
+    }
+}
+
+/// Parameters for creating a poly-pressure (per-note aftertouch) event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiPolyPressureCreate {
+    pub channel: u8,
+    pub note: u8,
+    pub pressure: u8,
+    pub position_ppq: f64,
+}
+
+impl MidiPolyPressureCreate {
+    pub fn new(channel: u8, note: u8, pressure: u8, position_ppq: f64) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            note: note & 0x7F,
+            pressure: pressure & 0x7F,
+            position_ppq,
+        }
+    }
+}
+
+/// Parameters for creating a per-note expression event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiNoteExpressionCreate {
+    pub channel: u8,
+    /// Target note (pitch). `0xFF` = "any note on this channel".
+    pub note: u8,
+    pub dimension: NoteExpressionDim,
+    pub value: f64,
+    pub position_ppq: f64,
+}
+
+impl MidiNoteExpressionCreate {
+    pub fn new(
+        channel: u8,
+        note: u8,
+        dimension: NoteExpressionDim,
+        value: f64,
+        position_ppq: f64,
+    ) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            note: if note == 0xFF { 0xFF } else { note & 0x7F },
+            dimension,
+            value,
+            position_ppq,
+        }
+    }
+}
+
 impl MidiPitchBendCreate {
     pub fn new(channel: u8, value: i16, position_ppq: f64) -> Self {
         Self {
@@ -161,8 +265,40 @@ pub trait Midi {
 
     fn pitch_bends(&self, location: MidiTakeLocation) -> Vec<MidiPitchBend>;
     fn add_pitch_bend(&self, location: MidiTakeLocation, pb: MidiPitchBendCreate) -> u32;
+    fn delete_pitch_bend(&self, location: MidiTakeLocation, index: u32);
+    fn set_pitch_bend_value(&self, location: MidiTakeLocation, index: u32, value: i16);
+
     fn program_changes(&self, location: MidiTakeLocation) -> Vec<MidiProgramChange>;
+    fn add_program_change(&self, location: MidiTakeLocation, pc: MidiProgramChangeCreate) -> u32;
+    fn delete_program_change(&self, location: MidiTakeLocation, index: u32);
+    fn set_program(&self, location: MidiTakeLocation, index: u32, program: u8);
+
     fn sysex(&self, location: MidiTakeLocation) -> Vec<MidiSysEx>;
+    fn add_sysex(&self, location: MidiTakeLocation, sysex: MidiSysExCreate) -> u32;
+    fn delete_sysex(&self, location: MidiTakeLocation, index: u32);
+
+    // ── Channel + poly aftertouch ─────────────────────────────────
+
+    fn channel_pressures(&self, location: MidiTakeLocation) -> Vec<MidiChannelPressure>;
+    fn add_channel_pressure(
+        &self,
+        location: MidiTakeLocation,
+        cp: MidiChannelPressureCreate,
+    ) -> u32;
+    fn delete_channel_pressure(&self, location: MidiTakeLocation, index: u32);
+    fn set_channel_pressure_value(&self, location: MidiTakeLocation, index: u32, pressure: u8);
+
+    fn poly_pressures(&self, location: MidiTakeLocation) -> Vec<MidiPolyPressure>;
+    fn add_poly_pressure(&self, location: MidiTakeLocation, pp: MidiPolyPressureCreate) -> u32;
+    fn delete_poly_pressure(&self, location: MidiTakeLocation, index: u32);
+    fn set_poly_pressure_value(&self, location: MidiTakeLocation, index: u32, pressure: u8);
+
+    // ── Per-note expression (MPE / CLAP / VST3) ────────────────────
+
+    fn note_expressions(&self, location: MidiTakeLocation) -> Vec<MidiNoteExpression>;
+    fn add_note_expression(&self, location: MidiTakeLocation, ne: MidiNoteExpressionCreate) -> u32;
+    fn delete_note_expression(&self, location: MidiTakeLocation, index: u32);
+    fn set_note_expression_value(&self, location: MidiTakeLocation, index: u32, value: f64);
 }
 
 #[cfg(feature = "vox")]

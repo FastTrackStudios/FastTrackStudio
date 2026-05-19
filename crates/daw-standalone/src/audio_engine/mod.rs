@@ -36,6 +36,8 @@ mod mixer;
 pub mod plugin_host;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod render;
+#[cfg(feature = "vst3-host")]
+pub mod vst3_host;
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
 pub mod web;
 // Legacy mixer-direct RPP loader retired in favor of

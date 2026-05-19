@@ -19,12 +19,18 @@
 
 mod action_registry;
 mod audio_accessor;
-#[cfg(any(feature = "audio", feature = "decode", feature = "clap-host"))]
+#[cfg(any(
+    feature = "audio",
+    feature = "decode",
+    feature = "clap-host",
+    feature = "vst3-host"
+))]
 pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
 mod automation_touch;
 pub use automation_touch::TouchableParam;
+mod batch;
 #[cfg(feature = "bootstrap")]
 pub mod bootstrap;
 mod dawfile_service;
@@ -43,6 +49,7 @@ pub mod media_bay;
 mod midi;
 mod peak;
 pub(crate) mod platform;
+pub mod plugin;
 mod plugin_loader;
 mod position_conversion;
 mod project;
@@ -52,8 +59,8 @@ mod region;
 mod resource;
 mod routing;
 mod routing_sync;
+pub mod rpp_state;
 mod screenset;
-pub mod plugin;
 mod services;
 mod shared_state;
 pub mod sync;
@@ -65,6 +72,7 @@ mod transport;
 pub mod transport_engine;
 mod ui;
 mod window_geometry;
+mod window_manager;
 
 // All per-service impls are on `Standalone` directly post-port.
 // Old `Standalone*` per-service structs retired.

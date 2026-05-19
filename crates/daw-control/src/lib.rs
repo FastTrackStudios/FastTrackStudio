@@ -145,6 +145,7 @@ pub(crate) use daw_proto::dock_host::DockHostingClient;
 pub(crate) use daw_proto::event_bus::EventBusClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoadingClient;
 pub(crate) use daw_proto::toolbar::ToolbarClient;
+pub(crate) use daw_proto::window_manager::WindowManagerClient;
 pub use vox::Caller;
 
 pub mod error;
@@ -176,6 +177,7 @@ mod toolbar;
 mod tracks;
 mod transport;
 mod window_geometry;
+mod window_manager;
 
 pub use self::action_registry::ActionRegistry;
 pub use self::audio_engine::AudioEngine;
@@ -203,6 +205,7 @@ pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
 pub use self::window_geometry::WindowGeometry;
+pub use self::window_manager::WindowManager;
 
 /// Service clients for a DAW connection
 #[derive(Clone)]
@@ -223,6 +226,7 @@ pub struct DawClients {
     pub(crate) screenset: ScreensetsClient,
     pub(crate) dawfile: DawFileOpsClient,
     pub(crate) window_geometry: WindowGeometryClient,
+    pub(crate) window_manager: WindowManagerClient,
     pub(crate) automation: AutomationClient,
     pub(crate) live_midi: LiveMidiClient,
     pub(crate) midi: MidiClient,
@@ -261,6 +265,7 @@ impl DawClients {
             screenset: ScreensetsClient::new(handle.clone()),
             dawfile: DawFileOpsClient::new(handle.clone()),
             window_geometry: WindowGeometryClient::new(handle.clone()),
+            window_manager: WindowManagerClient::new(handle.clone()),
             automation: AutomationClient::new(handle.clone()),
             live_midi: LiveMidiClient::new(handle.clone()),
             midi: MidiClient::new(handle.clone()),
@@ -577,6 +582,14 @@ impl Daw {
     /// Access named FTS screensets.
     pub fn screensets(&self) -> Screensets {
         Screensets::new(self.clients.clone())
+    }
+
+    /// Access named workspace layouts (mode toolbars + docking).
+    /// Layouts are stored in REAPER's `reaper-screensets.ini`; the
+    /// service resolves names against that file and dispatches the
+    /// matching `Screenset: Load #N` action when applied.
+    pub fn window_manager(&self) -> WindowManager {
+        WindowManager::new(self.clients.clone())
     }
 
     /// Access on-disk DAW project file helpers (`.RPP` summary, `.RPL`

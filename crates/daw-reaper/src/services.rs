@@ -34,7 +34,7 @@ use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, diagnostics, event_bus,
     ext_state, fx, fx_chains, fx_params, health, input, item, live_midi, marker, midi,
     plugin_loader, project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
-    window_geometry,
+    window_geometry, window_manager,
 };
 
 use crate::Reaper;
@@ -66,6 +66,7 @@ impl Services for Reaper {
             screenset::Service,
             dawfile_service::Service,
             window_geometry::Service,
+            window_manager::Service,
             plugin_loader::Service,
             automation::Service,
             batch::Service,

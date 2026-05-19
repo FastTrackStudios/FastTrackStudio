@@ -47,6 +47,7 @@ pub mod transport;
 pub mod ui;
 pub mod undo;
 pub mod window_geometry;
+pub mod window_manager;
 
 pub use action_registry::*;
 pub use actions::*;
@@ -118,3 +119,4 @@ pub use transport::*;
 pub use ui::*;
 pub use undo::*;
 pub use window_geometry::*;
+pub use window_manager::*;

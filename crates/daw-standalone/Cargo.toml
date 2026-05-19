@@ -30,7 +30,14 @@ ureq = { version = "2", optional = true }
 # .clap bundles and dylibs). Behind `clap-host` feature.
 clack-host = { workspace = true, optional = true }
 clack-extensions = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
+thiserror = { workspace = true }
+
+# VST3 plugin hosting (auto-generated Steinberg COM bindings). Native-only.
+vst3 = { workspace = true, optional = true }
+libloading = { workspace = true, optional = true }
+
+# Decoding REAPER VST/VST3/CLAP plugin state blobs from .rpp files.
+base64 = "0.22"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
@@ -47,6 +54,8 @@ daw-control = { path = "../daw-control" }
 eyre = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = "0.3"
+base64 = "0.22"
+dawfile-reaper = { path = "../dawfile-reaper" }
 
 [features]
 # Symphonia-backed source decoding without cpal. WASM-compatible —
@@ -75,7 +84,10 @@ bootstrap = ["dep:daw-control", "dep:eyre"]
 http-resolver = ["dep:ureq"]
 # Host CLAP plugins (load .clap bundles, inspect params, process audio).
 # Native-only (clack-host dynamically loads native dylibs).
-clap-host = ["dep:clack-host", "dep:clack-extensions", "dep:thiserror"]
+clap-host = ["dep:clack-host", "dep:clack-extensions"]
+# Host VST3 plugins (load .vst3 bundles, inspect descriptor, process audio).
+# Native-only (libloading + native dylibs).
+vst3-host = ["dep:vst3", "dep:libloading"]
 # Browser bindings: a wasm-bindgen wrapper that an AudioWorklet
 # processor can construct + drive. Only meaningful on wasm32.
 web = ["decode", "dep:wasm-bindgen", "dep:js-sys"]

@@ -3,9 +3,7 @@
 use daw_proto::midi::Midi;
 use daw_proto::project::ProjectContext;
 use daw_proto::{Effects, FxChainContext, ItemRef, ProjectInfo, Takes, TrackRef, Tracks};
-use daw_standalone::media_bay::{
-    BayFileResolver, BayView, InMemoryResolver, ReplaceScope,
-};
+use daw_standalone::media_bay::{BayFileResolver, BayView, InMemoryResolver, ReplaceScope};
 use daw_standalone::sync::Standalone;
 
 fn seeded() -> (Standalone, String) {
@@ -166,12 +164,7 @@ fn replace_in_project_all_instances() {
     add_audio_item(&daw, &guid, &t, 1.0, 1.0, "a.wav");
 
     daw.media_bay()
-        .replace_in_project(
-            ctx.clone(),
-            "a.wav",
-            "b.wav",
-            ReplaceScope::AllInstances,
-        )
+        .replace_in_project(ctx.clone(), "a.wav", "b.wav", ReplaceScope::AllInstances)
         .unwrap();
     assert_eq!(daw.media_bay().usage_count(ctx.clone(), "a.wav"), 0);
     assert_eq!(daw.media_bay().usage_count(ctx, "b.wav"), 2);
@@ -192,7 +185,12 @@ fn mute_all_uses_propagates_to_items() {
     let items = daw.media_bay().list(ctx.clone(), BayView::MediaItems, "");
     for item in items.iter() {
         if item.id == i1 || item.id == i2 {
-            assert_eq!(item.all_muted, Some(true), "item {} should be muted", item.id);
+            assert_eq!(
+                item.all_muted,
+                Some(true),
+                "item {} should be muted",
+                item.id
+            );
         }
     }
     // Source entry reports all_muted = true.
@@ -304,7 +302,13 @@ fn effects_view_lists_fx_chain_entries() {
     let (daw, guid) = seeded();
     let ctx = ProjectContext::Project(guid.clone());
     let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
-    Effects::add(&daw, ctx.clone(), FxChainContext::Track(t.clone()), "ReaComp").unwrap();
+    Effects::add(
+        &daw,
+        ctx.clone(),
+        FxChainContext::Track(t.clone()),
+        "ReaComp",
+    )
+    .unwrap();
     Effects::add(&daw, ctx.clone(), FxChainContext::Track(t), "ReaEQ").unwrap();
 
     let entries = daw.media_bay().list(ctx, BayView::Effects, "");

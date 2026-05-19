@@ -249,6 +249,22 @@ pub struct ProjectState {
     /// each `MidiNote` mirrors its position in the vec (rewritten on
     /// add/delete to keep references stable within a single read).
     pub midi_notes: HashMap<String, Vec<MidiNote>>,
+    /// Per-take MIDI Control Change events, keyed by take guid.
+    /// CC streams feed plugins per-block alongside note events.
+    pub midi_ccs: HashMap<String, Vec<daw_proto::midi::MidiCC>>,
+    /// Per-take MIDI Pitch Bend events.
+    pub midi_pitch_bends: HashMap<String, Vec<daw_proto::midi::MidiPitchBend>>,
+    /// Per-take MIDI Program Change events.
+    pub midi_program_changes: HashMap<String, Vec<daw_proto::midi::MidiProgramChange>>,
+    /// Per-take MIDI System Exclusive events (full F0..F7 frames).
+    pub midi_sysex: HashMap<String, Vec<daw_proto::midi::MidiSysEx>>,
+    /// Per-take channel-pressure (mono aftertouch) events.
+    pub midi_channel_pressures: HashMap<String, Vec<daw_proto::midi::MidiChannelPressure>>,
+    /// Per-take poly-pressure (per-note aftertouch) events.
+    pub midi_poly_pressures: HashMap<String, Vec<daw_proto::midi::MidiPolyPressure>>,
+    /// Per-take MPE-style note-expression events (volume/pan/tuning/
+    /// vibrato/expression/brightness/pressure per voice).
+    pub midi_note_expressions: HashMap<String, Vec<daw_proto::midi::MidiNoteExpression>>,
     /// Automation envelopes keyed by `(track_guid, EnvelopeKey)`. Points
     /// are kept sorted by time within each envelope.
     pub envelopes: HashMap<(String, EnvelopeKey), EnvelopeData>,
@@ -275,6 +291,14 @@ pub struct ProjectState {
     // Phase 2 storage ─────────────────────────────────────────────────────
     /// FX chains keyed by their context.
     pub fx_chains: HashMap<FxChainKey, Vec<FxEntry>>,
+    /// Active preset index per FX guid. Tracks what the last
+    /// `Effects::set_preset` call selected — no introspection of
+    /// what presets the underlying plugin offers.
+    pub fx_preset_index: HashMap<String, u32>,
+    /// Named-config key/value store per FX, keyed by `(fx_guid, key)`.
+    /// Mirrors REAPER's `TrackFX_GetNamedConfigParm` so clients that
+    /// stash plugin-specific metadata can round-trip through standalone.
+    pub fx_named_config: HashMap<(String, String), String>,
     /// Items keyed by item guid.
     pub items: HashMap<String, ItemEntry>,
     /// Per-track item ordering. `track_guid -> [item_guid, ...]`.
@@ -306,6 +330,13 @@ impl ProjectState {
             tracks: Vec::new(),
             track_ext: HashMap::new(),
             midi_notes: HashMap::new(),
+            midi_ccs: HashMap::new(),
+            midi_pitch_bends: HashMap::new(),
+            midi_program_changes: HashMap::new(),
+            midi_sysex: HashMap::new(),
+            midi_channel_pressures: HashMap::new(),
+            midi_poly_pressures: HashMap::new(),
+            midi_note_expressions: HashMap::new(),
             envelopes: HashMap::new(),
             global_automation_override: None,
             bay_state: None,
@@ -316,6 +347,8 @@ impl ProjectState {
             track_ext_state: HashMap::new(),
             project_ext_state: HashMap::new(),
             fx_chains: HashMap::new(),
+            fx_preset_index: HashMap::new(),
+            fx_named_config: HashMap::new(),
             items: HashMap::new(),
             items_by_track: HashMap::new(),
             takes: HashMap::new(),
@@ -369,11 +402,9 @@ pub struct Standalone {
     /// Shared file-intake resolver used by `MediaBay`. Single source
     /// of truth so resolver installs persist across `media_bay()`
     /// handles and across threads.
-    pub(crate) bay_resolver:
-        Arc<Mutex<Option<Box<dyn crate::media_bay::BayFileResolver>>>>,
+    pub(crate) bay_resolver: Arc<Mutex<Option<Box<dyn crate::media_bay::BayFileResolver>>>>,
     /// Touch / latch state for realtime automation write modes.
-    pub(crate) automation_touch:
-        Arc<Mutex<crate::automation_touch::AutomationTouchState>>,
+    pub(crate) automation_touch: Arc<Mutex<crate::automation_touch::AutomationTouchState>>,
     /// Loaded plugin instances keyed by `fx_guid`. Separate from
     /// `ProjectState.fx_chains` (which carries proto-serializable
     /// `FxEntry` metadata only) so the renderer can `lock()` plugins
@@ -515,6 +546,46 @@ impl Standalone {
             .get(fx_guid)
             .map(|p| p.is_prepared())
             .unwrap_or(false)
+    }
+
+    /// Apply a previously-saved plugin state blob to the FX backing
+    /// `fx_guid`. The blob format is the one returned by
+    /// `PluginInstance::save_state` (DAW3-framed for VST3; raw bytes
+    /// for CLAP). To load from a REAPER `.rpp` chunk, decode it
+    /// through [`crate::rpp_state`] first.
+    ///
+    /// Returns `Err` if the FX guid isn't backed by a loaded plugin
+    /// instance, or the plugin's `load_state` returned an error.
+    pub fn apply_plugin_state(
+        &self,
+        fx_guid: &str,
+        state: &[u8],
+    ) -> Result<(), crate::plugin::PluginError> {
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned");
+        match plugins.get_mut(fx_guid) {
+            Some(p) => p.load_state(state),
+            None => Err(crate::plugin::PluginError::LoadFailed(format!(
+                "no plugin instance for fx_guid {fx_guid}"
+            ))),
+        }
+    }
+
+    /// Save the current state of the FX backing `fx_guid`. Returns
+    /// `Err` if there's no loaded plugin or its `save_state` failed.
+    pub fn save_plugin_state(&self, fx_guid: &str) -> Result<Vec<u8>, crate::plugin::PluginError> {
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned");
+        match plugins.get_mut(fx_guid) {
+            Some(p) => p.save_state(),
+            None => Err(crate::plugin::PluginError::LoadFailed(format!(
+                "no plugin instance for fx_guid {fx_guid}"
+            ))),
+        }
     }
 
     /// Project Media/FX Bay handle. Cheap to construct — clones an

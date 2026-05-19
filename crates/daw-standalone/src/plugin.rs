@@ -61,6 +61,54 @@ impl Default for PluginFormat {
     }
 }
 
+/// A MIDI event scheduled at a sample offset inside the current
+/// process block. Used to drive virtual instruments (CLAPi/VST3i)
+/// and to feed effect plugins that respond to CC/program changes.
+#[derive(Clone, Debug)]
+pub struct PluginMidiEvent {
+    /// Sample offset from the start of the block (0..block_size).
+    pub offset: u32,
+    pub message: daw_proto::MidiMessage,
+}
+
+/// One per-note expression event scheduled at a sample offset.
+/// Surfaces CLAP's `NoteExpressionEvent` and VST3's
+/// `NoteExpressionValueEvent` through a single host-side type — the
+/// renderer emits these alongside MIDI; backends translate to the
+/// format-native event.
+#[derive(Clone, Copy, Debug)]
+pub struct PluginNoteExpression {
+    pub offset: u32,
+    pub channel: u8,
+    /// Target note pitch, or `0xFF` for "any active voice".
+    pub note: u8,
+    pub dimension: daw_proto::midi::NoteExpressionDim,
+    pub value: f64,
+}
+
+/// Per-block inputs to [`PluginInstance::process_block`].
+///
+/// Borrowed slices so the renderer can pass scratch buffers without
+/// extra allocation. An empty `PluginEvents` is the common case
+/// for static effects with no automation or note input.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PluginEvents<'a> {
+    /// `(param_id, plain_value)` changes applied at sample 0.
+    pub params: &'a [(u32, f64)],
+    /// Sorted-by-offset MIDI events for this block.
+    pub midi: &'a [PluginMidiEvent],
+    /// Sorted-by-offset per-note expression events for this block.
+    pub note_expressions: &'a [PluginNoteExpression],
+}
+
+impl<'a> PluginEvents<'a> {
+    pub const EMPTY: PluginEvents<'static> = PluginEvents {
+        params: &[],
+        midi: &[],
+        note_expressions: &[],
+    };
+}
+
 /// One parameter exposed by the plugin.
 #[derive(Clone, Debug)]
 pub struct PluginParamInfo {
@@ -104,17 +152,39 @@ pub trait PluginInstance: Send {
     /// Whether `prepare` has been called and the plugin is ready.
     fn is_prepared(&self) -> bool;
 
-    /// Render one block. `param_events` is a list of
-    /// `(param_id, value)` changes scheduled at the start of the
-    /// block (typical use: drive automation envelopes).
+    /// Render one block. `events` carries per-block parameter changes
+    /// and MIDI input (needed for virtual instruments like CLAPi /
+    /// VST3i, which produce audio from note events rather than
+    /// processing an audio input).
     fn process_block(
         &mut self,
         in_l: &[f32],
         in_r: &[f32],
         out_l: &mut [f32],
         out_r: &mut [f32],
-        param_events: &[(u32, f64)],
+        events: &PluginEvents<'_>,
     ) -> Result<(), PluginError>;
+
+    /// Restore plugin state from a host-defined byte blob. The
+    /// blob format is backend-specific — for round-trip safety the
+    /// blob must have been produced by [`save_state`] from a plugin
+    /// of the same backend, or built from a host-side parser (see
+    /// [`crate::rpp_state`] for REAPER `.rpp` chunk decoding).
+    ///
+    /// Calling this on an *activated* plugin is allowed but
+    /// implementation-defined — VST3 plugins generally tolerate it,
+    /// CLAP plugins typically need a deactivate/load/activate cycle
+    /// for some param changes to apply.
+    fn load_state(&mut self, _state: &[u8]) -> Result<(), PluginError> {
+        Err(PluginError::UnsupportedFormat(self.descriptor().format))
+    }
+
+    /// Save plugin state to a host-defined byte blob suitable for
+    /// passing back to [`load_state`] on a fresh instance of the same
+    /// backend.
+    fn save_state(&mut self) -> Result<Vec<u8>, PluginError> {
+        Err(PluginError::UnsupportedFormat(self.descriptor().format))
+    }
 
     /// Release activation. Idempotent — calling twice is fine.
     fn deactivate(&mut self);
@@ -155,20 +225,54 @@ impl fmt::Display for PluginError {
 
 impl std::error::Error for PluginError {}
 
+pub use thread_serialized::ThreadSerialized;
+
+#[allow(unsafe_code)]
+mod thread_serialized {
+    /// Marker wrapper that asserts (via unsafe) that the wrapped value
+    /// is safe to send between threads as long as all access is
+    /// serialized externally (e.g. through a `Mutex`).
+    ///
+    /// Lives here (always-on) so format-specific host modules can share
+    /// it without depending on each other's feature gates.
+    pub struct ThreadSerialized<T>(T);
+
+    impl<T> ThreadSerialized<T> {
+        /// SAFETY: caller must guarantee that the wrapped value is only
+        /// ever accessed from one thread at a time. The DAW enforces
+        /// this by storing instances inside `Mutex<HashMap<..>>`.
+        pub unsafe fn new(value: T) -> Self {
+            Self(value)
+        }
+    }
+
+    unsafe impl<T> Send for ThreadSerialized<T> {}
+
+    impl<T> core::ops::Deref for ThreadSerialized<T> {
+        type Target = T;
+        fn deref(&self) -> &T {
+            &self.0
+        }
+    }
+    impl<T> core::ops::DerefMut for ThreadSerialized<T> {
+        fn deref_mut(&mut self) -> &mut T {
+            &mut self.0
+        }
+    }
+}
+
 /// Format-aware instantiator. Tries to load `name_or_path` using the
 /// first backend that recognizes the format. Returns
 /// `PluginError::UnsupportedFormat` if no backend can handle it.
 ///
 /// `Synthetic` returns `Ok(None)` — caller falls back to the
 /// existing synthetic FX path (see `crate::fx`).
-pub fn load_plugin(
-    name_or_path: &str,
-) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
+pub fn load_plugin(name_or_path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
     let format = PluginFormat::from_path_or_name(name_or_path);
     match format {
         PluginFormat::Synthetic => Ok(None),
         PluginFormat::Clap => load_clap(name_or_path),
-        PluginFormat::Vst3 => Err(PluginError::UnsupportedFormat(format)),
+        PluginFormat::Vst3 => load_vst3(name_or_path),
         PluginFormat::Lv2 => Err(PluginError::UnsupportedFormat(format)),
     }
 }
@@ -189,6 +293,20 @@ fn load_clap(path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError>
 #[cfg(not(feature = "clap-host"))]
 fn load_clap(_path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
     Err(PluginError::UnsupportedFormat(PluginFormat::Clap))
+}
+
+#[cfg(feature = "vst3-host")]
+fn load_vst3(path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
+    use crate::audio_engine::vst3_host::Vst3Host;
+    let plugin = Vst3Host::new()
+        .load(Path::new(path), 0)
+        .map_err(|e| PluginError::LoadFailed(format!("{e:?}")))?;
+    Ok(Some(Box::new(plugin.into_send())))
+}
+
+#[cfg(not(feature = "vst3-host"))]
+fn load_vst3(_path: &str) -> Result<Option<Box<dyn PluginInstance>>, PluginError> {
+    Err(PluginError::UnsupportedFormat(PluginFormat::Vst3))
 }
 
 // Convenience so `Path` import on the cfg(feature) branch is used.

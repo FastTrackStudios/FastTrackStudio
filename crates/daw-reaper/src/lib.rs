@@ -79,6 +79,7 @@ pub mod track;
 pub mod transport;
 pub mod ui;
 pub mod window_geometry;
+pub mod window_manager;
 
 // Push-based change detection via REAPER's IReaperControlSurface
 // callbacks. Parallel fast path alongside the 30Hz pollers — see

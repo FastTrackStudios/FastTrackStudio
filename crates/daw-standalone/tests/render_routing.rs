@@ -278,9 +278,7 @@ fn parent_send_disabled_excludes_track_from_master() {
 #[test]
 fn volume_envelope_attenuates_master() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -310,8 +308,7 @@ fn volume_envelope_attenuates_master() {
     // First 100ms — envelope ≈ 1.0, full volume.
     let early = r.render_block(0, SAMPLE_RATE as usize / 10);
     // Last 100ms — envelope ≈ 0.0, near silence.
-    let late =
-        r.render_block(SAMPLE_RATE as u64 * 9 / 10, SAMPLE_RATE as usize / 10);
+    let late = r.render_block(SAMPLE_RATE as u64 * 9 / 10, SAMPLE_RATE as usize / 10);
 
     assert!(
         rms_l(&early) > rms_l(&late) + 0.05,
@@ -324,9 +321,7 @@ fn volume_envelope_attenuates_master() {
 #[test]
 fn pan_envelope_routes_to_right_side() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -335,10 +330,7 @@ fn pan_envelope_routes_to_right_side() {
     create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
 
     // Pan envelope held at 1.0 (hard right).
-    let loc = EnvelopeLocation::new(
-        TrackRef::Guid(t),
-        EnvelopeRef::Type(EnvelopeType::Pan),
-    );
+    let loc = EnvelopeLocation::new(TrackRef::Guid(t), EnvelopeRef::Type(EnvelopeType::Pan));
     Automation::add_point(
         &daw,
         ctx,
@@ -363,9 +355,7 @@ fn pan_envelope_routes_to_right_side() {
 #[test]
 fn mute_envelope_gates_output() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -374,10 +364,7 @@ fn mute_envelope_gates_output() {
     create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
 
     // Mute envelope held above 0.5 = muted.
-    let loc = EnvelopeLocation::new(
-        TrackRef::Guid(t),
-        EnvelopeRef::Type(EnvelopeType::Mute),
-    );
+    let loc = EnvelopeLocation::new(TrackRef::Guid(t), EnvelopeRef::Type(EnvelopeType::Mute));
     Automation::add_point(
         &daw,
         ctx,
@@ -394,9 +381,7 @@ fn mute_envelope_gates_output() {
 #[test]
 fn send_volume_envelope_rides_send_level() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, SendEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, SendEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -450,9 +435,7 @@ fn send_volume_envelope_rides_send_level() {
 #[test]
 fn send_mute_envelope_silences_send() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, SendEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, SendEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -490,9 +473,7 @@ fn send_mute_envelope_silences_send() {
 #[test]
 fn send_pan_envelope_steers_send() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, SendEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, SendEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -524,16 +505,17 @@ fn send_pan_envelope_steers_send() {
     );
     let block =
         ProjectRenderer::new(&daw, "p", SAMPLE_RATE).render_block(0, SAMPLE_RATE as usize / 4);
-    assert!(rms_l(&block) < 0.05, "hard-right send pan: L should be quiet");
+    assert!(
+        rms_l(&block) < 0.05,
+        "hard-right send pan: L should be quiet"
+    );
     assert!(rms_r(&block) > 0.3, "hard-right send pan: R audible");
 }
 
 #[test]
 fn volume_prefx_envelope_stacks_with_main_volume_envelope() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -574,16 +556,13 @@ fn volume_prefx_envelope_stacks_with_main_volume_envelope() {
 #[test]
 fn take_volume_envelope_attenuates_item() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
     let ctx = ProjectContext::Project(guid);
     let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
-    let (item_guid, take_guid) =
-        create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
+    let (item_guid, take_guid) = create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
 
     // Take vol envelope: 1.0 at item start, 0.0 at end.
     let loc = EnvelopeLocation::new(
@@ -621,16 +600,13 @@ fn take_volume_envelope_attenuates_item() {
 #[test]
 fn take_mute_envelope_silences_item() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
     let ctx = ProjectContext::Project(guid);
     let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
-    let (item_guid, take_guid) =
-        create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
+    let (item_guid, take_guid) = create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
 
     Automation::add_point(
         &daw,
@@ -654,16 +630,13 @@ fn take_mute_envelope_silences_item() {
 #[test]
 fn take_pan_envelope_pans_item_within_track() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
     let ctx = ProjectContext::Project(guid);
     let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
-    let (item_guid, take_guid) =
-        create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
+    let (item_guid, take_guid) = create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
 
     // Hard right take pan.
     Automation::add_point(
@@ -681,16 +654,22 @@ fn take_pan_envelope_pans_item_within_track() {
     );
     let block =
         ProjectRenderer::new(&daw, "p", SAMPLE_RATE).render_block(0, SAMPLE_RATE as usize / 4);
-    assert!(rms_l(&block) < 0.05, "L should be near-silent, got {}", rms_l(&block));
-    assert!(rms_r(&block) > 0.3, "R should be audible, got {}", rms_r(&block));
+    assert!(
+        rms_l(&block) < 0.05,
+        "L should be near-silent, got {}",
+        rms_l(&block)
+    );
+    assert!(
+        rms_r(&block) > 0.3,
+        "R should be audible, got {}",
+        rms_r(&block)
+    );
 }
 
 #[test]
 fn take_pitch_envelope_shifts_play_rate() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -699,8 +678,7 @@ fn take_pitch_envelope_shifts_play_rate() {
     // Item is 1s long; source is also 1s of constant audio. With
     // +12 semitones, source advances 2x → after 0.5s of wall time
     // we've consumed all 1s of the source.
-    let (item_guid, take_guid) =
-        create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
+    let (item_guid, take_guid) = create_item_with_audio(&daw, "p", &t, 0.0, 1.0, const_audio(1.0));
 
     Automation::add_point(
         &daw,
@@ -728,7 +706,11 @@ fn take_pitch_envelope_shifts_play_rate() {
             },
         ),
     );
-    assert_eq!(points.len(), 1, "pitch env should have 1 point, got {points:?}");
+    assert_eq!(
+        points.len(),
+        1,
+        "pitch env should have 1 point, got {points:?}"
+    );
     assert!((points[0].value - 12.0).abs() < 1e-6);
 
     let r = ProjectRenderer::new(&daw, "p", SAMPLE_RATE);
@@ -740,8 +722,7 @@ fn take_pitch_envelope_shifts_play_rate() {
     );
     // After 0.6s (past the source-exhausted point at 0.5s) source
     // index is past the end and frames are skipped — much quieter.
-    let late =
-        r.render_block(SAMPLE_RATE as u64 * 6 / 10, SAMPLE_RATE as usize / 8);
+    let late = r.render_block(SAMPLE_RATE as u64 * 6 / 10, SAMPLE_RATE as usize / 8);
     assert!(
         rms_l(&late) < rms_l(&first) * 0.5 + 0.01,
         "post-source-exhaust block ({}) should be much quieter than early ({})",
@@ -753,9 +734,7 @@ fn take_pitch_envelope_shifts_play_rate() {
 #[test]
 fn automation_mode_off_bypasses_envelope() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
     use daw_proto::primitives::{AutomationMode, PositionInSeconds};
 
     let (daw, guid) = seeded();
@@ -792,9 +771,7 @@ fn automation_mode_off_bypasses_envelope() {
 #[test]
 fn envelope_eval_is_per_sample_not_block() {
     use daw_proto::Automation;
-    use daw_proto::automation::{
-        AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType,
-    };
+    use daw_proto::automation::{AddPointParams, EnvelopeLocation, EnvelopeRef, EnvelopeType};
     use daw_proto::primitives::PositionInSeconds;
 
     let (daw, guid) = seeded();
@@ -807,10 +784,7 @@ fn envelope_eval_is_per_sample_not_block() {
     // (~0.5) and rms would be uniform. With per-sample eval, the
     // first-half rms (≈0.75) is clearly louder than the second-half
     // rms (≈0.25).
-    let loc = EnvelopeLocation::new(
-        TrackRef::Guid(t),
-        EnvelopeRef::Type(EnvelopeType::Volume),
-    );
+    let loc = EnvelopeLocation::new(TrackRef::Guid(t), EnvelopeRef::Type(EnvelopeType::Volume));
     Automation::add_point(
         &daw,
         ctx.clone(),

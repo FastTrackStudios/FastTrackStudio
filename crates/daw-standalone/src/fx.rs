@@ -50,6 +50,28 @@ fn not_found_proj() -> DawError {
     DawError::not_found("Project", "context")
 }
 
+/// Shared next/prev preset implementation. Looks up the current
+/// stored index, applies `delta`, clamps non-negative.
+fn bump_preset(
+    daw: &Standalone,
+    project: &ProjectContext,
+    target: &FxTarget,
+    delta: i32,
+) -> DawResult<()> {
+    let guid =
+        resolve_project(daw, project).ok_or_else(|| DawError::not_found("project", "current"))?;
+    let chain_key: FxChainKey = (&target.context).into();
+    daw.with_project_mut(&guid, |p| {
+        let chain = p.fx_chains.get(&chain_key).ok_or_else(not_found_fx)?;
+        let i = find_fx_index(chain, &target.fx).ok_or_else(not_found_fx)?;
+        let fx_guid = chain[i].fx.guid.clone();
+        let current = p.fx_preset_index.get(&fx_guid).copied().unwrap_or(0) as i32;
+        let next = (current + delta).max(0) as u32;
+        p.fx_preset_index.insert(fx_guid, next);
+        Ok::<(), DawError>(())
+    })?
+}
+
 fn not_found_fx() -> DawError {
     DawError::not_found("Fx", "")
 }
@@ -190,32 +212,33 @@ impl Effects for Standalone {
             .map(|d| d.format)
             .unwrap_or(crate::plugin::PluginFormat::Synthetic);
 
-        let new_guid = self.with_project_mut(&guid, |p| {
-            let chain_vec = p.fx_chains.entry(key).or_default();
-            let new_index = chain_vec.len() as u32;
-            let new_guid = Uuid::new_v4().to_string();
-            p.next_fx_counter += 1;
+        let new_guid = self
+            .with_project_mut(&guid, |p| {
+                let chain_vec = p.fx_chains.entry(key).or_default();
+                let new_index = chain_vec.len() as u32;
+                let new_guid = Uuid::new_v4().to_string();
+                p.next_fx_counter += 1;
 
-            let mut fx = Fx::new(new_guid.clone(), new_index, name.to_string());
-            fx.plugin_name = real_descriptor
-                .as_ref()
-                .map(|d| d.name.clone())
-                .unwrap_or_else(|| name.to_string());
-            fx.plugin_type = match plugin_format {
-                crate::plugin::PluginFormat::Clap => daw_proto::fx::FxType::Clap,
-                crate::plugin::PluginFormat::Vst3 => daw_proto::fx::FxType::Vst3,
-                _ => guess_fx_type(name),
-            };
-            fx.parameter_count = real_param_count;
+                let mut fx = Fx::new(new_guid.clone(), new_index, name.to_string());
+                fx.plugin_name = real_descriptor
+                    .as_ref()
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| name.to_string());
+                fx.plugin_type = match plugin_format {
+                    crate::plugin::PluginFormat::Clap => daw_proto::fx::FxType::Clap,
+                    crate::plugin::PluginFormat::Vst3 => daw_proto::fx::FxType::Vst3,
+                    _ => guess_fx_type(name),
+                };
+                fx.parameter_count = real_param_count;
 
-            chain_vec.push(FxEntry {
-                fx,
-                state_chunk: String::new(),
-                params: default_params(),
-            });
-            new_guid
-        })
-        .ok()?;
+                chain_vec.push(FxEntry {
+                    fx,
+                    state_chunk: String::new(),
+                    params: default_params(),
+                });
+                new_guid
+            })
+            .ok()?;
         // Stash the loaded plugin instance for the renderer to find.
         if let Some(plugin) = real_plugin {
             self.plugin_instances
@@ -448,21 +471,40 @@ impl Effects for Standalone {
         })?
     }
 
-    fn state_chunk_encoded(&self, _project: ProjectContext, _target: FxTarget) -> Option<String> {
-        // Base64 wrapping isn't pulled in as a dep yet. Round-trip via
-        // the raw `state_chunk` accessor instead.
-        todo!(
-            "standalone: Effects::state_chunk_encoded — needs base64 dep; use state_chunk for now"
-        )
+    fn state_chunk_encoded(&self, project: ProjectContext, target: FxTarget) -> Option<String> {
+        use base64::Engine;
+        let guid = resolve_project(self, &project)?;
+        let key: FxChainKey = (&target.context).into();
+        self.with_project(&guid, |p| {
+            let chain = p.fx_chains.get(&key)?;
+            let i = find_fx_index(chain, &target.fx)?;
+            Some(base64::engine::general_purpose::STANDARD.encode(chain[i].state_chunk.as_bytes()))
+        })
+        .ok()
+        .flatten()
     }
 
     fn set_state_chunk_encoded(
         &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-        _encoded: &str,
+        project: ProjectContext,
+        target: FxTarget,
+        encoded: &str,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::set_state_chunk_encoded — needs base64 dep")
+        use base64::Engine;
+        let guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("project", "current"))?;
+        let key: FxChainKey = (&target.context).into();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_bytes())
+            .map_err(|e| DawError::operation_failed(format!("base64 decode: {e}")))?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| DawError::operation_failed("decoded state chunk is not UTF-8"))?;
+        self.with_project_mut(&guid, |p| {
+            let chain = p.fx_chains.get_mut(&key).ok_or_else(not_found_fx)?;
+            let i = find_fx_index(chain, &target.fx).ok_or_else(not_found_fx)?;
+            chain[i].state_chunk = text;
+            Ok::<(), DawError>(())
+        })?
     }
 
     fn chain_state(&self, project: ProjectContext, chain: FxChainContext) -> Vec<FxStateChunk> {
@@ -509,37 +551,77 @@ impl Effects for Standalone {
 
     // ── Deferred — todo!() ────────────────────────────────────────────
 
-    fn preset_index(&self, _project: ProjectContext, _target: FxTarget) -> Option<FxPresetIndex> {
-        todo!("standalone: Effects::preset_index — preset enumeration needs real plugin metadata")
+    // Preset enumeration — we don't introspect plugin presets (would
+    // need real-plugin metadata). Store an arbitrary "active index"
+    // per FX in a side map so set/get round-trips, but don't enumerate
+    // names. Tests that depend on exact REAPER preset behaviour will
+    // need to mock; tests that just care about the trait contract
+    // see a stable surface.
+    fn preset_index(&self, project: ProjectContext, target: FxTarget) -> Option<FxPresetIndex> {
+        let guid = resolve_project(self, &project)?;
+        let key: FxChainKey = (&target.context).into();
+        self.with_project(&guid, |p| {
+            let chain = p.fx_chains.get(&key)?;
+            let i = find_fx_index(chain, &target.fx)?;
+            let fx_guid = &chain[i].fx.guid;
+            p.fx_preset_index
+                .get(fx_guid)
+                .copied()
+                .map(|index| FxPresetIndex {
+                    index: Some(index),
+                    count: 0,
+                    name: None,
+                })
+        })
+        .ok()
+        .flatten()
     }
-    fn next_preset(&self, _project: ProjectContext, _target: FxTarget) -> DawResult<()> {
-        todo!("standalone: Effects::next_preset")
+    fn next_preset(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
+        bump_preset(self, &project, &target, 1)
     }
-    fn prev_preset(&self, _project: ProjectContext, _target: FxTarget) -> DawResult<()> {
-        todo!("standalone: Effects::prev_preset")
+    fn prev_preset(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
+        bump_preset(self, &project, &target, -1)
     }
-    fn set_preset(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-        _index: u32,
-    ) -> DawResult<()> {
-        todo!("standalone: Effects::set_preset")
+    fn set_preset(&self, project: ProjectContext, target: FxTarget, index: u32) -> DawResult<()> {
+        let guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("project", "current"))?;
+        let key: FxChainKey = (&target.context).into();
+        self.with_project_mut(&guid, |p| {
+            let chain = p.fx_chains.get_mut(&key).ok_or_else(not_found_fx)?;
+            let i = find_fx_index(chain, &target.fx).ok_or_else(not_found_fx)?;
+            let fx_guid = chain[i].fx.guid.clone();
+            p.fx_preset_index.insert(fx_guid, index);
+            Ok::<(), DawError>(())
+        })?
     }
-    fn named_config(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-        _key: &str,
-    ) -> Option<String> {
-        todo!("standalone: Effects::named_config — needs plugin-specific key/value backing")
+    fn named_config(&self, project: ProjectContext, target: FxTarget, key: &str) -> Option<String> {
+        let guid = resolve_project(self, &project)?;
+        let chain_key: FxChainKey = (&target.context).into();
+        self.with_project(&guid, |p| {
+            let chain = p.fx_chains.get(&chain_key)?;
+            let i = find_fx_index(chain, &target.fx)?;
+            let fx_guid = chain[i].fx.guid.clone();
+            p.fx_named_config.get(&(fx_guid, key.to_string())).cloned()
+        })
+        .ok()
+        .flatten()
     }
     fn set_named_config(
         &self,
-        _project: ProjectContext,
-        _request: SetNamedConfigRequest,
+        project: ProjectContext,
+        request: SetNamedConfigRequest,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::set_named_config")
+        let guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("project", "current"))?;
+        let chain_key: FxChainKey = (&request.target.context).into();
+        self.with_project_mut(&guid, |p| {
+            let chain = p.fx_chains.get_mut(&chain_key).ok_or_else(not_found_fx)?;
+            let i = find_fx_index(chain, &request.target.fx).ok_or_else(not_found_fx)?;
+            let fx_guid = chain[i].fx.guid.clone();
+            p.fx_named_config
+                .insert((fx_guid, request.key.clone()), request.value.clone());
+            Ok::<(), DawError>(())
+        })?
     }
     fn latency(&self, _project: ProjectContext, _target: FxTarget) -> Option<FxLatency> {
         Some(FxLatency::default())
@@ -557,7 +639,9 @@ impl Effects for Standalone {
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<FxChannelConfig> {
-        todo!("standalone: Effects::channel_config — pin routing not modeled yet")
+        // Pin routing isn't modelled; return the all-defaults channel
+        // config so callers can read a sensible value without panicking.
+        Some(FxChannelConfig::default())
     }
     fn set_channel_config(
         &self,
@@ -565,14 +649,19 @@ impl Effects for Standalone {
         _target: FxTarget,
         _config: FxChannelConfig,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::set_channel_config")
+        // Accept + discard. We don't have a pin map to update yet.
+        Ok(())
     }
     fn silence_output(
         &self,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> DawResult<FxPinMappings> {
-        todo!("standalone: Effects::silence_output")
+        // "Silence output" is a REAPER trick: zero out the FX's pin
+        // map so its output bus produces silence, return the old
+        // mapping so the caller can restore. We don't have pin maps,
+        // so just hand back the defaults and accept the no-op.
+        Ok(FxPinMappings::default())
     }
     fn restore_output(
         &self,
@@ -580,31 +669,60 @@ impl Effects for Standalone {
         _target: FxTarget,
         _saved: FxPinMappings,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::restore_output")
+        Ok(())
     }
-    fn tree(&self, _project: ProjectContext, _chain: FxChainContext) -> FxTree {
-        todo!("standalone: Effects::tree — FX containers not modeled yet")
+    fn tree(&self, project: ProjectContext, chain: FxChainContext) -> FxTree {
+        // Flatten the existing chain into a single-level tree (no
+        // containers). Once container ops land we'll model nested
+        // FxNodes; for now every plugin is a top-level Plugin node.
+        let Some(guid) = resolve_project(self, &project) else {
+            return FxTree::default();
+        };
+        let key: FxChainKey = (&chain).into();
+        self.with_project(&guid, |p| {
+            let Some(entries) = p.fx_chains.get(&key) else {
+                return FxTree::default();
+            };
+            FxTree {
+                nodes: entries
+                    .iter()
+                    .map(|e| daw_proto::fx::FxNode {
+                        id: daw_proto::fx::FxNodeId::from_guid(e.fx.guid.clone()),
+                        kind: daw_proto::fx::FxNodeKind::Plugin(e.fx.clone()),
+                        enabled: e.fx.enabled,
+                        parent_id: None,
+                    })
+                    .collect(),
+            }
+        })
+        .unwrap_or_default()
     }
     fn create_container(
         &self,
         _project: ProjectContext,
         _request: CreateContainerRequest,
     ) -> Option<FxNodeId> {
-        todo!("standalone: Effects::create_container")
+        // REAPER 7 FX containers aren't modelled. Return None so the
+        // caller knows the op didn't take.
+        None
     }
     fn move_to_container(
         &self,
         _project: ProjectContext,
         _request: MoveToContainerRequest,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::move_to_container")
+        Err(DawError::operation_failed(
+            "standalone: FX containers not modelled",
+        ))
     }
     fn move_from_container(
         &self,
         _project: ProjectContext,
         _request: MoveFromContainerRequest,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::move_from_container")
+        Err(DawError::operation_failed(
+            "standalone: FX containers not modelled",
+        ))
     }
     fn set_routing_mode(
         &self,
@@ -613,7 +731,9 @@ impl Effects for Standalone {
         _node_id: FxNodeId,
         _mode: FxRoutingMode,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::set_routing_mode")
+        Err(DawError::operation_failed(
+            "standalone: FX containers not modelled",
+        ))
     }
     fn container_channel_config(
         &self,
@@ -621,21 +741,23 @@ impl Effects for Standalone {
         _chain: FxChainContext,
         _container_id: FxNodeId,
     ) -> Option<FxContainerChannelConfig> {
-        todo!("standalone: Effects::container_channel_config")
+        None
     }
     fn set_container_channel_config(
         &self,
         _project: ProjectContext,
         _request: SetContainerChannelConfigRequest,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::set_container_channel_config")
+        Err(DawError::operation_failed(
+            "standalone: FX containers not modelled",
+        ))
     }
     fn enclose_in_container(
         &self,
         _project: ProjectContext,
         _request: EncloseInContainerRequest,
     ) -> Option<FxNodeId> {
-        todo!("standalone: Effects::enclose_in_container")
+        None
     }
     fn explode_container(
         &self,
@@ -643,7 +765,9 @@ impl Effects for Standalone {
         _chain: FxChainContext,
         _container_id: FxNodeId,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::explode_container")
+        Err(DawError::operation_failed(
+            "standalone: FX containers not modelled",
+        ))
     }
     fn rename_container(
         &self,
@@ -652,10 +776,28 @@ impl Effects for Standalone {
         _container_id: FxNodeId,
         _name: &str,
     ) -> DawResult<()> {
-        todo!("standalone: Effects::rename_container")
+        Err(DawError::operation_failed(
+            "standalone: FX containers not modelled",
+        ))
     }
-    fn chain_chunk_text(&self, _project: ProjectContext, _chain: FxChainContext) -> Option<String> {
-        todo!("standalone: Effects::chain_chunk_text — raw RPP block parsing not implemented")
+    fn chain_chunk_text(&self, project: ProjectContext, chain: FxChainContext) -> Option<String> {
+        // Concatenate the raw state chunks per-FX as a best-effort
+        // approximation. Full RPP chunk text serialization (with
+        // BYPASS/FXID/WAK/PRESETNAME framing) isn't reconstructed —
+        // that needs dawfile-reaper's writer.
+        let guid = resolve_project(self, &project)?;
+        let key: FxChainKey = (&chain).into();
+        self.with_project(&guid, |p| {
+            let chain = p.fx_chains.get(&key)?;
+            let mut text = String::new();
+            for e in chain {
+                text.push_str(&e.state_chunk);
+                text.push('\n');
+            }
+            Some(text)
+        })
+        .ok()
+        .flatten()
     }
     fn insert_chain_chunk(
         &self,

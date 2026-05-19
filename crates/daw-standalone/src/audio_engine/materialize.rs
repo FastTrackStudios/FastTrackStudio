@@ -141,5 +141,7 @@ pub fn materialize_via_bay(
     project_guid: &str,
 ) -> Result<MaterializeReport, String> {
     let bay = daw.media_bay();
-    Ok(materialize_audio(daw, project_guid, |path| bay.resolve_file(path)))
+    Ok(materialize_audio(daw, project_guid, |path| {
+        bay.resolve_file(path)
+    }))
 }

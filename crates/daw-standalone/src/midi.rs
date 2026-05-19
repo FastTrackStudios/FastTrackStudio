@@ -20,8 +20,11 @@
 
 use daw_proto::item::SourceType;
 use daw_proto::midi::{
-    HumanizeParams, Midi, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
-    MidiPitchBendCreate, MidiProgramChange, MidiSysEx, MidiTakeLocation, PpqRange, QuantizeParams,
+    HumanizeParams, Midi, MidiCC, MidiCCCreate, MidiChannelPressure, MidiChannelPressureCreate,
+    MidiNote, MidiNoteCreate, MidiNoteExpression, MidiNoteExpressionCreate, MidiPitchBend,
+    MidiPitchBendCreate, MidiPolyPressure, MidiPolyPressureCreate, MidiProgramChange,
+    MidiProgramChangeCreate, MidiSysEx, MidiSysExCreate, MidiTakeLocation, PpqRange,
+    QuantizeParams,
 };
 use daw_proto::primitives::{Duration, PositionInSeconds};
 use daw_proto::project::ProjectContext;
@@ -405,37 +408,700 @@ impl Midi for Standalone {
         });
     }
 
-    fn humanize_notes(&self, _location: MidiTakeLocation, _params: HumanizeParams) {
-        // Random walks need an rng; standalone doesn't pull rand yet.
-        // Kept as a deliberate no-op (not a panic) so callers can run
-        // the trait without crashing, but the effect is empty until
-        // we wire a deterministic seed.
-        todo!("standalone: Midi::humanize_notes — needs rng + seed plumbing")
+    fn humanize_notes(&self, location: MidiTakeLocation, params: HumanizeParams) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            let Some(notes) = p.midi_notes.get_mut(&take_guid) else {
+                return;
+            };
+            // Pick targets: explicit indices, or selected, or all.
+            let touched: Vec<usize> = if !params.indices.is_empty() {
+                params
+                    .indices
+                    .iter()
+                    .filter_map(|&i| {
+                        if (i as usize) < notes.len() {
+                            Some(i as usize)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                let any_selected = notes.iter().any(|n| n.selected);
+                if any_selected {
+                    notes
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| n.selected)
+                        .map(|(i, _)| i)
+                        .collect()
+                } else {
+                    (0..notes.len()).collect()
+                }
+            };
+            // Deterministic PRNG seeded from take guid + total note
+            // count so the same humanize on the same take produces
+            // the same offsets. Splitmix64: tiny, fast, well-studied.
+            let mut state = splitmix_seed(&take_guid, notes.len());
+            for idx in touched {
+                let n = &mut notes[idx];
+                if params.timing_range_ppq > 0.0 {
+                    // Symmetric range [-range, +range], uniform.
+                    let raw = (next_u64(&mut state) as f64) / (u64::MAX as f64);
+                    let offset = (raw * 2.0 - 1.0) * params.timing_range_ppq;
+                    n.start_ppq = (n.start_ppq + offset).max(0.0);
+                }
+                if params.velocity_range > 0 {
+                    let raw = (next_u64(&mut state) as f64) / (u64::MAX as f64);
+                    let offset = ((raw * 2.0 - 1.0) * params.velocity_range as f64).round() as i32;
+                    n.velocity = ((n.velocity as i32) + offset).clamp(1, 127) as u8;
+                }
+            }
+            // Resort + renumber since timing shifted.
+            notes.sort_by(|a, b| {
+                a.start_ppq
+                    .partial_cmp(&b.start_ppq)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            renumber(notes);
+        });
     }
 
-    fn ccs(&self, _location: MidiTakeLocation, _controller: Option<u8>) -> Vec<MidiCC> {
-        todo!("standalone: Midi::ccs — CC storage not yet modeled")
+    // ── CCs ────────────────────────────────────────────────────────
+
+    fn ccs(&self, location: MidiTakeLocation, controller: Option<u8>) -> Vec<MidiCC> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_ccs
+                .get(&take_guid)
+                .map(|v| match controller {
+                    Some(c) => v.iter().filter(|cc| cc.controller == c).cloned().collect(),
+                    None => v.clone(),
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
-    fn add_cc(&self, _location: MidiTakeLocation, _cc: MidiCCCreate) -> u32 {
-        todo!("standalone: Midi::add_cc")
+
+    fn add_cc(&self, location: MidiTakeLocation, cc: MidiCCCreate) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_ccs.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiCC {
+                index: new_index,
+                channel: cc.channel & 0x0F,
+                controller: cc.controller & 0x7F,
+                value: cc.value & 0x7F,
+                position_ppq: cc.position_ppq,
+                selected: false,
+            });
+            sort_by_ppq_cc(v);
+            renumber_cc(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
     }
-    fn delete_cc(&self, _location: MidiTakeLocation, _index: u32) {
-        todo!("standalone: Midi::delete_cc")
+
+    fn delete_cc(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_ccs.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_cc(v);
+                }
+            }
+        });
     }
-    fn set_cc_value(&self, _location: MidiTakeLocation, _index: u32, _value: u8) {
-        todo!("standalone: Midi::set_cc_value")
+
+    fn set_cc_value(&self, location: MidiTakeLocation, index: u32, value: u8) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_ccs.get_mut(&take_guid) {
+                if let Some(cc) = v.get_mut(index as usize) {
+                    cc.value = value & 0x7F;
+                }
+            }
+        });
     }
-    fn pitch_bends(&self, _location: MidiTakeLocation) -> Vec<MidiPitchBend> {
-        todo!("standalone: Midi::pitch_bends")
+
+    // ── Pitch bends ────────────────────────────────────────────────
+
+    fn pitch_bends(&self, location: MidiTakeLocation) -> Vec<MidiPitchBend> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_pitch_bends
+                .get(&take_guid)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
-    fn add_pitch_bend(&self, _location: MidiTakeLocation, _pb: MidiPitchBendCreate) -> u32 {
-        todo!("standalone: Midi::add_pitch_bend")
+
+    fn add_pitch_bend(&self, location: MidiTakeLocation, pb: MidiPitchBendCreate) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_pitch_bends.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiPitchBend {
+                index: new_index,
+                channel: pb.channel & 0x0F,
+                value: pb.value.clamp(-8192, 8191),
+                position_ppq: pb.position_ppq,
+                selected: false,
+            });
+            sort_by_ppq_pb(v);
+            renumber_pb(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
     }
-    fn program_changes(&self, _location: MidiTakeLocation) -> Vec<MidiProgramChange> {
-        todo!("standalone: Midi::program_changes")
+
+    fn delete_pitch_bend(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_pitch_bends.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_pb(v);
+                }
+            }
+        });
     }
-    fn sysex(&self, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
-        todo!("standalone: Midi::sysex")
+
+    fn set_pitch_bend_value(&self, location: MidiTakeLocation, index: u32, value: i16) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_pitch_bends.get_mut(&take_guid) {
+                if let Some(pb) = v.get_mut(index as usize) {
+                    pb.value = value.clamp(-8192, 8191);
+                }
+            }
+        });
+    }
+
+    // ── Program changes ────────────────────────────────────────────
+
+    fn program_changes(&self, location: MidiTakeLocation) -> Vec<MidiProgramChange> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_program_changes
+                .get(&take_guid)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn add_program_change(&self, location: MidiTakeLocation, pc: MidiProgramChangeCreate) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_program_changes.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiProgramChange {
+                index: new_index,
+                channel: pc.channel & 0x0F,
+                program: pc.program & 0x7F,
+                position_ppq: pc.position_ppq,
+            });
+            sort_by_ppq_pc(v);
+            renumber_pc(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
+    }
+
+    fn delete_program_change(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_program_changes.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_pc(v);
+                }
+            }
+        });
+    }
+
+    fn set_program(&self, location: MidiTakeLocation, index: u32, program: u8) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_program_changes.get_mut(&take_guid) {
+                if let Some(pc) = v.get_mut(index as usize) {
+                    pc.program = program & 0x7F;
+                }
+            }
+        });
+    }
+
+    // ── SysEx ──────────────────────────────────────────────────────
+
+    fn sysex(&self, location: MidiTakeLocation) -> Vec<MidiSysEx> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_sysex.get(&take_guid).cloned().unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn add_sysex(&self, location: MidiTakeLocation, sysex: MidiSysExCreate) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_sysex.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiSysEx {
+                index: new_index,
+                position_ppq: sysex.position_ppq,
+                data: sysex.data,
+            });
+            sort_by_ppq_sysex(v);
+            renumber_sysex(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
+    }
+
+    fn delete_sysex(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_sysex.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_sysex(v);
+                }
+            }
+        });
+    }
+
+    // ── Channel pressure (mono aftertouch) ─────────────────────────
+
+    fn channel_pressures(&self, location: MidiTakeLocation) -> Vec<MidiChannelPressure> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_channel_pressures
+                .get(&take_guid)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn add_channel_pressure(
+        &self,
+        location: MidiTakeLocation,
+        cp: MidiChannelPressureCreate,
+    ) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_channel_pressures.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiChannelPressure {
+                index: new_index,
+                channel: cp.channel & 0x0F,
+                pressure: cp.pressure & 0x7F,
+                position_ppq: cp.position_ppq,
+                selected: false,
+            });
+            sort_by_ppq_cp(v);
+            renumber_cp(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
+    }
+
+    fn delete_channel_pressure(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_channel_pressures.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_cp(v);
+                }
+            }
+        });
+    }
+
+    fn set_channel_pressure_value(&self, location: MidiTakeLocation, index: u32, pressure: u8) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_channel_pressures.get_mut(&take_guid) {
+                if let Some(cp) = v.get_mut(index as usize) {
+                    cp.pressure = pressure & 0x7F;
+                }
+            }
+        });
+    }
+
+    // ── Poly pressure (per-note aftertouch) ────────────────────────
+
+    fn poly_pressures(&self, location: MidiTakeLocation) -> Vec<MidiPolyPressure> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_poly_pressures
+                .get(&take_guid)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn add_poly_pressure(&self, location: MidiTakeLocation, pp: MidiPolyPressureCreate) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_poly_pressures.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiPolyPressure {
+                index: new_index,
+                channel: pp.channel & 0x0F,
+                note: pp.note & 0x7F,
+                pressure: pp.pressure & 0x7F,
+                position_ppq: pp.position_ppq,
+                selected: false,
+            });
+            sort_by_ppq_pp(v);
+            renumber_pp(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
+    }
+
+    fn delete_poly_pressure(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_poly_pressures.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_pp(v);
+                }
+            }
+        });
+    }
+
+    fn set_poly_pressure_value(&self, location: MidiTakeLocation, index: u32, pressure: u8) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_poly_pressures.get_mut(&take_guid) {
+                if let Some(pp) = v.get_mut(index as usize) {
+                    pp.pressure = pressure & 0x7F;
+                }
+            }
+        });
+    }
+
+    // ── Note expression (MPE / CLAP / VST3) ────────────────────────
+
+    fn note_expressions(&self, location: MidiTakeLocation) -> Vec<MidiNoteExpression> {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return Vec::new();
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.midi_note_expressions
+                .get(&take_guid)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn add_note_expression(&self, location: MidiTakeLocation, ne: MidiNoteExpressionCreate) -> u32 {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return 0;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return 0;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let v = p.midi_note_expressions.entry(take_guid).or_default();
+            let new_index = v.len() as u32;
+            v.push(MidiNoteExpression {
+                index: new_index,
+                channel: ne.channel & 0x0F,
+                note: ne.note,
+                dimension: ne.dimension,
+                value: ne.value,
+                position_ppq: ne.position_ppq,
+                selected: false,
+            });
+            sort_by_ppq_ne(v);
+            renumber_ne(v);
+            new_index
+        })
+        .ok()
+        .unwrap_or(0)
+    }
+
+    fn delete_note_expression(&self, location: MidiTakeLocation, index: u32) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_note_expressions.get_mut(&take_guid) {
+                if (index as usize) < v.len() {
+                    v.remove(index as usize);
+                    renumber_ne(v);
+                }
+            }
+        });
+    }
+
+    fn set_note_expression_value(&self, location: MidiTakeLocation, index: u32, value: f64) {
+        let Some(take_guid) = resolve_take_guid(self, &location) else {
+            return;
+        };
+        let Some(project_guid) = resolve_project(self, &location.project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(v) = p.midi_note_expressions.get_mut(&take_guid) {
+                if let Some(ne) = v.get_mut(index as usize) {
+                    ne.value = value;
+                }
+            }
+        });
+    }
+}
+
+/// Tiny SplitMix64 PRNG. Seeded from the take guid + a counter so
+/// repeated humanize calls on the same take with the same params
+/// produce identical offsets — important for test reproducibility.
+fn splitmix_seed(take_guid: &str, salt: usize) -> u64 {
+    // FNV-1a hash for the seed.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in take_guid.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h ^ (salt as u64).rotate_left(17)
+}
+
+fn next_u64(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E3779B97F4A7C15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+    z ^ (z >> 31)
+}
+
+fn sort_by_ppq_ne(v: &mut [MidiNoteExpression]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_ne(v: &mut [MidiNoteExpression]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
+    }
+}
+
+fn sort_by_ppq_cp(v: &mut [MidiChannelPressure]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_cp(v: &mut [MidiChannelPressure]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
+    }
+}
+fn sort_by_ppq_pp(v: &mut [MidiPolyPressure]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_pp(v: &mut [MidiPolyPressure]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
+    }
+}
+
+// ── Sort + renumber helpers (one per event vec type) ──────────────
+
+fn sort_by_ppq_cc(v: &mut [MidiCC]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_cc(v: &mut [MidiCC]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
+    }
+}
+fn sort_by_ppq_pb(v: &mut [MidiPitchBend]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_pb(v: &mut [MidiPitchBend]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
+    }
+}
+fn sort_by_ppq_pc(v: &mut [MidiProgramChange]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_pc(v: &mut [MidiProgramChange]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
+    }
+}
+fn sort_by_ppq_sysex(v: &mut [MidiSysEx]) {
+    v.sort_by(|a, b| {
+        a.position_ppq
+            .partial_cmp(&b.position_ppq)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+fn renumber_sysex(v: &mut [MidiSysEx]) {
+    for (i, e) in v.iter_mut().enumerate() {
+        e.index = i as u32;
     }
 }
 

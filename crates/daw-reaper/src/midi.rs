@@ -323,4 +323,85 @@ impl Midi for crate::Reaper {
     fn sysex(&self, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
         Vec::new()
     }
+
+    // Read-only stubs for newer mutation methods in the Midi trait.
+    fn delete_pitch_bend(&self, _: MidiTakeLocation, _: u32) {
+        readonly_warn("delete_pitch_bend");
+    }
+    fn set_pitch_bend_value(&self, _: MidiTakeLocation, _: u32, _: i16) {
+        readonly_warn("set_pitch_bend_value");
+    }
+    fn add_program_change(
+        &self,
+        _: MidiTakeLocation,
+        _: daw_proto::MidiProgramChangeCreate,
+    ) -> u32 {
+        readonly_warn("add_program_change");
+        0
+    }
+    fn delete_program_change(&self, _: MidiTakeLocation, _: u32) {
+        readonly_warn("delete_program_change");
+    }
+    fn set_program(&self, _: MidiTakeLocation, _: u32, _: u8) {
+        readonly_warn("set_program");
+    }
+    fn add_sysex(&self, _: MidiTakeLocation, _: daw_proto::MidiSysExCreate) -> u32 {
+        readonly_warn("add_sysex");
+        0
+    }
+    fn delete_sysex(&self, _: MidiTakeLocation, _: u32) {
+        readonly_warn("delete_sysex");
+    }
+
+    // Channel-pressure + poly-pressure read-only stubs, mirroring the
+    // pattern above for CC/pitch-bend/program-change. REAPER's MIDI take
+    // accessors expose these via `MIDI_GetCC` etc.; wiring them up is
+    // tracked separately from this WindowManager work.
+    fn channel_pressures(&self, _: MidiTakeLocation) -> Vec<daw_proto::MidiChannelPressure> {
+        Vec::new()
+    }
+    fn add_channel_pressure(
+        &self,
+        _: MidiTakeLocation,
+        _: daw_proto::MidiChannelPressureCreate,
+    ) -> u32 {
+        readonly_warn("add_channel_pressure");
+        0
+    }
+    fn delete_channel_pressure(&self, _: MidiTakeLocation, _: u32) {
+        readonly_warn("delete_channel_pressure");
+    }
+    fn set_channel_pressure_value(&self, _: MidiTakeLocation, _: u32, _: u8) {
+        readonly_warn("set_channel_pressure_value");
+    }
+    fn poly_pressures(&self, _: MidiTakeLocation) -> Vec<daw_proto::MidiPolyPressure> {
+        Vec::new()
+    }
+    fn add_poly_pressure(&self, _: MidiTakeLocation, _: daw_proto::MidiPolyPressureCreate) -> u32 {
+        readonly_warn("add_poly_pressure");
+        0
+    }
+    fn delete_poly_pressure(&self, _: MidiTakeLocation, _: u32) {
+        readonly_warn("delete_poly_pressure");
+    }
+    fn set_poly_pressure_value(&self, _: MidiTakeLocation, _: u32, _: u8) {
+        readonly_warn("set_poly_pressure_value");
+    }
+    fn note_expressions(&self, _: MidiTakeLocation) -> Vec<daw_proto::MidiNoteExpression> {
+        Vec::new()
+    }
+    fn add_note_expression(
+        &self,
+        _: MidiTakeLocation,
+        _: daw_proto::MidiNoteExpressionCreate,
+    ) -> u32 {
+        readonly_warn("add_note_expression");
+        0
+    }
+    fn delete_note_expression(&self, _: MidiTakeLocation, _: u32) {
+        readonly_warn("delete_note_expression");
+    }
+    fn set_note_expression_value(&self, _: MidiTakeLocation, _: u32, _: f64) {
+        readonly_warn("set_note_expression_value");
+    }
 }

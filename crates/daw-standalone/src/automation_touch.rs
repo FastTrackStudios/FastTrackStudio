@@ -38,16 +38,43 @@ use crate::sync::{EnvelopeKey, Standalone};
 /// Identifies an automatable parameter on the project.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum TouchableParam {
-    TrackVolume { track_guid: String },
-    TrackPan { track_guid: String },
-    TrackMute { track_guid: String },
-    SendVolume { track_guid: String, send_index: u32 },
-    SendPan { track_guid: String, send_index: u32 },
-    SendMute { track_guid: String, send_index: u32 },
-    TakeVolume { item_guid: String, take_guid: String },
-    TakePan { item_guid: String, take_guid: String },
-    TakeMute { item_guid: String, take_guid: String },
-    TakePitch { item_guid: String, take_guid: String },
+    TrackVolume {
+        track_guid: String,
+    },
+    TrackPan {
+        track_guid: String,
+    },
+    TrackMute {
+        track_guid: String,
+    },
+    SendVolume {
+        track_guid: String,
+        send_index: u32,
+    },
+    SendPan {
+        track_guid: String,
+        send_index: u32,
+    },
+    SendMute {
+        track_guid: String,
+        send_index: u32,
+    },
+    TakeVolume {
+        item_guid: String,
+        take_guid: String,
+    },
+    TakePan {
+        item_guid: String,
+        take_guid: String,
+    },
+    TakeMute {
+        item_guid: String,
+        take_guid: String,
+    },
+    TakePitch {
+        item_guid: String,
+        take_guid: String,
+    },
 }
 
 impl TouchableParam {
@@ -270,8 +297,10 @@ impl Standalone {
                 TrackRef::Master => "master".to_string(),
             },
         };
-        self.read_project(&guid, |p| p.envelopes.get(&(owner, key)).map(|d| d.automation_mode))
-            .flatten()
+        self.read_project(&guid, |p| {
+            p.envelopes.get(&(owner, key)).map(|d| d.automation_mode)
+        })
+        .flatten()
     }
 }
 

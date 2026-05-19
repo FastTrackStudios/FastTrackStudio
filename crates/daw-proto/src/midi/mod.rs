@@ -11,8 +11,9 @@ pub use error::*;
 pub use event::*;
 pub use note::*;
 pub use service::{
-    HumanizeParams, Midi, MidiCCCreate, MidiPitchBendCreate, MidiRpc, MidiTakeLocation, PpqRange,
-    QuantizeParams,
+    HumanizeParams, Midi, MidiCCCreate, MidiChannelPressureCreate, MidiNoteExpressionCreate,
+    MidiPitchBendCreate, MidiPolyPressureCreate, MidiProgramChangeCreate, MidiRpc, MidiSysExCreate,
+    MidiTakeLocation, PpqRange, QuantizeParams,
 };
 
 #[cfg(feature = "vox")]

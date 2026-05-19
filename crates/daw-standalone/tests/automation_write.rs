@@ -136,10 +136,7 @@ async fn write_param_in_touch_mode_only_records_while_touched() {
     let pts = Automation::points(
         &daw,
         ctx,
-        EnvelopeLocation::new(
-            TrackRef::Guid(t),
-            EnvelopeRef::Type(EnvelopeType::Volume),
-        ),
+        EnvelopeLocation::new(TrackRef::Guid(t), EnvelopeRef::Type(EnvelopeType::Volume)),
     );
     assert_eq!(pts.len(), count_before, "released → no further recording");
 }
@@ -219,10 +216,7 @@ async fn write_param_when_stopped_does_not_record() {
     let pts = Automation::points(
         &daw,
         ctx,
-        EnvelopeLocation::new(
-            TrackRef::Guid(t),
-            EnvelopeRef::Type(EnvelopeType::Volume),
-        ),
+        EnvelopeLocation::new(TrackRef::Guid(t), EnvelopeRef::Type(EnvelopeType::Volume)),
     );
     assert_eq!(pts.len(), 1);
 }
