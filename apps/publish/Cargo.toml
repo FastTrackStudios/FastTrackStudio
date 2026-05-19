@@ -43,3 +43,8 @@ knowledge-proto = { workspace = true }
 knowledge-crdt = { workspace = true }
 project-proto = { workspace = true }
 architect = { workspace = true }
+
+# Shared engine: parser + Dioxus render components + resolvers.
+# `apps/publish` is one of two consumers (the live outliner in
+# `features/knowledge/knowledge-ui` is the other).
+publish-core = { workspace = true }

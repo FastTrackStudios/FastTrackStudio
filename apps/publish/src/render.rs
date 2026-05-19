@@ -4,14 +4,14 @@
 //! themselves live in [`crate::components`]; this module just
 //! drives them and wraps the output in the static `<html>` shell.
 
-use crate::components::{
-    BacklinksPanel, BlockRefResolver, DocBody, NamespaceResolver, PageContent, PageEmbedResolver,
-    QueryResolver, Sidebar, WikiResolver,
-};
 use crate::graph::{BacklinkEntry, GraphView};
 use crate::tags::TagPageEntry;
 use dioxus::prelude::*;
 use knowledge_proto::{Block, Page};
+use publish_core::{
+    BacklinksPanel, BlockRefResolver, DocBody, NamespaceResolver, PageContent, PageEmbedResolver,
+    QueryResolver, Sidebar, WikiResolver,
+};
 
 /// Render a single page to a complete HTML document string.
 pub fn render_page(
@@ -492,7 +492,7 @@ mod tests {
         let mut refs = HashMap::new();
         refs.insert(
             target_block.id,
-            crate::components::BlockRefTarget {
+            publish_core::BlockRefTarget {
                 page_slug: "target".into(),
                 snippet: "the embedded paragraph".into(),
                 content: "the embedded paragraph".into(),

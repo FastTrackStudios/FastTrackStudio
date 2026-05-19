@@ -22,8 +22,37 @@ use knowledge_proto::{Block, Page};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::graph::BacklinkEntry;
-use crate::inline;
+/// One row in the "Linked references" panel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BacklinkEntry {
+    pub slug: String,
+    pub label: String,
+    pub snippet: String,
+}
+
+/// URL-safe slug. Lowercases, replaces runs of non-alphanumeric
+/// with `-`, trims dashes.
+pub fn slugify(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_dash = true;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            for ch in c.to_lowercase() {
+                out.push(ch);
+            }
+            last_dash = false;
+        } else if !last_dash {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        return "untitled".into();
+    }
+    trimmed.to_string()
+}
+use crate::parser as inline;
 
 /// Resolution table: lowercased basename → URL slug. Provided
 /// as context so descendant components can resolve `[[wikilinks]]`
@@ -225,7 +254,7 @@ fn PageTreeItem(node: PageTreeNode, current_id: Option<uuid::Uuid>) -> Element {
         li {
             if let Some(full) = node.full_basename.clone() {
                 {
-                    let slug = crate::site::slugify(&full);
+                    let slug = slugify(&full);
                     rsx! { a { class: "{active_cls}", href: "/{slug}/", "{node.segment}" } }
                 }
             } else {

@@ -21,15 +21,15 @@ use clap::Parser;
 use eyre::{Context, Result};
 use std::path::PathBuf;
 
-mod components;
+use publish_core as components; // re-export shared engine
 mod feeds;
 mod graph;
-mod inline;
+use publish_core::parser as inline;
 mod render;
 mod search;
 mod site;
 mod source;
-mod syntax;
+use publish_core::syntax;
 mod tags;
 
 #[derive(Parser, Debug)]

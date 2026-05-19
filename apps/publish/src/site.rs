@@ -11,11 +11,9 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::components::{
-    NamespaceResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver,
-};
 use crate::graph::build_block_ref_resolver;
 use crate::{feeds, graph, render, search, tags};
+use publish_core::{NamespaceResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver};
 
 const STYLE_CSS: &str = include_str!("style.css");
 const GRAPH_JS: &str = include_str!("graph.js");

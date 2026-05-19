@@ -18,14 +18,14 @@
 //! simulation. Good enough up to ~500 nodes; bigger vaults can
 //! upgrade to Pixi/D3 in a later phase.
 
-use crate::components::{
-    BlockRefResolver, BlockRefTarget, NamespaceResolver, PageEmbedResolver, QueryResolver,
-    WikiResolver,
-};
-use crate::inline;
 use crate::site::slugify;
 use dioxus::prelude::*;
 use knowledge_proto::{Block, Page};
+use publish_core::parser;
+use publish_core::{
+    BlockRefResolver, BlockRefTarget, NamespaceResolver, PageEmbedResolver, QueryResolver,
+    WikiResolver,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -77,7 +77,7 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
         let Some(src) = id_to_slug.get(&b.page_id) else {
             continue;
         };
-        let nodes = inline::parse(
+        let nodes = publish_core::parser::parse(
             &b.content,
             &resolver,
             &block_refs,
@@ -87,7 +87,7 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
         );
         for n in walk(&nodes) {
             match n {
-                inline::Node::Wikilink {
+                publish_core::parser::Node::Wikilink {
                     slug,
                     broken: false,
                     ..
@@ -99,7 +99,7 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
                             .insert(slug.clone());
                     }
                 }
-                inline::Node::BlockRef {
+                publish_core::parser::Node::BlockRef {
                     page_slug,
                     broken: false,
                     ..
@@ -188,15 +188,15 @@ fn block_snippet(content: &str) -> String {
 
 /// Flatten an Inline tree to a borrow-iterator of leaf nodes
 /// (Wikilinks live at any depth — inside Bold, Italic, etc.).
-pub(crate) fn walk(nodes: &[inline::Node]) -> Vec<inline::Node> {
+pub(crate) fn walk(nodes: &[publish_core::parser::Node]) -> Vec<publish_core::parser::Node> {
     let mut out = Vec::new();
-    fn rec(nodes: &[inline::Node], out: &mut Vec<inline::Node>) {
+    fn rec(nodes: &[publish_core::parser::Node], out: &mut Vec<publish_core::parser::Node>) {
         for n in nodes {
             match n {
-                inline::Node::Bold(c)
-                | inline::Node::Italic(c)
-                | inline::Node::Strikethrough(c)
-                | inline::Node::Highlight(c) => rec(c, out),
+                publish_core::parser::Node::Bold(c)
+                | publish_core::parser::Node::Italic(c)
+                | publish_core::parser::Node::Strikethrough(c)
+                | publish_core::parser::Node::Highlight(c) => rec(c, out),
                 _ => out.push(n.clone()),
             }
         }
@@ -211,16 +211,10 @@ pub(crate) fn walk(nodes: &[inline::Node]) -> Vec<inline::Node> {
 #[derive(Clone, Default, PartialEq)]
 pub struct BacklinkIndex(pub std::sync::Arc<HashMap<String, Vec<BacklinkEntry>>>);
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct BacklinkEntry {
-    pub slug: String,
-    pub label: String,
-    /// Short snippet of the referring block's content so the
-    /// backlinks panel can show *where* the reference lives, not
-    /// just *which page* it's on. Mirrors Logseq's references
-    /// sidebar layout.
-    pub snippet: String,
-}
+// `BacklinkEntry` itself lives in `publish_core` so the shared
+// renderer can consume it; re-exported here so existing
+// `crate::graph::BacklinkEntry` imports keep working.
+pub use publish_core::BacklinkEntry;
 
 /// Build the backlinks index from the same data the graph uses.
 /// Symmetric edges are deduped by (target ← source-page, source-block) pair
@@ -248,7 +242,7 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
         let Some((src_slug, src_label)) = id_to_meta.get(&b.page_id) else {
             continue;
         };
-        let parsed = inline::parse(
+        let parsed = publish_core::parser::parse(
             &b.content,
             &resolver,
             &block_refs,
@@ -259,12 +253,12 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
         let snippet = block_snippet(&b.content);
         for n in walk(&parsed) {
             let target = match n {
-                inline::Node::Wikilink {
+                publish_core::parser::Node::Wikilink {
                     slug,
                     broken: false,
                     ..
                 } => slug,
-                inline::Node::BlockRef {
+                publish_core::parser::Node::BlockRef {
                     page_slug,
                     broken: false,
                     ..

@@ -37,6 +37,12 @@ indexmap = { workspace = true, features = ["serde"] }
 regex = { workspace = true }
 vim = { workspace = true }
 
+# Shared engine — same parser + render components the static-site
+# generator (`apps/publish`) uses. Provides the Logseq-flavored
+# block model (block-refs / page-embeds / queries / namespaces /
+# task markers / planning timestamps) so both surfaces stay in sync.
+publish-core = { workspace = true }
+
 # Browser-side debounce timer for the awareness publish path —
 # coalesces cursor moves so we don't ship one frame per keystroke.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
