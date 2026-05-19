@@ -5118,10 +5118,13 @@ dependencies = [
  "js-sys",
  "knowledge-crdt",
  "knowledge-proto",
+ "loro",
  "project-proto",
+ "publish-core",
  "regex",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "uuid",
  "vim",
@@ -7352,6 +7355,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "publish-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "knowledge-proto",
+ "serde",
+ "serde_json",
+ "syntect",
+ "uuid",
+]
+
+[[package]]
 name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9274,6 +9290,7 @@ dependencies = [
  "knowledge-crdt",
  "knowledge-proto",
  "project-proto",
+ "publish-core",
  "serde",
  "serde_json",
  "syntect",

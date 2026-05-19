@@ -105,6 +105,31 @@ pub struct QueryResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
 #[derive(Clone, Default, PartialEq)]
 pub struct NamespaceResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
 
+/// Optional in-app navigator. Hosts that want clicks on
+/// `[[Page]]` rendered links to stay inside the app (rather
+/// than the browser/webview attempting to navigate to `/slug/`)
+/// provide a callback. Static-site renderers leave it unset
+/// and the renderer falls back to `<a href>` anchors.
+#[derive(Clone, Default)]
+pub struct WikiNavigator(pub Option<Callback<String>>);
+
+impl PartialEq for WikiNavigator {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.is_some() == other.0.is_some()
+    }
+}
+
+/// Same shape but for `((uuid))` block-ref clicks. Hosts
+/// receive the target block's UUID.
+#[derive(Clone, Default)]
+pub struct BlockRefNavigator(pub Option<Callback<uuid::Uuid>>);
+
+impl PartialEq for BlockRefNavigator {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.is_some() == other.0.is_some()
+    }
+}
+
 /// Outer document. `dioxus-ssr` renders the children as HTML
 /// inside a hand-written `<html>` shell (`crate::render::shell`)
 /// — Dioxus 0.7 doesn't have a first-class `<html>`/`<head>`
@@ -745,9 +770,31 @@ pub fn InlineNode(node: inline::Node) -> Element {
                     span { class: "{class}", title: "{title}", "{label}" }
                 }
             } else {
-                let href = format!("/{slug}/");
-                rsx! {
-                    a { class: "{class}", href: "{href}", "{label}" }
+                // In-app: if a host provided a `WikiNavigator`,
+                // render as a `<span>` with onclick instead of an
+                // anchor so the webview doesn't try to navigate
+                // outside the app. Static-site builds (no
+                // navigator in context) keep the plain `<a href>`.
+                let nav = try_use_context::<WikiNavigator>().and_then(|n| n.0);
+                if let Some(cb) = nav {
+                    let slug_for_click = slug.clone();
+                    rsx! {
+                        span {
+                            class: "{class}",
+                            style: "cursor: pointer;",
+                            onclick: move |e: Event<MouseData>| {
+                                e.prevent_default();
+                                e.stop_propagation();
+                                cb.call(slug_for_click.clone());
+                            },
+                            "{label}"
+                        }
+                    }
+                } else {
+                    let href = format!("/{slug}/");
+                    rsx! {
+                        a { class: "{class}", href: "{href}", "{label}" }
+                    }
                 }
             }
         }
@@ -889,13 +936,31 @@ pub fn InlineNode(node: inline::Node) -> Element {
                     }
                 }
             } else {
-                let href = format!("/{page_slug}/#block-{}", target_id.simple());
-                rsx! {
-                    a {
-                        class: "block-ref",
-                        href: "{href}",
-                        title: "{snippet}",
-                        "{snippet}"
+                let nav = try_use_context::<BlockRefNavigator>().and_then(|n| n.0);
+                if let Some(cb) = nav {
+                    let target_for_click = target_id;
+                    rsx! {
+                        span {
+                            class: "block-ref",
+                            style: "cursor: pointer;",
+                            title: "{snippet}",
+                            onclick: move |e: Event<MouseData>| {
+                                e.prevent_default();
+                                e.stop_propagation();
+                                cb.call(target_for_click);
+                            },
+                            "{snippet}"
+                        }
+                    }
+                } else {
+                    let href = format!("/{page_slug}/#block-{}", target_id.simple());
+                    rsx! {
+                        a {
+                            class: "block-ref",
+                            href: "{href}",
+                            title: "{snippet}",
+                            "{snippet}"
+                        }
                     }
                 }
             }

@@ -25,9 +25,9 @@ pub mod parser;
 pub mod syntax;
 
 pub use components::{
-    BacklinkEntry, BacklinksPanel, BlockNode, BlockRefResolver, BlockRefTarget, DocBody,
-    InlineNode, Inlines, NamespaceResolver, PageContent, PageEmbedResolver, PageTreeNode,
-    PlanningTimestamps, QueryHit, QueryResolver, Sidebar, TaskMarker, WikiResolver,
+    BacklinkEntry, BacklinksPanel, BlockNode, BlockRefNavigator, BlockRefResolver, BlockRefTarget,
+    DocBody, InlineNode, Inlines, NamespaceResolver, PageContent, PageEmbedResolver, PageTreeNode,
+    PlanningTimestamps, QueryHit, QueryResolver, Sidebar, TaskMarker, WikiNavigator, WikiResolver,
     build_page_tree, parse_props, peel_planning, peel_task_marker, slugify,
 };
 pub use parser::{Node, parse};

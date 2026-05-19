@@ -539,6 +539,48 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| sidebar_stack);
     use_context_provider(|| ZoomState(zoomed_block));
 
+    // In-app navigators so clicks on `[[Page]]` and `((uuid))`
+    // change the active page / zoomed block instead of letting
+    // the webview try to navigate to a non-existent URL.
+    let mut active_page_for_wiki = active_page;
+    let wiki_resolver_for_nav = resolvers.wiki.clone();
+    let pages_for_nav = vault_data.pages.clone();
+    let wiki_nav = publish_core::WikiNavigator(Some(Callback::new(move |slug: String| {
+        let target_basename = wiki_resolver_for_nav
+            .0
+            .iter()
+            .find(|(_, s)| **s == slug)
+            .map(|(name, _)| name.clone());
+        if let Some(name) = target_basename {
+            if let Some(p) = pages_for_nav
+                .iter()
+                .find(|p| p.basename.to_lowercase() == name)
+            {
+                active_page_for_wiki.set(Some(p.id));
+            }
+        }
+    })));
+    use_context_provider(|| wiki_nav);
+
+    let block_refs_for_nav = resolvers.block_refs.clone();
+    let pages_for_block_nav = vault_data.pages.clone();
+    let mut active_page_for_block = active_page;
+    let mut zoom_for_block = zoomed_block;
+    let block_ref_nav =
+        publish_core::BlockRefNavigator(Some(Callback::new(move |target: Uuid| {
+            if let Some(b_target) = block_refs_for_nav.0.get(&target) {
+                let slug = b_target.page_slug.clone();
+                if let Some(p) = pages_for_block_nav
+                    .iter()
+                    .find(|p| slugify(&p.basename) == slug)
+                {
+                    active_page_for_block.set(Some(p.id));
+                    zoom_for_block.set(Some(target));
+                }
+            }
+        })));
+    use_context_provider(|| block_ref_nav);
+
     // BlockOps depends on the sidebar/zoom signals, so it
     // constructs last.
     let ops = make_block_ops(doc.read().clone(), editing_id, sidebar_stack, zoomed_block);
