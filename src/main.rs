@@ -9,8 +9,7 @@ mod state;
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    ArrowLeft, BookOpen, ChevronRight, Circle, ExternalLink, FileCode, FileText, Github, ListMusic,
-    Music, Play, SkipBack, SkipForward, Square,
+    ChevronRight, Circle, FileCode, Github, ListMusic, Music, Play, SkipBack, SkipForward, Square,
 };
 use fts_ui::prelude::*;
 
@@ -31,16 +30,6 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     Home {},
-    #[route("/docs")]
-    DocsHome {},
-    #[route("/docs/keyflow")]
-    DocsKeyflow {},
-    #[route("/docs/reaper")]
-    DocsReaper {},
-    #[route("/docs/desktop")]
-    DocsDesktop {},
-    #[route("/docs/plugins")]
-    DocsPlugins {},
     #[route("/test/render")]
     TestRender {},
     #[route("/test/fx-ui")]
@@ -149,38 +138,6 @@ fn Layout() -> Element {
                                 class: "text-foreground font-semibold text-sm leading-tight group-hover:text-primary transition-colors",
                                 "FastTrackStudio"
                             }
-                            // Show section name based on current route
-                            {
-                                let section = match route {
-                                    Route::DocsHome {}
-                                    | Route::DocsKeyflow {}
-                                    | Route::DocsReaper {}
-                                    | Route::DocsDesktop {}
-                                    | Route::DocsPlugins {} => Some("Documentation"),
-                                    _ => None,
-                                };
-                                if let Some(name) = section {
-                                    rsx! {
-                                        span {
-                                            class: "text-muted-foreground text-xs leading-tight",
-                                            "{name}"
-                                        }
-                                    }
-                                } else {
-                                    rsx! {}
-                                }
-                            }
-                        }
-                    }
-
-                    // Center navigation (hidden on mobile)
-                    div {
-                        class: "hidden md:flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-muted/50",
-
-                        NavLink {
-                            to: Route::DocsHome {},
-                            icon: rsx! { BookOpen { class: "w-4 h-4" } },
-                            label: "Docs"
                         }
                     }
 
@@ -463,7 +420,7 @@ fn SetlistPreviewCard() -> Element {
                 class: "absolute bottom-0 left-0 right-0 bg-gradient-to-t from-card via-card/95 to-transparent pt-16 pb-6 px-6 text-center",
 
                 Link {
-                    to: Route::DocsDesktop {},
+                    to: Route::Home {},
                     class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
                     ListMusic { class: "w-5 h-5" }
                     "Learn More"
@@ -1334,264 +1291,6 @@ fn PluginsShowcaseCard() -> Element {
     }
 }
 
-// =============================================================================
-// Documentation Pages
-// =============================================================================
-
-/// Docs home page
-#[component]
-fn DocsHome() -> Element {
-    rsx! {
-        div {
-            class: "max-w-5xl mx-auto px-6 py-16",
-            div {
-                class: "text-center mb-16",
-                Heading { level: HeadingLevel::H1, class: "text-foreground mb-4", "Documentation" }
-                Text { variant: TextVariant::Muted, class: "text-xl", "Everything you need to build with FastTrackStudio" }
-            }
-            div {
-                class: "grid md:grid-cols-2 gap-6",
-
-                DocsSection { to: Route::DocsKeyflow {}, title: "Keyflow", description: "Chart notation language with GPU-accelerated rendering. Write chord charts with intuitive syntax.", icon: rsx! { FileText { class: "w-8 h-8" } }, color: "emerald" }
-                DocsSection { to: Route::DocsReaper {}, title: "REAPER Extension", description: "Deep DAW integration for transport control, MIDI routing, and real-time state synchronization.", icon: rsx! { Music { class: "w-8 h-8" } }, color: "violet" }
-                DocsSection { to: Route::DocsDesktop {}, title: "Desktop App", description: "Cross-platform application built with Dioxus for setlist management, lyrics, and live performance.", icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-8 h-8" } }, color: "blue" }
-                DocsSection { to: Route::DocsPlugins {}, title: "Audio Plugins", description: "CLAP and VST3 plugins built with nih-plug for audio processing and instrument control.", icon: rsx! { fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-8 h-8" } }, color: "amber" }
-            }
-        }
-    }
-}
-
-#[component]
-fn DocsSection(
-    to: Route,
-    title: &'static str,
-    description: &'static str,
-    icon: Element,
-    color: &'static str,
-) -> Element {
-    let (bg_color, border_color, text_color) = match color {
-        "emerald" => (
-            "bg-emerald-500/10",
-            "hover:border-emerald-500/50",
-            "text-emerald-500",
-        ),
-        "violet" => (
-            "bg-violet-500/10",
-            "hover:border-violet-500/50",
-            "text-violet-500",
-        ),
-        "blue" => (
-            "bg-blue-500/10",
-            "hover:border-blue-500/50",
-            "text-blue-500",
-        ),
-        "amber" => (
-            "bg-amber-500/10",
-            "hover:border-amber-500/50",
-            "text-amber-500",
-        ),
-        _ => ("bg-primary/10", "hover:border-primary/50", "text-primary"),
-    };
-
-    rsx! {
-        Link {
-            to: to,
-            class: "group block rounded-xl border border-border bg-card p-6 transition-all {border_color} hover:shadow-lg",
-            div {
-                class: "flex items-start gap-4",
-                div { class: "shrink-0 rounded-lg p-3 {bg_color} {text_color}", {icon} }
-                div {
-                    h3 { class: "text-xl font-semibold text-foreground mb-2 group-hover:text-primary transition-colors", "{title}" }
-                    p { class: "text-muted-foreground leading-relaxed", "{description}" }
-                    div { class: "mt-4 flex items-center gap-1 text-sm font-medium {text_color}", "Learn more", ChevronRight { class: "w-4 h-4" } }
-                }
-            }
-        }
-    }
-}
-
-/// Keyflow documentation landing page
-#[component]
-fn DocsKeyflow() -> Element {
-    rsx! {
-        div {
-            class: "max-w-5xl mx-auto px-6 py-12",
-            Link { to: Route::DocsHome {}, class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors", ArrowLeft { class: "w-4 h-4" }, "Back to Docs" }
-
-            div {
-                class: "mb-12",
-                div { class: "inline-flex items-center gap-3 mb-4",
-                    div { class: "rounded-lg p-3 bg-emerald-500/10 text-emerald-500", FileText { class: "w-8 h-8" } }
-                    Heading { level: HeadingLevel::H1, class: "text-foreground", "Keyflow" }
-                }
-                Text { variant: TextVariant::Muted, class: "text-xl max-w-2xl", "A domain-specific language for writing chord charts with GPU-accelerated rendering." }
-            }
-
-            div {
-                class: "prose prose-invert max-w-none",
-                Heading { level: HeadingLevel::H3, class: "text-foreground mb-6", "Features" }
-                div {
-                    class: "grid md:grid-cols-3 gap-6",
-                    KeyflowFeatureCard { title: "Intuitive Syntax", description: "Write chord charts as naturally as you'd read them. No complex markup required." }
-                    KeyflowFeatureCard { title: "Smart Memory", description: "Automatically remembers chord voicings within sections for consistent playback." }
-                    KeyflowFeatureCard { title: "Section Structure", description: "Verse, Chorus, Bridge, and more - with automatic numbering and theming." }
-                    KeyflowFeatureCard { title: "Complex Rhythms", description: "Triplet pushes, syncopation, and explicit durations for any rhythmic pattern." }
-                    KeyflowFeatureCard { title: "GPU Rendering", description: "WebGPU-accelerated rendering for crisp, publication-quality output." }
-                    KeyflowFeatureCard { title: "PDF Export", description: "Export charts as print-ready PDFs with customizable settings." }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn KeyflowFeatureCard(title: &'static str, description: &'static str) -> Element {
-    rsx! {
-        Card { class: "border-border/50 bg-card/30",
-            CardContent { class: "p-4",
-                CardTitle { class: "text-sm mb-1", "{title}" }
-                CardDescription { "{description}" }
-            }
-        }
-    }
-}
-
-/// REAPER Extension documentation page
-#[component]
-fn DocsReaper() -> Element {
-    rsx! {
-        div {
-            class: "max-w-5xl mx-auto px-6 py-12",
-            Link { to: Route::DocsHome {}, class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors", ArrowLeft { class: "w-4 h-4" }, "Back to Docs" }
-            div { class: "mb-12",
-                div { class: "inline-flex items-center gap-3 mb-4",
-                    div { class: "rounded-lg p-3 bg-violet-500/10 text-violet-500", Music { class: "w-8 h-8" } }
-                    Heading { level: HeadingLevel::H1, class: "text-foreground", "REAPER Extension" }
-                }
-                Text { variant: TextVariant::Muted, class: "text-xl max-w-2xl", "Deep DAW integration for transport control, MIDI routing, and real-time state synchronization." }
-            }
-            div { class: "space-y-6",
-                ReaperFeatureSection { title: "Transport Sync", description: "Real-time synchronization with REAPER's transport for play/pause/stop controls, timeline position, and tempo changes." }
-                ReaperFeatureSection { title: "MIDI Routing", description: "Flexible MIDI routing between tracks, virtual instruments, and external hardware." }
-                ReaperFeatureSection { title: "Key Input", description: "Intercept and redirect keyboard input for custom shortcuts and live performance controls." }
-                ReaperFeatureSection { title: "IPC Communication", description: "Bidirectional communication with the desktop app via iroh for seamless integration." }
-            }
-            Card { class: "mt-12 p-6 border-violet-500/30 bg-violet-500/5",
-                CardTitle { class: "mb-2", "Documentation Coming Soon" }
-                CardDescription { "Detailed installation guides, API reference, and usage examples are being written." }
-            }
-        }
-    }
-}
-
-#[component]
-fn ReaperFeatureSection(title: &'static str, description: &'static str) -> Element {
-    rsx! {
-        Card { class: "p-6",
-            CardTitle { class: "mb-2", "{title}" }
-            CardDescription { "{description}" }
-        }
-    }
-}
-
-/// Desktop App documentation page
-#[component]
-fn DocsDesktop() -> Element {
-    rsx! {
-        div {
-            class: "max-w-5xl mx-auto px-6 py-12",
-            Link { to: Route::DocsHome {}, class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors", ArrowLeft { class: "w-4 h-4" }, "Back to Docs" }
-            div { class: "mb-12",
-                div { class: "inline-flex items-center gap-3 mb-4",
-                    div { class: "rounded-lg p-3 bg-blue-500/10 text-blue-500", fts_ui::lucide_dioxus::Monitor { class: "w-8 h-8" } }
-                    Heading { level: HeadingLevel::H1, class: "text-foreground", "Desktop App" }
-                }
-                Text { variant: TextVariant::Muted, class: "text-xl max-w-2xl", "Cross-platform application for setlist management, lyrics display, and live performance." }
-            }
-            div { class: "grid md:grid-cols-2 gap-6",
-                DesktopFeatureCard { title: "Setlist Management", description: "Organize songs into setlists with drag-and-drop ordering and quick access." }
-                DesktopFeatureCard { title: "Lyrics Display", description: "Full-screen lyrics view with auto-scroll synced to transport position." }
-                DesktopFeatureCard { title: "Chart Viewer", description: "View and edit Keyflow charts with real-time preview and PDF export." }
-                DesktopFeatureCard { title: "P2P Sync", description: "Share setlists and charts with bandmates in real-time over peer-to-peer connections." }
-            }
-            Card { class: "mt-12 p-6 border-blue-500/30 bg-blue-500/5",
-                CardTitle { class: "mb-2", "Documentation Coming Soon" }
-                CardDescription { "Installation guides, feature walkthroughs, and configuration options are being written." }
-            }
-        }
-    }
-}
-
-#[component]
-fn DesktopFeatureCard(title: &'static str, description: &'static str) -> Element {
-    rsx! {
-        Card { class: "p-6",
-            CardTitle { class: "mb-2", "{title}" }
-            CardDescription { "{description}" }
-        }
-    }
-}
-
-/// Audio Plugins documentation page
-#[component]
-fn DocsPlugins() -> Element {
-    rsx! {
-        div {
-            class: "max-w-5xl mx-auto px-6 py-12",
-            Link { to: Route::DocsHome {}, class: "inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors", ArrowLeft { class: "w-4 h-4" }, "Back to Docs" }
-            div { class: "mb-12",
-                div { class: "inline-flex items-center gap-3 mb-4",
-                    div { class: "rounded-lg p-3 bg-amber-500/10 text-amber-500", fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-8 h-8" } }
-                    Heading { level: HeadingLevel::H1, class: "text-foreground", "Audio Plugins" }
-                }
-                Text { variant: TextVariant::Muted, class: "text-xl max-w-2xl", "CLAP and VST3 plugins built with nih-plug for audio processing and instrument control." }
-            }
-            div { class: "space-y-6",
-                PluginCard { name: "fts-guide", description: "Click track, count-in, and section guide for live performance navigation." }
-                PluginCard { name: "fts-macros", description: "Macro parameter surface with 8 automatable parameters for REAPER integration." }
-            }
-            Card { class: "mt-12 p-6 border-amber-500/30 bg-amber-500/5",
-                CardTitle { class: "mb-2", "Built with nih-plug" }
-                CardDescription { class: "mb-4", "All plugins are built using nih-plug, a Rust framework for creating CLAP and VST3 plugins with minimal boilerplate." }
-                a {
-                    href: "https://github.com/robbert-vdh/nih-plug",
-                    target: "_blank",
-                    class: "inline-flex items-center gap-2 text-amber-500 hover:text-amber-400 transition-colors",
-                    "Learn more about nih-plug"
-                    ExternalLink { class: "w-4 h-4" }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn PluginCard(name: &'static str, description: &'static str) -> Element {
-    rsx! {
-        Card { class: "p-6",
-            div { class: "flex items-center gap-3 mb-2",
-                Badge { class: "border-amber-500/30 bg-amber-500/10 text-amber-500 font-mono", "{name}" }
-            }
-            CardDescription { "{description}" }
-        }
-    }
-}
-
-#[component]
-fn FeatureCard(title: &'static str, description: &'static str, icon: Element) -> Element {
-    rsx! {
-        Card {
-            class: "p-6 hover:border-primary/50 transition-colors",
-            div { class: "mb-4", {icon} }
-            Heading { level: HeadingLevel::H5, class: "text-card-foreground mb-2", "{title}" }
-            CardDescription { "{description}" }
-        }
-    }
-}
-
-// =============================================================================
-// Snippets Browser
-// =============================================================================
 
 #[component]
 fn TestRender() -> Element {
