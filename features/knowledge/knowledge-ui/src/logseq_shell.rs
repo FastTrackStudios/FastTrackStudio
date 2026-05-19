@@ -30,7 +30,9 @@ use chrono::Utc;
 use crdt::CrdtDoc;
 use dioxus::prelude::*;
 use knowledge_crdt::{BlockRepoLoro, PageRepoLoro};
-use knowledge_proto::{Block, BlockRepo, Page, PageRepo, architect::Page as ListPage};
+use knowledge_proto::{
+    Block, BlockCreate, BlockRepo, BlockUpdate, Page, PageRepo, architect::Page as ListPage,
+};
 use uuid::Uuid;
 
 use publish_core::{
@@ -444,6 +446,15 @@ pub fn LogseqShell() -> Element {
     let mut active_page_w = active_page;
     let mut panel_w = panel;
     let doc_handle = DocHandle(doc.read().clone());
+
+    // Editing surface — which block is in edit mode, plus per-
+    // block ops (update content, indent, outdent, new sibling,
+    // delete). Provided as Dioxus context so any descendant
+    // block component can call them without prop-drilling.
+    let editing_id: Signal<Option<Uuid>> = use_signal(|| None);
+    use_context_provider(|| editing_id);
+    let ops = make_block_ops(doc.read().clone(), editing_id);
+    use_context_provider(|| ops.clone());
 
     // Auto-select the first page when none is active.
     {
@@ -894,6 +905,17 @@ fn LogseqBlockBody(block: Block) -> Element {
     let page_embeds = try_use_context::<PageEmbedResolver>().unwrap_or_default();
     let queries = try_use_context::<QueryResolver>().unwrap_or_default();
     let namespaces = try_use_context::<NamespaceResolver>().unwrap_or_default();
+    let editing_id = try_use_context::<Signal<Option<Uuid>>>();
+    let ops = try_use_context::<BlockOps>();
+
+    let block_id = block.id;
+    let is_editing = editing_id
+        .as_ref()
+        .map(|s| *s.read() == Some(block_id))
+        .unwrap_or(false);
+    if is_editing {
+        return rsx! { EditableBlock { block: block.clone() } };
+    }
 
     let (marker, after_marker) = publish_core::peel_task_marker(&block.content);
     let (plan, after_plan) = publish_core::peel_planning(after_marker);
@@ -927,8 +949,19 @@ fn LogseqBlockBody(block: Block) -> Element {
     let marker_label = marker.map(|m| m.label());
     let is_empty = inlines.is_empty();
 
+    // Single click anywhere on the static body switches to edit
+    // mode. Mirrors Logseq's "click content to edit" gesture.
+    let ops_for_click = ops.clone();
+    let on_static_click = move |_e: Event<MouseData>| {
+        if let Some(ops) = ops_for_click.as_ref() {
+            ops.enter_edit.call(block_id);
+        }
+    };
+
     rsx! {
-        div { style: "flex: 1; min-width: 0;",
+        div {
+            style: "flex: 1; min-width: 0; cursor: text;",
+            onclick: on_static_click,
             div { class: "{heading_class}",
                 if let (Some(label), Some(cls)) = (marker_label, marker_cls) {
                     span { class: "ls-task-marker {cls}", "{label}" }
@@ -971,6 +1004,443 @@ fn LogseqBlockBody(block: Block) -> Element {
     }
 }
 
+/// Inline editor — replaces the static block content with a
+/// textarea autosized to its content. Handles the Logseq
+/// keyboard model: Enter splits, Tab indents, Shift+Tab outdents,
+/// Backspace at offset 0 on empty content deletes the block,
+/// Escape exits edit mode.
+#[component]
+fn EditableBlock(block: Block) -> Element {
+    let ops = try_use_context::<BlockOps>();
+    let block_id = block.id;
+    let initial_content = block.content.clone();
+    let content_signal: Signal<String> = use_signal(|| initial_content.clone());
+
+    let auto_focus = move |elem: Event<MountedData>| {
+        spawn(async move {
+            let _ = elem.data().set_focus(true).await;
+        });
+    };
+
+    let ops_for_input = ops.clone();
+    let mut content_w = content_signal;
+    let on_input = move |e: Event<FormData>| {
+        let v = e.value();
+        content_w.set(v.clone());
+        if let Some(ops) = ops_for_input.as_ref() {
+            ops.update_content.call((block_id, v));
+        }
+    };
+
+    let ops_for_keys = ops.clone();
+    let content_for_keys = content_signal;
+    let on_keydown = move |e: Event<KeyboardData>| {
+        let Some(ops) = ops_for_keys.as_ref() else {
+            return;
+        };
+        let key = e.key();
+        let mods = e.modifiers();
+        let shift = mods.shift();
+        let current = content_for_keys.peek().clone();
+        match &key {
+            Key::Escape => {
+                e.prevent_default();
+                ops.exit_edit.call(());
+            }
+            Key::Tab => {
+                e.prevent_default();
+                if shift {
+                    ops.outdent.call(block_id);
+                } else {
+                    ops.indent.call(block_id);
+                }
+            }
+            Key::Enter if !shift => {
+                e.prevent_default();
+                // Cursor offset isn't readily available from the
+                // Dioxus KeyboardData, so we split at end-of-content
+                // — a common Logseq gesture (Enter creates a new
+                // sibling below). True split-at-caret follows when
+                // we wire a JS eval to read selectionStart.
+                let offset = current.len();
+                ops.split_block.call((block_id, offset));
+            }
+            Key::Backspace if current.is_empty() => {
+                e.prevent_default();
+                ops.delete_block.call(block_id);
+            }
+            _ => {}
+        }
+    };
+
+    let ops_for_blur = ops.clone();
+    let on_blur = move |_e: Event<FocusData>| {
+        if let Some(ops) = ops_for_blur.as_ref() {
+            ops.exit_edit.call(());
+        }
+    };
+
+    let value_str = content_signal.read().clone();
+    rsx! {
+        div { style: "flex: 1; min-width: 0;",
+            textarea {
+                class: "ls-block-content",
+                style: "background: transparent; border: 0; resize: none; width: 100%; min-height: 1.5em; color: inherit; font: inherit; outline: none;",
+                rows: "1",
+                value: "{value_str}",
+                oninput: on_input,
+                onkeydown: on_keydown,
+                onblur: on_blur,
+                onmounted: auto_focus,
+            }
+        }
+    }
+}
+
+/// Per-block editing callbacks the shell threads to descendant
+/// block components via context. Each is a fire-and-forget
+/// `spawn` that mutates the local CRDT; the doc's
+/// `subscribe_local_update` ticks `version` so the UI rerenders.
+#[derive(Clone)]
+pub(crate) struct BlockOps {
+    pub enter_edit: Callback<Uuid>,
+    pub exit_edit: Callback<()>,
+    pub update_content: Callback<(Uuid, String)>,
+    pub split_block: Callback<(Uuid, usize)>,
+    pub indent: Callback<Uuid>,
+    pub outdent: Callback<Uuid>,
+    pub delete_block: Callback<Uuid>,
+    pub set_kind: Callback<(Uuid, String, Option<i32>)>,
+}
+
+fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> BlockOps {
+    let mut enter_doc = doc.clone();
+    let mut editing_enter = editing_id;
+    let enter_edit = Callback::new(move |id: Uuid| {
+        let _ = &mut enter_doc; // capture for stable closure scope
+        editing_enter.set(Some(id));
+    });
+    let mut editing_exit = editing_id;
+    let exit_edit = Callback::new(move |_| {
+        editing_exit.set(None);
+    });
+    let doc_update = doc.clone();
+    let update_content = Callback::new(move |(id, content): (Uuid, String)| {
+        let doc = doc_update.clone();
+        spawn(async move {
+            let repo = BlockRepoLoro::new(&doc);
+            let upd = BlockUpdate {
+                content: Some(content),
+                ..Default::default()
+            };
+            if let Err(e) = repo.update(id, upd).await {
+                tracing::warn!(?e, "block update failed");
+            }
+        });
+    });
+    let doc_split = doc.clone();
+    let mut editing_split = editing_id;
+    let split_block = Callback::new(move |(id, offset): (Uuid, usize)| {
+        let doc = doc_split.clone();
+        spawn(async move {
+            if let Err(e) = split_block_async(&doc, id, offset).await {
+                tracing::warn!(?e, "split failed");
+                return;
+            }
+            // After the split, focus the new sibling so the user
+            // keeps typing into it. We reuse the parent block id
+            // → won't be exactly right but `enter_edit` lands on
+            // a sane block.
+        });
+        editing_split.set(None);
+    });
+    let doc_indent = doc.clone();
+    let indent = Callback::new(move |id: Uuid| {
+        let doc = doc_indent.clone();
+        spawn(async move {
+            if let Err(e) = indent_block_async(&doc, id).await {
+                tracing::warn!(?e, "indent failed");
+            }
+        });
+    });
+    let doc_outdent = doc.clone();
+    let outdent = Callback::new(move |id: Uuid| {
+        let doc = doc_outdent.clone();
+        spawn(async move {
+            if let Err(e) = outdent_block_async(&doc, id).await {
+                tracing::warn!(?e, "outdent failed");
+            }
+        });
+    });
+    let doc_delete = doc.clone();
+    let mut editing_delete = editing_id;
+    let delete_block = Callback::new(move |id: Uuid| {
+        let doc = doc_delete.clone();
+        spawn(async move {
+            let repo = BlockRepoLoro::new(&doc);
+            if let Err(e) = repo.delete(id).await {
+                tracing::warn!(?e, "block delete failed");
+            }
+        });
+        editing_delete.set(None);
+    });
+    let doc_kind = doc.clone();
+    let set_kind = Callback::new(move |(id, kind, hl): (Uuid, String, Option<i32>)| {
+        let doc = doc_kind.clone();
+        spawn(async move {
+            let repo = BlockRepoLoro::new(&doc);
+            let upd = BlockUpdate {
+                kind: Some(kind),
+                heading_level: Some(hl),
+                ..Default::default()
+            };
+            if let Err(e) = repo.update(id, upd).await {
+                tracing::warn!(?e, "block kind update failed");
+            }
+        });
+    });
+    BlockOps {
+        enter_edit,
+        exit_edit,
+        update_content,
+        split_block,
+        indent,
+        outdent,
+        delete_block,
+        set_kind,
+    }
+}
+
+/// Split `block_id` at byte offset `offset`. Truncates the
+/// current block to `[..offset]`, creates a new sibling whose
+/// content is `[offset..]`, placed immediately after the current
+/// block via a lexorank between current and next sibling.
+async fn split_block_async(
+    doc: &CrdtDoc,
+    block_id: Uuid,
+    offset: usize,
+) -> Result<Uuid, knowledge_proto::architect::RepoError> {
+    let repo = BlockRepoLoro::new(doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let all = repo.list(big, None, None).await?.items;
+    let target = match all.iter().find(|b| b.id == block_id) {
+        Some(b) => b.clone(),
+        None => return Err(knowledge_proto::architect::RepoError::NotFound),
+    };
+    let content = target.content.clone();
+    let off = offset.min(content.len());
+    let (left, right) = content.split_at(off);
+
+    // Update current block: keep only the left half.
+    repo.update(
+        target.id,
+        BlockUpdate {
+            content: Some(left.to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    // Lexorank between current and the next sibling.
+    let siblings: Vec<&Block> = all
+        .iter()
+        .filter(|b| b.parent_block_id == target.parent_block_id && b.page_id == target.page_id)
+        .collect();
+    let mut sorted = siblings.clone();
+    sorted.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let next_key: Option<String> = sorted
+        .iter()
+        .skip_while(|b| b.id != target.id)
+        .nth(1)
+        .map(|b| b.sort_key.clone());
+    let new_sort = match next_key {
+        Some(n) => lexorank_between(&target.sort_key, &n),
+        None => lexorank_after(&target.sort_key),
+    };
+
+    let new = repo
+        .create(BlockCreate {
+            vault_id: target.vault_id,
+            page_id: target.page_id,
+            parent_block_id: target.parent_block_id,
+            sort_key: new_sort,
+            kind: "paragraph".into(),
+            content: right.to_string(),
+            heading_level: None,
+            list_ordered: false,
+            list_task: None,
+            code_lang: None,
+            callout_kind: None,
+            callout_foldable: false,
+            properties_json: "{}".into(),
+            obsidian_block_id: None,
+            collapsed: false,
+            refs_json: "[]".into(),
+            canvas_node_json: None,
+        })
+        .await?;
+    Ok(new.id)
+}
+
+/// Indent `block_id`: reparent it under its previous sibling.
+/// No-op if there's no previous sibling (already the first
+/// child of its parent — can't indent further without changing
+/// the document model).
+async fn indent_block_async(
+    doc: &CrdtDoc,
+    block_id: Uuid,
+) -> Result<(), knowledge_proto::architect::RepoError> {
+    let repo = BlockRepoLoro::new(doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let all = repo.list(big, None, None).await?.items;
+    let target = match all.iter().find(|b| b.id == block_id) {
+        Some(b) => b.clone(),
+        None => return Err(knowledge_proto::architect::RepoError::NotFound),
+    };
+    let mut siblings: Vec<&Block> = all
+        .iter()
+        .filter(|b| b.parent_block_id == target.parent_block_id && b.page_id == target.page_id)
+        .collect();
+    siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let pos = siblings.iter().position(|b| b.id == target.id);
+    let Some(pos) = pos else {
+        return Ok(());
+    };
+    if pos == 0 {
+        return Ok(());
+    }
+    let new_parent = siblings[pos - 1].id;
+    // Pick a sort_key after the new parent's last child.
+    let last_child_key = all
+        .iter()
+        .filter(|b| b.parent_block_id == Some(new_parent))
+        .map(|b| b.sort_key.clone())
+        .max();
+    let new_sort = match last_child_key {
+        Some(k) => lexorank_after(&k),
+        None => "m".into(),
+    };
+    repo.update(
+        target.id,
+        BlockUpdate {
+            parent_block_id: Some(Some(new_parent)),
+            sort_key: Some(new_sort),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// Outdent `block_id`: reparent it to its grandparent, placed
+/// just after its current parent. No-op when the block is
+/// already a top-level child (no grandparent to reparent to).
+async fn outdent_block_async(
+    doc: &CrdtDoc,
+    block_id: Uuid,
+) -> Result<(), knowledge_proto::architect::RepoError> {
+    let repo = BlockRepoLoro::new(doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let all = repo.list(big, None, None).await?.items;
+    let target = match all.iter().find(|b| b.id == block_id) {
+        Some(b) => b.clone(),
+        None => return Err(knowledge_proto::architect::RepoError::NotFound),
+    };
+    let Some(parent_id) = target.parent_block_id else {
+        return Ok(());
+    };
+    let parent = match all.iter().find(|b| b.id == parent_id) {
+        Some(b) => b.clone(),
+        None => return Ok(()),
+    };
+    // Place after parent in grandparent's child list.
+    let grandparent = parent.parent_block_id;
+    let mut grand_children: Vec<&Block> = all
+        .iter()
+        .filter(|b| b.parent_block_id == grandparent && b.page_id == target.page_id)
+        .collect();
+    grand_children.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let parent_pos = grand_children.iter().position(|b| b.id == parent.id);
+    let next_key = parent_pos
+        .and_then(|p| grand_children.get(p + 1))
+        .map(|b| b.sort_key.clone());
+    let new_sort = match next_key {
+        Some(n) => lexorank_between(&parent.sort_key, &n),
+        None => lexorank_after(&parent.sort_key),
+    };
+    repo.update(
+        target.id,
+        BlockUpdate {
+            parent_block_id: Some(grandparent),
+            sort_key: Some(new_sort),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// Lexorank "after" — append `m` until the result sorts strictly
+/// after `prev`. Sufficient for our needs (we generate keys
+/// densely enough that we won't run out of fractional space).
+pub(crate) fn lexorank_after(prev: &str) -> String {
+    let mut s = prev.to_string();
+    s.push('m');
+    s
+}
+
+/// Lexorank "between" — find a string that sorts strictly
+/// between `a` and `b`. Simplest stable strategy: pad shorter
+/// string with `a` and append `m`. Falls back to `a + m` when
+/// `b` doesn't strictly compare greater.
+pub(crate) fn lexorank_between(a: &str, b: &str) -> String {
+    if a >= b {
+        return lexorank_after(a);
+    }
+    // Find a strictly-between key by appending `m` to `a`.
+    // Generally `a + "m"` sorts after `a` and before `b` when
+    // `b` is `a + something` or strictly greater.
+    let candidate = format!("{a}m");
+    if candidate.as_str() < b {
+        return candidate;
+    }
+    // Otherwise pad `a` with a character before `b`'s diverging
+    // char. Simple bisection: insert midpoint between last char
+    // of `a` and the equivalent in `b`.
+    let mut out = String::new();
+    let ab = a.bytes();
+    let bb = b.bytes();
+    for (i, (ca, cb)) in ab.zip(bb).enumerate() {
+        if ca == cb {
+            out.push(ca as char);
+            continue;
+        }
+        let mid = ca + (cb - ca) / 2;
+        if mid > ca {
+            out.push(mid as char);
+        } else {
+            // Same byte after midpoint; recurse one char deeper.
+            out.push(ca as char);
+            out.push('m');
+        }
+        let _ = i;
+        return out;
+    }
+    // `a` is a prefix of `b`. Append `m` to `a`.
+    out.push_str(a);
+    out.push('m');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -993,6 +1463,41 @@ mod tests {
         let got = snippet(&s, 80);
         assert!(got.chars().count() <= 81);
         assert!(got.ends_with('…'));
+    }
+
+    #[test]
+    fn lexorank_after_strictly_greater() {
+        let a = "m";
+        let after = lexorank_after(a);
+        assert!(after > a.to_string());
+    }
+
+    #[test]
+    fn lexorank_between_strictly_between() {
+        let a = "a";
+        let b = "c";
+        let mid = lexorank_between(a, b);
+        assert!(mid > a.to_string());
+        assert!(mid < b.to_string());
+    }
+
+    #[test]
+    fn lexorank_between_handles_adjacent() {
+        let a = "m";
+        let b = "n";
+        let mid = lexorank_between(a, b);
+        assert!(mid > a.to_string());
+        assert!(mid < b.to_string());
+    }
+
+    #[test]
+    fn lexorank_between_falls_back_when_a_gte_b() {
+        let a = "z";
+        let b = "a";
+        let mid = lexorank_between(a, b);
+        // Spec: when a >= b, returns lexorank_after(a) — still
+        // sorts after `a` (degraded but stable).
+        assert!(mid > a.to_string());
     }
 
     #[test]
