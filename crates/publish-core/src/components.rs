@@ -138,6 +138,14 @@ pub struct QueryHit {
 #[derive(Clone, Default, PartialEq)]
 pub struct QueryResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
 
+/// Resolution table: template name (lowercased) → ordered list
+/// of block contents that form the template body. Lets
+/// `{{template foo}}` macros expand at render time into the
+/// template's blocks. Templates are conventionally tagged with
+/// a `template:: <name>` block-property in Logseq vaults.
+#[derive(Clone, Default, PartialEq)]
+pub struct TemplateResolver(pub Arc<HashMap<String, Vec<String>>>);
+
 /// Resolution table for `(property <key> <value>)` queries.
 /// Inner map: `key` → `value` → matching pages. Keys + values
 /// are lowercased on the way in to make matching forgiving.
@@ -474,6 +482,7 @@ pub fn BlockNode(block: Block) -> Element {
     let (plan, body_content) = peel_planning(body_content);
     let namespaces = try_use_context::<NamespaceResolver>().unwrap_or_default();
     let properties = try_use_context::<PagePropertyResolver>().unwrap_or_default();
+    let templates = try_use_context::<TemplateResolver>().unwrap_or_default();
     let inlines = inline::parse(
         body_content,
         &resolver,
@@ -482,6 +491,7 @@ pub fn BlockNode(block: Block) -> Element {
         &queries,
         &namespaces,
         &properties,
+        &templates,
     );
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
@@ -505,6 +515,7 @@ pub fn BlockNode(block: Block) -> Element {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         return rsx! {
             aside { id: "{anchor}", class: "block-embed",
@@ -1104,6 +1115,28 @@ pub fn InlineNode(node: inline::Node) -> Element {
                 }
             }
         }
+        Node::Template {
+            name,
+            contents,
+            broken,
+        } => {
+            if broken {
+                rsx! {
+                    span { class: "template-broken",
+                        title: "no template named '{name}'",
+                        "{{{{template {name}}}}}"
+                    }
+                }
+            } else {
+                rsx! {
+                    aside { class: "template-expansion",
+                        for (i, body) in contents.iter().enumerate() {
+                            div { key: "{i}", class: "template-line", "{body}" }
+                        }
+                    }
+                }
+            }
+        }
         Node::Namespace { prefix, results } => {
             rsx! {
                 aside { class: "namespace",
@@ -1208,6 +1241,7 @@ pub fn InlineNode(node: inline::Node) -> Element {
                             &QueryResolver::default(),
                             &NamespaceResolver::default(),
                             &PagePropertyResolver::default(),
+                            &TemplateResolver::default(),
                         )
                     })
                     .collect();

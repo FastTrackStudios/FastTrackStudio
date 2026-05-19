@@ -85,6 +85,7 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &publish_core::PagePropertyResolver::default(),
+            &publish_core::TemplateResolver::default(),
         );
         for n in walk(&nodes) {
             match n {
@@ -251,6 +252,7 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &publish_core::PagePropertyResolver::default(),
+            &publish_core::TemplateResolver::default(),
         );
         let snippet = block_snippet(&b.content);
         for n in walk(&parsed) {

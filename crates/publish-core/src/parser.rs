@@ -9,7 +9,7 @@
 
 use crate::components::{
     BlockRefResolver, NamespaceResolver, PageEmbedResolver, PagePropertyResolver, QueryHit,
-    QueryResolver, WikiResolver,
+    QueryResolver, TemplateResolver, WikiResolver,
 };
 use uuid::Uuid;
 
@@ -97,6 +97,14 @@ pub enum Node {
     MathInline(String),
     /// `$$expr$$` — block LaTeX. Same idea, rendered as a `<div>`.
     MathBlock(String),
+    /// `{{template <name>}}` — expand the template block's contents
+    /// inline. Resolved at parse time against a [`TemplateResolver`];
+    /// `broken: true` when no template matches.
+    Template {
+        name: String,
+        contents: Vec<String>,
+        broken: bool,
+    },
 }
 
 /// Closed set of media-embed kinds recognized by the parser.
@@ -115,6 +123,7 @@ pub fn parse(
     queries: &QueryResolver,
     namespaces: &NamespaceResolver,
     properties: &PagePropertyResolver,
+    templates: &TemplateResolver,
 ) -> Vec<Node> {
     let mut out = Vec::new();
     let mut buf = String::new();
@@ -163,6 +172,23 @@ pub fn parse(
                     results,
                 });
                 i += 11 + end + 2;
+                continue;
+            }
+        }
+        // {{template <name>}} — expand the named template block's
+        // contents inline. `broken: true` when no template matches.
+        if s[i..].starts_with("{{template") {
+            if let Some(end) = s[i + 10..].find("}}") {
+                let name = s[i + 10..i + 10 + end].trim();
+                let key = name.to_lowercase();
+                let contents = templates.0.get(&key).cloned();
+                flush(&mut buf, &mut out);
+                out.push(Node::Template {
+                    name: name.to_string(),
+                    broken: contents.is_none(),
+                    contents: contents.unwrap_or_default(),
+                });
+                i += 10 + end + 2;
                 continue;
             }
         }
@@ -425,6 +451,7 @@ pub fn parse(
                     queries,
                     namespaces,
                     properties,
+                    templates,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Bold(inner));
@@ -443,6 +470,7 @@ pub fn parse(
                     queries,
                     namespaces,
                     properties,
+                    templates,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Strikethrough(inner));
@@ -461,6 +489,7 @@ pub fn parse(
                     queries,
                     namespaces,
                     properties,
+                    templates,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Highlight(inner));
@@ -479,6 +508,7 @@ pub fn parse(
                     queries,
                     namespaces,
                     properties,
+                    templates,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Italic(inner));
@@ -754,6 +784,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -771,6 +802,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -788,6 +820,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(matches!(
             n.first().unwrap(),
@@ -805,6 +838,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let bold = match n.first().unwrap() {
             Node::Bold(c) => c,
@@ -825,6 +859,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef {
@@ -852,6 +887,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef { broken, .. } => Some(*broken),
@@ -876,6 +912,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let pe = n.iter().find_map(|x| match x {
             Node::PageEmbed {
@@ -921,6 +958,7 @@ mod tests {
             &qr,
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::Query {
@@ -941,6 +979,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let broken = n
             .iter()
@@ -958,6 +997,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let broken = n
             .iter()
@@ -977,6 +1017,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::BlockRef { .. })));
         let txt: String = n
@@ -1000,6 +1041,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let img = n.iter().find(|x| matches!(x, Node::Image { .. }));
         assert!(img.is_some());
@@ -1013,6 +1055,48 @@ mod tests {
     }
 
     #[test]
+    fn template_macro_resolves() {
+        let mut t = std::collections::HashMap::new();
+        t.insert(
+            "daily".to_string(),
+            vec!["- Reflection".to_string(), "- Wins".to_string()],
+        );
+        let tr = TemplateResolver(std::sync::Arc::new(t));
+        let n = parse(
+            "{{template daily}}",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+            &tr,
+        );
+        let tmpl = n
+            .iter()
+            .find(|x| matches!(x, Node::Template { broken: false, .. }));
+        assert!(tmpl.is_some(), "expected resolved Template; got {n:?}");
+    }
+
+    #[test]
+    fn template_macro_broken() {
+        let n = parse(
+            "{{template missing}}",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
+        );
+        assert!(
+            n.iter()
+                .any(|x| matches!(x, Node::Template { broken: true, .. }))
+        );
+    }
+
+    #[test]
     fn inline_math_round_trip() {
         let n = parse(
             "result is $a + b$ today",
@@ -1022,6 +1106,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let m = n.iter().find_map(|x| match x {
             Node::MathInline(s) => Some(s.clone()),
@@ -1040,6 +1125,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let m = n.iter().find_map(|x| match x {
             Node::MathBlock(s) => Some(s.clone()),
@@ -1058,6 +1144,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::MathInline(_))));
     }
@@ -1072,6 +1159,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let img = n.iter().find(|x| matches!(x, Node::Image { .. }));
         assert!(img.is_some(), "expected Image; got {n:?}");
@@ -1092,6 +1180,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(n.iter().any(|x| matches!(x, Node::PageEmbed { .. })));
         assert!(!n.iter().any(|x| matches!(x, Node::Image { .. })));
@@ -1107,6 +1196,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let fr = n.iter().find_map(|x| match x {
             Node::FootnoteRef(id) => Some(id.clone()),
@@ -1127,6 +1217,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::FootnoteRef(_))));
     }
@@ -1147,6 +1238,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let pe = n.iter().find(|x| matches!(x, Node::PageEmbed { .. }));
         assert!(pe.is_some(), "expected PageEmbed, got {n:?}");
@@ -1248,6 +1340,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let media = n.iter().find_map(|x| match x {
             Node::Media { kind, target } => Some((*kind, target.clone())),
@@ -1269,6 +1362,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let kinds: Vec<MediaKind> = n
             .iter()
@@ -1316,6 +1410,7 @@ mod tests {
             &QueryResolver::default(),
             &NamespaceResolver::default(),
             &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
         );
         let br = n.iter().find(|x| matches!(x, Node::BlockRef { .. }));
         assert!(

@@ -578,6 +578,7 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| resolvers.queries.clone());
     use_context_provider(|| resolvers.namespaces.clone());
     use_context_provider(|| resolvers.properties.clone());
+    use_context_provider(|| resolvers.templates.clone());
     use_context_provider(|| match vault_data.root_path.clone() {
         Some(p) => publish_core::AssetBaseResolver::from_root(p),
         None => publish_core::AssetBaseResolver::default(),
@@ -874,6 +875,7 @@ struct ResolverBundle {
     queries: QueryResolver,
     namespaces: NamespaceResolver,
     properties: publish_core::PagePropertyResolver,
+    templates: publish_core::TemplateResolver,
 }
 
 fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
@@ -1009,6 +1011,32 @@ fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
         }
     }
 
+    // Template index: blocks tagged with `template:: <name>` are
+    // available as `{{template <name>}}`. The body is the block's
+    // own content + each direct child block's content, in order.
+    let mut tmpl_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut blocks_by_parent: HashMap<Option<Uuid>, Vec<&Block>> = HashMap::new();
+    for b in &vault.blocks {
+        blocks_by_parent
+            .entry(b.parent_block_id)
+            .or_default()
+            .push(b);
+    }
+    for siblings in blocks_by_parent.values_mut() {
+        siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    }
+    for b in &vault.blocks {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&b.properties_json) {
+            if let Some(name) = v.get("template").and_then(|x| x.as_str()) {
+                let mut body = vec![b.content.clone()];
+                if let Some(children) = blocks_by_parent.get(&Some(b.id)) {
+                    body.extend(children.iter().map(|c| c.content.clone()));
+                }
+                tmpl_map.insert(name.to_lowercase(), body);
+            }
+        }
+    }
+
     ResolverBundle {
         wiki: WikiResolver(Arc::new(basename_to_slug)),
         block_refs: BlockRefResolver(Arc::new(block_map)),
@@ -1016,6 +1044,7 @@ fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
         queries: QueryResolver(Arc::new(tag_map)),
         namespaces: NamespaceResolver(Arc::new(ns_map)),
         properties: publish_core::PagePropertyResolver(Arc::new(prop_map)),
+        templates: publish_core::TemplateResolver(Arc::new(tmpl_map)),
     }
 }
 
@@ -1892,6 +1921,7 @@ fn LogseqBlockBody(block: Block) -> Element {
     let (drawers, after_drawers) = publish_core::peel_drawers(after_plan);
     let after_drawers_owned: String = after_drawers;
     let properties = use_context::<publish_core::PagePropertyResolver>();
+    let templates = use_context::<publish_core::TemplateResolver>();
     let inlines = publish_core::parse(
         &after_drawers_owned,
         &resolver,
@@ -1900,6 +1930,7 @@ fn LogseqBlockBody(block: Block) -> Element {
         &queries,
         &namespaces,
         &properties,
+        &templates,
     );
     let chips = publish_core::parse_props(&block.properties_json);
 
