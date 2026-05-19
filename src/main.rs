@@ -1076,7 +1076,7 @@ fn ProjectTilesGrid() -> Element {
             class: "relative z-10 py-24",
 
             div {
-                class: "mx-auto max-w-7xl px-6",
+                class: "mx-auto max-w-[96rem] px-6",
 
                 div {
                     class: "mb-14 text-center",
