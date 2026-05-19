@@ -463,8 +463,12 @@ pub fn LogseqShell() -> Element {
     // them via oninput; popup components read them.
     let slash_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
     let page_search_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
+    let block_ref_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
+    let tag_search_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
     use_context_provider(|| SlashState(slash_state));
     use_context_provider(|| PageSearchState(page_search_state));
+    use_context_provider(|| BlockRefState(block_ref_state));
+    use_context_provider(|| TagSearchState(tag_search_state));
 
     // Auto-select the first page when none is active.
     {
@@ -1022,6 +1026,12 @@ pub(crate) struct SlashState(pub Signal<Option<(Uuid, String)>>);
 #[derive(Clone, Copy)]
 pub(crate) struct PageSearchState(pub Signal<Option<(Uuid, String)>>);
 
+#[derive(Clone, Copy)]
+pub(crate) struct BlockRefState(pub Signal<Option<(Uuid, String)>>);
+
+#[derive(Clone, Copy)]
+pub(crate) struct TagSearchState(pub Signal<Option<(Uuid, String)>>);
+
 /// Inline editor — replaces the static block content with a
 /// textarea autosized to its content. Handles the Logseq
 /// keyboard model: Enter splits, Tab indents, Shift+Tab outdents,
@@ -1042,58 +1052,126 @@ fn EditableBlock(block: Block) -> Element {
         });
     };
 
+    let block_ref_state = try_use_context::<BlockRefState>();
+    let tag_search_state = try_use_context::<TagSearchState>();
     let ops_for_input = ops.clone();
     let mut content_w = content_signal;
     let id_str_input = block_id.simple().to_string();
-    let mut slash_w = slash_state;
-    let mut page_search_w = page_search_state;
+    let slash_w = slash_state;
+    let page_search_w = page_search_state;
+    let block_ref_w = block_ref_state;
+    let tag_search_w = tag_search_state;
     let on_input = move |e: Event<FormData>| {
         let v = e.value();
         content_w.set(v.clone());
         if let Some(ops) = ops_for_input.as_ref() {
             ops.update_content.call((block_id, v.clone()));
         }
-        // Trigger detection: read the caret position from the
-        // textarea and inspect the text just before it. `/foo`
-        // opens the slash palette; `[[foo` opens page search.
+        // Detect all four popup triggers in one pass — first
+        // match wins. Order matters: longer literal sigils
+        // (`[[`, `((`) before single chars (`/`, `#`).
         let id_str = id_str_input.clone();
         let content = v.clone();
         let mut slash = slash_w;
         let mut page_search = page_search_w;
+        let mut block_ref = block_ref_w;
+        let mut tag_search = tag_search_w;
         spawn(async move {
             let off = read_selection_start(&id_str).await.unwrap_or(content.len());
             let before = &content[..off.min(content.len())];
-            // Slash palette: last `/` after a whitespace or start.
-            if let Some(slash_pos) = trigger_after_boundary(before, '/') {
-                let q = before[slash_pos + 1..].to_string();
-                if let Some(ref mut s) = slash.as_mut() {
-                    s.0.set(Some((block_id, q.clone())));
+
+            let close_all = |slash: &mut Option<SlashState>,
+                             page_search: &mut Option<PageSearchState>,
+                             block_ref: &mut Option<BlockRefState>,
+                             tag_search: &mut Option<TagSearchState>| {
+                if let Some(s) = slash.as_mut() {
+                    s.0.set(None);
                 }
-                if let Some(ref mut p) = page_search.as_mut() {
+                if let Some(p) = page_search.as_mut() {
                     p.0.set(None);
                 }
-                return;
-            }
-            // Page search: `[[query` (unclosed) directly before caret.
-            if let Some(pos) = before.rfind("[[") {
+                if let Some(b) = block_ref.as_mut() {
+                    b.0.set(None);
+                }
+                if let Some(t) = tag_search.as_mut() {
+                    t.0.set(None);
+                }
+            };
+
+            // Block ref: `((query` unclosed.
+            if let Some(pos) = before.rfind("((") {
                 let rest = &before[pos + 2..];
-                if !rest.contains("]]") {
-                    if let Some(ref mut p) = page_search.as_mut() {
-                        p.0.set(Some((block_id, rest.to_string())));
-                    }
-                    if let Some(ref mut s) = slash.as_mut() {
-                        s.0.set(None);
+                if !rest.contains("))") {
+                    close_all(
+                        &mut slash,
+                        &mut page_search,
+                        &mut block_ref,
+                        &mut tag_search,
+                    );
+                    if let Some(b) = block_ref.as_mut() {
+                        b.0.set(Some((block_id, rest.to_string())));
                     }
                     return;
                 }
             }
-            // No trigger active — clear popups.
-            if let Some(ref mut s) = slash.as_mut() {
-                s.0.set(None);
+            // Page search: `[[query` unclosed.
+            if let Some(pos) = before.rfind("[[") {
+                let rest = &before[pos + 2..];
+                if !rest.contains("]]") {
+                    close_all(
+                        &mut slash,
+                        &mut page_search,
+                        &mut block_ref,
+                        &mut tag_search,
+                    );
+                    if let Some(p) = page_search.as_mut() {
+                        p.0.set(Some((block_id, rest.to_string())));
+                    }
+                    return;
+                }
             }
-            if let Some(ref mut p) = page_search.as_mut() {
-                p.0.set(None);
+            // Slash palette.
+            if let Some(slash_pos) = trigger_after_boundary(before, '/') {
+                let q = before[slash_pos + 1..].to_string();
+                close_all(
+                    &mut slash,
+                    &mut page_search,
+                    &mut block_ref,
+                    &mut tag_search,
+                );
+                if let Some(s) = slash.as_mut() {
+                    s.0.set(Some((block_id, q)));
+                }
+                return;
             }
+            // Tag autocomplete: `#tagquery`. Require at least one
+            // char after `#` so the chip doesn't pop on every `#`.
+            if let Some(tag_pos) = trigger_after_boundary(before, '#') {
+                if tag_pos + 1 < before.len() {
+                    let q = before[tag_pos + 1..].to_string();
+                    // Only show while the query stays "tag-like".
+                    if q.chars()
+                        .all(|c| c.is_alphanumeric() || c == '/' || c == '-' || c == '_')
+                    {
+                        close_all(
+                            &mut slash,
+                            &mut page_search,
+                            &mut block_ref,
+                            &mut tag_search,
+                        );
+                        if let Some(t) = tag_search.as_mut() {
+                            t.0.set(Some((block_id, q)));
+                        }
+                        return;
+                    }
+                }
+            }
+            close_all(
+                &mut slash,
+                &mut page_search,
+                &mut block_ref,
+                &mut tag_search,
+            );
         });
     };
 
@@ -1156,6 +1234,46 @@ fn EditableBlock(block: Block) -> Element {
                     }
                 });
             }
+            Key::ArrowUp => {
+                if mods.ctrl() || mods.meta() {
+                    // Cmd/Ctrl+ArrowUp → move block up.
+                    e.prevent_default();
+                    ops.move_up.call(block_id);
+                } else {
+                    // Plain ArrowUp: jump to previous block only
+                    // when the caret is at the top of the textarea
+                    // (offset 0 or first line). For simplicity we
+                    // check offset 0 — multi-line awareness comes
+                    // later. Cancel otherwise to let cursor move
+                    // up by line.
+                    let id_str = block_id.simple().to_string();
+                    let prev_cb = ops.focus_prev;
+                    let bid = block_id;
+                    spawn(async move {
+                        if read_selection_start(&id_str).await.unwrap_or(1) == 0 {
+                            prev_cb.call(bid);
+                        }
+                    });
+                }
+            }
+            Key::ArrowDown => {
+                if mods.ctrl() || mods.meta() {
+                    e.prevent_default();
+                    ops.move_down.call(block_id);
+                } else {
+                    // Plain ArrowDown — jump to next block when
+                    // caret is at end of content.
+                    let id_str = block_id.simple().to_string();
+                    let next_cb = ops.focus_next;
+                    let bid = block_id;
+                    let cur_len = current.len();
+                    spawn(async move {
+                        if read_selection_start(&id_str).await.unwrap_or(0) >= cur_len {
+                            next_cb.call(bid);
+                        }
+                    });
+                }
+            }
             _ => {}
         }
     };
@@ -1179,6 +1297,16 @@ fn EditableBlock(block: Block) -> Element {
         .and_then(|s| s.0.read().clone())
         .filter(|(b, _)| *b == block_id)
         .map(|(_, q)| q);
+    let block_ref_open = block_ref_state
+        .as_ref()
+        .and_then(|s| s.0.read().clone())
+        .filter(|(b, _)| *b == block_id)
+        .map(|(_, q)| q);
+    let tag_search_open = tag_search_state
+        .as_ref()
+        .and_then(|s| s.0.read().clone())
+        .filter(|(b, _)| *b == block_id)
+        .map(|(_, q)| q);
 
     rsx! {
         div { style: "flex: 1; min-width: 0; position: relative;",
@@ -1198,6 +1326,12 @@ fn EditableBlock(block: Block) -> Element {
             }
             if let Some(q) = page_search_open {
                 PageSearchPalette { block_id, query: q, content: content_signal }
+            }
+            if let Some(q) = block_ref_open {
+                BlockRefPalette { block_id, query: q, content: content_signal }
+            }
+            if let Some(q) = tag_search_open {
+                TagSearchPalette { block_id, query: q, content: content_signal }
             }
         }
     }
@@ -1493,6 +1627,137 @@ async fn read_selection_start(block_simple_id: &str) -> Option<usize> {
     }
 }
 
+#[component]
+fn BlockRefPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
+    let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
+    let ops = try_use_context::<BlockOps>();
+    let block_ref_state = try_use_context::<BlockRefState>();
+    let q_lower = query.to_lowercase();
+    let mut hits: Vec<(Uuid, String)> = block_refs
+        .0
+        .iter()
+        .filter(|(_, target)| {
+            q_lower.is_empty() || target.snippet.to_lowercase().contains(&q_lower)
+        })
+        .map(|(id, target)| (*id, target.snippet.clone()))
+        .collect();
+    hits.sort_by(|a, b| a.1.cmp(&b.1));
+    hits.truncate(10);
+
+    rsx! {
+        div { class: "ls-popup",
+            style: "position: absolute; top: 100%; left: 0; margin-top: 0.25em; min-width: 320px; max-height: 280px; overflow-y: auto; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; z-index: 50; box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
+            div { style: "padding: 0.35em 0.6em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                "Block reference"
+            }
+            if hits.is_empty() {
+                div { style: "padding: 0.6em; color: var(--ls-secondary-text-color); font-style: italic;",
+                    "No matching blocks."
+                }
+            }
+            for (id, snippet) in hits {
+                {
+                    let id_for_click = id;
+                    let ops = ops.clone();
+                    let mut content_w = content;
+                    let mut block_ref_w = block_ref_state;
+                    let query_for_click = query.clone();
+                    let onclick = move |_e: Event<MouseData>| {
+                        let mut cur = content_w.peek().clone();
+                        if let Some(pos) = cur.rfind("((") {
+                            let end = pos + 2 + query_for_click.len();
+                            let end = end.min(cur.len());
+                            let replacement = format!("(({}))", id_for_click);
+                            cur.replace_range(pos..end, &replacement);
+                            content_w.set(cur.clone());
+                            if let Some(ops) = ops.as_ref() {
+                                ops.update_content.call((block_id, cur));
+                            }
+                        }
+                        if let Some(ref mut s) = block_ref_w.as_mut() {
+                            s.0.set(None);
+                        }
+                    };
+                    rsx! {
+                        div {
+                            key: "{id}",
+                            style: "padding: 0.35em 0.6em; cursor: pointer; color: var(--ls-link-text-color); border-bottom: 1px solid var(--ls-border-color); display: flex; gap: 0.5em; align-items: baseline;",
+                            onclick,
+                            onmousedown: move |e: Event<MouseData>| e.prevent_default(),
+                            span { style: "font-family: ui-monospace, monospace; font-size: 0.7rem; color: var(--ls-secondary-text-color);", "((·))" }
+                            span { "{snippet}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn TagSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
+    let queries_ctx = try_use_context::<QueryResolver>().unwrap_or_default();
+    let ops = try_use_context::<BlockOps>();
+    let tag_state = try_use_context::<TagSearchState>();
+    let q_lower = query.to_lowercase();
+    let mut hits: Vec<String> = queries_ctx
+        .0
+        .keys()
+        .filter(|tag| q_lower.is_empty() || tag.contains(&q_lower))
+        .cloned()
+        .collect();
+    hits.sort();
+    hits.truncate(10);
+
+    rsx! {
+        div { class: "ls-popup",
+            style: "position: absolute; top: 100%; left: 0; margin-top: 0.25em; min-width: 240px; max-height: 280px; overflow-y: auto; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; z-index: 50; box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
+            div { style: "padding: 0.35em 0.6em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                "Tag"
+            }
+            if hits.is_empty() {
+                div { style: "padding: 0.6em; color: var(--ls-secondary-text-color); font-style: italic;",
+                    "No matching tags. The current `#", "{query}", "` will stay as-typed."
+                }
+            }
+            for tag in hits {
+                {
+                    let tag_for_click = tag.clone();
+                    let ops = ops.clone();
+                    let mut content_w = content;
+                    let mut tag_w = tag_state;
+                    let query_for_click = query.clone();
+                    let onclick = move |_e: Event<MouseData>| {
+                        let mut cur = content_w.peek().clone();
+                        if let Some(pos) = cur.rfind('#') {
+                            let end = pos + 1 + query_for_click.len();
+                            let end = end.min(cur.len());
+                            let replacement = format!("#{}", tag_for_click);
+                            cur.replace_range(pos..end, &replacement);
+                            content_w.set(cur.clone());
+                            if let Some(ops) = ops.as_ref() {
+                                ops.update_content.call((block_id, cur));
+                            }
+                        }
+                        if let Some(ref mut s) = tag_w.as_mut() {
+                            s.0.set(None);
+                        }
+                    };
+                    rsx! {
+                        div {
+                            key: "{tag}",
+                            style: "padding: 0.35em 0.6em; cursor: pointer; color: var(--ls-tag-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                            onclick,
+                            onmousedown: move |e: Event<MouseData>| e.prevent_default(),
+                            "#{tag}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Per-block editing callbacks the shell threads to descendant
 /// block components via context. Each is a fire-and-forget
 /// `spawn` that mutates the local CRDT; the doc's
@@ -1507,6 +1772,15 @@ pub(crate) struct BlockOps {
     pub outdent: Callback<Uuid>,
     pub delete_block: Callback<Uuid>,
     pub set_kind: Callback<(Uuid, String, Option<i32>)>,
+    /// Swap with the previous sibling (Cmd+ArrowUp).
+    pub move_up: Callback<Uuid>,
+    /// Swap with the next sibling (Cmd+ArrowDown).
+    pub move_down: Callback<Uuid>,
+    /// Focus the block immediately before this one in document
+    /// order. ArrowUp from the top of a textarea triggers this.
+    pub focus_prev: Callback<Uuid>,
+    /// Focus the block immediately after this one. ArrowDown.
+    pub focus_next: Callback<Uuid>,
 }
 
 fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> BlockOps {
@@ -1595,6 +1869,44 @@ fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> Bl
             }
         });
     });
+    let doc_move_up = doc.clone();
+    let move_up = Callback::new(move |id: Uuid| {
+        let doc = doc_move_up.clone();
+        spawn(async move {
+            if let Err(e) = move_block_async(&doc, id, -1).await {
+                tracing::warn!(?e, "move-up failed");
+            }
+        });
+    });
+    let doc_move_down = doc.clone();
+    let move_down = Callback::new(move |id: Uuid| {
+        let doc = doc_move_down.clone();
+        spawn(async move {
+            if let Err(e) = move_block_async(&doc, id, 1).await {
+                tracing::warn!(?e, "move-down failed");
+            }
+        });
+    });
+    let doc_focus_prev = doc.clone();
+    let mut editing_focus_prev = editing_id;
+    let focus_prev = Callback::new(move |id: Uuid| {
+        let doc = doc_focus_prev.clone();
+        spawn(async move {
+            if let Some(prev) = neighbor_in_doc_order(&doc, id, -1).await {
+                editing_focus_prev.set(Some(prev));
+            }
+        });
+    });
+    let doc_focus_next = doc.clone();
+    let mut editing_focus_next = editing_id;
+    let focus_next = Callback::new(move |id: Uuid| {
+        let doc = doc_focus_next.clone();
+        spawn(async move {
+            if let Some(next) = neighbor_in_doc_order(&doc, id, 1).await {
+                editing_focus_next.set(Some(next));
+            }
+        });
+    });
     BlockOps {
         enter_edit,
         exit_edit,
@@ -1604,7 +1916,126 @@ fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> Bl
         outdent,
         delete_block,
         set_kind,
+        move_up,
+        move_down,
+        focus_prev,
+        focus_next,
     }
+}
+
+/// Swap `block_id` with its previous (`dir = -1`) or next
+/// (`dir = 1`) sibling by exchanging their `sort_key` values.
+/// No-op at the boundary (first / last sibling).
+async fn move_block_async(
+    doc: &CrdtDoc,
+    block_id: Uuid,
+    dir: i32,
+) -> Result<(), knowledge_proto::architect::RepoError> {
+    let repo = BlockRepoLoro::new(doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let all = repo.list(big, None, None).await?.items;
+    let target = match all.iter().find(|b| b.id == block_id) {
+        Some(b) => b.clone(),
+        None => return Err(knowledge_proto::architect::RepoError::NotFound),
+    };
+    let mut siblings: Vec<Block> = all
+        .iter()
+        .filter(|b| b.parent_block_id == target.parent_block_id && b.page_id == target.page_id)
+        .cloned()
+        .collect();
+    siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let pos = siblings.iter().position(|b| b.id == target.id);
+    let Some(pos) = pos else { return Ok(()) };
+    let other_idx = if dir < 0 {
+        if pos == 0 {
+            return Ok(());
+        }
+        pos - 1
+    } else {
+        if pos + 1 >= siblings.len() {
+            return Ok(());
+        }
+        pos + 1
+    };
+    let other = siblings[other_idx].clone();
+    // Swap sort keys.
+    repo.update(
+        target.id,
+        BlockUpdate {
+            sort_key: Some(other.sort_key.clone()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    repo.update(
+        other.id,
+        BlockUpdate {
+            sort_key: Some(target.sort_key.clone()),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// Find the neighbor of `block_id` in document (flat) order
+/// where dir=-1 → previous block, dir=1 → next. Document order
+/// is a recursive top-down walk: parent then its children
+/// before siblings.
+async fn neighbor_in_doc_order(doc: &CrdtDoc, block_id: Uuid, dir: i32) -> Option<Uuid> {
+    let repo = BlockRepoLoro::new(doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let all = repo.list(big, None, None).await.ok()?.items;
+    let target_page = all.iter().find(|b| b.id == block_id).map(|b| b.page_id)?;
+    let page_blocks: Vec<Block> = all
+        .into_iter()
+        .filter(|b| b.page_id == target_page)
+        .collect();
+    let flat = flat_doc_order(&page_blocks);
+    let pos = flat.iter().position(|id| *id == block_id)?;
+    if dir < 0 {
+        if pos == 0 {
+            None
+        } else {
+            flat.get(pos - 1).copied()
+        }
+    } else {
+        flat.get(pos + 1).copied()
+    }
+}
+
+/// Flatten a page's blocks into document order: depth-first
+/// traversal of the parent→child tree, siblings ordered by
+/// sort_key.
+pub(crate) fn flat_doc_order(blocks: &[Block]) -> Vec<Uuid> {
+    use std::collections::HashMap;
+    let mut by_parent: HashMap<Option<Uuid>, Vec<Block>> = HashMap::new();
+    for b in blocks {
+        by_parent
+            .entry(b.parent_block_id)
+            .or_default()
+            .push(b.clone());
+    }
+    for v in by_parent.values_mut() {
+        v.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    }
+    let mut out = Vec::new();
+    fn walk(parent: Option<Uuid>, map: &HashMap<Option<Uuid>, Vec<Block>>, out: &mut Vec<Uuid>) {
+        if let Some(children) = map.get(&parent) {
+            for c in children {
+                out.push(c.id);
+                walk(Some(c.id), map, out);
+            }
+        }
+    }
+    walk(None, &by_parent, &mut out);
+    out
 }
 
 /// Split `block_id` at byte offset `offset`. Truncates the
@@ -1927,6 +2358,47 @@ mod tests {
         // Spec: when a >= b, returns lexorank_after(a) — still
         // sorts after `a` (degraded but stable).
         assert!(mid > a.to_string());
+    }
+
+    #[test]
+    fn flat_doc_order_depth_first() {
+        let now = Utc::now();
+        let page_id = Uuid::new_v4();
+        let mk = |id: Uuid, parent: Option<Uuid>, key: &str| Block {
+            id,
+            vault_id: Uuid::nil(),
+            page_id,
+            parent_block_id: parent,
+            sort_key: key.into(),
+            kind: "paragraph".into(),
+            content: "".into(),
+            heading_level: None,
+            list_ordered: false,
+            list_task: None,
+            code_lang: None,
+            callout_kind: None,
+            callout_foldable: false,
+            properties_json: "{}".into(),
+            obsidian_block_id: None,
+            collapsed: false,
+            refs_json: "[]".into(),
+            canvas_node_json: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let a1 = Uuid::new_v4();
+        let a2 = Uuid::new_v4();
+        let blocks = vec![
+            mk(a, None, "a"),
+            mk(b, None, "b"),
+            mk(a1, Some(a), "a"),
+            mk(a2, Some(a), "b"),
+        ];
+        let order = flat_doc_order(&blocks);
+        // Expected: a, a1, a2, b
+        assert_eq!(order, vec![a, a1, a2, b]);
     }
 
     #[test]
