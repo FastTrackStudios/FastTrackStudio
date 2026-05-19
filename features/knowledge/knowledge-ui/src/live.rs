@@ -1733,6 +1733,8 @@ fn PageBody(
             VimMode::Insert => "insert",
             VimMode::Visual => "visual",
             VimMode::VisualLine => "visual",
+            VimMode::Command => "command",
+            VimMode::Search => "search",
         };
         let Some(hub_sig) = hub_for_publish else {
             return;
@@ -2009,6 +2011,14 @@ fn PageBody(
                     // Cursor stays at the same offset (now points
                     // at what used to be the char after).
                 }
+                // Command/Search submit + V-LINE selection ops are
+                // engine-state events the host doesn't yet handle.
+                // Drop them silently for now; future work wires
+                // them to actual save/find/delete behaviors.
+                VimAction::SubmitCommand(_)
+                | VimAction::SubmitSearch
+                | VimAction::DeleteSelection
+                | VimAction::YankSelection => {}
             }
         }
         let _ = active_id;
@@ -2576,6 +2586,8 @@ fn VimModeIndicator(mode: VimMode) -> Element {
         VimMode::Insert => ("INSERT", "bg-emerald-500 text-white"),
         VimMode::Visual => ("VISUAL", "bg-amber-500 text-black"),
         VimMode::VisualLine => ("V-LINE", "bg-amber-600 text-black"),
+        VimMode::Command => ("COMMAND", "bg-sky-500 text-white"),
+        VimMode::Search => ("SEARCH", "bg-violet-500 text-white"),
     };
     rsx! {
         div {

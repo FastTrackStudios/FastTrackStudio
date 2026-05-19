@@ -344,7 +344,7 @@ fn OutlinerNode(
             "data-block-kind": "{kind}",
             "data-block-depth": "{depth}",
             "data-editing": "{is_active}",
-            "data-vim-mode": match vim_mode { VimMode::Normal => "normal", VimMode::Insert => "insert", VimMode::Visual => "visual", VimMode::VisualLine => "visual-line" },
+            "data-vim-mode": match vim_mode { VimMode::Normal => "normal", VimMode::Insert => "insert", VimMode::Visual => "visual", VimMode::VisualLine => "visual-line", VimMode::Command => "command", VimMode::Search => "search" },
             // Highlight via a thin left-border accent — doesn't
             // shift content position the way bg fill + padding
             // would, so the view↔edit swap stays metric-stable.

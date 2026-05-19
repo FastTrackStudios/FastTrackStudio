@@ -48,11 +48,53 @@ pub enum Route {
 
 #[component]
 fn DashboardRoute() -> Element {
+    let nav = use_navigator();
     rsx! {
         div { class: "mx-auto flex max-w-3xl flex-col gap-4 p-6 lg:p-10",
             Heading { level: HeadingLevel::H1, "Home" }
             Text { variant: TextVariant::Muted,
-                "Task vertical slice — projects + tasks. Use the sidebar to navigate."
+                "Local-first, real-time collaborative production-workflow vault. "
+                "Open Knowledge to start editing — it's the Logseq-style outliner "
+                "where pages, blocks, references, queries, and embeds all live."
+            }
+            div { class: "grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2",
+                button {
+                    class: "rounded-lg border border-border bg-card hover:bg-muted/40 \
+                            p-4 text-left transition-colors",
+                    onclick: move |_| { nav.push(Route::KnowledgeRoute {}); },
+                    div { class: "font-semibold text-base", "Knowledge" }
+                    div { class: "text-sm text-muted-foreground mt-1",
+                        "Outliner with `[[wikilinks]]`, `((block-refs))`, "
+                        "`![[embeds]]`, `{{query #tag}}`, and vim mode."
+                    }
+                }
+                button {
+                    class: "rounded-lg border border-border bg-card hover:bg-muted/40 \
+                            p-4 text-left transition-colors",
+                    onclick: move |_| { nav.push(Route::TasksKanbanRoute {}); },
+                    div { class: "font-semibold text-base", "Tasks (Kanban)" }
+                    div { class: "text-sm text-muted-foreground mt-1",
+                        "Drag-and-drop board grouped by status. Drives the same data."
+                    }
+                }
+                button {
+                    class: "rounded-lg border border-border bg-card hover:bg-muted/40 \
+                            p-4 text-left transition-colors",
+                    onclick: move |_| { nav.push(Route::ProjectsRoute {}); },
+                    div { class: "font-semibold text-base", "Projects" }
+                    div { class: "text-sm text-muted-foreground mt-1",
+                        "Project / task hierarchy with filter tabs and inline editing."
+                    }
+                }
+                button {
+                    class: "rounded-lg border border-border bg-card hover:bg-muted/40 \
+                            p-4 text-left transition-colors",
+                    onclick: move |_| { nav.push(Route::ServersRoute {}); },
+                    div { class: "font-semibold text-base", "Servers" }
+                    div { class: "text-sm text-muted-foreground mt-1",
+                        "Federated vaults — pull tasks + pages from other Task servers."
+                    }
+                }
             }
         }
     }
