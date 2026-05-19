@@ -28,6 +28,7 @@ vox = { workspace = true }
 vox-core = { workspace = true }
 vox-websocket = { workspace = true }
 crdt = { workspace = true }
+thiserror = { workspace = true }
 # Used by the desktop persistence loop to call
 # `LoroDoc::export(ExportMode::Snapshot)`.
 loro = "1.12"

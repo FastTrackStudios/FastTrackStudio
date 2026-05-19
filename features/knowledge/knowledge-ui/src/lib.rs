@@ -8,6 +8,7 @@
 //! `project-ui::TasksByProjectLive` uses.
 
 pub mod awareness;
+pub mod graph_loader;
 #[cfg(target_arch = "wasm32")]
 pub mod idb_persistence;
 pub mod inline_md;
