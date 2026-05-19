@@ -29,8 +29,13 @@
     ).slice(0, 20);
     for (const e of hits) {
       const li = document.createElement('li');
+      if (e.anchor) {
+        li.className = 'search-hit-block';
+      }
       const a = document.createElement('a');
-      a.href = '/' + e.slug + '/';
+      // Block hits deep-link to `#block-<uuid>` so the browser
+      // scrolls to the specific block on the target page.
+      a.href = '/' + e.slug + '/' + (e.anchor ? '#block-' + e.anchor : '');
       a.textContent = e.title;
       li.appendChild(a);
       const sn = document.createElement('span');
