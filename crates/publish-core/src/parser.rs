@@ -80,6 +80,23 @@ pub enum Node {
     /// this inline parser; rendering renders the definitions
     /// separately at block level.
     FootnoteRef(String),
+    /// `{{video <url>}}` / `{{youtube <id-or-url>}}` /
+    /// `{{tweet <id-or-url>}}` — media embed macros. `kind`
+    /// selects the renderer (HTML `<video>`, YouTube iframe,
+    /// Twitter blockquote stub); `target` is the URL or
+    /// extracted id.
+    Media {
+        kind: MediaKind,
+        target: String,
+    },
+}
+
+/// Closed set of media-embed kinds recognized by the parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MediaKind {
+    Video,
+    Youtube,
+    Tweet,
 }
 
 pub fn parse(
@@ -161,6 +178,33 @@ pub fn parse(
                 // Unrecognized embed payload — fall through and
                 // let text accumulate.
             }
+        }
+        // {{video <url>}} / {{youtube <id-or-url>}} /
+        // {{tweet <id-or-url>}} — media embed macros. Helper
+        // returns Some(advance) on match.
+        let media_advance = (|| -> Option<usize> {
+            for (prefix, kind) in [
+                ("{{video", MediaKind::Video),
+                ("{{youtube", MediaKind::Youtube),
+                ("{{tweet", MediaKind::Tweet),
+            ] {
+                if s[i..].starts_with(prefix) {
+                    let after = i + prefix.len();
+                    if let Some(end) = s[after..].find("}}") {
+                        let target = s[after..after + end].trim().to_string();
+                        if !target.is_empty() {
+                            flush(&mut buf, &mut out);
+                            out.push(Node::Media { kind, target });
+                            return Some(after + end + 2);
+                        }
+                    }
+                }
+            }
+            None
+        })();
+        if let Some(next_i) = media_advance {
+            i = next_i;
+            continue;
         }
         // {{query <expr>}} — embedded live query. Match before
         // emphasis / brackets so the literal sigil wins.
@@ -991,6 +1035,70 @@ mod tests {
             slug: slug.into(),
             title: slug.into(),
         }
+    }
+
+    #[test]
+    fn media_macro_video() {
+        let n = parse(
+            "{{video https://example.com/clip.mp4}}",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        let media = n.iter().find_map(|x| match x {
+            Node::Media { kind, target } => Some((*kind, target.clone())),
+            _ => None,
+        });
+        assert_eq!(
+            media,
+            Some((MediaKind::Video, "https://example.com/clip.mp4".into()))
+        );
+    }
+
+    #[test]
+    fn media_macro_youtube_and_tweet() {
+        let n = parse(
+            "{{youtube dQw4w9WgXcQ}} {{tweet 1234567890}}",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        let kinds: Vec<MediaKind> = n
+            .iter()
+            .filter_map(|x| match x {
+                Node::Media { kind, .. } => Some(*kind),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, vec![MediaKind::Youtube, MediaKind::Tweet]);
+    }
+
+    #[test]
+    fn extract_youtube_id_from_watch_url() {
+        assert_eq!(
+            crate::components::extract_youtube_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            "dQw4w9WgXcQ"
+        );
+    }
+
+    #[test]
+    fn extract_youtube_id_from_short_url() {
+        assert_eq!(
+            crate::components::extract_youtube_id("https://youtu.be/dQw4w9WgXcQ"),
+            "dQw4w9WgXcQ"
+        );
+    }
+
+    #[test]
+    fn extract_youtube_id_passthrough_bare_id() {
+        assert_eq!(
+            crate::components::extract_youtube_id("dQw4w9WgXcQ"),
+            "dQw4w9WgXcQ"
+        );
     }
 
     #[test]

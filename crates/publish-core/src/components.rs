@@ -30,6 +30,45 @@ pub struct BacklinkEntry {
     pub snippet: String,
 }
 
+/// Extract a YouTube video id from a payload that may already be
+/// a bare id, a `youtube.com/watch?v=…` URL, or a `youtu.be/…`
+/// short link. Returns the input unchanged when nothing matches
+/// (lets the iframe surface its own error).
+pub fn extract_youtube_id(s: &str) -> String {
+    let s = s.trim();
+    if let Some(idx) = s.find("v=") {
+        let after = &s[idx + 2..];
+        let id: String = after
+            .chars()
+            .take_while(|c| *c != '&' && *c != '#')
+            .collect();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    if let Some(idx) = s.rfind("youtu.be/") {
+        let after = &s[idx + 9..];
+        let id: String = after
+            .chars()
+            .take_while(|c| *c != '?' && *c != '&')
+            .collect();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    if let Some(idx) = s.find("/embed/") {
+        let after = &s[idx + 7..];
+        let id: String = after
+            .chars()
+            .take_while(|c| *c != '?' && *c != '&')
+            .collect();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+    s.to_string()
+}
+
 /// URL-safe slug. Lowercases, replaces runs of non-alphanumeric
 /// with `-`, trims dashes.
 pub fn slugify(s: &str) -> String {
@@ -956,6 +995,53 @@ pub fn InlineNode(node: inline::Node) -> Element {
             rsx! {
                 sup { class: "footnote-ref",
                     a { href: "{href}", "[{id}]" }
+                }
+            }
+        }
+        Node::Media { kind, target } => {
+            match kind {
+                crate::parser::MediaKind::Video => rsx! {
+                    video {
+                        class: "media-video",
+                        src: "{target}",
+                        controls: true,
+                        style: "max-width: 100%;",
+                    }
+                },
+                crate::parser::MediaKind::Youtube => {
+                    // Accept either a bare id or a full URL; extract
+                    // the id from common URL shapes.
+                    let id = extract_youtube_id(&target);
+                    let src = format!("https://www.youtube.com/embed/{id}");
+                    rsx! {
+                        iframe {
+                            class: "media-youtube",
+                            src: "{src}",
+                            width: "560",
+                            height: "315",
+                            "frameborder": "0",
+                            allowfullscreen: true,
+                        }
+                    }
+                }
+                crate::parser::MediaKind::Tweet => {
+                    // Render as a link card; full Twitter embed
+                    // requires their JS which we don't want to
+                    // ship by default.
+                    let url = if target.starts_with("http") {
+                        target.clone()
+                    } else {
+                        format!("https://twitter.com/i/web/status/{target}")
+                    };
+                    rsx! {
+                        a {
+                            class: "media-tweet",
+                            href: "{url}",
+                            target: "_blank",
+                            rel: "noopener",
+                            "Tweet ↗"
+                        }
+                    }
                 }
             }
         }

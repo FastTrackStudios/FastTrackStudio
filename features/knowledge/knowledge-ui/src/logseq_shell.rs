@@ -365,6 +365,33 @@ html, body {
 }
 .ls-shell .ls-prop-chip .ls-prop-key { padding: 0.05em 0.45em; background: var(--ls-tertiary-background-color); color: var(--ls-secondary-text-color); font-weight: 600; }
 .ls-shell .ls-prop-chip .ls-prop-val { padding: 0.05em 0.5em; }
+.ls-shell .ls-drawer {
+    margin: 0.3em 0 0.3em 1.6em;
+    border: 1px solid var(--ls-border-color);
+    border-radius: 0.4em;
+    background: var(--ls-tertiary-background-color);
+    font-size: 0.8rem;
+}
+.ls-shell .ls-drawer .ls-drawer-name {
+    padding: 0.25em 0.6em;
+    color: var(--ls-secondary-text-color);
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    user-select: none;
+}
+.ls-shell .ls-drawer .ls-drawer-name::before { content: "▸ "; }
+.ls-shell .ls-drawer[open] .ls-drawer-name::before { content: "▾ "; }
+.ls-shell .ls-drawer .ls-drawer-body {
+    margin: 0;
+    padding: 0.4em 0.75em;
+    border-top: 1px solid var(--ls-border-color);
+    color: var(--ls-primary-text-color);
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
 .ls-shell .ls-right-sidebar {
     width: 320px;
     background: var(--ls-secondary-background-color);
@@ -1757,8 +1784,10 @@ fn LogseqBlockBody(block: Block) -> Element {
 
     let (marker, after_marker) = publish_core::peel_task_marker(&block.content);
     let (plan, after_plan) = publish_core::peel_planning(after_marker);
+    let (drawers, after_drawers) = publish_core::peel_drawers(after_plan);
+    let after_drawers_owned: String = after_drawers;
     let inlines = publish_core::parse(
-        after_plan,
+        &after_drawers_owned,
         &resolver,
         &block_refs,
         &page_embeds,
@@ -1836,6 +1865,14 @@ fn LogseqBlockBody(block: Block) -> Element {
                             span { class: "ls-prop-val", "{v}" }
                         }
                     }
+                }
+            }
+            for (i, drawer) in drawers.into_iter().enumerate() {
+                details {
+                    key: "{i}",
+                    class: "ls-drawer",
+                    summary { class: "ls-drawer-name", "{drawer.name}" }
+                    pre { class: "ls-drawer-body", "{drawer.body}" }
                 }
             }
         }
