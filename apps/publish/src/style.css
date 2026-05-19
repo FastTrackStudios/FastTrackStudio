@@ -371,6 +371,32 @@ span.block-ref.broken {
   cursor: not-allowed;
 }
 
+/* Sidebar page-tree — nested namespaces collapse via indent. */
+ul.page-tree,
+ul.page-tree-children {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+ul.page-tree-children {
+  padding-left: 0.85em;
+  border-left: 1px dotted var(--border);
+  margin-left: 0.25em;
+}
+
+ul.page-tree li {
+  padding: 0.1em 0;
+}
+
+ul.page-tree .page-tree-folder {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: lowercase;
+  letter-spacing: 0.03em;
+}
+
 /* Block embed — a block whose entire content is a single
    `((uuid))` gets transcluded as the target block's full content,
    wrapped in an aside with a source-link header. Mirrors Logseq's

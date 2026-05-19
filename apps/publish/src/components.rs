@@ -107,11 +107,64 @@ pub fn DocBody(site_title: String, page_title: String, sidebar: Element, body: E
     }
 }
 
-/// Sidebar — flat alphabetical page list, current page marked.
+/// One node in the namespace-hierarchy tree built from page
+/// basenames split on `/`. Intermediate nodes (no page) act as
+/// folder headers; leaf nodes link to the page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PageTreeNode {
+    pub segment: String,
+    pub full_basename: Option<String>,
+    pub page_id: Option<uuid::Uuid>,
+    pub children: Vec<PageTreeNode>,
+}
+
+/// Build a namespace tree from a flat page list. Segments are
+/// split on `/`; pages without a `/` land at the root. Intermediate
+/// "folder" nodes are synthesized for namespaces that have no
+/// direct page. Children are sorted alphabetically per level.
+pub fn build_page_tree(pages: &[Page]) -> Vec<PageTreeNode> {
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Builder {
+        page_id: Option<uuid::Uuid>,
+        full_basename: Option<String>,
+        children: BTreeMap<String, Builder>,
+    }
+
+    let mut root: Builder = Builder::default();
+    for p in pages {
+        let segments: Vec<&str> = p.basename.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.is_empty() {
+            continue;
+        }
+        let mut cur = &mut root;
+        for s in &segments {
+            cur = cur.children.entry((*s).to_string()).or_default();
+        }
+        cur.page_id = Some(p.id);
+        cur.full_basename = Some(p.basename.clone());
+    }
+
+    fn to_nodes(b: Builder) -> Vec<PageTreeNode> {
+        b.children
+            .into_iter()
+            .map(|(segment, child)| PageTreeNode {
+                segment,
+                full_basename: child.full_basename.clone(),
+                page_id: child.page_id,
+                children: to_nodes(child),
+            })
+            .collect()
+    }
+    to_nodes(root)
+}
+
+/// Sidebar — namespaced tree of pages, alphabetical per level.
+/// Pages with `/` in their basename group under their parents.
 #[component]
 pub fn Sidebar(pages: Vec<Page>, current_id: Option<uuid::Uuid>) -> Element {
-    let mut sorted = pages.clone();
-    sorted.sort_by(|a, b| a.basename.to_lowercase().cmp(&b.basename.to_lowercase()));
+    let tree = build_page_tree(&pages);
     rsx! {
         nav { class: "sidebar",
             div { class: "sidebar-section",
@@ -131,17 +184,36 @@ pub fn Sidebar(pages: Vec<Page>, current_id: Option<uuid::Uuid>) -> Element {
             }
             script { src: "/assets/search.js", defer: "true" }
             h2 { "Pages" }
-            ul {
-                for p in sorted {
-                    {
-                        let slug = crate::site::slugify(&p.basename);
-                        let active = current_id == Some(p.id);
-                        let cls = if active { "active" } else { "" };
-                        rsx! {
-                            li { key: "{p.id}",
-                                a { class: "{cls}", href: "/{slug}/", "{p.basename}" }
-                            }
-                        }
+            ul { class: "page-tree",
+                for node in tree {
+                    PageTreeItem { key: "{node.segment}", node: node, current_id: current_id }
+                }
+            }
+        }
+    }
+}
+
+/// Recursive sidebar item — renders one node + its children. Leaf
+/// pages are anchors; intermediate folders are plain spans that
+/// wrap a nested `<ul>` of children.
+#[component]
+fn PageTreeItem(node: PageTreeNode, current_id: Option<uuid::Uuid>) -> Element {
+    let is_active = node.page_id.is_some() && node.page_id == current_id;
+    let active_cls = if is_active { "active" } else { "" };
+    rsx! {
+        li {
+            if let Some(full) = node.full_basename.clone() {
+                {
+                    let slug = crate::site::slugify(&full);
+                    rsx! { a { class: "{active_cls}", href: "/{slug}/", "{node.segment}" } }
+                }
+            } else {
+                span { class: "page-tree-folder", "{node.segment}" }
+            }
+            if !node.children.is_empty() {
+                ul { class: "page-tree-children",
+                    for child in node.children {
+                        PageTreeItem { key: "{child.segment}", node: child, current_id: current_id }
                     }
                 }
             }
@@ -209,10 +281,18 @@ pub fn PageContent(
 /// One block. Kind decides the wrapping element.
 #[component]
 pub fn BlockNode(block: Block) -> Element {
+    // Task glyphs — extends the Obsidian Tasks plugin set with
+    // Logseq's wider state vocabulary. `struck: true` strikes
+    // through the rest of the block (done / cancelled).
     let task_glyph = match block.list_task.as_deref() {
         Some(" ") | Some("") => Some(("☐", false)),
         Some("/") => Some(("◐", false)),
         Some("x") | Some("X") => Some(("☑", true)),
+        Some("-") => Some(("⊟", true)),  // cancelled
+        Some(">") => Some(("→", false)), // migrated / forward
+        Some("<") => Some(("←", false)), // scheduled
+        Some("!") => Some(("❗", false)),
+        Some("?") => Some(("❓", false)),
         _ => None,
     };
     let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
