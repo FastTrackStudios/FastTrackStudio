@@ -206,6 +206,7 @@ mod tests {
             BlockRefTarget {
                 page_slug: page_slug.into(),
                 snippet: snippet.into(),
+                content: snippet.into(),
             },
         );
         BlockRefResolver(Arc::new(m))

@@ -371,6 +371,34 @@ span.block-ref.broken {
   cursor: not-allowed;
 }
 
+/* Block embed — a block whose entire content is a single
+   `((uuid))` gets transcluded as the target block's full content,
+   wrapped in an aside with a source-link header. Mirrors Logseq's
+   solo-block-ref expansion. */
+aside.block-embed {
+  margin: 0.75em 0;
+  padding: 0.6em 0.8em;
+  border-left: 3px solid var(--link);
+  background: var(--bg-alt);
+  border-radius: 0 0.4em 0.4em 0;
+}
+
+aside.block-embed .block-embed-source {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-decoration: none;
+  margin-bottom: 0.3em;
+}
+
+aside.block-embed .block-embed-source:hover {
+  color: var(--link);
+}
+
+aside.block-embed .block-embed-body {
+  color: var(--text);
+}
+
 code {
   background: var(--code-bg);
   padding: 0.1em 0.35em;

@@ -157,6 +157,7 @@ pub fn build_block_ref_resolver(
             BlockRefTarget {
                 page_slug: slug.clone(),
                 snippet: block_snippet(&b.content),
+                content: b.content.clone(),
             },
         );
     }

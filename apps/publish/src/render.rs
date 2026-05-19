@@ -381,6 +381,52 @@ mod tests {
     }
 
     #[test]
+    fn solo_block_ref_renders_as_embed_aside() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let target_page = page("Target");
+        let host_page = page("Host");
+        // Target block with real content the embed should inline.
+        let mut target_block = block("the embedded paragraph");
+        target_block.page_id = target_page.id;
+        // Host block whose content is just `((target_block.id))`.
+        let mut host_block = block("");
+        host_block.page_id = host_page.id;
+        host_block.content = format!("(({}))", target_block.id);
+
+        // Resolver knows the target's content for transclusion.
+        let mut refs = HashMap::new();
+        refs.insert(
+            target_block.id,
+            crate::components::BlockRefTarget {
+                page_slug: "target".into(),
+                snippet: "the embedded paragraph".into(),
+                content: "the embedded paragraph".into(),
+            },
+        );
+
+        let html = render_page(
+            "Site",
+            &host_page,
+            &[host_block],
+            &book(),
+            &BlockRefResolver(Arc::new(refs)),
+            &[target_page.clone(), host_page.clone()],
+            &[],
+        );
+        assert!(html.contains("block-embed"), "should render embed aside");
+        assert!(
+            html.contains("the embedded paragraph"),
+            "should inline target content"
+        );
+        assert!(
+            html.contains("↪ from /target"),
+            "should link back to source page; got: {html}"
+        );
+    }
+
+    #[test]
     fn renders_index() {
         let pages = vec![page("Alpha"), page("Beta")];
         let html = render_index("Site", &pages);

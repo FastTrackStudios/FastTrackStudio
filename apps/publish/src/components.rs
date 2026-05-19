@@ -32,11 +32,13 @@ use crate::inline;
 pub struct WikiResolver(pub Arc<HashMap<String, String>>);
 
 /// Per-block target metadata: where the block lives + a short
-/// snippet of its content for inline-chip rendering.
+/// snippet (for inline chips) + the full content (for
+/// transclusion / embed when a block is just a solo `((uuid))`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockRefTarget {
     pub page_slug: String,
     pub snippet: String,
+    pub content: String,
 }
 
 /// Resolution table: block UUID → target page slug + snippet.
@@ -197,6 +199,28 @@ pub fn BlockNode(block: Block) -> Element {
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
     let anchor = format!("block-{}", block.id.simple());
+
+    // Transclusion: if the trimmed content is just a single
+    // resolved block-ref, render the target's full content inline
+    // as an `<aside>` instead of a small chip. Mirrors Logseq's
+    // "solo block-ref expands" convention. Re-parsing the target's
+    // content with an empty BlockRefResolver bounds recursion to
+    // one level so embed cycles can't blow the stack.
+    if let Some((target_id, page_slug, content)) = solo_block_ref(&inlines, &block_refs) {
+        let href = format!("/{page_slug}/#block-{}", target_id.simple());
+        let empty_blocks = BlockRefResolver::default();
+        let target_inlines = inline::parse(&content, &resolver, &empty_blocks);
+        return rsx! {
+            aside { id: "{anchor}", class: "block-embed",
+                a { class: "block-embed-source", href: "{href}",
+                    "↪ from /{page_slug}"
+                }
+                div { class: "block-embed-body",
+                    Inlines { nodes: target_inlines }
+                }
+            }
+        };
+    }
     match block.kind.as_str() {
         "heading" => {
             let level = block.heading_level.unwrap_or(1).clamp(1, 6) as u8;
@@ -250,6 +274,41 @@ pub fn BlockNode(block: Block) -> Element {
             }
         },
     }
+}
+
+/// If the parsed inline tree is just a single resolved block-ref
+/// (optionally surrounded by whitespace text), return the embed
+/// target's metadata. Used to switch from "chip" rendering to
+/// full-block transclusion. Returns `None` for anything else,
+/// including broken refs (a broken ref still renders as a chip).
+fn solo_block_ref(
+    nodes: &[inline::Node],
+    refs: &BlockRefResolver,
+) -> Option<(uuid::Uuid, String, String)> {
+    let mut ref_node: Option<(uuid::Uuid, String, bool)> = None;
+    for n in nodes {
+        match n {
+            inline::Node::Text(s) if s.trim().is_empty() => continue,
+            inline::Node::BlockRef {
+                target_id,
+                page_slug,
+                broken,
+                ..
+            } => {
+                if ref_node.is_some() {
+                    return None;
+                }
+                ref_node = Some((*target_id, page_slug.clone(), *broken));
+            }
+            _ => return None,
+        }
+    }
+    let (id, slug, broken) = ref_node?;
+    if broken {
+        return None;
+    }
+    let target = refs.0.get(&id)?;
+    Some((id, slug, target.content.clone()))
 }
 
 /// Render a list of inline nodes.
