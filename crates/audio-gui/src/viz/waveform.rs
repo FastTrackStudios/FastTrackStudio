@@ -614,8 +614,9 @@ impl CanvasPainter for PeakWaveformPainter {
             0.0
         };
 
-        // Clip to [0, w] so the phase-shifted overshoot doesn't bleed out
-        scene.push_clip_layer(transform, &Rect::new(0.0, 0.0, w, h));
+        // Clip to [0, w] so the phase-shifted overshoot doesn't bleed out.
+        // Vello 0.8 added a `clip_style` arg in front of the existing pair.
+        scene.push_clip_layer(Fill::NonZero, transform, &Rect::new(0.0, 0.0, w, h));
 
         // ── Input level — teal/cyan gradient fill ──
         if !self.levels.is_empty() {
