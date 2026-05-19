@@ -417,17 +417,236 @@ fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
 // Pro Tools → REAPER conversion
 // ============================================================================
 
+/// Convert a Pro Tools session at `path` to a REAPER `.rpp` string.
+///
+/// Public so that command-line tools and tests can run the conversion without
+/// going through the REAPER plugin entry point.
+pub fn protools_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    import_protools(path)
+}
+
 fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let session = dawfile_protools::read_session(path, 48000)?;
     let sample_rate = session.session_sample_rate as f64;
 
+    // Pro Tools stores audio files in `Audio Files/` next to the .ptx.
+    // Resolve a bare filename ("kick.wav") to the on-disk absolute path so
+    // REAPER items point at real audio instead of dangling-source stubs.
+    let session_dir = std::path::Path::new(path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let audio_files_dir = session_dir.join("Audio Files");
+    let resolve_audio_path = |filename: &str| -> String {
+        if filename.is_empty() {
+            return String::new();
+        }
+        // Already absolute → use as-is.
+        let p = std::path::Path::new(filename);
+        if p.is_absolute() {
+            return filename.to_string();
+        }
+        // Try Audio Files/ subdir first (the standard layout).
+        let in_audio = audio_files_dir.join(filename);
+        if in_audio.exists() {
+            return in_audio.to_string_lossy().into_owned();
+        }
+        // Fall back to session dir.
+        let in_session = session_dir.join(filename);
+        if in_session.exists() {
+            return in_session.to_string_lossy().into_owned();
+        }
+        // Last resort: emit the Audio Files/ path even if the file is
+        // missing — REAPER will show a "missing media" item rather than
+        // an empty one, and the user can relink.
+        in_audio.to_string_lossy().into_owned()
+    };
+
     let mut builder = ReaperProjectBuilder::new();
     builder = builder.sample_rate(session.session_sample_rate as i32);
 
-    // Audio tracks
-    for track in &session.audio_tracks {
-        builder = builder.track(&track.name, |t| {
+    // Initial tempo + time signature
+    //
+    // Pro Tools stores BPM relative to the click note value (encoded in
+    // `ticks_per_beat`: 960000 = quarter, 480000 = eighth, 1440000 = dotted-quarter, etc.).
+    // REAPER always interprets tempo as quarter-note BPM regardless of time signature.
+    // Convert: reaper_bpm = pt_bpm × (pt_tpb / 960000).
+    fn pt_bpm_to_reaper(pt_bpm: f64, pt_tpb: u64) -> f64 {
+        if pt_tpb == 0 {
+            pt_bpm
+        } else {
+            pt_bpm * (pt_tpb as f64 / 960_000.0)
+        }
+    }
+    let init_tpb = session
+        .tempo_events
+        .first()
+        .map(|t| t.ticks_per_beat)
+        .unwrap_or(960_000);
+    let init_bpm = pt_bpm_to_reaper(session.bpm, init_tpb);
+    let (init_num, init_den) = session
+        .meter_events
+        .first()
+        .map(|m| (m.numerator as i32, m.denominator as i32))
+        .unwrap_or((4, 4));
+    builder = builder.tempo_with_time_sig(init_bpm, init_num, init_den);
+
+    // Tempo / meter envelope — emit only if there's more than one change.
+    let has_tempo_changes = session.tempo_events.len() > 1;
+    let has_meter_changes = session.meter_events.len() > 1;
+    if has_tempo_changes || has_meter_changes {
+        // Merge tempo + meter events on a single timeline keyed by sample position.
+        // At each point we know the active (bpm, num, den); emit one envelope point.
+        let mut positions: Vec<u64> = session
+            .tempo_events
+            .iter()
+            .map(|t| t.sample_start)
+            .chain(session.meter_events.iter().map(|m| m.sample_start))
+            .collect();
+        positions.sort_unstable();
+        positions.dedup();
+
+        builder = builder.tempo_envelope(|mut env| {
+            let mut cur_bpm = init_bpm;
+            let mut cur_num = init_num;
+            let mut cur_den = init_den;
+            for sample_pos in positions {
+                if let Some(t) = session
+                    .tempo_events
+                    .iter()
+                    .find(|t| t.sample_start == sample_pos)
+                {
+                    cur_bpm = pt_bpm_to_reaper(t.bpm, t.ticks_per_beat);
+                }
+                let meter_changed = session
+                    .meter_events
+                    .iter()
+                    .find(|m| m.sample_start == sample_pos)
+                    .map(|m| {
+                        cur_num = m.numerator as i32;
+                        cur_den = m.denominator as i32;
+                    })
+                    .is_some();
+                let pos_secs = sample_pos as f64 / sample_rate;
+                env = if meter_changed {
+                    env.point_with_time_sig(pos_secs, cur_bpm, cur_num, cur_den)
+                } else {
+                    env.point(pos_secs, cur_bpm)
+                };
+            }
+            env
+        });
+    }
+
+    // Markers (Pro Tools Memory Locations)
+    for marker in &session.markers {
+        let pos_secs = marker.sample_pos as f64 / sample_rate;
+        builder = builder.marker(marker.number as i32, pos_secs, &marker.name);
+    }
+
+    // Compute folder boundaries from `Track.is_folder` over the linear
+    // emission order (audio tracks with stereo-sibling dedup, then MIDI).
+    //
+    // Heuristic (until `PTXTrackSpec.children` is decoded): each track flagged
+    // `is_folder` opens a new top-level folder; the previous folder (if any)
+    // closes on the track immediately before. The final open folder closes on
+    // the last track. This produces flat, 1-deep folders that surface the
+    // flag in REAPER without inventing nesting that isn't in the source.
+    let folder_end_levels: Vec<i32> = {
+        let mut flags: Vec<bool> = Vec::new();
+        let mut i = 0;
+        while i < session.audio_tracks.len() {
+            let stereo = session
+                .audio_tracks
+                .get(i + 1)
+                .map(|next| next.name == session.audio_tracks[i].name)
+                .unwrap_or(false);
+            flags.push(session.audio_tracks[i].is_folder);
+            i += if stereo { 2 } else { 1 };
+        }
+        for mt in &session.midi_tracks {
+            flags.push(mt.is_folder);
+        }
+        let n = flags.len();
+        let mut ends = vec![0i32; n];
+        let mut depth: i32 = 0;
+        for i in 0..n {
+            if flags[i] {
+                if depth > 0 && i > 0 {
+                    ends[i - 1] += depth;
+                    depth = 0;
+                }
+                depth += 1;
+            }
+        }
+        if depth > 0 && n > 0 {
+            ends[n - 1] += depth;
+        }
+        ends
+    };
+    let mut plan_idx = 0usize;
+
+    // Pro Tools stores stereo tracks as TWO consecutive entries (one per
+    // channel) sharing the same `name`. They reference the same stereo source
+    // file via `.L` / `.R` region siblings. Skip the R-channel sibling so we
+    // emit ONE REAPER track per stereo pair.
+    let mut skip_next = false;
+    for (i, track) in session.audio_tracks.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        // Stereo PT track = two consecutive same-name entries (one per channel).
+        let is_stereo = session
+            .audio_tracks
+            .get(i + 1)
+            .map(|next| next.name == track.name)
+            .unwrap_or(false);
+        if is_stereo {
+            skip_next = true;
+        }
+
+        let display_name = if track.output.is_empty() {
+            track.name.clone()
+        } else {
+            format!("{} → {}", track.name, track.output)
+        };
+        let is_folder_start = track.is_folder;
+        let end_levels = folder_end_levels.get(plan_idx).copied().unwrap_or(0);
+        plan_idx += 1;
+        builder = builder.track(&display_name, |t| {
             let mut t = t;
+            if is_folder_start {
+                t = t.folder_start();
+            }
+            // Apply per-track mix state from PT's 0x1029 block.
+            // Volume is in 0.1 dB units (centibel); ≤ -1440 means -∞.
+            // Pan is -100..+100. For STEREO PT tracks the stored "pan" is the
+            // left-channel pan (defaults to -100 = full-left, the natural
+            // state), NOT a balance adjustment. REAPER's default stereo-pan
+            // mode would interpret pan = -1 as "mute the right channel", so
+            // for stereo we emit pan = 0 (centered balance) regardless.
+            let linear_vol = if track.volume_centibel <= -1440 {
+                0.0
+            } else {
+                10f64.powf(track.volume_centibel as f64 / 200.0)
+            };
+            let reaper_pan = if is_stereo {
+                0.0
+            } else {
+                (track.pan as f64 / 100.0).clamp(-1.0, 1.0)
+            };
+            let mut t = t.volume(linear_vol).pan(reaper_pan);
+            // Mute via `0x1029 +5`. Accurate for the LORD family stems +
+            // ClickPrint + Inst stack; over-reports on SYZ / AC GTR / El
+            // Gtr / Bass Demo where the byte is set but PT shows audible.
+            // See `lord_of_the_fight_mute_pattern` test for the diff.
+            if track.mute {
+                t = t.muted();
+            }
+            if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
+                t = t.color(rgb);
+            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.audio_regions.len() {
                     continue;
@@ -442,24 +661,122 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     continue;
                 }
 
-                // Get source filename
+                // Get source filename and resolve to absolute on-disk path.
+                //
+                // The region's `audio_file_index` from the parser is currently
+                // unreliable (PT12 stores file ↔ region mapping in a block we
+                // don't decode yet). Fall back to matching the region NAME
+                // against the audio file stems: PT auto-generates region names
+                // like "02 LORD OF THE FIGHT (Vocals)_1-03.L" where the part
+                // before the trailing "-NN.L/R" is the source filename stem.
+                fn region_to_file_stem(region_name: &str) -> &str {
+                    // Strip optional ".L"/".R" channel suffix.
+                    let without_chan = region_name
+                        .strip_suffix(".L")
+                        .or_else(|| region_name.strip_suffix(".R"))
+                        .unwrap_or(region_name);
+                    // Strip optional "-NN" sub-region suffix.
+                    if let Some(idx) = without_chan.rfind('-') {
+                        let suffix = &without_chan[idx + 1..];
+                        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+                            return &without_chan[..idx];
+                        }
+                    }
+                    without_chan
+                }
+                let stem = region_to_file_stem(&region.name);
                 let filename = session
                     .audio_files
                     .iter()
-                    .find(|f| f.index == region.audio_file_index)
+                    // Exact match first.
+                    .find(|f| {
+                        f.filename
+                            .strip_suffix(".wav")
+                            .or_else(|| f.filename.strip_suffix(".WAV"))
+                            .map(|s| s == stem)
+                            .unwrap_or(false)
+                    })
+                    // Then try a starts-with (handles ".dup1" / ".01" tail).
+                    .or_else(|| {
+                        session.audio_files.iter().find(|f| {
+                            f.filename
+                                .strip_suffix(".wav")
+                                .or_else(|| f.filename.strip_suffix(".WAV"))
+                                .map(|s| stem.starts_with(s) || s.starts_with(stem))
+                                .unwrap_or(false)
+                        })
+                    })
                     .map(|f| f.filename.as_str())
                     .unwrap_or("");
+                let absolute_path = resolve_audio_path(filename);
+
+                // Match fade entries to this item by timeline position.
+                // PT 0x262f fade defs carry both an in-length and an out-length:
+                //   - `out_length == 0` ⇒ pure fade-in starting at the item start
+                //   - `in_length == 0` ⇒ pure fade-out ending at the item end
+                //   - both non-zero ⇒ crossfade. The fade entry's start_pos is
+                //     the START of the in-fade (= end of the previous item).
+                //     For the LEADING item of the crossfade pair, we want the
+                //     fade-out (= the matching `in_length` of the crossfade
+                //     "into" the next item). For the TRAILING item, we want
+                //     the fade-in (= the same in_length).
+                let item_start = tr.start_pos;
+                let item_end = item_start.saturating_add(region.length);
+                let mut fade_in_secs: Option<f64> = None;
+                let mut fade_out_secs: Option<f64> = None;
+                let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
+                for f in &track.fades {
+                    let crossfade = f.in_length > 0 && f.out_length > 0;
+                    let fade_total = f.in_length.max(f.out_length);
+                    if fade_total == 0 {
+                        continue;
+                    }
+                    // Fade-IN: the fade's start coincides with this item's start.
+                    if f.start_pos.abs_diff(item_start) <= tolerance && f.in_length > 0 {
+                        fade_in_secs = Some(f.in_length as f64 / sample_rate);
+                    }
+                    // Fade-OUT: the fade ends at this item's end. For pure
+                    // fade-outs (`in == 0`) PT places start_pos = item_end - out_length.
+                    // For crossfades, start_pos sits at the boundary where the
+                    // out-fading item ends, so item_end ≈ start_pos.
+                    let f_end = f.start_pos.saturating_add(fade_total);
+                    if (crossfade && f.start_pos.abs_diff(item_end) <= tolerance)
+                        || (f.out_length > 0 && f_end.abs_diff(item_end) <= tolerance)
+                    {
+                        let out_len = if f.out_length > 0 {
+                            f.out_length
+                        } else {
+                            f.in_length
+                        };
+                        fade_out_secs = Some(out_len as f64 / sample_rate);
+                    }
+                }
 
                 t = t.item(position_secs, length_secs, |item| {
-                    let mut item = item.name(&region.name);
-                    if !filename.is_empty() {
-                        item = item.source_wave(filename);
+                    // Set the TAKE name (not the item name) to the region
+                    // name so REAPER displays a single readable label rather
+                    // than stacking item-level + take-level labels.
+                    let mut item = item;
+                    if !absolute_path.is_empty() {
+                        item = item.source_wave(&absolute_path).take_name(&region.name);
+                    } else {
+                        item = item.name(&region.name);
                     }
                     if offset_secs > 0.0 {
                         item = item.slip_offset(offset_secs);
                     }
+                    if let Some(fi) = fade_in_secs {
+                        item = item.fade_in(fi, dawfile_reaper::types::item::FadeCurveType::Linear);
+                    }
+                    if let Some(fo) = fade_out_secs {
+                        item =
+                            item.fade_out(fo, dawfile_reaper::types::item::FadeCurveType::Linear);
+                    }
                     item
                 });
+            }
+            if end_levels > 0 {
+                t = t.folder_end(end_levels);
             }
             t
         });
@@ -467,8 +784,36 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 
     // MIDI tracks
     for track in &session.midi_tracks {
-        builder = builder.track(&track.name, |t| {
+        let display_name = if track.output.is_empty() {
+            track.name.clone()
+        } else {
+            format!("{} → {}", track.name, track.output)
+        };
+        let is_folder_start = track.is_folder;
+        let end_levels = folder_end_levels.get(plan_idx).copied().unwrap_or(0);
+        plan_idx += 1;
+        builder = builder.track(&display_name, |t| {
             let mut t = t;
+            if is_folder_start {
+                t = t.folder_start();
+            }
+            let linear_vol = if track.volume_centibel <= -1440 {
+                0.0
+            } else {
+                10f64.powf(track.volume_centibel as f64 / 200.0)
+            };
+            let reaper_pan = (track.pan as f64 / 100.0).clamp(-1.0, 1.0);
+            let mut t = t.volume(linear_vol).pan(reaper_pan);
+            // Mute via `0x1029 +5`. Accurate for the LORD family stems +
+            // ClickPrint + Inst stack; over-reports on SYZ / AC GTR / El
+            // Gtr / Bass Demo where the byte is set but PT shows audible.
+            // See `lord_of_the_fight_mute_pattern` test for the diff.
+            if track.mute {
+                t = t.muted();
+            }
+            if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
+                t = t.color(rgb);
+            }
             for tr in &track.regions {
                 if tr.region_index as usize >= session.midi_regions.len() {
                     continue;
@@ -483,20 +828,53 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 }
 
                 t = t.item(position_secs, length_secs, |item| {
-                    item.name(&region.name).source_midi().midi(|midi| {
-                        let mut midi = midi;
-                        for event in &region.events {
-                            midi = midi.at(event.position).note(
-                                0,
-                                0,
-                                event.note,
-                                event.velocity,
-                                event.duration as u32,
-                            );
+                    // `.midi(...)` adds the MIDI take; do NOT also call
+                    // `.source_midi()` — that would push an empty MIDI take
+                    // first, leaving the real data on take #1 (and REAPER
+                    // would render the item as silent take #0).
+                    item.name(&region.name).midi(|midi| {
+                        // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
+                        // the REAPER builder to use the same PPQN so positions
+                        // and durations don't need numeric rescaling.
+                        let mut midi = midi.ticks_per_qn(960_000);
+
+                        // Many PT regions store duration=0 for every event
+                        // (a paired note-on/note-off encoding the parser
+                        // doesn't fully reconstruct yet). For those events,
+                        // fall back to "until the next note of the same
+                        // pitch" so notes sustain naturally instead of
+                        // truncating to silence.
+                        const FALLBACK_DUR: u64 = 480_000; // half a quarter
+                        let region_end = region.length.max(FALLBACK_DUR);
+
+                        for (i, event) in region.events.iter().enumerate() {
+                            if event.velocity == 0 {
+                                continue;
+                            }
+                            let dur = if event.duration > 0 {
+                                event.duration as u32
+                            } else {
+                                // Find the next note of the SAME pitch and
+                                // end this one just before it. Failing that,
+                                // use the region end, capped at one quarter.
+                                let next = region.events[i + 1..]
+                                    .iter()
+                                    .find(|e| e.note == event.note)
+                                    .map(|e| e.position);
+                                let end = next.unwrap_or(region_end);
+                                let span = end.saturating_sub(event.position);
+                                span.clamp(FALLBACK_DUR, 960_000) as u32
+                            };
+                            midi =
+                                midi.at(event.position)
+                                    .note(0, 0, event.note, event.velocity, dur);
                         }
                         midi
                     })
                 });
+            }
+            if end_levels > 0 {
+                t = t.folder_end(end_levels);
             }
             t
         });
@@ -780,6 +1158,79 @@ fn parse_hex_color(hex: &str) -> Option<u32> {
 }
 
 // ── Color mapping ──────────────────────────────────────────────────────────
+
+/// Convert a Pro Tools color palette byte to a REAPER-compatible color
+/// integer (`0x01000000 | (B << 16) | (G << 8) | R`).
+///
+/// The byte is the raw value of `0x200b +163` per the dawfile-protools
+/// decoder. Encoding (user-confirmed against the 23×3 Color Testing
+/// fixture):
+///
+/// - byte `0x00..0x01` = no color / default (returns `None`)
+/// - byte `>= 0x02`: `(byte - 2) / 24` is the row (0..2), `(byte - 2) % 24`
+///   is the column (0..22). PT's palette has 23 hues sweeping the color
+///   wheel starting at dark blue.
+///
+/// Each subsequent row is a darker variant of the same column hue.
+/// REAPER's `COLOR` field needs the high bit (`0x01000000`) set for the
+/// custom color to be honored; without it REAPER falls back to default.
+pub fn pt_color_to_rgb(byte: u8) -> Option<u32> {
+    if byte < 2 {
+        return None;
+    }
+    let pos = (byte - 2) as usize;
+    let row = pos / 24;
+    let col = pos % 24;
+    if col >= 23 || row >= 3 {
+        return None;
+    }
+
+    // 23-hue palette at row 0 (lightest / most-saturated row).
+    // Approximations based on PT's stock palette ordering described by the
+    // user: dark blue → purple → magenta → pink → fuchsia → light red →
+    // red → red-orange → orange → light orange → yellow → yellow-green →
+    // light green → green → green-with-some-blue → cyan → teal → light
+    // blue → blue → darker blue → very dark blue → (wraps to blue) → blue.
+    const ROW0: [(u8, u8, u8); 23] = [
+        (0x4A, 0x5C, 0xBE), // 0  dark blue
+        (0x7D, 0x5A, 0xC2), // 1  purple
+        (0xB0, 0x4A, 0xB8), // 2  magenta
+        (0xCF, 0x66, 0xA7), // 3  pink
+        (0xD1, 0x4C, 0x8E), // 4  fuchsia
+        (0xE0, 0x6B, 0x6B), // 5  light red
+        (0xD9, 0x3D, 0x3D), // 6  red
+        (0xE0, 0x55, 0x2A), // 7  red-orange
+        (0xE6, 0x7E, 0x22), // 8  orange
+        (0xEF, 0xA8, 0x4A), // 9  light orange
+        (0xEC, 0xCB, 0x3D), // 10 yellow
+        (0xC4, 0xCB, 0x3D), // 11 yellow-green
+        (0x9B, 0xCB, 0x4E), // 12 light green
+        (0x68, 0xB0, 0x4C), // 13 green
+        (0x4F, 0xB0, 0x80), // 14 green-with-blue
+        (0x42, 0xB6, 0xB0), // 15 cyan
+        (0x35, 0x97, 0xA8), // 16 teal
+        (0x52, 0x9F, 0xC2), // 17 light blue
+        (0x42, 0x7D, 0xC2), // 18 blue
+        (0x36, 0x5F, 0xA8), // 19 darker blue
+        (0x2A, 0x46, 0x8C), // 20 very dark blue
+        (0x36, 0x5F, 0xA8), // 21 wrap (≈ darker blue)
+        (0x42, 0x7D, 0xC2), // 22 wrap (≈ blue)
+    ];
+
+    let (r0, g0, b0) = ROW0[col];
+    // Row 1: ~70% brightness, Row 2: ~45% brightness.
+    let scale = match row {
+        0 => 100,
+        1 => 70,
+        _ => 45,
+    };
+    let r = ((r0 as u32) * scale / 100) as u8;
+    let g = ((g0 as u32) * scale / 100) as u8;
+    let b = ((b0 as u32) * scale / 100) as u8;
+
+    // REAPER COLOR field: high byte 0x01 = "use this color".
+    Some(0x01_00_00_00 | ((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
+}
 
 /// Map Ableton color index (0-69) to a REAPER-compatible RGB integer.
 ///

@@ -18,3 +18,23 @@ pub enum TempoMapEvent {
     /// The entire tempo map changed (e.g., project reload)
     MapChanged(Vec<TempoPoint>),
 }
+
+/// Streaming envelope — pairs a [`TempoMapEvent`] with the project
+/// it applies to.
+#[derive(Debug, Clone, Facet)]
+pub struct TempoMapStreamEvent {
+    pub project_guid: String,
+    pub event: TempoMapEvent,
+}
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{TempoMapEvent, TempoMapStreamEvent};
+    unsafe impl vox_types::Reborrow for TempoMapEvent {
+        type Ref<'a> = TempoMapEvent;
+    }
+    unsafe impl vox_types::Reborrow for TempoMapStreamEvent {
+        type Ref<'a> = TempoMapStreamEvent;
+    }
+}

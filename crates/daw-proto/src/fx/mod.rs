@@ -1,25 +1,23 @@
-//! FX module
+//! Effects (FX) — types + events + service trait.
 //!
-//! This module provides FX (audio plugin) types and the FxService trait
-//! for managing audio effects in DAW track chains.
+//! "FX" is REAPER's term for plugins. `Effects` is the architect::rpc
+//! service trait for managing FX instances in chains (add, remove,
+//! parameters, presets, state, containers, tree). For loading plugin
+//! binaries off disk, see `PluginLoading` (`crate::plugin_loader`).
+//! For per-chain ops see `FxChains`; for per-param ops see `FxParams`.
 
 mod error;
 mod event;
+#[allow(clippy::module_inception)]
 mod service;
 pub mod tree;
 mod types;
 
-pub use error::FxError;
-pub use event::FxEvent;
-pub use service::{FxService, FxServiceClient, FxServiceDispatcher, fx_service_service_descriptor};
-pub use tree::{
-    FxContainerChannelConfig, FxNode, FxNodeId, FxNodeKind, FxRoutingMode, FxTree,
-    FxTreeDepthFirstIter,
-};
-pub use types::{
-    AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxChannelConfig, FxLatency, FxParamModulation, FxParameter, FxPinMappings, FxPresetIndex,
-    FxRef, FxStateChunk, FxTarget, FxType, InstalledFx, LastTouchedFx, MoveFromContainerRequest,
-    MoveToContainerRequest, SetContainerChannelConfigRequest, SetNamedConfigRequest,
-    SetParameterByNameRequest, SetParameterRequest,
-};
+pub use error::*;
+pub use event::*;
+pub use service::{Effects, EffectsRpc};
+pub use tree::*;
+pub use types::*;
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, EffectsClient, Service, descriptor, layer, serve};

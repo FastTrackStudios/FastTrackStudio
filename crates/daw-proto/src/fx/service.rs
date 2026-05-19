@@ -1,502 +1,280 @@
-//! FX service trait
+//! Effects service — FX instance management (add/remove/configure
+//! plugins in chains, parameter access, presets, state chunks,
+//! containers/tree, channel config, pin mappings).
 //!
-//! Defines the RPC interface for FX (audio plugin) operations.
-//!
-//! ## Return Type Conventions
-//!
-//! - **Query methods** (`get_*`, `fx_count`): Return `Option<T>` when the target
-//!   may not exist (single item lookups), or `Vec<T>` / plain `T` for
-//!   collection queries and counts where "not found" is just "empty".
-//! - **Mutation methods** (`set_*`, `move_*`, `remove_*`, `create_*`, etc.):
-//!   Return `Result<(), String>` (or `Result<T, String>` when producing a value)
-//!   so callers can detect and handle failures.
-//! - **Subscription methods**: Return `Result<(), String>` for setup failures.
+//! "FX" = "Effects" — these are plugin instances mounted in chains.
+//! See `PluginLoading` (`crate::plugin_loader`) for loading plugin
+//! binaries off disk. Subscription stream retires; sibling trait
+//! when revived.
 
 use super::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
-    FxParameter, FxPinMappings, FxPresetIndex, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
-    InstalledFx, LastTouchedFx, MoveFromContainerRequest, MoveToContainerRequest,
+    FxChannelConfig, FxContainerChannelConfig, FxLatency, FxNodeId, FxParamModulation, FxParameter,
+    FxPinMappings, FxPresetIndex, FxRoutingMode, FxStateChunk, FxTarget, FxTree, InstalledFx,
+    LastTouchedFx, MoveFromContainerRequest, MoveToContainerRequest,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use crate::ProjectContext;
-use vox::Tx;
-use vox::service;
+use crate::{DawResult, ProjectContext};
 
-/// Service for managing FX (audio plugins) in a DAW project
-///
-/// FX are audio processing plugins (VST, AU, JS, CLAP) that can be
-/// inserted into track FX chains for processing audio.
-#[service]
-pub trait FxService {
-    // =========================================================================
-    // Installed Plugins
-    // =========================================================================
+#[architect::rpc]
+pub trait Effects {
+    // ── Installed plugins ──────────────────────────────────────────
 
-    /// List all installed FX plugins in the DAW.
-    ///
-    /// Returns every plugin known to REAPER (VST2, VST3, CLAP, AU, JS, etc.)
-    /// with its display name and full identifier string. No project context
-    /// is needed — installed plugins are global.
-    async fn list_installed_fx(&self) -> Vec<InstalledFx>;
+    /// All installed FX plugins (VST2/VST3/CLAP/AU/JS/…). Global to
+    /// the DAW — no `ProjectContext` needed.
+    fn list_installed(&self) -> Vec<InstalledFx>;
 
-    /// Get the last touched FX parameter.
-    ///
-    /// Returns information about which FX parameter was most recently
-    /// adjusted by the user in the DAW UI. Returns `None` if no FX
-    /// parameter has been touched yet or the FX no longer exists.
-    async fn get_last_touched_fx(&self) -> Option<LastTouchedFx>;
+    /// Last touched FX parameter, if any.
+    fn last_touched(&self) -> Option<LastTouchedFx>;
 
-    // =========================================================================
-    // Chain Queries
-    // =========================================================================
+    // ── Chain queries ──────────────────────────────────────────────
 
-    /// Get all FX in a chain
-    async fn get_fx_list(&self, project: ProjectContext, chain: FxChainContext) -> Vec<Fx>;
+    fn list(&self, project: ProjectContext, chain: FxChainContext) -> Vec<Fx>;
+    fn get(&self, project: ProjectContext, target: FxTarget) -> Option<Fx>;
+    fn count(&self, project: ProjectContext, chain: FxChainContext) -> u32;
 
-    /// Get a specific FX by reference
-    async fn get_fx(&self, project: ProjectContext, target: FxTarget) -> Option<Fx>;
+    // ── State ──────────────────────────────────────────────────────
 
-    /// Get the number of FX in a chain
-    async fn fx_count(&self, project: ProjectContext, chain: FxChainContext) -> u32;
-
-    // =========================================================================
-    // FX State
-    // =========================================================================
-
-    /// Enable or bypass an FX
-    async fn set_fx_enabled(
+    fn set_enabled(
         &self,
         project: ProjectContext,
         target: FxTarget,
         enabled: bool,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Set FX offline state (completely disable processing)
-    async fn set_fx_offline(
+    fn set_offline(
         &self,
         project: ProjectContext,
         target: FxTarget,
         offline: bool,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // FX Management
-    // =========================================================================
+    // ── Management ─────────────────────────────────────────────────
 
-    /// Add an FX to the end of a chain
-    ///
-    /// Returns the GUID of the newly added FX, or None if the plugin wasn't found.
-    ///
-    /// # Examples
-    /// - `"ReaComp"` - Add by short name
-    /// - `"VST3: FabFilter Pro-C 2"` - Add with type prefix
-    /// - `"JS: 1175 Compressor"` - Add JS effect
-    async fn add_fx(
-        &self,
-        project: ProjectContext,
-        chain: FxChainContext,
-        name: String,
-    ) -> Option<String>;
+    /// Add an FX to the end of a chain. Accepts short name
+    /// (`"ReaComp"`), prefixed (`"VST3: FabFilter Pro-C 2"`), or JS
+    /// (`"JS: 1175 Compressor"`). Returns the new FX's GUID.
+    fn add(&self, project: ProjectContext, chain: FxChainContext, name: &str) -> Option<String>;
 
-    /// Add an FX at a specific position in the chain
-    async fn add_fx_at(&self, project: ProjectContext, request: AddFxAtRequest) -> Option<String>;
+    /// Add an FX at a specific position.
+    fn add_at(&self, project: ProjectContext, request: AddFxAtRequest) -> Option<String>;
 
-    /// Remove an FX from the chain
-    async fn remove_fx(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
+    fn remove(&self, project: ProjectContext, target: FxTarget) -> DawResult<()>;
 
-    /// Move an FX to a new position in the chain
-    async fn move_fx(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-        new_index: u32,
-    ) -> Result<(), String>;
+    fn move_to(&self, project: ProjectContext, target: FxTarget, new_index: u32) -> DawResult<()>;
 
-    // =========================================================================
-    // Parameters
-    // =========================================================================
+    // ── Parameters ─────────────────────────────────────────────────
 
-    /// Get all parameters for an FX
-    async fn get_parameters(&self, project: ProjectContext, target: FxTarget) -> Vec<FxParameter>;
+    fn parameters(&self, project: ProjectContext, target: FxTarget) -> Vec<FxParameter>;
 
-    /// Get a specific parameter by index
-    async fn get_parameter(
+    fn parameter(
         &self,
         project: ProjectContext,
         target: FxTarget,
         index: u32,
     ) -> Option<FxParameter>;
 
-    /// Set a parameter value by index (normalized 0.0-1.0)
-    async fn set_parameter(
-        &self,
-        project: ProjectContext,
-        request: SetParameterRequest,
-    ) -> Result<(), String>;
+    fn set_parameter(&self, project: ProjectContext, request: SetParameterRequest)
+    -> DawResult<()>;
 
-    /// Get a parameter by name (first match)
-    async fn get_parameter_by_name(
+    fn parameter_by_name(
         &self,
         project: ProjectContext,
         target: FxTarget,
-        name: String,
+        name: &str,
     ) -> Option<FxParameter>;
 
-    /// Set a parameter value by name (normalized 0.0-1.0)
-    async fn set_parameter_by_name(
+    fn set_parameter_by_name(
         &self,
         project: ProjectContext,
         request: SetParameterByNameRequest,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // Presets
-    // =========================================================================
+    // ── Presets ────────────────────────────────────────────────────
 
-    /// Get the current preset index, total count, and name.
-    ///
-    /// Returns the plugin's internal preset state — which factory/user
-    /// preset is active and how many are available for cycling.
-    async fn get_preset_index(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Option<FxPresetIndex>;
+    /// Current preset index, total count, and name.
+    fn preset_index(&self, project: ProjectContext, target: FxTarget) -> Option<FxPresetIndex>;
 
-    /// Navigate to the next preset
-    async fn next_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
+    fn next_preset(&self, project: ProjectContext, target: FxTarget) -> DawResult<()>;
+    fn prev_preset(&self, project: ProjectContext, target: FxTarget) -> DawResult<()>;
+    fn set_preset(&self, project: ProjectContext, target: FxTarget, index: u32) -> DawResult<()>;
 
-    /// Navigate to the previous preset
-    async fn prev_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
+    // ── UI ─────────────────────────────────────────────────────────
 
-    /// Set preset by index
-    async fn set_preset(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-        index: u32,
-    ) -> Result<(), String>;
+    fn open_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()>;
+    fn close_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()>;
+    fn toggle_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()>;
 
-    // =========================================================================
-    // UI
-    // =========================================================================
+    // ── Named config ───────────────────────────────────────────────
 
-    /// Open the FX UI window
-    async fn open_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
+    /// `TrackFX_GetNamedConfigParm` — plugin-specific settings not
+    /// exposed as regular parameters.
+    fn named_config(&self, project: ProjectContext, target: FxTarget, key: &str) -> Option<String>;
 
-    /// Close the FX UI window
-    async fn close_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
-
-    /// Toggle the FX UI window
-    async fn toggle_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
-
-    // =========================================================================
-    // Advanced (Named Config Parameters)
-    // =========================================================================
-
-    /// Get a named configuration parameter (TrackFX_GetNamedConfigParm)
-    ///
-    /// Named config params provide access to plugin-specific settings
-    /// that aren't exposed as regular parameters.
-    async fn get_named_config(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-        key: String,
-    ) -> Option<String>;
-
-    /// Set a named configuration parameter (TrackFX_SetNamedConfigParm)
-    async fn set_named_config(
+    fn set_named_config(
         &self,
         project: ProjectContext,
         request: SetNamedConfigRequest,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Get FX latency information (PDC)
-    async fn get_fx_latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency>;
+    fn latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency>;
 
-    /// Get parameter modulation state
-    async fn get_param_modulation(
+    fn param_modulation(
         &self,
         project: ProjectContext,
         target: FxTarget,
         param_index: u32,
     ) -> Option<FxParamModulation>;
 
-    // =========================================================================
-    // FX Channel Configuration
-    //
-    // Per-FX channel count control via REAPER's `channel_config` named param.
-    // Used for gapless switching: silence an FX by setting channels to 0,
-    // activate by setting to 2 (stereo).
-    // =========================================================================
+    // ── Channel config (non-container) ─────────────────────────────
 
-    /// Get the channel configuration for a specific FX (non-container).
-    ///
-    /// Returns the requested channel count, channel mode, and supported flags.
-    /// Not supported for containers — use `get_container_channel_config` instead.
-    async fn get_fx_channel_config(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Option<FxChannelConfig>;
+    fn channel_config(&self, project: ProjectContext, target: FxTarget) -> Option<FxChannelConfig>;
 
-    /// Set the channel configuration for a specific FX (non-container).
-    ///
-    /// Setting channel_count to 0 effectively silences the FX output (VST3 auto mode).
-    /// Setting it to 2 restores normal stereo output.
-    /// Not supported for containers — use `set_container_channel_config` instead.
-    async fn set_fx_channel_config(
+    fn set_channel_config(
         &self,
         project: ProjectContext,
         target: FxTarget,
         config: FxChannelConfig,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // Output Pin Mapping (Silence/Restore)
-    //
-    // Uses TrackFX_SetPinMappings to zero/restore output routing.
-    // This is the reliable mechanism for silencing non-container FX —
-    // `channel_config` via SetNamedConfigParm is read-only in REAPER.
-    // =========================================================================
+    // ── Output pin mappings (silence/restore) ──────────────────────
 
-    /// Silence an FX by zeroing all output pin mappings.
-    ///
-    /// Returns the saved pin mappings so they can be restored later.
-    /// This is the correct mechanism for gapless loading — unlike
-    /// `channel_config`, pin mappings are reliably writable via REAPER's API.
-    async fn silence_fx_output(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<FxPinMappings, String>;
+    /// Zero all output pin mappings. Returns the previous mappings so
+    /// they can be restored later. The reliable mechanism for
+    /// silencing non-container FX (channel_config via
+    /// SetNamedConfigParm is read-only).
+    fn silence_output(&self, project: ProjectContext, target: FxTarget)
+    -> DawResult<FxPinMappings>;
 
-    /// Restore an FX's output pin mappings from a previously saved state.
-    ///
-    /// If `saved` is empty (no prior non-zero mappings), restores default
-    /// stereo pass-through (pin 0 → ch 0, pin 1 → ch 1).
-    async fn restore_fx_output(
+    /// Restore output pin mappings. Empty `saved` restores stereo
+    /// pass-through default.
+    fn restore_output(
         &self,
         project: ProjectContext,
         target: FxTarget,
         saved: FxPinMappings,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // State Chunks
-    //
-    // Binary plugin state capture and restore.
-    //
-    // Following Track Snapshot's approach: full binary state round-trip via
-    // REAPER's native chunk format. Individual FX chunks use vst_chunk (base64).
-    // Full chain chunks capture all FX state in one operation.
-    //
-    // Reference: FTS-GUITAR/Scripts/Daniel Lumertz Scripts/Tracks/Track Snapshot
-    // =========================================================================
+    // ── State chunks ──────────────────────────────────────────────
 
-    /// Get the binary state chunk for a single FX (decoded bytes).
-    ///
-    /// This captures the complete plugin state including internal state
-    /// not exposed as parameters. Uses REAPER's `vst_chunk` named config.
-    async fn get_fx_state_chunk(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Option<Vec<u8>>;
+    fn state_chunk(&self, project: ProjectContext, target: FxTarget) -> Option<Vec<u8>>;
 
-    /// Set the binary state chunk for a single FX (decoded bytes).
-    ///
-    /// Restores complete plugin state. The FX must already exist in the chain.
-    async fn set_fx_state_chunk(
+    fn set_state_chunk(
         &self,
         project: ProjectContext,
         target: FxTarget,
         chunk: Vec<u8>,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Get the base64-encoded state chunk for a single FX.
-    ///
-    /// More efficient than `get_fx_state_chunk` when the data will be
-    /// serialized (avoids decode + re-encode round-trip).
-    async fn get_fx_state_chunk_encoded(
+    fn state_chunk_encoded(&self, project: ProjectContext, target: FxTarget) -> Option<String>;
+
+    fn set_state_chunk_encoded(
         &self,
         project: ProjectContext,
         target: FxTarget,
-    ) -> Option<String>;
+        encoded: &str,
+    ) -> DawResult<()>;
 
-    /// Set the base64-encoded state chunk for a single FX.
-    async fn set_fx_state_chunk_encoded(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-        encoded: String,
-    ) -> Result<(), String>;
+    fn chain_state(&self, project: ProjectContext, chain: FxChainContext) -> Vec<FxStateChunk>;
 
-    /// Capture state chunks for all FX in a chain.
-    ///
-    /// Returns a list of (fx_guid, base64_encoded_chunk) pairs in chain order.
-    /// Like Track Snapshot, this captures the full binary state of every plugin.
-    async fn get_fx_chain_state(
-        &self,
-        project: ProjectContext,
-        chain: FxChainContext,
-    ) -> Vec<FxStateChunk>;
-
-    /// Restore state chunks for all FX in a chain.
-    ///
-    /// Matches FX by GUID and applies state chunks. FX not found in the
-    /// chain are skipped (graceful handling of missing FX, like Track Snapshot).
-    async fn set_fx_chain_state(
+    fn set_chain_state(
         &self,
         project: ProjectContext,
         chain: FxChainContext,
         chunks: Vec<FxStateChunk>,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // Container / Tree Operations
-    //
-    // Tree-aware methods for reading and manipulating FX containers.
-    // All container methods use FxNodeId for addressing — never raw
-    // REAPER indices. The tree model abstracts the DAW's internal
-    // encoding completely.
-    // =========================================================================
+    // ── Containers / tree ──────────────────────────────────────────
 
-    /// Get the full FX chain as a recursive tree.
-    ///
-    /// Returns the complete hierarchy including containers, their children,
-    /// routing modes, and channel configurations. This is the primary method
-    /// for reading container-aware FX chain state.
-    async fn get_fx_tree(&self, project: ProjectContext, chain: FxChainContext) -> FxTree;
+    /// Full FX chain as a recursive tree (containers, children,
+    /// routing modes, channel configs).
+    fn tree(&self, project: ProjectContext, chain: FxChainContext) -> FxTree;
 
-    /// Create a new empty container at a position in the chain.
-    ///
-    /// Returns the `FxNodeId` of the newly created container.
-    async fn create_container(
+    /// Create a new empty container. Returns the new `FxNodeId`.
+    fn create_container(
         &self,
         project: ProjectContext,
         request: CreateContainerRequest,
     ) -> Option<FxNodeId>;
 
-    /// Move an FX node into a container at a specified child position.
-    async fn move_to_container(
+    fn move_to_container(
         &self,
         project: ProjectContext,
         request: MoveToContainerRequest,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Move an FX node out of its container to a parent-level position.
-    async fn move_from_container(
+    fn move_from_container(
         &self,
         project: ProjectContext,
         request: MoveFromContainerRequest,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Set the routing mode (serial/parallel) for FX within a container.
-    async fn set_routing_mode(
+    fn set_routing_mode(
         &self,
         project: ProjectContext,
         chain: FxChainContext,
         node_id: FxNodeId,
         mode: FxRoutingMode,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Get the channel configuration for a container.
-    async fn get_container_channel_config(
+    fn container_channel_config(
         &self,
         project: ProjectContext,
         chain: FxChainContext,
         container_id: FxNodeId,
     ) -> Option<FxContainerChannelConfig>;
 
-    /// Set the channel configuration for a container.
-    async fn set_container_channel_config(
+    fn set_container_channel_config(
         &self,
         project: ProjectContext,
         request: SetContainerChannelConfigRequest,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Enclose one or more existing FX nodes in a new container.
-    ///
-    /// Creates a container at the position of the first specified node,
-    /// then moves all specified nodes into it. Returns the new container's
-    /// `FxNodeId`.
-    async fn enclose_in_container(
+    /// Create a new container at the position of the first specified
+    /// node, then move all specified nodes into it. Returns the new
+    /// container's id.
+    fn enclose_in_container(
         &self,
         project: ProjectContext,
         request: EncloseInContainerRequest,
     ) -> Option<FxNodeId>;
 
-    /// Explode a container — moves all children out to the parent level,
-    /// then removes the empty container.
-    async fn explode_container(
+    /// Move children out to the parent level, then remove the empty
+    /// container.
+    fn explode_container(
         &self,
         project: ProjectContext,
         chain: FxChainContext,
         container_id: FxNodeId,
-    ) -> Result<(), String>;
+    ) -> DawResult<()>;
 
-    /// Rename a container.
-    async fn rename_container(
+    fn rename_container(
         &self,
         project: ProjectContext,
         chain: FxChainContext,
         container_id: FxNodeId,
-        name: String,
-    ) -> Result<(), String>;
+        name: &str,
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // Raw Chunk Text Operations
-    //
-    // Track Snapshot-style operations that work with raw RPP chunk text.
-    // Used for atomic module preset save/load — captures the full container
-    // block including nested FX, their binary state, routing, and config.
-    // =========================================================================
+    // ── Raw chunk text ─────────────────────────────────────────────
 
-    /// Get the raw RPP chunk text for the entire FX chain section.
-    ///
-    /// Returns the `<FXCHAIN ...>...</FXCHAIN>` block as a string from the
-    /// track's state chunk. Returns `None` if the track has no FX chain.
-    async fn get_fx_chain_chunk_text(
+    /// Raw RPP `<FXCHAIN ...>...</FXCHAIN>` block from the track's
+    /// state chunk. `None` if no FX chain.
+    fn chain_chunk_text(&self, project: ProjectContext, chain: FxChainContext) -> Option<String>;
+
+    /// Insert a raw RPP block (e.g. a `<CONTAINER>` block with
+    /// nested FX) at the end of the chain. REAPER handles plugin
+    /// instantiation + state restoration atomically.
+    fn insert_chain_chunk(
         &self,
         project: ProjectContext,
         chain: FxChainContext,
-    ) -> Option<String>;
-
-    /// Insert a raw RPP chunk block into the FX chain.
-    ///
-    /// The `chunk_text` should be a complete RPP block (e.g., a `<CONTAINER>`
-    /// block with nested FX). It is appended at the end of the existing chain.
-    /// REAPER handles all plugin instantiation and state restoration atomically.
-    async fn insert_fx_chain_chunk(
-        &self,
-        project: ProjectContext,
-        chain: FxChainContext,
-        chunk_text: String,
-    ) -> Result<(), String>;
-
-    // =========================================================================
-    // Observation / Subscriptions
-    //
-    // Reactive push-based FX state observation.
-    // Follows the same pattern as TransportService::subscribe_state.
-    // =========================================================================
-
-    /// Subscribe to FX chain events for a specific chain.
-    ///
-    /// Events include parameter changes, FX add/remove/reorder,
-    /// enable/bypass changes, and preset changes. The subscription
-    /// delivers events through a unified `FxEvent` stream.
-    ///
-    /// The subscriber receives events until the sender is dropped
-    /// or the subscriber disconnects.
-    async fn subscribe_fx_events(
-        &self,
-        project: ProjectContext,
-        chain: FxChainContext,
-        events: Tx<FxEvent>,
-    );
+        chunk_text: &str,
+    ) -> DawResult<()>;
 }
+
+#[cfg(feature = "vox")]
+pub use EffectsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use effects_rpc_service_descriptor as descriptor;

@@ -96,12 +96,12 @@ impl ActionRegistry {
     }
 
     /// Unregister a previously registered action.
-    pub async fn unregister(&self, command_name: &str) -> crate::Result<bool> {
-        Ok(self
-            .clients
+    pub async fn unregister(&self, command_name: &str) -> crate::Result<()> {
+        self.clients
             .action_registry
-            .unregister_action(command_name.to_string())
-            .await?)
+            .unregister(command_name.to_string())
+            .await??;
+        Ok(())
     }
 
     /// Check if a named action is registered in REAPER.
@@ -143,15 +143,9 @@ impl ActionRegistry {
         Ok(self.clients.action_registry.list_actions(request).await?)
     }
 
-    /// Subscribe to action trigger events.
-    ///
-    /// Returns a stream of `ActionEvent::Triggered` events whenever a REAPER
-    /// action registered through this service is triggered by the user.
-    pub async fn subscribe_actions(&self) -> crate::Result<vox::Rx<daw_proto::ActionEvent>> {
-        let (tx, rx) = vox::channel::<daw_proto::ActionEvent>();
-        self.clients.action_registry.subscribe_actions(tx).await?;
-        Ok(rx)
-    }
+    // `subscribe_actions` retired with the architect::rpc port —
+    // streaming subscriptions live on a sibling trait. Polling
+    // `list_actions` is the current substitute.
 
     /// Execute a native DAW command by numeric ID.
     ///

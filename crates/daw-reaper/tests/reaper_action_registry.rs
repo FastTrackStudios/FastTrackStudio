@@ -719,8 +719,7 @@ async fn unregister_returns_true_for_known_action(ctx: &ReaperTestContext) -> ey
             .await?
     );
 
-    let removed = actions.unregister("FTS_TEST_UNREGISTER_KNOWN").await?;
-    assert!(removed, "unregister of a known action should return true");
+    actions.unregister("FTS_TEST_UNREGISTER_KNOWN").await?;
 
     Ok(())
 }
@@ -737,8 +736,7 @@ async fn unregister_removes_from_action_list(ctx: &ReaperTestContext) -> eyre::R
         "freshly registered action must be in the action list"
     );
 
-    let removed = actions.unregister("FTS_TEST_UNREGISTER_ME").await?;
-    assert!(removed);
+    actions.unregister("FTS_TEST_UNREGISTER_ME").await?;
 
     // The gaccel entry is gone — the action no longer appears in the
     // Actions window / REAPER's main keyboard section action list.
@@ -800,13 +798,11 @@ async fn reregister_after_unregister_keeps_cmd_id_but_re_adds_gaccel(
 async fn unregister_unknown_returns_false(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
 
-    let removed = actions
+    // API now returns () — unregistering an unknown action is a no-op rather
+    // than a boolean signal. Test simply asserts it doesn't error.
+    actions
         .unregister("FTS_TEST_UNREGISTER_NEVER_REGISTERED")
         .await?;
-    assert!(
-        !removed,
-        "unregister of an unknown action should return false"
-    );
 
     Ok(())
 }

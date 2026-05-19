@@ -1,7 +1,13 @@
-//! Marker module
+//! Marker module — canonical home for everything markers-related.
 //!
-//! This module provides marker types and the MarkerService trait
-//! for managing named reference points in a DAW timeline.
+//! - [`Marker`] : the wire struct
+//! - [`Markers`] : the service trait, decorated with `#[architect::rpc]`
+//! - [`MarkerEvent`] / [`MarkerError`] : event + error types
+//!
+//! The architect macro derives the async vox face from the sync
+//! `Markers` trait: backends impl `Markers` directly, in-process
+//! callers use it as a plain sync API, and remote callers reach the
+//! same surface via the auto-emitted [`MarkersClient`] over vox.
 
 mod error;
 mod event;
@@ -10,8 +16,16 @@ mod marker;
 mod service;
 
 pub use error::MarkerError;
-pub use event::MarkerEvent;
+pub use event::{MarkerEvent, MarkerStreamEvent};
 pub use marker::Marker;
+pub use service::{Markers, MarkersRpc};
+
+// vox-emitted names from the auto-generated mirror trait. Re-exported
+// with shorter aliases (`descriptor`, `dispatcher`) so consumer
+// mounting code reads `marker::descriptor()` and `marker::serve(Reaper)`
+// rather than juggling the underscored mirror names directly.
+#[cfg(feature = "vox")]
 pub use service::{
-    MarkerService, MarkerServiceClient, MarkerServiceDispatcher, marker_service_service_descriptor,
+    MarkersClient, MarkersRpcDispatcher as Dispatcher, Service, layer,
+    markers_rpc_service_descriptor as descriptor, serve,
 };

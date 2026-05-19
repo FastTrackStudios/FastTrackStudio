@@ -19,6 +19,18 @@ pub enum TrackRef {
     Master,
 }
 
+/// Behavior to use when moving selected tracks to a new index.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Facet)]
+pub enum ReorderTracksBehavior {
+    /// Move selected tracks without changing folder membership.
+    Normal,
+    /// Make moved tracks children of the track immediately above the destination.
+    MakeChildOfPreviousTrack,
+    /// Extend the folder above the destination when applicable.
+    ExtendFolder,
+}
+
 impl TrackRef {
     /// Create a reference by GUID
     pub fn guid(guid: impl Into<String>) -> Self {

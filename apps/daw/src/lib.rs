@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::{env, fs};
 
-use daw::Daw;
+use daw::rpc::Daw;
 use daw::service::FxType;
 use eyre::{Result, bail};
 use serde_json::json;
@@ -22,6 +22,7 @@ use vox::{
 
 pub mod cli_values;
 pub mod ops;
+pub mod sync;
 
 /// A DAW connection that keeps the vox session alive.
 ///
@@ -65,7 +66,7 @@ pub fn discover_socket() -> Option<PathBuf> {
         .collect();
 
     // Sort by PID (most recent process likely has highest PID)
-    sockets.sort_by(|a, b| b.0.cmp(&a.0));
+    sockets.sort_by_key(|s| std::cmp::Reverse(s.0));
     sockets.into_iter().next().map(|(_, path)| path)
 }
 
@@ -88,7 +89,7 @@ pub fn discover_all_sockets() -> Vec<(u32, PathBuf)> {
             if alive { Some((pid, path)) } else { None }
         })
         .collect();
-    sockets.sort_by(|a, b| b.0.cmp(&a.0));
+    sockets.sort_by_key(|s| std::cmp::Reverse(s.0));
     sockets
 }
 
@@ -505,6 +506,13 @@ fn find_built_daw_bridge() -> Option<PathBuf> {
 }
 
 pub fn spawn_reaper(profile: &DawProfile) -> Result<u32> {
+    spawn_reaper_with_env(profile, &[])
+}
+
+/// Like [`spawn_reaper`] but lets the caller inject extra env vars into the
+/// REAPER process (e.g. `FTS_SYNC_ENABLED=1` to enable the daw-bridge sync
+/// runtime).
+pub fn spawn_reaper_with_env(profile: &DawProfile, extra_env: &[(&str, &str)]) -> Result<u32> {
     ensure_reaper_profile_dirs(profile)?;
 
     let mut cmd = if profile.sandboxed {
@@ -533,6 +541,10 @@ pub fn spawn_reaper(profile: &DawProfile) -> Result<u32> {
         .arg("-newinst")
         .arg("-nosplash")
         .arg("-ignoreerrors");
+
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
 
     let child = cmd.spawn().map_err(|e| {
         eyre::eyre!(
@@ -743,7 +755,7 @@ pub async fn resolve_track(daw: &Daw, track_arg: &str) -> Result<(String, String
 }
 
 /// Resolve a track argument and return the TrackHandle directly.
-pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::TrackHandle> {
+pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::rpc::TrackHandle> {
     let (guid, _) = resolve_track(daw, track_arg).await?;
     let project = daw.current_project().await?;
     project
@@ -755,10 +767,10 @@ pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::Tra
 
 /// Resolve an FX argument (index or name) on a track's FX chain.
 pub async fn resolve_fx_handle(
-    fx_chain: &daw::FxChain,
+    fx_chain: &daw::rpc::FxChain,
     fx_arg: &str,
     track_name: &str,
-) -> Result<daw::FxHandle> {
+) -> Result<daw::rpc::FxHandle> {
     let fx_handle = if let Ok(idx) = fx_arg.parse::<u32>() {
         fx_chain.by_index(idx).await?
     } else {
@@ -1633,7 +1645,7 @@ async fn resolve_take(
     track_arg: &str,
     item_idx: u32,
     take_idx: u32,
-) -> Result<daw::TakeHandle> {
+) -> Result<daw::rpc::TakeHandle> {
     let track = resolve_track_handle(daw, track_arg).await?;
     let item = track
         .items()

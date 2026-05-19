@@ -7,3 +7,6 @@ authors.workspace = true
 description = "Real-time-aware allocator and main-thread task dispatch for DAW extensions. Inspired by Helgobox (https://github.com/helgoboss/helgobox)."
 
 [dependencies]
+
+[lints]
+workspace = true

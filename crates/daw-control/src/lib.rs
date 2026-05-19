@@ -117,32 +117,35 @@ pub use daw_proto::transport::transport::Transport as TransportState;
 use std::sync::Arc;
 
 // Service clients are internal — consumers use high-level handles instead.
-pub(crate) use daw_proto::ActionRegistryServiceClient;
-pub(crate) use daw_proto::AudioEngineServiceClient;
-pub(crate) use daw_proto::AutomationServiceClient;
-pub(crate) use daw_proto::DawFileServiceClient;
-pub(crate) use daw_proto::ExtStateServiceClient;
-pub(crate) use daw_proto::FxServiceClient;
-pub(crate) use daw_proto::HealthServiceClient;
-pub(crate) use daw_proto::InputServiceClient;
-pub(crate) use daw_proto::ItemServiceClient;
-pub(crate) use daw_proto::LiveMidiServiceClient;
-pub(crate) use daw_proto::MarkerServiceClient;
-pub(crate) use daw_proto::MidiServiceClient;
-pub(crate) use daw_proto::PositionConversionServiceClient;
-pub(crate) use daw_proto::ProjectServiceClient;
-pub(crate) use daw_proto::RegionServiceClient;
-pub(crate) use daw_proto::RoutingServiceClient;
-pub(crate) use daw_proto::ScreensetServiceClient;
-pub(crate) use daw_proto::TakeServiceClient;
-pub(crate) use daw_proto::TempoMapServiceClient;
-pub(crate) use daw_proto::TrackServiceClient;
-pub(crate) use daw_proto::WindowGeometryServiceClient;
-pub(crate) use daw_proto::batch::BatchServiceClient;
-pub(crate) use daw_proto::dock_host::DockHostServiceClient;
-pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
-pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
-pub(crate) use daw_proto::transport::transport::TransportServiceClient;
+pub(crate) use daw_proto::ActionRegistrationClient;
+pub(crate) use daw_proto::AudioEngineClient;
+pub(crate) use daw_proto::AutomationClient;
+pub(crate) use daw_proto::DawFileOpsClient;
+pub(crate) use daw_proto::EffectsClient;
+pub(crate) use daw_proto::ExtStateClient;
+pub(crate) use daw_proto::HealthClient;
+pub(crate) use daw_proto::InputClient;
+pub(crate) use daw_proto::ItemsClient;
+pub(crate) use daw_proto::LiveMidiClient;
+pub(crate) use daw_proto::MarkersClient;
+pub(crate) use daw_proto::MidiClient;
+pub(crate) use daw_proto::PositionConversionClient;
+pub(crate) use daw_proto::ProjectsClient;
+pub(crate) use daw_proto::RegionsClient;
+pub(crate) use daw_proto::RoutingClient;
+pub(crate) use daw_proto::ScreensetsClient;
+pub(crate) use daw_proto::TakesClient;
+pub(crate) use daw_proto::TempoMapClient;
+pub(crate) use daw_proto::TracksClient;
+pub(crate) use daw_proto::TransportClient;
+pub(crate) use daw_proto::WindowGeometryClient;
+pub(crate) use daw_proto::batch::BatchExecutionClient;
+pub(crate) use daw_proto::diagnostics::DiagnosticsClient;
+pub(crate) use daw_proto::dock_host::DockHostingClient;
+pub(crate) use daw_proto::event_bus::EventBusClient;
+pub(crate) use daw_proto::plugin_loader::PluginLoadingClient;
+pub(crate) use daw_proto::toolbar::ToolbarClient;
+pub(crate) use daw_proto::window_manager::WindowManagerClient;
 pub use vox::Caller;
 
 pub mod error;
@@ -155,7 +158,9 @@ mod audio_engine;
 mod automation;
 pub mod batch;
 mod dawfile;
+mod diagnostics;
 mod dock_host;
+mod event_bus;
 mod ext_state;
 mod fx;
 mod input;
@@ -172,6 +177,7 @@ mod toolbar;
 mod tracks;
 mod transport;
 mod window_geometry;
+mod window_manager;
 
 pub use self::action_registry::ActionRegistry;
 pub use self::audio_engine::AudioEngine;
@@ -180,7 +186,9 @@ pub use self::batch::{
     BatchBuilder, BatchExtractError, BatchResponseExt, FromStepOutput, StepHandle,
 };
 pub use self::dawfile::DawFile;
+pub use self::diagnostics::Probes;
 pub use self::dock_host::DockHost;
+pub use self::event_bus::Events;
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::input::Input;
@@ -197,36 +205,40 @@ pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
 pub use self::window_geometry::WindowGeometry;
+pub use self::window_manager::WindowManager;
 
 /// Service clients for a DAW connection
 #[derive(Clone)]
 pub struct DawClients {
-    pub(crate) action_registry: ActionRegistryServiceClient,
-    pub(crate) dock_host: DockHostServiceClient,
-    pub(crate) transport: TransportServiceClient,
-    pub(crate) project: ProjectServiceClient,
-    pub(crate) marker: MarkerServiceClient,
-    pub(crate) region: RegionServiceClient,
-    pub(crate) tempo_map: TempoMapServiceClient,
-    pub(crate) track: TrackServiceClient,
-    pub(crate) fx: FxServiceClient,
-    pub(crate) position_conversion: PositionConversionServiceClient,
-    pub(crate) item: ItemServiceClient,
-    pub(crate) take: TakeServiceClient,
-    pub(crate) routing: RoutingServiceClient,
-    pub(crate) screenset: ScreensetServiceClient,
-    pub(crate) dawfile: DawFileServiceClient,
-    pub(crate) window_geometry: WindowGeometryServiceClient,
-    pub(crate) automation: AutomationServiceClient,
-    pub(crate) live_midi: LiveMidiServiceClient,
-    pub(crate) midi: MidiServiceClient,
-    pub(crate) audio_engine: AudioEngineServiceClient,
-    pub(crate) ext_state: ExtStateServiceClient,
-    pub(crate) health: HealthServiceClient,
-    pub(crate) input: InputServiceClient,
-    pub(crate) toolbar: ToolbarServiceClient,
-    pub(crate) plugin_loader: PluginLoaderServiceClient,
-    pub(crate) batch: BatchServiceClient,
+    pub(crate) action_registry: ActionRegistrationClient,
+    pub(crate) dock_host: DockHostingClient,
+    pub(crate) transport: TransportClient,
+    pub(crate) project: ProjectsClient,
+    pub(crate) marker: MarkersClient,
+    pub(crate) region: RegionsClient,
+    pub(crate) tempo_map: TempoMapClient,
+    pub(crate) track: TracksClient,
+    pub(crate) fx: EffectsClient,
+    pub(crate) position_conversion: PositionConversionClient,
+    pub(crate) item: ItemsClient,
+    pub(crate) take: TakesClient,
+    pub(crate) routing: RoutingClient,
+    pub(crate) screenset: ScreensetsClient,
+    pub(crate) dawfile: DawFileOpsClient,
+    pub(crate) window_geometry: WindowGeometryClient,
+    pub(crate) window_manager: WindowManagerClient,
+    pub(crate) automation: AutomationClient,
+    pub(crate) live_midi: LiveMidiClient,
+    pub(crate) midi: MidiClient,
+    pub(crate) audio_engine: AudioEngineClient,
+    pub(crate) ext_state: ExtStateClient,
+    pub(crate) health: HealthClient,
+    pub(crate) input: InputClient,
+    pub(crate) toolbar: ToolbarClient,
+    pub(crate) plugin_loader: PluginLoadingClient,
+    pub(crate) batch: BatchExecutionClient,
+    pub(crate) diagnostics: DiagnosticsClient,
+    pub(crate) event_bus: EventBusClient,
     /// Original `Caller` kept around so consumers can build additional
     /// service clients on the same in-process channel (e.g.
     /// `keyflow_daw_analysis::MidiChartServiceClient`).
@@ -237,32 +249,35 @@ impl DawClients {
     /// Create service clients from a connection handle
     pub fn new(handle: Caller) -> Self {
         Self {
-            action_registry: ActionRegistryServiceClient::new(handle.clone()),
-            dock_host: DockHostServiceClient::new(handle.clone()),
-            transport: TransportServiceClient::new(handle.clone()),
-            project: ProjectServiceClient::new(handle.clone()),
-            marker: MarkerServiceClient::new(handle.clone()),
-            region: RegionServiceClient::new(handle.clone()),
-            tempo_map: TempoMapServiceClient::new(handle.clone()),
-            track: TrackServiceClient::new(handle.clone()),
-            fx: FxServiceClient::new(handle.clone()),
-            position_conversion: PositionConversionServiceClient::new(handle.clone()),
-            item: ItemServiceClient::new(handle.clone()),
-            take: TakeServiceClient::new(handle.clone()),
-            routing: RoutingServiceClient::new(handle.clone()),
-            screenset: ScreensetServiceClient::new(handle.clone()),
-            dawfile: DawFileServiceClient::new(handle.clone()),
-            window_geometry: WindowGeometryServiceClient::new(handle.clone()),
-            automation: AutomationServiceClient::new(handle.clone()),
-            live_midi: LiveMidiServiceClient::new(handle.clone()),
-            midi: MidiServiceClient::new(handle.clone()),
-            audio_engine: AudioEngineServiceClient::new(handle.clone()),
-            ext_state: ExtStateServiceClient::new(handle.clone()),
-            health: HealthServiceClient::new(handle.clone()),
-            input: InputServiceClient::new(handle.clone()),
-            toolbar: ToolbarServiceClient::new(handle.clone()),
-            plugin_loader: PluginLoaderServiceClient::new(handle.clone()),
-            batch: BatchServiceClient::new(handle.clone()),
+            action_registry: ActionRegistrationClient::new(handle.clone()),
+            dock_host: DockHostingClient::new(handle.clone()),
+            transport: TransportClient::new(handle.clone()),
+            project: ProjectsClient::new(handle.clone()),
+            marker: MarkersClient::new(handle.clone()),
+            region: RegionsClient::new(handle.clone()),
+            tempo_map: TempoMapClient::new(handle.clone()),
+            track: TracksClient::new(handle.clone()),
+            fx: EffectsClient::new(handle.clone()),
+            position_conversion: PositionConversionClient::new(handle.clone()),
+            item: ItemsClient::new(handle.clone()),
+            take: TakesClient::new(handle.clone()),
+            routing: RoutingClient::new(handle.clone()),
+            screenset: ScreensetsClient::new(handle.clone()),
+            dawfile: DawFileOpsClient::new(handle.clone()),
+            window_geometry: WindowGeometryClient::new(handle.clone()),
+            window_manager: WindowManagerClient::new(handle.clone()),
+            automation: AutomationClient::new(handle.clone()),
+            live_midi: LiveMidiClient::new(handle.clone()),
+            midi: MidiClient::new(handle.clone()),
+            audio_engine: AudioEngineClient::new(handle.clone()),
+            ext_state: ExtStateClient::new(handle.clone()),
+            health: HealthClient::new(handle.clone()),
+            input: InputClient::new(handle.clone()),
+            toolbar: ToolbarClient::new(handle.clone()),
+            plugin_loader: PluginLoadingClient::new(handle.clone()),
+            batch: BatchExecutionClient::new(handle.clone()),
+            diagnostics: DiagnosticsClient::new(handle.clone()),
+            event_bus: EventBusClient::new(handle.clone()),
             caller: handle,
         }
     }
@@ -322,6 +337,22 @@ impl Daw {
         &self.clients.caller
     }
 
+    /// Cross-domain event-bus handle. Subscribe with a `BusFilter` to
+    /// receive every enabled domain's events on one channel. Per-domain
+    /// `project.tracks().subscribe()` etc. remain — use this when a
+    /// consumer wants several domains at once.
+    pub fn events(&self) -> Events {
+        Events::new(self.clients.clone())
+    }
+
+    /// In-process diagnostic probes (latency, throughput). The probe
+    /// bodies run on REAPER's main thread inside a single dispatched
+    /// closure, so they measure intrinsic backend latency without
+    /// per-sample RPC / IPC overhead.
+    pub fn diagnostics(&self) -> Probes {
+        Probes::new(self.clients.clone())
+    }
+
     /// Get the current/active project
     ///
     /// Returns the project that is currently focused/active in the DAW.
@@ -333,7 +364,7 @@ impl Daw {
         let info = self
             .clients
             .project
-            .get_current()
+            .current()
             .await?
             .ok_or(Error::NoCurrentProject)?;
 
@@ -474,40 +505,8 @@ impl Daw {
         Ok(())
     }
 
-    /// Subscribe to project changes (open, close, switch)
-    ///
-    /// Returns a receiver that streams project events:
-    /// - `ProjectsChanged`: Full list of open projects
-    /// - `CurrentChanged`: Active project changed
-    /// - `Opened`: A project was opened
-    /// - `Closed`: A project was closed
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use daw_control::Daw;
-    ///
-    /// # async fn example(daw: &Daw) -> daw_control::Result<()> {
-    /// let mut rx = daw.subscribe_projects().await?;
-    /// while let Ok(Some(event)) = rx.recv().await {
-    ///     match &*event {
-    ///         daw_control::ProjectEvent::CurrentChanged(guid) => {
-    ///             println!("Current project: {:?}", guid);
-    ///         }
-    ///         daw_control::ProjectEvent::ProjectsChanged(projects) => {
-    ///             println!("Projects: {} open", projects.len());
-    ///         }
-    ///         _ => {}
-    ///     }
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn subscribe_projects(&self) -> crate::Result<vox::Rx<ProjectEvent>> {
-        let (tx, rx) = vox::channel::<ProjectEvent>();
-        self.clients.project.subscribe(tx).await?;
-        Ok(rx)
-    }
+    // `subscribe_projects` retired with the architect::rpc port —
+    // project event streaming lives on a sibling trait.
 
     /// Get a handle to the audio engine.
     ///
@@ -585,6 +584,14 @@ impl Daw {
         Screensets::new(self.clients.clone())
     }
 
+    /// Access named workspace layouts (mode toolbars + docking).
+    /// Layouts are stored in REAPER's `reaper-screensets.ini`; the
+    /// service resolves names against that file and dispatches the
+    /// matching `Screenset: Load #N` action when applied.
+    pub fn window_manager(&self) -> WindowManager {
+        WindowManager::new(self.clients.clone())
+    }
+
     /// Access on-disk DAW project file helpers (`.RPP` summary, `.RPL`
     /// combine). Pure-function operations — no REAPER context required.
     pub fn dawfile(&self) -> DawFile {
@@ -606,7 +613,7 @@ impl Daw {
     /// Returns every plugin known to REAPER (VST2, VST3, CLAP, AU, JS, etc.)
     /// with its display name and full identifier string.
     pub async fn installed_plugins(&self) -> crate::Result<Vec<InstalledFx>> {
-        Ok(self.clients.fx.list_installed_fx().await?)
+        Ok(self.clients.fx.list_installed().await?)
     }
 
     /// Get the last touched FX parameter.
@@ -614,7 +621,7 @@ impl Daw {
     /// Returns information about which FX parameter was most recently
     /// adjusted by the user in the DAW UI.
     pub async fn last_touched_fx(&self) -> crate::Result<Option<LastTouchedFx>> {
-        Ok(self.clients.fx.get_last_touched_fx().await?)
+        Ok(self.clients.fx.last_touched().await?)
     }
 
     /// Show a message in the DAW's console/log window.

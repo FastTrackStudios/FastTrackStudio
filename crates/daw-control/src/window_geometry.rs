@@ -41,11 +41,11 @@ impl WindowGeometry {
         Ok(self.clients.window_geometry.grow(target, dw, dh).await?)
     }
 
-    pub async fn set_rect(
-        &self,
-        target: WindowTarget,
-        rect: ScreensetRect,
-    ) -> crate::Result<WindowGeometryResult> {
-        Ok(self.clients.window_geometry.set_rect(target, rect).await?)
+    pub async fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> crate::Result<()> {
+        self.clients
+            .window_geometry
+            .set_rect(target, rect)
+            .await??;
+        Ok(())
     }
 }

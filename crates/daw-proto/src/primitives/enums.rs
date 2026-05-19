@@ -88,4 +88,7 @@ pub enum AutomationMode {
     Latch = 4,
     /// Latch Preview mode - like Latch but previews changes
     LatchPreview = 5,
+    /// Off — bypass automation (matches REAPER's "Off" track mode).
+    /// The envelope is ignored entirely during playback + render.
+    Off = 6,
 }

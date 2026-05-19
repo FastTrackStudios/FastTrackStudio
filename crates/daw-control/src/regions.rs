@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use crate::Result;
-use daw_proto::{ProjectContext, Region, RegionEvent};
-use vox::Rx;
+use daw_proto::{ProjectContext, Region};
 
 /// Regions handle for a specific project
 ///
@@ -67,39 +66,19 @@ impl Regions {
 
     /// Get all regions in the project
     pub async fn all(&self) -> Result<Vec<Region>> {
-        let regions = self.clients.region.get_regions(self.context()).await?;
+        let regions = self.clients.region.all(self.context()).await?;
         Ok(regions)
     }
 
     /// Get a specific region by ID
     pub async fn get(&self, id: u32) -> Result<Option<Region>> {
-        let region = self.clients.region.get_region(self.context(), id).await?;
-        Ok(region)
-    }
-
-    /// Get all regions that intersect with a time range
-    pub async fn in_range(&self, start: f64, end: f64) -> Result<Vec<Region>> {
-        let regions = self
-            .clients
-            .region
-            .get_regions_in_range(self.context(), start, end)
-            .await?;
-        Ok(regions)
-    }
-
-    /// Get the region containing a specific position (if any)
-    pub async fn at_position(&self, position: f64) -> Result<Option<Region>> {
-        let region = self
-            .clients
-            .region
-            .get_region_at(self.context(), position)
-            .await?;
+        let region = self.clients.region.get(self.context(), id).await?;
         Ok(region)
     }
 
     /// Get the total number of regions
-    pub async fn count(&self) -> Result<usize> {
-        let count = self.clients.region.region_count(self.context()).await?;
+    pub async fn count(&self) -> Result<u32> {
+        let count = self.clients.region.count(self.context()).await?;
         Ok(count)
     }
 
@@ -111,49 +90,19 @@ impl Regions {
     ///
     /// Returns the ID of the newly created region.
     pub async fn add(&self, start: f64, end: f64, name: &str) -> Result<u32> {
+        // architect-emitted client wraps `DawResult<T>` in vox's
+        // `Result<_, vox::Error>` — flatten both with `.await??`.
         let id = self
             .clients
             .region
-            .add_region(self.context(), start, end, name.to_string())
-            .await?;
+            .add(self.context(), start, end, name.to_string())
+            .await??;
         Ok(id)
-    }
-
-    /// Add a new region in a specific ruler lane.
-    ///
-    /// Returns the ID of the newly created region.
-    pub async fn add_in_lane(&self, start: f64, end: f64, name: &str, lane: u32) -> Result<u32> {
-        let id = self
-            .clients
-            .region
-            .add_region_in_lane(
-                self.context(),
-                daw_proto::AddRegionInLaneRequest {
-                    start,
-                    end,
-                    name: name.to_string(),
-                    lane,
-                },
-            )
-            .await?;
-        Ok(id)
-    }
-
-    /// Set the ruler lane for a region. Pass None to move to the default lane.
-    pub async fn set_lane(&self, id: u32, lane: Option<u32>) -> Result<()> {
-        self.clients
-            .region
-            .set_region_lane(self.context(), id, lane)
-            .await?;
-        Ok(())
     }
 
     /// Remove a region by ID
     pub async fn remove(&self, id: u32) -> Result<()> {
-        self.clients
-            .region
-            .remove_region(self.context(), id)
-            .await?;
+        self.clients.region.remove(self.context(), id).await??;
         Ok(())
     }
 
@@ -161,8 +110,8 @@ impl Regions {
     pub async fn set_bounds(&self, id: u32, start: f64, end: f64) -> Result<()> {
         self.clients
             .region
-            .set_region_bounds(self.context(), id, start, end)
-            .await?;
+            .set_bounds(self.context(), id, start, end)
+            .await??;
         Ok(())
     }
 
@@ -170,8 +119,8 @@ impl Regions {
     pub async fn rename(&self, id: u32, name: &str) -> Result<()> {
         self.clients
             .region
-            .rename_region(self.context(), id, name.to_string())
-            .await?;
+            .rename(self.context(), id, name.to_string())
+            .await??;
         Ok(())
     }
 
@@ -179,25 +128,8 @@ impl Regions {
     pub async fn set_color(&self, id: u32, color: u32) -> Result<()> {
         self.clients
             .region
-            .set_region_color(self.context(), id, color)
-            .await?;
-        Ok(())
-    }
-
-    /// Configure whether a track renders for this region (region render matrix).
-    ///
-    /// `track_index` is the 0-based REAPER track index.
-    /// `enable` = true to include the track, false to exclude it.
-    pub async fn set_render_track(
-        &self,
-        region_id: u32,
-        track_index: u32,
-        enable: bool,
-    ) -> Result<()> {
-        self.clients
-            .region
-            .set_region_render_matrix(self.context(), region_id, track_index, enable)
-            .await?;
+            .set_color(self.context(), id, color)
+            .await??;
         Ok(())
     }
 
@@ -205,31 +137,13 @@ impl Regions {
     // Navigation Methods
     // =========================================================================
 
-    /// Navigate to the start of a region
-    pub async fn goto_start(&self, id: u32) -> Result<()> {
-        self.clients
-            .region
-            .goto_region_start(self.context(), id)
-            .await?;
-        Ok(())
-    }
-
-    /// Navigate to the end of a region
-    pub async fn goto_end(&self, id: u32) -> Result<()> {
-        self.clients
-            .region
-            .goto_region_end(self.context(), id)
-            .await?;
-        Ok(())
-    }
-
     // =========================================================================
     // Subscriptions
     // =========================================================================
 
-    /// Subscribe to region change events for this project.
-    pub async fn subscribe(&self) -> Result<Rx<RegionEvent>> {
-        let (tx, rx) = vox::channel::<RegionEvent>();
+    /// Subscribe to region add/remove/modify events.
+    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::region::RegionStreamEvent>> {
+        let (tx, rx) = vox::channel();
         self.clients.region.subscribe(self.context(), tx).await?;
         Ok(rx)
     }

@@ -1,48 +1,33 @@
-//! Tempo map service trait
+//! Tempo map service trait.
 //!
-//! Defines the RPC interface for tempo and time signature management.
+//! Sync, decorated with `#[architect::rpc]`. `ProjectContext` per
+//! method; backends impl directly on their singleton type. Retired
+//! surfaces (time_to_qn / qn_to_time helpers + subscribe streaming)
+//! land on follow-on sibling traits if needed.
 
-use super::{TempoMapEvent, TempoPoint};
-use crate::ProjectContext;
-use vox::{Tx, service};
+use super::TempoPoint;
+use super::event::TempoMapStreamEvent;
+use crate::{DawResult, ProjectContext};
+use vox::Tx;
 
-/// Service for managing the tempo map in a DAW project
-///
-/// The tempo map defines how tempo and time signature change over time.
-/// This enables conversion between time (seconds) and musical position
-/// (measures/beats).
-#[service]
-pub trait TempoMapService {
-    // =========================================================================
-    // Query Methods
-    // =========================================================================
+#[architect::rpc]
+pub trait TempoMap {
+    // ── Queries ─────────────────────────────────────────────────────
 
-    /// Get all tempo points in the project
-    async fn get_tempo_points(&self, project: ProjectContext) -> Vec<TempoPoint>;
+    fn get_tempo_points(&self, project: ProjectContext) -> Vec<TempoPoint>;
 
-    /// Get tempo point at a specific index
-    async fn get_tempo_point(&self, project: ProjectContext, index: u32) -> Option<TempoPoint>;
+    fn get_tempo_point(&self, project: ProjectContext, index: u32) -> Option<TempoPoint>;
 
-    /// Get the number of tempo points
-    async fn tempo_point_count(&self, project: ProjectContext) -> usize;
+    fn tempo_point_count(&self, project: ProjectContext) -> u32;
 
-    /// Get the tempo at a specific time position (interpolated if between points)
-    async fn get_tempo_at(&self, project: ProjectContext, seconds: f64) -> f64;
+    fn get_tempo_at(&self, project: ProjectContext, seconds: f64) -> f64;
 
-    /// Get the time signature at a specific time position
-    async fn get_time_signature_at(&self, project: ProjectContext, seconds: f64) -> (i32, i32);
+    fn get_time_signature_at(&self, project: ProjectContext, seconds: f64) -> (i32, i32);
 
-    /// Convert a time position (seconds) to quarter-note position
-    async fn time_to_qn(&self, project: ProjectContext, seconds: f64) -> f64;
+    fn time_to_musical(&self, project: ProjectContext, seconds: f64) -> (i32, i32, f64);
 
-    /// Convert a quarter-note position to time position (seconds)
-    async fn qn_to_time(&self, project: ProjectContext, qn: f64) -> f64;
-
-    /// Convert time position to musical position (measure, beat, fraction)
-    async fn time_to_musical(&self, project: ProjectContext, seconds: f64) -> (i32, i32, f64);
-
-    /// Convert musical position to time position in seconds
-    async fn musical_to_time(
+    /// `(measure, beat, fraction)` → seconds.
+    fn musical_to_time(
         &self,
         project: ProjectContext,
         measure: i32,
@@ -50,59 +35,39 @@ pub trait TempoMapService {
         fraction: f64,
     ) -> f64;
 
-    // =========================================================================
-    // Mutation Methods
-    // =========================================================================
+    // ── Mutation ────────────────────────────────────────────────────
 
-    /// Add a tempo point at the given position
-    ///
-    /// To also set a time signature change, call `set_time_signature_at_point`
-    /// after adding the tempo point.
-    async fn add_tempo_point(&self, project: ProjectContext, seconds: f64, bpm: f64) -> u32;
+    fn add_tempo_point(&self, project: ProjectContext, seconds: f64, bpm: f64) -> DawResult<u32>;
 
-    /// Remove a tempo point by index
-    async fn remove_tempo_point(&self, project: ProjectContext, index: u32);
+    fn remove_tempo_point(&self, project: ProjectContext, index: u32) -> DawResult<()>;
 
-    /// Set tempo at a specific point
-    async fn set_tempo_at_point(&self, project: ProjectContext, index: u32, bpm: f64);
+    fn set_tempo_at_point(&self, project: ProjectContext, index: u32, bpm: f64) -> DawResult<()>;
 
-    /// Set time signature at a specific point
-    async fn set_time_signature_at_point(
+    fn set_time_signature_at_point(
         &self,
         project: ProjectContext,
         index: u32,
         numerator: i32,
         denominator: i32,
-    );
+    ) -> DawResult<()>;
 
-    /// Move a tempo point to a new position
-    async fn move_tempo_point(&self, project: ProjectContext, index: u32, seconds: f64);
+    fn move_tempo_point(&self, project: ProjectContext, index: u32, seconds: f64) -> DawResult<()>;
 
-    // =========================================================================
-    // Project Defaults
-    // =========================================================================
+    // ── Project defaults ────────────────────────────────────────────
 
-    /// Get the project's default tempo (at position 0)
-    async fn get_default_tempo(&self, project: ProjectContext) -> f64;
+    fn get_default_tempo(&self, project: ProjectContext) -> f64;
 
-    /// Set the project's default tempo
-    async fn set_default_tempo(&self, project: ProjectContext, bpm: f64);
+    fn set_default_tempo(&self, project: ProjectContext, bpm: f64) -> DawResult<()>;
 
-    /// Get the project's default time signature
-    async fn get_default_time_signature(&self, project: ProjectContext) -> (i32, i32);
+    fn get_default_time_signature(&self, project: ProjectContext) -> (i32, i32);
 
-    /// Set the project's default time signature
-    async fn set_default_time_signature(
+    fn set_default_time_signature(
         &self,
         project: ProjectContext,
         numerator: i32,
         denominator: i32,
-    );
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // Subscriptions
-    // =========================================================================
-
-    /// Subscribe to tempo map change events for a project.
-    async fn subscribe_tempo_map(&self, project: ProjectContext, tx: Tx<TempoMapEvent>);
+    /// Subscribe to tempo-map changes across all open projects.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<TempoMapStreamEvent>);
 }

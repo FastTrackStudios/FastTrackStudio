@@ -1,75 +1,48 @@
-//! Live MIDI service trait
+//! Live MIDI service — device management + realtime I/O.
+//!
+//! For editing MIDI data in takes, see `Midi`.
 
-use super::{
-    LiveMidiEvent, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
-};
-use vox::service;
+use super::{MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget};
 
-/// Service for real-time MIDI input/output
-///
-/// This service handles MIDI device management and real-time MIDI I/O during
-/// playback. For editing MIDI data in takes, see `MidiService`.
-#[service]
-pub trait LiveMidiService {
-    // === Device Enumeration ===
+#[architect::rpc]
+pub trait LiveMidi {
+    // ── Device enumeration ─────────────────────────────────────────
 
-    /// Get all available MIDI input devices
-    async fn get_input_devices(&self) -> Vec<MidiInputDevice>;
+    fn input_devices(&self) -> Vec<MidiInputDevice>;
+    fn output_devices(&self) -> Vec<MidiOutputDevice>;
+    fn input_device(&self, id: u32) -> Option<MidiInputDevice>;
+    fn output_device(&self, id: u32) -> Option<MidiOutputDevice>;
 
-    /// Get all available MIDI output devices
-    async fn get_output_devices(&self) -> Vec<MidiOutputDevice>;
+    // ── Device state ───────────────────────────────────────────────
 
-    /// Get a specific input device by ID
-    async fn get_input_device(&self, id: u32) -> Option<MidiInputDevice>;
+    fn open_input_device(&self, id: u32) -> bool;
+    fn close_input_device(&self, id: u32);
+    fn open_output_device(&self, id: u32) -> bool;
+    fn close_output_device(&self, id: u32);
 
-    /// Get a specific output device by ID
-    async fn get_output_device(&self, id: u32) -> Option<MidiOutputDevice>;
+    // ── Output ─────────────────────────────────────────────────────
 
-    // === Device State ===
+    /// Send a MIDI message to a device.
+    fn send_midi(&self, device_id: u32, message: MidiMessage, timing: SendMidiTiming);
 
-    /// Open a MIDI input device for receiving
-    /// Returns true if successful
-    async fn open_input_device(&self, id: u32) -> bool;
+    // ── Input subscription ─────────────────────────────────────────
+    //
+    // Subscription stream retires with the architect::rpc port; sibling
+    // trait when revived. `subscribe_input` kept as a one-shot "arm"
+    // operation; the actual event delivery uses the broadcaster.
 
-    /// Close a MIDI input device
-    async fn close_input_device(&self, id: u32);
+    fn subscribe_input(&self, device_id: u32) -> bool;
+    fn unsubscribe_input(&self, device_id: u32);
 
-    /// Open a MIDI output device for sending
-    /// Returns true if successful
-    async fn open_output_device(&self, id: u32) -> bool;
+    // ── MIDI injection (StuffMIDIMessage) ──────────────────────────
 
-    /// Close a MIDI output device
-    async fn close_output_device(&self, id: u32);
-
-    // === Output ===
-
-    /// Send a MIDI message to a device
-    async fn send_midi(&self, device_id: u32, message: MidiMessage, timing: SendMidiTiming);
-
-    /// Send multiple MIDI events (with timing)
-    async fn send_midi_batch(&self, device_id: u32, events: Vec<LiveMidiEvent>);
-
-    // === Input Subscription ===
-    // Events are delivered via the event system (LiveMidiServiceEvent::MidiReceived)
-
-    /// Subscribe to MIDI input from a device
-    /// Returns true if successful
-    async fn subscribe_input(&self, device_id: u32) -> bool;
-
-    /// Unsubscribe from MIDI input
-    async fn unsubscribe_input(&self, device_id: u32);
-
-    // === MIDI Injection (StuffMIDIMessage) ===
-
-    /// Inject a MIDI message into REAPER's internal message queue.
-    ///
-    /// This uses REAPER's `StuffMIDIMessage` API to inject MIDI into the
-    /// virtual keyboard queue or control input queue. Messages injected into
-    /// `VirtualMidiKeyboard` are routed to armed tracks whose record input
-    /// is set to MIDI Virtual Keyboard (VKB).
-    ///
-    /// This is the mechanism used by Helgobox for simulating MIDI input in
-    /// integration tests, and is how we send CC messages to plugins that
-    /// manage presets internally (e.g., Neural DSP Archetype plugins).
-    async fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage);
+    /// Inject into REAPER's internal MIDI message queue. Used for
+    /// VKB simulation in integration tests and for sending CC to
+    /// plugins that manage presets internally.
+    fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage);
 }
+
+#[cfg(feature = "vox")]
+pub use LiveMidiRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use live_midi_rpc_service_descriptor as descriptor;

@@ -1,0 +1,17 @@
+//! Health service — connection liveness probe.
+
+#[architect::rpc]
+pub trait Health {
+    /// Returns `true` if the DAW is reachable. Cheapest possible RPC
+    /// round-trip — used by fts-control's health-check loop to detect
+    /// disconnects faster than process polling.
+    fn ping(&self) -> bool;
+
+    /// Show a message in the DAW's console/log window.
+    fn show_console_msg(&self, msg: &str);
+}
+
+#[cfg(feature = "vox")]
+pub use HealthRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use health_rpc_service_descriptor as descriptor;

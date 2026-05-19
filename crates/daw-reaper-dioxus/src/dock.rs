@@ -19,7 +19,7 @@ use reaper_low::{Reaper, Swell};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_void};
 use std::ptr;
 
 use crate::embedded::EmbeddedView;
@@ -108,7 +108,12 @@ const DEFAULT_CLASS: &str = "FTSDioxusPanel\0";
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    static PANELS: RefCell<HashMap<PanelId, LivePanel>> = RefCell::new(HashMap::new());
+    // REAPER may tear the extension down while native/Dioxus state is still
+    // connected to SWELL/GDK. Let explicit unregister paths clean this up, but
+    // do not run `VirtualDom` destructors from TLS shutdown where a panic aborts
+    // the whole host.
+    static PANELS: &'static RefCell<HashMap<PanelId, LivePanel>> =
+        Box::leak(Box::new(RefCell::new(HashMap::new())));
 }
 
 static REAPER_API: std::sync::OnceLock<&'static Reaper> = std::sync::OnceLock::new();
@@ -269,10 +274,14 @@ impl reaper_medium::HwndInfo for DockPanelHwndInfo {
 }
 
 fn reaper() -> &'static Reaper {
-    REAPER_API.get().expect("dock::init() must be called first")
+    REAPER_API.get().copied().unwrap_or_else(Reaper::get)
 }
 fn swell() -> &'static Swell {
-    SWELL_API.get().expect("dock::init() must be called first")
+    SWELL_API.get().copied().unwrap_or_else(Swell::get)
+}
+
+fn is_initialized() -> bool {
+    true
 }
 
 /// Assert we're on the main thread (debug builds only).
@@ -415,12 +424,7 @@ fn show_dock_context_menu(hwnd: raw::HWND, screen_x: i32, screen_y: i32) {
 
     match cmd as u32 {
         CMD_CLOSE => {
-            PANELS.with(|panels| {
-                let mut panels = panels.borrow_mut();
-                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
-                    hide_panel_inner(panel);
-                }
-            });
+            hide_panel_by_hwnd(hwnd);
         }
         CMD_TOGGLE_DOCK => {
             PANELS.with(|panels| {
@@ -487,6 +491,10 @@ pub fn register_panel(
         tracing::error!("Failed to create dock panel window for '{}'", config.title);
         return;
     }
+    #[cfg(target_os = "linux")]
+    if config.default_dock_position == -1 {
+        apply_floating_window_hints(hwnd, &config, swell, reaper);
+    }
 
     // Dock registration order (matches reaimgui docker.cpp:404-420):
     //   1. Dock_UpdateDockID — sets the dock position for this ident
@@ -511,7 +519,7 @@ pub fn register_panel(
                 .to_bytes()
                 .is_empty()
     };
-    if first_launch && config.default_dock_position >= 0 {
+    if config.default_dock_position == -1 || (first_launch && config.default_dock_position >= 0) {
         unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), config.default_dock_position) };
     }
     if first_launch {
@@ -525,12 +533,27 @@ pub fn register_panel(
 
     let title_c = CString::new(config.title).unwrap();
     unsafe {
-        reaper.DockWindowAddEx(
-            hwnd,
-            title_c.as_ptr(),
-            ident.as_ptr(),
-            config.show_on_first_launch,
-        );
+        if config.default_dock_position >= 0 {
+            reaper.DockWindowAddEx(
+                hwnd,
+                title_c.as_ptr(),
+                ident.as_ptr(),
+                config.show_on_first_launch,
+            );
+        } else if config.show_on_first_launch {
+            swell.SetWindowPos(
+                hwnd,
+                ptr::null_mut(),
+                200,
+                200,
+                config.default_width as c_int,
+                config.default_height as c_int,
+                (raw::SWP_NOZORDER | raw::SWP_SHOWWINDOW) as c_int,
+            );
+            swell.ShowWindow(hwnd, raw::SW_SHOW as c_int);
+            #[cfg(target_os = "linux")]
+            apply_floating_window_hints(hwnd, &config, swell, reaper);
+        }
     }
 
     // Register a screenset callback so REAPER can restore dock tab focus
@@ -573,6 +596,14 @@ pub fn register_panel(
 pub fn register_panel_from_service(def: &daw_module::PanelDef) {
     use dioxus_native::prelude::Element;
 
+    if !is_initialized() {
+        tracing::warn!(
+            panel = def.id,
+            "Ignoring panel registration before dock::init"
+        );
+        return;
+    }
+
     let reaper = reaper();
     let swell = swell();
 
@@ -603,14 +634,15 @@ pub fn register_panel_from_service(def: &daw_module::PanelDef) {
 pub fn toggle_panel(id: PanelId) {
     #[cfg(debug_assertions)]
     assert_main_thread();
-    PANELS.with(|panels| {
-        let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id) {
-            if panel.visible {
-                hide_panel_inner(panel);
-            } else {
-                show_panel_inner(panel);
-            }
+    if !is_initialized() {
+        tracing::warn!(panel = id, "Ignoring toggle_panel before dock::init");
+        return;
+    }
+    with_panel_removed(id, |panel| {
+        if panel.visible {
+            hide_panel_inner(panel);
+        } else {
+            show_panel_inner(panel);
         }
     });
 }
@@ -618,12 +650,15 @@ pub fn toggle_panel(id: PanelId) {
 pub fn show_panel(id: PanelId) {
     #[cfg(debug_assertions)]
     assert_main_thread();
-    PANELS.with(|panels| {
-        let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id)
-            && !panel.visible
-        {
+    if !is_initialized() {
+        tracing::warn!(panel = id, "Ignoring show_panel before dock::init");
+        return;
+    }
+    with_panel_removed(id, |panel| {
+        if !panel.visible {
             show_panel_inner(panel);
+        } else {
+            focus_panel_inner(panel);
         }
     });
 }
@@ -631,11 +666,12 @@ pub fn show_panel(id: PanelId) {
 pub fn hide_panel(id: PanelId) {
     #[cfg(debug_assertions)]
     assert_main_thread();
-    PANELS.with(|panels| {
-        let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id)
-            && panel.visible
-        {
+    if !is_initialized() {
+        tracing::warn!(panel = id, "Ignoring hide_panel before dock::init");
+        return;
+    }
+    with_panel_removed(id, |panel| {
+        if panel.visible {
             hide_panel_inner(panel);
         }
     });
@@ -643,6 +679,52 @@ pub fn hide_panel(id: PanelId) {
 
 pub fn is_panel_visible(id: PanelId) -> bool {
     PANELS.with(|panels| panels.borrow().get(id).is_some_and(|p| p.visible))
+}
+
+fn with_panel_removed(id: PanelId, f: impl FnOnce(&mut LivePanel)) {
+    let Some(mut panel) = PANELS.with(|panels| panels.borrow_mut().remove(id)) else {
+        return;
+    };
+    f(&mut panel);
+    PANELS.with(|panels| {
+        panels.borrow_mut().insert(id, panel);
+    });
+}
+
+fn hide_panel_by_hwnd(hwnd: raw::HWND) {
+    let id = PANELS.with(|panels| {
+        panels
+            .borrow()
+            .values()
+            .find(|panel| panel.hwnd == hwnd)
+            .map(|panel| panel.config.id)
+    });
+    if let Some(id) = id {
+        hide_panel(id);
+    }
+}
+
+/// Create a panel's Dioxus view while leaving the native window hidden.
+///
+/// This pays the renderer/component startup cost during extension startup so
+/// latency-sensitive panels can appear immediately when shown later.
+pub fn prewarm_panel(id: PanelId) {
+    #[cfg(debug_assertions)]
+    assert_main_thread();
+    if !is_initialized() {
+        tracing::warn!(panel = id, "Ignoring prewarm_panel before dock::init");
+        return;
+    }
+    PANELS.with(|panels| {
+        let mut panels = panels.borrow_mut();
+        if let Some(panel) = panels.get_mut(id) {
+            try_init_embedded_view(panel, InitVisibility::HiddenPrewarm);
+            if let Some(view) = panel.view.as_mut() {
+                view.update();
+                view.mark_dirty();
+            }
+        }
+    });
 }
 
 /// Dispatch a synthetic UI event to a panel's EmbeddedView.
@@ -767,7 +849,7 @@ pub fn update_panels() {
 
             // Deferred renderer init (max 30 retries ≈ 1 second)
             if panel_needs_init(panel) && panel.init_attempts < 30 {
-                try_init_embedded_view(panel);
+                try_init_embedded_view(panel, InitVisibility::Visible);
             }
 
             let mut rect = raw::RECT {
@@ -859,11 +941,13 @@ pub fn unregister_all_panels() {
 fn save_panel_state(panel: &LivePanel) {
     let reaper = reaper();
     let id = panel.config.id;
-    let section = CString::new(id).unwrap();
-    let vis_key = CString::new("visible").unwrap();
-    let vis_val = CString::new(if panel.visible { "1" } else { "0" }).unwrap();
-    unsafe {
-        reaper.SetExtState(section.as_ptr(), vis_key.as_ptr(), vis_val.as_ptr(), true);
+    save_panel_visibility(id, panel.visible);
+
+    // Floating panels are not registered with REAPER's docker while hidden.
+    // Querying their dock state during startup restore can block inside SWELL,
+    // so only docked panels persist a dock id here.
+    if panel.config.default_dock_position == -1 {
+        return;
     }
 
     // Persist dock position via REAPER's authoritative API.
@@ -872,6 +956,16 @@ fn save_panel_state(panel: &LivePanel) {
     if dock_id >= 0 {
         let ident = CString::new(id).unwrap();
         unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), dock_id) };
+    }
+}
+
+fn save_panel_visibility(id: PanelId, visible: bool) {
+    let reaper = reaper();
+    let section = CString::new(id).unwrap();
+    let vis_key = CString::new("visible").unwrap();
+    let vis_val = CString::new(if visible { "1" } else { "0" }).unwrap();
+    unsafe {
+        reaper.SetExtState(section.as_ptr(), vis_key.as_ptr(), vis_val.as_ptr(), true);
     }
 }
 
@@ -887,6 +981,12 @@ pub fn save_dock_state() {
 }
 
 pub fn restore_dock_state() {
+    #[cfg(debug_assertions)]
+    assert_main_thread();
+    if !is_initialized() {
+        tracing::warn!("Ignoring restore_dock_state before dock::init");
+        return;
+    }
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         let reaper = reaper();
@@ -897,6 +997,15 @@ pub fn restore_dock_state() {
             if !vis_ptr.is_null() {
                 let vis_str = unsafe { std::ffi::CStr::from_ptr(vis_ptr) }.to_string_lossy();
                 if vis_str == "1" {
+                    if panel.config.default_dock_position == -1 {
+                        tracing::info!(
+                            panel = panel.config.id,
+                            "Skipping startup restore for floating panel"
+                        );
+                        panel.visible = false;
+                        save_panel_visibility(panel.config.id, false);
+                        continue;
+                    }
                     show_panel_inner(panel);
                 }
             }
@@ -910,6 +1019,7 @@ pub fn restore_dock_state() {
 
 fn show_panel_inner(panel: &mut LivePanel) {
     let reaper = reaper();
+    let swell = swell();
 
     // Re-register with docker (removed on hide) so the tab reappears.
     // allowShow=true makes REAPER show the window; no separate ShowWindow needed
@@ -917,8 +1027,33 @@ fn show_panel_inner(panel: &mut LivePanel) {
     let ident = CString::new(panel.config.id).unwrap();
     let title = CString::new(panel.config.title).unwrap();
     unsafe {
-        reaper.DockWindowAddEx(panel.hwnd, title.as_ptr(), ident.as_ptr(), true);
-        reaper.DockWindowActivate(panel.hwnd);
+        if panel.config.default_dock_position == -1 {
+            reaper.Dock_UpdateDockID(ident.as_ptr(), panel.config.default_dock_position);
+            reaper.DockWindowRemove(panel.hwnd);
+            tracing::info!(
+                panel = panel.config.id,
+                width = panel.config.default_width,
+                height = panel.config.default_height,
+                "Showing floating panel outside REAPER docker"
+            );
+            swell.SetWindowPos(
+                panel.hwnd,
+                ptr::null_mut(),
+                200,
+                200,
+                panel.config.default_width as c_int,
+                panel.config.default_height as c_int,
+                (raw::SWP_NOZORDER | raw::SWP_SHOWWINDOW) as c_int,
+            );
+            swell.ShowWindow(panel.hwnd, raw::SW_SHOW as c_int);
+            #[cfg(target_os = "linux")]
+            apply_floating_window_hints(panel.hwnd, &panel.config, swell, reaper);
+            swell.SetFocus(panel.hwnd);
+        } else {
+            reaper.DockWindowAddEx(panel.hwnd, title.as_ptr(), ident.as_ptr(), true);
+            reaper.DockWindowActivate(panel.hwnd);
+            swell.SetFocus(panel.hwnd);
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -937,6 +1072,21 @@ fn show_panel_inner(panel: &mut LivePanel) {
     save_panel_state(panel);
 }
 
+fn focus_panel_inner(panel: &mut LivePanel) {
+    let reaper = reaper();
+    let swell = swell();
+    unsafe {
+        if panel.config.default_dock_position == -1 {
+            swell.ShowWindow(panel.hwnd, raw::SW_SHOW as c_int);
+            #[cfg(target_os = "linux")]
+            apply_floating_window_hints(panel.hwnd, &panel.config, swell, reaper);
+        } else {
+            reaper.DockWindowActivate(panel.hwnd);
+        }
+        swell.SetFocus(panel.hwnd);
+    }
+}
+
 fn hide_panel_inner(panel: &mut LivePanel) {
     let swell = swell();
     let reaper = reaper();
@@ -953,14 +1103,21 @@ fn hide_panel_inner(panel: &mut LivePanel) {
     save_panel_state(panel);
 }
 
-fn try_init_embedded_view(panel: &mut LivePanel) {
-    if !panel_needs_init(panel) || !panel.visible {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitVisibility {
+    Visible,
+    HiddenPrewarm,
+}
+
+fn try_init_embedded_view(panel: &mut LivePanel, visibility: InitVisibility) {
+    if !panel_needs_init(panel) || (visibility == InitVisibility::Visible && !panel.visible) {
         return;
     }
     panel.init_attempts += 1;
     tracing::info!(
         panel = panel.config.id,
         attempt = panel.init_attempts,
+        ?visibility,
         "Attempting to init EmbeddedView"
     );
 
@@ -1015,6 +1172,11 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
             view.mark_dirty(); // Ensure first frame renders
             panel.view = Some(view);
             tracing::info!("Created EmbeddedView for panel '{}'", panel.config.id);
+            if visibility == InitVisibility::Visible {
+                unsafe {
+                    swell.SetFocus(panel.hwnd);
+                }
+            }
 
             // Attach the macOS InputView so keyDown: / insertText: reach the
             // Blitz document even when the SWELL HWND isn't firstResponder.
@@ -1221,8 +1383,165 @@ fn create_panel_window(config: &DockablePanelConfig, swell: &Swell) -> raw::HWND
                 config.default_height as c_int,
                 0x0006, // SWP_NOZORDER | SWP_NOMOVE
             );
+            #[cfg(target_family = "unix")]
+            swell.SWELL_SetWindowWantRaiseAmt(hwnd, 1);
         }
         hwnd
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_floating_window_hints(
+    hwnd: raw::HWND,
+    config: &DockablePanelConfig,
+    swell: &Swell,
+    reaper: &Reaper,
+) {
+    let Some((display, window)) = x11_window_from_swell(hwnd, swell) else {
+        tracing::warn!(
+            panel = config.id,
+            "Could not resolve X11 window for floating hints"
+        );
+        return;
+    };
+    let parent = x11_window_from_swell(reaper.GetMainHwnd(), swell).map(|(_, window)| window);
+    let Ok(xlib) = x11_dl::xlib::Xlib::open() else {
+        tracing::warn!(panel = config.id, "Could not open Xlib for floating hints");
+        return;
+    };
+
+    unsafe {
+        let atom = |name: &str| {
+            let c = CString::new(name).unwrap();
+            (xlib.XInternAtom)(display, c.as_ptr(), x11_dl::xlib::False)
+        };
+
+        let wm_type = atom("_NET_WM_WINDOW_TYPE");
+        let wm_type_dialog = atom("_NET_WM_WINDOW_TYPE_DIALOG");
+        let wm_type_utility = atom("_NET_WM_WINDOW_TYPE_UTILITY");
+        let wm_types = [wm_type_dialog, wm_type_utility];
+        (xlib.XChangeProperty)(
+            display,
+            window,
+            wm_type,
+            x11_dl::xlib::XA_ATOM,
+            32,
+            x11_dl::xlib::PropModeReplace,
+            wm_types.as_ptr() as *const u8,
+            wm_types.len() as c_int,
+        );
+
+        let wm_state = atom("_NET_WM_STATE");
+        let wm_skip_taskbar = atom("_NET_WM_STATE_SKIP_TASKBAR");
+        let wm_skip_pager = atom("_NET_WM_STATE_SKIP_PAGER");
+        let wm_state_above = atom("_NET_WM_STATE_ABOVE");
+        let states = [wm_skip_taskbar, wm_skip_pager, wm_state_above];
+        (xlib.XChangeProperty)(
+            display,
+            window,
+            wm_state,
+            x11_dl::xlib::XA_ATOM,
+            32,
+            x11_dl::xlib::PropModeReplace,
+            states.as_ptr() as *const u8,
+            states.len() as c_int,
+        );
+
+        let mut hints: x11_dl::xlib::XSizeHints = std::mem::zeroed();
+        hints.flags = x11_dl::xlib::PSize | x11_dl::xlib::PMinSize | x11_dl::xlib::PBaseSize;
+        hints.width = config.default_width as c_int;
+        hints.height = config.default_height as c_int;
+        hints.min_width = config.default_width as c_int;
+        hints.min_height = config.default_height as c_int;
+        hints.base_width = config.default_width as c_int;
+        hints.base_height = config.default_height as c_int;
+        (xlib.XSetWMNormalHints)(display, window, &mut hints);
+
+        if let Some(parent) = parent {
+            (xlib.XSetTransientForHint)(display, window, parent);
+        }
+        (xlib.XFlush)(display);
+    }
+    tracing::info!(
+        panel = config.id,
+        xid = window,
+        parent_xid = parent.unwrap_or(0),
+        width = config.default_width,
+        height = config.default_height,
+        "Applied floating X11 window hints"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn x11_window_from_swell(
+    hwnd: raw::HWND,
+    swell: &Swell,
+) -> Option<(*mut x11_dl::xlib::Display, x11_dl::xlib::Window)> {
+    if hwnd.is_null() {
+        return None;
+    }
+    let gdk_window_type = CString::new("GdkWindow").ok()?;
+    let gdk_window = unsafe { swell.SWELL_GetOSWindow(hwnd, gdk_window_type.as_ptr()) };
+    if gdk_window.is_null() {
+        tracing::warn!("SWELL_GetOSWindow returned null GdkWindow");
+        return None;
+    }
+    let gdk = GdkX11Fns::load()?;
+    unsafe {
+        let gdk_display = (gdk.gdk_window_get_display)(gdk_window);
+        if gdk_display.is_null() {
+            return None;
+        }
+        let display = (gdk.gdk_x11_display_get_xdisplay)(gdk_display);
+        let window = (gdk.gdk_x11_window_get_xid)(gdk_window);
+        if display.is_null() || window == 0 {
+            return None;
+        }
+        Some((display as *mut x11_dl::xlib::Display, window))
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct GdkX11Fns {
+    _gdk: *mut c_void,
+    _gdk_x11: *mut c_void,
+    gdk_window_get_display: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    gdk_x11_display_get_xdisplay: unsafe extern "C" fn(*mut c_void) -> *mut c_void,
+    gdk_x11_window_get_xid: unsafe extern "C" fn(*mut c_void) -> x11_dl::xlib::Window,
+}
+
+#[cfg(target_os = "linux")]
+impl GdkX11Fns {
+    fn load() -> Option<Self> {
+        unsafe {
+            let gdk = dlopen("libgdk-3.so.0")?;
+            let gdk_x11 = dlopen("libgdk-3.so.0")?;
+            Some(Self {
+                _gdk: gdk,
+                _gdk_x11: gdk_x11,
+                gdk_window_get_display: dlsym(gdk, "gdk_window_get_display")?,
+                gdk_x11_display_get_xdisplay: dlsym(gdk_x11, "gdk_x11_display_get_xdisplay")?,
+                gdk_x11_window_get_xid: dlsym(gdk_x11, "gdk_x11_window_get_xid")?,
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+unsafe fn dlopen(name: &str) -> Option<*mut c_void> {
+    let name = CString::new(name).ok()?;
+    let handle = unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_LAZY | libc::RTLD_LOCAL) };
+    if handle.is_null() { None } else { Some(handle) }
+}
+
+#[cfg(target_os = "linux")]
+unsafe fn dlsym<T>(handle: *mut c_void, symbol: &str) -> Option<T> {
+    let symbol = CString::new(symbol).ok()?;
+    let ptr = unsafe { libc::dlsym(handle, symbol.as_ptr()) };
+    if ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { std::mem::transmute_copy(&ptr) })
     }
 }
 
@@ -1232,7 +1551,21 @@ unsafe extern "C" fn panel_wndproc(
     wparam: raw::WPARAM,
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
-    panel_wndproc_inner(hwnd, msg, wparam, lparam)
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        panel_wndproc_inner(hwnd, msg, wparam, lparam)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            tracing::error!(
+                ?hwnd,
+                msg,
+                wparam,
+                lparam,
+                "panic in Dioxus panel window procedure"
+            );
+            unsafe { swell().DefWindowProc(hwnd, msg, wparam, lparam) }
+        }
+    }
 }
 
 fn panel_wndproc_inner(
@@ -1511,23 +1844,13 @@ fn panel_wndproc_inner(
         }
         // ── Docker close button ─────────────────────────────────────
         WM_COMMAND if (wparam & 0xFFFF) as u32 == IDCANCEL => {
-            PANELS.with(|panels| {
-                let mut panels = panels.borrow_mut();
-                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
-                    tracing::info!(panel = panel.config.id, "Docker close button");
-                    hide_panel_inner(panel);
-                }
-            });
+            tracing::info!("Docker close button");
+            hide_panel_by_hwnd(hwnd);
             0
         }
         WM_CLOSE => {
-            PANELS.with(|panels| {
-                let mut panels = panels.borrow_mut();
-                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
-                    tracing::info!(panel = panel.config.id, "WM_CLOSE");
-                    hide_panel_inner(panel);
-                }
-            });
+            tracing::info!("WM_CLOSE");
+            hide_panel_by_hwnd(hwnd);
             0
         }
         // Tell the dialog manager we want every key — prevents Tab/Enter/Escape

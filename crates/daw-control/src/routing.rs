@@ -5,11 +5,10 @@ use std::sync::Arc;
 use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
-    ProjectContext, RoutingEvent,
+    ProjectContext,
     routing::{RouteLocation, RouteRef, RouteType, SendMode, TrackRoute},
     track::TrackRef,
 };
-use vox::Rx;
 
 /// Sends accessor for a track
 #[derive(Clone)]
@@ -44,7 +43,7 @@ impl Sends {
         let sends = self
             .clients
             .routing
-            .get_sends(self.context(), self.track_ref())
+            .sends(self.context(), self.track_ref())
             .await?;
         Ok(sends)
     }
@@ -94,18 +93,8 @@ impl Sends {
     // Streaming
     // =========================================================================
 
-    /// Subscribe to routing events (sends/receives added, removed, changed, etc.)
-    ///
-    /// Returns a receiver that streams granular routing events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe(&self) -> Result<Rx<RoutingEvent>> {
-        let (tx, rx) = vox::channel::<RoutingEvent>();
-        self.clients
-            .routing
-            .subscribe_routing(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
+    // `subscribe` retired with the architect::rpc port — routing
+    // event streaming lives on a sibling trait.
 
     /// Add a send to another track
     pub async fn add_to(&self, dest_track_guid: &str) -> Result<RouteHandle> {
@@ -172,7 +161,7 @@ impl Receives {
         let receives = self
             .clients
             .routing
-            .get_receives(self.context(), self.track_ref())
+            .receives(self.context(), self.track_ref())
             .await?;
         Ok(receives)
     }
@@ -240,7 +229,7 @@ impl HardwareOutputs {
         let outputs = self
             .clients
             .routing
-            .get_hardware_outputs(self.context(), self.track_ref())
+            .hardware_outputs(self.context(), self.track_ref())
             .await?;
         Ok(outputs)
     }
@@ -366,7 +355,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_volume(self.context(), self.location(), volume)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -380,7 +369,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_pan(self.context(), self.location(), pan)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -393,7 +382,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_muted(self.context(), self.location(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -402,7 +391,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_muted(self.context(), self.location(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -416,7 +405,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_mono(self.context(), self.location(), mono)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -425,7 +414,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_phase(self.context(), self.location(), inverted)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -446,7 +435,7 @@ impl RouteHandle {
                 self.route_ref.clone(),
                 mode,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -462,7 +451,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_source_channels(self.context(), self.location(), start_channel, num_channels)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -473,7 +462,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_dest_channels(self.context(), self.location(), start_channel, num_channels)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -486,7 +475,7 @@ impl RouteHandle {
         self.clients
             .routing
             .remove_route(self.context(), self.location())
-            .await?;
+            .await??;
         Ok(())
     }
 }

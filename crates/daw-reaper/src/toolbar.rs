@@ -7,7 +7,7 @@
 //! re-entrancy issues inside REAPER callbacks.
 
 use daw_proto::toolbar::{
-    ToolbarButton, ToolbarIcon, ToolbarItemInfo, ToolbarPlacement, ToolbarResult, ToolbarService,
+    Toolbar, ToolbarButton, ToolbarIcon, ToolbarItemInfo, ToolbarPlacement, ToolbarResult,
     ToolbarSnapshot, ToolbarSnapshotSource, ToolbarTarget, TrackedButton,
 };
 use reaper_high::Reaper;
@@ -585,106 +585,76 @@ fn unit_result(result: Result<(), String>) -> ToolbarResult {
 // ToolbarService trait implementation
 // ============================================================================
 
-impl ToolbarService for ReaperToolbar {
-    async fn add_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
-        debug!(command = %button.command_name, "toolbar add_button service call");
-        crate::main_thread::query(move || {
-            if !is_api_available() {
-                return ToolbarResult::error("Dynamic toolbar API not available");
-            }
-            command_result(add_button_immediate(&button, &workflow_id))
-        })
-        .await
-        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
+impl Toolbar for crate::Reaper {
+    fn add_button(&self, button: ToolbarButton, workflow_id: &str) -> ToolbarResult {
+        debug!(command = %button.command_name, "toolbar add_button");
+        if !is_api_available() {
+            return ToolbarResult::error("Dynamic toolbar API not available");
+        }
+        command_result(add_button_immediate(&button, workflow_id))
     }
 
-    async fn update_button(&self, button: ToolbarButton, workflow_id: String) -> ToolbarResult {
-        crate::main_thread::query(move || {
-            if !is_api_available() {
-                return ToolbarResult::error("Dynamic toolbar API not available");
-            }
-            command_result(update_button_immediate(&button, &workflow_id))
-        })
-        .await
-        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
+    fn update_button(&self, button: ToolbarButton, workflow_id: &str) -> ToolbarResult {
+        if !is_api_available() {
+            return ToolbarResult::error("Dynamic toolbar API not available");
+        }
+        command_result(update_button_immediate(&button, workflow_id))
     }
 
-    async fn remove_button(&self, target: ToolbarTarget, command_name: String) -> ToolbarResult {
-        crate::main_thread::query(move || {
-            if !is_api_available() {
-                return ToolbarResult::ok(0);
-            }
-            unit_result(remove_button_immediate(&target, &command_name))
-        })
-        .await
-        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
+    fn remove_button(&self, target: ToolbarTarget, command_name: &str) -> ToolbarResult {
+        if !is_api_available() {
+            return ToolbarResult::ok(0);
+        }
+        unit_result(remove_button_immediate(&target, command_name))
     }
 
-    async fn move_button(
+    fn move_button(
         &self,
         target: ToolbarTarget,
-        command_name: String,
+        command_name: &str,
         position: u32,
     ) -> ToolbarResult {
-        debug!(%command_name, position, "toolbar move_button service call");
-        crate::main_thread::query(move || {
-            if !is_api_available() {
-                return ToolbarResult::error("Dynamic toolbar API not available");
-            }
-            command_result(move_button_immediate(&target, &command_name, position))
-        })
-        .await
-        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
+        debug!(%command_name, position, "toolbar move_button");
+        if !is_api_available() {
+            return ToolbarResult::error("Dynamic toolbar API not available");
+        }
+        command_result(move_button_immediate(&target, command_name, position))
     }
 
-    async fn set_button_icon(
+    fn set_button_icon(
         &self,
         target: ToolbarTarget,
-        command_name: String,
+        command_name: &str,
         icon: Option<ToolbarIcon>,
     ) -> ToolbarResult {
-        crate::main_thread::query(move || {
-            if !is_api_available() {
-                return ToolbarResult::error("Dynamic toolbar API not available");
-            }
-            command_result(set_button_icon_immediate(&target, &command_name, icon))
-        })
-        .await
-        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
+        if !is_api_available() {
+            return ToolbarResult::error("Dynamic toolbar API not available");
+        }
+        command_result(set_button_icon_immediate(&target, command_name, icon))
     }
 
-    async fn remove_workflow_buttons(&self, workflow_id: String) -> ToolbarResult {
-        crate::main_thread::query(move || {
-            if !is_api_available() {
-                return ToolbarResult::ok(0);
-            }
-            unit_result(remove_workflow_buttons_immediate(&workflow_id))
-        })
-        .await
-        .unwrap_or_else(|| ToolbarResult::error("Main thread dispatcher not available"))
+    fn remove_workflow_buttons(&self, workflow_id: &str) -> ToolbarResult {
+        if !is_api_available() {
+            return ToolbarResult::ok(0);
+        }
+        unit_result(remove_workflow_buttons_immediate(workflow_id))
     }
 
-    async fn is_available(&self) -> bool {
-        crate::main_thread::query(is_api_available)
-            .await
-            .unwrap_or(false)
+    fn is_available(&self) -> bool {
+        is_api_available()
     }
 
-    async fn get_tracked_buttons(&self) -> Vec<TrackedButton> {
-        crate::main_thread::query(|| {
-            toolbar_targets()
-                .map(snapshot_live_toolbar)
-                .flat_map(|snapshot| {
-                    let toolbar_name = snapshot.toolbar_name;
-                    snapshot.items.into_iter().map(move |item| TrackedButton {
-                        toolbar_name: toolbar_name.clone(),
-                        command_name: facet_json::to_string(&item).unwrap_or_default(),
-                        workflow_id: "__fts_live_toolbar_item".to_string(),
-                    })
+    fn tracked_buttons(&self) -> Vec<TrackedButton> {
+        toolbar_targets()
+            .map(snapshot_live_toolbar)
+            .flat_map(|snapshot| {
+                let toolbar_name = snapshot.toolbar_name;
+                snapshot.items.into_iter().map(move |item| TrackedButton {
+                    toolbar_name: toolbar_name.clone(),
+                    command_name: facet_json::to_string(&item).unwrap_or_default(),
+                    workflow_id: "__fts_live_toolbar_item".to_string(),
                 })
-                .collect()
-        })
-        .await
-        .unwrap_or_default()
+            })
+            .collect()
     }
 }

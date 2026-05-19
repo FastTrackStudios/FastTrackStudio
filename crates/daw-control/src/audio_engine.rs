@@ -1,6 +1,6 @@
 //! High-level handle for the audio engine.
 //!
-//! Wraps the raw `AudioEngineServiceClient` so consumers never interact
+//! Wraps the raw `AudioEngineClient` so consumers never interact
 //! with the RPC layer directly.
 
 use std::sync::Arc;
@@ -38,12 +38,12 @@ impl AudioEngine {
 
     /// Get complete audio engine state including latency.
     pub async fn get_state(&self) -> crate::Result<daw_proto::AudioEngineState> {
-        Ok(self.clients.audio_engine.get_state().await?)
+        Ok(self.clients.audio_engine.state().await?)
     }
 
     /// Get current latency information (input/output in samples and seconds).
     pub async fn get_latency(&self) -> crate::Result<daw_proto::AudioLatency> {
-        Ok(self.clients.audio_engine.get_latency().await?)
+        Ok(self.clients.audio_engine.latency().await?)
     }
 
     /// Get output latency in seconds.
@@ -51,11 +51,7 @@ impl AudioEngine {
     /// Directly usable for compensating visual elements to sync with audio output.
     /// Returns 0.0 if the audio engine is not running.
     pub async fn output_latency_seconds(&self) -> crate::Result<f64> {
-        Ok(self
-            .clients
-            .audio_engine
-            .get_output_latency_seconds()
-            .await?)
+        Ok(self.clients.audio_engine.output_latency_seconds().await?)
     }
 
     /// Check if the audio engine is currently running.
@@ -65,7 +61,7 @@ impl AudioEngine {
 
     /// Enumerate available audio input channels on the current device.
     pub async fn get_audio_inputs(&self) -> crate::Result<daw_proto::AudioInputInfo> {
-        Ok(self.clients.audio_engine.get_audio_inputs().await?)
+        Ok(self.clients.audio_engine.inputs().await?)
     }
 
     /// Open all audio and MIDI devices.
@@ -73,13 +69,13 @@ impl AudioEngine {
     /// If devices are already open this is a no-op. After calling this,
     /// `is_running()` should return `true`.
     pub async fn init(&self) -> crate::Result<()> {
-        self.clients.audio_engine.init().await?;
+        self.clients.audio_engine.init().await??;
         Ok(())
     }
 
     /// Close all audio and MIDI devices.
     pub async fn quit(&self) -> crate::Result<()> {
-        self.clients.audio_engine.quit().await?;
+        self.clients.audio_engine.quit().await??;
         Ok(())
     }
 }

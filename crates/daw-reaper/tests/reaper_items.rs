@@ -89,8 +89,10 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
         }
     };
 
-    // Debug: get track chunk to inspect item/take/source
-    let chunk = track.get_chunk().await.unwrap_or_else(|_| "FAILED".into());
+    // Debug: chunk inspection retired with the architect::rpc port —
+    // `TrackHandle::get_chunk` lives on a sibling trait when revived.
+    let chunk: String = "<chunk inspection unavailable>".into();
+    let _ = &track;
     // Find the ITEM section
     if let Some(item_start) = chunk.find("<ITEM") {
         let item_chunk = &chunk[item_start..chunk.len().min(item_start + 800)];

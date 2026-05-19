@@ -35,3 +35,6 @@ default = []
 daw-proto = { path = "../../crates/daw-proto" }
 reaper-test.workspace = true
 eyre.workspace = true
+
+[lints]
+workspace = true

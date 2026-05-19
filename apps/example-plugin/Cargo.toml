@@ -12,10 +12,13 @@ crate-type = ["cdylib", "lib"]
 nih_plug.workspace = true
 
 # DAW API — the only dependency needed for REAPER access
-daw = { path = "../../crates/daw", features = ["sync", "reaper"] }
+daw = { path = "../../crates/daw", features = ["reaper"] }
 
 [dev-dependencies]
-daw = { path = "../../crates/daw", features = ["sync", "reaper"] }
+daw = { path = "../../crates/daw", features = ["reaper"] }
 reaper-test.workspace = true
 tokio = { workspace = true, features = ["time"] }
 eyre = "0.6"
+
+[lints]
+workspace = true

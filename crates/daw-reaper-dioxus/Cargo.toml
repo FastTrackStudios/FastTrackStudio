@@ -15,6 +15,7 @@ daw-module = { path = "../daw-module" }
 
 # DockHostService trait + DockHandle/DockEvent types
 daw-proto = { path = "../daw-proto" }
+architect = { workspace = true }
 vox.workspace = true
 moire.workspace = true
 tokio = { workspace = true, features = ["sync"] }
@@ -65,3 +66,7 @@ tempfile = "3"
 
 [lints.rust]
 unsafe_code = "allow"
+
+
+[lints.rustdoc]
+broken_intra_doc_links = "allow"

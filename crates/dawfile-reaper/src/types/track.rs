@@ -754,222 +754,170 @@ impl Track {
         };
 
         match identifier.as_str() {
-            "NAME" => {
-                if tokens.len() > 1 {
-                    let new_name = Self::parse_string(&tokens[1])?;
-                    if track.name.is_empty() {
-                        track.name = new_name;
-                    }
+            "NAME" if tokens.len() > 1 => {
+                let new_name = Self::parse_string(&tokens[1])?;
+                if track.name.is_empty() {
+                    track.name = new_name;
                 }
             }
-            "LOCK" => {
-                if tokens.len() > 1 {
-                    track.locked = Self::parse_bool(&tokens[1])?;
-                }
+            "LOCK" if tokens.len() > 1 => {
+                track.locked = Self::parse_bool(&tokens[1])?;
             }
-            "SEL" => {
-                if tokens.len() > 1 {
-                    track.selected = Self::parse_bool(&tokens[1])?;
-                }
+            "SEL" if tokens.len() > 1 => {
+                track.selected = Self::parse_bool(&tokens[1])?;
             }
-            "PEAKCOL" => {
-                if tokens.len() > 1 {
-                    track.peak_color = Some(Self::parse_int(&tokens[1])?);
-                }
+            "PEAKCOL" if tokens.len() > 1 => {
+                track.peak_color = Some(Self::parse_int(&tokens[1])?);
             }
-            "BEAT" => {
-                if tokens.len() > 1 {
-                    track.beat = Some(Self::parse_int(&tokens[1])?);
-                }
+            "BEAT" if tokens.len() > 1 => {
+                track.beat = Some(Self::parse_int(&tokens[1])?);
             }
-            "AUTOMODE" => {
-                if tokens.len() > 1 {
-                    track.automation_mode = AutomationMode::from(Self::parse_int(&tokens[1])?);
-                }
+            "AUTOMODE" if tokens.len() > 1 => {
+                track.automation_mode = AutomationMode::from(Self::parse_int(&tokens[1])?);
             }
-            "VOLPAN" => {
-                if tokens.len() >= 4 {
-                    track.volpan = Some(VolPanSettings {
-                        volume: Self::parse_float(&tokens[1])?,
-                        pan: Self::parse_float(&tokens[2])?,
-                        pan_law: Self::parse_float(&tokens[3])?,
-                    });
-                }
+            "VOLPAN" if tokens.len() >= 4 => {
+                track.volpan = Some(VolPanSettings {
+                    volume: Self::parse_float(&tokens[1])?,
+                    pan: Self::parse_float(&tokens[2])?,
+                    pan_law: Self::parse_float(&tokens[3])?,
+                });
             }
-            "MUTESOLO" => {
-                if tokens.len() >= 4 {
-                    track.mutesolo = Some(MuteSoloSettings {
-                        mute: Self::parse_bool(&tokens[1])?,
-                        solo: TrackSoloState::from(Self::parse_int(&tokens[2])?),
-                        solo_defeat: Self::parse_bool(&tokens[3])?,
-                    });
-                }
+            "MUTESOLO" if tokens.len() >= 4 => {
+                track.mutesolo = Some(MuteSoloSettings {
+                    mute: Self::parse_bool(&tokens[1])?,
+                    solo: TrackSoloState::from(Self::parse_int(&tokens[2])?),
+                    solo_defeat: Self::parse_bool(&tokens[3])?,
+                });
             }
-            "IPHASE" => {
-                if tokens.len() > 1 {
-                    track.invert_phase = Self::parse_bool(&tokens[1])?;
-                }
+            "IPHASE" if tokens.len() > 1 => {
+                track.invert_phase = Self::parse_bool(&tokens[1])?;
             }
-            "ISBUS" => {
-                if tokens.len() >= 3 {
-                    track.folder = Some(FolderSettings {
-                        folder_state: FolderState::from(Self::parse_int(&tokens[1])?),
-                        indentation: Self::parse_int(&tokens[2])?,
-                    });
-                }
+            "ISBUS" if tokens.len() >= 3 => {
+                track.folder = Some(FolderSettings {
+                    folder_state: FolderState::from(Self::parse_int(&tokens[1])?),
+                    indentation: Self::parse_int(&tokens[2])?,
+                });
             }
-            "BUSCOMP" => {
-                if tokens.len() >= 6 {
-                    track.bus_compact = Some(BusCompactSettings {
-                        arrange_collapse: Self::parse_int(&tokens[1])?,
-                        mixer_collapse: Self::parse_int(&tokens[2])?,
-                        wiring_collapse: Self::parse_int(&tokens[3])?,
-                        wiring_x: Self::parse_int(&tokens[4])?,
-                        wiring_y: Self::parse_int(&tokens[5])?,
-                    });
-                }
+            "BUSCOMP" if tokens.len() >= 6 => {
+                track.bus_compact = Some(BusCompactSettings {
+                    arrange_collapse: Self::parse_int(&tokens[1])?,
+                    mixer_collapse: Self::parse_int(&tokens[2])?,
+                    wiring_collapse: Self::parse_int(&tokens[3])?,
+                    wiring_x: Self::parse_int(&tokens[4])?,
+                    wiring_y: Self::parse_int(&tokens[5])?,
+                });
             }
-            "SHOWINMIX" => {
-                if tokens.len() >= 9 {
-                    track.show_in_mixer = Some(ShowInMixerSettings {
-                        show_in_mixer: Self::parse_bool(&tokens[1])?,
-                        unknown_field_2: Self::parse_float(&tokens[2])?,
-                        unknown_field_3: Self::parse_float(&tokens[3])?,
-                        show_in_track_list: Self::parse_bool(&tokens[4])?,
-                        unknown_field_5: Self::parse_float(&tokens[5])?,
-                        unknown_field_6: Self::parse_int(&tokens[6])?,
-                        unknown_field_7: Self::parse_int(&tokens[7])?,
-                        unknown_field_8: Self::parse_int(&tokens[8])?,
-                    });
-                }
+            "SHOWINMIX" if tokens.len() >= 9 => {
+                track.show_in_mixer = Some(ShowInMixerSettings {
+                    show_in_mixer: Self::parse_bool(&tokens[1])?,
+                    unknown_field_2: Self::parse_float(&tokens[2])?,
+                    unknown_field_3: Self::parse_float(&tokens[3])?,
+                    show_in_track_list: Self::parse_bool(&tokens[4])?,
+                    unknown_field_5: Self::parse_float(&tokens[5])?,
+                    unknown_field_6: Self::parse_int(&tokens[6])?,
+                    unknown_field_7: Self::parse_int(&tokens[7])?,
+                    unknown_field_8: Self::parse_int(&tokens[8])?,
+                });
             }
-            "FREEMODE" => {
-                if tokens.len() > 1 {
-                    track.free_mode = Some(FreeMode::from(Self::parse_int(&tokens[1])?));
-                }
+            "FREEMODE" if tokens.len() > 1 => {
+                track.free_mode = Some(FreeMode::from(Self::parse_int(&tokens[1])?));
             }
-            "FIXEDLANES" => {
-                if tokens.len() >= 6 {
-                    track.fixed_lanes = Some(FixedLanesSettings {
-                        bitfield: Self::parse_int(&tokens[1])?,
-                        allow_editing: Self::parse_bool(&tokens[2])?,
-                        show_play_only_lane: Self::parse_bool(&tokens[3])?,
-                        mask_playback: Self::parse_bool(&tokens[4])?,
-                        recording_behavior: Self::parse_int(&tokens[5])?,
-                    });
-                }
+            "FIXEDLANES" if tokens.len() >= 6 => {
+                track.fixed_lanes = Some(FixedLanesSettings {
+                    bitfield: Self::parse_int(&tokens[1])?,
+                    allow_editing: Self::parse_bool(&tokens[2])?,
+                    show_play_only_lane: Self::parse_bool(&tokens[3])?,
+                    mask_playback: Self::parse_bool(&tokens[4])?,
+                    recording_behavior: Self::parse_int(&tokens[5])?,
+                });
             }
-            "REC" => {
-                if tokens.len() >= 8 {
-                    track.record = Some(RecordSettings {
-                        armed: Self::parse_bool(&tokens[1])?,
-                        input: Self::parse_int(&tokens[2])?,
-                        monitor: MonitorMode::from(Self::parse_int(&tokens[3])?),
-                        record_mode: RecordMode::from(Self::parse_int(&tokens[4])?),
-                        monitor_track_media: Self::parse_bool(&tokens[5])?,
-                        preserve_pdc_delayed: Self::parse_bool(&tokens[6])?,
-                        record_path: Self::parse_int(&tokens[7])?,
-                    });
-                }
+            "REC" if tokens.len() >= 8 => {
+                track.record = Some(RecordSettings {
+                    armed: Self::parse_bool(&tokens[1])?,
+                    input: Self::parse_int(&tokens[2])?,
+                    monitor: MonitorMode::from(Self::parse_int(&tokens[3])?),
+                    record_mode: RecordMode::from(Self::parse_int(&tokens[4])?),
+                    monitor_track_media: Self::parse_bool(&tokens[5])?,
+                    preserve_pdc_delayed: Self::parse_bool(&tokens[6])?,
+                    record_path: Self::parse_int(&tokens[7])?,
+                });
             }
-            "TRACKHEIGHT" => {
-                if tokens.len() >= 3 {
-                    track.track_height = Some(TrackHeightSettings {
-                        height: Self::parse_int(&tokens[1])?,
-                        folder_override: Self::parse_bool(&tokens[2])?,
-                    });
-                }
+            "TRACKHEIGHT" if tokens.len() >= 3 => {
+                track.track_height = Some(TrackHeightSettings {
+                    height: Self::parse_int(&tokens[1])?,
+                    folder_override: Self::parse_bool(&tokens[2])?,
+                });
             }
-            "INQ" => {
-                if tokens.len() >= 9 {
-                    track.input_quantize = Some(InputQuantizeSettings {
-                        quantize_midi: Self::parse_bool(&tokens[1])?,
-                        quantize_to_pos: Self::parse_int(&tokens[2])?,
-                        quantize_note_offs: Self::parse_bool(&tokens[3])?,
-                        quantize_to: Self::parse_float(&tokens[4])?,
-                        quantize_strength: Self::parse_int(&tokens[5])?,
-                        swing_strength: Self::parse_int(&tokens[6])?,
-                        quantize_range_min: Self::parse_int(&tokens[7])?,
-                        quantize_range_max: Self::parse_int(&tokens[8])?,
-                    });
-                }
+            "INQ" if tokens.len() >= 9 => {
+                track.input_quantize = Some(InputQuantizeSettings {
+                    quantize_midi: Self::parse_bool(&tokens[1])?,
+                    quantize_to_pos: Self::parse_int(&tokens[2])?,
+                    quantize_note_offs: Self::parse_bool(&tokens[3])?,
+                    quantize_to: Self::parse_float(&tokens[4])?,
+                    quantize_strength: Self::parse_int(&tokens[5])?,
+                    swing_strength: Self::parse_int(&tokens[6])?,
+                    quantize_range_min: Self::parse_int(&tokens[7])?,
+                    quantize_range_max: Self::parse_int(&tokens[8])?,
+                });
             }
-            "PERF" => {
-                if tokens.len() > 1 {
-                    track.perf = Some(Self::parse_int(&tokens[1])?);
-                }
+            "PERF" if tokens.len() > 1 => {
+                track.perf = Some(Self::parse_int(&tokens[1])?);
             }
-            "LAYOUTS" => {
-                if tokens.len() >= 3 {
-                    let tcp_layout = Self::parse_string(&tokens[1])?;
-                    let mcp_layout = Self::parse_string(&tokens[2])?;
-                    track.layouts = Some((tcp_layout, mcp_layout));
-                }
+            "LAYOUTS" if tokens.len() >= 3 => {
+                let tcp_layout = Self::parse_string(&tokens[1])?;
+                let mcp_layout = Self::parse_string(&tokens[2])?;
+                track.layouts = Some((tcp_layout, mcp_layout));
             }
-            "AUXRECV" => {
-                if tokens.len() >= 13 {
-                    track.receives.push(ReceiveSettings {
-                        source_track_index: Self::parse_int(&tokens[1])?,
-                        mode: Self::parse_int(&tokens[2])?,
-                        volume: Self::parse_float(&tokens[3])?,
-                        pan: Self::parse_float(&tokens[4])?,
-                        mute: Self::parse_bool(&tokens[5])?,
-                        mono_sum: Self::parse_bool(&tokens[6])?,
-                        invert_polarity: Self::parse_bool(&tokens[7])?,
-                        source_audio_channels: Self::parse_int(&tokens[8])?,
-                        dest_audio_channels: Self::parse_int(&tokens[9])?,
-                        pan_law: Self::parse_float(&tokens[10])?,
-                        midi_channels: Self::parse_int(&tokens[11])?,
-                        automation_mode: Self::parse_int(&tokens[12])?,
-                    });
-                }
+            "AUXRECV" if tokens.len() >= 13 => {
+                track.receives.push(ReceiveSettings {
+                    source_track_index: Self::parse_int(&tokens[1])?,
+                    mode: Self::parse_int(&tokens[2])?,
+                    volume: Self::parse_float(&tokens[3])?,
+                    pan: Self::parse_float(&tokens[4])?,
+                    mute: Self::parse_bool(&tokens[5])?,
+                    mono_sum: Self::parse_bool(&tokens[6])?,
+                    invert_polarity: Self::parse_bool(&tokens[7])?,
+                    source_audio_channels: Self::parse_int(&tokens[8])?,
+                    dest_audio_channels: Self::parse_int(&tokens[9])?,
+                    pan_law: Self::parse_float(&tokens[10])?,
+                    midi_channels: Self::parse_int(&tokens[11])?,
+                    automation_mode: Self::parse_int(&tokens[12])?,
+                });
             }
-            "MIDIOUT" => {
-                if tokens.len() > 1 {
-                    let value = Self::parse_int(&tokens[1])?;
-                    track.midi_output = Some(MidiOutputSettings {
-                        device: value / 32,
-                        channel: value & 0x1F,
-                    });
-                }
+            "MIDIOUT" if tokens.len() > 1 => {
+                let value = Self::parse_int(&tokens[1])?;
+                track.midi_output = Some(MidiOutputSettings {
+                    device: value / 32,
+                    channel: value & 0x1F,
+                });
             }
-            "MAINSEND" => {
-                if tokens.len() >= 3 {
-                    track.master_send = Some(MasterSendSettings {
-                        enabled: Self::parse_bool(&tokens[1])?,
-                        unknown_field_2: Self::parse_int(&tokens[2])?,
-                    });
-                }
+            "MAINSEND" if tokens.len() >= 3 => {
+                track.master_send = Some(MasterSendSettings {
+                    enabled: Self::parse_bool(&tokens[1])?,
+                    unknown_field_2: Self::parse_int(&tokens[2])?,
+                });
             }
-            "HWOUT" => {
-                if tokens.len() >= 10 {
-                    track.hardware_outputs.push(HardwareOutputSettings {
-                        output_index: Self::parse_int(&tokens[1])?,
-                        send_mode: Self::parse_int(&tokens[2])?,
-                        volume: Self::parse_float(&tokens[3])?,
-                        pan: Self::parse_float(&tokens[4])?,
-                        mute: Self::parse_bool(&tokens[5])?,
-                        invert_polarity: Self::parse_bool(&tokens[6])?,
-                        send_source_channel: Self::parse_int(&tokens[7])?,
-                        unknown_field_8: Self::parse_int(&tokens[8])?,
-                        automation_mode: Self::parse_int(&tokens[9])?,
-                    });
-                }
+            "HWOUT" if tokens.len() >= 10 => {
+                track.hardware_outputs.push(HardwareOutputSettings {
+                    output_index: Self::parse_int(&tokens[1])?,
+                    send_mode: Self::parse_int(&tokens[2])?,
+                    volume: Self::parse_float(&tokens[3])?,
+                    pan: Self::parse_float(&tokens[4])?,
+                    mute: Self::parse_bool(&tokens[5])?,
+                    invert_polarity: Self::parse_bool(&tokens[6])?,
+                    send_source_channel: Self::parse_int(&tokens[7])?,
+                    unknown_field_8: Self::parse_int(&tokens[8])?,
+                    automation_mode: Self::parse_int(&tokens[9])?,
+                });
             }
-            "NCHAN" => {
-                if tokens.len() > 1 {
-                    track.channel_count = Self::parse_int(&tokens[1])? as u32;
-                }
+            "NCHAN" if tokens.len() > 1 => {
+                track.channel_count = Self::parse_int(&tokens[1])? as u32;
             }
-            "FX" => {
-                if tokens.len() > 1 {
-                    track.fx_enabled = Self::parse_bool(&tokens[1])?;
-                }
+            "FX" if tokens.len() > 1 => {
+                track.fx_enabled = Self::parse_bool(&tokens[1])?;
             }
-            "TRACKID" => {
-                if tokens.len() > 1 {
-                    track.track_id = Some(Self::parse_string(&tokens[1])?);
-                }
+            "TRACKID" if tokens.len() > 1 => {
+                track.track_id = Some(Self::parse_string(&tokens[1])?);
             }
             _ => {}
         }

@@ -1,106 +1,51 @@
-//! Marker service trait
+//! Markers service trait.
 //!
-//! Defines the RPC interface for marker operations.
+//! One canonical declaration, decorated with `#[architect::rpc]`. The
+//! macro derives the async vox client + a `serve` function from this
+//! sync trait — backends impl `Markers` directly (zero-cost in-process
+//! call sites), and remote callers reach the same surface via the
+//! auto-emitted `MarkersClient` over vox. See `architect/DESIGN.md`.
+//!
+//! Backends are **stateless singletons** — they don't carry per-project
+//! state. Project context flows through method calls. That keeps one
+//! backend type per runtime (`Reaper`, `Standalone`, `RppFile`, …)
+//! and lets a single mount serve every project a binary touches.
 
-use super::{Marker, MarkerEvent};
-use crate::ProjectContext;
-use vox::{Tx, service};
+use crate::marker::event::MarkerStreamEvent;
+use crate::{DawResult, Marker, ProjectContext};
+use vox::Tx;
 
-/// Service for managing markers in a DAW project
-///
-/// Markers are named reference points in the timeline that can be used
-/// for navigation, synchronization, or structural organization.
-#[service]
-pub trait MarkerService {
-    // =========================================================================
-    // Query Methods
-    // =========================================================================
+/// Operations on the markers of a project. `ProjectContext` flows
+/// through each call so backends can serve any project.
+#[architect::rpc]
+pub trait Markers {
+    /// Every marker in the project, ordered by position.
+    fn all(&self, project: ProjectContext) -> Vec<Marker>;
 
-    /// Get all markers in the project
-    async fn get_markers(&self, project: ProjectContext) -> Vec<Marker>;
+    /// One marker by its DAW-assigned id, if it still exists.
+    fn get(&self, project: ProjectContext, id: u32) -> Option<Marker>;
 
-    /// Get a specific marker by ID
-    async fn get_marker(&self, project: ProjectContext, id: u32) -> Option<Marker>;
+    /// Total count of markers (cheaper than `all().len()` for
+    /// backends that can answer without materializing the full list).
+    fn count(&self, project: ProjectContext) -> u32;
 
-    /// Get all markers within a time range (inclusive)
-    async fn get_markers_in_range(
-        &self,
-        project: ProjectContext,
-        start: f64,
-        end: f64,
-    ) -> Vec<Marker>;
+    /// Insert a marker at `position` seconds with the given name.
+    /// Returns the DAW-assigned id.
+    fn add(&self, project: ProjectContext, position: f64, name: &str) -> DawResult<u32>;
 
-    /// Get the next marker after the given position
-    async fn get_next_marker(&self, project: ProjectContext, after: f64) -> Option<Marker>;
+    /// Remove the marker with the given id.
+    fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()>;
 
-    /// Get the previous marker before the given position
-    async fn get_previous_marker(&self, project: ProjectContext, before: f64) -> Option<Marker>;
+    /// Move the marker to a new position in seconds.
+    fn set_position(&self, project: ProjectContext, id: u32, position: f64) -> DawResult<()>;
 
-    /// Get the total number of markers
-    async fn marker_count(&self, project: ProjectContext) -> usize;
+    /// Rename the marker.
+    fn rename(&self, project: ProjectContext, id: u32, name: &str) -> DawResult<()>;
 
-    // =========================================================================
-    // Mutation Methods
-    // =========================================================================
+    /// Set the marker's color. `0` clears to the DAW default.
+    fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()>;
 
-    /// Add a new marker at the given position (returns marker ID)
-    async fn add_marker(&self, project: ProjectContext, position: f64, name: String) -> u32;
-
-    /// Remove a marker by ID
-    async fn remove_marker(&self, project: ProjectContext, id: u32);
-
-    /// Move a marker to a new position
-    async fn move_marker(&self, project: ProjectContext, id: u32, position: f64);
-
-    /// Rename a marker
-    async fn rename_marker(&self, project: ProjectContext, id: u32, name: String);
-
-    /// Set the color of a marker (0 for default color)
-    async fn set_marker_color(&self, project: ProjectContext, id: u32, color: u32);
-
-    // =========================================================================
-    // Navigation Methods
-    // =========================================================================
-
-    /// Navigate to the next marker from current position
-    async fn goto_next_marker(&self, project: ProjectContext);
-
-    /// Navigate to the previous marker from current position
-    async fn goto_previous_marker(&self, project: ProjectContext);
-
-    /// Navigate to a specific marker by ID
-    async fn goto_marker(&self, project: ProjectContext, id: u32);
-
-    // =========================================================================
-    // Lane Methods (v7.62+)
-    // =========================================================================
-
-    /// Add a new marker at the given position in a specific ruler lane.
-    /// Returns the marker ID.
-    async fn add_marker_in_lane(
-        &self,
-        project: ProjectContext,
-        position: f64,
-        name: String,
-        lane: u32,
-    ) -> u32;
-
-    /// Set the ruler lane for a marker (None to move to default lane)
-    async fn set_marker_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>);
-
-    /// Get all markers in a specific ruler lane
-    async fn get_markers_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Marker>;
-
-    // =========================================================================
-    // Streaming
-    // =========================================================================
-
-    /// Subscribe to marker changes for a project
-    ///
-    /// Streams events when:
-    /// - A marker is added, removed, or modified
-    /// - Project markers are bulk-updated (e.g., project reload)
-    ///
-    /// Initially sends a `MarkersChanged` event with all current markers.
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerEvent>);
+    /// Subscribe to marker changes across all open projects. Subscribers
+    /// filter by `project_guid` on the envelope.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerStreamEvent>);
 }

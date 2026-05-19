@@ -27,7 +27,7 @@ impl Screensets {
         Ok(self
             .clients
             .screenset
-            .capture_screenset(daw_proto::CaptureScreensetRequest {
+            .capture(daw_proto::CaptureScreensetRequest {
                 id: id.to_string(),
                 name: name.to_string(),
                 description: description.to_string(),
@@ -44,18 +44,14 @@ impl Screensets {
         screenset: daw_proto::Screenset,
         options: daw_proto::ScreensetOptions,
     ) -> crate::Result<daw_proto::ScreensetResult> {
-        Ok(self
-            .clients
-            .screenset
-            .save_screenset(screenset, options)
-            .await?)
+        Ok(self.clients.screenset.save(screenset, options).await?)
     }
 
     pub async fn list(
         &self,
         options: daw_proto::ScreensetOptions,
     ) -> crate::Result<Vec<daw_proto::ScreensetSummary>> {
-        Ok(self.clients.screenset.list_screensets(options).await?)
+        Ok(self.clients.screenset.list(options).await?)
     }
 
     pub async fn get(
@@ -63,11 +59,7 @@ impl Screensets {
         id: &str,
         options: daw_proto::ScreensetOptions,
     ) -> crate::Result<Option<daw_proto::Screenset>> {
-        Ok(self
-            .clients
-            .screenset
-            .get_screenset(id.to_string(), options)
-            .await?)
+        Ok(self.clients.screenset.get(id.to_string(), options).await?)
     }
 
     pub async fn apply(
@@ -78,7 +70,7 @@ impl Screensets {
         Ok(self
             .clients
             .screenset
-            .apply_screenset(id.to_string(), options)
+            .apply(id.to_string(), options)
             .await?)
     }
 
@@ -90,7 +82,7 @@ impl Screensets {
         Ok(self
             .clients
             .screenset
-            .delete_screenset(id.to_string(), options)
+            .delete(id.to_string(), options)
             .await?)
     }
 }

@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use crate::Result;
-use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
-use vox::Rx;
+use daw_proto::{
+    LoopRegion, PlayState, ProjectContext, TimeSignature, Transport as TransportState,
+};
 
 /// Transport handle for a specific project
 ///
@@ -64,7 +65,7 @@ impl Transport {
     ///
     /// Starts playback from the current playhead position.
     pub async fn play(&self) -> Result<()> {
-        self.clients.transport.play(self.context()).await?;
+        self.clients.transport.play(self.context()).await??;
         Ok(())
     }
 
@@ -72,7 +73,7 @@ impl Transport {
     ///
     /// Maintains the playhead position so playback can be resumed.
     pub async fn pause(&self) -> Result<()> {
-        self.clients.transport.pause(self.context()).await?;
+        self.clients.transport.pause(self.context()).await??;
         Ok(())
     }
 
@@ -80,19 +81,19 @@ impl Transport {
     ///
     /// Stops playback and typically resets to the edit cursor or start position.
     pub async fn stop(&self) -> Result<()> {
-        self.clients.transport.stop(self.context()).await?;
+        self.clients.transport.stop(self.context()).await??;
         Ok(())
     }
 
     /// Toggle between play and pause
     pub async fn play_pause(&self) -> Result<()> {
-        self.clients.transport.play_pause(self.context()).await?;
+        self.clients.transport.play_pause(self.context()).await??;
         Ok(())
     }
 
     /// Toggle between play and stop
     pub async fn play_stop(&self) -> Result<()> {
-        self.clients.transport.play_stop(self.context()).await?;
+        self.clients.transport.play_stop(self.context()).await??;
         Ok(())
     }
 
@@ -102,7 +103,7 @@ impl Transport {
 
     /// Start recording
     pub async fn record(&self) -> Result<()> {
-        self.clients.transport.record(self.context()).await?;
+        self.clients.transport.record(self.context()).await??;
         Ok(())
     }
 
@@ -111,7 +112,7 @@ impl Transport {
         self.clients
             .transport
             .stop_recording(self.context())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -120,7 +121,7 @@ impl Transport {
         self.clients
             .transport
             .toggle_recording(self.context())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -133,7 +134,7 @@ impl Transport {
         self.clients
             .transport
             .set_position(self.context(), seconds)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -145,13 +146,13 @@ impl Transport {
 
     /// Go to the start of the project (position 0)
     pub async fn goto_start(&self) -> Result<()> {
-        self.clients.transport.goto_start(self.context()).await?;
+        self.clients.transport.goto_start(self.context()).await??;
         Ok(())
     }
 
     /// Go to the end of the project
     pub async fn goto_end(&self) -> Result<()> {
-        self.clients.transport.goto_end(self.context()).await?;
+        self.clients.transport.goto_end(self.context()).await??;
         Ok(())
     }
 
@@ -202,7 +203,7 @@ impl Transport {
         self.clients
             .transport
             .set_tempo(self.context(), bpm)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -212,7 +213,7 @@ impl Transport {
 
     /// Toggle loop mode on/off
     pub async fn toggle_loop(&self) -> Result<()> {
-        self.clients.transport.toggle_loop(self.context()).await?;
+        self.clients.transport.toggle_loop(self.context()).await??;
         Ok(())
     }
 
@@ -227,7 +228,35 @@ impl Transport {
         self.clients
             .transport
             .set_loop(self.context(), enabled)
+            .await??;
+        Ok(())
+    }
+
+    /// Get the current time selection, if one is set.
+    pub async fn get_time_selection(&self) -> Result<Option<LoopRegion>> {
+        let selection = self
+            .clients
+            .transport
+            .get_time_selection(self.context())
             .await?;
+        Ok(selection)
+    }
+
+    /// Set the current time selection in seconds.
+    pub async fn set_time_selection(&self, start_seconds: f64, end_seconds: f64) -> Result<()> {
+        self.clients
+            .transport
+            .set_time_selection(self.context(), start_seconds, end_seconds)
+            .await??;
+        Ok(())
+    }
+
+    /// Clear the current time selection.
+    pub async fn clear_time_selection(&self) -> Result<()> {
+        self.clients
+            .transport
+            .clear_time_selection(self.context())
+            .await??;
         Ok(())
     }
 
@@ -246,7 +275,7 @@ impl Transport {
         self.clients
             .transport
             .set_playrate(self.context(), rate)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -268,155 +297,22 @@ impl Transport {
     // Musical Position Control
     // =========================================================================
 
-    /// Set playhead position using musical position (measure, beat, subdivision)
-    ///
-    /// The musical position is converted to time using the project's tempo map.
-    /// - measure: 0-indexed measure number
-    /// - beat: 0-indexed beat within the measure
-    /// - subdivision: 0-999 representing fractional beat (0.000 to 0.999)
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # async fn example(transport: daw_control::Transport) -> daw_control::Result<()> {
-    /// // Go to measure 5, beat 1 (0-indexed: measure 4, beat 0)
-    /// transport.set_position_musical(4, 0, 0).await?;
-    ///
-    /// // Go to measure 1, beat 3, half-beat subdivision
-    /// transport.set_position_musical(0, 2, 500).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn set_position_musical(
-        &self,
-        measure: i32,
-        beat: i32,
-        subdivision: i32,
-    ) -> Result<()> {
-        self.clients
-            .transport
-            .set_position_musical(self.context(), measure, beat, subdivision)
-            .await?;
-        Ok(())
-    }
-
-    /// Go to a specific measure
-    ///
-    /// Seeks to the start of the specified measure (0-indexed).
-    /// This uses the project's tempo map to convert measure number to time.
-    ///
-    /// # Arguments
-    ///
-    /// * `measure` - The measure number to seek to (0-indexed, so measure 0 is the first measure)
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use daw_control::Daw;
-    ///
-    /// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
-    /// let daw = Daw::new(handle);
-    /// let project = daw.current_project().await?;
-    /// let transport = project.transport();
-    ///
-    /// // Go to measure 8 (9th measure, since 0-indexed)
-    /// transport.goto_measure(8).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn goto_measure(&self, measure: i32) -> Result<()> {
-        self.clients
-            .transport
-            .goto_measure(self.context(), measure)
-            .await?;
-        Ok(())
-    }
-
     // =========================================================================
     // Streaming
     // =========================================================================
 
-    /// Subscribe to transport state changes at 60Hz
-    ///
-    /// Returns a receiver that streams transport state updates at high frequency.
-    /// Updates are sent:
-    /// - Immediately when play/pause/stop state changes
-    /// - At ~60Hz intervals during playback
-    /// - When tempo, time signature, or loop state changes
-    ///
-    /// The stream continues until the returned `Rx` is dropped.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use daw_control::Daw;
-    ///
-    /// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
-    /// let daw = Daw::new(handle);
-    /// let project = daw.current_project().await?;
-    /// let transport = project.transport();
-    ///
-    /// // Subscribe to transport state updates
-    /// let mut rx = transport.subscribe_state().await?;
-    ///
-    /// // Receive updates
-    /// while let Ok(Some(state)) = rx.recv().await {
-    ///     println!("Position: {:?}", state.playhead_position);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn subscribe_state(&self) -> Result<Rx<TransportState>> {
-        // Create a channel pair
-        let (tx, rx) = vox::channel::<TransportState>();
-
-        // Call the service method to start the stream
+    /// Subscribe to transport events. `sub` selects which kinds —
+    /// discrete state changes, continuous position ticks, or both —
+    /// multiplexed onto one `Rx` as `TransportStreamEvent::{State, Position}`.
+    pub async fn subscribe(
+        &self,
+        sub: daw_proto::transport::TransportSubscription,
+    ) -> Result<vox::Rx<daw_proto::transport::TransportStreamEvent>> {
+        let (tx, rx) = vox::channel();
         self.clients
             .transport
-            .subscribe_state(self.context(), tx)
+            .subscribe(self.context(), sub, tx)
             .await?;
-
-        Ok(rx)
-    }
-
-    /// Subscribe to transport state changes for ALL open projects at ~30Hz
-    ///
-    /// Returns a receiver that streams transport state updates for every open project.
-    /// This is much more efficient than subscribing to each project individually.
-    ///
-    /// Updates are only sent when a project's state actually changes (reactive).
-    ///
-    /// The stream continues until the returned `Rx` is dropped.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use daw_control::Daw;
-    ///
-    /// # async fn example(handle: vox::Caller) -> daw_control::Result<()> {
-    /// let daw = Daw::new(handle);
-    /// let project = daw.current_project().await?;
-    /// let transport = project.transport();
-    ///
-    /// // Subscribe to all projects' transport state updates
-    /// let mut rx = transport.subscribe_all_projects().await?;
-    ///
-    /// // Receive updates
-    /// while let Ok(Some(update)) = rx.recv().await {
-    ///     for proj in &update.projects {
-    ///         println!("Project {}: {:?}", proj.project_guid, proj.transport.play_state);
-    ///     }
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn subscribe_all_projects(&self) -> Result<Rx<daw_proto::AllProjectsTransport>> {
-        // Create a channel pair
-        let (tx, rx) = vox::channel::<daw_proto::AllProjectsTransport>();
-
-        // Call the service method to start the stream
-        self.clients.transport.subscribe_all_projects(tx).await?;
-
         Ok(rx)
     }
 }

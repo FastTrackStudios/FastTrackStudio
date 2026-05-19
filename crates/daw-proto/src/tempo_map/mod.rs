@@ -1,7 +1,4 @@
-//! Tempo map module
-//!
-//! Provides types and services for managing tempo and time signature changes
-//! throughout a project's timeline.
+//! Tempo map module — canonical home for everything tempo-map-related.
 
 mod error;
 mod event;
@@ -10,8 +7,10 @@ mod tempo_point;
 
 pub use error::*;
 pub use event::*;
+#[cfg(feature = "vox")]
 pub use service::{
-    TempoMapService, TempoMapServiceClient, TempoMapServiceDispatcher,
-    tempo_map_service_service_descriptor,
+    Service, TempoMapClient, TempoMapRpcDispatcher as Dispatcher, layer, serve,
+    tempo_map_rpc_service_descriptor as descriptor,
 };
+pub use service::{TempoMap, TempoMapRpc};
 pub use tempo_point::*;

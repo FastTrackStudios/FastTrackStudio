@@ -1,5 +1,6 @@
 //! REAPER project data structures and parsing
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -490,13 +491,11 @@ impl ProjectProperties {
                 if let Some(property_name) = tokens.first() {
                     if let Some(name) = property_name.as_string() {
                         match name {
-                            "VOL" => {
-                                if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) =
-                                        (tokens[1].as_number(), tokens[2].as_number())
-                                    {
-                                        metronome.volume = (a, b);
-                                    }
+                            "VOL" if tokens.len() >= 3 => {
+                                if let (Some(a), Some(b)) =
+                                    (tokens[1].as_number(), tokens[2].as_number())
+                                {
+                                    metronome.volume = (a, b);
                                 }
                             }
                             "BEATLEN" => {
@@ -504,75 +503,65 @@ impl ProjectProperties {
                                     metronome.beat_length = val as i32;
                                 }
                             }
-                            "FREQ" => {
-                                if tokens.len() >= 4 {
-                                    if let (Some(a), Some(b), Some(c)) = (
-                                        tokens[1].as_number(),
-                                        tokens[2].as_number(),
-                                        tokens[3].as_number(),
-                                    ) {
-                                        metronome.frequency = (a as i32, b as i32, c as i32);
-                                    }
+                            "FREQ" if tokens.len() >= 4 => {
+                                if let (Some(a), Some(b), Some(c)) = (
+                                    tokens[1].as_number(),
+                                    tokens[2].as_number(),
+                                    tokens[3].as_number(),
+                                ) {
+                                    metronome.frequency = (a as i32, b as i32, c as i32);
                                 }
                             }
-                            "SAMPLES" => {
-                                if tokens.len() >= 5 {
-                                    if let (Some(a), Some(b), Some(c), Some(d)) = (
-                                        tokens[1].as_string(),
-                                        tokens[2].as_string(),
-                                        tokens[3].as_string(),
-                                        tokens[4].as_string(),
-                                    ) {
-                                        metronome.samples = (
-                                            a.to_string(),
-                                            b.to_string(),
-                                            c.to_string(),
-                                            d.to_string(),
-                                        );
-                                    }
+                            "SAMPLES" if tokens.len() >= 5 => {
+                                if let (Some(a), Some(b), Some(c), Some(d)) = (
+                                    tokens[1].as_string(),
+                                    tokens[2].as_string(),
+                                    tokens[3].as_string(),
+                                    tokens[4].as_string(),
+                                ) {
+                                    metronome.samples = (
+                                        a.to_string(),
+                                        b.to_string(),
+                                        c.to_string(),
+                                        d.to_string(),
+                                    );
                                 }
                             }
-                            "SPLIGNORE" => {
-                                if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) =
-                                        (tokens[1].as_number(), tokens[2].as_number())
-                                    {
-                                        metronome.split_ignore = (a as i32, b as i32);
-                                    }
+                            "SPLIGNORE" if tokens.len() >= 3 => {
+                                if let (Some(a), Some(b)) =
+                                    (tokens[1].as_number(), tokens[2].as_number())
+                                {
+                                    metronome.split_ignore = (a as i32, b as i32);
                                 }
                             }
-                            "SPLDEF" => {
-                                if tokens.len() >= 6 {
-                                    if let (
-                                        Some(index),
-                                        Some(freq),
-                                        Some(sample),
-                                        Some(flags),
-                                        Some(name),
-                                    ) = (
-                                        tokens[1].as_number(),
-                                        tokens[2].as_number(),
-                                        tokens[3].as_string(),
-                                        tokens[4].as_number(),
-                                        tokens[5].as_string(),
-                                    ) {
-                                        metronome.split_def.push(SplitDefinition {
-                                            index: index as i32,
-                                            frequency: freq as i32,
-                                            sample_path: sample.to_string(),
-                                            flags: flags as i32,
-                                            name: name.to_string(),
-                                        });
-                                    }
+                            "SPLDEF" if tokens.len() >= 6 => {
+                                if let (
+                                    Some(index),
+                                    Some(freq),
+                                    Some(sample),
+                                    Some(flags),
+                                    Some(name),
+                                ) = (
+                                    tokens[1].as_number(),
+                                    tokens[2].as_number(),
+                                    tokens[3].as_string(),
+                                    tokens[4].as_number(),
+                                    tokens[5].as_string(),
+                                ) {
+                                    metronome.split_def.push(SplitDefinition {
+                                        index: index as i32,
+                                        frequency: freq as i32,
+                                        sample_path: sample.to_string(),
+                                        flags: flags as i32,
+                                        name: name.to_string(),
+                                    });
                                 }
                             }
-                            "PATTERN" => {
-                                if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) =
-                                        (tokens[1].as_number(), tokens[2].as_number())
-                                    {
-                                        metronome.pattern = (a as i32, b as i32);
-                                    }
+                            "PATTERN" if tokens.len() >= 3 => {
+                                if let (Some(a), Some(b)) =
+                                    (tokens[1].as_number(), tokens[2].as_number())
+                                {
+                                    metronome.pattern = (a as i32, b as i32);
                                 }
                             }
                             "PATTERNSTR" => {
@@ -616,33 +605,27 @@ impl ProjectProperties {
                                     envelope.guid = Some(val.to_string());
                                 }
                             }
-                            "ACT" => {
-                                if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) =
-                                        (tokens[1].as_number(), tokens[2].as_number())
-                                    {
-                                        envelope.active = (a as i32, b as i32);
-                                    }
+                            "ACT" if tokens.len() >= 3 => {
+                                if let (Some(a), Some(b)) =
+                                    (tokens[1].as_number(), tokens[2].as_number())
+                                {
+                                    envelope.active = (a as i32, b as i32);
                                 }
                             }
-                            "VIS" => {
-                                if tokens.len() >= 4 {
-                                    if let (Some(a), Some(b), Some(c)) = (
-                                        tokens[1].as_number(),
-                                        tokens[2].as_number(),
-                                        tokens[3].as_number(),
-                                    ) {
-                                        envelope.visible = (a as i32, b as i32, c);
-                                    }
+                            "VIS" if tokens.len() >= 4 => {
+                                if let (Some(a), Some(b), Some(c)) = (
+                                    tokens[1].as_number(),
+                                    tokens[2].as_number(),
+                                    tokens[3].as_number(),
+                                ) {
+                                    envelope.visible = (a as i32, b as i32, c);
                                 }
                             }
-                            "LANEHEIGHT" => {
-                                if tokens.len() >= 3 {
-                                    if let (Some(a), Some(b)) =
-                                        (tokens[1].as_number(), tokens[2].as_number())
-                                    {
-                                        envelope.lane_height = (a as i32, b as i32);
-                                    }
+                            "LANEHEIGHT" if tokens.len() >= 3 => {
+                                if let (Some(a), Some(b)) =
+                                    (tokens[1].as_number(), tokens[2].as_number())
+                                {
+                                    envelope.lane_height = (a as i32, b as i32);
                                 }
                             }
                             "ARM" => {
@@ -650,19 +633,17 @@ impl ProjectProperties {
                                     envelope.armed = val as i32;
                                 }
                             }
-                            "DEFSHAPE" => {
-                                if tokens.len() >= 4 {
-                                    if let (Some(shape), Some(range), Some(snap)) = (
-                                        tokens[1].as_number(),
-                                        tokens[2].as_number(),
-                                        tokens[3].as_number(),
-                                    ) {
-                                        envelope.default_shape = (
-                                            EnvelopeShape::from_value(shape as i32),
-                                            range as i32,
-                                            snap as i32,
-                                        );
-                                    }
+                            "DEFSHAPE" if tokens.len() >= 4 => {
+                                if let (Some(shape), Some(range), Some(snap)) = (
+                                    tokens[1].as_number(),
+                                    tokens[2].as_number(),
+                                    tokens[3].as_number(),
+                                ) {
+                                    envelope.default_shape = (
+                                        EnvelopeShape::from_value(shape as i32),
+                                        range as i32,
+                                        snap as i32,
+                                    );
                                 }
                             }
                             _ => {}
@@ -1326,98 +1307,112 @@ impl ReaperProject {
             }
         }
 
+        // Parallel parsing requires the `parallel` feature (rayon).
+        // WASM builds always take the serial branch.
+        #[cfg(feature = "parallel")]
         let can_parallelize = rpp_project.blocks.len() >= 16;
+        #[cfg(not(feature = "parallel"))]
+        let can_parallelize = false;
         if can_parallelize {
-            if options.parse_tracks {
-                let mut track_results: Vec<(usize, Result<Track, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::Track {
-                            return None;
+            #[cfg(not(feature = "parallel"))]
+            unreachable!("parallel branch entered without rayon feature");
+            #[cfg(feature = "parallel")]
+            {
+                if options.parse_tracks {
+                    let mut track_results: Vec<(usize, Result<Track, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::Track {
+                                return None;
+                            }
+                            Some((
+                                idx,
+                                Track::from_block_with_options(block, options.track_options),
+                            ))
+                        })
+                        .collect();
+                    track_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in track_results {
+                        match result {
+                            Ok(track) => project.tracks.push(track),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse track at block {idx}: {e}")
+                            }
                         }
-                        Some((
-                            idx,
-                            Track::from_block_with_options(block, options.track_options),
-                        ))
-                    })
-                    .collect();
-                track_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in track_results {
-                    match result {
-                        Ok(track) => project.tracks.push(track),
-                        Err(e) => eprintln!("Warning: Failed to parse track at block {idx}: {e}"),
                     }
                 }
-            }
 
-            if options.parse_project_items {
-                let mut item_results: Vec<(usize, Result<Item, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::Item {
-                            return None;
+                if options.parse_project_items {
+                    let mut item_results: Vec<(usize, Result<Item, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::Item {
+                                return None;
+                            }
+                            Some((idx, Item::from_block(block)))
+                        })
+                        .collect();
+                    item_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in item_results {
+                        match result {
+                            Ok(item) => project.items.push(item),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse item at block {idx}: {e}")
+                            }
                         }
-                        Some((idx, Item::from_block(block)))
-                    })
-                    .collect();
-                item_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in item_results {
-                    match result {
-                        Ok(item) => project.items.push(item),
-                        Err(e) => eprintln!("Warning: Failed to parse item at block {idx}: {e}"),
                     }
                 }
-            }
 
-            if options.parse_project_envelopes {
-                let mut envelope_results: Vec<(usize, Result<Envelope, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::Envelope {
-                            return None;
-                        }
-                        Some((idx, Envelope::from_block(block)))
-                    })
-                    .collect();
-                envelope_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in envelope_results {
-                    match result {
-                        Ok(envelope) => project.envelopes.push(envelope),
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse envelope at block {idx}: {e}")
+                if options.parse_project_envelopes {
+                    let mut envelope_results: Vec<(usize, Result<Envelope, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::Envelope {
+                                return None;
+                            }
+                            Some((idx, Envelope::from_block(block)))
+                        })
+                        .collect();
+                    envelope_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in envelope_results {
+                        match result {
+                            Ok(envelope) => project.envelopes.push(envelope),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse envelope at block {idx}: {e}")
+                            }
                         }
                     }
                 }
-            }
 
-            if options.parse_project_fxchains {
-                let mut fx_results: Vec<(usize, Result<FxChain, String>)> = rpp_project
-                    .blocks
-                    .par_iter()
-                    .enumerate()
-                    .filter_map(|(idx, block)| {
-                        if block.block_type != BlockType::FxChain {
-                            return None;
-                        }
-                        Some((idx, FxChain::from_block(block)))
-                    })
-                    .collect();
-                fx_results.sort_by_key(|(idx, _)| *idx);
-                for (idx, result) in fx_results {
-                    match result {
-                        Ok(fx) => project.fx_chains.push(fx),
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse FX chain at block {idx}: {e}")
+                if options.parse_project_fxchains {
+                    let mut fx_results: Vec<(usize, Result<FxChain, String>)> = rpp_project
+                        .blocks
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(idx, block)| {
+                            if block.block_type != BlockType::FxChain {
+                                return None;
+                            }
+                            Some((idx, FxChain::from_block(block)))
+                        })
+                        .collect();
+                    fx_results.sort_by_key(|(idx, _)| *idx);
+                    for (idx, result) in fx_results {
+                        match result {
+                            Ok(fx) => project.fx_chains.push(fx),
+                            Err(e) => {
+                                eprintln!("Warning: Failed to parse FX chain at block {idx}: {e}")
+                            }
                         }
                     }
                 }
-            }
+            } // end #[cfg(feature = "parallel")] block
         } else {
             for block in &rpp_project.blocks {
                 match block.block_type {

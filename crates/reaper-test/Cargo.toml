@@ -21,3 +21,6 @@ reaper-test-macro = { path = "../reaper-test-macro" }
 
 # Runner deps (xtask only — not needed by test binaries)
 reaper-launcher = { workspace = true, optional = true }
+
+[lints]
+workspace = true

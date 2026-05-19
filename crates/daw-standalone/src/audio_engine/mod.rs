@@ -26,11 +26,28 @@
 //!                    └────────────────────────────┘
 //! ```
 
-mod decoder;
+#[cfg(any(feature = "decode", feature = "audio"))]
+pub mod decoder;
+#[cfg(any(feature = "decode", feature = "audio"))]
+pub mod materialize;
+#[cfg(feature = "audio")]
 mod mixer;
-#[cfg(feature = "rpp-loader")]
-pub mod rpp_loader;
+#[cfg(feature = "clap-host")]
+pub mod plugin_host;
+#[cfg(any(feature = "decode", feature = "audio"))]
+pub mod render;
+#[cfg(feature = "vst3-host")]
+pub mod vst3_host;
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+pub mod web;
+// Legacy mixer-direct RPP loader retired in favor of
+// `crate::project_loader::load_rpp`, which populates the full
+// `ProjectState` and routes audio through the renderer. Keep the
+// gate so old `rpp-loader` consumers still compile (now a no-op).
+#[cfg(feature = "audio")]
 pub mod test_tone;
 
+#[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
+#[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};

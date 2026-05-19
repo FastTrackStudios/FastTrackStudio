@@ -139,56 +139,13 @@ pub fn use_fx_browser_subscription() {
                 *FX_PARAMETERS.write() = params;
                 *FX_LOADING.write() = false;
 
-                // Subscribe to live events for this chain
-                tracing::debug!("FX browser: subscribing to FX events");
-                let mut rx = chain.subscribe_events().await?;
-                let selected_guid = fx_guid.clone();
-
-                loop {
-                    match rx.recv().await {
-                        Ok(Some(event_ref)) => {
-                            match event_ref.get() {
-                                FxEvent::ParameterChanged {
-                                    fx_guid: event_guid,
-                                    param_index,
-                                    value,
-                                    ..
-                                } => {
-                                    if *event_guid == selected_guid {
-                                        // Check if this FX is still selected before writing
-                                        let still_selected = FX_SELECTED_FX
-                                            .read()
-                                            .as_ref()
-                                            .map(|g| g == &selected_guid)
-                                            .unwrap_or(false);
-                                        if !still_selected {
-                                            tracing::debug!(
-                                                "FX browser: FX deselected, stopping event loop"
-                                            );
-                                            break;
-                                        }
-                                        FX_PARAMETERS.write().iter_mut().for_each(|p| {
-                                            if p.index == *param_index {
-                                                p.value = *value;
-                                            }
-                                        });
-                                    }
-                                }
-                                _ => {
-                                    // Other FX events (added, removed, enabled, etc.)
-                                }
-                            }
-                        }
-                        Ok(None) => {
-                            tracing::debug!("FX browser: event channel closed");
-                            break;
-                        }
-                        Err(e) => {
-                            tracing::warn!("FX browser: event error: {:?}", e);
-                            continue;
-                        }
-                    }
-                }
+                // FX event streaming retired with the architect::rpc
+                // port (sibling-trait territory). Live updates pause
+                // until the sibling trait lands — until then the
+                // parameter view is a one-shot snapshot.
+                let _ = chain;
+                let _ = fx_guid;
+                let _: &FxEvent;
 
                 Ok(())
             }

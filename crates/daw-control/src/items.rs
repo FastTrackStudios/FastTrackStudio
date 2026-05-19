@@ -5,12 +5,11 @@ use std::sync::Arc;
 use crate::Result;
 use crate::{DawClients, Error, MidiEditor};
 use daw_proto::{
-    ItemEvent, ProjectContext, TakeEvent,
+    ProjectContext,
     item::{FadeShape, Item, ItemRef, Take, TakeRef},
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
-use vox::Rx;
 
 /// Items handle for a specific track
 ///
@@ -244,7 +243,7 @@ impl ProjectItems {
         self.clients
             .item
             .select_all_items(self.context(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -253,39 +252,12 @@ impl ProjectItems {
         self.clients
             .item
             .select_all_items(self.context(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
-    // =========================================================================
-    // Streaming
-    // =========================================================================
-
-    /// Subscribe to item events (added, removed, moved, etc.)
-    ///
-    /// Returns a receiver that streams granular item events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe(&self) -> Result<Rx<ItemEvent>> {
-        let (tx, rx) = vox::channel::<ItemEvent>();
-        self.clients
-            .item
-            .subscribe_items(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
-
-    /// Subscribe to take events (added, removed, activated, etc.)
-    ///
-    /// Returns a receiver that streams granular take events for this project.
-    /// The stream continues until the returned `Rx` is dropped.
-    pub async fn subscribe_takes(&self) -> Result<Rx<TakeEvent>> {
-        let (tx, rx) = vox::channel::<TakeEvent>();
-        self.clients
-            .take
-            .subscribe_takes(self.context(), tx)
-            .await?;
-        Ok(rx)
-    }
+    // Item + take subscriptions retired with the architect::rpc port —
+    // sibling-trait territory if streaming surfaces a real consumer.
 }
 
 impl std::fmt::Debug for ProjectItems {
@@ -372,7 +344,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_position(self.context(), self.item_ref(), position)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -386,7 +358,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_length(self.context(), self.item_ref(), length)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -399,7 +371,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_muted(self.context(), self.item_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -408,7 +380,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_muted(self.context(), self.item_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -417,7 +389,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_color(self.context(), self.item_ref(), color)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -426,7 +398,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_selected(self.context(), self.item_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -435,7 +407,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_selected(self.context(), self.item_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -444,7 +416,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_locked(self.context(), self.item_ref(), true)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -453,7 +425,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_locked(self.context(), self.item_ref(), false)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -471,7 +443,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_volume(self.context(), self.item_ref(), volume)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -480,7 +452,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_fade_in(self.context(), self.item_ref(), length, shape)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -489,7 +461,7 @@ impl ItemHandle {
         self.clients
             .item
             .set_fade_out(self.context(), self.item_ref(), length, shape)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -502,7 +474,7 @@ impl ItemHandle {
         self.clients
             .item
             .move_to_track(self.context(), self.item_ref(), track)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -511,7 +483,7 @@ impl ItemHandle {
         self.clients
             .item
             .delete_item(self.context(), self.item_ref())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -741,7 +713,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 name.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -764,7 +736,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 semitones,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -778,7 +750,7 @@ impl TakeHandle {
         self.clients
             .take
             .set_play_rate(self.context(), self.item_ref(), self.take_ref.clone(), rate)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -797,7 +769,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 volume,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -810,7 +782,7 @@ impl TakeHandle {
         self.clients
             .take
             .set_active_take(self.context(), self.item_ref(), self.take_ref.clone())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -819,7 +791,7 @@ impl TakeHandle {
         self.clients
             .take
             .delete_take(self.context(), self.item_ref(), self.take_ref.clone())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -833,7 +805,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 path.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -847,7 +819,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 color,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -861,7 +833,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 preserve,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -939,7 +911,7 @@ impl TakeHandle {
                     color,
                 },
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -990,7 +962,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 index,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -1044,7 +1016,7 @@ impl TakeHandle {
                 self.take_ref.clone(),
                 command_id,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 

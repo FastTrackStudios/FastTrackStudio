@@ -1,25 +1,26 @@
-//! MIDI editing service trait
+//! MIDI editing service — notes, CCs, pitch bends, program changes,
+//! SysEx in MIDI takes.
+//!
+//! For realtime MIDI I/O see `LiveMidi`.
 
-use super::{MidiCC, MidiNote, MidiNoteCreate, MidiPitchBend, MidiProgramChange, MidiSysEx};
+use super::{
+    MidiCC, MidiChannelPressure, MidiNote, MidiNoteCreate, MidiNoteExpression, MidiPitchBend,
+    MidiPolyPressure, MidiProgramChange, MidiSysEx, NoteExpressionDim,
+};
 use crate::TrackRef;
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use facet::Facet;
-use vox::service;
 
-/// Location of a MIDI take (project + item + take)
+/// Location of a MIDI take (project + item + take).
 #[derive(Clone, Debug, Facet)]
 pub struct MidiTakeLocation {
-    /// Project context
     pub project: ProjectContext,
-    /// Item containing the take
     pub item: ItemRef,
-    /// Take reference
     pub take: TakeRef,
 }
 
 impl MidiTakeLocation {
-    /// Create a new MIDI take location
     pub fn new(project: ProjectContext, item: ItemRef, take: TakeRef) -> Self {
         Self {
             project,
@@ -28,65 +29,57 @@ impl MidiTakeLocation {
         }
     }
 
-    /// Create for the active take of an item
+    /// For the active take of an item.
     pub fn active(project: ProjectContext, item: ItemRef) -> Self {
         Self::new(project, item, TakeRef::Active)
     }
 }
 
-/// PPQ range for queries
+/// PPQ range for queries.
 #[derive(Clone, Debug, Facet)]
 pub struct PpqRange {
-    /// Start position in PPQ
     pub start: f64,
-    /// End position in PPQ
     pub end: f64,
 }
 
 impl PpqRange {
-    /// Create a new PPQ range
     pub fn new(start: f64, end: f64) -> Self {
         Self { start, end }
     }
 }
 
-/// Parameters for quantizing notes
+/// Quantize parameters.
 #[derive(Clone, Debug, Facet)]
 pub struct QuantizeParams {
-    /// Note indices to quantize (empty = selected notes)
+    /// Empty = selected notes.
     pub indices: Vec<u32>,
-    /// Grid size in PPQ (1.0 = quarter note)
+    /// Grid size in PPQ (1.0 = quarter note).
     pub grid_ppq: f64,
-    /// Strength (0.0 = no change, 1.0 = full snap)
+    /// Strength (0.0 = no change, 1.0 = full snap).
     pub strength: f64,
 }
 
-/// Parameters for humanizing notes
+/// Humanize parameters.
 #[derive(Clone, Debug, Facet)]
 pub struct HumanizeParams {
-    /// Note indices to humanize (empty = selected notes)
+    /// Empty = selected notes.
     pub indices: Vec<u32>,
-    /// Random timing variation range in PPQ
+    /// Random timing variation range in PPQ.
     pub timing_range_ppq: f64,
-    /// Random velocity variation range
+    /// Random velocity variation range.
     pub velocity_range: u8,
 }
 
-/// Parameters for creating a CC event
+/// CC event create parameters.
 #[derive(Clone, Debug, Facet)]
 pub struct MidiCCCreate {
-    /// MIDI channel (0-15)
     pub channel: u8,
-    /// Controller number (0-127)
     pub controller: u8,
-    /// Controller value (0-127)
     pub value: u8,
-    /// Position in PPQ
     pub position_ppq: f64,
 }
 
 impl MidiCCCreate {
-    /// Create a new CC event
     pub fn new(channel: u8, controller: u8, value: u8, position_ppq: f64) -> Self {
         Self {
             channel: channel & 0x0F,
@@ -97,19 +90,117 @@ impl MidiCCCreate {
     }
 }
 
-/// Parameters for creating a pitch bend event
+/// Pitch bend event create parameters.
 #[derive(Clone, Debug, Facet)]
 pub struct MidiPitchBendCreate {
-    /// MIDI channel (0-15)
     pub channel: u8,
-    /// Pitch bend value (-8192 to 8191)
+    /// Pitch bend value (-8192 to 8191).
     pub value: i16,
-    /// Position in PPQ
     pub position_ppq: f64,
 }
 
+/// Parameters for creating a new Program Change event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiProgramChangeCreate {
+    pub channel: u8,
+    pub program: u8,
+    pub position_ppq: f64,
+}
+
+impl MidiProgramChangeCreate {
+    pub fn new(channel: u8, program: u8, position_ppq: f64) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            program: program & 0x7F,
+            position_ppq,
+        }
+    }
+}
+
+/// Parameters for creating a new System Exclusive event. The `data`
+/// vector should include the leading `0xF0` and trailing `0xF7`
+/// framing bytes — the standalone impl stores them verbatim and the
+/// renderer hands them straight to the plugin's MIDI input port.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiSysExCreate {
+    pub data: Vec<u8>,
+    pub position_ppq: f64,
+}
+
+impl MidiSysExCreate {
+    pub fn new(data: Vec<u8>, position_ppq: f64) -> Self {
+        Self { data, position_ppq }
+    }
+}
+
+/// Parameters for creating a channel-pressure (mono aftertouch) event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiChannelPressureCreate {
+    pub channel: u8,
+    pub pressure: u8,
+    pub position_ppq: f64,
+}
+
+impl MidiChannelPressureCreate {
+    pub fn new(channel: u8, pressure: u8, position_ppq: f64) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            pressure: pressure & 0x7F,
+            position_ppq,
+        }
+    }
+}
+
+/// Parameters for creating a poly-pressure (per-note aftertouch) event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiPolyPressureCreate {
+    pub channel: u8,
+    pub note: u8,
+    pub pressure: u8,
+    pub position_ppq: f64,
+}
+
+impl MidiPolyPressureCreate {
+    pub fn new(channel: u8, note: u8, pressure: u8, position_ppq: f64) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            note: note & 0x7F,
+            pressure: pressure & 0x7F,
+            position_ppq,
+        }
+    }
+}
+
+/// Parameters for creating a per-note expression event.
+#[derive(Clone, Debug, Facet)]
+pub struct MidiNoteExpressionCreate {
+    pub channel: u8,
+    /// Target note (pitch). `0xFF` = "any note on this channel".
+    pub note: u8,
+    pub dimension: NoteExpressionDim,
+    pub value: f64,
+    pub position_ppq: f64,
+}
+
+impl MidiNoteExpressionCreate {
+    pub fn new(
+        channel: u8,
+        note: u8,
+        dimension: NoteExpressionDim,
+        value: f64,
+        position_ppq: f64,
+    ) -> Self {
+        Self {
+            channel: channel & 0x0F,
+            note: if note == 0xFF { 0xFF } else { note & 0x7F },
+            dimension,
+            value,
+            position_ppq,
+        }
+    }
+}
+
 impl MidiPitchBendCreate {
-    /// Create a new pitch bend event
     pub fn new(channel: u8, value: i16, position_ppq: f64) -> Self {
         Self {
             channel: channel & 0x0F,
@@ -119,34 +210,20 @@ impl MidiPitchBendCreate {
     }
 }
 
-/// Service for editing MIDI data in takes
-///
-/// This service provides CRUD operations on MIDI notes, CC events, and other
-/// MIDI data within takes. For real-time MIDI I/O, see `LiveMidiService`.
-#[service]
-pub trait MidiService {
-    // === Note Queries ===
+#[architect::rpc]
+pub trait Midi {
+    // ── Notes ──────────────────────────────────────────────────────
 
-    /// Get all notes in a MIDI take
-    async fn get_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote>;
+    fn notes(&self, location: MidiTakeLocation) -> Vec<MidiNote>;
 
-    /// Get notes within a PPQ range
-    async fn get_notes_in_range(
-        &self,
-        location: MidiTakeLocation,
-        range: PpqRange,
-    ) -> Vec<MidiNote>;
+    fn notes_in_range(&self, location: MidiTakeLocation, range: PpqRange) -> Vec<MidiNote>;
 
-    /// Get only selected notes
-    async fn get_selected_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote>;
+    fn selected_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote>;
+    fn note_count(&self, location: MidiTakeLocation) -> u32;
 
-    /// Get the total note count
-    async fn note_count(&self, location: MidiTakeLocation) -> u32;
-
-    // === Note CRUD ===
-
-    /// Create a new empty MIDI item on a track, returning the take location
-    async fn create_midi_item(
+    /// Create a new empty MIDI item on a track. Returns the take
+    /// location of the new item's active take.
+    fn create_midi_item(
         &self,
         project: ProjectContext,
         track: TrackRef,
@@ -154,85 +231,77 @@ pub trait MidiService {
         end_seconds: f64,
     ) -> Option<MidiTakeLocation>;
 
-    /// Add a note, returns the note index
-    async fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32;
+    /// Add a note. Returns the note index.
+    fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32;
 
-    /// Add multiple notes, returns their indices
-    async fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32>;
+    fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32>;
+    fn delete_note(&self, location: MidiTakeLocation, index: u32);
+    fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>);
+    fn delete_selected_notes(&self, location: MidiTakeLocation);
 
-    /// Delete a note by index
-    async fn delete_note(&self, location: MidiTakeLocation, index: u32);
+    fn set_note_pitch(&self, location: MidiTakeLocation, index: u32, pitch: u8);
+    fn set_note_velocity(&self, location: MidiTakeLocation, index: u32, velocity: u8);
+    fn set_note_position(&self, location: MidiTakeLocation, index: u32, start_ppq: f64);
+    fn set_note_length(&self, location: MidiTakeLocation, index: u32, length_ppq: f64);
+    fn set_note_channel(&self, location: MidiTakeLocation, index: u32, channel: u8);
+    fn set_note_selected(&self, location: MidiTakeLocation, index: u32, selected: bool);
+    fn set_note_muted(&self, location: MidiTakeLocation, index: u32, muted: bool);
 
-    /// Delete multiple notes
-    async fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>);
+    // ── Batch ops ──────────────────────────────────────────────────
 
-    /// Delete all selected notes
-    async fn delete_selected_notes(&self, location: MidiTakeLocation);
+    fn select_all_notes(&self, location: MidiTakeLocation, selected: bool);
+    fn transpose_notes(&self, location: MidiTakeLocation, indices: Vec<u32>, semitones: i8);
+    fn quantize_notes(&self, location: MidiTakeLocation, params: QuantizeParams);
+    fn humanize_notes(&self, location: MidiTakeLocation, params: HumanizeParams);
 
-    // === Note Modification ===
+    // ── CCs ────────────────────────────────────────────────────────
 
-    /// Set note pitch
-    async fn set_note_pitch(&self, location: MidiTakeLocation, index: u32, pitch: u8);
+    fn ccs(&self, location: MidiTakeLocation, controller: Option<u8>) -> Vec<MidiCC>;
+    fn add_cc(&self, location: MidiTakeLocation, cc: MidiCCCreate) -> u32;
+    fn delete_cc(&self, location: MidiTakeLocation, index: u32);
+    fn set_cc_value(&self, location: MidiTakeLocation, index: u32, value: u8);
 
-    /// Set note velocity
-    async fn set_note_velocity(&self, location: MidiTakeLocation, index: u32, velocity: u8);
+    // ── Other event types ─────────────────────────────────────────
 
-    /// Set note position
-    async fn set_note_position(&self, location: MidiTakeLocation, index: u32, start_ppq: f64);
+    fn pitch_bends(&self, location: MidiTakeLocation) -> Vec<MidiPitchBend>;
+    fn add_pitch_bend(&self, location: MidiTakeLocation, pb: MidiPitchBendCreate) -> u32;
+    fn delete_pitch_bend(&self, location: MidiTakeLocation, index: u32);
+    fn set_pitch_bend_value(&self, location: MidiTakeLocation, index: u32, value: i16);
 
-    /// Set note length
-    async fn set_note_length(&self, location: MidiTakeLocation, index: u32, length_ppq: f64);
+    fn program_changes(&self, location: MidiTakeLocation) -> Vec<MidiProgramChange>;
+    fn add_program_change(&self, location: MidiTakeLocation, pc: MidiProgramChangeCreate) -> u32;
+    fn delete_program_change(&self, location: MidiTakeLocation, index: u32);
+    fn set_program(&self, location: MidiTakeLocation, index: u32, program: u8);
 
-    /// Set note channel
-    async fn set_note_channel(&self, location: MidiTakeLocation, index: u32, channel: u8);
+    fn sysex(&self, location: MidiTakeLocation) -> Vec<MidiSysEx>;
+    fn add_sysex(&self, location: MidiTakeLocation, sysex: MidiSysExCreate) -> u32;
+    fn delete_sysex(&self, location: MidiTakeLocation, index: u32);
 
-    /// Set note selected state
-    async fn set_note_selected(&self, location: MidiTakeLocation, index: u32, selected: bool);
+    // ── Channel + poly aftertouch ─────────────────────────────────
 
-    /// Set note muted state
-    async fn set_note_muted(&self, location: MidiTakeLocation, index: u32, muted: bool);
+    fn channel_pressures(&self, location: MidiTakeLocation) -> Vec<MidiChannelPressure>;
+    fn add_channel_pressure(
+        &self,
+        location: MidiTakeLocation,
+        cp: MidiChannelPressureCreate,
+    ) -> u32;
+    fn delete_channel_pressure(&self, location: MidiTakeLocation, index: u32);
+    fn set_channel_pressure_value(&self, location: MidiTakeLocation, index: u32, pressure: u8);
 
-    // === Batch Operations ===
+    fn poly_pressures(&self, location: MidiTakeLocation) -> Vec<MidiPolyPressure>;
+    fn add_poly_pressure(&self, location: MidiTakeLocation, pp: MidiPolyPressureCreate) -> u32;
+    fn delete_poly_pressure(&self, location: MidiTakeLocation, index: u32);
+    fn set_poly_pressure_value(&self, location: MidiTakeLocation, index: u32, pressure: u8);
 
-    /// Select or deselect all notes
-    async fn select_all_notes(&self, location: MidiTakeLocation, selected: bool);
+    // ── Per-note expression (MPE / CLAP / VST3) ────────────────────
 
-    /// Transpose notes by semitones
-    async fn transpose_notes(&self, location: MidiTakeLocation, indices: Vec<u32>, semitones: i8);
-
-    /// Quantize notes to a grid
-    async fn quantize_notes(&self, location: MidiTakeLocation, params: QuantizeParams);
-
-    /// Humanize notes (add random variation)
-    async fn humanize_notes(&self, location: MidiTakeLocation, params: HumanizeParams);
-
-    // === CC Queries ===
-
-    /// Get CC events (optionally filtered by controller number)
-    async fn get_ccs(&self, location: MidiTakeLocation, controller: Option<u8>) -> Vec<MidiCC>;
-
-    // === CC CRUD ===
-
-    /// Add a CC event, returns the event index
-    async fn add_cc(&self, location: MidiTakeLocation, cc: MidiCCCreate) -> u32;
-
-    /// Delete a CC event
-    async fn delete_cc(&self, location: MidiTakeLocation, index: u32);
-
-    /// Set CC value
-    async fn set_cc_value(&self, location: MidiTakeLocation, index: u32, value: u8);
-
-    // === Other Events ===
-
-    /// Get pitch bend events
-    async fn get_pitch_bends(&self, location: MidiTakeLocation) -> Vec<MidiPitchBend>;
-
-    /// Add a pitch bend event
-    async fn add_pitch_bend(&self, location: MidiTakeLocation, pb: MidiPitchBendCreate) -> u32;
-
-    /// Get program change events
-    async fn get_program_changes(&self, location: MidiTakeLocation) -> Vec<MidiProgramChange>;
-
-    /// Get SysEx events
-    async fn get_sysex(&self, location: MidiTakeLocation) -> Vec<MidiSysEx>;
+    fn note_expressions(&self, location: MidiTakeLocation) -> Vec<MidiNoteExpression>;
+    fn add_note_expression(&self, location: MidiTakeLocation, ne: MidiNoteExpressionCreate) -> u32;
+    fn delete_note_expression(&self, location: MidiTakeLocation, index: u32);
+    fn set_note_expression_value(&self, location: MidiTakeLocation, index: u32, value: f64);
 }
+
+#[cfg(feature = "vox")]
+pub use MidiRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use midi_rpc_service_descriptor as descriptor;

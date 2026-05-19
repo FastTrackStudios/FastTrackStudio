@@ -1,16 +1,27 @@
-//! Markers handle and operations
+//! Markers handle — per-project facade over the architect-emitted
+//! `MarkersClient`.
+//!
+//! Plumbs the `project_id` into every call site so consumer code looks
+//! like `markers.add(10.5, "Verse 1")` instead of repeating
+//! `ProjectContext::Project(...)` everywhere. The underlying trait is
+//! stateless; this handle is the per-project ergonomic shell.
+//!
+//! Range-queries, lane methods, transport-style "goto" operations, and
+//! event subscriptions were retired alongside the architect::rpc port —
+//! the sync `Markers` trait doesn't speak them. Range queries can be
+//! reconstructed locally with `markers.all().await?.iter().filter(...)`
+//! when needed; lane + goto + subscribe live on follow-on traits when
+//! we add them.
 
 use std::sync::Arc;
 
 use crate::DawClients;
 use crate::Result;
-use daw_proto::{Marker, MarkerEvent, ProjectContext};
-use vox::Rx;
+use daw_proto::{Marker, ProjectContext};
 
-/// Markers handle for a specific project
+/// Markers handle for a specific project.
 ///
-/// This handle provides access to marker operations (query, add, remove, navigate)
-/// for a specific project. Like reaper-rs, it's lightweight and cheap to clone.
+/// Cheap to clone — only holds a project guid and an `Arc<DawClients>`.
 ///
 /// # Example
 ///
@@ -22,18 +33,10 @@ use vox::Rx;
 /// let project = daw.current_project().await?;
 /// let markers = project.markers();
 ///
-/// // Query markers
 /// let all = markers.all().await?;
-/// let count = markers.count().await?;
-///
-/// // Add and manipulate markers
 /// let id = markers.add(10.5, "Verse 1").await?;
 /// markers.rename(id, "Chorus").await?;
 /// markers.set_color(id, 0xFF0000).await?;
-///
-/// // Navigation
-/// markers.goto_next().await?;
-/// markers.goto(id).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -44,7 +47,6 @@ pub struct Markers {
 }
 
 impl Markers {
-    /// Create a new markers handle for a project
     pub(crate) fn new(project_id: String, clients: Arc<DawClients>) -> Self {
         Self {
             project_id,
@@ -52,168 +54,71 @@ impl Markers {
         }
     }
 
-    /// Helper to create project context
     fn context(&self) -> ProjectContext {
         ProjectContext::Project(self.project_id.clone())
     }
 
-    // =========================================================================
-    // Query Methods
-    // =========================================================================
-
-    /// Get all markers in the project
+    /// Every marker in the project, ordered by position.
     pub async fn all(&self) -> Result<Vec<Marker>> {
-        let markers = self.clients.marker.get_markers(self.context()).await?;
-        Ok(markers)
+        Ok(self.clients.marker.all(self.context()).await?)
     }
 
-    /// Get a specific marker by ID
+    /// One marker by id, if it still exists.
     pub async fn get(&self, id: u32) -> Result<Option<Marker>> {
-        let marker = self.clients.marker.get_marker(self.context(), id).await?;
-        Ok(marker)
+        Ok(self.clients.marker.get(self.context(), id).await?)
     }
 
-    /// Get all markers within a time range (inclusive)
-    pub async fn in_range(&self, start: f64, end: f64) -> Result<Vec<Marker>> {
-        let markers = self
-            .clients
-            .marker
-            .get_markers_in_range(self.context(), start, end)
-            .await?;
-        Ok(markers)
+    /// Total count of markers.
+    pub async fn count(&self) -> Result<u32> {
+        Ok(self.clients.marker.count(self.context()).await?)
     }
 
-    /// Get the next marker after the given position
-    pub async fn next_after(&self, position: f64) -> Result<Option<Marker>> {
-        let marker = self
-            .clients
-            .marker
-            .get_next_marker(self.context(), position)
-            .await?;
-        Ok(marker)
-    }
-
-    /// Get the previous marker before the given position
-    pub async fn previous_before(&self, position: f64) -> Result<Option<Marker>> {
-        let marker = self
-            .clients
-            .marker
-            .get_previous_marker(self.context(), position)
-            .await?;
-        Ok(marker)
-    }
-
-    /// Get the total number of markers
-    pub async fn count(&self) -> Result<usize> {
-        let count = self.clients.marker.marker_count(self.context()).await?;
-        Ok(count)
-    }
-
-    // =========================================================================
-    // Mutation Methods
-    // =========================================================================
-
-    /// Add a new marker at the given position
-    ///
-    /// Returns the ID of the newly created marker.
+    /// Insert a marker at `position` seconds with the given name.
+    /// Returns the new id.
     pub async fn add(&self, position: f64, name: &str) -> Result<u32> {
-        let id = self
+        Ok(self
             .clients
             .marker
-            .add_marker(self.context(), position, name.to_string())
-            .await?;
-        Ok(id)
+            .add(self.context(), position, name.to_string())
+            .await??)
     }
 
-    /// Add a new marker at the given position in a specific ruler lane.
-    ///
-    /// Returns the ID of the newly created marker.
-    pub async fn add_in_lane(&self, position: f64, name: &str, lane: u32) -> Result<u32> {
-        let id = self
-            .clients
-            .marker
-            .add_marker_in_lane(self.context(), position, name.to_string(), lane)
-            .await?;
-        Ok(id)
-    }
-
-    /// Set the ruler lane for a marker. Pass None to move to the default lane.
-    pub async fn set_lane(&self, id: u32, lane: Option<u32>) -> Result<()> {
-        self.clients
-            .marker
-            .set_marker_lane(self.context(), id, lane)
-            .await?;
-        Ok(())
-    }
-
-    /// Remove a marker by ID
+    /// Remove a marker by id.
     pub async fn remove(&self, id: u32) -> Result<()> {
-        self.clients
-            .marker
-            .remove_marker(self.context(), id)
-            .await?;
+        self.clients.marker.remove(self.context(), id).await??;
         Ok(())
     }
 
-    /// Move a marker to a new position
+    /// Move a marker to a new position in seconds.
     pub async fn move_to(&self, id: u32, position: f64) -> Result<()> {
         self.clients
             .marker
-            .move_marker(self.context(), id, position)
-            .await?;
+            .set_position(self.context(), id, position)
+            .await??;
         Ok(())
     }
 
-    /// Rename a marker
+    /// Rename a marker.
     pub async fn rename(&self, id: u32, name: &str) -> Result<()> {
         self.clients
             .marker
-            .rename_marker(self.context(), id, name.to_string())
-            .await?;
+            .rename(self.context(), id, name.to_string())
+            .await??;
         Ok(())
     }
 
-    /// Set the color of a marker (0 for default color)
+    /// Set the marker's color. `0` clears to the DAW default.
     pub async fn set_color(&self, id: u32, color: u32) -> Result<()> {
         self.clients
             .marker
-            .set_marker_color(self.context(), id, color)
-            .await?;
+            .set_color(self.context(), id, color)
+            .await??;
         Ok(())
     }
 
-    // =========================================================================
-    // Navigation Methods
-    // =========================================================================
-
-    /// Navigate to the next marker from current position
-    pub async fn goto_next(&self) -> Result<()> {
-        self.clients.marker.goto_next_marker(self.context()).await?;
-        Ok(())
-    }
-
-    /// Navigate to the previous marker from current position
-    pub async fn goto_previous(&self) -> Result<()> {
-        self.clients
-            .marker
-            .goto_previous_marker(self.context())
-            .await?;
-        Ok(())
-    }
-
-    /// Navigate to a specific marker by ID
-    pub async fn goto(&self, id: u32) -> Result<()> {
-        self.clients.marker.goto_marker(self.context(), id).await?;
-        Ok(())
-    }
-
-    // =========================================================================
-    // Subscriptions
-    // =========================================================================
-
-    /// Subscribe to marker change events for this project.
-    pub async fn subscribe(&self) -> Result<Rx<MarkerEvent>> {
-        let (tx, rx) = vox::channel::<MarkerEvent>();
+    /// Subscribe to marker add/remove/modify events.
+    pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::marker::MarkerStreamEvent>> {
+        let (tx, rx) = vox::channel();
         self.clients.marker.subscribe(self.context(), tx).await?;
         Ok(rx)
     }

@@ -1,7 +1,13 @@
-//! Track module
+//! Track module — canonical home for everything tracks-related.
 //!
-//! This module provides track types and the TrackService trait
-//! for managing audio/MIDI tracks in a DAW mixer.
+//! - [`Track`], [`TrackRef`], [`InputMonitoringMode`], [`RecordInput`] : data
+//! - [`Tracks`] : the service trait, decorated with `#[architect::rpc]`
+//! - [`TrackEvent`] / [`TrackError`] : event + error types
+//! - [`TrackHierarchy`] + builder : structural helpers
+//!
+//! Backends impl `Tracks` directly; in-process callers use it as a
+//! plain sync API; remote callers reach the same surface via the
+//! auto-emitted [`TracksClient`] over vox.
 
 mod error;
 mod event;
@@ -13,14 +19,20 @@ mod test_utils;
 mod track;
 
 pub use error::TrackError;
-pub use event::TrackEvent;
+pub use event::{TrackEvent, TrackStreamEvent};
 pub use hierarchy::{FolderDepthChange, TrackHierarchy, TrackNode};
 pub use hierarchy_builder::{AddChildren, TrackHierarchyBuilder};
-pub use service::TrackExtStateRequest;
+pub use service::{TrackExtStateRequest, Tracks, TracksRpc};
+
+// vox-emitted names from the architect macro mirror. Aliased to short
+// names so mounting reads `track::descriptor()` + `track::serve(Reaper)`.
+#[cfg(feature = "vox")]
 pub use service::{
-    TrackService, TrackServiceClient, TrackServiceDispatcher, track_service_service_descriptor,
+    Service, TracksClient, TracksRpcDispatcher as Dispatcher, layer, serve,
+    tracks_rpc_service_descriptor as descriptor,
 };
+
 pub use test_utils::{
     TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist, format_tracklist,
 };
-pub use track::{InputMonitoringMode, RecordInput, Track, TrackRef};
+pub use track::{InputMonitoringMode, RecordInput, ReorderTracksBehavior, Track, TrackRef};

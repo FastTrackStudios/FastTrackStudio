@@ -1,25 +1,12 @@
-//! [`DawFileService`] implementation backed by `dawfile-reaper`.
+//! `impl DawFileOps for Reaper` — pure-function project-file helpers
+//! (no REAPER context required), backed by `dawfile-reaper`.
 
 use std::path::{Path, PathBuf};
 
 use daw_proto::{
-    CombineSetlistOptions, CombineSetlistResult, DawFileService, ProjectSummary,
-    ProjectTrackSummary, SetlistSong,
+    CombineSetlistOptions, CombineSetlistResult, DawFileOps, ProjectSummary, ProjectTrackSummary,
+    SetlistSong,
 };
-
-/// Pure-function project-file helpers (no REAPER context required).
-///
-/// Lives in `daw-reaper` so the existing service registration in
-/// `plugin_services.rs` can reach it, but it has no `Reaper::get()` calls
-/// — the operations are filesystem + parsing only.
-#[derive(Clone, Default)]
-pub struct DawFileOps;
-
-impl DawFileOps {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 fn summarize_path(path: &str) -> ProjectSummary {
     let mut summary = ProjectSummary {
@@ -70,7 +57,11 @@ fn resolve_combine_output(input: &Path, requested: &str) -> PathBuf {
     parent.join(format!("{}.RPP", stem.to_string_lossy()))
 }
 
-fn combine(input: &str, output: &str, options: &CombineSetlistOptions) -> CombineSetlistResult {
+fn combine_impl(
+    input: &str,
+    output: &str,
+    options: &CombineSetlistOptions,
+) -> CombineSetlistResult {
     use dawfile_reaper::setlist_rpp::{self, CombineOptions};
 
     let mut result = CombineSetlistResult {
@@ -121,34 +112,17 @@ fn combine(input: &str, output: &str, options: &CombineSetlistOptions) -> Combin
     result
 }
 
-impl DawFileService for DawFileOps {
-    async fn summarize_project(&self, path: String) -> ProjectSummary {
-        // Heavy parsing — run on a blocking pool so we don't stall the
-        // service runtime. Project files are typically <1 MB but very large
-        // sessions can easily push tens of MB of XML chunks.
-        match tokio::task::spawn_blocking(move || summarize_path(&path)).await {
-            Ok(summary) => summary,
-            Err(err) => ProjectSummary {
-                error: format!("summarize task panicked: {err}"),
-                ..Default::default()
-            },
-        }
+impl DawFileOps for crate::Reaper {
+    fn summarize_project(&self, path: &str) -> ProjectSummary {
+        summarize_path(path)
     }
 
-    async fn combine_setlist(
+    fn combine_setlist(
         &self,
-        input: String,
-        output: String,
+        input: &str,
+        output: &str,
         options: CombineSetlistOptions,
     ) -> CombineSetlistResult {
-        let input_for_err = input.clone();
-        match tokio::task::spawn_blocking(move || combine(&input, &output, &options)).await {
-            Ok(result) => result,
-            Err(err) => CombineSetlistResult {
-                input: input_for_err,
-                error: format!("combine task panicked: {err}"),
-                ..Default::default()
-            },
-        }
+        combine_impl(input, output, &options)
     }
 }

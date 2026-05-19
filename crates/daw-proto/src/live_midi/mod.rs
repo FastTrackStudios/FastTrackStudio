@@ -1,10 +1,7 @@
-//! Live MIDI module for real-time MIDI I/O
+//! Live MIDI — types + events + service trait.
 //!
-//! This module provides types and services for handling real-time MIDI input
-//! and output during playback. It manages MIDI device enumeration, connection,
-//! and event streaming.
-//!
-//! For editing MIDI data within takes, see the `midi` module.
+//! Send-batch + subscribe-input streaming retire with the
+//! architect::rpc port; sibling-trait territory.
 
 mod device;
 mod error;
@@ -16,4 +13,7 @@ pub use device::*;
 pub use error::*;
 pub use event::*;
 pub use message::*;
-pub use service::*;
+pub use service::{LiveMidi, LiveMidiRpc};
+
+#[cfg(feature = "vox")]
+pub use service::{Dispatcher, LiveMidiClient, Service, descriptor, layer, serve};

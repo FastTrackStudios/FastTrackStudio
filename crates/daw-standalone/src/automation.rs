@@ -1,365 +1,361 @@
-//! Standalone automation implementation
+//! `impl Automation for Standalone` — envelope storage in
+//! `ProjectState.envelopes`.
+//!
+//! Each envelope is keyed by `(track_guid, EnvelopeKey)` and stores
+//! visibility, arm, automation mode, plus a vec of `EnvelopePoint`s
+//! kept sorted by time. `value_at` interpolates linearly between
+//! adjacent points (or holds for `EnvelopeShape::Square`); non-linear
+//! shapes (SlowStartEnd / FastStart / FastEnd / Bezier) fall back to
+//! linear for now — wire real curves when the audio graph needs them.
 
-use crate::platform::RwLock;
-use daw_proto::{
-    ProjectContext,
-    automation::{
-        AddPointParams, AutomationService, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeRef,
-        EnvelopeShape, EnvelopeType, SetPointParams, TimeRangeParams,
-    },
-    primitives::{AutomationMode, PositionInSeconds},
-    track::TrackRef,
+use daw_proto::TrackRef;
+use daw_proto::automation::{
+    AddPointParams, Automation, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeShape,
+    SetPointParams, TimeRangeParams,
 };
-use std::sync::Arc;
+use daw_proto::primitives::{AutomationMode, PositionInSeconds};
+use daw_proto::project::ProjectContext;
 
-/// Internal envelope state
-#[derive(Clone)]
-struct EnvelopeState {
-    track_guid: String,
-    envelope_type: EnvelopeType,
-    name: String,
-    visible: bool,
-    armed: bool,
-    automation_mode: AutomationMode,
-    points: Vec<PointState>,
-}
+use crate::sync::{EnvelopeData, EnvelopeKey, Standalone};
 
-/// Internal point state
-#[derive(Clone)]
-struct PointState {
-    index: u32,
-    time: PositionInSeconds,
-    value: f64,
-    shape: EnvelopeShape,
-    tension: f64,
-    selected: bool,
-}
-
-impl EnvelopeState {
-    fn to_envelope(&self) -> Envelope {
-        Envelope {
-            track_guid: self.track_guid.clone(),
-            envelope_type: self.envelope_type,
-            name: self.name.clone(),
-            fx_guid: None,
-            param_index: None,
-            visible: self.visible,
-            armed: self.armed,
-            automation_mode: self.automation_mode,
-            point_count: self.points.len() as u32,
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => {
+            let state = daw.state.lock().ok()?;
+            state.current_project_guid.clone()
         }
     }
 }
 
-impl PointState {
-    fn to_point(&self) -> EnvelopePoint {
-        EnvelopePoint {
-            index: self.index,
-            time: self.time,
-            value: self.value,
-            shape: self.shape,
-            tension: self.tension,
-            selected: self.selected,
-        }
-    }
-}
-
-/// Standalone automation service implementation
-#[derive(Clone)]
-pub struct StandaloneAutomation {
-    envelopes: Arc<RwLock<Vec<EnvelopeState>>>,
-}
-
-impl Default for StandaloneAutomation {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StandaloneAutomation {
-    pub fn new() -> Self {
-        Self {
-            envelopes: Arc::new(RwLock::new("standalone-automation", Vec::new())),
-        }
-    }
-
-    fn find_envelope<'a>(
-        envelopes: &'a mut [EnvelopeState],
-        location: &EnvelopeLocation,
-    ) -> Option<&'a mut EnvelopeState> {
-        let track_guid = match &location.track {
-            TrackRef::Guid(g) => g.clone(),
-            _ => return None,
-        };
-        envelopes.iter_mut().find(|e| {
-            e.track_guid == track_guid
-                && match &location.envelope {
-                    EnvelopeRef::Type(t) => e.envelope_type == *t,
-                    EnvelopeRef::ByName(n) => &e.name == n,
-                    EnvelopeRef::FxParam { .. } => false,
-                }
-        })
-    }
-}
-
-impl AutomationService for StandaloneAutomation {
-    async fn get_envelopes(&self, _project: ProjectContext, track: TrackRef) -> Vec<Envelope> {
-        let track_guid = match track {
-            TrackRef::Guid(g) => g,
-            _ => return vec![],
-        };
-        let envelopes = self.envelopes.read().await;
-        envelopes
+fn resolve_track_guid(daw: &Standalone, project_guid: &str, track: &TrackRef) -> Option<String> {
+    daw.with_project(project_guid, |p| match track {
+        TrackRef::Guid(g) => p
+            .tracks
             .iter()
-            .filter(|e| e.track_guid == track_guid)
-            .map(|e| e.to_envelope())
-            .collect()
-    }
+            .find(|t| t.guid == *g)
+            .map(|t| t.guid.clone()),
+        TrackRef::Index(i) => p.tracks.get(*i as usize).map(|t| t.guid.clone()),
+        TrackRef::Master => Some("master".to_string()),
+    })
+    .ok()
+    .flatten()
+}
 
-    async fn get_envelope(
-        &self,
-        _project: ProjectContext,
-        location: EnvelopeLocation,
-    ) -> Option<Envelope> {
-        let track_guid = match &location.track {
-            TrackRef::Guid(g) => g.clone(),
-            _ => return None,
+fn renumber(points: &mut [EnvelopePoint]) {
+    for (i, p) in points.iter_mut().enumerate() {
+        p.index = i as u32;
+    }
+}
+
+fn sort_points(points: &mut [EnvelopePoint]) {
+    points.sort_by(|a, b| {
+        a.time
+            .as_seconds()
+            .partial_cmp(&b.time.as_seconds())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
+/// Resolve the envelope at `loc` to its `(owner_id, key)` identity.
+/// `owner_id` is the track GUID for track / FxParam / Send / Named
+/// envelopes, or an empty string for `Take` envelopes (the item +
+/// take GUIDs are carried inside the `EnvelopeKey::Take` variant so
+/// the storage key is fully self-identifying).
+fn resolve_envelope_id(
+    daw: &Standalone,
+    project_guid: &str,
+    loc: &EnvelopeLocation,
+) -> Option<(String, EnvelopeKey)> {
+    let key = EnvelopeKey::from_ref(&loc.envelope);
+    if matches!(key, EnvelopeKey::Take { .. }) {
+        // Take envelopes don't have a track owner — the (item, take)
+        // identity carries everything needed.
+        return Some((String::new(), key));
+    }
+    let track_guid = resolve_track_guid(daw, project_guid, &loc.track)?;
+    Some((track_guid, key))
+}
+
+impl Automation for Standalone {
+    fn envelopes(&self, project: ProjectContext, track: TrackRef) -> Vec<Envelope> {
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return Vec::new();
         };
-        let envelopes = self.envelopes.read().await;
-        envelopes
-            .iter()
-            .find(|e| {
-                e.track_guid == track_guid
-                    && match &location.envelope {
-                        EnvelopeRef::Type(t) => e.envelope_type == *t,
-                        EnvelopeRef::ByName(n) => &e.name == n,
-                        EnvelopeRef::FxParam { .. } => false,
+        let Some(track_guid) = resolve_track_guid(self, &project_guid, &track) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.envelopes
+                .iter()
+                .filter_map(|((tg, key), data)| {
+                    if tg == &track_guid {
+                        Some(data.to_proto(tg, key))
+                    } else {
+                        None
                     }
-            })
-            .map(|e| e.to_envelope())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
     }
 
-    async fn set_visible(
+    fn envelope(&self, project: ProjectContext, location: EnvelopeLocation) -> Option<Envelope> {
+        let project_guid = resolve_project(self, &project)?;
+        let (track_guid, key) = resolve_envelope_id(self, &project_guid, &location)?;
+        self.with_project(&project_guid, |p| {
+            p.envelopes
+                .get(&(track_guid.clone(), key.clone()))
+                .map(|d| d.to_proto(&track_guid, &key))
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn set_visible(&self, project: ProjectContext, location: EnvelopeLocation, visible: bool) {
+        mutate_envelope(self, project, location, |e| e.visible = visible);
+    }
+
+    fn set_armed(&self, project: ProjectContext, location: EnvelopeLocation, armed: bool) {
+        mutate_envelope(self, project, location, |e| e.armed = armed);
+    }
+
+    fn set_automation_mode(
         &self,
-        _project: ProjectContext,
-        location: EnvelopeLocation,
-        visible: bool,
-    ) {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            e.visible = visible;
-        }
-    }
-
-    async fn set_armed(&self, _project: ProjectContext, location: EnvelopeLocation, armed: bool) {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            e.armed = armed;
-        }
-    }
-
-    async fn set_automation_mode(
-        &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         location: EnvelopeLocation,
         mode: AutomationMode,
     ) {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            e.automation_mode = mode;
-        }
+        mutate_envelope(self, project, location, |e| e.automation_mode = mode);
     }
 
-    async fn get_points(
-        &self,
-        _project: ProjectContext,
-        location: EnvelopeLocation,
-    ) -> Vec<EnvelopePoint> {
-        let envelopes = self.envelopes.read().await;
-        let track_guid = match &location.track {
-            TrackRef::Guid(g) => g.clone(),
-            _ => return vec![],
+    fn points(&self, project: ProjectContext, location: EnvelopeLocation) -> Vec<EnvelopePoint> {
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return Vec::new();
         };
-        envelopes
-            .iter()
-            .find(|e| {
-                e.track_guid == track_guid
-                    && match &location.envelope {
-                        EnvelopeRef::Type(t) => e.envelope_type == *t,
-                        EnvelopeRef::ByName(n) => &e.name == n,
-                        EnvelopeRef::FxParam { .. } => false,
-                    }
-            })
-            .map(|e| e.points.iter().map(|p| p.to_point()).collect())
-            .unwrap_or_default()
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return Vec::new();
+        };
+        self.with_project(&project_guid, |p| {
+            p.envelopes
+                .get(&(tg, key))
+                .map(|d| d.points.clone())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
-    async fn get_points_in_range(
+    fn points_in_range(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         location: EnvelopeLocation,
         range: TimeRangeParams,
     ) -> Vec<EnvelopePoint> {
-        let envelopes = self.envelopes.read().await;
-        let track_guid = match &location.track {
-            TrackRef::Guid(g) => g.clone(),
-            _ => return vec![],
-        };
-        envelopes
-            .iter()
-            .find(|e| {
-                e.track_guid == track_guid
-                    && match &location.envelope {
-                        EnvelopeRef::Type(t) => e.envelope_type == *t,
-                        EnvelopeRef::ByName(n) => &e.name == n,
-                        EnvelopeRef::FxParam { .. } => false,
-                    }
+        let (start, end) = (range.start.as_seconds(), range.end.as_seconds());
+        Automation::points(self, project, location)
+            .into_iter()
+            .filter(|p| {
+                let t = p.time.as_seconds();
+                t >= start && t <= end
             })
-            .map(|e| {
-                e.points
-                    .iter()
-                    .filter(|p| {
-                        p.time.as_seconds() >= range.start.as_seconds()
-                            && p.time.as_seconds() <= range.end.as_seconds()
-                    })
-                    .map(|p| p.to_point())
-                    .collect()
-            })
-            .unwrap_or_default()
+            .collect()
     }
 
-    async fn get_value_at(
+    fn value_at(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         location: EnvelopeLocation,
         time: PositionInSeconds,
     ) -> f64 {
-        let envelopes = self.envelopes.read().await;
-        let track_guid = match &location.track {
-            TrackRef::Guid(g) => g.clone(),
-            _ => return 0.0,
-        };
-        envelopes
-            .iter()
-            .find(|e| {
-                e.track_guid == track_guid
-                    && match &location.envelope {
-                        EnvelopeRef::Type(t) => e.envelope_type == *t,
-                        EnvelopeRef::ByName(n) => &e.name == n,
-                        EnvelopeRef::FxParam { .. } => false,
-                    }
-            })
-            .map(|e| {
-                // Simple linear interpolation
-                let t = time.as_seconds();
-                let mut prev: Option<&PointState> = None;
-                for p in &e.points {
-                    if p.time.as_seconds() > t {
-                        if let Some(prev) = prev {
-                            let ratio = (t - prev.time.as_seconds())
-                                / (p.time.as_seconds() - prev.time.as_seconds());
-                            return prev.value + (p.value - prev.value) * ratio;
+        let points = Automation::points(self, project, location);
+        if points.is_empty() {
+            return 0.0;
+        }
+        let t = time.as_seconds();
+        let first = &points[0];
+        if t <= first.time.as_seconds() {
+            return first.value;
+        }
+        let last = points.last().unwrap();
+        if t >= last.time.as_seconds() {
+            return last.value;
+        }
+        // Find the segment containing `t`.
+        for i in 0..points.len() - 1 {
+            let a = &points[i];
+            let b = &points[i + 1];
+            let ta = a.time.as_seconds();
+            let tb = b.time.as_seconds();
+            if t >= ta && t <= tb {
+                match a.shape {
+                    EnvelopeShape::Square => return a.value,
+                    // Linear (and all other shapes for now — see file
+                    // doc-comment).
+                    _ => {
+                        let span = tb - ta;
+                        if span <= 0.0 {
+                            return b.value;
                         }
-                        return p.value;
+                        let f = (t - ta) / span;
+                        return a.value + (b.value - a.value) * f;
                     }
-                    prev = Some(p);
                 }
-                prev.map(|p| p.value).unwrap_or(0.0)
-            })
-            .unwrap_or(0.0)
+            }
+        }
+        0.0
     }
 
-    async fn add_point(
+    fn add_point(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         location: EnvelopeLocation,
         params: AddPointParams,
     ) -> u32 {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            let index = e.points.len() as u32;
-            e.points.push(PointState {
-                index,
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return u32::MAX;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return u32::MAX;
+        };
+        self.with_project_mut(&project_guid, |p| {
+            let data = p
+                .envelopes
+                .entry((tg, key))
+                .or_insert_with(EnvelopeData::new);
+            // Note: value is stored unclamped. Different envelope
+            // kinds use different ranges (Volume/Pan/Mute = 0..=1,
+            // Pitch = semitones, FxParam = whatever the plugin
+            // exposes). The renderer / consumer clamps when it
+            // applies the value.
+            data.points.push(EnvelopePoint {
+                index: 0, // rewritten by renumber()
                 time: params.time,
                 value: params.value,
                 shape: params.shape,
                 tension: 0.0,
                 selected: false,
             });
-            // Sort by time
-            e.points.sort_by(|a, b| {
-                a.time
-                    .as_seconds()
-                    .partial_cmp(&b.time.as_seconds())
-                    .unwrap()
-            });
-            // Re-index
-            for (i, p) in e.points.iter_mut().enumerate() {
-                p.index = i as u32;
-            }
-            return index;
-        }
-        0
+            sort_points(&mut data.points);
+            renumber(&mut data.points);
+            // Return the new point's index (post-sort).
+            data.points
+                .iter()
+                .position(|pt| {
+                    (pt.time.as_seconds() - params.time.as_seconds()).abs() < 1e-12
+                        && (pt.value - params.value).abs() < 1e-12
+                })
+                .map(|i| i as u32)
+                .unwrap_or(0)
+        })
+        .unwrap_or(u32::MAX)
     }
 
-    async fn delete_point(&self, _project: ProjectContext, location: EnvelopeLocation, index: u32) {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            e.points.retain(|p| p.index != index);
-            // Re-index
-            for (i, p) in e.points.iter_mut().enumerate() {
-                p.index = i as u32;
+    fn delete_point(&self, project: ProjectContext, location: EnvelopeLocation, index: u32) {
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(data) = p.envelopes.get_mut(&(tg, key)) {
+                let i = index as usize;
+                if i < data.points.len() {
+                    data.points.remove(i);
+                    renumber(&mut data.points);
+                }
             }
-        }
+        });
     }
 
-    async fn set_point(
+    fn set_point(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         location: EnvelopeLocation,
         params: SetPointParams,
     ) {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location)
-            && let Some(p) = e.points.iter_mut().find(|p| p.index == params.index)
-        {
-            p.time = params.time;
-            p.value = params.value;
-            p.shape = params.shape;
-        }
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(data) = p.envelopes.get_mut(&(tg, key)) {
+                let i = params.index as usize;
+                if let Some(pt) = data.points.get_mut(i) {
+                    pt.time = params.time;
+                    pt.value = params.value;
+                    pt.shape = params.shape;
+                    sort_points(&mut data.points);
+                    renumber(&mut data.points);
+                }
+            }
+        });
     }
 
-    async fn delete_points_in_range(
+    fn delete_points_in_range(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         location: EnvelopeLocation,
         range: TimeRangeParams,
     ) {
-        let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            e.points.retain(|p| {
-                p.time.as_seconds() < range.start.as_seconds()
-                    || p.time.as_seconds() > range.end.as_seconds()
-            });
-            // Re-index
-            for (i, p) in e.points.iter_mut().enumerate() {
-                p.index = i as u32;
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let Some((tg, key)) = resolve_envelope_id(self, &project_guid, &location) else {
+            return;
+        };
+        let (start, end) = (range.start.as_seconds(), range.end.as_seconds());
+        let _ = self.with_project_mut(&project_guid, |p| {
+            if let Some(data) = p.envelopes.get_mut(&(tg, key)) {
+                data.points.retain(|pt| {
+                    let t = pt.time.as_seconds();
+                    !(t >= start && t <= end)
+                });
+                renumber(&mut data.points);
             }
-        }
+        });
     }
 
-    async fn get_global_automation_override(
-        &self,
-        _project: ProjectContext,
-    ) -> Option<AutomationMode> {
-        None
+    fn global_automation_override(&self, project: ProjectContext) -> Option<AutomationMode> {
+        let project_guid = resolve_project(self, &project)?;
+        self.with_project(&project_guid, |p| p.global_automation_override)
+            .ok()
+            .flatten()
     }
 
-    async fn set_global_automation_override(
+    fn set_global_automation_override(
         &self,
-        _project: ProjectContext,
-        _mode: Option<AutomationMode>,
+        project: ProjectContext,
+        mode: Option<AutomationMode>,
     ) {
-        // Stub - no-op
+        let Some(project_guid) = resolve_project(self, &project) else {
+            return;
+        };
+        let _ = self.with_project_mut(&project_guid, |p| {
+            p.global_automation_override = mode;
+        });
     }
+}
+
+fn mutate_envelope(
+    daw: &Standalone,
+    project: ProjectContext,
+    location: EnvelopeLocation,
+    f: impl FnOnce(&mut EnvelopeData),
+) {
+    let Some(project_guid) = resolve_project(daw, &project) else {
+        return;
+    };
+    let Some((tg, key)) = resolve_envelope_id(daw, &project_guid, &location) else {
+        return;
+    };
+    let _ = daw.with_project_mut(&project_guid, |p| {
+        let data = p
+            .envelopes
+            .entry((tg, key))
+            .or_insert_with(EnvelopeData::new);
+        f(data);
+    });
 }

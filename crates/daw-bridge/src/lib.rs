@@ -6,6 +6,10 @@
 //! in-process instead of routing through this bridge.
 
 mod routed_handler;
+#[cfg(feature = "sync")]
+mod sync_runtime;
+
+use daw::{Layer, Services as _};
 
 // ============================================================================
 // RT-safe Global Allocator
@@ -27,19 +31,7 @@ use std::sync::OnceLock;
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
 
-use routed_handler::{DawConnectionAcceptor, RoutedHandler};
-
-// Service dispatchers for method ID routing
-use daw::service::{
-    ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, BatchServiceDispatcher,
-    DawFileServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
-    HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
-    LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiServiceDispatcher,
-    PluginLoaderServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    RoutingServiceDispatcher, ScreensetServiceDispatcher, TakeServiceDispatcher,
-    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
-    TransportServiceDispatcher, WindowGeometryServiceDispatcher,
-};
+use routed_handler::DawConnectionAcceptor;
 
 // ============================================================================
 // Global State (TaskSupport for main thread dispatch)
@@ -146,165 +138,26 @@ async fn register_daw_dispatcher() {
     // Set TaskSupport for daw-reaper to use
     daw::reaper::set_task_support(Global::task_support());
 
-    // Initialize all broadcasters
-    daw::reaper::init_transport_broadcaster();
-    daw::reaper::init_fx_broadcaster();
-    daw::reaper::init_track_broadcaster();
+    // Surviving (non-service) broadcasters — others retired with the
+    // architect::rpc port.
     daw::reaper::init_item_broadcaster();
-    daw::reaper::init_routing_broadcaster();
     daw::reaper::init_tempo_map_broadcaster();
-    info!("All broadcasters initialized");
+    daw::reaper::init_fx_broadcaster();
+    daw::reaper::init_routing_broadcaster();
+    daw::reaper::init_take_broadcaster();
+    info!("Surviving broadcasters initialized");
 
-    // Create REAPER implementations
-    let transport = daw::reaper::ReaperTransport::new();
-    let project = daw::reaper::ReaperProject::new();
-    let marker = daw::reaper::ReaperMarker::new();
-    let region = daw::reaper::ReaperRegion::new();
-    let tempo_map = daw::reaper::ReaperTempoMap::new();
-    let audio_engine = daw::reaper::ReaperAudioEngine::new();
-    let midi = daw::reaper::ReaperMidi::new();
-    let fx = daw::reaper::ReaperFx::new();
-    let track = daw::reaper::ReaperTrack::new();
-    let routing = daw::reaper::ReaperRouting::new();
-    let live_midi = daw::reaper::ReaperLiveMidi::new();
-    let ext_state = daw::reaper::ReaperExtState::new();
-    let item = daw::reaper::ReaperItem::new();
-    let take = daw::reaper::ReaperTake::new();
-    let health = daw::reaper::ReaperHealth::new();
-    let action_registry = daw::reaper::ReaperActionRegistry::new();
-    let input = daw::reaper::ReaperInput::new();
-    let toolbar = daw::reaper::ReaperToolbar::new();
-    let screenset = daw::reaper::ReaperScreenset::new();
-    let dawfile_ops = daw::reaper::DawFileOps::new();
-    let window_geometry = daw::reaper::ReaperWindowGeometry::new();
-    let plugin_loader = daw::reaper::ReaperPluginLoader::new();
-    let automation = daw::reaper::ReaperAutomation::new();
-    let batch = daw::reaper::batch::BatchExecutor::new();
     let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
-    // Import service descriptor functions for method_id routing
-    use daw::service::{
-        action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
-        batch_service_service_descriptor, daw_file_service_service_descriptor,
-        ext_state_service_service_descriptor, fx_service_service_descriptor,
-        health_service_service_descriptor, input_service_service_descriptor,
-        item_service_service_descriptor, live_midi_service_service_descriptor,
-        marker_service_service_descriptor, midi_service_service_descriptor,
-        plugin_loader_service_service_descriptor, project_service_service_descriptor,
-        region_service_service_descriptor, routing_service_service_descriptor,
-        screenset_service_service_descriptor, take_service_service_descriptor,
-        tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
-        track_service_service_descriptor, transport_service_service_descriptor,
-        window_geometry_service_service_descriptor,
-    };
+    // Reaper's canonical service surface (impl Services for Reaper),
+    // plus the dock-host bolt-on (different backend, so it ships
+    // pre-mounted). The MIDI analysis service (`keyflow-daw-analysis`)
+    // is mounted out-of-tree by fts-extensions; see daw-reaper
+    // a823b67 for why.
+    let daw_handler = daw::reaper::Reaper::layers()
+        .merge(daw_proto::dock_host::layer(dock_host))
+        .provide(daw::reaper::Reaper);
 
-    // Compose all 16 service dispatchers via RoutedHandler
-    let daw_handler = RoutedHandler::new()
-        .with(
-            transport_service_service_descriptor(),
-            TransportServiceDispatcher::new(transport),
-        )
-        .with(
-            project_service_service_descriptor(),
-            ProjectServiceDispatcher::new(project),
-        )
-        .with(
-            marker_service_service_descriptor(),
-            MarkerServiceDispatcher::new(marker),
-        )
-        .with(
-            region_service_service_descriptor(),
-            RegionServiceDispatcher::new(region),
-        )
-        .with(
-            tempo_map_service_service_descriptor(),
-            TempoMapServiceDispatcher::new(tempo_map),
-        )
-        .with(
-            audio_engine_service_service_descriptor(),
-            AudioEngineServiceDispatcher::new(audio_engine),
-        )
-        .with(
-            midi_service_service_descriptor(),
-            MidiServiceDispatcher::new(midi),
-        )
-        // MidiAnalysisService is registered out-of-tree by `keyflow-daw-
-        // analysis` (loaded via fts-extensions); see daw-reaper a823b67
-        // for the cycle that prevents in-tree registration.
-        .with(
-            fx_service_service_descriptor(),
-            FxServiceDispatcher::new(fx),
-        )
-        .with(
-            track_service_service_descriptor(),
-            TrackServiceDispatcher::new(track),
-        )
-        .with(
-            routing_service_service_descriptor(),
-            RoutingServiceDispatcher::new(routing),
-        )
-        .with(
-            live_midi_service_service_descriptor(),
-            LiveMidiServiceDispatcher::new(live_midi),
-        )
-        .with(
-            ext_state_service_service_descriptor(),
-            ExtStateServiceDispatcher::new(ext_state),
-        )
-        .with(
-            health_service_service_descriptor(),
-            HealthServiceDispatcher::new(health),
-        )
-        .with(
-            item_service_service_descriptor(),
-            ItemServiceDispatcher::new(item),
-        )
-        .with(
-            take_service_service_descriptor(),
-            TakeServiceDispatcher::new(take),
-        )
-        .with(
-            action_registry_service_service_descriptor(),
-            ActionRegistryServiceDispatcher::new(action_registry),
-        )
-        .with(
-            input_service_service_descriptor(),
-            InputServiceDispatcher::new(input),
-        )
-        .with(
-            toolbar_service_service_descriptor(),
-            ToolbarServiceDispatcher::new(toolbar),
-        )
-        .with(
-            screenset_service_service_descriptor(),
-            ScreensetServiceDispatcher::new(screenset),
-        )
-        .with(
-            daw_file_service_service_descriptor(),
-            DawFileServiceDispatcher::new(dawfile_ops),
-        )
-        .with(
-            window_geometry_service_service_descriptor(),
-            WindowGeometryServiceDispatcher::new(window_geometry),
-        )
-        .with(
-            plugin_loader_service_service_descriptor(),
-            PluginLoaderServiceDispatcher::new(plugin_loader),
-        )
-        .with(
-            daw::service::automation::automation_service_service_descriptor(),
-            daw::service::automation::AutomationServiceDispatcher::new(automation),
-        )
-        .with(
-            batch_service_service_descriptor(),
-            BatchServiceDispatcher::new(batch),
-        )
-        .with(
-            daw_proto::dock_host::dock_host_service_service_descriptor(),
-            daw_proto::dock_host::DockHostServiceDispatcher::new(dock_host),
-        );
-
-    // Build the connection acceptor from the routed handler
     let acceptor = DawConnectionAcceptor::new(daw_handler);
 
     // Start Unix socket server
@@ -432,6 +285,101 @@ fn get_app() -> Option<&'static Fragile<App>> {
 /// tick so REAPER's CLAP scanner has already finished scanning.
 static FX_PLUGINS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Shared audio-thread snapshot cell. Audio hook writes per-buffer
+/// state; main thread / RPC reads via this handle.
+pub static AUDIO_SYNC_CELL: OnceLock<std::sync::Arc<daw_audio_sync::SnapshotCell>> =
+    OnceLock::new();
+
+/// Multi-project registry — one snapshot cell per open project,
+/// populated by the multi-project audio hook + the main-thread
+/// updater that maps `enum_projects` → slot.
+pub static PROJECT_REGISTRY: OnceLock<std::sync::Arc<daw_audio_sync::registry::ProjectRegistry>> =
+    OnceLock::new();
+
+/// Live clock-sync session. `None` until the bound task succeeds; held
+/// here so the Diagnostics RPC can read the peer table without
+/// re-binding sockets.
+pub static CLOCK_SYNC: OnceLock<std::sync::Arc<daw_audio_sync::clock_sync::ClockSync>> =
+    OnceLock::new();
+
+/// Live drift corrector. Holds the spawned task; dropping (extension
+/// unload) stops the controller.
+pub static DRIFT_CORRECTOR: OnceLock<std::sync::Arc<daw_audio_sync::drift::DriftCorrector>> =
+    OnceLock::new();
+
+/// Refresh `ProjectRegistry` slot assignments from REAPER's open
+/// projects. Runs on the main thread every timer tick. New projects
+/// get a fresh UUID; vanished projects have their slot cleared.
+///
+/// State: a per-process map (`PROJECT_ID_MAP`) keyed by ReaProject
+/// pointer (as `usize`) → assigned `[u8; 16]` id, so the same
+/// project keeps the same id across timer ticks and across slot
+/// reshuffles when other projects close.
+fn refresh_audio_sync_registry(registry: &daw_audio_sync::registry::ProjectRegistry) {
+    use reaper_medium::{ProjectRef, ReaProject};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static PROJECT_ID_MAP: std::sync::OnceLock<Mutex<HashMap<usize, [u8; 16]>>> =
+        std::sync::OnceLock::new();
+    let id_map = PROJECT_ID_MAP.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Enumerate open projects.
+    let reaper = reaper_high::Reaper::get().medium_reaper();
+    let mut seen: Vec<(ReaProject, [u8; 16])> = Vec::new();
+    for tab in 0..=daw_audio_sync::registry::MAX_PROJECTS {
+        match reaper.enum_projects(ProjectRef::Tab(tab as u32), 0) {
+            Some(res) => {
+                let ptr_key = res.project.as_ptr() as usize;
+                let id = {
+                    let mut map = match id_map.lock() {
+                        Ok(g) => g,
+                        Err(_) => return,
+                    };
+                    *map.entry(ptr_key).or_insert_with(|| {
+                        let id = uuid::Uuid::new_v4();
+                        *id.as_bytes()
+                    })
+                };
+                seen.push((res.project, id));
+            }
+            None => break,
+        }
+    }
+
+    // Assign each seen project to a slot. Try to keep the existing
+    // mapping (find_slot); fall back to find_vacant.
+    for (project, id) in &seen {
+        let slot_idx = registry
+            .find_slot(*project)
+            .or_else(|| registry.find_vacant());
+        if let Some(idx) = slot_idx
+            && let Some(slot) = registry.slot(idx)
+        {
+            slot.assign(*project, *id);
+        }
+    }
+
+    // Clear slots for projects no longer open.
+    for idx in 0..daw_audio_sync::registry::MAX_PROJECTS {
+        let Some(slot) = registry.slot(idx) else {
+            continue;
+        };
+        let Some((current_project, _)) = slot.current() else {
+            continue;
+        };
+        let still_open = seen
+            .iter()
+            .any(|(p, _)| p.as_ptr() == current_project.as_ptr());
+        if !still_open {
+            slot.clear();
+            // Also clean the id map.
+            if let Ok(mut map) = id_map.lock() {
+                map.remove(&(current_project.as_ptr() as usize));
+            }
+        }
+    }
+}
+
 extern "C" fn timer_callback() {
     // catch_unwind prevents panics from unwinding through the C ABI boundary
     // (which is UB). Any panic inside is logged and the timer keeps running.
@@ -440,6 +388,27 @@ extern "C" fn timer_callback() {
         if !FX_PLUGINS_LOADED.load(std::sync::atomic::Ordering::Relaxed) {
             FX_PLUGINS_LOADED.store(true, std::sync::atomic::Ordering::Relaxed);
             daw::reaper::eager_load_fx_plugins();
+        }
+
+        // Measure REAPER's actual timer tick rate when FTS_TIMER_PROBE=1.
+        // Gives ground truth for what the dispatcher ceiling actually
+        // is — the SDK doc says "roughly 30 times per second" but
+        // observed rate can differ. Logs every 30 ticks.
+        if std::env::var("FTS_TIMER_PROBE").as_deref() == Ok("1") {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::time::Instant;
+            static LAST: std::sync::OnceLock<std::sync::Mutex<Instant>> =
+                std::sync::OnceLock::new();
+            static COUNT: AtomicU64 = AtomicU64::new(0);
+            let last = LAST.get_or_init(|| std::sync::Mutex::new(Instant::now()));
+            let now = Instant::now();
+            let mut guard = last.lock().unwrap();
+            let dt = now.duration_since(*guard);
+            *guard = now;
+            let n = COUNT.fetch_add(1, Ordering::Relaxed);
+            if n.is_multiple_of(30) && n > 0 {
+                tracing::info!(tick = n, "FTS_TIMER_PROBE dt={dt:?}");
+            }
         }
 
         if let Some(app_fragile) = get_app() {
@@ -453,16 +422,28 @@ extern "C" fn timer_callback() {
                 runtime.process_main_thread_tasks();
             }
 
-            // Poll all broadcasters for state changes
-            daw::reaper::poll_and_broadcast();
-            daw::reaper::poll_and_broadcast_fx();
-            daw::reaper::poll_and_broadcast_tracks();
+            // Poll surviving broadcasters. FX / routing / track
+            // streams will land as DawEventHub channels (Phase 2 of
+            // docs/streaming-design.md) — transport is wired now.
             daw::reaper::poll_and_broadcast_items();
-            daw::reaper::poll_and_broadcast_routing();
             daw::reaper::poll_and_broadcast_tempo_map();
+            daw::reaper::poll_and_broadcast_transport();
+            daw::reaper::poll_and_broadcast_markers();
+            daw::reaper::poll_and_broadcast_regions();
+            daw::reaper::poll_and_broadcast_tracks();
+            daw::reaper::poll_and_broadcast_fx();
+            daw::reaper::poll_and_broadcast_routing();
+            daw::reaper::poll_and_broadcast_takes();
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();
+
+            // Refresh the multi-project audio-sync slot assignments.
+            // Cheap (one enum_projects loop) and lets the audio
+            // hook observe newly-opened tabs / clear closed ones.
+            if let Some(registry) = PROJECT_REGISTRY.get() {
+                refresh_audio_sync_registry(registry);
+            }
         }
     });
     if let Err(e) = result {
@@ -473,11 +454,16 @@ extern "C" fn timer_callback() {
 /// REAPER extension entry point.
 #[reaper_extension_plugin]
 fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
-    // Initialize tracing to /tmp/daw-bridge.log
-    let log_file =
-        std::fs::File::create("/tmp/daw-bridge.log").expect("Failed to create /tmp/daw-bridge.log");
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "daw_bridge=info,daw_reaper=info,warn".into());
+    // Initialize tracing to /tmp/daw-bridge-{pid}.log so multi-instance
+    // tests don't clobber each other's logs.
+    let pid = std::process::id();
+    let log_path = format!("/tmp/daw-bridge-{pid}.log");
+    let log_file = std::fs::File::create(&log_path).expect("Failed to create daw-bridge log file");
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // Suppress cranelift / wgpu noise; keep our crates + dependencies
+        // we care about at info.
+        "info,cranelift_jit=warn,cranelift_codegen=warn,wgpu=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn".into()
+    });
 
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
@@ -556,13 +542,192 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let app = APP_INSTANCE.get().expect("App should be initialized").get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
+
+    // Faster main-thread tick — bumps REAPER's internal MISC_TIMER
+    // (id 666) to a higher rate via SWELL's SetTimer. Drives all
+    // plugin_register("timer") callbacks at the new rate, which cuts
+    // architect dispatcher wait (0..tick) for inbound RPCs.
+    //
+    // Same trick as the public `reaper_60fps` extension. Opt-in via
+    // FTS_MISC_TIMER_HZ (e.g. 60, 120, 240). Unix-only for now
+    // (Windows would need User32::SetTimer instead of SWELL).
+    #[cfg(target_family = "unix")]
+    if let Ok(hz) = std::env::var("FTS_MISC_TIMER_HZ")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|hz| hz.clamp(15, 1000))
+        .ok_or(())
+    {
+        // REAPER's misc timer id is 666. Re-arming SetTimer with the
+        // same (hwnd, id) replaces the existing timer's interval.
+        const MISC_TIMER: usize = 666;
+        let rate_ms = (1000 / hz).max(1);
+        let swell = reaper_low::Swell::load(*session.reaper().low().plugin_context());
+        let hwnd = session.reaper().get_main_hwnd();
+        // SAFETY: hwnd from REAPER, timer id matches REAPER's misc
+        // timer slot, null TIMERPROC delegates to REAPER's existing
+        // WM_TIMER handler.
+        unsafe {
+            swell.SetTimer(hwnd.as_ptr(), MISC_TIMER, rate_ms, None);
+        }
+        info!("FTS_MISC_TIMER_HZ={hz} — REAPER misc timer rearmed at {rate_ms}ms");
+    }
+
     daw::reaper::register_extension_menu(&mut session);
 
     daw::reaper::register_project_importer(&mut session)?;
 
+    // Audio-thread observer: writes per-buffer (host_micros, playhead,
+    // sample_rate, len) into a lock-free seqlock cell that the main
+    // thread + sync engine read. Foundation for sample-accurate
+    // multi-machine sync.
+    //
+    // Two hooks register together so single-project consumers
+    // (DriftCorrector, default Diagnostics RPCs) keep working while
+    // multi-project consumers (FTS-session, per-project drift) get
+    // independent per-project snapshots via the registry.
+    let audio_sync_cell = {
+        let rt_reaper = session.create_real_time_reaper();
+        let (cell, hook) = daw_audio_sync::build_hook(rt_reaper);
+        daw_audio_sync::set_global_cell(cell.clone());
+        let _ = AUDIO_SYNC_CELL.set(cell.clone());
+        match session.audio_reg_hardware_hook_add(Box::new(hook)) {
+            Ok(_) => info!("audio-sync single-project hook registered"),
+            Err(e) => warn!("audio-sync single-project hook failed: {e}"),
+        }
+        cell
+    };
+    {
+        let rt_reaper = session.create_real_time_reaper();
+        let (registry, hook) = daw_audio_sync::registry::build_multi_project_hook(rt_reaper);
+        daw_audio_sync::registry::set_global_registry(registry.clone());
+        let _ = PROJECT_REGISTRY.set(registry);
+        match session.audio_reg_hardware_hook_add(Box::new(hook)) {
+            Ok(_) => info!("audio-sync multi-project hook registered"),
+            Err(e) => warn!("audio-sync multi-project hook failed: {e}"),
+        }
+    }
+
+    // ClockSync — UDP peer discovery + PTP-style offset estimation +
+    // sample-position broadcast. Opt-in via FTS_AUDIO_SYNC_PORT so
+    // existing test rigs and single-instance setups don't bind random
+    // sockets. Default port is 7777 when env var is set without a
+    // numeric value.
+    if let Ok(raw) = std::env::var("FTS_AUDIO_SYNC_PORT") {
+        let port = raw
+            .parse::<u16>()
+            .unwrap_or(daw_audio_sync::clock_sync::DEFAULT_PORT);
+        let cell_for_sync = audio_sync_cell.clone();
+        // Use the bridge's own tokio runtime (plugin_main runs from a
+        // C ABI thread without an ambient runtime — Handle::current
+        // panics, try_current returns None).
+        let handle = app.tokio_runtime.handle().clone();
+        handle.spawn(async move {
+            let cell_for_drift = cell_for_sync.clone();
+            match daw_audio_sync::clock_sync::ClockSync::bind(
+                port,
+                daw_audio_sync::clock_sync::DEFAULT_MULTICAST,
+                Some(cell_for_sync),
+            )
+            .await
+            {
+                Ok(cs) => {
+                    info!(
+                        peer_id = ?cs.peer_id,
+                        port,
+                        "clock-sync bound; multicast peer discovery + position broadcast active"
+                    );
+                    let arc = std::sync::Arc::new(cs);
+                    daw_audio_sync::set_global_clock_sync(arc.clone());
+
+                    // Drift corrector: dispatches CSurf_OnPlayRateChange
+                    // via TaskSupport when local position diverges from
+                    // the elected leader's projected position. Off by
+                    // default — opt in via FTS_AUDIO_SYNC_DRIFT=1
+                    // (still safe to enable: actuator is a no-op
+                    // when leader is None / drift below deadband).
+                    if std::env::var("FTS_AUDIO_SYNC_DRIFT").as_deref() == Ok("1") {
+                        let ts = Global::task_support();
+                        let corrector = daw_audio_sync::drift::DriftCorrector::spawn(
+                            cell_for_drift,
+                            arc.clone(),
+                            daw_audio_sync::drift::DriftConfig::default(),
+                            move |rate| {
+                                use reaper_medium::PlaybackSpeedFactor;
+                                let _ = ts.do_later_in_main_thread_asap(move || {
+                                    let reaper = reaper_high::Reaper::get();
+                                    let speed = PlaybackSpeedFactor::new(rate);
+                                    reaper.medium_reaper().csurf_on_play_rate_change(speed);
+                                });
+                            },
+                        );
+                        let arc_corrector = std::sync::Arc::new(corrector);
+                        daw_audio_sync::set_global_drift_corrector(arc_corrector.clone());
+                        let _ = DRIFT_CORRECTOR.set(arc_corrector);
+                        info!("drift correction enabled — proportional, ±1% cap");
+                    }
+
+                    let _ = CLOCK_SYNC.set(arc);
+                }
+                Err(e) => warn!(?e, "clock-sync bind failed"),
+            }
+        });
+    }
+
+    // Push-based change-detection via REAPER's IReaperControlSurface
+    // callbacks. Mode is selected by the FTS_CSURF_MODE env var:
+    //
+    //   FTS_CSURF_MODE=full       — publish every callback (sub-tick push
+    //                               for read-only subscribers like web UIs
+    //                               and MIDI/OSC surface adapters). Don't
+    //                               combine with the bidirectional sync
+    //                               runtime: applies → REAPER → callback
+    //                               → publish creates echo loops.
+    //   FTS_CSURF_MODE=push-only  — default. Publish only events that have
+    //                               no equivalent in the 30 Hz poller (FX
+    //                               params, marker nudges). Safe to pair
+    //                               with bidirectional sync.
+    //   FTS_CSURF_MODE=off        — register but no-op every callback.
+    //   FTS_CSURF_DISABLED=1      — skip registration entirely (back-compat).
+    //
+    // The returned RegistrationHandle is dropped; ReaperSession owns the
+    // boxed surface and unregisters on REAPER shutdown.
+    if std::env::var("FTS_CSURF_DISABLED").as_deref() != Ok("1") {
+        use reaper_high::MiddlewareControlSurface;
+        let mode = daw::reaper::CsurfMode::from_env();
+        let csurf = MiddlewareControlSurface::new(daw::reaper::DawControlSurface::with_mode(mode));
+        match session.plugin_register_add_csurf_inst(Box::new(csurf)) {
+            Ok(_handle) => {
+                info!("daw control surface registered (mode={mode:?})");
+            }
+            Err(e) => {
+                warn!("failed to register daw control surface: {e}");
+            }
+        }
+    }
+
     drop(session);
 
     register_window_geometry_actions();
+
+    #[cfg(feature = "sync")]
+    if std::env::var("FTS_SYNC_ENABLED").as_deref() == Ok("1") {
+        let app = APP_INSTANCE.get().expect("App should be initialized").get();
+        let runtime = app.tokio_runtime.handle().clone();
+        // Construct an in-process Daw handle pointing at the REAPER dispatcher
+        // we registered above. Don't rely on the daw::get() facade singleton —
+        // daw-bridge never calls init_from_parts, so it stays None.
+        runtime.spawn(async move {
+            match daw::reaper::build_extension_daw().await {
+                Ok(daw) => {
+                    if let Err(e) = sync_runtime::start(daw).await {
+                        warn!("sync runtime start failed: {e}");
+                    }
+                }
+                Err(e) => warn!("sync runtime: failed to build daw handle: {e}"),
+            }
+        });
+    }
 
     info!("daw-bridge initialized successfully");
     Ok(())

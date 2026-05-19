@@ -1,115 +1,109 @@
-//! Standalone ExtState implementation (in-memory mock)
+//! `impl ExtState for Standalone` — post-architect::rpc port.
+//!
+//! Global keys live in `StandaloneState::global_ext_state`. Project
+//! keys live in `ProjectState::project_ext_state`. The `persist` flag
+//! is ignored — the standalone mock is transient.
 
-use daw_proto::{ExtStateService, ProjectContext};
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use daw_proto::ExtState;
+use daw_proto::{DawError, DawResult, ProjectContext};
 
-type GlobalStateMap = Arc<RwLock<HashMap<(String, String), String>>>;
-type ProjectStateMap = Arc<RwLock<HashMap<(String, String, String), String>>>;
+use crate::sync::Standalone;
 
-/// In-memory ext state for testing.
-///
-/// Stores global values in `global_state: HashMap<(section, key), value>`.
-/// Stores per-project values in `project_state: HashMap<(project_guid, section, key), value>`.
-/// The `persist` flag is accepted but ignored — all values are transient in the standalone mock.
-#[derive(Clone)]
-pub struct StandaloneExtState {
-    global_state: GlobalStateMap,
-    project_state: ProjectStateMap,
-}
-
-impl StandaloneExtState {
-    pub fn new() -> Self {
-        Self {
-            global_state: Arc::new(RwLock::new(HashMap::new())),
-            project_state: Arc::new(RwLock::new(HashMap::new())),
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => {
+            let state = daw.state.lock().ok()?;
+            state.current_project_guid.clone()
         }
     }
 }
 
-impl Default for StandaloneExtState {
-    fn default() -> Self {
-        Self::new()
-    }
+fn no_project() -> DawError {
+    DawError::not_found("Project", "context")
 }
 
-impl ExtStateService for StandaloneExtState {
-    async fn get_ext_state(&self, section: String, key: String) -> Option<String> {
-        let state = self.global_state.read().unwrap();
-        state.get(&(section, key)).cloned()
+impl ExtState for Standalone {
+    fn get(&self, section: &str, key: &str) -> Option<String> {
+        let state = self.state.lock().ok()?;
+        state
+            .global_ext_state
+            .get(&(section.to_string(), key.to_string()))
+            .cloned()
     }
 
-    async fn set_ext_state(&self, section: String, key: String, value: String, _persist: bool) {
-        let mut state = self.global_state.write().unwrap();
-        state.insert((section, key), value);
+    fn set(&self, section: &str, key: &str, value: &str, _persist: bool) -> DawResult<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| DawError::operation_failed("standalone state lock poisoned"))?;
+        state
+            .global_ext_state
+            .insert((section.to_string(), key.to_string()), value.to_string());
+        Ok(())
     }
 
-    async fn delete_ext_state(&self, section: String, key: String, _persist: bool) {
-        let mut state = self.global_state.write().unwrap();
-        state.remove(&(section, key));
+    fn delete(&self, section: &str, key: &str, _persist: bool) -> DawResult<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| DawError::operation_failed("standalone state lock poisoned"))?;
+        state
+            .global_ext_state
+            .remove(&(section.to_string(), key.to_string()));
+        Ok(())
     }
 
-    async fn has_ext_state(&self, section: String, key: String) -> bool {
-        let state = self.global_state.read().unwrap();
-        state.contains_key(&(section, key))
+    fn has(&self, section: &str, key: &str) -> bool {
+        let Ok(state) = self.state.lock() else {
+            return false;
+        };
+        state
+            .global_ext_state
+            .contains_key(&(section.to_string(), key.to_string()))
     }
 
-    // === Project-Scoped ExtState ===
+    fn get_project(&self, project: ProjectContext, section: &str, key: &str) -> Option<String> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project(&guid, |p| {
+            p.project_ext_state
+                .get(&(section.to_string(), key.to_string()))
+                .cloned()
+        })
+        .ok()
+        .flatten()
+    }
 
-    async fn get_project_ext_state(
+    fn set_project(
         &self,
         project: ProjectContext,
-        section: String,
-        key: String,
-    ) -> Option<String> {
-        let project_guid = match project {
-            ProjectContext::Current => "current".to_string(),
-            ProjectContext::Project(guid) => guid,
-        };
-        let state = self.project_state.read().unwrap();
-        state.get(&(project_guid, section, key)).cloned()
+        section: &str,
+        key: &str,
+        value: &str,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            p.project_ext_state
+                .insert((section.to_string(), key.to_string()), value.to_string());
+        })
     }
 
-    async fn set_project_ext_state(
-        &self,
-        project: ProjectContext,
-        section: String,
-        key: String,
-        value: String,
-    ) {
-        let project_guid = match project {
-            ProjectContext::Current => "current".to_string(),
-            ProjectContext::Project(guid) => guid,
-        };
-        let mut state = self.project_state.write().unwrap();
-        state.insert((project_guid, section, key), value);
+    fn delete_project(&self, project: ProjectContext, section: &str, key: &str) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            p.project_ext_state
+                .remove(&(section.to_string(), key.to_string()));
+        })
     }
 
-    async fn delete_project_ext_state(
-        &self,
-        project: ProjectContext,
-        section: String,
-        key: String,
-    ) {
-        let project_guid = match project {
-            ProjectContext::Current => "current".to_string(),
-            ProjectContext::Project(guid) => guid,
+    fn has_project(&self, project: ProjectContext, section: &str, key: &str) -> bool {
+        let Some(guid) = resolve_project(self, &project) else {
+            return false;
         };
-        let mut state = self.project_state.write().unwrap();
-        state.remove(&(project_guid, section, key));
-    }
-
-    async fn has_project_ext_state(
-        &self,
-        project: ProjectContext,
-        section: String,
-        key: String,
-    ) -> bool {
-        let project_guid = match project {
-            ProjectContext::Current => "current".to_string(),
-            ProjectContext::Project(guid) => guid,
-        };
-        let state = self.project_state.read().unwrap();
-        state.contains_key(&(project_guid, section, key))
+        self.with_project(&guid, |p| {
+            p.project_ext_state
+                .contains_key(&(section.to_string(), key.to_string()))
+        })
+        .unwrap_or(false)
     }
 }

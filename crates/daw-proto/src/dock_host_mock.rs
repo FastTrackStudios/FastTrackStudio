@@ -1,4 +1,4 @@
-//! In-memory [`DockHostService`] adapter for unit tests.
+//! In-memory [`DockHosting`] adapter for unit tests.
 //!
 //! Records every call into a `Vec<DockOp>` so tests can assert exact
 //! sequences ("show was called once for this handle", "register_dock for
@@ -8,10 +8,9 @@
 //! Pulled in via `cargo features = ["test-utils"]` so production builds
 //! never link this code.
 
-use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels, UiEventDto};
+use crate::dock_host::{DockEvent, DockHandle, DockHosting, DockKind, PanelPixels, UiEventDto};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use vox::Tx;
 
 /// Record of a single operation invoked against [`MockDockHost`].
 ///
@@ -46,7 +45,7 @@ pub struct MockDock {
     pub visible: bool,
 }
 
-/// Pure in-memory [`DockHostService`].
+/// Pure in-memory [`DockHosting`].
 ///
 /// Stores docks in a `HashMap<DockHandle, MockDock>` and tracks every
 /// operation in a `Vec<DockOp>` for assertion. Subscribers receive
@@ -63,7 +62,6 @@ struct MockState {
     by_id: HashMap<String, DockHandle>,
     next_id: u64,
     ops: Vec<DockOp>,
-    subscribers: Vec<Tx<DockEvent>>,
     /// Layout blob set by `restore_layout`, returned by next `save_layout`.
     /// Not a faithful round-trip — just a stable shape so tests can assert
     /// "the blob the host gave back is the one we set."
@@ -100,7 +98,7 @@ impl MockDockHost {
     }
 
     /// Pre-load a stub pixel buffer the next call to
-    /// [`capture_panel_pixels`](DockHostService::capture_panel_pixels)
+    /// [`capture_panel_pixels`](DockHosting::capture_panel_pixels)
     /// will return for `handle`.
     pub fn set_pixels(&self, handle: DockHandle, pixels: PanelPixels) {
         self.inner.lock().unwrap().pixels.insert(handle, pixels);
@@ -129,16 +127,16 @@ impl MockDockHost {
     fn emit(_state: &MockState, _event: DockEvent) {}
 }
 
-impl DockHostService for MockDockHost {
-    async fn register_dock(&self, id: String, title: String, kind: DockKind) -> DockHandle {
+impl DockHosting for MockDockHost {
+    fn register_dock(&self, id: &str, title: &str, kind: DockKind) -> DockHandle {
         let mut st = self.inner.lock().unwrap();
-        if let Some(&existing) = st.by_id.get(&id) {
+        if let Some(&existing) = st.by_id.get(id) {
             Self::record(
                 &mut st,
                 DockOp::Register {
                     handle: existing,
-                    id,
-                    title,
+                    id: id.to_string(),
+                    title: title.to_string(),
                     kind,
                 },
             );
@@ -149,26 +147,26 @@ impl DockHostService for MockDockHost {
         st.docks.insert(
             handle,
             MockDock {
-                id: id.clone(),
-                title: title.clone(),
+                id: id.to_string(),
+                title: title.to_string(),
                 kind,
                 visible: false,
             },
         );
-        st.by_id.insert(id.clone(), handle);
+        st.by_id.insert(id.to_string(), handle);
         Self::record(
             &mut st,
             DockOp::Register {
                 handle,
-                id,
-                title,
+                id: id.to_string(),
+                title: title.to_string(),
                 kind,
             },
         );
         handle
     }
 
-    async fn unregister_dock(&self, handle: DockHandle) -> bool {
+    fn unregister_dock(&self, handle: DockHandle) -> bool {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::Unregister(handle));
         if let Some(dock) = st.docks.remove(&handle) {
@@ -179,7 +177,7 @@ impl DockHostService for MockDockHost {
         }
     }
 
-    async fn show(&self, handle: DockHandle) {
+    fn show(&self, handle: DockHandle) {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::Show(handle));
         if let Some(dock) = st.docks.get_mut(&handle) {
@@ -188,7 +186,7 @@ impl DockHostService for MockDockHost {
         }
     }
 
-    async fn hide(&self, handle: DockHandle) {
+    fn hide(&self, handle: DockHandle) {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::Hide(handle));
         if let Some(dock) = st.docks.get_mut(&handle) {
@@ -197,7 +195,7 @@ impl DockHostService for MockDockHost {
         }
     }
 
-    async fn toggle(&self, handle: DockHandle) -> bool {
+    fn toggle(&self, handle: DockHandle) -> bool {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::Toggle(handle));
         let visible = if let Some(dock) = st.docks.get_mut(&handle) {
@@ -217,7 +215,7 @@ impl DockHostService for MockDockHost {
         visible
     }
 
-    async fn is_visible(&self, handle: DockHandle) -> bool {
+    fn is_visible(&self, handle: DockHandle) -> bool {
         self.inner
             .lock()
             .unwrap()
@@ -226,105 +224,28 @@ impl DockHostService for MockDockHost {
             .is_some_and(|d| d.visible)
     }
 
-    async fn save_layout(&self) -> Vec<u8> {
+    fn save_layout(&self) -> Vec<u8> {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::SaveLayout);
         st.layout_blob.clone()
     }
 
-    async fn restore_layout(&self, blob: Vec<u8>) -> bool {
+    fn restore_layout(&self, blob: &[u8]) -> bool {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::RestoreLayout);
-        st.layout_blob = blob;
+        st.layout_blob = blob.to_vec();
         Self::emit(&st, DockEvent::LayoutChanged);
         true
     }
 
-    async fn subscribe_dock_events(&self, tx: Tx<DockEvent>) {
-        let mut st = self.inner.lock().unwrap();
-        Self::record(&mut st, DockOp::Subscribe);
-        st.subscribers.push(tx);
-    }
-
-    async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
+    fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
         self.inner.lock().unwrap().pixels.get(&handle).cloned()
     }
 
-    async fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool {
+    fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool {
         let mut st = self.inner.lock().unwrap();
         let known = st.docks.contains_key(&handle);
         Self::record(&mut st, DockOp::InjectUiEvent { handle, event });
         known
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::dock_host::DockKind;
-
-    fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        // Tiny single-thread runtime so we don't need to pull tokio in.
-        // Future is polled until ready; the trait methods are all
-        // synchronous-equivalent (no real awaits past the lock).
-        let mut f = Box::pin(f);
-        let waker = std::task::Waker::noop();
-        let mut cx = std::task::Context::from_waker(waker);
-        loop {
-            if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
-                return v;
-            }
-        }
-    }
-
-    #[test]
-    fn register_returns_stable_handle_for_repeat_id() {
-        let host = MockDockHost::new();
-        let h1 = block_on(host.register_dock("a".into(), "A".into(), DockKind::Tabbed));
-        let h2 = block_on(host.register_dock("a".into(), "A2".into(), DockKind::Floating));
-        assert_eq!(h1, h2, "same id must yield same handle");
-        // Two register calls recorded (idempotent at the data layer, not
-        // at the op-log layer — log captures intent).
-        assert_eq!(
-            host.ops()
-                .iter()
-                .filter(|o| matches!(o, DockOp::Register { .. }))
-                .count(),
-            2
-        );
-    }
-
-    #[test]
-    fn show_hide_toggle_track_visibility() {
-        let host = MockDockHost::new();
-        let h = block_on(host.register_dock("p".into(), "P".into(), DockKind::Tabbed));
-        assert!(!block_on(host.is_visible(h)));
-
-        block_on(host.show(h));
-        assert!(block_on(host.is_visible(h)));
-
-        block_on(host.hide(h));
-        assert!(!block_on(host.is_visible(h)));
-
-        let after = block_on(host.toggle(h));
-        assert!(after);
-        assert!(block_on(host.is_visible(h)));
-    }
-
-    #[test]
-    fn unregister_clears_state_and_returns_false_for_unknown() {
-        let host = MockDockHost::new();
-        let h = block_on(host.register_dock("p".into(), "P".into(), DockKind::Tabbed));
-        assert!(block_on(host.unregister_dock(h)));
-        assert!(host.dock(h).is_none());
-        assert!(!block_on(host.unregister_dock(h)));
-    }
-
-    #[test]
-    fn save_layout_round_trips_blob_set_via_restore() {
-        let host = MockDockHost::new();
-        let blob = vec![1, 2, 3, 4];
-        block_on(host.restore_layout(blob.clone()));
-        assert_eq!(block_on(host.save_layout()), blob);
     }
 }

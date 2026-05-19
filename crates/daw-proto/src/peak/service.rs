@@ -1,33 +1,20 @@
-//! Peak metering service trait
+//! Peak metering service — track meters + take waveform peak data.
 
 use super::{TakePeakData, TrackPeak};
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
-use vox::service;
 
-/// Service for reading track peak meters and take waveform data
-///
-/// This service provides access to real-time peak levels for tracks
-/// and waveform peak data for takes (used for waveform display).
-#[service]
-pub trait PeakService {
-    /// Get the current peak level for a track channel
-    ///
-    /// Returns peak and peak-hold values in dB (0.0 = full scale, negative = below)
-    async fn get_track_peak(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        channel: u32,
-    ) -> TrackPeak;
+#[architect::rpc]
+pub trait Peaks {
+    /// Current peak level for a track channel. Peak and peak-hold
+    /// values in dB (0.0 = full scale, negative = below).
+    fn track_peak(&self, project: ProjectContext, track: TrackRef, channel: u32) -> TrackPeak;
 
-    /// Get waveform peak data for a take
-    ///
-    /// The `block_size` parameter controls the resolution of peak data.
-    /// Larger values = fewer peaks = faster but less detailed.
-    /// Typical values: 1024-4096 samples per peak.
-    async fn get_take_peaks(
+    /// Waveform peak data for a take. `block_size` controls the
+    /// resolution: larger = fewer peaks = faster but less detailed.
+    /// Typical values 1024–4096 samples per peak.
+    fn take_peaks(
         &self,
         project: ProjectContext,
         item: ItemRef,
@@ -35,3 +22,8 @@ pub trait PeakService {
         block_size: u32,
     ) -> TakePeakData;
 }
+
+#[cfg(feature = "vox")]
+pub use PeaksRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use peaks_rpc_service_descriptor as descriptor;

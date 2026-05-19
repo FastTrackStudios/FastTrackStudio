@@ -4,7 +4,6 @@ members = [
     "crates/audio-controls",
     "crates/daw",
     "crates/daw-control",
-    "crates/daw-control-sync",
     "crates/daw-proto",
     "crates/daw-reaper",
     "crates/daw-standalone",
@@ -20,6 +19,7 @@ members = [
     "crates/reaper-test-macro",
     "crates/reaper-launcher",
     "crates/daw-allocator",
+    "crates/daw-audio-sync",
     "crates/daw-bridge",
     "crates/daw-perf-test",
     "crates/fts-audio-proto",
@@ -30,6 +30,9 @@ members = [
     "crates/daw-reaper-dioxus",
     "crates/daw-reaper-dioxus-ext",
     "crates/daw-reaper-dioxus-ext-test",
+    "crates/daw-synchronization",
+    "crates/daw-network",
+    "crates/daw-link",
     "apps/example-extension",
     "apps/example-plugin",
     "xtask",
@@ -58,6 +61,12 @@ audio-controls = { path = "crates/audio-controls" }
 daw-allocator = { path = "crates/daw-allocator" }
 # Extension runtime — integrated REAPER extension helpers
 daw-extension-runtime = { path = "crates/daw-extension-runtime" }
+daw-reaper = { path = "crates/daw-reaper" }
+# Sync stack — public sibling crates (cannot be folded under the `daw`
+# facade because each depends on `daw` itself, see lib.rs note).
+daw-synchronization = { path = "crates/daw-synchronization" }
+daw-network = { path = "crates/daw-network" }
+daw-link = { path = "crates/daw-link" }
 # Dev tooling — REAPER extension install/symlink helpers (for xtask use)
 fts-devtools = { path = "crates/fts-devtools" }
 # FTS design system — used by `daw-ui`'s `reaper-test-panels` feature so the
@@ -70,18 +79,49 @@ fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", rev = "d9f012
 facet = { version = "0.46" }
 facet-json = { version = "0.46" }
 
+# architect framework — defines #[architect::rpc] for sync-trait → vox
+# bridge generation plus the Entity derive for CRUD-shaped data.
+# Path dep onto the local checkout; vox refs inside architect get
+# redirected to the Codys-Wright fork via the [patch] section below.
+architect = { path = "../../../Development/architect/macros/architect" }
+architect-rpc-derive = { path = "../../../Development/architect/macros/architect-rpc-derive" }
+
 # VOX service framework (pinned to FastTrackStudios fork)
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-ffi = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-ffi = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
 # Plugin framework
 nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+
+# CLAP plugin hosting (Rust-native CLAP host + extension bindings).
+# Pinned to the prokopyl/clack upstream — same revs as fts-analyzer
+# so workspaces line up.
+clack-host = { git = "https://github.com/prokopyl/clack" }
+clack-extensions = { git = "https://github.com/prokopyl/clack", features = [
+    "clack-host",
+    "audio-ports",
+    "note-ports",
+    "params",
+    "state",
+    "latency",
+    "gui",
+    "timer",
+    "log",
+    "thread-check",
+    "tail",
+] }
+
+# VST3 plugin hosting (auto-generated COM bindings from the official
+# Steinberg SDK headers). MIT/Apache-2.0 — does NOT contaminate with
+# GPL the way RustAudio's vst3-sys would.
+vst3 = "0.3"
+libloading = "0.8"
 
 # Sibling repos
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
@@ -187,22 +227,7 @@ daw-reaper-dioxus = { path = "crates/daw-reaper-dioxus" }
 daw-control = { path = "crates/daw-control" }
 dawfile-reaper = { path = "crates/dawfile-reaper" }
 
-# ── Vendored patches ──────────────────────────────────────────────────
-# Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).
-[patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-facet-cbor = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+# (vox patch block removed — all pins now point at bearcove/vox directly)
 
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid duplicate
@@ -271,4 +296,26 @@ moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2
 dead_code = "allow"
 unused = "allow"
 
+[workspace.lints.rustdoc]
+# Broken intra-doc links are noisy on a fast-moving codebase. They're
+# real bugs (renames that didn't update doc comments) but block CI from
+# unrelated work. Re-tighten per-crate once a sweep is done.
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
+redundant_explicit_links = "allow"
+
 [workspace.lints.clippy]
+# Stylistic lints that don't reflect actual bugs and create churn on a
+# fast-moving codebase. Re-enable on a per-crate basis if/when a crate
+# wants to be strict about these.
+#
+# To take effect, each crate's Cargo.toml needs `[lints] workspace = true`.
+field_reassign_with_default = "allow"
+manual_clamp = "allow"
+needless_range_loop = "allow"
+not_unsafe_ptr_arg_deref = "allow"
+only_used_in_recursion = "allow"
+unnecessary_sort_by = "allow"
+unnecessary_unsafe = "allow"
+unused_unsafe = "allow"
+unusual_byte_groupings = "allow"

@@ -11,6 +11,9 @@ path = "src/lib.rs"
 
 [dependencies]
 daw-proto = { path = "../daw-proto" }
+daw-audio-sync = { path = "../daw-audio-sync" }
+uuid = { workspace = true }
+architect = { workspace = true, features = ["vox"] }
 vox.workspace = true
 tracing.workspace = true
 tokio.workspace = true
@@ -32,7 +35,6 @@ camino = "1"
 libloading = "0.8"
 crossbeam-channel.workspace = true
 daw-control = { path = "../daw-control" }
-daw-control-sync = { path = "../daw-control-sync" }
 eyre.workspace = true
 facet-json.workspace = true
 
@@ -53,3 +55,6 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = "0.7"
 vox.workspace = true
 moire.workspace = true
+
+[lints]
+workspace = true

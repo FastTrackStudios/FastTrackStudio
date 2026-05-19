@@ -24,3 +24,6 @@ fragile.workspace = true
 reaper-high.workspace = true
 reaper-low.workspace = true
 reaper-medium.workspace = true
+
+[lints]
+workspace = true

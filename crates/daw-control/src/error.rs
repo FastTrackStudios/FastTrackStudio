@@ -56,6 +56,16 @@ impl From<vox::VoxError<String>> for Error {
     }
 }
 
+impl From<daw_proto::DawError> for Error {
+    fn from(err: daw_proto::DawError) -> Self {
+        // Architect-emitted sync methods return `DawResult<T>`. When
+        // those flow over vox the outer layer is the transport error
+        // (`vox::VoxError`); this conversion handles the inner app
+        // error so callers can `.await??` cleanly.
+        Error::InvalidOperation(err.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

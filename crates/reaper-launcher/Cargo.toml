@@ -20,3 +20,6 @@ icon-gen = ["tiny-skia", "ab_glyph", "image", "icns", "anyhow"]
 [[bin]]
 name = "reaper-launcher"
 path = "src/main.rs"
+
+[lints]
+workspace = true

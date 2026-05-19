@@ -1,7 +1,4 @@
-//! Region module
-//!
-//! This module provides region types and the RegionService trait
-//! for managing named time spans in a DAW timeline.
+//! Region module — canonical home for everything regions-related.
 
 mod error;
 mod event;
@@ -10,9 +7,14 @@ mod region;
 mod service;
 
 pub use error::RegionError;
-pub use event::RegionEvent;
+pub use event::{RegionEvent, RegionStreamEvent};
 pub use region::Region;
+pub use service::{AddRegionInLaneRequest, Regions, RegionsRpc};
+
+// vox-emitted names from the architect macro mirror. Aliased to short
+// names so mounting reads `region::descriptor()` + `region::serve(Reaper)`.
+#[cfg(feature = "vox")]
 pub use service::{
-    AddRegionInLaneRequest, RegionService, RegionServiceClient, RegionServiceDispatcher,
-    region_service_service_descriptor,
+    RegionsClient, RegionsRpcDispatcher as Dispatcher, Service, layer,
+    regions_rpc_service_descriptor as descriptor, serve,
 };

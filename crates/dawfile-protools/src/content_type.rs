@@ -69,6 +69,40 @@ pub enum ContentType {
     AudioTrackInfo = 0x1014,
     /// Audio tracks container
     AudioTrackList = 0x1015,
+    /// Per-track mix-state block (volume, pan, mute). 281-byte payload.
+    /// One block per mixable track (Master output is excluded).
+    /// See `docs/pt-track-properties.md` for the byte layout.
+    TrackMixSettings = 0x1029,
+
+    /// Per-track mix wrapper. Groups `0x1029` plus routing (`0x260e`) and
+    /// send entries (`0x260a`) under one container. One per mixable track,
+    /// in `0x251a` document order (29 entries in the user session).
+    TrackMixWrapper = 0x260d,
+
+    /// Track output / routing assignment. Carries a length-prefixed string
+    /// at payload offset `+0x24..` naming the destination (e.g.
+    /// `"Analog 1-2"` for a hardware output, `"Bus 1"` for an internal
+    /// bus). The 61-byte variant (payload begins `ff ff 01 01 ...`) has no
+    /// destination.
+    TrackRouting = 0x260e,
+
+    /// Per-colored-track container. Holds `0x261b` (the main per-track
+    /// container) plus `0x200b` whose payload `+163` byte is the track's
+    /// color palette position in PT's 23-column × 3-row palette. Folder
+    /// tracks have no `0x261c`.
+    TrackContainer = 0x261c,
+
+    /// Per-colored-track auxiliary state block. Lives inside `0x261c`.
+    /// Payload byte `+163` = color palette position.
+    TrackAuxState = 0x200b,
+
+    /// Per-session list of fade definitions (lengths + curve shape). Wraps
+    /// one `FadeDef` (0x262f) per fade-marked track entry.
+    FadeDefList = 0x2630,
+    /// A single fade definition: 24..36-byte payload encoding in-length,
+    /// out-length, and curve shape. Indexed by the fade entry's `+4` field.
+    /// See `docs/pt-fade-encoding.md`.
+    FadeDef = 0x262f,
 
     // ── FX / Plugins ────────────────────────────────────────────────────
     /// Plugin entry
@@ -137,6 +171,12 @@ pub enum ContentType {
     MarkerList = 0x271a,
     /// User-defined memory location container (user markers live here)
     UserMarkerContainer = 0x263b,
+    /// Song-section marker section (PT 12 layout). Holds `MarkerEntryV12` children
+    /// — each one is a user-defined memory location with name + tick position.
+    MarkerSectionV12 = 0x2030,
+    /// Song-section marker entry (PT 12 layout). Payload: header(8B) + u32 name_len
+    /// + name + u64 encoded tick position + duplicate(8B) + remaining fields.
+    MarkerEntryV12 = 0x2077,
 
     // ── Snaps ───────────────────────────────────────────────────────────
     /// Snaps block
@@ -151,6 +191,24 @@ pub enum ContentType {
     // ── Markers ─────────────────────────────────────────────────────────
     /// Individual entry block within the marker / track-list hierarchy
     MarkerEntry = 0x2619,
+
+    // ── Groups (PT 12+) ─────────────────────────────────────────────────
+    /// Edit-groups list block (one per session when any groups are defined).
+    /// Contains a per-track membership table followed by a flat sequence of
+    /// `[u32 namelen][utf-8 name][i16 color]` entries. See
+    /// `docs/converter-frida-discovered-offsets.md` §"`0x4501` / `0x4702`".
+    EditGroupList = 0x4501,
+    /// Stem-mapping list (PT 12+'s "Stem Mapping" feature). Flat list of
+    /// `[u32 namelen][utf-8 name]` entries; starts with built-in stem types
+    /// `Dialog`/`Music`/`Effects`/`Narration`. Used to categorize tracks
+    /// for stem export.
+    StemMappingList = 0x4702,
+
+    /// Internal (non-audio) track entry — Aux Input / Internal Bus / Master
+    /// Fader / Click track. One block per internal track. Name lives at
+    /// payload `+0x1d` (= magic + `0x24`) as a length-prefixed string;
+    /// 6-byte routing UID at `+0x29..+0x2e`.
+    InternalTrackEntry = 0x261e,
 }
 
 impl ContentType {
@@ -185,6 +243,13 @@ impl ContentType {
 
             0x1014 => Some(Self::AudioTrackInfo),
             0x1015 => Some(Self::AudioTrackList),
+            0x1029 => Some(Self::TrackMixSettings),
+            0x260d => Some(Self::TrackMixWrapper),
+            0x260e => Some(Self::TrackRouting),
+            0x261c => Some(Self::TrackContainer),
+            0x200b => Some(Self::TrackAuxState),
+            0x2630 => Some(Self::FadeDefList),
+            0x262f => Some(Self::FadeDef),
 
             0x1017 => Some(Self::PluginEntry),
             0x1018 => Some(Self::PluginList),
@@ -217,12 +282,18 @@ impl ContentType {
 
             0x271a => Some(Self::MarkerList),
             0x263b => Some(Self::UserMarkerContainer),
+            0x2030 => Some(Self::MarkerSectionV12),
+            0x2077 => Some(Self::MarkerEntryV12),
             0x2511 => Some(Self::SnapsBlock),
 
             0x2028 => Some(Self::TempoBlock),
             0x2029 => Some(Self::MeterBlock),
 
             0x2619 => Some(Self::MarkerEntry),
+
+            0x4501 => Some(Self::EditGroupList),
+            0x4702 => Some(Self::StemMappingList),
+            0x261e => Some(Self::InternalTrackEntry),
 
             _ => None,
         }

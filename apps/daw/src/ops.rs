@@ -1,6 +1,6 @@
 //! Structured operations shared by DAW CLI commands.
 
-use daw::Daw;
+use daw::rpc::Daw;
 use eyre::Result;
 use serde_json::{Value, json};
 
@@ -37,35 +37,36 @@ fn service_descriptor_json(service: &'static vox::ServiceDescriptor) -> Value {
 }
 
 fn daw_service_descriptors() -> Vec<&'static vox::ServiceDescriptor> {
+    use daw::service;
     vec![
-        daw::service::action_registry_service_service_descriptor(),
-        daw::service::audio_accessor_service_service_descriptor(),
-        daw::service::audio_engine_service_service_descriptor(),
-        daw::service::automation_service_service_descriptor(),
-        daw::service::batch_service_service_descriptor(),
-        daw::service::dock_host_service_service_descriptor(),
-        daw::service::ext_state_service_service_descriptor(),
-        daw::service::fx_service_service_descriptor(),
-        daw::service::health_service_service_descriptor(),
-        daw::service::input_service_service_descriptor(),
-        daw::service::item_service_service_descriptor(),
-        daw::service::live_midi_service_service_descriptor(),
-        daw::service::marker_service_service_descriptor(),
-        daw::service::midi_service_service_descriptor(),
-        daw::service::peak_service_service_descriptor(),
-        daw::service::plugin_loader_service_service_descriptor(),
-        daw::service::position_conversion_service_service_descriptor(),
-        daw::service::project_service_service_descriptor(),
-        daw::service::region_service_service_descriptor(),
-        daw::service::resource_service_service_descriptor(),
-        daw::service::routing_service_service_descriptor(),
-        daw::service::screenset_service_service_descriptor(),
-        daw::service::take_service_service_descriptor(),
-        daw::service::tempo_map_service_service_descriptor(),
-        daw::service::toolbar_service_service_descriptor(),
-        daw::service::track_service_service_descriptor(),
-        daw::service::transport_service_service_descriptor(),
-        daw::service::ui_service_service_descriptor(),
+        service::action_registry::descriptor(),
+        service::audio_accessor::descriptor(),
+        service::audio_engine::descriptor(),
+        service::automation::descriptor(),
+        service::batch::descriptor(),
+        service::dock_host::descriptor(),
+        service::ext_state::descriptor(),
+        service::fx::descriptor(),
+        service::health::descriptor(),
+        service::input::descriptor(),
+        service::item::items_descriptor(),
+        service::live_midi::descriptor(),
+        service::marker::descriptor(),
+        service::midi::descriptor(),
+        service::peak::descriptor(),
+        service::plugin_loader::descriptor(),
+        service::position_conversion::descriptor(),
+        service::project::descriptor(),
+        service::region::descriptor(),
+        service::resource::descriptor(),
+        service::routing::descriptor(),
+        service::screenset::descriptor(),
+        service::take::descriptor(),
+        service::tempo_map::descriptor(),
+        service::toolbar::descriptor(),
+        service::track::descriptor(),
+        service::transport::descriptor(),
+        service::dawfile_service::descriptor(),
     ]
 }
 
@@ -462,7 +463,7 @@ pub async fn transport_control(daw: &Daw, action: &str) -> Result<Value> {
     transport_state_for_project(&project).await
 }
 
-async fn transport_state_for_project(project: &daw::Project) -> Result<Value> {
+async fn transport_state_for_project(project: &daw::rpc::Project) -> Result<Value> {
     let state = project.transport().get_state().await?;
     Ok(json!({
         "play_state": format!("{:?}", state.play_state),
@@ -503,10 +504,12 @@ pub async fn transport_set_playrate(daw: &Daw, rate: f64) -> Result<Value> {
     transport_state_for_project(&project).await
 }
 
-pub async fn transport_goto_measure(daw: &Daw, measure: i32) -> Result<Value> {
-    let project = daw.current_project().await?;
-    project.transport().goto_measure(measure).await?;
-    transport_state_for_project(&project).await
+pub async fn transport_goto_measure(_daw: &Daw, _measure: i32) -> Result<Value> {
+    // Musical-position navigation retired with the architect::rpc port —
+    // sibling-trait territory if revived.
+    Err(eyre::eyre!(
+        "transport goto-measure retired with the architect::rpc port"
+    ))
 }
 
 pub async fn markers(daw: &Daw) -> Result<Value> {
@@ -550,10 +553,15 @@ pub async fn regions(daw: &Daw) -> Result<Value> {
 
 pub async fn marker_add(daw: &Daw, position: f64, name: &str, lane: Option<u32>) -> Result<Value> {
     let project = daw.current_project().await?;
-    let id = match lane {
-        Some(lane) => project.markers().add_in_lane(position, name, lane).await?,
-        None => project.markers().add(position, name).await?,
-    };
+    // Ruler-lane placement retired with the architect::rpc port — the
+    // sync `Markers` trait carries only the canonical CRUD verbs. The
+    // CLI continues to accept `--lane` for forward compat; we log and
+    // fall through to plain `add` until a lane-aware sibling trait
+    // lands.
+    if lane.is_some() {
+        tracing::debug!("marker_add: --lane ignored (no longer supported on the sync trait)");
+    }
+    let id = project.markers().add(position, name).await?;
     Ok(json!({ "id": id, "position_seconds": position, "name": name }))
 }
 
@@ -582,16 +590,14 @@ pub async fn region_add(
     name: &str,
     lane: Option<u32>,
 ) -> Result<Value> {
+    // Lane placement retired with the architect::rpc port — the CLI
+    // continues to accept `--lane` for forward compat; log and fall
+    // through to plain `add` until a lane-aware sibling trait lands.
+    if lane.is_some() {
+        tracing::debug!("region_add: --lane ignored (no longer supported on the sync trait)");
+    }
     let project = daw.current_project().await?;
-    let id = match lane {
-        Some(lane) => {
-            project
-                .regions()
-                .add_in_lane(start, end, name, lane)
-                .await?
-        }
-        None => project.regions().add(start, end, name).await?,
-    };
+    let id = project.regions().add(start, end, name).await?;
     Ok(json!({ "id": id, "start_seconds": start, "end_seconds": end, "name": name }))
 }
 
@@ -796,43 +802,12 @@ pub async fn track_set(daw: &Daw, track_arg: &str, field: &str, value: Value) ->
                 )
                 .await?
         }
-        "folder_depth" => {
-            handle
-                .set_folder_depth(
-                    value
-                        .as_i64()
-                        .ok_or_else(|| eyre::eyre!("folder_depth expects integer"))?
-                        as i32,
-                )
-                .await?
-        }
-        "num_channels" => {
-            handle
-                .set_num_channels(
-                    value
-                        .as_u64()
-                        .ok_or_else(|| eyre::eyre!("num_channels expects integer"))?
-                        as u32,
-                )
-                .await?
-        }
-        "visible_in_tcp" => {
-            handle
-                .set_visible_in_tcp(
-                    value
-                        .as_bool()
-                        .ok_or_else(|| eyre::eyre!("visible_in_tcp expects bool"))?,
-                )
-                .await?
-        }
-        "visible_in_mixer" => {
-            handle
-                .set_visible_in_mixer(
-                    value
-                        .as_bool()
-                        .ok_or_else(|| eyre::eyre!("visible_in_mixer expects bool"))?,
-                )
-                .await?
+        "folder_depth" | "num_channels" | "visible_in_tcp" | "visible_in_mixer" => {
+            // Retired alongside the architect::rpc port — these
+            // properties live on sibling traits when revived.
+            return Err(eyre::eyre!(
+                "track property '{field}' retired with the architect::rpc port"
+            ));
         }
         "parent_send" => {
             handle
@@ -881,50 +856,45 @@ pub async fn track_set_color(daw: &Daw, track_arg: &str, color: u32) -> Result<V
     }))
 }
 
-pub async fn track_set_folder_depth(daw: &Daw, track_arg: &str, depth: i32) -> Result<Value> {
-    let handle = crate::resolve_track_handle(daw, track_arg).await?;
-    handle.set_folder_depth(depth).await?;
-    let info = handle.info().await?;
-    Ok(json!({
-        "guid": info.guid,
-        "index": info.index,
-        "name": info.name,
-        "folder_depth": info.folder_depth,
-    }))
+// Retired alongside the architect::rpc port: folder depth, move,
+// per-track ext state. These returned `not supported` errors below
+// rather than disappearing from the CLI surface so the
+// subcommand-driving code keeps compiling — wire them to a real impl
+// once sibling traits land.
+
+pub async fn track_set_folder_depth(_daw: &Daw, _track_arg: &str, _depth: i32) -> Result<Value> {
+    Err(eyre::eyre!(
+        "track set-folder-depth retired with the architect::rpc port"
+    ))
 }
 
-pub async fn track_move(daw: &Daw, track_arg: &str, index: u32) -> Result<Value> {
-    let handle = crate::resolve_track_handle(daw, track_arg).await?;
-    handle.move_to_index(index).await?;
-    let info = handle.info().await?;
-    Ok(json!({ "guid": info.guid, "index": info.index, "name": info.name }))
+pub async fn track_move(_daw: &Daw, _track_arg: &str, _index: u32) -> Result<Value> {
+    Err(eyre::eyre!(
+        "track move retired with the architect::rpc port"
+    ))
 }
 
 pub async fn track_ext_state(
-    daw: &Daw,
-    track_arg: &str,
-    section: &str,
-    key: &str,
-    value: Option<&str>,
+    _daw: &Daw,
+    _track_arg: &str,
+    _section: &str,
+    _key: &str,
+    _value: Option<&str>,
 ) -> Result<Value> {
-    let handle = crate::resolve_track_handle(daw, track_arg).await?;
-    if let Some(value) = value {
-        handle.set_ext_state(section, key, value).await?;
-    }
-    Ok(
-        json!({ "section": section, "key": key, "value": handle.get_ext_state(section, key).await? }),
-    )
+    Err(eyre::eyre!(
+        "track ext-state retired with the architect::rpc port"
+    ))
 }
 
 pub async fn track_delete_ext_state(
-    daw: &Daw,
-    track_arg: &str,
-    section: &str,
-    key: &str,
+    _daw: &Daw,
+    _track_arg: &str,
+    _section: &str,
+    _key: &str,
 ) -> Result<Value> {
-    let handle = crate::resolve_track_handle(daw, track_arg).await?;
-    handle.delete_ext_state(section, key).await?;
-    Ok(json!({ "deleted": true, "section": section, "key": key }))
+    Err(eyre::eyre!(
+        "track delete-ext-state retired with the architect::rpc port"
+    ))
 }
 
 pub async fn remove_track(daw: &Daw, track_arg: &str) -> Result<Value> {

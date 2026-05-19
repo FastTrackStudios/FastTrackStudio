@@ -137,8 +137,8 @@ pub struct ReaperBootstrap {
 
 // ── Plugin DAW initialization ────────────────────────────────────────
 
+use crate::local_caller::LocalCaller;
 use daw_control::Daw;
-use daw_control_sync::LocalCaller;
 
 /// Create a `Daw` instance from a raw CLAP host pointer.
 ///
@@ -240,15 +240,14 @@ pub async fn build_extension_daw() -> eyre::Result<Daw> {
 }
 
 /// Like [`build_extension_daw`], but accepts an externally-built
-/// `RoutedHandler` so consumers can layer their own dispatchers on top
-/// of the standard daw services.
+/// `architect::LayerRouter` so consumers can layer their own dispatchers on
+/// top of the standard daw services.
 ///
 /// Typical use from an extension that wants to host non-daw services
 /// (e.g. `keyflow-daw-analysis::MidiChartService`) on the same in-process
 /// channel as the rest of the daw API:
 ///
 /// ```rust,ignore
-/// use daw_reaper::routed_handler::RoutedHandler;
 /// use daw_reaper::plugin_services::create_daw_handler;
 ///
 /// let handler = create_daw_handler()
@@ -258,9 +257,7 @@ pub async fn build_extension_daw() -> eyre::Result<Daw> {
 ///     daw::reaper::build_extension_daw_with(handler)
 /// )?;
 /// ```
-pub async fn build_extension_daw_with(
-    handler: crate::routed_handler::RoutedHandler,
-) -> eyre::Result<Daw> {
+pub async fn build_extension_daw_with(handler: architect::LayerRouter) -> eyre::Result<Daw> {
     let local = LocalCaller::new(handler).await?;
     let caller = local.caller();
     // Leak LocalCaller to keep the server-side moire task alive for the

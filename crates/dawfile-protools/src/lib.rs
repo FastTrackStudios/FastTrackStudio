@@ -58,7 +58,9 @@ pub mod write;
 // Re-export the primary public API
 pub use convert::{feature_support, session_summary};
 pub use error::{PtError, PtResult};
-pub use io::read_session;
+pub use io::{read_session, read_session_from_bytes};
 pub use raw_block::{RawSession, parse_raw};
 pub use types::*;
-pub use write::write_session;
+pub use write::{
+    get_track_color, set_track_color, set_track_mix_state, set_track_output, write_session,
+};

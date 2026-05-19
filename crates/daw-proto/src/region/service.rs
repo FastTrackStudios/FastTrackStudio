@@ -1,14 +1,23 @@
-//! Region service trait
+//! Regions service trait.
 //!
-//! Defines the RPC interface for region operations.
+//! Stateless singleton backends — `ProjectContext` flows through every
+//! call. `#[architect::rpc]` derives the async vox client + `serve`
+//! function; backends impl `Regions` directly. Same pattern as
+//! `marker/service.rs` and `track/service.rs`.
+//!
+//! Scope trimmed from the previous async `RegionService`. Retired
+//! surfaces (range queries, lane placement, render matrix, navigation
+//! goto, subscribe) land on follow-on sibling traits if/when a real
+//! consumer needs them.
 
-use super::{Region, RegionEvent};
-use crate::ProjectContext;
+use super::Region;
+use super::event::RegionStreamEvent;
+use crate::{DawResult, ProjectContext};
 use facet::Facet;
-use vox::{Tx, service};
+use vox::Tx;
 
-/// Request for adding a region in a specific ruler lane.
-/// Groups params to stay within the 4-element Facet tuple limit.
+/// Lane placement request — kept here so retired batch ops can still
+/// name it without dragging in the full lane surface.
 #[derive(Clone, Debug, Facet)]
 pub struct AddRegionInLaneRequest {
     pub start: f64,
@@ -17,104 +26,35 @@ pub struct AddRegionInLaneRequest {
     pub lane: u32,
 }
 
-/// Service for managing regions in a DAW project
-///
-/// Regions are named time spans that can be used for organizing sections,
-/// defining loop areas, or marking sections for export.
-#[service]
-pub trait RegionService {
-    // =========================================================================
-    // Query Methods
-    // =========================================================================
+/// Operations on the regions of a project.
+#[architect::rpc]
+pub trait Regions {
+    /// Every region in the project, ordered by position.
+    fn all(&self, project: ProjectContext) -> Vec<Region>;
 
-    /// Get all regions in the project
-    async fn get_regions(&self, project: ProjectContext) -> Vec<Region>;
+    /// One region by id, if it still exists.
+    fn get(&self, project: ProjectContext, id: u32) -> Option<Region>;
 
-    /// Get a specific region by ID
-    async fn get_region(&self, project: ProjectContext, id: u32) -> Option<Region>;
+    /// Total count of regions.
+    fn count(&self, project: ProjectContext) -> u32;
 
-    /// Get all regions that intersect with a time range
-    async fn get_regions_in_range(
-        &self,
-        project: ProjectContext,
-        start: f64,
-        end: f64,
-    ) -> Vec<Region>;
+    /// Insert a region spanning `[start, end]` seconds with the given
+    /// name. Returns the DAW-assigned id.
+    fn add(&self, project: ProjectContext, start: f64, end: f64, name: &str) -> DawResult<u32>;
 
-    /// Get the region containing a specific position (if any)
-    async fn get_region_at(&self, project: ProjectContext, position: f64) -> Option<Region>;
+    /// Remove the region with the given id.
+    fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()>;
 
-    /// Get the total number of regions
-    async fn region_count(&self, project: ProjectContext) -> usize;
+    /// Resize the region to the new `[start, end]` bounds in seconds.
+    fn set_bounds(&self, project: ProjectContext, id: u32, start: f64, end: f64) -> DawResult<()>;
 
-    // =========================================================================
-    // Mutation Methods
-    // =========================================================================
+    /// Rename the region.
+    fn rename(&self, project: ProjectContext, id: u32, name: &str) -> DawResult<()>;
 
-    /// Add a new region (returns region ID)
-    async fn add_region(&self, project: ProjectContext, start: f64, end: f64, name: String) -> u32;
+    /// Set the region's color. `0` clears to the DAW default.
+    fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()>;
 
-    /// Remove a region by ID
-    async fn remove_region(&self, project: ProjectContext, id: u32);
-
-    /// Set region bounds (start and end position)
-    async fn set_region_bounds(&self, project: ProjectContext, id: u32, start: f64, end: f64);
-
-    /// Rename a region
-    async fn rename_region(&self, project: ProjectContext, id: u32, name: String);
-
-    /// Set the color of a region (0 for default color)
-    async fn set_region_color(&self, project: ProjectContext, id: u32, color: u32);
-
-    // =========================================================================
-    // Lane Methods (v7.62+)
-    // =========================================================================
-
-    /// Add a new region in a specific ruler lane. Returns region ID.
-    async fn add_region_in_lane(
-        &self,
-        project: ProjectContext,
-        request: AddRegionInLaneRequest,
-    ) -> u32;
-
-    /// Set the ruler lane for a region (None to move to default lane)
-    async fn set_region_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>);
-
-    /// Get all regions in a specific ruler lane
-    async fn get_regions_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Region>;
-
-    // =========================================================================
-    // Navigation Methods
-    // =========================================================================
-
-    /// Configure the region render matrix — whether a specific track renders for this region.
-    ///
-    /// `track_index` is the 0-based REAPER track index. `enable` = true to include the
-    /// track in the render for this region, false to exclude it.
-    async fn set_region_render_matrix(
-        &self,
-        project: ProjectContext,
-        region_id: u32,
-        track_index: u32,
-        enable: bool,
-    );
-
-    /// Navigate to the start of a region
-    async fn goto_region_start(&self, project: ProjectContext, id: u32);
-
-    /// Navigate to the end of a region
-    async fn goto_region_end(&self, project: ProjectContext, id: u32);
-
-    // =========================================================================
-    // Streaming
-    // =========================================================================
-
-    /// Subscribe to region changes for a project
-    ///
-    /// Streams events when:
-    /// - A region is added, removed, or modified
-    /// - Project regions are bulk-updated (e.g., project reload)
-    ///
-    /// Initially sends a `RegionsChanged` event with all current regions.
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionEvent>);
+    /// Subscribe to region changes across all open projects. Subscribers
+    /// filter by `project_guid` on the envelope.
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionStreamEvent>);
 }

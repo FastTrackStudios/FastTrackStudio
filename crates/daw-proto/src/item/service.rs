@@ -1,43 +1,29 @@
-//! Item and Take service traits
+//! Items service — architect::rpc port.
+//!
+//! Stateless singleton backends. `ProjectContext` flows through every
+//! call; `TrackRef` / `ItemRef` identify the target. The legacy
+//! async `ItemService` retired with this port — see commit log for
+//! the dropped surfaces (subscribe_items is sibling-trait territory).
 
-use super::{FadeShape, Item, ItemEvent, ItemRef, SourceType, Take, TakeEvent, TakeRef};
+use super::{FadeShape, Item, ItemRef};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
-use crate::{ProjectContext, TrackRef};
-use vox::{Tx, service};
+use crate::{DawResult, ProjectContext, TrackRef};
 
-/// Service for managing items on tracks
-///
-/// Items are media containers that hold one or more takes. They have position,
-/// length, and various properties like volume, fades, and timing behavior.
-#[service]
-pub trait ItemService {
-    // =========================================================================
-    // Queries
-    // =========================================================================
+#[architect::rpc]
+pub trait Items {
+    // ── Queries ──────────────────────────────────────────────────────
 
-    /// Get all items on a track
-    async fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item>;
+    fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item>;
+    fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item>;
+    fn get_all_items(&self, project: ProjectContext) -> Vec<Item>;
+    fn get_selected_items(&self, project: ProjectContext) -> Vec<Item>;
+    fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32;
 
-    /// Get a specific item
-    async fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item>;
+    // ── CRUD ─────────────────────────────────────────────────────────
 
-    /// Get all items in the project
-    async fn get_all_items(&self, project: ProjectContext) -> Vec<Item>;
-
-    /// Get all selected items in the project
-    async fn get_selected_items(&self, project: ProjectContext) -> Vec<Item>;
-
-    /// Get the number of items on a track
-    async fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32;
-
-    // =========================================================================
-    // CRUD Operations
-    // =========================================================================
-
-    /// Add a new item to a track
-    ///
-    /// Returns the GUID of the created item, or None if creation failed.
-    async fn add_item(
+    /// Create a new (MIDI) item at the given position/length. Returns
+    /// the new item's GUID.
+    fn add_item(
         &self,
         project: ProjectContext,
         track: TrackRef,
@@ -45,304 +31,99 @@ pub trait ItemService {
         length: Duration,
     ) -> Option<String>;
 
-    /// Delete an item
-    async fn delete_item(&self, project: ProjectContext, item: ItemRef);
+    fn delete_item(&self, project: ProjectContext, item: ItemRef) -> DawResult<()>;
 
-    /// Duplicate an item
-    ///
-    /// Returns the GUID of the new item, or None if duplication failed.
-    async fn duplicate_item(&self, project: ProjectContext, item: ItemRef) -> Option<String>;
+    /// Duplicate an item. Returns the new item's GUID (or a pointer
+    /// string fallback when REAPER doesn't expose a stable handle).
+    fn duplicate_item(&self, project: ProjectContext, item: ItemRef) -> Option<String>;
 
-    // =========================================================================
-    // Position & Length
-    // =========================================================================
+    // ── Position & Length ────────────────────────────────────────────
 
-    /// Set the position of an item
-    async fn set_position(
+    fn set_position(
         &self,
         project: ProjectContext,
         item: ItemRef,
         position: PositionInSeconds,
-    );
+    ) -> DawResult<()>;
+    fn set_length(&self, project: ProjectContext, item: ItemRef, length: Duration)
+    -> DawResult<()>;
+    fn move_to_track(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        track: TrackRef,
+    ) -> DawResult<()>;
+    fn set_snap_offset(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        offset: Duration,
+    ) -> DawResult<()>;
 
-    /// Set the length of an item
-    async fn set_length(&self, project: ProjectContext, item: ItemRef, length: Duration);
+    // ── State ────────────────────────────────────────────────────────
 
-    /// Move an item to a different track
-    async fn move_to_track(&self, project: ProjectContext, item: ItemRef, track: TrackRef);
+    fn set_muted(&self, project: ProjectContext, item: ItemRef, muted: bool) -> DawResult<()>;
+    fn set_selected(&self, project: ProjectContext, item: ItemRef, selected: bool)
+    -> DawResult<()>;
+    fn set_locked(&self, project: ProjectContext, item: ItemRef, locked: bool) -> DawResult<()>;
+    fn select_all_items(&self, project: ProjectContext, selected: bool) -> DawResult<()>;
 
-    /// Set the snap offset
-    async fn set_snap_offset(&self, project: ProjectContext, item: ItemRef, offset: Duration);
+    // ── Audio Properties ─────────────────────────────────────────────
 
-    // =========================================================================
-    // State
-    // =========================================================================
-
-    /// Set whether an item is muted
-    async fn set_muted(&self, project: ProjectContext, item: ItemRef, muted: bool);
-
-    /// Set whether an item is selected
-    async fn set_selected(&self, project: ProjectContext, item: ItemRef, selected: bool);
-
-    /// Set whether an item is locked
-    async fn set_locked(&self, project: ProjectContext, item: ItemRef, locked: bool);
-
-    /// Select or deselect all items in the project
-    async fn select_all_items(&self, project: ProjectContext, selected: bool);
-
-    // =========================================================================
-    // Audio Properties
-    // =========================================================================
-
-    /// Set the volume of an item (1.0 = 0dB)
-    async fn set_volume(&self, project: ProjectContext, item: ItemRef, volume: f64);
-
-    /// Set the fade in properties
-    async fn set_fade_in(
+    fn set_volume(&self, project: ProjectContext, item: ItemRef, volume: f64) -> DawResult<()>;
+    fn set_fade_in(
         &self,
         project: ProjectContext,
         item: ItemRef,
         length: Duration,
         shape: FadeShape,
-    );
-
-    /// Set the fade out properties
-    async fn set_fade_out(
+    ) -> DawResult<()>;
+    fn set_fade_out(
         &self,
         project: ProjectContext,
         item: ItemRef,
         length: Duration,
         shape: FadeShape,
-    );
+    ) -> DawResult<()>;
 
-    // =========================================================================
-    // Timing Behavior
-    // =========================================================================
+    // ── Timing Behavior ──────────────────────────────────────────────
 
-    /// Set whether the source should loop
-    async fn set_loop_source(&self, project: ProjectContext, item: ItemRef, loop_source: bool);
-
-    /// Set how the item attaches to the timeline
-    async fn set_beat_attach_mode(
+    fn set_loop_source(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        loop_source: bool,
+    ) -> DawResult<()>;
+    fn set_beat_attach_mode(
         &self,
         project: ProjectContext,
         item: ItemRef,
         mode: BeatAttachMode,
-    );
-
-    /// Set whether the item auto-stretches at tempo changes
-    async fn set_auto_stretch(&self, project: ProjectContext, item: ItemRef, auto_stretch: bool);
-
-    // =========================================================================
-    // Visual Properties
-    // =========================================================================
-
-    /// Set the custom color (None to use default)
-    async fn set_color(&self, project: ProjectContext, item: ItemRef, color: Option<u32>);
-
-    /// Set the group ID (None to remove from group)
-    async fn set_group_id(&self, project: ProjectContext, item: ItemRef, group_id: Option<u32>);
-
-    // =========================================================================
-    // Subscriptions
-    // =========================================================================
-
-    /// Subscribe to item change events for a project.
-    async fn subscribe_items(&self, project: ProjectContext, tx: Tx<ItemEvent>);
-}
-
-/// Service for managing takes within items
-///
-/// Takes are alternative recordings or sources within an item. Each item
-/// can have multiple takes, but only one is active at a time.
-#[service]
-pub trait TakeService {
-    // =========================================================================
-    // Queries
-    // =========================================================================
-
-    /// Get all takes in an item
-    async fn get_takes(&self, project: ProjectContext, item: ItemRef) -> Vec<Take>;
-
-    /// Get a specific take
-    async fn get_take(&self, project: ProjectContext, item: ItemRef, take: TakeRef)
-    -> Option<Take>;
-
-    /// Get the active take
-    async fn get_active_take(&self, project: ProjectContext, item: ItemRef) -> Option<Take>;
-
-    /// Get the number of takes in an item
-    async fn take_count(&self, project: ProjectContext, item: ItemRef) -> u32;
-
-    // =========================================================================
-    // CRUD Operations
-    // =========================================================================
-
-    /// Add a new empty take to an item
-    ///
-    /// Returns the GUID of the created take, or None if creation failed.
-    async fn add_take(&self, project: ProjectContext, item: ItemRef) -> Option<String>;
-
-    /// Delete a take
-    async fn delete_take(&self, project: ProjectContext, item: ItemRef, take: TakeRef);
-
-    /// Set which take is active
-    async fn set_active_take(&self, project: ProjectContext, item: ItemRef, take: TakeRef);
-
-    // =========================================================================
-    // Metadata
-    // =========================================================================
-
-    /// Set the name of a take
-    async fn set_name(&self, project: ProjectContext, item: ItemRef, take: TakeRef, name: String);
-
-    /// Set the custom color
-    async fn set_color(
+    ) -> DawResult<()>;
+    fn set_auto_stretch(
         &self,
         project: ProjectContext,
         item: ItemRef,
-        take: TakeRef,
+        auto_stretch: bool,
+    ) -> DawResult<()>;
+
+    // ── Visual Properties ────────────────────────────────────────────
+
+    fn set_color(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
         color: Option<u32>,
-    );
-
-    // =========================================================================
-    // Playback Properties
-    // =========================================================================
-
-    /// Set the volume (1.0 = 0dB)
-    async fn set_volume(&self, project: ProjectContext, item: ItemRef, take: TakeRef, volume: f64);
-
-    /// Set the playback rate (1.0 = normal)
-    async fn set_play_rate(&self, project: ProjectContext, item: ItemRef, take: TakeRef, rate: f64);
-
-    /// Set the pitch adjustment in semitones
-    async fn set_pitch(
+    ) -> DawResult<()>;
+    fn set_group_id(
         &self,
         project: ProjectContext,
         item: ItemRef,
-        take: TakeRef,
-        semitones: f64,
-    );
-
-    /// Set whether to preserve pitch when changing playback rate
-    async fn set_preserve_pitch(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        preserve: bool,
-    );
-
-    /// Set the start offset into the source
-    async fn set_start_offset(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        offset: Duration,
-    );
-
-    // =========================================================================
-    // Source Management
-    // =========================================================================
-
-    /// Set the source file for a take
-    ///
-    /// This loads an audio or MIDI file as the source for the take.
-    async fn set_source_file(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        path: String,
-    );
-
-    /// Get the source type
-    async fn get_source_type(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-    ) -> SourceType;
-
-    // =========================================================================
-    // Take Markers
-    // =========================================================================
-
-    /// List all take markers in source-PPQ order.
-    async fn get_take_markers(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-    ) -> Vec<super::TakeMarker>;
-
-    /// Append a new take marker. Returns the new marker's enumeration index,
-    /// or `None` if REAPER refused the call (e.g. closed take handle).
-    async fn add_take_marker(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        marker: super::TakeMarkerCreate,
-    ) -> Option<u32>;
-
-    /// Modify an existing take marker. Fields left as `None` in the update
-    /// keep their current value.
-    async fn set_take_marker(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        update: super::TakeMarkerUpdate,
-    );
-
-    /// Delete the take marker at the given enumeration index.
-    async fn delete_take_marker(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        index: u32,
-    );
-
-    /// Place a take marker at an absolute project-timeline position. The
-    /// implementation does the project-time → source-time conversion
-    /// (accounting for the item's start, the take's start offset and play
-    /// rate) so callers can drop a marker at, say, "playhead" or "second
-    /// verse" without computing the source offset themselves.
-    ///
-    /// Returns the new marker's enumeration index, or `None` if the
-    /// position falls outside the item's playable region (no-op + warning
-    /// in the host log).
-    async fn add_take_marker_at_position(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        request: super::AddTakeMarkerAtPositionRequest,
-    ) -> Option<u32>;
-
-    // =========================================================================
-    // Take Ratings (REAPER 7.17+ ranking actions)
-    // =========================================================================
-
-    /// Run a REAPER take-ranking action against a specific item+take. The
-    /// implementation snapshots and restores the prior selection so this
-    /// is safe to call mid-session. `command_id` should come from
-    /// [`super::take_rating_actions`].
-    async fn run_take_rating_action(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        command_id: u32,
-    );
-
-    // =========================================================================
-    // Subscriptions
-    // =========================================================================
-
-    /// Subscribe to take change events for a project.
-    async fn subscribe_takes(&self, project: ProjectContext, tx: Tx<TakeEvent>);
+        group_id: Option<u32>,
+    ) -> DawResult<()>;
 }
+
+#[cfg(feature = "vox")]
+pub use ItemsRpcDispatcher as Dispatcher;
+#[cfg(feature = "vox")]
+pub use items_rpc_service_descriptor as descriptor;

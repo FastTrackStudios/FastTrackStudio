@@ -6,9 +6,9 @@ use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
-    FxParameter, FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxStateChunk, FxTarget,
-    FxTree, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    FxChannelConfig, FxContainerChannelConfig, FxLatency, FxNodeId, FxParamModulation, FxParameter,
+    FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
+    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
@@ -77,7 +77,7 @@ impl FxChain {
         let fx_list = self
             .clients
             .fx
-            .get_fx_list(self.project_context(), self.context.clone())
+            .list(self.project_context(), self.context.clone())
             .await?;
         Ok(fx_list)
     }
@@ -85,11 +85,7 @@ impl FxChain {
     /// Get FX by index
     pub async fn by_index(&self, index: u32) -> Result<Option<FxHandle>> {
         let target = FxTarget::new(self.context.clone(), FxRef::Index(index));
-        let fx = self
-            .clients
-            .fx
-            .get_fx(self.project_context(), target)
-            .await?;
+        let fx = self.clients.fx.get(self.project_context(), target).await?;
 
         Ok(fx.map(|f| {
             FxHandle::new(
@@ -104,11 +100,7 @@ impl FxChain {
     /// Get FX by GUID
     pub async fn by_guid(&self, guid: &str) -> Result<Option<FxHandle>> {
         let target = FxTarget::new(self.context.clone(), FxRef::Guid(guid.to_string()));
-        let fx = self
-            .clients
-            .fx
-            .get_fx(self.project_context(), target)
-            .await?;
+        let fx = self.clients.fx.get(self.project_context(), target).await?;
 
         Ok(fx.map(|f| {
             FxHandle::new(
@@ -123,11 +115,7 @@ impl FxChain {
     /// Get FX by name (first match)
     pub async fn by_name(&self, name: &str) -> Result<Option<FxHandle>> {
         let target = FxTarget::new(self.context.clone(), FxRef::Name(name.to_string()));
-        let fx = self
-            .clients
-            .fx
-            .get_fx(self.project_context(), target)
-            .await?;
+        let fx = self.clients.fx.get(self.project_context(), target).await?;
 
         Ok(fx.map(|f| {
             FxHandle::new(
@@ -144,7 +132,7 @@ impl FxChain {
         let count = self
             .clients
             .fx
-            .fx_count(self.project_context(), self.context.clone())
+            .count(self.project_context(), self.context.clone())
             .await?;
         Ok(count)
     }
@@ -172,7 +160,7 @@ impl FxChain {
         let guid = self
             .clients
             .fx
-            .add_fx(
+            .add(
                 self.project_context(),
                 self.context.clone(),
                 fx_name.to_string(),
@@ -200,7 +188,7 @@ impl FxChain {
         let chunks = self
             .clients
             .fx
-            .get_fx_chain_state(self.project_context(), self.context.clone())
+            .chain_state(self.project_context(), self.context.clone())
             .await?;
         Ok(chunks)
     }
@@ -212,36 +200,13 @@ impl FxChain {
     pub async fn restore_state(&self, chunks: Vec<FxStateChunk>) -> Result<()> {
         self.clients
             .fx
-            .set_fx_chain_state(self.project_context(), self.context.clone(), chunks)
-            .await?;
+            .set_chain_state(self.project_context(), self.context.clone(), chunks)
+            .await??;
         Ok(())
     }
 
-    /// Subscribe to FX chain events (parameter changes, add/remove, enable/bypass).
-    ///
-    /// Returns a stream of `FxEvent`s for this chain. Events are delivered
-    /// reactively — only when state actually changes.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # use daw_control::FxChain;
-    /// # async fn example(chain: FxChain) -> daw_control::Result<()> {
-    /// let mut rx = chain.subscribe_events().await?;
-    /// while let Ok(Some(event)) = rx.recv().await {
-    ///     println!("FX event: {:?}", &*event);
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn subscribe_events(&self) -> Result<vox::Rx<FxEvent>> {
-        let (tx, rx) = vox::channel::<FxEvent>();
-        self.clients
-            .fx
-            .subscribe_fx_events(self.project_context(), self.context.clone(), tx)
-            .await?;
-        Ok(rx)
-    }
+    // `subscribe_events` retired with the architect::rpc port —
+    // FX event streaming lives on a sibling trait.
 
     // =========================================================================
     // FX Management (continued)
@@ -258,7 +223,7 @@ impl FxChain {
         let guid = self
             .clients
             .fx
-            .add_fx_at(self.project_context(), request)
+            .add_at(self.project_context(), request)
             .await?
             .ok_or_else(|| {
                 Error::Other(format!("Failed to add FX at index {}: {}", index, fx_name))
@@ -281,7 +246,7 @@ impl FxChain {
         let tree = self
             .clients
             .fx
-            .get_fx_tree(self.project_context(), self.context.clone())
+            .tree(self.project_context(), self.context.clone())
             .await?;
         Ok(tree)
     }
@@ -316,7 +281,7 @@ impl FxChain {
         self.clients
             .fx
             .move_to_container(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -330,7 +295,7 @@ impl FxChain {
         self.clients
             .fx
             .move_from_container(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -348,7 +313,7 @@ impl FxChain {
                 container_id.clone(),
                 mode,
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -360,7 +325,7 @@ impl FxChain {
         let config = self
             .clients
             .fx
-            .get_container_channel_config(
+            .container_channel_config(
                 self.project_context(),
                 self.context.clone(),
                 container_id.clone(),
@@ -384,7 +349,7 @@ impl FxChain {
         self.clients
             .fx
             .set_container_channel_config(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -415,7 +380,7 @@ impl FxChain {
                 self.context.clone(),
                 container_id.clone(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -429,7 +394,7 @@ impl FxChain {
                 container_id.clone(),
                 name.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -444,7 +409,7 @@ impl FxChain {
     pub async fn fx_chain_chunk_text(&self) -> Result<String> {
         self.clients
             .fx
-            .get_fx_chain_chunk_text(self.project_context(), self.context.clone())
+            .chain_chunk_text(self.project_context(), self.context.clone())
             .await?
             .ok_or_else(|| Error::Other("No FX chain chunk found".to_string()))
     }
@@ -457,12 +422,12 @@ impl FxChain {
     pub async fn insert_chunk(&self, chunk_text: &str) -> Result<()> {
         self.clients
             .fx
-            .insert_fx_chain_chunk(
+            .insert_chain_chunk(
                 self.project_context(),
                 self.context.clone(),
                 chunk_text.to_string(),
             )
-            .await?;
+            .await??;
         Ok(())
     }
 }
@@ -561,7 +526,7 @@ impl FxHandle {
     pub async fn info(&self) -> Result<Fx> {
         self.clients
             .fx
-            .get_fx(self.project_context(), self.target())
+            .get(self.project_context(), self.target())
             .await?
             .ok_or_else(|| Error::Other(format!("FX not found: {}", self.fx_guid)))
     }
@@ -574,8 +539,8 @@ impl FxHandle {
     pub async fn enable(&self) -> Result<()> {
         self.clients
             .fx
-            .set_fx_enabled(self.project_context(), self.target(), true)
-            .await?;
+            .set_enabled(self.project_context(), self.target(), true)
+            .await??;
         Ok(())
     }
 
@@ -583,8 +548,8 @@ impl FxHandle {
     pub async fn disable(&self) -> Result<()> {
         self.clients
             .fx
-            .set_fx_enabled(self.project_context(), self.target(), false)
-            .await?;
+            .set_enabled(self.project_context(), self.target(), false)
+            .await??;
         Ok(())
     }
 
@@ -593,8 +558,8 @@ impl FxHandle {
         let info = self.info().await?;
         self.clients
             .fx
-            .set_fx_enabled(self.project_context(), self.target(), !info.enabled)
-            .await?;
+            .set_enabled(self.project_context(), self.target(), !info.enabled)
+            .await??;
         Ok(())
     }
 
@@ -612,7 +577,7 @@ impl FxHandle {
         let params = self
             .clients
             .fx
-            .get_parameters(self.project_context(), self.target())
+            .parameters(self.project_context(), self.target())
             .await?;
         Ok(params)
     }
@@ -650,7 +615,7 @@ impl FxHandle {
         let result = self
             .clients
             .fx
-            .get_preset_index(self.project_context(), self.target())
+            .preset_index(self.project_context(), self.target())
             .await?;
         Ok(result)
     }
@@ -660,7 +625,7 @@ impl FxHandle {
         self.clients
             .fx
             .next_preset(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -669,7 +634,7 @@ impl FxHandle {
         self.clients
             .fx
             .prev_preset(self.project_context(), self.target())
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -678,7 +643,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_preset(self.project_context(), self.target(), index)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -690,8 +655,8 @@ impl FxHandle {
     pub async fn open_ui(&self) -> Result<()> {
         self.clients
             .fx
-            .open_fx_ui(self.project_context(), self.target())
-            .await?;
+            .open_ui(self.project_context(), self.target())
+            .await??;
         Ok(())
     }
 
@@ -699,8 +664,8 @@ impl FxHandle {
     pub async fn close_ui(&self) -> Result<()> {
         self.clients
             .fx
-            .close_fx_ui(self.project_context(), self.target())
-            .await?;
+            .close_ui(self.project_context(), self.target())
+            .await??;
         Ok(())
     }
 
@@ -708,8 +673,8 @@ impl FxHandle {
     pub async fn toggle_ui(&self) -> Result<()> {
         self.clients
             .fx
-            .toggle_fx_ui(self.project_context(), self.target())
-            .await?;
+            .toggle_ui(self.project_context(), self.target())
+            .await??;
         Ok(())
     }
 
@@ -721,8 +686,8 @@ impl FxHandle {
     pub async fn remove(&self) -> Result<()> {
         self.clients
             .fx
-            .remove_fx(self.project_context(), self.target())
-            .await?;
+            .remove(self.project_context(), self.target())
+            .await??;
         Ok(())
     }
 
@@ -730,8 +695,8 @@ impl FxHandle {
     pub async fn move_to(&self, index: u32) -> Result<()> {
         self.clients
             .fx
-            .move_fx(self.project_context(), self.target(), index)
-            .await?;
+            .move_to(self.project_context(), self.target(), index)
+            .await??;
         Ok(())
     }
 
@@ -744,7 +709,7 @@ impl FxHandle {
         let latency = self
             .clients
             .fx
-            .get_fx_latency(self.project_context(), self.target())
+            .latency(self.project_context(), self.target())
             .await?
             .ok_or_else(|| Error::Other("FX latency not available".to_string()))?;
         Ok(latency)
@@ -762,7 +727,7 @@ impl FxHandle {
         let chunk = self
             .clients
             .fx
-            .get_fx_state_chunk(self.project_context(), self.target())
+            .state_chunk(self.project_context(), self.target())
             .await?;
         Ok(chunk)
     }
@@ -773,8 +738,8 @@ impl FxHandle {
     pub async fn set_state_chunk(&self, chunk: Vec<u8>) -> Result<()> {
         self.clients
             .fx
-            .set_fx_state_chunk(self.project_context(), self.target(), chunk)
-            .await?;
+            .set_state_chunk(self.project_context(), self.target(), chunk)
+            .await??;
         Ok(())
     }
 
@@ -786,7 +751,7 @@ impl FxHandle {
         let encoded = self
             .clients
             .fx
-            .get_fx_state_chunk_encoded(self.project_context(), self.target())
+            .state_chunk_encoded(self.project_context(), self.target())
             .await?;
         Ok(encoded)
     }
@@ -795,8 +760,8 @@ impl FxHandle {
     pub async fn set_state_chunk_encoded(&self, encoded: String) -> Result<()> {
         self.clients
             .fx
-            .set_fx_state_chunk_encoded(self.project_context(), self.target(), encoded)
-            .await?;
+            .set_state_chunk_encoded(self.project_context(), self.target(), encoded)
+            .await??;
         Ok(())
     }
 
@@ -809,7 +774,7 @@ impl FxHandle {
         let value = self
             .clients
             .fx
-            .get_named_config(self.project_context(), self.target(), key.to_string())
+            .named_config(self.project_context(), self.target(), key.to_string())
             .await?;
         Ok(value)
     }
@@ -832,7 +797,7 @@ impl FxHandle {
         self.clients
             .fx
             .set_named_config(self.project_context(), request)
-            .await?;
+            .await??;
         Ok(())
     }
 
@@ -847,7 +812,7 @@ impl FxHandle {
     pub async fn channel_config(&self) -> Result<FxChannelConfig> {
         self.clients
             .fx
-            .get_fx_channel_config(self.project_context(), self.target())
+            .channel_config(self.project_context(), self.target())
             .await?
             .ok_or_else(|| Error::Other("FX channel config not available".to_string()))
     }
@@ -859,8 +824,8 @@ impl FxHandle {
     pub async fn set_channel_config(&self, config: FxChannelConfig) -> Result<()> {
         self.clients
             .fx
-            .set_fx_channel_config(self.project_context(), self.target(), config)
-            .await?;
+            .set_channel_config(self.project_context(), self.target(), config)
+            .await??;
         Ok(())
     }
 
@@ -874,12 +839,11 @@ impl FxHandle {
     /// This is the reliable mechanism for gapless loading — `channel_config`
     /// via `SetNamedConfigParm` is read-only in REAPER.
     pub async fn silence_output(&self) -> Result<FxPinMappings> {
-        let saved = self
+        Ok(self
             .clients
             .fx
-            .silence_fx_output(self.project_context(), self.target())
-            .await?;
-        Ok(saved)
+            .silence_output(self.project_context(), self.target())
+            .await??)
     }
 
     /// Restore this FX's output pin mappings from a previously saved state.
@@ -888,8 +852,8 @@ impl FxHandle {
     pub async fn restore_output(&self, saved: FxPinMappings) -> Result<()> {
         self.clients
             .fx
-            .restore_fx_output(self.project_context(), self.target(), saved)
-            .await?;
+            .restore_output(self.project_context(), self.target(), saved)
+            .await??;
         Ok(())
     }
 }
@@ -1010,13 +974,13 @@ impl FxParamHandle {
             ParamRef::Index(index) => self
                 .clients
                 .fx
-                .get_parameter(self.project_context(), self.target(), *index)
+                .parameter(self.project_context(), self.target(), *index)
                 .await?
                 .ok_or_else(|| Error::Other(format!("Parameter not found at index {}", index))),
             ParamRef::Name(name) => self
                 .clients
                 .fx
-                .get_parameter_by_name(self.project_context(), self.target(), name.clone())
+                .parameter_by_name(self.project_context(), self.target(), name.clone())
                 .await?
                 .ok_or_else(|| Error::Other(format!("Parameter not found: {}", name))),
         }
@@ -1039,7 +1003,7 @@ impl FxParamHandle {
                 self.clients
                     .fx
                     .set_parameter(self.project_context(), request)
-                    .await?;
+                    .await??;
             }
             ParamRef::Name(name) => {
                 let request = SetParameterByNameRequest {
@@ -1050,7 +1014,7 @@ impl FxParamHandle {
                 self.clients
                     .fx
                     .set_parameter_by_name(self.project_context(), request)
-                    .await?;
+                    .await??;
             }
         }
         Ok(())
@@ -1076,7 +1040,7 @@ impl FxParamHandle {
         let mod_state = self
             .clients
             .fx
-            .get_param_modulation(self.project_context(), self.target(), index)
+            .param_modulation(self.project_context(), self.target(), index)
             .await?
             .ok_or_else(|| Error::Other("Parameter modulation not available".to_string()))?;
         Ok(mod_state)

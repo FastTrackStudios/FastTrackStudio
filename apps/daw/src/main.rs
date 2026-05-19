@@ -297,6 +297,16 @@ enum Command {
         #[arg(long)]
         config: Option<String>,
     },
+    /// Manage multi-instance sync (daw-bridge sync runtime).
+    ///
+    /// Spawns/connects/monitors REAPER instances with the
+    /// `FTS_SYNC_ENABLED=1` daw-bridge sync runtime enabled so they form a
+    /// TCP peer mesh and propagate transport/track/marker/region/tempo
+    /// changes between each other.
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommand,
+    },
     /// List configured DAW launch profiles
     Profiles,
     /// Quit a running REAPER instance (sends SIGTERM)
@@ -734,6 +744,26 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum SyncCommand {
+    /// Spawn N sync-enabled REAPER instances and wait for each socket.
+    Spawn {
+        /// How many REAPER instances to spawn. Use 2+ for cross-peer sync.
+        #[arg(long, default_value = "2")]
+        count: u32,
+        /// DAW launch profile to use for every spawned instance.
+        #[arg(long, default_value = "fasttrackstudio")]
+        profile: String,
+    },
+    /// Wire every sync-ready REAPER into a direct-TCP mesh.
+    Connect,
+    /// Print FTS_SYNC_EXT/{status,peer_id,mesh_port,peer_count} for every
+    /// locally-discovered REAPER.
+    Status,
+    /// Kill every locally-discovered sync-enabled REAPER.
+    Stop,
+}
+
+#[derive(Subcommand)]
 enum ActionsCommand {
     /// List actions from REAPER's main action list
     List {
@@ -949,6 +979,39 @@ fn print_action_list(value: Value, as_json: bool, columns: &str) -> Result<()> {
     Ok(())
 }
 
+async fn run_sync(command: &SyncCommand, json_out: bool) -> Result<()> {
+    use daw_cli::sync as s;
+    match command {
+        SyncCommand::Spawn { count, profile } => {
+            if *count == 0 {
+                eyre::bail!("--count must be >= 1");
+            }
+            let instances = s::spawn_sync_instances(*count, profile).await?;
+            println!(
+                "Spawned {} sync-enabled REAPER(s). Run `daw sync connect` to wire them up.",
+                instances.len()
+            );
+        }
+        SyncCommand::Connect => s::connect_all().await?,
+        SyncCommand::Status => {
+            let instances = s::status_all().await?;
+            if json_out {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&s::status_json(&instances))?
+                );
+            } else {
+                s::print_status_table(&instances);
+            }
+        }
+        SyncCommand::Stop => {
+            let killed = s::stop_all().await?;
+            println!("Stopped {killed} sync-enabled REAPER(s).");
+        }
+    }
+    Ok(())
+}
+
 fn read_json_input(input: &str) -> Result<Value> {
     let text = if input == "-" {
         std::io::read_to_string(std::io::stdin())?
@@ -980,6 +1043,9 @@ async fn main() -> Result<()> {
         }
         Command::Profiles => {
             return daw_cli::cmd_profiles(cli.json);
+        }
+        Command::Sync { ref command } => {
+            return run_sync(command, cli.json).await;
         }
         Command::Quit { pid } => {
             return daw_cli::cmd_quit(pid);
@@ -1560,6 +1626,7 @@ async fn main() -> Result<()> {
         Command::Launch { .. }
         | Command::Profiles
         | Command::Quit { .. }
+        | Command::Sync { .. }
         | Command::ServiceCatalog => unreachable!(),
     }
 

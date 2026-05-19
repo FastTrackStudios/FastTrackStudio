@@ -1,47 +1,52 @@
-//! REAPER Region Implementation
+//! `impl Regions for Reaper` — sync trait + REAPER C API.
 //!
-//! Implements RegionService by dispatching REAPER API calls to the main thread
-//! using crate::main_thread.
+//! Mounting goes through `daw_proto::region::serve(Reaper)`. The
+//! dispatcher (REAPER's main thread queue) is pulled off the backend
+//! via `HasDispatcher` on `Reaper`. Each method assumes it's running
+//! on the main thread — the bridge enforces that contract.
+//!
+//! Helper `get_regions_on_main_thread` stays public for callers that
+//! already hold a main-thread proof (no need to go through the
+//! singleton trait).
 
-use crate::main_thread;
-use crate::project_context::resolve_project_context;
-use crate::safe_wrappers::markers as sw;
-use crate::safe_wrappers::ruler_lanes;
-use daw_proto::region::AddRegionInLaneRequest;
-use daw_proto::{ProjectContext, Region, RegionEvent, RegionService, TimeRange};
+use std::ffi::CString;
+
+use daw_proto::Regions;
+use daw_proto::{DawError, DawResult, ProjectContext, Region, TimeRange};
+use reaper_high::Reaper as ReaperHigh;
 use reaper_medium::{
     MarkerOrRegionPosition, PositionInSeconds, ProjectContext as ReaperProjectContext,
 };
-use std::ffi::CString;
-use std::time::Duration;
-use tracing::{debug, info};
-use vox::Tx;
 
-// =============================================================================
-// Public sync helper — callable directly from the main thread
-// =============================================================================
+use crate::project_context::resolve_project_context;
+use crate::safe_wrappers::markers as sw;
+use crate::safe_wrappers::ruler_lanes;
+
+// ── Public sync helper ────────────────────────────────────────────────
 
 /// Read all regions from the current project, sorted by start position.
-///
 /// Must be called from the main thread.
 pub fn get_regions_on_main_thread() -> Vec<Region> {
-    let reaper = reaper_high::Reaper::get();
+    read_regions(ReaperProjectContext::CurrentProject)
+}
+
+fn read_regions(ctx: ReaperProjectContext) -> Vec<Region> {
+    let reaper = ReaperHigh::get();
     let medium = reaper.medium_reaper();
     let low = medium.low();
     let mut regions = Vec::new();
 
-    let count_result = medium.count_project_markers(ReaperProjectContext::CurrentProject);
-    let total_count = count_result.total_count;
-
+    let total_count = medium.count_project_markers(ctx).total_count;
     for idx in 0..total_count {
-        medium.enum_project_markers_3(ReaperProjectContext::CurrentProject, idx, |result| {
+        medium.enum_project_markers_3(ctx, idx, |result| {
             if let Some(info) = result
                 && let Some(end_pos) = info.region_end_position
             {
-                let lane =
-                    ruler_lanes::get_marker_lane(low, ReaperProjectContext::CurrentProject, idx);
+                let id = info.id.get();
+                let lane = ruler_lanes::assigned_lane(low, ctx, true, id)
+                    .or_else(|| ruler_lanes::get_marker_lane(low, ctx, idx));
                 regions.push(Region {
-                    id: Some(info.id.get()),
+                    id: Some(id),
                     time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
                     name: info.name.to_string(),
                     color: {
@@ -60,384 +65,250 @@ pub fn get_regions_on_main_thread() -> Vec<Region> {
             .partial_cmp(&b.start_seconds())
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-
     regions
 }
 
-/// REAPER region implementation.
-///
-/// All methods dispatch to the main thread via main_thread.
-#[derive(Clone)]
-pub struct ReaperRegion;
+// ── Tracks impl ───────────────────────────────────────────────────────
 
-impl ReaperRegion {
-    pub fn new() -> Self {
-        Self
-    }
+fn not_found_region() -> DawError {
+    DawError::not_found("Region", "")
 }
 
-impl Default for ReaperRegion {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RegionService for ReaperRegion {
-    // =========================================================================
-    // Query Methods
-    // =========================================================================
-
-    async fn get_regions(&self, project: ProjectContext) -> Vec<Region> {
-        main_thread::query(move || {
-            // For non-current projects we still need to resolve the context
-            let reaper_ctx = resolve_project_context(&project);
-            if matches!(reaper_ctx, ReaperProjectContext::CurrentProject) {
-                return get_regions_on_main_thread();
-            }
-
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let mut regions = Vec::new();
-
-            let count_result = medium.count_project_markers(reaper_ctx);
-            let total_count = count_result.total_count;
-
-            for idx in 0..total_count {
-                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                    if let Some(info) = result
-                        && let Some(end_pos) = info.region_end_position
-                    {
-                        let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
-                        regions.push(Region {
-                            id: Some(info.id.get()),
-                            time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
-                            name: info.name.to_string(),
-                            color: {
-                                let c = info.color.to_raw();
-                                if c != 0 { Some(c as u32) } else { None }
-                            },
-                            guid: None,
-                            lane,
-                        });
-                    }
-                });
-            }
-
-            regions.sort_by(|a, b| {
-                a.start_seconds()
-                    .partial_cmp(&b.start_seconds())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-
-            regions
-        })
-        .await
-        .unwrap_or_default()
+impl Regions for crate::Reaper {
+    fn all(&self, project: ProjectContext) -> Vec<Region> {
+        read_regions(resolve_project_context(&project))
     }
 
-    async fn get_region(&self, project: ProjectContext, id: u32) -> Option<Region> {
-        let regions = self.get_regions(project).await;
-        regions.into_iter().find(|r| r.id == Some(id))
-    }
-
-    async fn get_regions_in_range(
-        &self,
-        project: ProjectContext,
-        start: f64,
-        end: f64,
-    ) -> Vec<Region> {
-        let regions = self.get_regions(project).await;
-        regions
+    fn get(&self, project: ProjectContext, id: u32) -> Option<Region> {
+        read_regions(resolve_project_context(&project))
             .into_iter()
-            .filter(|r| r.intersects_range(start, end))
-            .collect()
+            .find(|r| r.id == Some(id))
     }
 
-    async fn get_region_at(&self, project: ProjectContext, position: f64) -> Option<Region> {
-        let regions = self.get_regions(project).await;
-        regions.into_iter().find(|r| r.contains_position(position))
+    fn count(&self, project: ProjectContext) -> u32 {
+        let medium = ReaperHigh::get().medium_reaper();
+        let ctx = resolve_project_context(&project);
+        let total = medium.count_project_markers(ctx).total_count;
+        let mut n = 0u32;
+        for idx in 0..total {
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                if let Some(info) = result
+                    && info.region_end_position.is_some()
+                {
+                    n += 1;
+                }
+            });
+        }
+        n
     }
 
-    async fn region_count(&self, project: ProjectContext) -> usize {
-        self.get_regions(project).await.len()
-    }
-
-    // =========================================================================
-    // Mutation Methods
-    // =========================================================================
-
-    async fn add_region(
-        &self,
-        _project: ProjectContext,
-        start: f64,
-        end: f64,
-        name: String,
-    ) -> u32 {
-        debug!(
-            "ReaperRegion: add_region '{}' from {} to {}",
-            name, start, end
-        );
-        main_thread::query(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            if let (Ok(start_pos), Ok(end_pos)) =
-                (PositionInSeconds::new(start), PositionInSeconds::new(end))
-            {
-                medium
-                    .add_project_marker_2(
-                        ReaperProjectContext::CurrentProject,
-                        MarkerOrRegionPosition::Region(start_pos, end_pos),
-                        name.as_str(),
-                        None,
-                        None,
-                    )
-                    .unwrap_or(0)
-            } else {
-                0
-            }
-        })
-        .await
-        .unwrap_or(0)
-    }
-
-    async fn remove_region(&self, _project: ProjectContext, id: u32) {
-        debug!("ReaperRegion: remove_region {}", id);
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::delete_project_marker(
-                low,
-                ReaperProjectContext::CurrentProject,
-                id as i32,
-                true, // is a region
-            );
-        });
-    }
-
-    async fn set_region_bounds(&self, _project: ProjectContext, id: u32, start: f64, end: f64) {
-        debug!(
-            "ReaperRegion: set_region_bounds {} to {} - {}",
-            id, start, end
-        );
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::set_project_marker(
-                low, id as i32, true, // is a region
-                start, end, None,
-            );
-        });
-    }
-
-    async fn rename_region(&self, _project: ProjectContext, id: u32, name: String) {
-        debug!("ReaperRegion: rename_region {} to '{}'", id, name);
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            if let Ok(cname) = CString::new(name) {
-                sw::set_project_marker(low, id as i32, true, -1.0, -1.0, Some(&cname));
-            }
-        });
-    }
-
-    async fn set_region_color(&self, _project: ProjectContext, id: u32, color: u32) {
-        debug!("ReaperRegion: set_region_color {} to {}", id, color);
-        main_thread::run(move || {
-            let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::set_project_marker_by_index2(
-                low,
-                ReaperProjectContext::CurrentProject,
-                id as i32,
-                true, // is a region
-                -1.0,
-                -1.0,
-                -1,
+    fn add(&self, project: ProjectContext, start: f64, end: f64, name: &str) -> DawResult<u32> {
+        let ctx = resolve_project_context(&project);
+        let medium = ReaperHigh::get().medium_reaper();
+        let start_pos = PositionInSeconds::new(start)
+            .map_err(|e| DawError::operation_failed(format!("invalid start position: {e:?}")))?;
+        let end_pos = PositionInSeconds::new(end)
+            .map_err(|e| DawError::operation_failed(format!("invalid end position: {e:?}")))?;
+        let id = medium
+            .add_project_marker_2(
+                ctx,
+                MarkerOrRegionPosition::Region(start_pos, end_pos),
+                name,
                 None,
-                color as i32,
-                0,
-            );
-        });
+                None,
+            )
+            .map_err(|e| DawError::operation_failed(format!("add region failed: {e:?}")))?;
+        Ok(id)
     }
 
-    // =========================================================================
-    // Lane Methods
-    // =========================================================================
+    fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
+        let ctx = resolve_project_context(&project);
+        let low = ReaperHigh::get().medium_reaper().low();
+        sw::delete_project_marker(low, ctx, id as i32, true);
+        Ok(())
+    }
 
-    async fn add_region_in_lane(
-        &self,
-        project: ProjectContext,
-        request: AddRegionInLaneRequest,
-    ) -> u32 {
-        debug!(
-            "ReaperRegion: add_region_in_lane '{}' from {} to {} in lane {}",
-            request.name, request.start, request.end, request.lane
-        );
-        let id = self
-            .add_region(project.clone(), request.start, request.end, request.name)
-            .await;
-        if id != 0 {
-            let lane = request.lane;
-            main_thread::run(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                let low = medium.low();
-                let reaper_ctx = ReaperProjectContext::CurrentProject;
-                let count_result = medium.count_project_markers(reaper_ctx);
-                let total_count = count_result.total_count;
+    fn set_bounds(&self, _project: ProjectContext, id: u32, start: f64, end: f64) -> DawResult<()> {
+        let low = ReaperHigh::get().medium_reaper().low();
+        sw::set_project_marker(low, id as i32, true, start, end, None);
+        Ok(())
+    }
 
-                for idx in 0..total_count {
-                    medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                        if let Some(info) = result
-                            && info.region_end_position.is_some()
-                            && info.id.get() == id
-                        {
-                            ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
+    fn rename(&self, project: ProjectContext, id: u32, name: &str) -> DawResult<()> {
+        let ctx = resolve_project_context(&project);
+        let reaper = ReaperHigh::get();
+        let medium = reaper.medium_reaper();
+        let low = medium.low();
+        let total_count = medium.count_project_markers(ctx).total_count;
+        let cname = CString::new(name)
+            .map_err(|e| DawError::operation_failed(format!("invalid name: {e}")))?;
+
+        let mut found = false;
+        for idx in 0..total_count {
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                if let Some(info) = result
+                    && let Some(end_pos) = info.region_end_position
+                    && info.id.get() == id
+                {
+                    sw::set_project_marker(
+                        low,
+                        id as i32,
+                        true,
+                        info.position.get(),
+                        end_pos.get(),
+                        Some(&cname),
+                    );
+                    found = true;
+                }
+            });
+            if found {
+                break;
+            }
+        }
+        if !found {
+            return Err(not_found_region());
+        }
+        Ok(())
+    }
+
+    fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()> {
+        let ctx = resolve_project_context(&project);
+        let medium = ReaperHigh::get().medium_reaper();
+        let low = medium.low();
+        let total_count = medium.count_project_markers(ctx).total_count;
+        let reaper_color = (color | 0x01000000) as i32;
+
+        let mut found = false;
+        for idx in 0..total_count {
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                if let Some(info) = result
+                    && let Some(end_pos) = info.region_end_position
+                    && info.id.get() == id
+                    && let Ok(name) = CString::new(info.name.to_string())
+                {
+                    sw::set_project_marker_by_index2(
+                        low,
+                        ctx,
+                        idx as i32,
+                        true,
+                        info.position.get(),
+                        end_pos.get(),
+                        id as i32,
+                        Some(&name),
+                        reaper_color,
+                        0,
+                    );
+                    found = true;
+                }
+            });
+            if found {
+                break;
+            }
+        }
+        if !found {
+            return Err(not_found_region());
+        }
+        Ok(())
+    }
+
+    async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<RegionStreamEvent>) {
+        let mut rx = crate::event_hub::hub().subscribe_regions();
+        tokio::task::spawn(async move {
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            return;
                         }
+                    }
+                    Err(RecvError::Closed) => return,
+                    Err(RecvError::Lagged(skipped)) => {
+                        tracing::warn!(skipped, "regions subscriber lagged");
+                    }
+                }
+            }
+        });
+    }
+}
+
+// ── Streaming: poll + broadcast regions ────────────────────────────────
+//
+// Same pattern as markers — per-project HashMap<u32, Region> cache,
+// diff per tick, emit Added/Changed/Removed events through the hub's
+// regions channel. Driven from the bridge's 30Hz timer.
+
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+use daw_proto::RegionEvent;
+use daw_proto::region::RegionStreamEvent;
+use reaper_medium::ProjectRef;
+
+use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
+
+static REGION_CACHE: OnceLock<Mutex<HashMap<String, HashMap<u32, Region>>>> = OnceLock::new();
+
+fn region_cache() -> &'static Mutex<HashMap<String, HashMap<u32, Region>>> {
+    REGION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Poll REAPER region state for every open project. **Main thread only.**
+pub fn poll_and_broadcast_regions() {
+    let hub = crate::event_hub::hub();
+    if hub.regions_subscriber_count() == 0 {
+        return;
+    }
+
+    let reaper = ReaperHigh::get();
+    let medium = reaper.medium_reaper();
+    let mut cache = region_cache().lock().expect("region cache mutex poisoned");
+
+    let mut seen_projects: Vec<String> = Vec::new();
+
+    for tab_index in 0..MAX_PROJECT_TABS {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+        let project = reaper_high::Project::new(result.project);
+        let project_guid = project_guid_from(&project);
+        seen_projects.push(project_guid.clone());
+
+        let project_ctx = ProjectContext::Project(project_guid.clone());
+        let fresh: Vec<Region> = daw_proto::Regions::all(&crate::Reaper, project_ctx);
+        let fresh_by_id: HashMap<u32, Region> = fresh
+            .into_iter()
+            .filter_map(|r| r.id.map(|id| (id, r)))
+            .collect();
+
+        let prev = cache.entry(project_guid.clone()).or_default();
+
+        for (id, region) in &fresh_by_id {
+            match prev.get(id) {
+                None => hub.publish_region(RegionStreamEvent {
+                    project_guid: project_guid.clone(),
+                    event: RegionEvent::Added(region.clone()),
+                }),
+                Some(old) if old != region => {
+                    hub.publish_region(RegionStreamEvent {
+                        project_guid: project_guid.clone(),
+                        event: RegionEvent::Changed(region.clone()),
                     });
                 }
-            });
+                Some(_) => {}
+            }
         }
-        id
-    }
-
-    async fn set_region_lane(&self, _project: ProjectContext, id: u32, lane: Option<u32>) {
-        debug!("ReaperRegion: set_region_lane id={id} lane={lane:?}");
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let reaper_ctx = ReaperProjectContext::CurrentProject;
-            let total_count = medium.count_project_markers(reaper_ctx).total_count;
-            let lane_value = lane.unwrap_or(0);
-            for idx in 0..total_count {
-                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                    if let Some(info) = result
-                        && info.region_end_position.is_some()
-                        && info.id.get() == id
-                    {
-                        ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane_value);
-                    }
+        for id in prev.keys() {
+            if !fresh_by_id.contains_key(id) {
+                hub.publish_region(RegionStreamEvent {
+                    project_guid: project_guid.clone(),
+                    event: RegionEvent::Removed(*id),
                 });
             }
-        });
-    }
-
-    async fn get_regions_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Region> {
-        let regions = self.get_regions(project).await;
-        regions
-            .into_iter()
-            .filter(|r| r.lane == Some(lane))
-            .collect()
-    }
-
-    async fn set_region_render_matrix(
-        &self,
-        _project: ProjectContext,
-        region_id: u32,
-        track_index: u32,
-        enable: bool,
-    ) {
-        debug!(
-            "ReaperRegion: set_region_render_matrix region={} track_index={} enable={}",
-            region_id, track_index, enable
-        );
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            let low = medium.low();
-            let proj_ctx = ReaperProjectContext::CurrentProject;
-
-            let track = medium.get_track(proj_ctx, track_index);
-            let track_ptr = match track {
-                Some(t) => t.as_ptr(),
-                None => {
-                    debug!(
-                        "set_region_render_matrix: no track at index {}",
-                        track_index
-                    );
-                    return;
-                }
-            };
-
-            let flag = if enable { 1 } else { 0 };
-            unsafe {
-                low.SetRegionRenderMatrix(proj_ctx.to_raw(), region_id as i32, track_ptr, flag);
-            }
-        });
-    }
-
-    async fn goto_region_start(&self, _project: ProjectContext, id: u32) {
-        debug!("ReaperRegion: goto_region_start {}", id);
-        main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            // Go to region by ID (uses same API as markers)
-            medium.go_to_marker(
-                ReaperProjectContext::CurrentProject,
-                reaper_medium::BookmarkRef::Id(reaper_medium::BookmarkId::new(id as _)),
-            );
-        });
-    }
-
-    async fn goto_region_end(&self, project: ProjectContext, id: u32) {
-        debug!("ReaperRegion: goto_region_end {}", id);
-        // Get the region's end position and set cursor there
-        if let Some(region) = self.get_region(project, id).await {
-            let end_pos = region.end_seconds();
-            main_thread::run(move || {
-                let reaper = reaper_high::Reaper::get();
-                if let Ok(pos) = PositionInSeconds::new(end_pos) {
-                    reaper.current_project().set_edit_cursor_position(
-                        pos,
-                        reaper_medium::SetEditCurPosOptions {
-                            move_view: false,
-                            seek_play: true,
-                        },
-                    );
-                }
-            });
         }
+
+        *prev = fresh_by_id;
     }
 
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionEvent>) {
-        info!("ReaperRegion::subscribe() - starting region stream");
-
-        // Clone self for the spawned task
-        let this = self.clone();
-
-        // Spawn the streaming loop so this method returns immediately
-        // (vox needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
-            // Send initial state
-            let regions = this.get_regions(project.clone()).await;
-            if tx
-                .send(RegionEvent::RegionsChanged(regions.clone()))
-                .await
-                .is_err()
-            {
-                debug!("ReaperRegion::subscribe() - client disconnected during initial send");
-                return;
-            }
-
-            // Poll for changes at 60Hz
-            let mut last_regions = regions;
-
-            loop {
-                tokio::time::sleep(Duration::from_micros(16667)).await;
-
-                let current_regions = this.get_regions(project.clone()).await;
-                if current_regions != last_regions {
-                    if tx
-                        .send(RegionEvent::RegionsChanged(current_regions.clone()))
-                        .await
-                        .is_err()
-                    {
-                        debug!("ReaperRegion::subscribe() - client disconnected");
-                        break;
-                    }
-                    last_regions = current_regions;
-                }
-            }
-
-            info!("ReaperRegion::subscribe() - stream ended");
-        });
-    }
+    cache.retain(|guid, _| seen_projects.iter().any(|seen| seen == guid));
 }

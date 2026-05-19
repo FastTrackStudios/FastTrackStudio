@@ -57,7 +57,7 @@ impl MidiEditor {
 
     /// Get all notes
     pub async fn notes(&self) -> Result<Vec<MidiNote>> {
-        let notes = self.clients.midi.get_notes(self.location()).await?;
+        let notes = self.clients.midi.notes(self.location()).await?;
         Ok(notes)
     }
 
@@ -66,18 +66,14 @@ impl MidiEditor {
         let notes = self
             .clients
             .midi
-            .get_notes_in_range(self.location(), PpqRange::new(start_ppq, end_ppq))
+            .notes_in_range(self.location(), PpqRange::new(start_ppq, end_ppq))
             .await?;
         Ok(notes)
     }
 
     /// Get selected notes
     pub async fn selected_notes(&self) -> Result<Vec<MidiNote>> {
-        let notes = self
-            .clients
-            .midi
-            .get_selected_notes(self.location())
-            .await?;
+        let notes = self.clients.midi.selected_notes(self.location()).await?;
         Ok(notes)
     }
 
@@ -304,11 +300,7 @@ impl MidiEditor {
 
     /// Get all CC events (optionally filtered by controller)
     pub async fn ccs(&self, controller: Option<u8>) -> Result<Vec<MidiCC>> {
-        let ccs = self
-            .clients
-            .midi
-            .get_ccs(self.location(), controller)
-            .await?;
+        let ccs = self.clients.midi.ccs(self.location(), controller).await?;
         Ok(ccs)
     }
 
@@ -346,7 +338,7 @@ impl MidiEditor {
 
     /// Get pitch bend events
     pub async fn pitch_bends(&self) -> Result<Vec<MidiPitchBend>> {
-        let bends = self.clients.midi.get_pitch_bends(self.location()).await?;
+        let bends = self.clients.midi.pitch_bends(self.location()).await?;
         Ok(bends)
     }
 
@@ -363,17 +355,13 @@ impl MidiEditor {
 
     /// Get program change events
     pub async fn program_changes(&self) -> Result<Vec<MidiProgramChange>> {
-        let changes = self
-            .clients
-            .midi
-            .get_program_changes(self.location())
-            .await?;
+        let changes = self.clients.midi.program_changes(self.location()).await?;
         Ok(changes)
     }
 
     /// Get SysEx events
     pub async fn sysex(&self) -> Result<Vec<MidiSysEx>> {
-        let events = self.clients.midi.get_sysex(self.location()).await?;
+        let events = self.clients.midi.sysex(self.location()).await?;
         Ok(events)
     }
 }

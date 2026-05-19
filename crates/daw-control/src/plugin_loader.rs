@@ -26,7 +26,7 @@ impl PluginLoader {
         Ok(self
             .clients
             .plugin_loader
-            .load_plugin(plugin_path.to_string())
+            .load(plugin_path.to_string())
             .await?)
     }
 

@@ -1,37 +1,18 @@
-//! REAPER Health Service Implementation
+//! `impl Health for Reaper` — sync trait + REAPER's console-msg helper.
 //!
-//! Trivial implementation — always returns `true`. The value of the ping is
-//! in the RPC round-trip succeeding, not in the response payload.
+//! Mounting goes through `daw_proto::health::serve(Reaper)`. The
+//! architect::rpc bridge hops calls onto REAPER's main thread via
+//! `HasDispatcher`. Bodies assume main-thread execution.
 
-use daw_proto::HealthService;
+use daw_proto::Health;
 
-/// REAPER health-check implementation.
-#[derive(Clone)]
-pub struct ReaperHealth;
-
-impl ReaperHealth {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for ReaperHealth {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HealthService for ReaperHealth {
-    async fn ping(&self) -> bool {
+impl Health for crate::Reaper {
+    fn ping(&self) -> bool {
         true
     }
 
-    async fn show_console_msg(&self, msg: String) {
-        use crate::main_thread;
-        main_thread::query(move || {
-            let reaper = reaper_high::Reaper::get();
-            reaper.show_console_msg(msg);
-        })
-        .await;
+    fn show_console_msg(&self, msg: &str) {
+        let reaper = reaper_high::Reaper::get();
+        reaper.show_console_msg(msg);
     }
 }

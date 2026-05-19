@@ -22,7 +22,9 @@ use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::Cursor;
 use crate::parse::tempo::{TempoSegment, tick_to_sample};
-use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackKind, TrackRegion, ZERO_TICKS};
+use crate::types::{
+    AudioRegion, FadeRegion, NO_REGION, Playlist, Track, TrackKind, TrackRegion, ZERO_TICKS,
+};
 
 /// Internal track entry that carries the channel position used for grouping.
 struct TrackEntry {
@@ -56,6 +58,11 @@ pub fn parse_audio_tracks(
         return tracks;
     }
 
+    // Collect every fade-definition block (0x262f) in document order so each
+    // fade entry's `+4` index can be resolved to a real (in_len, out_len, shape).
+    // See `docs/pt-fade-encoding.md`.
+    let fade_defs = collect_fade_defs(blocks);
+
     assign_regions_new(
         blocks,
         cursor,
@@ -64,10 +71,15 @@ pub fn parse_audio_tracks(
         rate_factor,
         tempo_map,
         target_sample_rate,
+        &fade_defs,
     );
 
-    // Step 3: Remove entries with no active regions
-    entries.retain(|e| !e.track.regions.is_empty());
+    // Keep all defined tracks, including empty ones (no regions). PT
+    // sessions used as palette tests (Color Testing.ptx) or routing-only
+    // skeletons have legitimate empty tracks that still carry color,
+    // routing, and mix state. Filtering them dropped 72/72 tracks on
+    // Color Testing.ptx. If a downstream caller wants only tracks with
+    // content, they can filter on `regions.is_empty()` themselves.
 
     // Step 4: Group alternates under their primary track
     let mut tracks = group_alternate_playlists(entries);
@@ -127,7 +139,19 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     index: track_index,
                     playlist_name: String::new(),
                     regions: Vec::new(),
+                    fades: Vec::new(),
+                    volume_centibel: 0,
+                    mute: false,
+                    solo: false,
+                    solo_defeat: false,
+                    inactive: false,
+                    pan: 0,
                     alternate_playlists: Vec::new(),
+                    output: String::new(),
+                    color_byte: 0,
+                    volume_automation: Vec::new(),
+                    mute_automation: Vec::new(),
+                    is_folder: false,
                 },
                 channel_pos: ch,
             });
@@ -176,6 +200,9 @@ fn assign_regions_old(
             tracks[track_idx].regions.push(TrackRegion {
                 region_index: raw_index,
                 start_pos: region.start_pos,
+                clip_flag_53: false,
+                clip_muted: false,
+                clip_color: None,
             });
         }
 
@@ -188,6 +215,7 @@ fn assign_regions_old(
 /// All `0x1052` entries map 1:1 to `entries` by position — both active and
 /// alternate playlists are in the same flat list. Grouping into alternates
 /// happens later in `group_alternate_playlists`.
+#[allow(clippy::too_many_arguments)]
 fn assign_regions_new(
     blocks: &[Block],
     cursor: &Cursor<'_>,
@@ -196,6 +224,7 @@ fn assign_regions_new(
     rate_factor: f64,
     tempo_map: &[TempoSegment],
     target_sample_rate: u32,
+    fade_defs: &[&Block],
 ) {
     let map_block = match find_top_level_block(blocks, ContentType::AudioRegionTrackMapNew) {
         Some(b) => b,
@@ -220,20 +249,27 @@ fn assign_regions_new(
             }
         };
 
-        let slot_regions = collect_slot_regions(
+        let (slot_regions, slot_fades) = collect_slot_regions(
             map_entry,
             cursor,
             regions,
             rate_factor,
             tempo_map,
             target_sample_rate,
+            fade_defs,
         );
         entries[idx].track.playlist_name = playlist_name;
         entries[idx].track.regions.extend(slot_regions);
+        entries[idx].track.fades.extend(slot_fades);
     }
 }
 
 /// Collect all region placements from a single 0x1052 block.
+///
+/// Returns `(main_regions, fades)`. Fade entries — track entries whose byte at
+/// offset +46 is `0x01` — are collected separately along with the referenced
+/// audio region's length, which empirically equals the fade duration when the
+/// referenced region is a PT-generated fade clip.
 fn collect_slot_regions(
     map_entry: &Block,
     cursor: &Cursor<'_>,
@@ -241,23 +277,53 @@ fn collect_slot_regions(
     rate_factor: f64,
     tempo_map: &[TempoSegment],
     target_sample_rate: u32,
-) -> Vec<TrackRegion> {
+    fade_defs: &[&Block],
+) -> (Vec<TrackRegion>, Vec<FadeRegion>) {
     let data = cursor.data();
     let mut slot_regions = Vec::new();
+    let mut slot_fades = Vec::new();
 
     for track_entry in &map_entry.find_all(ContentType::AudioRegionTrackEntryNew) {
-        // Skip fade regions (byte at offset+46 == 0x01)
-        if track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01 {
-            continue;
-        }
+        let is_fade =
+            track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01;
+
+        // Per-clip flag at 0x1050 +53 (u8). Discovered via Frida.
+        // 0x1050 is the parent (the track_entry itself).
+        // `track_entry.offset` points at content_type (= magic + 7),
+        // so +53 from offset = +46 from payload start in our parser's
+        // terms = file offset block.offset.saturating_sub(7) + 53.
+        let clip_flag_53 = {
+            let magic = track_entry.offset.saturating_sub(7);
+            data.get(magic + 53).copied().unwrap_or(0) != 0
+        };
+        // Per-clip state from inner 0x104f sub-block. Verified via
+        // Frida probe-and-diff:
+        //   - clip mute at `0x104f +9` u8
+        //   - clip color (palette index) at `0x104f +25..+26` i16 LE
+        let (clip_color, clip_muted) = {
+            let mut color: Option<i16> = None;
+            let mut muted = false;
+            for child in &track_entry.children {
+                if child.content_type_raw == 0x104f {
+                    let magic = child.offset.saturating_sub(7);
+                    if magic + 27 <= data.len() {
+                        muted = data[magic + 9] != 0;
+                        color = Some(i16::from_le_bytes([data[magic + 25], data[magic + 26]]));
+                    }
+                    break;
+                }
+            }
+            (color, muted)
+        };
 
         for sub_entry in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
             let raw_offset = sub_entry.offset + 4;
             if raw_offset + 4 > data.len() {
                 continue;
             }
-            let raw_index = cursor.u32_at(raw_offset) as u16;
-            if raw_index == NO_REGION {
+            let raw_index_u32 = cursor.u32_at(raw_offset);
+            let raw_index = raw_index_u32 as u16;
+            if !is_fade && raw_index == NO_REGION {
                 continue;
             }
 
@@ -285,14 +351,98 @@ fn collect_slot_regions(
                 0
             };
 
-            slot_regions.push(TrackRegion {
-                region_index: raw_index,
-                start_pos: start,
-            });
+            if is_fade {
+                // The fade entry's `+4..+7` field is an index into the
+                // session-wide fade-definition list (0x262f blocks), NOT into
+                // `audio_regions`. Look it up and decode the lengths + shape.
+                let fade_index = raw_index_u32;
+                let (in_length, out_length, shape) = fade_defs
+                    .get(fade_index as usize)
+                    .and_then(|def| decode_fade_def(def, data))
+                    .unwrap_or((0, 0, 1));
+
+                slot_fades.push(FadeRegion {
+                    start_pos: start,
+                    in_length,
+                    out_length,
+                    shape,
+                    fade_index,
+                });
+            } else {
+                slot_regions.push(TrackRegion {
+                    region_index: raw_index,
+                    start_pos: start,
+                    clip_flag_53,
+                    clip_color,
+                    clip_muted,
+                });
+            }
         }
     }
 
-    slot_regions
+    (slot_regions, slot_fades)
+}
+
+/// Decode a `0x262f` fade-definition block.
+///
+/// Layout (per `docs/pt-fade-encoding.md`):
+/// - `+7`: type byte. High nibble = byte width of in-length, low nibble = byte
+///   width of out-length. Observed values: 0x30, 0x33, 0x22, 0x20, 0x11.
+/// - `+10..`: in-length (LE, width per type byte high nibble), then out-length
+///   (LE, width per low nibble), then a single byte for shape (1 = linear,
+///   2 = equal power, 3 = equal gain).
+///
+/// Returns `(in_len_samples, out_len_samples, shape)`. `out_len == 0` denotes a
+/// single-direction fade; `in_len == out_len` denotes a symmetric crossfade.
+fn decode_fade_def(def: &Block, data: &[u8]) -> Option<(u64, u64, u8)> {
+    let base = def.offset;
+    if base + 11 > data.len() {
+        return None;
+    }
+    let type_byte = data[base + 7];
+    let n_in = (type_byte >> 4) as usize;
+    let n_out = (type_byte & 0x0f) as usize;
+    let payload_end = base + 10 + n_in + n_out;
+    if payload_end >= data.len() {
+        return None;
+    }
+    let read_le = |o: usize, n: usize| -> u64 {
+        let mut v = 0u64;
+        for i in 0..n {
+            v |= (data[o + i] as u64) << (8 * i);
+        }
+        v
+    };
+    let in_len = if n_in > 0 {
+        read_le(base + 10, n_in)
+    } else {
+        0
+    };
+    let out_len = if n_out > 0 {
+        read_le(base + 10 + n_in, n_out)
+    } else {
+        0
+    };
+    let shape = data[base + 10 + n_in + n_out];
+    Some((in_len, out_len, shape))
+}
+
+/// Walk the block tree and collect every `0x262f` fade-definition block in
+/// document order. The fade entry's `+4` field indexes into this list.
+fn collect_fade_defs(blocks: &[Block]) -> Vec<&Block> {
+    let mut out = Vec::new();
+    fn walk<'a>(b: &'a Block, out: &mut Vec<&'a Block>) {
+        if b.content_type == Some(ContentType::FadeDef) {
+            out.push(b);
+        }
+        for c in &b.children {
+            walk(c, out);
+        }
+    }
+    for b in blocks {
+        walk(b, &mut out);
+    }
+    out
 }
 
 // ── Alternate playlist grouping ────────────────────────────────────────────

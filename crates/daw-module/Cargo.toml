@@ -9,3 +9,6 @@ description = "Module-system primitives — DawModule trait, ActionDef, PanelDef
 [dependencies]
 tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
+
+[lints]
+workspace = true

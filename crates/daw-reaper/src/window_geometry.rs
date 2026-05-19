@@ -1,6 +1,6 @@
-//! Window geometry helpers for nudge / resize / snap actions.
+//! `impl WindowGeometry for Reaper` — post-architect::rpc port.
 //!
-//! Two pluggable backends sit behind the same `nudge`/`grow`/`rect`/
+//! Two pluggable backends sit behind the same `nudge`/`grow`/`get_rect`/
 //! `set_rect` surface:
 //!
 //! - `swell` — the default. Talks to SWELL through `swell-ui::Window`,
@@ -12,17 +12,14 @@
 //!   keybinds mean something useful (move-column-left, set-column-width
 //!   "+50", etc.) on niri.
 //!
-//! The selection happens once per process at first call to
-//! `backend()`. Same key pressed on a niri seat as on a Win32 seat
-//! does The Right Thing for the local layout model — the user doesn't
-//! re-bind anything when they switch seats.
+//! Methods run synchronously on the caller — the bridge / main-thread
+//! queue is responsible for routing onto the SWELL-safe thread before
+//! dispatch.
 
-use daw_proto::ScreensetRect;
-use daw_proto::window_geometry::{WindowGeometryResult, WindowGeometryService, WindowTarget};
+use daw_proto::window_geometry::{WindowGeometry, WindowGeometryResult, WindowTarget};
+use daw_proto::{DawError, DawResult, ScreensetRect};
 use reaper_low::raw;
 use swell_ui::Window;
-
-use crate::main_thread;
 
 /// Minimum allowed width/height after a shrink. Some window managers
 /// refuse zero-size windows or snap them to a corner; clamp here so a
@@ -127,11 +124,6 @@ fn backend() -> Backend {
     use std::sync::OnceLock;
     static CHOSEN: OnceLock<Backend> = OnceLock::new();
     *CHOSEN.get_or_init(|| {
-        // niri exports `$NIRI_SOCKET` to clients running under it. We
-        // also gate on `niri-msg` being PATH-resolvable to avoid taking
-        // the niri code path when a stale env var leaks into a non-niri
-        // session. The `which`-style check is a single existence test,
-        // not a spawn.
         let socket = std::env::var("NIRI_SOCKET").unwrap_or_default();
         if !socket.is_empty() && std::path::Path::new(&socket).exists() && which_in_path("niri") {
             tracing::info!("window-geometry backend: niri (socket={socket})");
@@ -143,8 +135,6 @@ fn backend() -> Backend {
     })
 }
 
-/// Look for `bin` in the user's `PATH`. Avoids depending on the `which`
-/// crate for a one-off check.
 fn which_in_path(bin: &str) -> bool {
     let Ok(path) = std::env::var("PATH") else {
         return false;
@@ -158,9 +148,6 @@ fn which_in_path(bin: &str) -> bool {
     false
 }
 
-/// Run a `niri msg action <name> [args...]` command. Fire-and-forget —
-/// niri's actions return success synchronously and we don't surface
-/// errors back to the user since these are bound to keypresses.
 fn niri_action(args: &[&str]) {
     let mut cmd = std::process::Command::new("niri");
     cmd.arg("msg").arg("action").args(args);
@@ -171,8 +158,6 @@ fn niri_action(args: &[&str]) {
     }
 }
 
-/// niri-specific nudge mapping. Direction-only; magnitude is ignored
-/// because niri's column/row moves are discrete.
 fn niri_nudge(dx: i32, dy: i32) {
     if dx < 0 {
         niri_action(&["move-column-left"]);
@@ -186,9 +171,6 @@ fn niri_nudge(dx: i32, dy: i32) {
     }
 }
 
-/// niri-specific resize mapping. Translates pixel deltas into niri's
-/// `set-column-width` / `set-window-height` arguments — niri accepts
-/// `+N` / `-N` strings for pixel deltas.
 fn niri_grow(dw: i32, dh: i32) {
     if dw != 0 {
         let arg = format!("{:+}", dw);
@@ -200,8 +182,6 @@ fn niri_grow(dw: i32, dh: i32) {
     }
 }
 
-/// Convert a SWELL `RECT` to the wire type used in screensets and the
-/// geometry service.
 fn rect_to_proto(r: raw::RECT) -> ScreensetRect {
     ScreensetRect {
         x: r.left,
@@ -213,9 +193,6 @@ fn rect_to_proto(r: raw::RECT) -> ScreensetRect {
 
 fn move_to_pixels(window: Window, x: i32, y: i32) {
     use swell_ui::{Pixels, Point};
-    // SWELL coordinates are unsigned; clamp negatives to 0 so a window
-    // can never be moved off-screen entirely on platforms that interpret
-    // negative coords as "leftmost monitor edge minus N".
     window.move_to_pixels(Point::new(Pixels(x.max(0) as u32), Pixels(y.max(0) as u32)));
 }
 
@@ -235,35 +212,29 @@ fn unresolved() -> WindowGeometryResult {
     }
 }
 
-/// REAPER-backed [`WindowGeometryService`] used by daw-bridge.
-///
-/// All operations queue on the REAPER main thread because SWELL window
-/// APIs are not safe to call from arbitrary threads.
-#[derive(Clone, Default)]
-pub struct ReaperWindowGeometry;
-
-impl ReaperWindowGeometry {
-    pub fn new() -> Self {
-        Self
-    }
+fn no_target_err() -> DawError {
+    DawError::not_found(
+        "Window",
+        "no resolvable target (SWELL unavailable or nothing focused)",
+    )
 }
 
-impl WindowGeometryService for ReaperWindowGeometry {
-    async fn get_rect(&self, target: WindowTarget) -> WindowGeometryResult {
-        main_thread::query(move || match resolve_target(target) {
+// ── WindowGeometry impl ────────────────────────────────────────────────
+
+impl WindowGeometry for crate::Reaper {
+    fn get_rect(&self, target: WindowTarget) -> WindowGeometryResult {
+        match resolve_target(target) {
             Some(window) => WindowGeometryResult {
                 applied: true,
                 rect: Some(read_rect(window)),
                 error: String::new(),
             },
             None => unresolved(),
-        })
-        .await
-        .unwrap_or_else(unresolved)
+        }
     }
 
-    async fn nudge(&self, target: WindowTarget, dx: i32, dy: i32) -> WindowGeometryResult {
-        main_thread::query(move || match resolve_target(target) {
+    fn nudge(&self, target: WindowTarget, dx: i32, dy: i32) -> WindowGeometryResult {
+        match resolve_target(target) {
             Some(window) => {
                 nudge(window, dx, dy);
                 WindowGeometryResult {
@@ -273,13 +244,11 @@ impl WindowGeometryService for ReaperWindowGeometry {
                 }
             }
             None => unresolved(),
-        })
-        .await
-        .unwrap_or_else(unresolved)
+        }
     }
 
-    async fn grow(&self, target: WindowTarget, dw: i32, dh: i32) -> WindowGeometryResult {
-        main_thread::query(move || match resolve_target(target) {
+    fn grow(&self, target: WindowTarget, dw: i32, dh: i32) -> WindowGeometryResult {
+        match resolve_target(target) {
             Some(window) => {
                 grow(window, dw, dh);
                 WindowGeometryResult {
@@ -289,24 +258,12 @@ impl WindowGeometryService for ReaperWindowGeometry {
                 }
             }
             None => unresolved(),
-        })
-        .await
-        .unwrap_or_else(unresolved)
+        }
     }
 
-    async fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> WindowGeometryResult {
-        main_thread::query(move || match resolve_target(target) {
-            Some(window) => {
-                set_rect(window, rect);
-                WindowGeometryResult {
-                    applied: true,
-                    rect: Some(read_rect(window)),
-                    error: String::new(),
-                }
-            }
-            None => unresolved(),
-        })
-        .await
-        .unwrap_or_else(unresolved)
+    fn set_rect(&self, target: WindowTarget, rect: ScreensetRect) -> DawResult<()> {
+        let window = resolve_target(target).ok_or_else(no_target_err)?;
+        set_rect(window, rect);
+        Ok(())
     }
 }

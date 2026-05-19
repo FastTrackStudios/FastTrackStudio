@@ -16,40 +16,75 @@
 //! This allows testing the full fts-control-web experience without a real DAW.
 
 #![deny(unsafe_code)]
+// Stylistic lints kept tolerant on this crate; standalone is the
+// reference/mock implementation and uses ergonomic patterns
+// (`let mut x = Default::default(); x.field = ...`) extensively.
+#![allow(
+    clippy::field_reassign_with_default,
+    clippy::manual_clamp,
+    clippy::needless_range_loop,
+    dead_code
+)]
 
-#[cfg(feature = "audio")]
+mod action_registry;
+mod audio_accessor;
+#[cfg(any(
+    feature = "audio",
+    feature = "decode",
+    feature = "clap-host",
+    feature = "vst3-host"
+))]
 pub mod audio_engine;
+mod audio_engine_svc;
 mod automation;
+mod automation_touch;
+pub use automation_touch::TouchableParam;
+mod batch;
+#[cfg(feature = "bootstrap")]
+pub mod bootstrap;
+mod dawfile_service;
+mod diagnostics;
+mod event_bus;
 mod ext_state;
 mod fx;
+mod fx_chains;
+mod fx_params;
+mod health;
+mod input;
 mod item;
 mod live_midi;
 mod marker;
+pub mod media_bay;
 mod midi;
+mod peak;
 pub(crate) mod platform;
+pub mod plugin;
+mod plugin_loader;
 mod position_conversion;
 mod project;
+#[cfg(any(feature = "rpp-project", feature = "rpp-project-wasm"))]
+pub mod project_loader;
 mod region;
 mod resource;
 mod routing;
+mod routing_sync;
+pub mod rpp_state;
+mod screenset;
+mod services;
+mod shared_state;
+pub mod sync;
+mod take;
 mod tempo_map;
+mod toolbar;
 mod track;
 mod transport;
+pub mod transport_engine;
 mod ui;
+mod window_geometry;
+mod window_manager;
 
-pub use automation::StandaloneAutomation;
-pub use ext_state::StandaloneExtState;
-pub use fx::StandaloneFx;
-pub use item::{StandaloneItem, StandaloneTake};
-pub use live_midi::StandaloneLiveMidi;
-pub use marker::StandaloneMarker;
-pub use midi::StandaloneMidi;
-pub use position_conversion::StandalonePositionConversion;
-pub use project::{StandaloneProject, project_guids};
-pub use region::StandaloneRegion;
-pub use resource::StandaloneResource;
-pub use routing::StandaloneRouting;
-pub use tempo_map::StandaloneTempoMap;
-pub use track::StandaloneTrack;
-pub use transport::{SharedProjectState, StandaloneTransport};
-pub use ui::StandaloneUi;
+// All per-service impls are on `Standalone` directly post-port.
+// Old `Standalone*` per-service structs retired.
+pub use project::project_guids;
+pub use shared_state::SharedProjectState;
+pub use sync::Standalone;

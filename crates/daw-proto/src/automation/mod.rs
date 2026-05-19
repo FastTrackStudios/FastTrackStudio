@@ -1,8 +1,4 @@
-//! Automation module for envelope control
-//!
-//! This module provides types and services for managing automation envelopes.
-//! Envelopes contain automation data for track parameters (volume, pan) and
-//! FX parameters. Each envelope has points with time, value, and curve shape.
+//! Automation — envelope + point types + service trait.
 
 mod envelope;
 mod error;
@@ -12,4 +8,7 @@ mod service;
 pub use envelope::*;
 pub use error::*;
 pub use event::*;
-pub use service::*;
+pub use service::{AddPointParams, Automation, AutomationRpc, SetPointParams, TimeRangeParams};
+
+#[cfg(feature = "vox")]
+pub use service::{AutomationClient, Dispatcher, Service, descriptor, layer, serve};

@@ -66,6 +66,10 @@ pub enum ProjectOp {
 // Transport operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Transport` trait. The
+// retired variants (PlayFromLastStartPosition, SetPositionMusical,
+// GotoMeasure) came from the old `TransportService` and land on
+// follow-on sibling traits if/when needed.
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum TransportOp {
@@ -74,7 +78,6 @@ pub enum TransportOp {
     Stop(ProjectArg),
     PlayPause(ProjectArg),
     PlayStop(ProjectArg),
-    PlayFromLastStartPosition(ProjectArg),
     Record(ProjectArg),
     StopRecording(ProjectArg),
     ToggleRecording(ProjectArg),
@@ -94,14 +97,16 @@ pub enum TransportOp {
     GetPlayrate(ProjectArg),
     SetPlayrate(ProjectArg, f64),
     GetTimeSignature(ProjectArg),
-    SetPositionMusical(ProjectArg, i32, i32, i32),
-    GotoMeasure(ProjectArg, i32),
 }
 
 // =============================================================================
 // Track operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Tracks` trait. Variants for
+// retired surfaces (input monitoring, record input, visibility, chunks,
+// folder depth, channel counts, move, apply_hierarchy, ext state) came
+// from the old `TrackService` and were retired alongside the port.
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum TrackOp {
@@ -115,8 +120,6 @@ pub enum TrackOp {
     SetSoloExclusive(ProjectArg, TrackArg),
     ClearAllSolo(ProjectArg),
     SetArmed(ProjectArg, TrackArg, bool),
-    SetInputMonitoring(ProjectArg, TrackArg, InputMonitoringMode),
-    SetRecordInput(ProjectArg, TrackArg, RecordInput),
     SetVolume(ProjectArg, TrackArg, f64),
     SetPan(ProjectArg, TrackArg, f64),
     SetSelected(ProjectArg, TrackArg, bool),
@@ -124,22 +127,11 @@ pub enum TrackOp {
     ClearSelection(ProjectArg),
     MuteAll(ProjectArg),
     UnmuteAll(ProjectArg),
-    SetVisibleInTcp(ProjectArg, TrackArg, bool),
-    SetVisibleInMixer(ProjectArg, TrackArg, bool),
     AddTrack(ProjectArg, String, Option<u32>),
     RemoveTrack(ProjectArg, TrackArg),
     RenameTrack(ProjectArg, TrackArg, String),
     SetTrackColor(ProjectArg, TrackArg, u32),
-    SetTrackChunk(ProjectArg, TrackArg, String),
-    GetTrackChunk(ProjectArg, TrackArg),
-    SetFolderDepth(ProjectArg, TrackArg, i32),
-    SetNumChannels(ProjectArg, TrackArg, u32),
     RemoveAllTracks(ProjectArg),
-    MoveTrack(ProjectArg, TrackArg, u32),
-    ApplyHierarchy(ProjectArg, TrackHierarchy),
-    GetExtState(ProjectArg, TrackArg, TrackExtStateRequest),
-    SetExtState(ProjectArg, TrackArg, TrackExtStateRequest),
-    DeleteExtState(ProjectArg, TrackArg, TrackExtStateRequest),
 }
 
 // =============================================================================
@@ -311,50 +303,43 @@ pub enum AutomationOp {
 // Marker operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Markers` trait. The
+// in-range / next / previous / goto / lane variants that used to live
+// here came from the old `MarkerService` and are retired alongside
+// the port — callers reconstruct them by filtering `GetMarkers` (for
+// queries) or call transport ops directly (for goto-style navigation).
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum MarkerOp {
     GetMarkers(ProjectArg),
     GetMarker(ProjectArg, u32),
-    GetMarkersInRange(ProjectArg, f64, f64),
-    GetNextMarker(ProjectArg, f64),
-    GetPreviousMarker(ProjectArg, f64),
     MarkerCount(ProjectArg),
     AddMarker(ProjectArg, f64, String),
     RemoveMarker(ProjectArg, u32),
     MoveMarker(ProjectArg, u32, f64),
     RenameMarker(ProjectArg, u32, String),
     SetMarkerColor(ProjectArg, u32, u32),
-    GotoNextMarker(ProjectArg),
-    GotoPreviousMarker(ProjectArg),
-    GotoMarker(ProjectArg, u32),
-    AddMarkerInLane(ProjectArg, f64, String, u32),
-    SetMarkerLane(ProjectArg, u32, Option<u32>),
-    GetMarkersInLane(ProjectArg, u32),
 }
 
 // =============================================================================
 // Region operations
 // =============================================================================
 
+// Mirrors the architect::rpc-emitted sync `Regions` trait. Variants
+// for retired surfaces (range queries, region-at-position, lane
+// placement, goto navigation) came from the old `RegionService` and
+// were retired alongside the port.
 #[repr(u8)]
 #[derive(Clone, Debug, Facet)]
 pub enum RegionOp {
     GetRegions(ProjectArg),
     GetRegion(ProjectArg, u32),
-    GetRegionsInRange(ProjectArg, f64, f64),
-    GetRegionAt(ProjectArg, f64),
     RegionCount(ProjectArg),
     AddRegion(ProjectArg, f64, f64, String),
     RemoveRegion(ProjectArg, u32),
     SetRegionBounds(ProjectArg, u32, f64, f64),
     RenameRegion(ProjectArg, u32, String),
     SetRegionColor(ProjectArg, u32, u32),
-    AddRegionInLane(ProjectArg, AddRegionInLaneRequest),
-    SetRegionLane(ProjectArg, u32, Option<u32>),
-    GetRegionsInLane(ProjectArg, u32),
-    GotoRegionStart(ProjectArg, u32),
-    GotoRegionEnd(ProjectArg, u32),
 }
 
 // =============================================================================
@@ -369,8 +354,6 @@ pub enum TempoMapOp {
     TempoPointCount(ProjectArg),
     GetTempoAt(ProjectArg, f64),
     GetTimeSignatureAt(ProjectArg, f64),
-    TimeToQn(ProjectArg, f64),
-    QnToTime(ProjectArg, f64),
     TimeToMusical(ProjectArg, f64),
     MusicalToTime(ProjectArg, i32, i32, f64),
     AddTempoPoint(ProjectArg, f64, f64),
@@ -634,7 +617,6 @@ impl BatchOp {
                     | TransportOp::Stop(p)
                     | TransportOp::PlayPause(p)
                     | TransportOp::PlayStop(p)
-                    | TransportOp::PlayFromLastStartPosition(p)
                     | TransportOp::Record(p)
                     | TransportOp::StopRecording(p)
                     | TransportOp::ToggleRecording(p)
@@ -654,8 +636,6 @@ impl BatchOp {
                     | TransportOp::SetTempo(p, _)
                     | TransportOp::SetLoop(p, _)
                     | TransportOp::SetPlayrate(p, _) => p,
-                    TransportOp::SetPositionMusical(p, _, _, _)
-                    | TransportOp::GotoMeasure(p, _) => p,
                 };
                 check_project(p, deps);
             }
@@ -812,26 +792,14 @@ fn track_op_project_arg(op: &TrackOp) -> &ProjectArg {
         | TrackOp::SetSoloed(p, _, _)
         | TrackOp::SetSoloExclusive(p, _)
         | TrackOp::SetArmed(p, _, _)
-        | TrackOp::SetInputMonitoring(p, _, _)
-        | TrackOp::SetRecordInput(p, _, _)
         | TrackOp::SetVolume(p, _, _)
         | TrackOp::SetPan(p, _, _)
         | TrackOp::SetSelected(p, _, _)
         | TrackOp::SelectExclusive(p, _)
-        | TrackOp::SetVisibleInTcp(p, _, _)
-        | TrackOp::SetVisibleInMixer(p, _, _)
         | TrackOp::RemoveTrack(p, _)
         | TrackOp::RenameTrack(p, _, _)
-        | TrackOp::SetTrackColor(p, _, _)
-        | TrackOp::SetTrackChunk(p, _, _)
-        | TrackOp::GetTrackChunk(p, _)
-        | TrackOp::SetFolderDepth(p, _, _)
-        | TrackOp::SetNumChannels(p, _, _)
-        | TrackOp::MoveTrack(p, _, _)
-        | TrackOp::GetExtState(p, _, _)
-        | TrackOp::SetExtState(p, _, _)
-        | TrackOp::DeleteExtState(p, _, _) => p,
-        TrackOp::AddTrack(p, _, _) | TrackOp::ApplyHierarchy(p, _) => p,
+        | TrackOp::SetTrackColor(p, _, _) => p,
+        TrackOp::AddTrack(p, _, _) => p,
     }
 }
 
@@ -842,25 +810,13 @@ fn track_op_track_arg(op: &TrackOp) -> Option<&TrackArg> {
         | TrackOp::SetSoloed(_, t, _)
         | TrackOp::SetSoloExclusive(_, t)
         | TrackOp::SetArmed(_, t, _)
-        | TrackOp::SetInputMonitoring(_, t, _)
-        | TrackOp::SetRecordInput(_, t, _)
         | TrackOp::SetVolume(_, t, _)
         | TrackOp::SetPan(_, t, _)
         | TrackOp::SetSelected(_, t, _)
         | TrackOp::SelectExclusive(_, t)
-        | TrackOp::SetVisibleInTcp(_, t, _)
-        | TrackOp::SetVisibleInMixer(_, t, _)
         | TrackOp::RemoveTrack(_, t)
         | TrackOp::RenameTrack(_, t, _)
-        | TrackOp::SetTrackColor(_, t, _)
-        | TrackOp::SetTrackChunk(_, t, _)
-        | TrackOp::GetTrackChunk(_, t)
-        | TrackOp::SetFolderDepth(_, t, _)
-        | TrackOp::SetNumChannels(_, t, _)
-        | TrackOp::MoveTrack(_, t, _)
-        | TrackOp::GetExtState(_, t, _)
-        | TrackOp::SetExtState(_, t, _)
-        | TrackOp::DeleteExtState(_, t, _) => Some(t),
+        | TrackOp::SetTrackColor(_, t, _) => Some(t),
         _ => None,
     }
 }
@@ -1105,21 +1061,12 @@ fn marker_op_project_arg(op: &MarkerOp) -> &ProjectArg {
     match op {
         MarkerOp::GetMarkers(p)
         | MarkerOp::GetMarker(p, _)
-        | MarkerOp::GetMarkersInRange(p, _, _)
-        | MarkerOp::GetNextMarker(p, _)
-        | MarkerOp::GetPreviousMarker(p, _)
         | MarkerOp::MarkerCount(p)
         | MarkerOp::AddMarker(p, _, _)
         | MarkerOp::RemoveMarker(p, _)
         | MarkerOp::MoveMarker(p, _, _)
         | MarkerOp::RenameMarker(p, _, _)
-        | MarkerOp::SetMarkerColor(p, _, _)
-        | MarkerOp::GotoNextMarker(p)
-        | MarkerOp::GotoPreviousMarker(p)
-        | MarkerOp::GotoMarker(p, _)
-        | MarkerOp::AddMarkerInLane(p, _, _, _)
-        | MarkerOp::SetMarkerLane(p, _, _)
-        | MarkerOp::GetMarkersInLane(p, _) => p,
+        | MarkerOp::SetMarkerColor(p, _, _) => p,
     }
 }
 
@@ -1127,19 +1074,12 @@ fn region_op_project_arg(op: &RegionOp) -> &ProjectArg {
     match op {
         RegionOp::GetRegions(p)
         | RegionOp::GetRegion(p, _)
-        | RegionOp::GetRegionsInRange(p, _, _)
-        | RegionOp::GetRegionAt(p, _)
         | RegionOp::RegionCount(p)
         | RegionOp::AddRegion(p, _, _, _)
         | RegionOp::RemoveRegion(p, _)
         | RegionOp::SetRegionBounds(p, _, _, _)
         | RegionOp::RenameRegion(p, _, _)
-        | RegionOp::SetRegionColor(p, _, _)
-        | RegionOp::AddRegionInLane(p, _)
-        | RegionOp::SetRegionLane(p, _, _)
-        | RegionOp::GetRegionsInLane(p, _)
-        | RegionOp::GotoRegionStart(p, _)
-        | RegionOp::GotoRegionEnd(p, _) => p,
+        | RegionOp::SetRegionColor(p, _, _) => p,
     }
 }
 
@@ -1150,8 +1090,6 @@ fn tempo_map_op_project_arg(op: &TempoMapOp) -> &ProjectArg {
         | TempoMapOp::TempoPointCount(p)
         | TempoMapOp::GetTempoAt(p, _)
         | TempoMapOp::GetTimeSignatureAt(p, _)
-        | TempoMapOp::TimeToQn(p, _)
-        | TempoMapOp::QnToTime(p, _)
         | TempoMapOp::TimeToMusical(p, _)
         | TempoMapOp::MusicalToTime(p, _, _, _)
         | TempoMapOp::AddTempoPoint(p, _, _)

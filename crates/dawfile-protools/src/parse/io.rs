@@ -75,10 +75,34 @@ fn parse_io_channel(block: &Block, cursor: &Cursor<'_>) -> Option<IoChannel> {
     // Clamp to sane values (1 or 2 channels for standard hardware)
     let channel_count = channel_count.clamp(1, 8);
 
+    // UID layout: a 15-byte fixed control region follows the name,
+    // then a `2A 00 00 00` sentinel (4 bytes), then 2 bytes, then the
+    // 6-byte UID. So UID is at `name_end + 21`.
+    //
+    // Discovered via Frida byte-read trace on LotF: routing entries'
+    // `destination_uid` matched bytes at this offset inside `0x1021`.
+    // Verified for "Analog 1-2" (UID at +46) and "Front Left / Front
+    // Right" (UID at +60) — both equal `name_end + 21`.
+    let magic = block.offset.saturating_sub(7);
+    let name_end = base + 8 + name_len;
+    let uid_at = name_end + 21;
+    let uid = if uid_at + 6 <= data.len()
+        // Optional sanity check: the `2A 00 00 00` sentinel just before
+        && data.get(uid_at.saturating_sub(6)) == Some(&0x2A)
+    {
+        let mut u = [0u8; 6];
+        u.copy_from_slice(&data[uid_at..uid_at + 6]);
+        Some(u)
+    } else {
+        None
+    };
+    let _ = magic;
+
     Some(IoChannel {
         name,
         io_class,
         channel_count,
+        uid,
     })
 }
 

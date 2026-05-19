@@ -1,72 +1,48 @@
-//! Standalone live MIDI implementation
+//! `impl LiveMidi for Standalone` — every method panics with
+//! `todo!("standalone: …")` so missing functionality surfaces at the
+//! call site instead of returning silent defaults.
 
 use daw_proto::live_midi::{
-    LiveMidiEvent, LiveMidiService, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming,
-    StuffMidiTarget,
+    LiveMidi, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
 };
 
-/// Standalone live MIDI service implementation
-///
-/// This is a stub implementation that provides no actual MIDI devices.
-#[derive(Clone, Default)]
-pub struct StandaloneLiveMidi;
+use crate::sync::Standalone;
 
-impl StandaloneLiveMidi {
-    pub fn new() -> Self {
-        Self
+impl LiveMidi for Standalone {
+    fn input_devices(&self) -> Vec<MidiInputDevice> {
+        todo!("standalone: LiveMidi::input_devices — no live MIDI device enumeration yet")
     }
-}
-
-impl LiveMidiService for StandaloneLiveMidi {
-    async fn get_input_devices(&self) -> Vec<MidiInputDevice> {
-        vec![]
+    fn output_devices(&self) -> Vec<MidiOutputDevice> {
+        todo!("standalone: LiveMidi::output_devices — no live MIDI device enumeration yet")
     }
-
-    async fn get_output_devices(&self) -> Vec<MidiOutputDevice> {
-        vec![]
+    fn input_device(&self, _id: u32) -> Option<MidiInputDevice> {
+        todo!("standalone: LiveMidi::input_device")
     }
-
-    async fn get_input_device(&self, __id: u32) -> Option<MidiInputDevice> {
-        None
+    fn output_device(&self, _id: u32) -> Option<MidiOutputDevice> {
+        todo!("standalone: LiveMidi::output_device")
     }
-
-    async fn get_output_device(&self, __id: u32) -> Option<MidiOutputDevice> {
-        None
+    fn open_input_device(&self, _id: u32) -> bool {
+        todo!("standalone: LiveMidi::open_input_device")
     }
-
-    async fn open_input_device(&self, __id: u32) -> bool {
-        false
+    fn close_input_device(&self, _id: u32) {
+        todo!("standalone: LiveMidi::close_input_device")
     }
-
-    async fn close_input_device(&self, __id: u32) {
-        // No-op
+    fn open_output_device(&self, _id: u32) -> bool {
+        todo!("standalone: LiveMidi::open_output_device")
     }
-
-    async fn open_output_device(&self, __id: u32) -> bool {
-        false
+    fn close_output_device(&self, _id: u32) {
+        todo!("standalone: LiveMidi::close_output_device")
     }
-
-    async fn close_output_device(&self, __id: u32) {
-        // No-op
+    fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {
+        todo!("standalone: LiveMidi::send_midi")
     }
-
-    async fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {
-        // No-op
+    fn subscribe_input(&self, _device_id: u32) -> bool {
+        todo!("standalone: LiveMidi::subscribe_input")
     }
-
-    async fn send_midi_batch(&self, __device_id: u32, _events: Vec<LiveMidiEvent>) {
-        // No-op
+    fn unsubscribe_input(&self, _device_id: u32) {
+        todo!("standalone: LiveMidi::unsubscribe_input")
     }
-
-    async fn subscribe_input(&self, __device_id: u32) -> bool {
-        false
-    }
-
-    async fn unsubscribe_input(&self, __device_id: u32) {
-        // No-op
-    }
-
-    async fn stuff_midi_message(&self, _target: StuffMidiTarget, _message: MidiMessage) {
-        // No-op
+    fn stuff_midi_message(&self, _target: StuffMidiTarget, _message: MidiMessage) {
+        todo!("standalone: LiveMidi::stuff_midi_message")
     }
 }

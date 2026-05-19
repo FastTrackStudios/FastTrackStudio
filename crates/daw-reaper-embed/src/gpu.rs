@@ -117,7 +117,7 @@ impl GpuState {
         };
 
         let instance = Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or_default(),
+            backends: preferred_backends(),
             flags: wgpu::InstanceFlags::from_build_config().with_env(),
             backend_options: wgpu::BackendOptions::from_env_or_default(),
             ..Default::default()
@@ -225,7 +225,7 @@ impl GpuState {
     /// match LICE's pixel layout on Linux/macOS SWELL.
     pub fn new_offscreen(width: u32, height: u32) -> Result<Self, GpuError> {
         let instance = Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or_default(),
+            backends: preferred_backends(),
             flags: wgpu::InstanceFlags::from_build_config().with_env(),
             backend_options: wgpu::BackendOptions::from_env_or_default(),
             ..Default::default()
@@ -481,6 +481,25 @@ impl GpuState {
 
     pub fn size(&self) -> (u32, u32) {
         (self.surface_config.width, self.surface_config.height)
+    }
+}
+
+fn preferred_backends() -> wgpu::Backends {
+    if let Some(backends) = wgpu::Backends::from_env() {
+        return backends;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Avoid probing GL/EGL from inside REAPER/SWELL. On NVIDIA/niri this
+        // produces noisy libEGL warnings before wgpu settles on a usable
+        // backend. Users can still override this with WGPU_BACKEND.
+        wgpu::Backends::VULKAN
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        wgpu::Backends::default()
     }
 }
 

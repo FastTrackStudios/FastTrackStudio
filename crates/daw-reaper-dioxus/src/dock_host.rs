@@ -1,8 +1,8 @@
-//! [`DockHostService`] implementation backed by the REAPER docker + Dioxus
+//! [`DockHosting`] implementation backed by the REAPER docker + Dioxus
 //! dock module.
 //!
 //! Wraps the imperative `dock::*` helpers behind the platform-portable
-//! `DockHostService` trait so callers (tests, RPC clients) can drive the
+//! `DockHosting` trait so callers (tests, RPC clients) can drive the
 //! dock host without knowing it's REAPER underneath.
 //!
 //! Lifetime model: panels are still registered through
@@ -16,12 +16,8 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use daw_proto::dock_host::{
-    DockEvent, DockHandle, DockHostService, DockKind, PanelPixels, UiEventDto,
-};
+use daw_proto::dock_host::{DockEvent, DockHandle, DockHosting, DockKind, PanelPixels, UiEventDto};
 use tokio::sync::broadcast;
-use tracing::{debug, info};
-use vox::Tx;
 
 use crate::dock;
 
@@ -133,7 +129,7 @@ fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> 
     })
 }
 
-/// REAPER-backed [`DockHostService`] adapter.
+/// REAPER-backed [`DockHosting`] adapter.
 ///
 /// Stateless wrapper — all dock state lives in a process-wide
 /// `OnceLock<Mutex<HostState>>` (matches the static-state pattern used by
@@ -141,6 +137,40 @@ fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> 
 /// is cheap and preserves the shared state.
 #[derive(Default, Clone, Copy)]
 pub struct ReaperDockHost;
+
+/// Same shape as `daw_reaper::ReaperMainThreadDispatcher` — duplicated
+/// here to avoid the daw-reaper-dioxus → daw-reaper crate cycle. The
+/// dock host always runs from REAPER's main thread so an immediate
+/// dispatcher is correct.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DockHostDispatcher;
+
+impl architect::dispatch::Dispatcher for DockHostDispatcher {
+    fn dispatch(
+        &self,
+        f: Box<dyn FnOnce() -> architect::dispatch::BoxedAny + Send + 'static>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = std::result::Result<
+                        architect::dispatch::BoxedAny,
+                        architect::dispatch::DispatchError,
+                    >,
+                > + Send
+                + 'static,
+        >,
+    > {
+        Box::pin(async move { Ok(f()) })
+    }
+}
+
+impl architect::HasDispatcher for ReaperDockHost {
+    type Dispatcher = DockHostDispatcher;
+
+    fn dispatcher(&self) -> Self::Dispatcher {
+        DockHostDispatcher
+    }
+}
 
 #[derive(Default)]
 struct HostState {
@@ -167,11 +197,10 @@ impl ReaperDockHost {
     }
 }
 
-impl DockHostService for ReaperDockHost {
-    async fn register_dock(&self, id: String, _title: String, _kind: DockKind) -> DockHandle {
+impl DockHosting for ReaperDockHost {
+    fn register_dock(&self, id: &str, _title: &str, _kind: DockKind) -> DockHandle {
         let mut st = host_state().lock().unwrap();
-        // Intern id as &'static str — the dock module requires it.
-        let static_id: &'static str = Box::leak(id.into_boxed_str());
+        let static_id: &'static str = Box::leak(id.to_string().into_boxed_str());
         if let Some(&existing) = st.by_id.get(static_id) {
             return existing;
         }
@@ -182,7 +211,7 @@ impl DockHostService for ReaperDockHost {
         handle
     }
 
-    async fn unregister_dock(&self, handle: DockHandle) -> bool {
+    fn unregister_dock(&self, handle: DockHandle) -> bool {
         let mut st = host_state().lock().unwrap();
         if let Some(id) = st.handles.remove(&handle.0) {
             st.by_id.remove(id);
@@ -192,21 +221,21 @@ impl DockHostService for ReaperDockHost {
         }
     }
 
-    async fn show(&self, handle: DockHandle) {
+    fn show(&self, handle: DockHandle) {
         if let Some(id) = self.lookup(handle) {
             dock::show_panel(id);
             Self::emit(DockEvent::Shown(handle));
         }
     }
 
-    async fn hide(&self, handle: DockHandle) {
+    fn hide(&self, handle: DockHandle) {
         if let Some(id) = self.lookup(handle) {
             dock::hide_panel(id);
             Self::emit(DockEvent::Hidden(handle));
         }
     }
 
-    async fn toggle(&self, handle: DockHandle) -> bool {
+    fn toggle(&self, handle: DockHandle) -> bool {
         let Some(id) = self.lookup(handle) else {
             return false;
         };
@@ -220,26 +249,22 @@ impl DockHostService for ReaperDockHost {
         visible
     }
 
-    async fn is_visible(&self, handle: DockHandle) -> bool {
+    fn is_visible(&self, handle: DockHandle) -> bool {
         self.lookup(handle).is_some_and(dock::is_panel_visible)
     }
 
-    async fn save_layout(&self) -> Vec<u8> {
-        // Layout currently lives in REAPER's ExtState — `dock::save_dock_state`
-        // is the actual side effect. Returning an empty marker blob keeps
-        // the trait shape uniform across adapters; consumers that need a
-        // portable blob should wrap this adapter.
+    fn save_layout(&self) -> Vec<u8> {
         dock::save_dock_state();
         Vec::new()
     }
 
-    async fn restore_layout(&self, _blob: Vec<u8>) -> bool {
+    fn restore_layout(&self, _blob: &[u8]) -> bool {
         dock::restore_dock_state();
         Self::emit(DockEvent::LayoutChanged);
         true
     }
 
-    async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
+    fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
         let id = self.lookup(handle)?;
         let (width, height, bgra) = dock::capture_panel_pixels(id)?;
         Some(PanelPixels {
@@ -249,7 +274,7 @@ impl DockHostService for ReaperDockHost {
         })
     }
 
-    async fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool {
+    fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool {
         let Some(id) = self.lookup(handle) else {
             return false;
         };
@@ -257,32 +282,5 @@ impl DockHostService for ReaperDockHost {
             return false;
         };
         dock::dispatch_event_to_panel(id, blitz_event)
-    }
-
-    async fn subscribe_dock_events(&self, tx: Tx<DockEvent>) {
-        let mut rx = dock_broadcaster().subscribe();
-        info!(
-            "Dock event subscriber added (receivers: {})",
-            dock_broadcaster().receiver_count()
-        );
-        moire::task::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if tx.send(event).await.is_err() {
-                            debug!("Dock event subscriber disconnected");
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(count)) => {
-                        debug!("Dock event subscriber lagged by {count} messages");
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        info!("Dock broadcast channel closed");
-                        break;
-                    }
-                }
-            }
-        });
     }
 }

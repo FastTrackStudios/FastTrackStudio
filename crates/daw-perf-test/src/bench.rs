@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use daw::rpc::{BatchBuilder, Daw};
 use daw::service::batch::*;
-use daw::{BatchBuilder, Daw};
-use daw_proto::batch::BatchService;
+
 use daw_reaper::batch::BatchExecutor;
 use tracing::info;
 
@@ -241,10 +241,7 @@ async fn native_remove_all_markers() {
         let rctx = reaper_medium::ProjectContext::CurrentProject;
         let mut ids = Vec::new();
         let mut idx = 0;
-        loop {
-            let Some(result) = markers_sw::enum_project_markers(low, idx) else {
-                break;
-            };
+        while let Some(result) = markers_sw::enum_project_markers(low, idx) {
             idx += 1;
             if !result.is_region {
                 ids.push(result.marker_idx);
@@ -268,7 +265,7 @@ async fn inproc_create_tracks(executor: &BatchExecutor, n: u32) -> Duration {
         b.add_track(&proj, format!("InprocTrack-{i}"), None);
     }
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     start.elapsed()
 }
 
@@ -295,7 +292,7 @@ async fn inproc_mutate_tracks(
     }
 
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     Ok(start.elapsed())
 }
 
@@ -322,7 +319,7 @@ async fn inproc_create_and_mutate(executor: &BatchExecutor, n: u32) -> Duration 
     }
 
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     start.elapsed()
 }
 
@@ -333,7 +330,7 @@ async fn inproc_add_markers(executor: &BatchExecutor, n: u32) -> Duration {
         b.add_marker(&proj, i as f64 * 0.5, format!("InprocMarker-{i}"));
     }
     let start = Instant::now();
-    executor.execute(b.build()).await;
+    executor.execute_sync(b.build());
     start.elapsed()
 }
 

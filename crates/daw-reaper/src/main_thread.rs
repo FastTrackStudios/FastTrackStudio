@@ -41,19 +41,21 @@
 //! ```
 
 use reaper_high::{Reaper, TaskSupport};
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 /// Global TaskSupport instance — set by the extension during initialization.
-static TASK_SUPPORT: OnceLock<&'static TaskSupport> = OnceLock::new();
+static TASK_SUPPORT: RwLock<Option<&'static TaskSupport>> = RwLock::new(None);
 
 /// Called by the extension during initialization.
 pub fn set_task_support(task_support: &'static TaskSupport) {
-    let _ = TASK_SUPPORT.set(task_support);
+    if let Ok(mut slot) = TASK_SUPPORT.write() {
+        *slot = Some(task_support);
+    }
 }
 
 /// Get the global TaskSupport reference.
 pub(crate) fn task_support() -> Option<&'static TaskSupport> {
-    TASK_SUPPORT.get().copied()
+    TASK_SUPPORT.read().ok().and_then(|slot| *slot)
 }
 
 /// Execute a closure on REAPER's main thread and return the result.
