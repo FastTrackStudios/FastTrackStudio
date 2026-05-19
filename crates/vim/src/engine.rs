@@ -72,6 +72,10 @@ pub struct VimEngine {
     /// Ex-command buffer. `Some(_)` while in [`VimMode::Command`];
     /// reset to `None` on submit (Enter) or cancel (Esc).
     command_buffer: Option<String>,
+    /// Search buffer. Stays `Some(_)` after submit so `n` / `N`
+    /// can replay the query; cleared on Esc-cancel or the next
+    /// `/` (which seeds a fresh empty buffer).
+    search_buffer: Option<String>,
 }
 
 impl Default for VimEngine {
@@ -82,6 +86,7 @@ impl Default for VimEngine {
             pending_op: None,
             last_find: None,
             command_buffer: None,
+            search_buffer: None,
         }
     }
 }
@@ -105,6 +110,14 @@ impl VimEngine {
         self.command_buffer.as_deref()
     }
 
+    /// The current search buffer. While in [`VimMode::Search`] this
+    /// echoes what the user is typing; after submit it holds the
+    /// last query so `n` / `N` can replay it. Returns `None` until
+    /// the first `/` has been typed.
+    pub fn search_buffer(&self) -> Option<&str> {
+        self.search_buffer.as_deref()
+    }
+
     /// Feed a key into the machine and return any actions the
     /// machine produced as a result. Multi-step sequences (`gg`,
     /// `dd`, `>>`) emit nothing on the first key and the action
@@ -121,22 +134,25 @@ impl VimEngine {
             self.pending_op = None;
         }
 
-        // Command mode owns every keystroke — bypass the modal
-        // machine entirely so `:wq` doesn't accidentally invoke a
-        // Normal-mode binding mid-input.
+        // Command + Search modes own every keystroke — bypass the
+        // modal machine so `:wq` / `/foo` don't accidentally
+        // invoke a Normal-mode binding mid-input.
         if matches!(self.mode(), VimMode::Command) {
             return self.handle_command_key(key);
         }
+        if matches!(self.mode(), VimMode::Search) {
+            return self.handle_search_key(key);
+        }
 
-        // Seed the command buffer before the `:` binding fires the
-        // mode transition. We can't set the mode directly (the
-        // `keybindings` crate only exposes `reset_mode`), so the
-        // mode change rides on a binding registered in
-        // `bindings::modes`; here we just initialize the buffer
-        // when we see `:` in Normal mode.
+        // Seed the command / search buffer before the trigger key's
+        // binding fires the mode transition. The `keybindings`
+        // crate only exposes `reset_mode`, so each transition rides
+        // on a binding registered in `bindings::modes`.
         if matches!(self.mode(), VimMode::Normal) {
-            if let DioxusKey::Char(':') = key {
-                self.command_buffer = Some(String::new());
+            match key {
+                DioxusKey::Char(':') => self.command_buffer = Some(String::new()),
+                DioxusKey::Char('/') => self.search_buffer = Some(String::new()),
+                _ => {}
             }
         }
 
@@ -305,6 +321,51 @@ impl VimEngine {
             }
             DioxusKey::Char(c) => {
                 if let Some(buf) = self.command_buffer.as_mut() {
+                    buf.push(c);
+                }
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    /// Handle a keystroke while in [`VimMode::Search`]. Symmetric
+    /// with [`Self::handle_command_key`] except submit keeps the
+    /// buffer alive (so `n` / `N` can replay) and cancel wipes it.
+    fn handle_search_key(&mut self, key: DioxusKey) -> Vec<VimAction> {
+        match key {
+            DioxusKey::Escape => {
+                self.search_buffer = None;
+                self.machine.reset_mode();
+                vec![]
+            }
+            DioxusKey::Enter => {
+                self.machine.reset_mode();
+                // Keep search_buffer populated for `n` / `N`.
+                let empty = self
+                    .search_buffer
+                    .as_deref()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true);
+                if empty {
+                    // Submitting an empty query is a no-op.
+                    self.search_buffer = None;
+                    vec![]
+                } else {
+                    vec![VimAction::SubmitSearch]
+                }
+            }
+            DioxusKey::Backspace => {
+                if let Some(buf) = self.search_buffer.as_mut() {
+                    if buf.pop().is_none() {
+                        self.search_buffer = None;
+                        self.machine.reset_mode();
+                    }
+                }
+                vec![]
+            }
+            DioxusKey::Char(c) => {
+                if let Some(buf) = self.search_buffer.as_mut() {
                     buf.push(c);
                 }
                 vec![]

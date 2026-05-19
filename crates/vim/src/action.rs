@@ -54,6 +54,10 @@ pub enum Motion {
         direction: i8,
         till: bool,
     },
+    /// `n` — repeat the last `/` search forward.
+    SearchNext,
+    /// `N` — repeat the last `/` search backward.
+    SearchPrev,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -135,6 +139,12 @@ pub enum VimAction {
     /// set so hosts can `match` on it without re-parsing. Unknown
     /// commands emit no action (engine silently drops them).
     SubmitCommand(VimCommand),
+
+    /// `/pattern<Enter>` — the user submitted a search query. The
+    /// engine doesn't run the search (no doc access); hosts call
+    /// [`VimEngine::search_buffer`] to read the pattern. After
+    /// submit the buffer stays alive so `n` / `N` can replay it.
+    SubmitSearch,
 }
 
 /// Closed set of ex-style commands the engine recognizes. Hosts

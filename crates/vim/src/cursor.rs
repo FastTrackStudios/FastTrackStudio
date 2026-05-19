@@ -217,6 +217,10 @@ pub fn apply_motion<V: DocView>(cursor: Cursor, motion: Motion, view: &V) -> Cur
             direction,
             till,
         } => find_char(cursor, &content, ch, direction, till),
+        // SearchNext / SearchPrev resolve against the host's stored
+        // last query — the cursor module has no doc-scope context,
+        // so we no-op here and let the host handle them.
+        Motion::SearchNext | Motion::SearchPrev => cursor,
     }
 }
 

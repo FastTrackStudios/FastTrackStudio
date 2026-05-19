@@ -37,6 +37,14 @@ pub fn register(m: &mut VimMachine) {
         (None, Some(VimMode::Command)),
     );
 
+    // / — enter Search mode. Same buffer-seeding pattern as `:`.
+    bind(
+        m,
+        VimMode::Normal,
+        &[ch('/')],
+        (None, Some(VimMode::Search)),
+    );
+
     // Esc — Insert/Visual/VisualLine → Normal.
     bind(
         m,

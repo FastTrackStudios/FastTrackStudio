@@ -104,5 +104,21 @@ pub fn register(m: &mut VimMachine) {
             &[ch('G')],
             (Some(VimAction::Move(Motion::DocEnd)), None),
         );
+
+        // n / N — repeat last `/` search forward / backward. Host
+        // applies it against `engine.search_buffer()`; engine just
+        // announces the direction via the Motion enum.
+        bind(
+            m,
+            mode,
+            &[ch('n')],
+            (Some(VimAction::Move(Motion::SearchNext)), None),
+        );
+        bind(
+            m,
+            mode,
+            &[ch('N')],
+            (Some(VimAction::Move(Motion::SearchPrev)), None),
+        );
     }
 }

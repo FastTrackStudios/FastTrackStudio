@@ -460,6 +460,73 @@ mod tests {
     }
 
     #[test]
+    fn slash_enters_search_mode() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('/'));
+        assert_eq!(e.mode(), VimMode::Search);
+        assert_eq!(e.search_buffer(), Some(""));
+    }
+
+    #[test]
+    fn search_buffer_survives_submit_for_n_replay() {
+        let mut e = VimEngine::default();
+        for c in "/foo".chars() {
+            e.feed(DioxusKey::Char(c));
+        }
+        let acts = e.feed(DioxusKey::Enter);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert_eq!(
+            e.search_buffer(),
+            Some("foo"),
+            "buffer should survive submit so n/N can replay"
+        );
+        assert!(
+            acts.iter().any(|a| matches!(a, VimAction::SubmitSearch)),
+            "expected SubmitSearch, got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn n_and_big_n_emit_search_motions() {
+        let mut e = VimEngine::default();
+        let n_acts = e.feed(DioxusKey::Char('n'));
+        let big_n_acts = e.feed(DioxusKey::Char('N'));
+        assert!(
+            n_acts
+                .iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::SearchNext))),
+            "expected SearchNext, got {n_acts:?}"
+        );
+        assert!(
+            big_n_acts
+                .iter()
+                .any(|a| matches!(a, VimAction::Move(Motion::SearchPrev))),
+            "expected SearchPrev, got {big_n_acts:?}"
+        );
+    }
+
+    #[test]
+    fn empty_search_submit_is_noop() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('/'));
+        let acts = e.feed(DioxusKey::Enter);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(acts.is_empty(), "empty search shouldn't emit; got {acts:?}");
+        assert_eq!(e.search_buffer(), None);
+    }
+
+    #[test]
+    fn escape_cancels_search_and_wipes_buffer() {
+        let mut e = VimEngine::default();
+        for c in "/foo".chars() {
+            e.feed(DioxusKey::Char(c));
+        }
+        e.feed(DioxusKey::Escape);
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert_eq!(e.search_buffer(), None);
+    }
+
+    #[test]
     fn escape_clears_pending_operator() {
         let mut e = VimEngine::default();
         e.feed(DioxusKey::Char('f'));

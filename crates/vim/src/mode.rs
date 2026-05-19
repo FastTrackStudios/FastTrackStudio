@@ -29,6 +29,10 @@ pub enum VimMode {
     /// or Esc (cancel). Hosts render the buffer as a status-line
     /// echo so the user sees what they're typing.
     Command,
+    /// Search input (`/`). Same lifecycle as Command but the
+    /// buffer is held in [`VimEngine::search_buffer`] and survives
+    /// submit so `n` / `N` can replay against it.
+    Search,
 }
 
 impl Mode<VimAction, EmptyKeyState> for VimMode {
@@ -40,6 +44,7 @@ impl Mode<VimAction, EmptyKeyState> for VimMode {
                 VimMode::Visual => "VISUAL",
                 VimMode::VisualLine => "V-LINE",
                 VimMode::Command => "COMMAND",
+                VimMode::Search => "SEARCH",
             }
             .to_string(),
         )
