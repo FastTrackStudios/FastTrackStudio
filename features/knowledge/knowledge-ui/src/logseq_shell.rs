@@ -342,6 +342,40 @@ html, body {
 }
 .ls-shell .ls-prop-chip .ls-prop-key { padding: 0.05em 0.45em; background: var(--ls-tertiary-background-color); color: var(--ls-secondary-text-color); font-weight: 600; }
 .ls-shell .ls-prop-chip .ls-prop-val { padding: 0.05em 0.5em; }
+.ls-shell .ls-right-sidebar {
+    width: 320px;
+    background: var(--ls-secondary-background-color);
+    border-left: 1px solid var(--ls-border-color);
+    overflow-y: auto;
+    padding: 0.75em;
+    display: flex; flex-direction: column;
+    gap: 0.6em;
+}
+.ls-shell .ls-right-sidebar-header {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--ls-secondary-text-color);
+    border-bottom: 1px solid var(--ls-border-color);
+    padding-bottom: 0.3em;
+}
+.ls-shell .ls-right-sidebar-card {
+    border: 1px solid var(--ls-border-color);
+    border-radius: 0.4em;
+    background: var(--ls-tertiary-background-color);
+    padding: 0.5em 0.6em;
+    font-size: 0.9em;
+}
+.ls-shell .ls-right-sidebar-card .ls-sidebar-close {
+    float: right;
+    cursor: pointer;
+    color: var(--ls-secondary-text-color);
+    font-size: 0.8em;
+    line-height: 1;
+    user-select: none;
+}
+.ls-shell .ls-right-sidebar-card .ls-sidebar-close:hover {
+    color: var(--ls-active-primary-color);
+}
 "#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -453,14 +487,10 @@ pub fn LogseqShell() -> Element {
     // block component can call them without prop-drilling.
     let editing_id: Signal<Option<Uuid>> = use_signal(|| None);
     use_context_provider(|| editing_id);
-    let ops = make_block_ops(doc.read().clone(), editing_id);
-    use_context_provider(|| ops.clone());
 
     // Slash-command palette + page-search popup state. Each is
     // wrapped in a per-popup newtype so Dioxus's type-keyed
-    // context map can carry both at once. `Some((block_id,
-    // query))` while the popup is open. EditableBlock writes
-    // them via oninput; popup components read them.
+    // context map can carry both at once.
     let slash_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
     let page_search_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
     let block_ref_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
@@ -469,6 +499,17 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| PageSearchState(page_search_state));
     use_context_provider(|| BlockRefState(block_ref_state));
     use_context_provider(|| TagSearchState(tag_search_state));
+
+    // Right sidebar stack + per-block zoom target.
+    let sidebar_stack: Signal<Vec<SidebarEntry>> = use_signal(Vec::new);
+    let zoomed_block: Signal<Option<Uuid>> = use_signal(|| None);
+    use_context_provider(|| sidebar_stack);
+    use_context_provider(|| ZoomState(zoomed_block));
+
+    // BlockOps depends on the sidebar/zoom signals, so it
+    // constructs last.
+    let ops = make_block_ops(doc.read().clone(), editing_id, sidebar_stack, zoomed_block);
+    use_context_provider(|| ops.clone());
 
     // Auto-select the first page when none is active.
     {
@@ -511,6 +552,7 @@ pub fn LogseqShell() -> Element {
                     on_pick_page: move |id| active_page_w.set(Some(id)),
                     on_set_panel: move |p| panel_w.set(p),
                 }
+                RightSidebar { stack: sidebar_stack, vault: vault_data.clone() }
             }
         }
     }
@@ -816,19 +858,55 @@ fn PageView(
     on_pick_page: EventHandler<Uuid>,
 ) -> Element {
     let _ = doc;
+    let zoom_state = try_use_context::<ZoomState>();
+    let mut zoom_w = zoom_state;
+    let zoom_id = zoom_state.as_ref().and_then(|z| *z.0.read());
+
     let mut sorted = blocks.clone();
     sorted.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
-    let tree = build_block_tree(&sorted);
+    let full_tree = build_block_tree(&sorted);
+
+    // If zoom is active and we can find the target, render only
+    // that subtree. Otherwise render the whole page.
+    let tree_to_show: Vec<BlockNodeTree> = if let Some(id) = zoom_id {
+        find_subtree(&full_tree, id)
+            .map(|t| vec![t])
+            .unwrap_or(full_tree.clone())
+    } else {
+        full_tree.clone()
+    };
+    let zoomed_block_title: Option<String> = zoom_id
+        .and_then(|id| sorted.iter().find(|b| b.id == id))
+        .map(|b| publish_core::peel_task_marker(&b.content).1.to_string());
 
     rsx! {
-        h1 { class: "ls-page-title", "{page.basename}" }
-        if let Some(day) = page.journal_day.as_ref() {
-            div { style: "color: var(--ls-secondary-text-color); margin-top: -0.5em; margin-bottom: 1em;",
-                "{day}"
+        if let Some(title) = zoomed_block_title.clone() {
+            // Zoom breadcrumb: link back to the page root.
+            div { style: "display: flex; gap: 0.5em; align-items: center; margin-bottom: 0.75em; color: var(--ls-secondary-text-color); font-size: 0.85rem;",
+                a {
+                    href: "#",
+                    style: "color: var(--ls-link-text-color); cursor: pointer; text-decoration: none;",
+                    onclick: move |e| {
+                        e.prevent_default();
+                        if let Some(ref mut z) = zoom_w.as_mut() {
+                            z.0.set(None);
+                        }
+                    },
+                    "← {page.basename}"
+                }
+                span { "/" }
+                span { "{title}" }
+            }
+        } else {
+            h1 { class: "ls-page-title", "{page.basename}" }
+            if let Some(day) = page.journal_day.as_ref() {
+                div { style: "color: var(--ls-secondary-text-color); margin-top: -0.5em; margin-bottom: 1em;",
+                    "{day}"
+                }
             }
         }
         div { class: "ls-block-tree",
-            for node in tree {
+            for node in tree_to_show {
                 LogseqBlockNode {
                     key: "{node.block.id}",
                     node: node.clone(),
@@ -838,6 +916,85 @@ fn PageView(
             }
         }
     }
+}
+
+#[component]
+fn RightSidebar(stack: Signal<Vec<SidebarEntry>>, vault: LogseqVault) -> Element {
+    let entries = stack.read().clone();
+    if entries.is_empty() {
+        return rsx! { div {} };
+    }
+    rsx! {
+        aside { class: "ls-right-sidebar",
+            div { class: "ls-right-sidebar-header",
+                span { "Stacked references" }
+                span {
+                    style: "cursor: pointer; text-transform: none; letter-spacing: 0;",
+                    onclick: move |_| stack.set(Vec::new()),
+                    "Clear"
+                }
+            }
+            for (i, entry) in entries.into_iter().enumerate() {
+                {
+                    let mut stack_w = stack;
+                    let entry_owned = entry.clone();
+                    rsx! {
+                        div { key: "{i}", class: "ls-right-sidebar-card",
+                            span {
+                                class: "ls-sidebar-close",
+                                onclick: move |_| {
+                                    let mut cur = stack_w.peek().clone();
+                                    cur.retain(|e| e != &entry_owned);
+                                    stack_w.set(cur);
+                                },
+                                "×"
+                            }
+                            SidebarCard { entry, vault: vault.clone() }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SidebarCard(entry: SidebarEntry, vault: LogseqVault) -> Element {
+    match entry {
+        SidebarEntry::Block(id) => {
+            let Some(b) = vault.blocks.iter().find(|b| b.id == id).cloned() else {
+                return rsx! { div { style: "color: var(--ls-secondary-text-color);", "block not found" } };
+            };
+            let snippet = b.content.lines().next().unwrap_or("").to_string();
+            rsx! {
+                div { style: "color: var(--ls-secondary-text-color); font-size: 0.7rem;",
+                    "Block"
+                }
+                div { style: "margin-top: 0.25em;", "{snippet}" }
+            }
+        }
+        SidebarEntry::Page(id) => {
+            let Some(p) = vault.pages.iter().find(|p| p.id == id).cloned() else {
+                return rsx! { div { style: "color: var(--ls-secondary-text-color);", "page not found" } };
+            };
+            rsx! {
+                div { style: "color: var(--ls-secondary-text-color); font-size: 0.7rem;", "Page" }
+                div { style: "margin-top: 0.25em; font-weight: 500;", "{p.basename}" }
+            }
+        }
+    }
+}
+
+fn find_subtree(tree: &[BlockNodeTree], id: Uuid) -> Option<BlockNodeTree> {
+    for n in tree {
+        if n.block.id == id {
+            return Some(n.clone());
+        }
+        if let Some(found) = find_subtree(&n.children, id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 #[derive(Clone, PartialEq)]
@@ -882,6 +1039,34 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
     let has_children = !node.children.is_empty();
     let block = node.block.clone();
     let block_id = block.id;
+    let is_collapsed = block.collapsed;
+    let ops = try_use_context::<BlockOps>();
+
+    let ops_fold = ops.clone();
+    let on_fold = move |e: Event<MouseData>| {
+        e.stop_propagation();
+        if let Some(ops) = ops_fold.as_ref() {
+            ops.toggle_collapsed.call(block_id);
+        }
+    };
+    let ops_bullet = ops.clone();
+    let on_bullet = move |e: Event<MouseData>| {
+        e.stop_propagation();
+        if let Some(ops) = ops_bullet.as_ref() {
+            // Shift-click → open in right sidebar; plain click →
+            // zoom into the block (Logseq's bullet behavior).
+            if e.modifiers().shift() {
+                ops.open_in_sidebar.call(block_id);
+            } else {
+                ops.zoom_block.call(block_id);
+            }
+        }
+    };
+    let chevron = if has_children {
+        if is_collapsed { "▸" } else { "▾" }
+    } else {
+        ""
+    };
 
     rsx! {
         div { class: "ls-block",
@@ -889,14 +1074,18 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
             div { class: "ls-block-row",
                 div {
                     class: if has_children { "ls-fold has-children" } else { "ls-fold" },
-                    if has_children { "▾" } else { "" }
+                    onclick: on_fold,
+                    "{chevron}"
                 }
-                div { class: if has_children { "ls-bullet has-children" } else { "ls-bullet" },
+                div {
+                    class: if has_children { "ls-bullet has-children" } else { "ls-bullet" },
+                    onclick: on_bullet,
+                    title: "Click: zoom · Shift-click: open in sidebar",
                     div { class: "ls-bullet-dot" }
                 }
                 LogseqBlockBody { block: block.clone() }
             }
-            if has_children {
+            if has_children && !is_collapsed {
                 div { class: "ls-block-children",
                     for c in node.children.clone() {
                         LogseqBlockNode {
@@ -1031,6 +1220,20 @@ pub(crate) struct BlockRefState(pub Signal<Option<(Uuid, String)>>);
 
 #[derive(Clone, Copy)]
 pub(crate) struct TagSearchState(pub Signal<Option<(Uuid, String)>>);
+
+/// Newtype for the per-shell `Option<Uuid>` "zoomed block" — the
+/// shell would otherwise collide with `editing_id` (same type).
+#[derive(Clone, Copy)]
+pub(crate) struct ZoomState(pub Signal<Option<Uuid>>);
+
+/// One pane in the right sidebar's stack.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidebarEntry {
+    /// Open a single block in a card. Click cycles to zoom.
+    Block(Uuid),
+    /// Open a whole page in a smaller pane.
+    Page(Uuid),
+}
 
 /// Inline editor — replaces the static block content with a
 /// textarea autosized to its content. Handles the Logseq
@@ -1781,9 +1984,21 @@ pub(crate) struct BlockOps {
     pub focus_prev: Callback<Uuid>,
     /// Focus the block immediately after this one. ArrowDown.
     pub focus_next: Callback<Uuid>,
+    /// Toggle the block's `collapsed` flag (fold chevron click).
+    pub toggle_collapsed: Callback<Uuid>,
+    /// Open the block in the right sidebar as a stacked pane.
+    pub open_in_sidebar: Callback<Uuid>,
+    /// Zoom into the block: navigate so that block is the
+    /// effective page root. Mirrors Logseq's bullet-click.
+    pub zoom_block: Callback<Uuid>,
 }
 
-fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> BlockOps {
+fn make_block_ops(
+    doc: Arc<CrdtDoc>,
+    mut editing_id: Signal<Option<Uuid>>,
+    mut sidebar_stack: Signal<Vec<SidebarEntry>>,
+    mut zoom_target: Signal<Option<Uuid>>,
+) -> BlockOps {
     let mut enter_doc = doc.clone();
     let mut editing_enter = editing_id;
     let enter_edit = Callback::new(move |id: Uuid| {
@@ -1907,6 +2122,45 @@ fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> Bl
             }
         });
     });
+    let doc_toggle = doc.clone();
+    let toggle_collapsed = Callback::new(move |id: Uuid| {
+        let doc = doc_toggle.clone();
+        spawn(async move {
+            let repo = BlockRepoLoro::new(&doc);
+            let big = ListPage {
+                index: 0,
+                size: 100_000,
+            };
+            let all = match repo.list(big, None, None).await {
+                Ok(l) => l.items,
+                Err(_) => return,
+            };
+            let Some(target) = all.into_iter().find(|b| b.id == id) else {
+                return;
+            };
+            let _ = repo
+                .update(
+                    id,
+                    BlockUpdate {
+                        collapsed: Some(!target.collapsed),
+                        ..Default::default()
+                    },
+                )
+                .await;
+        });
+    });
+    let open_in_sidebar = Callback::new(move |id: Uuid| {
+        let mut current = sidebar_stack.peek().clone();
+        let entry = SidebarEntry::Block(id);
+        if !current.contains(&entry) {
+            current.insert(0, entry);
+            sidebar_stack.set(current);
+        }
+    });
+    let zoom_block = Callback::new(move |id: Uuid| {
+        zoom_target.set(Some(id));
+    });
+
     BlockOps {
         enter_edit,
         exit_edit,
@@ -1920,6 +2174,9 @@ fn make_block_ops(doc: Arc<CrdtDoc>, mut editing_id: Signal<Option<Uuid>>) -> Bl
         move_down,
         focus_prev,
         focus_next,
+        toggle_collapsed,
+        open_in_sidebar,
+        zoom_block,
     }
 }
 
@@ -2358,6 +2615,41 @@ mod tests {
         // Spec: when a >= b, returns lexorank_after(a) — still
         // sorts after `a` (degraded but stable).
         assert!(mid > a.to_string());
+    }
+
+    #[test]
+    fn find_subtree_returns_match() {
+        let now = Utc::now();
+        let page_id = Uuid::new_v4();
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let child = Uuid::new_v4();
+        let mk = |id: Uuid, parent: Option<Uuid>, key: &str| Block {
+            id,
+            vault_id: Uuid::nil(),
+            page_id,
+            parent_block_id: parent,
+            sort_key: key.into(),
+            kind: "paragraph".into(),
+            content: format!("{id}"),
+            heading_level: None,
+            list_ordered: false,
+            list_task: None,
+            code_lang: None,
+            callout_kind: None,
+            callout_foldable: false,
+            properties_json: "{}".into(),
+            obsidian_block_id: None,
+            collapsed: false,
+            refs_json: "[]".into(),
+            canvas_node_json: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let blocks = vec![mk(a, None, "a"), mk(b, None, "b"), mk(child, Some(a), "a")];
+        let tree = build_block_tree(&blocks);
+        let found = find_subtree(&tree, child).expect("subtree present");
+        assert_eq!(found.block.id, child);
     }
 
     #[test]
