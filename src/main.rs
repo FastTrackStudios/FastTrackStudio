@@ -446,57 +446,7 @@ fn Home() -> Element {
                 charts: charts.clone()
             }
 
-            // Documentation sections
-            section {
-                class: "relative z-10 py-24",
-
-                div {
-                    class: "mx-auto max-w-5xl px-6",
-
-                    h2 {
-                        class: "text-center text-lg font-medium text-muted-foreground mb-4",
-                        "Everything you need for modern music production"
-                    }
-
-                    p {
-                        class: "text-center text-3xl font-semibold text-foreground mb-12",
-                        "Explore the Toolkit"
-                    }
-
-                    // 4 main documentation sections
-                    div {
-                        class: "grid md:grid-cols-2 gap-6",
-
-                        LandingDocsCard {
-                            to: Route::DocsKeyflow {},
-                            title: "Keyflow",
-                            description: "Chart notation language with GPU rendering",
-                            icon: rsx! { FileText { class: "w-6 h-6" } }
-                        }
-
-                        LandingDocsCard {
-                            to: Route::DocsReaper {},
-                            title: "REAPER Extension",
-                            description: "Deep DAW integration and transport sync",
-                            icon: rsx! { Music { class: "w-6 h-6" } }
-                        }
-
-                        LandingDocsCard {
-                            to: Route::DocsDesktop {},
-                            title: "Desktop App",
-                            description: "Setlists, lyrics, and live performance",
-                            icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-6 h-6" } }
-                        }
-
-                        LandingDocsCard {
-                            to: Route::DocsPlugins {},
-                            title: "Audio Plugins",
-                            description: "CLAP and VST3 with nih-plug",
-                            icon: rsx! { fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-6 h-6" } }
-                        }
-                    }
-                }
-            }
+            ProjectTilesGrid {}
 
             // Setlist Control Preview section
             section {
@@ -1034,6 +984,422 @@ fn LandingDocsCard(
 
             ChevronRight {
                 class: "w-5 h-5 text-muted-foreground/50 group-hover:text-muted-foreground ml-auto shrink-0 transition-colors"
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Project Tiles — six animated tiles, one per project, themed individually.
+// Ported from the rockstars-expansion deck (slides/decks/_project-themes.tsx)
+// using pure CSS keyframes for the looping animations.
+// =============================================================================
+
+#[derive(Clone, Copy, PartialEq)]
+enum BgKind {
+    Keyflow,
+    Session,
+    Signal,
+    Input,
+    Daw,
+    Plugins,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct ProjectTheme {
+    num: &'static str,
+    name: &'static str,
+    tagline: &'static str,
+    desc: &'static str,
+    glyph: &'static str,
+    accent: &'static str,
+    bg: &'static str,
+    bg_kind: BgKind,
+}
+
+const PROJECT_THEMES: &[ProjectTheme] = &[
+    ProjectTheme {
+        num: "01", name: "Keyflow", tagline: "Charts as code",
+        desc: "Plain-text music format that compiles into real lead sheets.",
+        glyph: ".kf", accent: "#a78bfa", bg: "#0d0a14", bg_kind: BgKind::Keyflow,
+    },
+    ProjectTheme {
+        num: "02", name: "Session", tagline: "Performance brain",
+        desc: "Setlist \u{00B7} song \u{00B7} section navigation across the network.",
+        glyph: "\u{2192}\u{2192}", accent: "#86efac", bg: "#0a1310", bg_kind: BgKind::Session,
+    },
+    ProjectTheme {
+        num: "03", name: "Signal", tagline: "The audio rig",
+        desc: "Plugin chains, profiles, snapshots, live morphing.",
+        glyph: "\u{224B}", accent: "#60a5fa", bg: "#0a1018", bg_kind: BgKind::Signal,
+    },
+    ProjectTheme {
+        num: "04", name: "Input", tagline: "Wiring closet",
+        desc: "MIDI, keys, hardware controllers \u{2014} into the action system.",
+        glyph: "I/O", accent: "#a1a1aa", bg: "#0f0f12", bg_kind: BgKind::Input,
+    },
+    ProjectTheme {
+        num: "05", name: "DAW", tagline: "REAPER layer",
+        desc: "Unified API. Transport, tracks, FX, project files.",
+        glyph: "\u{23F5}", accent: "#52525b", bg: "#050507", bg_kind: BgKind::Daw,
+    },
+    ProjectTheme {
+        num: "06", name: "Plugins", tagline: "DSP suite",
+        desc: "In-house CLAP/VST3 plugins with detachable GUI.",
+        glyph: "FX", accent: "#b54234", bg: "#140a08", bg_kind: BgKind::Plugins,
+    },
+];
+
+/// Convert "#rrggbb" + alpha to "rgba(r,g,b,a)" for inline gradients.
+fn hex_rgba(hex: &str, alpha: f32) -> String {
+    let h = hex.trim_start_matches('#');
+    let r = u8::from_str_radix(h.get(0..2).unwrap_or("00"), 16).unwrap_or(0);
+    let g = u8::from_str_radix(h.get(2..4).unwrap_or("00"), 16).unwrap_or(0);
+    let b = u8::from_str_radix(h.get(4..6).unwrap_or("00"), 16).unwrap_or(0);
+    format!("rgba({r},{g},{b},{alpha})")
+}
+
+/// Keyframes used by all the project-tile backgrounds. Injected once.
+const PROJECT_TILE_KEYFRAMES: &str = "
+@keyframes pt-scan-x { from { left: 0%; } to { left: 100%; } }
+@keyframes pt-drift  { from { left: -12%; } to { left: 112%; } }
+@keyframes pt-eq     { 0%,100% { height: 6px; } 50% { height: var(--pt-peak, 30px); } }
+";
+
+#[component]
+fn ProjectTilesGrid() -> Element {
+    rsx! {
+        document::Style { {PROJECT_TILE_KEYFRAMES} }
+
+        section {
+            class: "relative z-10 py-24",
+
+            div {
+                class: "mx-auto max-w-6xl px-6",
+
+                div {
+                    class: "mb-12 text-center",
+                    p {
+                        class: "font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground/70 mb-3",
+                        "Currently in development"
+                    }
+                    h2 {
+                        class: "text-3xl md:text-4xl font-semibold text-foreground tracking-tight",
+                        "Six projects, one suite."
+                    }
+                }
+
+                div {
+                    class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                    for theme in PROJECT_THEMES.iter().copied() {
+                        ProjectTile { theme: theme }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectTile(theme: ProjectTheme) -> Element {
+    let style = format!(
+        "background-color: {bg}; --pt-accent: {accent}; border-color: rgba(255,255,255,0.06);",
+        bg = theme.bg, accent = theme.accent
+    );
+    rsx! {
+        div {
+            class: "group relative overflow-hidden rounded-md border p-6 h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
+            style: "{style}",
+
+            // Animated motif painted behind the content
+            match theme.bg_kind {
+                BgKind::Keyflow => rsx! { BgKeyflow { color: theme.accent } },
+                BgKind::Session => rsx! { BgSession { color: theme.accent } },
+                BgKind::Signal  => rsx! { BgSignal  { color: theme.accent } },
+                BgKind::Input   => rsx! { BgInput   { color: theme.accent } },
+                BgKind::Daw     => rsx! { BgDaw     { color: theme.accent } },
+                BgKind::Plugins => rsx! { BgPlugins { color: theme.accent } },
+            }
+
+            // Top row: project number + glyph
+            div {
+                class: "relative z-10 flex items-start justify-between mb-6",
+                div {
+                    class: "font-mono text-[0.6rem] uppercase tracking-[0.25em] text-muted-foreground",
+                    "Project {theme.num}"
+                }
+                div {
+                    class: "font-mono text-[1.05rem] tracking-tight opacity-80",
+                    style: "color: {theme.accent};",
+                    "{theme.glyph}"
+                }
+            }
+
+            // Name, tagline, description
+            div {
+                class: "relative z-10",
+                div {
+                    class: "text-4xl font-semibold tracking-tight text-foreground leading-none",
+                    "{theme.name}"
+                }
+                div {
+                    class: "font-mono text-[0.7rem] tracking-[0.18em] uppercase mt-2",
+                    style: "color: {theme.accent};",
+                    "{theme.tagline}"
+                }
+                p {
+                    class: "text-sm leading-relaxed text-muted-foreground mt-3 max-w-[28ch]",
+                    "{theme.desc}"
+                }
+            }
+
+            // Accent bar (bottom-left, 48px wide)
+            div {
+                class: "absolute bottom-0 left-0 h-[2px] w-12 z-10",
+                style: "background-color: {theme.accent};",
+            }
+        }
+    }
+}
+
+// ----- Per-project animated backgrounds (CSS keyframes only) -----
+
+/// Keyflow — drifting musical glyphs over five-line staff.
+#[component]
+fn BgKeyflow(color: String) -> Element {
+    let glyphs: [(&str, f32); 12] = [
+        ("\u{1D11E}", 1.6),
+        ("\u{2669}", 1.0),
+        ("\u{266A}", 1.0),
+        ("\u{266B}", 1.1),
+        ("\u{266C}", 1.1),
+        ("\u{266D}", 0.9),
+        ("\u{266F}", 0.9),
+        ("\u{1D122}", 1.4),
+        ("\u{266E}", 0.9),
+        ("\u{1D110}", 1.0),
+        ("\u{1D13B}", 0.95),
+        ("\u{1D13D}", 0.95),
+    ];
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden pointer-events-none",
+            // Five-line staff
+            svg {
+                class: "absolute inset-x-0 top-1/2 -translate-y-1/2 w-full opacity-[0.07]",
+                style: "height: 3rem;",
+                preserve_aspect_ratio: "none",
+                view_box: "0 0 100 40",
+                for i in 0..5 {
+                    line {
+                        x1: "0", y1: "{4 + i * 8}", x2: "100", y2: "{4 + i * 8}",
+                        stroke: "{color}", stroke_width: "0.2",
+                    }
+                }
+            }
+            // Drifting glyphs
+            for (i, (ch, size)) in glyphs.iter().enumerate() {
+                span {
+                    key: "{i}",
+                    class: "absolute select-none leading-none",
+                    style: "color: {color}; opacity: 0.22; top: {10 + (i * 17) % 70}%; font-size: {size}rem; animation: pt-drift {18 + (i % 5) * 3}s linear infinite; animation-delay: -{i * 2}s;",
+                    "{ch}"
+                }
+            }
+        }
+    }
+}
+
+/// Session — section labels along the bottom, scanning playhead.
+#[component]
+fn BgSession(color: String) -> Element {
+    let sections = ["INTRO", "VS 1", "CH", "VS 2", "CH", "BR", "OUT"];
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden pointer-events-none flex items-end pb-6",
+            div {
+                class: "relative w-full px-6 flex justify-between",
+                for (i, s) in sections.iter().enumerate() {
+                    span {
+                        key: "{i}",
+                        class: "font-mono tracking-[0.25em]",
+                        style: "color: {color}; opacity: 0.18; font-size: 0.55rem;",
+                        "{s}"
+                    }
+                }
+                // Scanning playhead — vertical hairline crossing the tile
+                div {
+                    class: "absolute w-px",
+                    style: "background: {color}; opacity: 0.5; top: -30px; bottom: -30px; animation: pt-scan-x 7s linear infinite;",
+                }
+            }
+        }
+    }
+}
+
+/// Signal — full-width pulsing equalizer bars.
+#[component]
+fn BgSignal(color: String) -> Element {
+    let count = 42usize;
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden pointer-events-none flex items-end justify-between pb-1 px-1",
+            for i in 0..count {
+                {
+                    let peak = 10 + ((i * 17) % 52);
+                    let dur = 1.6 + ((i % 7) as f32) * 0.2;
+                    let delay = ((i as f32 * 0.05) % 1.4) - 1.4; // negative so animations start mid-cycle
+                    rsx! {
+                        span {
+                            key: "{i}",
+                            class: "block rounded-t-sm",
+                            style: "background: {color}; opacity: 0.18; width: calc((100% - {count}px) / {count}); min-width: 2px; --pt-peak: {peak}px; animation: pt-eq {dur}s ease-in-out infinite; animation-delay: {delay}s;",
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Input — static keyboard render (key-press timeline deferred to dioxus-motion port).
+#[component]
+fn BgInput(color: String) -> Element {
+    let rows: &[&[(f32, &str)]] = &[
+        &[(1.5, "esc"), (1.0, "1"), (1.0, "2"), (1.0, "3"), (1.0, "4"), (1.0, "5"), (1.0, "6"), (1.0, "7"), (1.0, "8"), (1.0, "9"), (1.0, "0"), (1.5, "\u{232B}")],
+        &[(1.5, "\u{21E5}"), (1.0, "Q"), (1.0, "W"), (1.0, "E"), (1.0, "R"), (1.0, "T"), (1.0, "Y"), (1.0, "U"), (1.0, "I"), (1.0, "O"), (1.0, "P"), (1.5, "\\")],
+        &[(1.75, "\u{21EA}"), (1.0, "A"), (1.0, "S"), (1.0, "D"), (1.0, "F"), (1.0, "G"), (1.0, "H"), (1.0, "J"), (1.0, "K"), (1.0, "L"), (2.25, "\u{21B5}")],
+        &[(1.5, "\u{21E7}"), (1.0, "Z"), (1.0, "X"), (1.0, "C"), (1.0, "V"), (1.0, "B"), (1.0, "N"), (1.0, "M"), (1.0, ","), (1.0, "."), (1.0, "/"), (1.5, "\u{21E7}")],
+        &[(1.25, "ctrl"), (1.25, "\u{2325}"), (1.5, "\u{2318}"), (6.25, ""), (1.5, "\u{2318}"), (1.25, "\u{2325}")],
+    ];
+    let unit = 14.0_f32;
+    let gap = 2.0_f32;
+    let bg_grad = format!(
+        "linear-gradient(180deg, {} 0%, transparent 100%)",
+        hex_rgba(&color, 0.05)
+    );
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden pointer-events-none flex items-end justify-end pb-3 pr-3",
+            div {
+                class: "flex flex-col",
+                style: "gap: {gap}px; padding: 4px;",
+                for (r_idx, row) in rows.iter().enumerate() {
+                    div {
+                        key: "{r_idx}",
+                        class: "flex",
+                        style: "gap: {gap}px;",
+                        for (k_idx, (w, label)) in row.iter().enumerate() {
+                            {
+                                let width = w * unit + (w - 1.0) * gap;
+                                rsx! {
+                                    div {
+                                        key: "{k_idx}",
+                                        class: "flex items-center justify-center font-mono select-none",
+                                        style: "width: {width}px; height: {unit}px; font-size: 0.5rem; color: {color}; border-radius: 3px; border: 1px solid {color}; background: {bg_grad}; opacity: 0.4;",
+                                        "{label}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// DAW — tape transport ruler with scanning playhead.
+#[component]
+fn BgDaw(color: String) -> Element {
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden pointer-events-none",
+            // Ruler ticks along the bottom
+            div {
+                class: "absolute inset-x-0 flex items-end gap-[6px] px-4",
+                style: "bottom: 0.75rem; height: 0.75rem;",
+                for i in 0..36 {
+                    {
+                        let h = if i % 4 == 0 { "10px" } else { "5px" };
+                        rsx! {
+                            span {
+                                key: "{i}",
+                                class: "block w-px",
+                                style: "background: {color}; opacity: 0.22; height: {h};",
+                            }
+                        }
+                    }
+                }
+            }
+            // Playhead
+            div {
+                class: "absolute",
+                style: "top: 0.5rem; bottom: 0.5rem; width: 1.5px; background: {color}; opacity: 0.5; animation: pt-scan-x 9s linear infinite;",
+            }
+        }
+    }
+}
+
+/// Plugins — static EQ curve + compressor + GR meter (path morphing deferred).
+#[component]
+fn BgPlugins(color: String) -> Element {
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden pointer-events-none",
+            // EQ curve (top half)
+            svg {
+                class: "absolute inset-x-0 top-0 w-full opacity-30",
+                style: "height: 50%;",
+                view_box: "0 0 200 80",
+                preserve_aspect_ratio: "none",
+                line { x1: "0", y1: "40", x2: "200", y2: "40", stroke: "{color}", stroke_width: "0.4", stroke_dasharray: "2,2", opacity: "0.4" }
+                for x in [40, 80, 120, 160].iter() {
+                    line { key: "{x}", x1: "{x}", y1: "36", x2: "{x}", y2: "44", stroke: "{color}", stroke_width: "0.3", opacity: "0.4" }
+                }
+                path {
+                    fill: "none",
+                    stroke: "{color}",
+                    stroke_width: "1.1",
+                    d: "M0,55 C20,55 30,28 50,30 S80,55 100,40 S140,18 160,30 S190,52 200,46",
+                }
+                circle { cx: "50",  cy: "30", r: "2.5", fill: "{color}", opacity: "0.6" }
+                circle { cx: "100", cy: "40", r: "2.5", fill: "{color}", opacity: "0.6" }
+                circle { cx: "160", cy: "30", r: "2.5", fill: "{color}", opacity: "0.6" }
+            }
+            // Midline divider
+            div {
+                class: "absolute left-2 right-2 h-px",
+                style: "top: 50%; background: {color}; opacity: 0.15;",
+            }
+            // Compressor curve (bottom-left)
+            svg {
+                class: "absolute opacity-30",
+                style: "bottom: 0.5rem; left: 0.5rem; width: 66%; height: 42%;",
+                view_box: "0 0 100 60",
+                preserve_aspect_ratio: "none",
+                line { x1: "0", y1: "60", x2: "100", y2: "60", stroke: "{color}", stroke_width: "0.4", opacity: "0.6" }
+                line { x1: "0", y1: "0",  x2: "0",   y2: "60", stroke: "{color}", stroke_width: "0.4", opacity: "0.6" }
+                line { x1: "0", y1: "60", x2: "100", y2: "0",  stroke: "{color}", stroke_width: "0.3", stroke_dasharray: "2,2", opacity: "0.3" }
+                path { fill: "none", stroke: "{color}", stroke_width: "1.2", d: "M0,60 L42,18 Q50,12 60,12 L100,2" }
+            }
+            // GR meter (bottom-right)
+            div {
+                class: "absolute flex flex-col items-center gap-1",
+                style: "bottom: 0.5rem; right: 0.75rem;",
+                div {
+                    class: "font-mono tracking-[0.15em]",
+                    style: "color: {color}; opacity: 0.5; font-size: 0.5rem;",
+                    "GR"
+                }
+                div {
+                    class: "rounded-sm relative overflow-hidden",
+                    style: "width: 6px; height: 36px; border: 1px solid {color}; opacity: 0.5;",
+                    div {
+                        class: "absolute inset-x-0 top-0",
+                        style: "background: {color}; height: 40%;",
+                    }
+                }
             }
         }
     }
