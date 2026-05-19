@@ -550,6 +550,10 @@ pub fn LogseqShell() -> Element {
     let mut cmd_k: Signal<Option<String>> = use_signal(|| None);
     use_context_provider(|| CommandPaletteState(cmd_k));
 
+    // Right-click block context menu position.
+    let block_menu: Signal<Option<(Uuid, i32, i32)>> = use_signal(|| None);
+    use_context_provider(|| BlockMenuState(block_menu));
+
     // Auto-select the first page when none is active.
     {
         let pages = vault_data.pages.clone();
@@ -610,6 +614,88 @@ pub fn LogseqShell() -> Element {
                 }
                 RightSidebar { stack: sidebar_stack, vault: vault_data.clone() }
             }
+            BlockContextMenuOverlay { state: block_menu }
+        }
+    }
+}
+
+#[component]
+fn BlockContextMenuOverlay(state: Signal<Option<(Uuid, i32, i32)>>) -> Element {
+    let snap = state.read().clone();
+    let Some((block_id, x, y)) = snap else {
+        return rsx! { div {} };
+    };
+    let ops = try_use_context::<BlockOps>();
+    let style = format!(
+        "position: fixed; top: {y}px; left: {x}px; min-width: 200px; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; box-shadow: 0 12px 30px rgba(0,0,0,0.45); z-index: 70;"
+    );
+    rsx! {
+        // Click-outside catcher: full-screen invisible div that
+        // closes the menu when clicked.
+        div {
+            style: "position: fixed; inset: 0; z-index: 65;",
+            onclick: move |_| state.set(None),
+        }
+        div { style: "{style}",
+            onmousedown: move |e: Event<MouseData>| e.stop_propagation(),
+            {
+                let ops_a = ops.clone();
+                let ops_b = ops.clone();
+                let ops_c = ops.clone();
+                let ops_d = ops.clone();
+                rsx! {
+                    BlockMenuItem {
+                        label: "Open in sidebar",
+                        onclick: move |_e: Event<MouseData>| {
+                            if let Some(ops) = ops_a.as_ref() { ops.open_in_sidebar.call(block_id); }
+                            state.set(None);
+                        },
+                    }
+                    BlockMenuItem {
+                        label: "Zoom in",
+                        onclick: move |_e: Event<MouseData>| {
+                            if let Some(ops) = ops_b.as_ref() { ops.zoom_block.call(block_id); }
+                            state.set(None);
+                        },
+                    }
+                    BlockMenuItem {
+                        label: "Copy block reference",
+                        onclick: move |_e: Event<MouseData>| {
+                            let id = block_id.simple().to_string();
+                            let script = format!(
+                                r#"navigator.clipboard.writeText("(({}))");"#, id
+                            );
+                            spawn(async move { let _ = document::eval(&script).recv::<serde_json::Value>().await; });
+                            state.set(None);
+                        },
+                    }
+                    BlockMenuItem {
+                        label: "Toggle collapse",
+                        onclick: move |_e: Event<MouseData>| {
+                            if let Some(ops) = ops_c.as_ref() { ops.toggle_collapsed.call(block_id); }
+                            state.set(None);
+                        },
+                    }
+                    BlockMenuItem {
+                        label: "Delete block",
+                        onclick: move |_e: Event<MouseData>| {
+                            if let Some(ops) = ops_d.as_ref() { ops.delete_block.call(block_id); }
+                            state.set(None);
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn BlockMenuItem(label: &'static str, onclick: EventHandler<Event<MouseData>>) -> Element {
+    rsx! {
+        div {
+            style: "padding: 0.4em 0.75em; cursor: pointer; color: var(--ls-primary-text-color);",
+            onclick: move |e| onclick.call(e),
+            "{label}"
         }
     }
 }
@@ -1012,6 +1098,22 @@ fn PageView(
                     "{day}"
                 }
             }
+            {
+                let frontmatter_chips = publish_core::parse_props(&page.frontmatter_json);
+                if !frontmatter_chips.is_empty() {
+                    rsx! {
+                        div {
+                            style: "background: var(--ls-block-properties-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; padding: 0.5em 0.7em; margin-bottom: 1.25em; display: grid; grid-template-columns: max-content 1fr; gap: 0.25em 0.75em; font-size: 0.85rem;",
+                            for (k, v) in frontmatter_chips {
+                                div { key: "{k}-k", style: "color: var(--ls-secondary-text-color); font-weight: 600;", "{k}" }
+                                div { key: "{k}-v", style: "color: var(--ls-primary-text-color);", "{v}" }
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {}
+                }
+            }
         }
         div { class: "ls-block-tree",
             for node in tree_to_show {
@@ -1214,9 +1316,20 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         ""
     };
 
+    let block_menu_state = try_use_context::<BlockMenuState>();
+    let on_context = move |e: Event<MouseData>| {
+        e.prevent_default();
+        let coords = e.data().client_coordinates();
+        if let Some(menu) = block_menu_state {
+            let mut sig = menu.0;
+            sig.set(Some((block_id, coords.x as i32, coords.y as i32)));
+        }
+    };
+
     rsx! {
         div { class: "ls-block",
             "data-block-id": "{block_id}",
+            oncontextmenu: on_context,
             div { class: "ls-block-row",
                 div {
                     class: if has_children { "ls-fold has-children" } else { "ls-fold" },
@@ -1375,6 +1488,10 @@ pub(crate) struct ZoomState(pub Signal<Option<Uuid>>);
 /// Cmd-K command palette state. `Some(query)` while open.
 #[derive(Clone, Copy)]
 pub(crate) struct CommandPaletteState(pub Signal<Option<String>>);
+
+/// Right-click block context menu position. `(block_id, x, y)`.
+#[derive(Clone, Copy)]
+pub(crate) struct BlockMenuState(pub Signal<Option<(Uuid, i32, i32)>>);
 
 /// One pane in the right sidebar's stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
