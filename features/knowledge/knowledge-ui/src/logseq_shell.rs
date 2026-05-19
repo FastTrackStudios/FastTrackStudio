@@ -799,6 +799,10 @@ pub fn LogseqShell() -> Element {
         });
     }
     use_context_provider(|| RecentsState(recent_pages));
+    let favorites: Signal<Vec<Uuid>> = use_signal(Vec::new);
+    use_context_provider(|| FavoritesState(favorites));
+    let find_in_page: Signal<Option<String>> = use_signal(|| None);
+    use_context_provider(|| FindInPageState(find_in_page));
 
     // Import toast — `Some(message)` while the result of an
     // import is shown to the user.
@@ -1766,6 +1770,37 @@ fn LeftSidebar(
                 "Tasks"
             }
             {
+                let favs = try_use_context::<FavoritesState>().map(|f| f.0.read().clone()).unwrap_or_default();
+                if !favs.is_empty() {
+                    rsx! {
+                        div { class: "ls-sidebar-section", "Favorites" }
+                        div { class: "ls-page-list",
+                            for id in favs {
+                                {
+                                    let p = pages.iter().find(|p| p.id == id).cloned();
+                                    if let Some(p) = p {
+                                        let pid = p.id;
+                                        let is_active = active == Some(pid);
+                                        let cls = if is_active { "ls-page-link active" } else { "ls-page-link" };
+                                        rsx! {
+                                            a {
+                                                key: "{pid}",
+                                                class: "{cls}",
+                                                onclick: move |_| on_pick_page.call(pid),
+                                                span { style: "margin-right: 0.3em; color: var(--ls-tag-text-color);", "★" }
+                                                "{p.basename}"
+                                            }
+                                        }
+                                    } else { rsx! {} }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {}
+                }
+            }
+            {
                 let recents = try_use_context::<RecentsState>().map(|r| r.0.read().clone()).unwrap_or_default();
                 if !recents.is_empty() {
                     rsx! {
@@ -2698,12 +2733,42 @@ fn PageView(
                 onblur: move |_| editing_title_w.set(None),
             }
         } else {
-            h1 {
-                class: "ls-page-title",
-                style: "cursor: text;",
-                title: "Click to rename",
-                onclick: move |_| editing_title_w.set(Some(basename_for_title.clone())),
-                "{page.basename}"
+            div { style: "display: flex; align-items: center; gap: 0.4em;",
+                h1 {
+                    class: "ls-page-title",
+                    style: "cursor: text; margin: 0;",
+                    title: "Click to rename",
+                    onclick: move |_| editing_title_w.set(Some(basename_for_title.clone())),
+                    "{page.basename}"
+                }
+                {
+                    let fav_state = try_use_context::<FavoritesState>();
+                    let pid = page_id_for_title;
+                    let is_fav = fav_state
+                        .as_ref()
+                        .map(|f| f.0.read().contains(&pid))
+                        .unwrap_or(false);
+                    let label = if is_fav { "★" } else { "☆" };
+                    let tooltip = if is_fav { "Remove from favorites" } else { "Add to favorites" };
+                    rsx! {
+                        button {
+                            style: "background: transparent; border: 0; color: var(--ls-tag-text-color); font-size: 1.2rem; cursor: pointer; padding: 0; line-height: 1;",
+                            title: "{tooltip}",
+                            onclick: move |_| {
+                                if let Some(mut f) = fav_state {
+                                    let mut cur = f.0.peek().clone();
+                                    if let Some(idx) = cur.iter().position(|x| *x == pid) {
+                                        cur.remove(idx);
+                                    } else {
+                                        cur.insert(0, pid);
+                                    }
+                                    f.0.set(cur);
+                                }
+                            },
+                            "{label}"
+                        }
+                    }
+                }
             }
             if let Some(day) = page.journal_day.as_ref() {
                 div { style: "color: var(--ls-secondary-text-color); margin-top: -0.5em; margin-bottom: 1em;",
@@ -2773,21 +2838,54 @@ fn PageView(
                 rsx! {}
             }
         }
+        {
+            let find = try_use_context::<FindInPageState>()
+                .as_ref()
+                .and_then(|f| f.0.read().clone());
+            if let Some(q) = find {
+                let q_clone = q.clone();
+                rsx! { FindInPageBar { initial_query: q_clone } }
+            } else {
+                rsx! {}
+            }
+        }
         if tree_to_show.is_empty() {
             EmptyPagePlaceholder { page_id: page.id }
         } else {
-            div { class: "ls-block-tree",
-                for node in tree_to_show {
-                    LogseqBlockNode {
-                        key: "{node.block.id}",
-                        node: node.clone(),
-                        depth: 0,
-                        on_pick_page,
+            {
+                let find_q = try_use_context::<FindInPageState>()
+                    .as_ref()
+                    .and_then(|f| f.0.read().clone())
+                    .filter(|q| !q.trim().is_empty())
+                    .map(|q| q.to_lowercase());
+                rsx! {
+                    div { class: "ls-block-tree",
+                        for node in tree_to_show {
+                            {
+                                let visible = match &find_q {
+                                    None => true,
+                                    Some(q) => subtree_matches(&node, q),
+                                };
+                                if visible {
+                                    rsx! {
+                                        LogseqBlockNode {
+                                            key: "{node.block.id}",
+                                            node: node.clone(),
+                                            depth: 0,
+                                            on_pick_page,
+                                        }
+                                    }
+                                } else {
+                                    rsx! {}
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        BacklinksSection { page: page.clone(), vault: vault_for_backlinks, on_pick_page, zoomed_block_id: zoom_id }
+        BacklinksSection { page: page.clone(), vault: vault_for_backlinks.clone(), on_pick_page, zoomed_block_id: zoom_id }
+        UnlinkedReferencesSection { page: page.clone(), vault: vault_for_backlinks, on_pick_page }
     }
 }
 
@@ -2845,6 +2943,213 @@ fn EmptyPagePlaceholder(page_id: Uuid) -> Element {
             "Click to start writing."
         }
     }
+}
+
+#[component]
+/// Find-in-page bar. Floats above the page content; the user
+/// types to filter blocks (case-insensitive substring on
+/// content). Esc closes; mirrors Cmd-F in most editors.
+#[component]
+fn FindInPageBar(initial_query: String) -> Element {
+    let find_state = try_use_context::<FindInPageState>();
+    let mut value: Signal<String> = use_signal(|| initial_query.clone());
+    rsx! {
+        div {
+            style: "position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 0.4em; padding: 0.4em 0.6em; margin: 0 0 0.6em; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 4px;",
+            span { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem;", "Find" }
+            input {
+                style: "flex: 1; background: transparent; border: 0; color: inherit; outline: none; font: inherit;",
+                value: "{value.read()}",
+                placeholder: "Filter blocks on this page…",
+                onmounted: move |e: Event<MountedData>| {
+                    spawn(async move { let _ = e.data().set_focus(true).await; });
+                },
+                oninput: move |e: Event<FormData>| {
+                    let v = e.value();
+                    value.set(v.clone());
+                    if let Some(s) = find_state.as_ref() {
+                        s.0.clone().set(Some(v));
+                    }
+                },
+                onkeydown: move |e: Event<KeyboardData>| {
+                    if matches!(e.key(), Key::Escape) {
+                        if let Some(s) = find_state.as_ref() {
+                            s.0.clone().set(None);
+                        }
+                    }
+                },
+            }
+            button {
+                style: "background: transparent; border: 0; color: var(--ls-secondary-text-color); cursor: pointer; padding: 0 0.4em; font-size: 0.85rem;",
+                onclick: move |_| {
+                    if let Some(s) = find_state.as_ref() {
+                        s.0.clone().set(None);
+                    }
+                },
+                "Close"
+            }
+        }
+    }
+}
+
+/// True when any block in the subtree (root or descendant) contains
+/// the lowercased query as a substring.
+pub(crate) fn subtree_matches(node: &BlockNodeTree, q: &str) -> bool {
+    if node.block.content.to_lowercase().contains(q) {
+        return true;
+    }
+    node.children.iter().any(|c| subtree_matches(c, q))
+}
+
+/// "Unlinked references" panel — blocks anywhere in the vault that
+/// mention this page's basename (or any alias) as plain text rather
+/// than inside a `[[wikilink]]`. Mirrors Logseq's same-named panel:
+/// great for catching mentions where you forgot the brackets.
+///
+/// Implementation: case-insensitive substring scan that excludes
+/// hits already inside `[[…]]`. We word-boundary the match so
+/// "Notes" doesn't fire on "Notification".
+#[component]
+fn UnlinkedReferencesSection(
+    page: Page,
+    vault: LogseqVault,
+    on_pick_page: EventHandler<Uuid>,
+) -> Element {
+    use std::collections::HashMap;
+    let needles: Vec<String> = std::iter::once(page.basename.clone())
+        .chain(page.aliases.iter().cloned())
+        .filter(|n| n.chars().count() >= 3)
+        .collect();
+    if needles.is_empty() {
+        return rsx! {};
+    }
+    let mut by_source: HashMap<Uuid, Vec<(Uuid, String)>> = HashMap::new();
+    for b in &vault.blocks {
+        if b.page_id == page.id {
+            continue;
+        }
+        if let Some(snippet) = scan_unlinked(&b.content, &needles) {
+            by_source
+                .entry(b.page_id)
+                .or_default()
+                .push((b.id, snippet));
+        }
+    }
+    if by_source.is_empty() {
+        return rsx! {};
+    }
+    let total: usize = by_source.values().map(|v| v.len()).sum();
+    let zoom_state = try_use_context::<ZoomState>();
+    rsx! {
+        section {
+            style: "margin-top: 1.5em; padding-top: 1em; border-top: 1px solid var(--ls-border-color);",
+            div {
+                style: "font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); margin-bottom: 0.5em;",
+                "Unlinked references · {total}"
+            }
+            for (source_page_id, hits) in by_source {
+                {
+                    let basename = vault
+                        .pages
+                        .iter()
+                        .find(|p| p.id == source_page_id)
+                        .map(|p| p.basename.clone())
+                        .unwrap_or_else(|| "—".into());
+                    rsx! {
+                        div { key: "{source_page_id}",
+                            style: "margin: 0.6em 0; padding-left: 0.6em; border-left: 2px solid var(--ls-border-color);",
+                            div {
+                                style: "color: var(--ls-link-text-color); cursor: pointer; font-weight: 600; margin-bottom: 0.25em;",
+                                onclick: move |_| on_pick_page.call(source_page_id),
+                                "{basename}"
+                            }
+                            for (b_id, snippet) in hits {
+                                {
+                                    let src_page = source_page_id;
+                                    let block_id = b_id;
+                                    let mut zoom_w = zoom_state;
+                                    rsx! {
+                                        div { key: "{b_id}",
+                                            style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin: 0.15em 0; cursor: pointer;",
+                                            onclick: move |_| {
+                                                on_pick_page.call(src_page);
+                                                if let Some(z) = zoom_w.as_mut() {
+                                                    z.0.set(Some(block_id));
+                                                }
+                                            },
+                                            "{snippet}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Returns the first line of `content` when it mentions any needle
+/// *as plain text* (case-insensitive, word-bounded) and the
+/// mention isn't already inside a `[[wikilink]]`. None when no
+/// qualifying mention is found.
+pub(crate) fn scan_unlinked(content: &str, needles: &[String]) -> Option<String> {
+    let content_lower = content.to_lowercase();
+    // Mask out spans inside `[[…]]` so we don't double-count
+    // backlinks. Replace each `[[Foo]]` with same-length space so
+    // byte offsets stay aligned with the original.
+    let masked = mask_wikilinks(&content_lower);
+    for needle in needles {
+        let n_lower = needle.to_lowercase();
+        let bytes = masked.as_bytes();
+        let nb = n_lower.as_bytes();
+        let mut i = 0;
+        while i + nb.len() <= bytes.len() {
+            if &bytes[i..i + nb.len()] == nb {
+                let left_ok = i == 0 || !is_word_byte(bytes[i - 1]);
+                let right_ok = i + nb.len() == bytes.len() || !is_word_byte(bytes[i + nb.len()]);
+                if left_ok && right_ok {
+                    return Some(content.lines().next().unwrap_or(content).to_string());
+                }
+                i += nb.len();
+            } else {
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+fn mask_wikilinks(s: &str) -> String {
+    let mut out: Vec<u8> = s.as_bytes().to_vec();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let mut j = i + 2;
+            while j + 1 < bytes.len() {
+                if bytes[j] == b']' && bytes[j + 1] == b']' {
+                    for k in i..(j + 2).min(out.len()) {
+                        out[k] = b' ';
+                    }
+                    i = j + 2;
+                    break;
+                }
+                j += 1;
+            }
+            if j + 1 >= bytes.len() {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap_or_default()
+}
+
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[component]
@@ -3580,6 +3885,16 @@ pub(crate) struct BlockMenuState(pub Signal<Option<(Uuid, i32, i32)>>);
 #[derive(Clone, Copy)]
 pub(crate) struct RecentsState(pub Signal<Vec<Uuid>>);
 
+/// User-pinned favorites — pages the user has explicitly starred.
+/// Persisted to disk alongside the doc snapshot on native builds.
+#[derive(Clone, Copy)]
+pub(crate) struct FavoritesState(pub Signal<Vec<Uuid>>);
+
+/// Active find-in-page query. `Some("term")` shows the find bar
+/// + filters blocks; `None` closes the bar. Cmd-F toggles.
+#[derive(Clone, Copy)]
+pub(crate) struct FindInPageState(pub Signal<Option<String>>);
+
 /// `Some(message)` while a transient toast (e.g. import result)
 /// is shown to the user. The Status bar pulls from this; the
 /// import button writes to it.
@@ -3909,6 +4224,13 @@ fn EditableBlock(block: Block) -> Element {
                             prev_cb.call(bid);
                         }
                     });
+                }
+            }
+            // Cmd/Ctrl-F → open the find-in-page bar.
+            Key::Character(ref c) if (mods.meta() || mods.ctrl()) && (c == "f" || c == "F") => {
+                e.prevent_default();
+                if let Some(s) = try_use_context::<FindInPageState>() {
+                    s.0.clone().set(Some(String::new()));
                 }
             }
             // Cmd/Ctrl-B → wrap selection in **bold**, or insert
@@ -6009,6 +6331,31 @@ mod tests {
     fn filter_slash_empty_query_returns_all() {
         let hits = filter_slash("");
         assert_eq!(hits.len(), 10); // capped at 10 even though catalog is 11
+    }
+
+    #[test]
+    fn scan_unlinked_matches_plain_mention() {
+        let needles = vec!["Notes".into()];
+        let hit = scan_unlinked("we should review Notes today", &needles);
+        assert!(hit.is_some());
+    }
+
+    #[test]
+    fn scan_unlinked_skips_wikilink_mention() {
+        let needles = vec!["Notes".into()];
+        let hit = scan_unlinked("we should review [[Notes]] today", &needles);
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn scan_unlinked_word_boundary() {
+        let needles = vec!["Note".into()];
+        // "Notification" must NOT match "Note".
+        let hit = scan_unlinked("got a Notification", &needles);
+        assert!(hit.is_none());
+        // "Note." with punctuation DOES match.
+        let hit = scan_unlinked("a Note. for you", &needles);
+        assert!(hit.is_some());
     }
 
     #[test]
