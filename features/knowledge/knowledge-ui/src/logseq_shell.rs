@@ -948,9 +948,12 @@ fn PageView(
         .and_then(|id| sorted.iter().find(|b| b.id == id))
         .map(|b| publish_core::peel_task_marker(&b.content).1.to_string());
 
+    let page_id_for_title = page.id;
+    let basename_for_title = page.basename.clone();
+    let editing_title: Signal<Option<String>> = use_signal(|| None);
+    let mut editing_title_w = editing_title;
     rsx! {
         if let Some(title) = zoomed_block_title.clone() {
-            // Zoom breadcrumb: link back to the page root.
             div { style: "display: flex; gap: 0.5em; align-items: center; margin-bottom: 0.75em; color: var(--ls-secondary-text-color); font-size: 0.85rem;",
                 a {
                     href: "#",
@@ -966,8 +969,44 @@ fn PageView(
                 span { "/" }
                 span { "{title}" }
             }
+        } else if let Some(draft) = editing_title.read().clone() {
+            input {
+                class: "ls-page-title",
+                style: "background: transparent; border: 0; border-bottom: 1px solid var(--ls-active-primary-color); width: 100%; padding: 0; color: inherit; font-family: inherit; font-size: var(--ls-page-title-size); font-weight: 500;",
+                value: "{draft}",
+                onmounted: |e: Event<MountedData>| {
+                    spawn(async move { let _ = e.data().set_focus(true).await; });
+                },
+                oninput: move |e: Event<FormData>| editing_title_w.set(Some(e.value())),
+                onkeydown: move |e: Event<KeyboardData>| {
+                    match e.key() {
+                        Key::Enter => {
+                            e.prevent_default();
+                            let new_name = editing_title_w.peek().clone().unwrap_or_default();
+                            if !new_name.trim().is_empty() {
+                                if let Some(ops) = try_use_context::<PageOps>() {
+                                    ops.rename_page.call((page_id_for_title, new_name.trim().to_string()));
+                                }
+                            }
+                            editing_title_w.set(None);
+                        }
+                        Key::Escape => {
+                            e.prevent_default();
+                            editing_title_w.set(None);
+                        }
+                        _ => {}
+                    }
+                },
+                onblur: move |_| editing_title_w.set(None),
+            }
         } else {
-            h1 { class: "ls-page-title", "{page.basename}" }
+            h1 {
+                class: "ls-page-title",
+                style: "cursor: text;",
+                title: "Click to rename",
+                onclick: move |_| editing_title_w.set(Some(basename_for_title.clone())),
+                "{page.basename}"
+            }
             if let Some(day) = page.journal_day.as_ref() {
                 div { style: "color: var(--ls-secondary-text-color); margin-top: -0.5em; margin-bottom: 1em;",
                     "{day}"
