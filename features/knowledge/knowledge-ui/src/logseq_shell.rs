@@ -456,6 +456,16 @@ pub fn LogseqShell() -> Element {
     let ops = make_block_ops(doc.read().clone(), editing_id);
     use_context_provider(|| ops.clone());
 
+    // Slash-command palette + page-search popup state. Each is
+    // wrapped in a per-popup newtype so Dioxus's type-keyed
+    // context map can carry both at once. `Some((block_id,
+    // query))` while the popup is open. EditableBlock writes
+    // them via oninput; popup components read them.
+    let slash_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
+    let page_search_state: Signal<Option<(Uuid, String)>> = use_signal(|| None);
+    use_context_provider(|| SlashState(slash_state));
+    use_context_provider(|| PageSearchState(page_search_state));
+
     // Auto-select the first page when none is active.
     {
         let pages = vault_data.pages.clone();
@@ -1004,6 +1014,14 @@ fn LogseqBlockBody(block: Block) -> Element {
     }
 }
 
+/// Newtype wrappers so multiple `Signal<Option<(Uuid, String)>>`
+/// can coexist in Dioxus's type-keyed context map.
+#[derive(Clone, Copy)]
+pub(crate) struct SlashState(pub Signal<Option<(Uuid, String)>>);
+
+#[derive(Clone, Copy)]
+pub(crate) struct PageSearchState(pub Signal<Option<(Uuid, String)>>);
+
 /// Inline editor — replaces the static block content with a
 /// textarea autosized to its content. Handles the Logseq
 /// keyboard model: Enter splits, Tab indents, Shift+Tab outdents,
@@ -1012,6 +1030,8 @@ fn LogseqBlockBody(block: Block) -> Element {
 #[component]
 fn EditableBlock(block: Block) -> Element {
     let ops = try_use_context::<BlockOps>();
+    let slash_state = try_use_context::<SlashState>();
+    let page_search_state = try_use_context::<PageSearchState>();
     let block_id = block.id;
     let initial_content = block.content.clone();
     let content_signal: Signal<String> = use_signal(|| initial_content.clone());
@@ -1024,12 +1044,57 @@ fn EditableBlock(block: Block) -> Element {
 
     let ops_for_input = ops.clone();
     let mut content_w = content_signal;
+    let id_str_input = block_id.simple().to_string();
+    let mut slash_w = slash_state;
+    let mut page_search_w = page_search_state;
     let on_input = move |e: Event<FormData>| {
         let v = e.value();
         content_w.set(v.clone());
         if let Some(ops) = ops_for_input.as_ref() {
-            ops.update_content.call((block_id, v));
+            ops.update_content.call((block_id, v.clone()));
         }
+        // Trigger detection: read the caret position from the
+        // textarea and inspect the text just before it. `/foo`
+        // opens the slash palette; `[[foo` opens page search.
+        let id_str = id_str_input.clone();
+        let content = v.clone();
+        let mut slash = slash_w;
+        let mut page_search = page_search_w;
+        spawn(async move {
+            let off = read_selection_start(&id_str).await.unwrap_or(content.len());
+            let before = &content[..off.min(content.len())];
+            // Slash palette: last `/` after a whitespace or start.
+            if let Some(slash_pos) = trigger_after_boundary(before, '/') {
+                let q = before[slash_pos + 1..].to_string();
+                if let Some(ref mut s) = slash.as_mut() {
+                    s.0.set(Some((block_id, q.clone())));
+                }
+                if let Some(ref mut p) = page_search.as_mut() {
+                    p.0.set(None);
+                }
+                return;
+            }
+            // Page search: `[[query` (unclosed) directly before caret.
+            if let Some(pos) = before.rfind("[[") {
+                let rest = &before[pos + 2..];
+                if !rest.contains("]]") {
+                    if let Some(ref mut p) = page_search.as_mut() {
+                        p.0.set(Some((block_id, rest.to_string())));
+                    }
+                    if let Some(ref mut s) = slash.as_mut() {
+                        s.0.set(None);
+                    }
+                    return;
+                }
+            }
+            // No trigger active — clear popups.
+            if let Some(ref mut s) = slash.as_mut() {
+                s.0.set(None);
+            }
+            if let Some(ref mut p) = page_search.as_mut() {
+                p.0.set(None);
+            }
+        });
     };
 
     let ops_for_keys = ops.clone();
@@ -1104,8 +1169,19 @@ fn EditableBlock(block: Block) -> Element {
 
     let value_str = content_signal.read().clone();
     let id_attr = block_id.simple().to_string();
+    let slash_open = slash_state
+        .as_ref()
+        .and_then(|s| s.0.read().clone())
+        .filter(|(b, _)| *b == block_id)
+        .map(|(_, q)| q);
+    let page_search_open = page_search_state
+        .as_ref()
+        .and_then(|s| s.0.read().clone())
+        .filter(|(b, _)| *b == block_id)
+        .map(|(_, q)| q);
+
     rsx! {
-        div { style: "flex: 1; min-width: 0;",
+        div { style: "flex: 1; min-width: 0; position: relative;",
             "data-edit-block": "{id_attr}",
             textarea {
                 class: "ls-block-content",
@@ -1117,8 +1193,280 @@ fn EditableBlock(block: Block) -> Element {
                 onblur: on_blur,
                 onmounted: auto_focus,
             }
+            if let Some(q) = slash_open {
+                SlashPalette { block_id, query: q, content: content_signal }
+            }
+            if let Some(q) = page_search_open {
+                PageSearchPalette { block_id, query: q, content: content_signal }
+            }
         }
     }
+}
+
+/// Static catalog of slash-palette commands. Each row carries
+/// its label, optional description, and the effect applied to
+/// the editing block when selected.
+#[derive(Clone, Debug)]
+struct SlashCommand {
+    label: &'static str,
+    desc: &'static str,
+    effect: SlashEffect,
+}
+
+#[derive(Clone, Debug)]
+enum SlashEffect {
+    /// Convert the block's kind. `(kind, heading_level)`.
+    SetKind(&'static str, Option<i32>),
+    /// Replace the slash-prefix with literal text.
+    InsertText(&'static str),
+    /// Insert today's date in `[[YYYY-MM-DD]]` form.
+    InsertToday,
+    /// Insert tomorrow's date.
+    InsertTomorrow,
+}
+
+fn slash_catalog() -> &'static [SlashCommand] {
+    &[
+        SlashCommand {
+            label: "Heading 1",
+            desc: "Largest heading",
+            effect: SlashEffect::SetKind("heading", Some(1)),
+        },
+        SlashCommand {
+            label: "Heading 2",
+            desc: "",
+            effect: SlashEffect::SetKind("heading", Some(2)),
+        },
+        SlashCommand {
+            label: "Heading 3",
+            desc: "",
+            effect: SlashEffect::SetKind("heading", Some(3)),
+        },
+        SlashCommand {
+            label: "TODO",
+            desc: "Mark this block as a task",
+            effect: SlashEffect::InsertText("TODO "),
+        },
+        SlashCommand {
+            label: "DOING",
+            desc: "Mark in progress",
+            effect: SlashEffect::InsertText("DOING "),
+        },
+        SlashCommand {
+            label: "DONE",
+            desc: "Mark completed",
+            effect: SlashEffect::InsertText("DONE "),
+        },
+        SlashCommand {
+            label: "LATER",
+            desc: "Defer this block",
+            effect: SlashEffect::InsertText("LATER "),
+        },
+        SlashCommand {
+            label: "Quote",
+            desc: "Blockquote",
+            effect: SlashEffect::SetKind("blockquote", None),
+        },
+        SlashCommand {
+            label: "Code block",
+            desc: "Fenced code",
+            effect: SlashEffect::SetKind("code", None),
+        },
+        SlashCommand {
+            label: "Today",
+            desc: "Insert today's date as a journal link",
+            effect: SlashEffect::InsertToday,
+        },
+        SlashCommand {
+            label: "Tomorrow",
+            desc: "Insert tomorrow's date",
+            effect: SlashEffect::InsertTomorrow,
+        },
+    ]
+}
+
+fn filter_slash(query: &str) -> Vec<&'static SlashCommand> {
+    let q = query.to_lowercase();
+    slash_catalog()
+        .iter()
+        .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q))
+        .take(10)
+        .collect()
+}
+
+#[component]
+fn SlashPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
+    let hits = filter_slash(&query);
+    let ops = try_use_context::<BlockOps>();
+    let slash_state = try_use_context::<SlashState>();
+    rsx! {
+        div { class: "ls-popup",
+            style: "position: absolute; top: 100%; left: 0; margin-top: 0.25em; min-width: 280px; max-height: 280px; overflow-y: auto; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; z-index: 50; box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
+            div { style: "padding: 0.35em 0.6em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                "Commands"
+            }
+            for cmd in hits {
+                {
+                    let effect = cmd.effect.clone();
+                    let ops = ops.clone();
+                    let mut slash_w = slash_state;
+                    let mut content_w = content;
+                    let query_for_click = query.clone();
+                    let onclick = move |_e: Event<MouseData>| {
+                        // Strip the `/query` from the current content
+                        // and apply the effect.
+                        let mut cur = content_w.peek().clone();
+                        if let Some(pos) = trigger_after_boundary(&cur, '/') {
+                            cur.replace_range(pos..pos + 1 + query_for_click.len(), "");
+                            content_w.set(cur.clone());
+                            if let Some(ops) = ops.as_ref() {
+                                ops.update_content.call((block_id, cur.clone()));
+                            }
+                        }
+                        match &effect {
+                            SlashEffect::SetKind(kind, hl) => {
+                                if let Some(ops) = ops.as_ref() {
+                                    ops.set_kind.call((block_id, kind.to_string(), *hl));
+                                }
+                            }
+                            SlashEffect::InsertText(text) => {
+                                let mut c = content_w.peek().clone();
+                                c.insert_str(0, text);
+                                content_w.set(c.clone());
+                                if let Some(ops) = ops.as_ref() {
+                                    ops.update_content.call((block_id, c));
+                                }
+                            }
+                            SlashEffect::InsertToday => {
+                                let today = chrono::Local::now().format("[[%Y-%m-%d]]").to_string();
+                                let mut c = content_w.peek().clone();
+                                c.push_str(&today);
+                                content_w.set(c.clone());
+                                if let Some(ops) = ops.as_ref() {
+                                    ops.update_content.call((block_id, c));
+                                }
+                            }
+                            SlashEffect::InsertTomorrow => {
+                                let t = (chrono::Local::now() + chrono::Duration::days(1))
+                                    .format("[[%Y-%m-%d]]")
+                                    .to_string();
+                                let mut c = content_w.peek().clone();
+                                c.push_str(&t);
+                                content_w.set(c.clone());
+                                if let Some(ops) = ops.as_ref() {
+                                    ops.update_content.call((block_id, c));
+                                }
+                            }
+                        }
+                        if let Some(ref mut s) = slash_w.as_mut() {
+                            s.0.set(None);
+                        }
+                    };
+                    rsx! {
+                        div {
+                            key: "{cmd.label}",
+                            style: "padding: 0.4em 0.6em; cursor: pointer; border-bottom: 1px solid var(--ls-border-color);",
+                            onclick,
+                            onmousedown: move |e: Event<MouseData>| e.prevent_default(),
+                            div { style: "color: var(--ls-primary-text-color); font-weight: 500;", "{cmd.label}" }
+                            if !cmd.desc.is_empty() {
+                                div { style: "color: var(--ls-secondary-text-color); font-size: 0.75rem;", "{cmd.desc}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PageSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
+    let wiki = try_use_context::<WikiResolver>().unwrap_or_default();
+    let ops = try_use_context::<BlockOps>();
+    let page_search_state = try_use_context::<PageSearchState>();
+    let q_lower = query.to_lowercase();
+    let mut hits: Vec<(String, String)> = wiki
+        .0
+        .iter()
+        .filter(|(name, _)| q_lower.is_empty() || name.contains(&q_lower))
+        .map(|(name, slug)| (name.clone(), slug.clone()))
+        .collect();
+    hits.sort_by(|a, b| a.0.cmp(&b.0));
+    hits.truncate(10);
+
+    rsx! {
+        div { class: "ls-popup",
+            style: "position: absolute; top: 100%; left: 0; margin-top: 0.25em; min-width: 280px; max-height: 280px; overflow-y: auto; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; z-index: 50; box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
+            div { style: "padding: 0.35em 0.6em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                "Link to page"
+            }
+            if hits.is_empty() {
+                div { style: "padding: 0.6em; color: var(--ls-secondary-text-color); font-style: italic;",
+                    "No matching pages. Pressing Enter will create [[", "{query}", "]] anyway."
+                }
+            }
+            for (name, _slug) in hits {
+                {
+                    let name_for_click = name.clone();
+                    let ops = ops.clone();
+                    let mut content_w = content;
+                    let mut page_search_w = page_search_state;
+                    let query_for_click = query.clone();
+                    let onclick = move |_e: Event<MouseData>| {
+                        let mut cur = content_w.peek().clone();
+                        // Find the `[[query` we matched and replace it
+                        // with `[[Name]]`.
+                        if let Some(pos) = cur.rfind("[[") {
+                            let end = pos + 2 + query_for_click.len();
+                            let end = end.min(cur.len());
+                            let replacement = format!("[[{}]]", name_for_click);
+                            cur.replace_range(pos..end, &replacement);
+                            content_w.set(cur.clone());
+                            if let Some(ops) = ops.as_ref() {
+                                ops.update_content.call((block_id, cur));
+                            }
+                        }
+                        if let Some(ref mut s) = page_search_w.as_mut() {
+                            s.0.set(None);
+                        }
+                    };
+                    rsx! {
+                        div {
+                            key: "{name}",
+                            style: "padding: 0.35em 0.6em; cursor: pointer; color: var(--ls-link-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                            onclick,
+                            onmousedown: move |e: Event<MouseData>| e.prevent_default(),
+                            "{name}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Return the index of the most recent `ch` that immediately
+/// follows a whitespace boundary (or starts the string) in
+/// `before` — i.e. the start of a "trigger word" the user is
+/// typing. Returns `None` when no such position exists.
+pub(crate) fn trigger_after_boundary(before: &str, ch: char) -> Option<usize> {
+    let bytes = before.as_bytes();
+    let mut last: Option<usize> = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == ch as u8 {
+            let at_start = i == 0;
+            let after_ws = i > 0
+                && bytes
+                    .get(i - 1)
+                    .map(|c| c.is_ascii_whitespace())
+                    .unwrap_or(false);
+            if at_start || after_ws {
+                last = Some(i);
+            }
+        }
+    }
+    last
 }
 
 /// Read the focused textarea's `selectionStart` for the block
@@ -1511,6 +1859,39 @@ mod tests {
         let got = snippet(&s, 80);
         assert!(got.chars().count() <= 81);
         assert!(got.ends_with('…'));
+    }
+
+    #[test]
+    fn trigger_after_boundary_finds_slash_at_start() {
+        assert_eq!(trigger_after_boundary("/heading", '/'), Some(0));
+    }
+
+    #[test]
+    fn trigger_after_boundary_finds_slash_after_space() {
+        assert_eq!(trigger_after_boundary("hello /h2", '/'), Some(6));
+    }
+
+    #[test]
+    fn trigger_after_boundary_ignores_inner_slash() {
+        assert_eq!(trigger_after_boundary("a/b/c", '/'), None);
+    }
+
+    #[test]
+    fn trigger_after_boundary_returns_last() {
+        // Two valid trigger positions; should return the more recent one.
+        assert_eq!(trigger_after_boundary("first / and /second", '/'), Some(12));
+    }
+
+    #[test]
+    fn filter_slash_matches_case_insensitive() {
+        let hits = filter_slash("todo");
+        assert!(hits.iter().any(|c| c.label == "TODO"));
+    }
+
+    #[test]
+    fn filter_slash_empty_query_returns_all() {
+        let hits = filter_slash("");
+        assert_eq!(hits.len(), 10); // capped at 10 even though catalog is 11
     }
 
     #[test]
