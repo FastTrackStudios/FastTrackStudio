@@ -2529,6 +2529,184 @@ pub(crate) fn lexorank_between(a: &str, b: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Helper: build an ephemeral CrdtDoc + seed a single page,
+    /// returning (doc, page_id, vault_id).
+    async fn ephemeral_page() -> (Arc<CrdtDoc>, Uuid, Uuid) {
+        use knowledge_proto::{VaultCreate, VaultRepo};
+        let doc = Arc::new(CrdtDoc::ephemeral());
+        let vr = knowledge_crdt::VaultRepoLoro::new(&doc);
+        let v = vr
+            .create(VaultCreate {
+                name: "T".into(),
+                root_path: None,
+                use_markdown_links: false,
+                new_link_format: "shortest".into(),
+                attachment_folder_path: String::new(),
+                default_view_mode: "live-preview".into(),
+                config_json: "{}".into(),
+            })
+            .await
+            .unwrap();
+        let pr = PageRepoLoro::new(&doc);
+        let now = Utc::now();
+        let p = pr
+            .create(knowledge_proto::PageCreate {
+                vault_id: v.id,
+                folder_id: None,
+                path: "p.md".into(),
+                basename: "p".into(),
+                ext: "md".into(),
+                aliases: Vec::new(),
+                frontmatter_json: "{}".into(),
+                stat_ctime: now,
+                stat_mtime: now,
+                stat_size: 0,
+                is_journal: false,
+                journal_day: None,
+                shadow_for_kind: None,
+                shadow_for_id: None,
+            })
+            .await
+            .unwrap();
+        (doc, p.id, v.id)
+    }
+
+    async fn mk_b(
+        doc: &CrdtDoc,
+        vault_id: Uuid,
+        page_id: Uuid,
+        parent: Option<Uuid>,
+        sort: &str,
+        content: &str,
+    ) -> Uuid {
+        let br = BlockRepoLoro::new(doc);
+        let b = br
+            .create(BlockCreate {
+                vault_id,
+                page_id,
+                parent_block_id: parent,
+                sort_key: sort.into(),
+                kind: "paragraph".into(),
+                content: content.into(),
+                heading_level: None,
+                list_ordered: false,
+                list_task: None,
+                code_lang: None,
+                callout_kind: None,
+                callout_foldable: false,
+                properties_json: "{}".into(),
+                obsidian_block_id: None,
+                collapsed: false,
+                refs_json: "[]".into(),
+                canvas_node_json: None,
+            })
+            .await
+            .unwrap();
+        b.id
+    }
+
+    async fn all_blocks_async(doc: &CrdtDoc) -> Vec<Block> {
+        let br = BlockRepoLoro::new(doc);
+        let big = ListPage {
+            index: 0,
+            size: 100_000,
+        };
+        br.list(big, None, None).await.unwrap().items
+    }
+
+    #[tokio::test]
+    async fn split_block_creates_sibling_with_right_half() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let id = mk_b(&doc, vault_id, page_id, None, "m", "Hello world").await;
+        let new_id = split_block_async(&doc, id, 5).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let orig = blocks.iter().find(|b| b.id == id).unwrap();
+        let nu = blocks.iter().find(|b| b.id == new_id).unwrap();
+        assert_eq!(orig.content, "Hello");
+        assert_eq!(nu.content, " world");
+        assert_eq!(orig.parent_block_id, nu.parent_block_id);
+        assert!(nu.sort_key > orig.sort_key);
+    }
+
+    #[tokio::test]
+    async fn indent_reparents_under_previous_sibling() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "a", "first").await;
+        let b = mk_b(&doc, vault_id, page_id, None, "b", "second").await;
+        indent_block_async(&doc, b).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let updated = blocks.iter().find(|x| x.id == b).unwrap();
+        assert_eq!(updated.parent_block_id, Some(a));
+    }
+
+    #[tokio::test]
+    async fn indent_first_sibling_is_noop() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "a", "first").await;
+        indent_block_async(&doc, a).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let updated = blocks.iter().find(|x| x.id == a).unwrap();
+        assert_eq!(updated.parent_block_id, None);
+    }
+
+    #[tokio::test]
+    async fn outdent_reparents_to_grandparent() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "a", "parent").await;
+        let b = mk_b(&doc, vault_id, page_id, Some(a), "a", "child").await;
+        outdent_block_async(&doc, b).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let updated = blocks.iter().find(|x| x.id == b).unwrap();
+        assert_eq!(updated.parent_block_id, None);
+        let aa = blocks.iter().find(|x| x.id == a).unwrap();
+        assert!(updated.sort_key > aa.sort_key);
+    }
+
+    #[tokio::test]
+    async fn outdent_top_level_is_noop() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "m", "x").await;
+        outdent_block_async(&doc, a).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let updated = blocks.iter().find(|x| x.id == a).unwrap();
+        assert_eq!(updated.parent_block_id, None);
+    }
+
+    #[tokio::test]
+    async fn move_block_swaps_with_sibling() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "a", "first").await;
+        let b = mk_b(&doc, vault_id, page_id, None, "b", "second").await;
+        move_block_async(&doc, b, -1).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let aa = blocks.iter().find(|x| x.id == a).unwrap();
+        let bb = blocks.iter().find(|x| x.id == b).unwrap();
+        assert!(bb.sort_key < aa.sort_key);
+    }
+
+    #[tokio::test]
+    async fn move_block_at_boundary_is_noop() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "a", "first").await;
+        let _b = mk_b(&doc, vault_id, page_id, None, "b", "second").await;
+        move_block_async(&doc, a, -1).await.unwrap();
+        let blocks = all_blocks_async(&doc).await;
+        let aa = blocks.iter().find(|x| x.id == a).unwrap();
+        assert_eq!(aa.sort_key, "a");
+    }
+
+    #[tokio::test]
+    async fn neighbor_in_doc_order_walks_tree() {
+        let (doc, page_id, vault_id) = ephemeral_page().await;
+        let a = mk_b(&doc, vault_id, page_id, None, "a", "a").await;
+        let b = mk_b(&doc, vault_id, page_id, None, "b", "b").await;
+        let a1 = mk_b(&doc, vault_id, page_id, Some(a), "a", "a1").await;
+        let next = neighbor_in_doc_order(&doc, a, 1).await;
+        assert_eq!(next, Some(a1));
+        let prev = neighbor_in_doc_order(&doc, b, -1).await;
+        assert_eq!(prev, Some(a1));
+    }
+
     #[test]
     fn extract_tags_basic() {
         let tags = extract_tags("Hello #demo and #foo/bar end");
