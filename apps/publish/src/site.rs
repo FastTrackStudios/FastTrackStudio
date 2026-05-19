@@ -122,6 +122,11 @@ pub async fn build(
         tokio::fs::write(dir.join("index.html"), html).await?;
     }
 
+    // ── Journals index ───────────────────────────────────
+    tokio::fs::create_dir_all(out.join("journals")).await?;
+    let journals_html = render::render_journals_page(site_title, &pages);
+    tokio::fs::write(out.join("journals/index.html"), journals_html).await?;
+
     // ── Tag aggregation pages ────────────────────────────
     tokio::fs::create_dir_all(out.join("tags")).await?;
     let tag_map: &std::collections::BTreeMap<_, _> = tag_index.0.as_ref();

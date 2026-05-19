@@ -110,6 +110,7 @@ pub fn Sidebar(pages: Vec<Page>, current_id: Option<uuid::Uuid>) -> Element {
                 a { class: "sidebar-link", href: "/", "Home" }
                 a { class: "sidebar-link", href: "/graph/", "Graph" }
                 a { class: "sidebar-link", href: "/tags/", "Tags" }
+                a { class: "sidebar-link", href: "/journals/", "Journals" }
             }
             div { class: "search-box",
                 input {
@@ -169,12 +170,25 @@ pub fn BacklinksPanel(entries: Vec<BacklinkEntry>) -> Element {
 
 /// Page body — sorted blocks rendered as their kind.
 #[component]
-pub fn PageContent(blocks: Vec<Block>, journal_day: Option<String>) -> Element {
+pub fn PageContent(
+    blocks: Vec<Block>,
+    journal_day: Option<String>,
+    frontmatter_json: String,
+) -> Element {
     let mut sorted = blocks.clone();
     sorted.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let page_props = parse_props(&frontmatter_json);
     rsx! {
         if let Some(d) = journal_day {
             div { class: "page-meta", "{d}" }
+        }
+        if !page_props.is_empty() {
+            dl { class: "page-props",
+                for (k, v) in page_props {
+                    dt { key: "{k}", "{k}" }
+                    dd { "{v}" }
+                }
+            }
         }
         article { class: "content",
             for b in sorted {
@@ -221,7 +235,7 @@ pub fn BlockNode(block: Block) -> Element {
             }
         };
     }
-    match block.kind.as_str() {
+    let body = match block.kind.as_str() {
         "heading" => {
             let level = block.heading_level.unwrap_or(1).clamp(1, 6) as u8;
             // Dynamic h{1..6} via match — small cost, big clarity.
@@ -273,6 +287,59 @@ pub fn BlockNode(block: Block) -> Element {
                 Inlines { nodes: inlines }
             }
         },
+    };
+    // Block-level `prop:: value` chips — parsed from
+    // `properties_json` and rendered as a row of pills under the
+    // block body. Mirrors Logseq's inline property display.
+    let chips = parse_props(&block.properties_json);
+    rsx! {
+        {body}
+        if !chips.is_empty() {
+            div { class: "block-props",
+                for (k, v) in chips {
+                    span { key: "{k}", class: "prop-chip",
+                        span { class: "prop-key", "{k}" }
+                        span { class: "prop-val", "{v}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Parse a `frontmatter_json` / `properties_json` blob into a
+/// sorted list of `(key, display)` pairs. JSON objects are the
+/// only supported shape; anything else returns empty. Values are
+/// stringified compactly so they fit in a chip or table cell.
+pub fn parse_props(blob: &str) -> Vec<(String, String)> {
+    let v: serde_json::Value = match serde_json::from_str(blob) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let obj = match v.as_object() {
+        Some(o) => o,
+        None => return Vec::new(),
+    };
+    let mut out: Vec<(String, String)> = obj
+        .iter()
+        .map(|(k, v)| (k.clone(), display_prop(v)))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn display_prop(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Array(arr) => {
+            arr.iter().map(display_prop).collect::<Vec<_>>().join(", ")
+        }
+        // Nested objects: compact JSON, hosts that want richer
+        // rendering can extend the renderer later.
+        serde_json::Value::Object(_) => v.to_string(),
     }
 }
 

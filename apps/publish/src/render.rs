@@ -28,6 +28,7 @@ pub fn render_page(
     let pages = all_pages.to_vec();
     let current_id = page.id;
     let journal_day = page.journal_day.clone();
+    let frontmatter_json = page.frontmatter_json.clone();
     let resolver_for_root = resolver.clone();
     let block_refs_for_root = block_refs.clone();
     let backlinks = backlinks.to_vec();
@@ -41,6 +42,7 @@ pub fn render_page(
             pages,
             current_id,
             journal_day,
+            frontmatter_json,
             resolver: resolver_for_root,
             block_refs: block_refs_for_root,
             backlinks,
@@ -152,6 +154,72 @@ fn TagsIndexRoot(site_title: String, tags: Vec<(String, usize)>, pages: Vec<Page
     }
 }
 
+/// Render `/journals/` — index of every page that has a
+/// `journal_day`, sorted by that date descending.
+pub fn render_journals_page(site_title: &str, pages: &[Page]) -> String {
+    let mut entries: Vec<&Page> = pages.iter().filter(|p| p.journal_day.is_some()).collect();
+    entries.sort_by(|a, b| b.journal_day.cmp(&a.journal_day));
+    let rows: Vec<(String, String, String)> = entries
+        .into_iter()
+        .map(|p| {
+            (
+                p.journal_day.clone().unwrap_or_default(),
+                p.basename.clone(),
+                crate::site::slugify(&p.basename),
+            )
+        })
+        .collect();
+    let mut vdom = VirtualDom::new_with_props(
+        JournalsRoot,
+        JournalsRootProps {
+            site_title: site_title.to_string(),
+            entries: rows,
+            pages: pages.to_vec(),
+        },
+    );
+    vdom.rebuild_in_place();
+    let body = dioxus_ssr::render(&vdom);
+    shell("Journals", body, "")
+}
+
+#[component]
+fn JournalsRoot(
+    site_title: String,
+    entries: Vec<(String, String, String)>,
+    pages: Vec<Page>,
+) -> Element {
+    rsx! {
+        DocBody {
+            site_title: site_title,
+            page_title: "Journals".to_string(),
+            sidebar: rsx! {
+                Sidebar { pages: pages, current_id: None }
+            },
+            body: rsx! {
+                article { class: "content",
+                    if entries.is_empty() {
+                        p { class: "muted", "No journal entries yet." }
+                    } else {
+                        ul { class: "journals-index",
+                            for (day, name, slug) in entries {
+                                {
+                                    let href = format!("/{slug}/");
+                                    rsx! {
+                                        li { key: "{slug}",
+                                            span { class: "journals-date", "{day}" }
+                                            a { href: "{href}", "{name}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        }
+    }
+}
+
 /// Render the graph view page — sidebar + a single canvas
 /// hosting the wikilink force-directed graph.
 pub fn render_graph_page(site_title: &str, pages: &[Page]) -> String {
@@ -211,6 +279,7 @@ fn Root(
     pages: Vec<Page>,
     current_id: uuid::Uuid,
     journal_day: Option<String>,
+    frontmatter_json: String,
     resolver: WikiResolver,
     block_refs: BlockRefResolver,
     backlinks: Vec<BacklinkEntry>,
@@ -225,7 +294,11 @@ fn Root(
                 Sidebar { pages: pages, current_id: Some(current_id) }
             },
             body: rsx! {
-                PageContent { blocks: blocks, journal_day: journal_day }
+                PageContent {
+                    blocks: blocks,
+                    journal_day: journal_day,
+                    frontmatter_json: frontmatter_json,
+                }
                 BacklinksPanel { entries: backlinks }
             },
         }
@@ -424,6 +497,71 @@ mod tests {
             html.contains("↪ from /target"),
             "should link back to source page; got: {html}"
         );
+    }
+
+    #[test]
+    fn render_journals_lists_only_journal_pages_desc() {
+        let mut p1 = page("2026-05-10");
+        p1.journal_day = Some("2026-05-10".into());
+        let mut p2 = page("2026-05-18");
+        p2.journal_day = Some("2026-05-18".into());
+        let p3 = page("Regular Note");
+        let html = render_journals_page("Site", &[p1.clone(), p2.clone(), p3.clone()]);
+        assert!(html.contains("journals-index"));
+        assert!(html.contains("2026-05-18"));
+        assert!(html.contains("2026-05-10"));
+        // Only the journal-stamped pages appear in the journals
+        // list (the sidebar lists every page, separately).
+        let idx_start = html.find("journals-index").expect("list rendered");
+        let idx_html = &html[idx_start..];
+        assert!(
+            !idx_html.contains("Regular Note"),
+            "non-journal pages should not appear in the journals list"
+        );
+        // Newer date appears before the older one inside the list.
+        let later = idx_html.find("2026-05-18").expect("18 present");
+        let earlier = idx_html.find("2026-05-10").expect("10 present");
+        assert!(later < earlier, "descending order expected");
+    }
+
+    #[test]
+    fn page_with_frontmatter_renders_props_table() {
+        let mut p = page("WithProps");
+        p.frontmatter_json = r#"{"status":"active","priority":"high"}"#.into();
+        let html = render_page(
+            "Site",
+            &p,
+            &[],
+            &book(),
+            &BlockRefResolver::default(),
+            &[p.clone()],
+            &[],
+        );
+        assert!(html.contains("page-props"), "expected dl.page-props");
+        assert!(html.contains("status"));
+        assert!(html.contains("active"));
+        assert!(html.contains("priority"));
+    }
+
+    #[test]
+    fn block_with_properties_renders_chips() {
+        let p = page("Host");
+        let mut b = block("a task");
+        b.page_id = p.id;
+        b.properties_json = r#"{"due":"2026-05-20","priority":"high"}"#.into();
+        let html = render_page(
+            "Site",
+            &p,
+            &[b],
+            &book(),
+            &BlockRefResolver::default(),
+            &[p.clone()],
+            &[],
+        );
+        assert!(html.contains("block-props"));
+        assert!(html.contains("prop-chip"));
+        assert!(html.contains("due"));
+        assert!(html.contains("2026-05-20"));
     }
 
     #[test]

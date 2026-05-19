@@ -399,6 +399,81 @@ aside.block-embed .block-embed-body {
   color: var(--text);
 }
 
+/* Block-level `prop:: value` chips rendered under each block. */
+.block-props {
+  margin: 0.2em 0 0.4em 1.5em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.prop-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.35em;
+  overflow: hidden;
+}
+
+.prop-chip .prop-key {
+  padding: 0.1em 0.45em;
+  background: var(--bg-alt);
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.prop-chip .prop-val {
+  padding: 0.1em 0.5em;
+  color: var(--text);
+}
+
+/* Page-level frontmatter table at the top of each page. */
+dl.page-props {
+  margin: 0.5em 0 1em;
+  padding: 0.5em 0.75em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 0.4em;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2em 0.75em;
+  font-size: 0.85rem;
+}
+
+dl.page-props dt {
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+dl.page-props dd {
+  margin: 0;
+  color: var(--text);
+}
+
+/* Journals index list — date column + page link. */
+ul.journals-index {
+  list-style: none;
+  padding: 0;
+  margin: 1em 0;
+}
+
+ul.journals-index li {
+  display: grid;
+  grid-template-columns: 8em 1fr;
+  gap: 0.75em;
+  padding: 0.35em 0;
+  border-bottom: 1px solid var(--border);
+}
+
+ul.journals-index .journals-date {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 code {
   background: var(--code-bg);
   padding: 0.1em 0.35em;
