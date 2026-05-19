@@ -1,0 +1,1034 @@
+//! Logseq-faithful UI shell.
+//!
+//! Visual + interaction port of Logseq's desktop UI. Built fresh
+//! rather than retrofitted onto the existing outliner so the
+//! layout, theme tokens, and keyboard model can match Logseq
+//! verbatim (or as close as a Dioxus port reasonably gets).
+//!
+//! Lays out as:
+//!
+//!   ┌──────────────┬──────────────────────────┬──────────┐
+//!   │ Header (48px sticky, drag-region)                  │
+//!   ├──────────────┼──────────────────────────┼──────────┤
+//!   │ LeftSidebar  │  Main (960px max)        │ RightSb  │
+//!   │  246px       │   - PageTitle            │  open    │
+//!   │  • Journals  │   - properties block     │  via     │
+//!   │  • All Pages │   - block tree           │  shift   │
+//!   │  • Graph     │                          │  click   │
+//!   │  • Favorites │                          │          │
+//!   │  • Recent    │                          │          │
+//!   │  • Pages     │                          │          │
+//!   └──────────────┴──────────────────────────┴──────────┘
+//!
+//! Color tokens, sizes, and indent units mirror Logseq's
+//! `vars-classic.css` so the visual feel is identical without
+//! shipping the original CSS.
+
+use std::sync::Arc;
+
+use chrono::Utc;
+use crdt::CrdtDoc;
+use dioxus::prelude::*;
+use knowledge_crdt::{BlockRepoLoro, PageRepoLoro};
+use knowledge_proto::{Block, BlockRepo, Page, PageRepo, architect::Page as ListPage};
+use uuid::Uuid;
+
+use publish_core::{
+    BlockRefResolver, BlockRefTarget, InlineNode, NamespaceResolver, PageEmbedResolver, QueryHit,
+    QueryResolver, WikiResolver, slugify,
+};
+
+/// Inline CSS injected once per shell. Drives the Logseq color
+/// palette + size tokens. Kept inline so the shell is
+/// self-contained (the desktop app's tailwind bundle can stay
+/// focused on utility classes).
+const LOGSEQ_CSS: &str = r#"
+:root {
+    --ls-primary-background-color: #002b36;
+    --ls-secondary-background-color: #023643;
+    --ls-tertiary-background-color: #01222a;
+    --ls-quaternary-background-color: #013540;
+    --ls-active-primary-color: #8ec2c2;
+    --ls-active-secondary-color: #8ec2c2;
+    --ls-primary-text-color: #a4b5b6;
+    --ls-secondary-text-color: #6e8b8c;
+    --ls-block-bullet-color: #608e91;
+    --ls-block-bullet-active-color: #8ec2c2;
+    --ls-border-color: #0e5263;
+    --ls-secondary-border-color: #126277;
+    --ls-link-text-color: rgb(138, 187, 187);
+    --ls-link-text-hover-color: #b4e2e2;
+    --ls-tag-text-color: #608e91;
+    --ls-page-text-size: 1em;
+    --ls-page-title-size: 36px;
+    --ls-left-sidebar-width: 246px;
+    --ls-headbar-height: 3rem;
+    --ls-main-content-max-width: 960px;
+    --ls-block-properties-background-color: #013540;
+    --ls-page-mark-bg-color: #4d422f;
+    --ls-page-mark-color: #e8d68a;
+    --ls-font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+html, body {
+    background: var(--ls-primary-background-color);
+    color: var(--ls-primary-text-color);
+    font-family: var(--ls-font-family);
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+}
+.ls-shell {
+    display: grid;
+    grid-template-rows: var(--ls-headbar-height) 1fr;
+    height: 100vh;
+}
+.ls-shell .ls-header {
+    position: sticky; top: 0;
+    display: flex; align-items: center; gap: 0.5em;
+    padding: 0 0.75em;
+    background: var(--ls-primary-background-color);
+    border-bottom: 1px solid var(--ls-border-color);
+    z-index: 30;
+    user-select: none;
+}
+.ls-shell .ls-header .ls-app-title {
+    font-weight: 600;
+    color: var(--ls-active-primary-color);
+    letter-spacing: 0.04em;
+}
+.ls-shell .ls-header .ls-search {
+    flex: 1; max-width: 520px;
+    padding: 0.3em 0.75em;
+    background: var(--ls-secondary-background-color);
+    border: 1px solid var(--ls-border-color);
+    border-radius: 0.4em;
+    color: var(--ls-primary-text-color);
+    outline: none;
+}
+.ls-shell .ls-header .ls-search:focus {
+    border-color: var(--ls-active-primary-color);
+}
+.ls-shell .ls-header .ls-spacer { flex: 1; }
+.ls-shell .ls-header .ls-status {
+    font-size: 0.75rem;
+    color: var(--ls-secondary-text-color);
+    padding: 0.15em 0.5em;
+    border: 1px solid var(--ls-border-color);
+    border-radius: 0.3em;
+}
+.ls-shell .ls-body {
+    display: grid;
+    grid-template-columns: var(--ls-left-sidebar-width) 1fr auto;
+    overflow: hidden;
+}
+.ls-shell .ls-left-sidebar {
+    background: var(--ls-secondary-background-color);
+    border-right: 1px solid var(--ls-border-color);
+    overflow-y: auto;
+    padding: 0.75em 0;
+    font-size: 0.9em;
+}
+.ls-shell .ls-nav-item {
+    display: flex; align-items: center; gap: 0.5em;
+    padding: 0.35em 1em;
+    color: var(--ls-primary-text-color);
+    cursor: pointer;
+    user-select: none;
+    text-decoration: none;
+}
+.ls-shell .ls-nav-item:hover {
+    background: var(--ls-quaternary-background-color);
+}
+.ls-shell .ls-nav-item.active {
+    background: var(--ls-quaternary-background-color);
+    color: var(--ls-active-primary-color);
+}
+.ls-shell .ls-nav-icon {
+    width: 1.2em;
+    text-align: center;
+    color: var(--ls-secondary-text-color);
+}
+.ls-shell .ls-sidebar-section {
+    margin-top: 1em;
+    padding: 0 1em;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ls-secondary-text-color);
+    user-select: none;
+}
+.ls-shell .ls-page-list { margin: 0.25em 0; }
+.ls-shell .ls-page-link {
+    display: block;
+    padding: 0.25em 1em;
+    color: var(--ls-primary-text-color);
+    cursor: pointer;
+    user-select: none;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-decoration: none;
+}
+.ls-shell .ls-page-link:hover { color: var(--ls-active-primary-color); background: var(--ls-quaternary-background-color); }
+.ls-shell .ls-page-link.active { color: var(--ls-active-primary-color); }
+.ls-shell .ls-main {
+    overflow-y: auto;
+    padding: 2em 0 6em;
+    background: var(--ls-primary-background-color);
+}
+.ls-shell .ls-main-inner {
+    max-width: var(--ls-main-content-max-width);
+    margin: 0 auto;
+    padding: 0 2em;
+}
+.ls-shell .ls-page-title {
+    font-size: var(--ls-page-title-size);
+    font-weight: 500;
+    color: var(--ls-primary-text-color);
+    margin: 0 0 1em;
+    line-height: 1.2;
+    outline: none;
+}
+.ls-shell .ls-page-title:focus { border-bottom: 1px solid var(--ls-active-primary-color); }
+.ls-shell .ls-block {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+}
+.ls-shell .ls-block-children {
+    margin-left: 1.4em;
+    border-left: 1px solid var(--ls-border-color);
+    padding-left: 0.5em;
+}
+.ls-shell .ls-block-row {
+    display: flex; align-items: flex-start; gap: 0.4em;
+    padding: 0.1em 0;
+    width: 100%;
+}
+.ls-shell .ls-fold {
+    width: 0.9em; flex-shrink: 0;
+    color: var(--ls-secondary-text-color);
+    cursor: pointer; user-select: none;
+    font-size: 0.7em;
+    line-height: 1.6;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+.ls-shell .ls-block:hover .ls-fold { opacity: 1; }
+.ls-shell .ls-fold.has-children { opacity: 0.7; }
+.ls-shell .ls-fold.has-children:hover { opacity: 1; color: var(--ls-active-primary-color); }
+.ls-shell .ls-bullet {
+    width: 1.2em;
+    height: 1.2em;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+}
+.ls-shell .ls-bullet-dot {
+    width: 6px; height: 6px;
+    background: var(--ls-block-bullet-color);
+    border-radius: 50%;
+    transition: all 0.1s;
+}
+.ls-shell .ls-bullet:hover .ls-bullet-dot {
+    background: var(--ls-block-bullet-active-color);
+    width: 9px; height: 9px;
+}
+.ls-shell .ls-bullet.has-children .ls-bullet-dot {
+    background: var(--ls-block-bullet-active-color);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--ls-block-bullet-active-color) 18%, transparent);
+}
+.ls-shell .ls-block-content {
+    flex: 1;
+    min-width: 0;
+    min-height: 1.5em;
+    line-height: 1.5;
+    padding: 0.05em 0;
+    color: var(--ls-primary-text-color);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.ls-shell .ls-block-content[contenteditable="true"] {
+    outline: none;
+    background: var(--ls-secondary-background-color);
+    border-radius: 0.2em;
+    padding: 0.05em 0.4em;
+    margin: -0.05em -0.4em;
+}
+.ls-shell .ls-block-empty {
+    color: var(--ls-secondary-text-color);
+    opacity: 0.5;
+}
+.ls-shell .ls-block-heading-1 { font-size: 1.8em; font-weight: 600; margin: 0.5em 0 0.2em; }
+.ls-shell .ls-block-heading-2 { font-size: 1.5em; font-weight: 600; margin: 0.4em 0 0.2em; }
+.ls-shell .ls-block-heading-3 { font-size: 1.25em; font-weight: 600; margin: 0.3em 0 0.2em; }
+.ls-shell .ls-block-heading-4 { font-size: 1.1em; font-weight: 600; }
+.ls-shell .ls-block-heading-5 { font-size: 1em; font-weight: 600; }
+.ls-shell .ls-block-heading-6 { font-size: 0.9em; font-weight: 600; }
+.ls-shell .ls-block-content a.wikilink {
+    color: var(--ls-link-text-color);
+    text-decoration: none;
+    cursor: pointer;
+}
+.ls-shell .ls-block-content a.wikilink:hover { color: var(--ls-link-text-hover-color); text-decoration: underline; }
+.ls-shell .ls-block-content a.wikilink.broken { color: var(--ls-tag-text-color); opacity: 0.7; text-decoration: underline dotted; }
+.ls-shell .ls-block-content a.block-ref,
+.ls-shell .ls-block-content span.block-ref {
+    background: var(--ls-tertiary-background-color);
+    border: 1px solid var(--ls-border-color);
+    padding: 0.05em 0.4em;
+    border-radius: 0.3em;
+    font-size: 0.9em;
+    color: var(--ls-link-text-color);
+    text-decoration: none;
+}
+.ls-shell .ls-block-content a.block-ref:hover { color: var(--ls-link-text-hover-color); border-color: var(--ls-active-primary-color); }
+.ls-shell .ls-block-content code {
+    background: var(--ls-tertiary-background-color);
+    border: 1px solid var(--ls-border-color);
+    padding: 0.05em 0.35em;
+    border-radius: 0.2em;
+    font-size: 0.9em;
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+}
+.ls-shell .ls-task-marker {
+    display: inline-block;
+    padding: 0 0.4em;
+    border-radius: 0.25em;
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-right: 0.4em;
+    vertical-align: 0.1em;
+    border: 1px solid transparent;
+}
+.ls-shell .ls-task-marker.todo { background: color-mix(in srgb, var(--ls-active-primary-color) 12%, transparent); color: var(--ls-active-primary-color); border-color: color-mix(in srgb, var(--ls-active-primary-color) 30%, transparent); }
+.ls-shell .ls-task-marker.doing,
+.ls-shell .ls-task-marker.now { background: color-mix(in srgb, #f59e0b 18%, transparent); color: #f59e0b; border-color: color-mix(in srgb, #f59e0b 35%, transparent); }
+.ls-shell .ls-task-marker.done { background: color-mix(in srgb, #10b981 14%, transparent); color: #10b981; border-color: color-mix(in srgb, #10b981 30%, transparent); }
+.ls-shell .ls-task-marker.later,
+.ls-shell .ls-task-marker.waiting { background: var(--ls-tertiary-background-color); color: var(--ls-secondary-text-color); border-color: var(--ls-border-color); }
+.ls-shell .ls-task-marker.cancelled { background: color-mix(in srgb, #f87171 14%, transparent); color: #f87171; border-color: color-mix(in srgb, #f87171 30%, transparent); text-decoration: line-through; }
+.ls-shell .ls-block-plan {
+    display: flex; gap: 0.4em; margin: 0.1em 0 0 1.6em;
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    font-size: 0.7rem;
+}
+.ls-shell .ls-plan-pill {
+    display: inline-flex;
+    border: 1px solid var(--ls-border-color);
+    border-radius: 0.25em;
+    overflow: hidden;
+}
+.ls-shell .ls-plan-pill .ls-plan-key { padding: 0.05em 0.45em; background: var(--ls-tertiary-background-color); color: var(--ls-secondary-text-color); font-weight: 700; }
+.ls-shell .ls-plan-pill .ls-plan-val { padding: 0.05em 0.5em; }
+.ls-shell .ls-plan-pill.deadline .ls-plan-key { color: #f87171; }
+.ls-shell .ls-block-props {
+    display: flex; flex-wrap: wrap; gap: 0.4em;
+    margin: 0.1em 0 0.2em 1.6em;
+    font-size: 0.75rem;
+}
+.ls-shell .ls-prop-chip {
+    display: inline-flex;
+    border: 1px solid var(--ls-border-color);
+    border-radius: 0.25em;
+    overflow: hidden;
+}
+.ls-shell .ls-prop-chip .ls-prop-key { padding: 0.05em 0.45em; background: var(--ls-tertiary-background-color); color: var(--ls-secondary-text-color); font-weight: 600; }
+.ls-shell .ls-prop-chip .ls-prop-val { padding: 0.05em 0.5em; }
+"#;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeftPanel {
+    Journals,
+    AllPages,
+}
+
+/// Newtype wrapper so we can pass `Arc<CrdtDoc>` as a Dioxus
+/// prop. `CrdtDoc` doesn't impl `PartialEq` (it's a CRDT with
+/// internal mutability); we compare by Arc pointer identity,
+/// which is sufficient because we hold one Arc per shell session.
+#[derive(Clone)]
+struct DocHandle(Arc<CrdtDoc>);
+
+impl PartialEq for DocHandle {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub struct LogseqVault {
+    pub pages: Vec<Page>,
+    pub blocks: Vec<Block>,
+}
+
+#[component]
+pub fn LogseqShell() -> Element {
+    let doc: Signal<Arc<CrdtDoc>> = use_signal(|| Arc::new(CrdtDoc::ephemeral()));
+    let version: Signal<u64> = use_signal(|| 0u64);
+    let active_page: Signal<Option<Uuid>> = use_signal(|| None);
+    let panel: Signal<LeftPanel> = use_signal(|| LeftPanel::Journals);
+
+    // Seed the doc with demo data the first time we render. Same
+    // path the live outliner uses — keeps content offline-first.
+    let doc_for_seed = doc.read().clone();
+    let mut version_for_seed = version;
+    use_hook(move || {
+        let doc = doc_for_seed.clone();
+        spawn(async move {
+            if !crate::seed::doc_has_pages(&doc).await {
+                if let Err(e) = crate::seed::seed_demo(doc.clone()).await {
+                    tracing::warn!(?e, "demo seed failed");
+                }
+                version_for_seed.with_mut(|v| *v += 1);
+            }
+        });
+    });
+
+    // Subscribe to local commits so the shell re-renders when
+    // CRDT state changes (typing, indent, etc).
+    let doc_for_sub = doc.read().clone();
+    let mut version_for_sub = version;
+    use_hook(move || {
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+        let sub = doc_for_sub
+            .loro()
+            .subscribe_local_update(Box::new(move |_b| {
+                let _ = tx.unbounded_send(());
+                true
+            }));
+        std::mem::forget(sub);
+        spawn(async move {
+            use futures::StreamExt;
+            while rx.next().await.is_some() {
+                version_for_sub.with_mut(|v| *v += 1);
+            }
+        });
+    });
+
+    // Snapshot — rebuilt on every commit via a Signal. Lists
+    // pages + blocks for the active doc. Re-fires whenever
+    // `version` ticks (local commit). We use a Signal+spawn here
+    // instead of `use_resource` because the resource's `Result`
+    // value doesn't impl `PartialEq` on the error path, and we
+    // want a plain `LogseqVault` to thread into components.
+    let vault_signal: Signal<LogseqVault> = use_signal(LogseqVault::default);
+    {
+        let doc_for_load = doc.read().clone();
+        let mut vault_w = vault_signal;
+        use_effect(move || {
+            let _v = version.read();
+            let doc = doc_for_load.clone();
+            spawn(async move {
+                if let Ok(v) = load_vault(doc).await {
+                    vault_w.set(v);
+                }
+            });
+        });
+    }
+    let vault_data = vault_signal.read().clone();
+
+    // Resolvers for publish-core renderer.
+    let resolvers = build_resolvers(&vault_data);
+    use_context_provider(|| resolvers.wiki.clone());
+    use_context_provider(|| resolvers.block_refs.clone());
+    use_context_provider(|| resolvers.page_embeds.clone());
+    use_context_provider(|| resolvers.queries.clone());
+    use_context_provider(|| resolvers.namespaces.clone());
+
+    let mut active_page_w = active_page;
+    let mut panel_w = panel;
+    let doc_handle = DocHandle(doc.read().clone());
+
+    // Auto-select the first page when none is active.
+    {
+        let pages = vault_data.pages.clone();
+        use_effect(move || {
+            if active_page_w.peek().is_none() {
+                if let Some(p) = pages.first() {
+                    active_page_w.set(Some(p.id));
+                }
+            }
+        });
+    }
+
+    rsx! {
+        style { dangerous_inner_html: LOGSEQ_CSS }
+        div { class: "ls-shell",
+            div { class: "ls-header",
+                div { class: "ls-app-title", "Task" }
+                input {
+                    class: "ls-search",
+                    r#type: "search",
+                    placeholder: "Search… (Ctrl+K)",
+                }
+                div { class: "ls-spacer" }
+                div { class: "ls-status", "offline" }
+            }
+            div { class: "ls-body",
+                LeftSidebar {
+                    pages: vault_data.pages.clone(),
+                    active_page,
+                    panel,
+                    on_set_panel: move |p| panel_w.set(p),
+                    on_pick_page: move |id| active_page_w.set(Some(id)),
+                }
+                MainArea {
+                    doc: doc_handle.clone(),
+                    vault: vault_data.clone(),
+                    active_page,
+                    panel,
+                    on_pick_page: move |id| active_page_w.set(Some(id)),
+                    on_set_panel: move |p| panel_w.set(p),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct ResolverBundle {
+    wiki: WikiResolver,
+    block_refs: BlockRefResolver,
+    page_embeds: PageEmbedResolver,
+    queries: QueryResolver,
+    namespaces: NamespaceResolver,
+}
+
+fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
+    use std::collections::HashMap;
+    let mut basename_to_slug = HashMap::new();
+    let mut id_to_slug = HashMap::new();
+    let mut id_to_basename = HashMap::new();
+    for p in &vault.pages {
+        let slug = slugify(&p.basename);
+        basename_to_slug.insert(p.basename.to_lowercase(), slug.clone());
+        for alias in &p.aliases {
+            basename_to_slug
+                .entry(alias.to_lowercase())
+                .or_insert_with(|| slug.clone());
+        }
+        id_to_slug.insert(p.id, slug);
+        id_to_basename.insert(p.id, p.basename.clone());
+    }
+
+    let mut block_map: HashMap<Uuid, BlockRefTarget> = HashMap::new();
+    let mut embed_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut tag_map: HashMap<String, Vec<QueryHit>> = HashMap::new();
+    let mut ns_map: HashMap<String, Vec<QueryHit>> = HashMap::new();
+
+    let mut blocks_by_page: HashMap<Uuid, Vec<Block>> = HashMap::new();
+    for b in &vault.blocks {
+        blocks_by_page.entry(b.page_id).or_default().push(b.clone());
+        if let Some(slug) = id_to_slug.get(&b.page_id) {
+            block_map.insert(
+                b.id,
+                BlockRefTarget {
+                    page_slug: slug.clone(),
+                    snippet: snippet(&b.content, 80),
+                    content: b.content.clone(),
+                },
+            );
+        }
+    }
+    for (page_id, bs) in &mut blocks_by_page {
+        bs.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        let Some(p) = vault.pages.iter().find(|p| p.id == *page_id) else {
+            continue;
+        };
+        let contents: Vec<String> = bs.iter().take(50).map(|b| b.content.clone()).collect();
+        embed_map.insert(p.basename.to_lowercase(), contents);
+    }
+
+    // Tag index (best-effort scan)
+    for b in &vault.blocks {
+        let Some(page) = vault.pages.iter().find(|p| p.id == b.page_id) else {
+            continue;
+        };
+        for tag in extract_tags(&b.content) {
+            tag_map
+                .entry(tag.to_lowercase())
+                .or_default()
+                .push(QueryHit {
+                    slug: slugify(&page.basename),
+                    title: page.basename.clone(),
+                });
+        }
+    }
+    // Dedupe + sort tag hits.
+    for hits in tag_map.values_mut() {
+        hits.sort_by(|a, b| a.slug.cmp(&b.slug));
+        hits.dedup_by(|a, b| a.slug == b.slug);
+    }
+
+    // Namespace index
+    for p in &vault.pages {
+        if !p.basename.contains('/') {
+            continue;
+        }
+        let parts: Vec<&str> = p.basename.split('/').collect();
+        let slug = slugify(&p.basename);
+        for d in 1..parts.len() {
+            let prefix = parts[..d].join("/").to_lowercase();
+            ns_map.entry(prefix).or_default().push(QueryHit {
+                slug: slug.clone(),
+                title: p.basename.clone(),
+            });
+        }
+    }
+    for hits in ns_map.values_mut() {
+        hits.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    }
+
+    ResolverBundle {
+        wiki: WikiResolver(Arc::new(basename_to_slug)),
+        block_refs: BlockRefResolver(Arc::new(block_map)),
+        page_embeds: PageEmbedResolver(Arc::new(embed_map)),
+        queries: QueryResolver(Arc::new(tag_map)),
+        namespaces: NamespaceResolver(Arc::new(ns_map)),
+    }
+}
+
+fn snippet(s: &str, max: usize) -> String {
+    let joined: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if joined.chars().count() > max {
+        joined.chars().take(max).collect::<String>() + "…"
+    } else if joined.is_empty() {
+        "…".into()
+    } else {
+        joined
+    }
+}
+
+fn extract_tags(s: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'#' && (i == 0 || bytes[i - 1].is_ascii_whitespace()) {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric()
+                    || bytes[end] == b'-'
+                    || bytes[end] == b'_'
+                    || bytes[end] == b'/')
+            {
+                end += 1;
+            }
+            if end > start {
+                tags.push(s[start..end].to_string());
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    tags
+}
+
+async fn load_vault(doc: Arc<CrdtDoc>) -> Result<LogseqVault, String> {
+    let pr = PageRepoLoro::new(&doc);
+    let br = BlockRepoLoro::new(&doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let pages = pr
+        .list(big.clone(), None, None)
+        .await
+        .map_err(|e| format!("page list: {e}"))?
+        .items;
+    let blocks = br
+        .list(big, None, None)
+        .await
+        .map_err(|e| format!("block list: {e}"))?
+        .items;
+    Ok(LogseqVault { pages, blocks })
+}
+
+#[component]
+fn LeftSidebar(
+    pages: Vec<Page>,
+    active_page: Signal<Option<Uuid>>,
+    panel: Signal<LeftPanel>,
+    on_set_panel: EventHandler<LeftPanel>,
+    on_pick_page: EventHandler<Uuid>,
+) -> Element {
+    let mut sorted = pages.clone();
+    sorted.sort_by(|a, b| a.basename.to_lowercase().cmp(&b.basename.to_lowercase()));
+    let active = *active_page.read();
+    let panel_cur = *panel.read();
+
+    rsx! {
+        nav { class: "ls-left-sidebar",
+            div {
+                class: if panel_cur == LeftPanel::Journals { "ls-nav-item active" } else { "ls-nav-item" },
+                onclick: move |_| on_set_panel.call(LeftPanel::Journals),
+                span { class: "ls-nav-icon", "◐" }
+                "Journals"
+            }
+            div {
+                class: if panel_cur == LeftPanel::AllPages { "ls-nav-item active" } else { "ls-nav-item" },
+                onclick: move |_| on_set_panel.call(LeftPanel::AllPages),
+                span { class: "ls-nav-icon", "▤" }
+                "All Pages"
+            }
+            div { class: "ls-nav-item",
+                span { class: "ls-nav-icon", "◇" }
+                "Graph"
+            }
+            div { class: "ls-sidebar-section", "Pages" }
+            div { class: "ls-page-list",
+                for p in sorted {
+                    {
+                        let id = p.id;
+                        let is_active = active == Some(id);
+                        let class_str = if is_active { "ls-page-link active" } else { "ls-page-link" };
+                        rsx! {
+                            a {
+                                key: "{id}",
+                                class: "{class_str}",
+                                onclick: move |_| on_pick_page.call(id),
+                                "{p.basename}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn MainArea(
+    doc: DocHandle,
+    vault: LogseqVault,
+    active_page: Signal<Option<Uuid>>,
+    panel: Signal<LeftPanel>,
+    on_pick_page: EventHandler<Uuid>,
+    on_set_panel: EventHandler<LeftPanel>,
+) -> Element {
+    let _ = on_set_panel;
+    let active = *active_page.read();
+    let panel_cur = *panel.read();
+
+    match panel_cur {
+        LeftPanel::AllPages => rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    h1 { class: "ls-page-title", "All Pages" }
+                    AllPagesGrid { vault: vault.clone(), on_pick_page }
+                }
+            }
+        },
+        LeftPanel::Journals => rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    if let Some(id) = active {
+                        if let Some(page) = vault.pages.iter().find(|p| p.id == id).cloned() {
+                            PageView {
+                                doc: doc.clone(),
+                                page: page.clone(),
+                                blocks: vault.blocks.iter().filter(|b| b.page_id == id).cloned().collect(),
+                                on_pick_page,
+                            }
+                        } else {
+                            div { class: "ls-block-empty", "Page not found." }
+                        }
+                    } else {
+                        div { class: "ls-block-empty", "Pick a page from the sidebar." }
+                    }
+                }
+            }
+        },
+    }
+}
+
+#[component]
+fn AllPagesGrid(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+    let mut sorted = vault.pages.clone();
+    sorted.sort_by(|a, b| a.basename.to_lowercase().cmp(&b.basename.to_lowercase()));
+    rsx! {
+        div {
+            style: "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5em;",
+            for p in sorted {
+                {
+                    let id = p.id;
+                    let block_count = vault.blocks.iter().filter(|b| b.page_id == id).count();
+                    let count_label = if block_count == 1 {
+                        "1 block".to_string()
+                    } else {
+                        format!("{block_count} blocks")
+                    };
+                    rsx! {
+                        div {
+                            key: "{id}",
+                            style: "border: 1px solid var(--ls-border-color); border-radius: 0.4em; padding: 0.6em 0.8em; background: var(--ls-secondary-background-color); cursor: pointer;",
+                            onclick: move |_| on_pick_page.call(id),
+                            div { style: "font-weight: 600; color: var(--ls-active-primary-color);", "{p.basename}" }
+                            div { style: "font-size: 0.75rem; color: var(--ls-secondary-text-color); margin-top: 0.2em;",
+                                "{count_label}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PageView(
+    doc: DocHandle,
+    page: Page,
+    blocks: Vec<Block>,
+    on_pick_page: EventHandler<Uuid>,
+) -> Element {
+    let _ = doc;
+    let mut sorted = blocks.clone();
+    sorted.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let tree = build_block_tree(&sorted);
+
+    rsx! {
+        h1 { class: "ls-page-title", "{page.basename}" }
+        if let Some(day) = page.journal_day.as_ref() {
+            div { style: "color: var(--ls-secondary-text-color); margin-top: -0.5em; margin-bottom: 1em;",
+                "{day}"
+            }
+        }
+        div { class: "ls-block-tree",
+            for node in tree {
+                LogseqBlockNode {
+                    key: "{node.block.id}",
+                    node: node.clone(),
+                    depth: 0,
+                    on_pick_page,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct BlockNodeTree {
+    block: Block,
+    children: Vec<BlockNodeTree>,
+}
+
+fn build_block_tree(blocks: &[Block]) -> Vec<BlockNodeTree> {
+    use std::collections::HashMap;
+    let mut by_parent: HashMap<Option<Uuid>, Vec<Block>> = HashMap::new();
+    for b in blocks {
+        by_parent
+            .entry(b.parent_block_id)
+            .or_default()
+            .push(b.clone());
+    }
+    for v in by_parent.values_mut() {
+        v.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    }
+    build_tree_recursive(None, &by_parent)
+}
+
+fn build_tree_recursive(
+    parent: Option<Uuid>,
+    map: &std::collections::HashMap<Option<Uuid>, Vec<Block>>,
+) -> Vec<BlockNodeTree> {
+    map.get(&parent)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| {
+            let children = build_tree_recursive(Some(b.id), map);
+            BlockNodeTree { block: b, children }
+        })
+        .collect()
+}
+
+#[component]
+fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler<Uuid>) -> Element {
+    let _ = on_pick_page;
+    let has_children = !node.children.is_empty();
+    let block = node.block.clone();
+    let block_id = block.id;
+
+    rsx! {
+        div { class: "ls-block",
+            "data-block-id": "{block_id}",
+            div { class: "ls-block-row",
+                div {
+                    class: if has_children { "ls-fold has-children" } else { "ls-fold" },
+                    if has_children { "▾" } else { "" }
+                }
+                div { class: if has_children { "ls-bullet has-children" } else { "ls-bullet" },
+                    div { class: "ls-bullet-dot" }
+                }
+                LogseqBlockBody { block: block.clone() }
+            }
+            if has_children {
+                div { class: "ls-block-children",
+                    for c in node.children.clone() {
+                        LogseqBlockNode {
+                            key: "{c.block.id}",
+                            node: c,
+                            depth: depth + 1,
+                            on_pick_page,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn LogseqBlockBody(block: Block) -> Element {
+    let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
+    let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
+    let page_embeds = try_use_context::<PageEmbedResolver>().unwrap_or_default();
+    let queries = try_use_context::<QueryResolver>().unwrap_or_default();
+    let namespaces = try_use_context::<NamespaceResolver>().unwrap_or_default();
+
+    let (marker, after_marker) = publish_core::peel_task_marker(&block.content);
+    let (plan, after_plan) = publish_core::peel_planning(after_marker);
+    let inlines = publish_core::parse(
+        after_plan,
+        &resolver,
+        &block_refs,
+        &page_embeds,
+        &queries,
+        &namespaces,
+    );
+    let chips = publish_core::parse_props(&block.properties_json);
+
+    let kind = block.kind.clone();
+    let heading_class = if kind == "heading" {
+        let level = block.heading_level.unwrap_or(1).clamp(1, 6);
+        format!("ls-block-content ls-block-heading-{level}")
+    } else {
+        "ls-block-content".to_string()
+    };
+
+    let marker_cls = marker.map(|m| match m {
+        publish_core::TaskMarker::Todo => "todo",
+        publish_core::TaskMarker::Doing => "doing",
+        publish_core::TaskMarker::Done => "done",
+        publish_core::TaskMarker::Later => "later",
+        publish_core::TaskMarker::Now => "now",
+        publish_core::TaskMarker::Waiting => "waiting",
+        publish_core::TaskMarker::Cancelled => "cancelled",
+    });
+    let marker_label = marker.map(|m| m.label());
+    let is_empty = inlines.is_empty();
+
+    rsx! {
+        div { style: "flex: 1; min-width: 0;",
+            div { class: "{heading_class}",
+                if let (Some(label), Some(cls)) = (marker_label, marker_cls) {
+                    span { class: "ls-task-marker {cls}", "{label}" }
+                }
+                if is_empty {
+                    span { class: "ls-block-empty", "—" }
+                } else {
+                    for (i, n) in inlines.into_iter().enumerate() {
+                        InlineNode { key: "{i}", node: n }
+                    }
+                }
+            }
+            if !plan.scheduled.is_empty() || !plan.deadline.is_empty() {
+                div { class: "ls-block-plan",
+                    if !plan.scheduled.is_empty() {
+                        span { class: "ls-plan-pill",
+                            span { class: "ls-plan-key", "SCHEDULED" }
+                            span { class: "ls-plan-val", "{plan.scheduled}" }
+                        }
+                    }
+                    if !plan.deadline.is_empty() {
+                        span { class: "ls-plan-pill deadline",
+                            span { class: "ls-plan-key", "DEADLINE" }
+                            span { class: "ls-plan-val", "{plan.deadline}" }
+                        }
+                    }
+                }
+            }
+            if !chips.is_empty() {
+                div { class: "ls-block-props",
+                    for (k, v) in chips {
+                        span { key: "{k}", class: "ls-prop-chip",
+                            span { class: "ls-prop-key", "{k}" }
+                            span { class: "ls-prop-val", "{v}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_tags_basic() {
+        let tags = extract_tags("Hello #demo and #foo/bar end");
+        assert_eq!(tags, vec!["demo".to_string(), "foo/bar".to_string()]);
+    }
+
+    #[test]
+    fn extract_tags_skips_in_word() {
+        let tags = extract_tags("not#a tag here");
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn snippet_truncates() {
+        let s = "a".repeat(120);
+        let got = snippet(&s, 80);
+        assert!(got.chars().count() <= 81);
+        assert!(got.ends_with('…'));
+    }
+
+    #[test]
+    fn build_block_tree_nests_by_parent() {
+        let vault_id = Uuid::nil();
+        let page_id = Uuid::new_v4();
+        let parent_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        let now = Utc::now();
+        let mk = |id: Uuid, parent: Option<Uuid>, sort_key: &str| Block {
+            id,
+            vault_id,
+            page_id,
+            parent_block_id: parent,
+            sort_key: sort_key.into(),
+            kind: "paragraph".into(),
+            content: format!("{id}"),
+            heading_level: None,
+            list_ordered: false,
+            list_task: None,
+            code_lang: None,
+            callout_kind: None,
+            callout_foldable: false,
+            properties_json: "{}".into(),
+            obsidian_block_id: None,
+            collapsed: false,
+            refs_json: "[]".into(),
+            canvas_node_json: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let blocks = vec![mk(parent_id, None, "a"), mk(child_id, Some(parent_id), "a")];
+        let tree = build_block_tree(&blocks);
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].block.id, parent_id);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].block.id, child_id);
+    }
+}

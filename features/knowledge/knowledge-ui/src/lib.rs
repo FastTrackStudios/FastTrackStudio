@@ -12,6 +12,7 @@ pub mod awareness;
 pub mod idb_persistence;
 pub mod inline_md;
 pub mod live;
+pub mod logseq_shell;
 pub mod outliner;
 pub mod properties_pane;
 pub mod query;
@@ -22,6 +23,7 @@ pub mod view_mode;
 pub mod views;
 
 pub use live::{KnowledgeLive, KnowledgeSnapshot, KnowledgeView};
+pub use logseq_shell::LogseqShell;
 pub use properties_pane::PropertiesPane;
 pub use tasks_kanban::TasksKanbanLive;
 pub use views::{KindCalendar, KindGallery, KindKanban, KindList};

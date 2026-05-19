@@ -2,13 +2,9 @@
 //! to the knowledge-ui live component.
 
 use dioxus::prelude::*;
-use knowledge_ui::KnowledgeLive;
+use knowledge_ui::LogseqShell;
 
 #[component]
 pub fn KnowledgeView() -> Element {
-    rsx! {
-        KnowledgeLive {
-            vox_url: crate::vox_session::vox_url(),
-        }
-    }
+    rsx! { LogseqShell {} }
 }
