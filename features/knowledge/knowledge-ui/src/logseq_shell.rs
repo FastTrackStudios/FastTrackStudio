@@ -513,6 +513,7 @@ pub fn LogseqShell() -> Element {
     let mut active_page_w = active_page;
     let mut panel_w = panel;
     let doc_handle = DocHandle(doc.read().clone());
+    use_context_provider(|| doc_handle.clone());
 
     // Editing surface — which block is in edit mode, plus per-
     // block ops (update content, indent, outdent, new sibling,
@@ -607,6 +608,22 @@ pub fn LogseqShell() -> Element {
             }
         });
     }
+
+    // Recent pages — newest first, deduped, capped at 8.
+    let recent_pages: Signal<Vec<Uuid>> = use_signal(Vec::new);
+    {
+        let mut recents_w = recent_pages;
+        use_effect(move || {
+            if let Some(id) = *active_page.read() {
+                let mut cur = recents_w.peek().clone();
+                cur.retain(|x| *x != id);
+                cur.insert(0, id);
+                cur.truncate(8);
+                recents_w.set(cur);
+            }
+        });
+    }
+    use_context_provider(|| RecentsState(recent_pages));
 
     rsx! {
         style { dangerous_inner_html: LOGSEQ_CSS }
@@ -934,6 +951,36 @@ fn LeftSidebar(
                 span { class: "ls-nav-icon", "◇" }
                 "Graph"
             }
+            {
+                let recents = try_use_context::<RecentsState>().map(|r| r.0.read().clone()).unwrap_or_default();
+                if !recents.is_empty() {
+                    rsx! {
+                        div { class: "ls-sidebar-section", "Recent" }
+                        div { class: "ls-page-list",
+                            for id in recents {
+                                {
+                                    let p = pages.iter().find(|p| p.id == id).cloned();
+                                    if let Some(p) = p {
+                                        let pid = p.id;
+                                        let is_active = active == Some(pid);
+                                        let cls = if is_active { "ls-page-link active" } else { "ls-page-link" };
+                                        rsx! {
+                                            a {
+                                                key: "{pid}",
+                                                class: "{cls}",
+                                                onclick: move |_| on_pick_page.call(pid),
+                                                "{p.basename}"
+                                            }
+                                        }
+                                    } else { rsx! {} }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {}
+                }
+            }
             div { class: "ls-sidebar-section",
                 style: "display: flex; justify-content: space-between; align-items: center;",
                 span { "Pages" }
@@ -1160,17 +1207,77 @@ fn PageView(
                 }
             }
         }
-        div { class: "ls-block-tree",
-            for node in tree_to_show {
-                LogseqBlockNode {
-                    key: "{node.block.id}",
-                    node: node.clone(),
-                    depth: 0,
-                    on_pick_page,
+        if tree_to_show.is_empty() {
+            EmptyPagePlaceholder { page_id: page.id }
+        } else {
+            div { class: "ls-block-tree",
+                for node in tree_to_show {
+                    LogseqBlockNode {
+                        key: "{node.block.id}",
+                        node: node.clone(),
+                        depth: 0,
+                        on_pick_page,
+                    }
                 }
             }
         }
         BacklinksSection { page: page.clone(), vault: vault_for_backlinks, on_pick_page }
+    }
+}
+
+#[component]
+fn EmptyPagePlaceholder(page_id: Uuid) -> Element {
+    // Inline button that creates the page's first block + drops
+    // into edit mode so the user can start typing immediately.
+    let doc_ctx = try_use_context::<DocHandle>();
+    let editing_id = try_use_context::<Signal<Option<Uuid>>>();
+    let on_start = move |_e: Event<MouseData>| {
+        let Some(handle) = doc_ctx.clone() else {
+            return;
+        };
+        let mut editing = editing_id;
+        spawn(async move {
+            // Find the vault id from any existing block on this
+            // page (none) or fall back to first vault.
+            let vault_id = first_vault_id(&handle.0).await.unwrap_or(Uuid::nil());
+            let br = BlockRepoLoro::new(&handle.0);
+            match br
+                .create(BlockCreate {
+                    vault_id,
+                    page_id,
+                    parent_block_id: None,
+                    sort_key: "m".into(),
+                    kind: "paragraph".into(),
+                    content: String::new(),
+                    heading_level: None,
+                    list_ordered: false,
+                    list_task: None,
+                    code_lang: None,
+                    callout_kind: None,
+                    callout_foldable: false,
+                    properties_json: "{}".into(),
+                    obsidian_block_id: None,
+                    collapsed: false,
+                    refs_json: "[]".into(),
+                    canvas_node_json: None,
+                })
+                .await
+            {
+                Ok(b) => {
+                    if let Some(mut e) = editing.as_mut() {
+                        e.set(Some(b.id));
+                    }
+                }
+                Err(e) => tracing::warn!(?e, "create first block failed"),
+            }
+        });
+    };
+    rsx! {
+        div {
+            style: "padding: 1em; color: var(--ls-secondary-text-color); cursor: text; border: 1px dashed var(--ls-border-color); border-radius: 0.5em; margin: 1em 0;",
+            onclick: on_start,
+            "Click to start writing."
+        }
     }
 }
 
@@ -1629,6 +1736,10 @@ pub(crate) struct CommandPaletteState(pub Signal<Option<String>>);
 /// Right-click block context menu position. `(block_id, x, y)`.
 #[derive(Clone, Copy)]
 pub(crate) struct BlockMenuState(pub Signal<Option<(Uuid, i32, i32)>>);
+
+/// MRU list of recently-visited pages.
+#[derive(Clone, Copy)]
+pub(crate) struct RecentsState(pub Signal<Vec<Uuid>>);
 
 /// One pane in the right sidebar's stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
