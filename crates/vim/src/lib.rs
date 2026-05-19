@@ -527,6 +527,42 @@ mod tests {
     }
 
     #[test]
+    fn d_in_visual_line_emits_delete_selection_and_exits() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('V'));
+        let acts = e.feed(DioxusKey::Char('d'));
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(
+            acts.iter().any(|a| matches!(a, VimAction::DeleteSelection)),
+            "expected DeleteSelection, got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn y_in_visual_line_emits_yank_selection_and_exits() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('V'));
+        let acts = e.feed(DioxusKey::Char('y'));
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(
+            acts.iter().any(|a| matches!(a, VimAction::YankSelection)),
+            "expected YankSelection, got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn x_in_visual_line_is_alias_for_d() {
+        let mut e = VimEngine::default();
+        e.feed(DioxusKey::Char('V'));
+        let acts = e.feed(DioxusKey::Char('x'));
+        assert_eq!(e.mode(), VimMode::Normal);
+        assert!(
+            acts.iter().any(|a| matches!(a, VimAction::DeleteSelection)),
+            "expected DeleteSelection via x, got {acts:?}"
+        );
+    }
+
+    #[test]
     fn escape_clears_pending_operator() {
         let mut e = VimEngine::default();
         e.feed(DioxusKey::Char('f'));

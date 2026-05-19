@@ -145,6 +145,15 @@ pub enum VimAction {
     /// [`VimEngine::search_buffer`] to read the pattern. After
     /// submit the buffer stays alive so `n` / `N` can replay it.
     SubmitSearch,
+
+    /// `d` / `x` in VisualLine — delete every block in the host's
+    /// current selection range. Engine doesn't track selection;
+    /// host iterates its own anchor/cursor span.
+    DeleteSelection,
+
+    /// `y` in VisualLine — yank every block in the host's current
+    /// selection range into the host's register.
+    YankSelection,
 }
 
 /// Closed set of ex-style commands the engine recognizes. Hosts

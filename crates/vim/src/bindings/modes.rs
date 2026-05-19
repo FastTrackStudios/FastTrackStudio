@@ -45,6 +45,30 @@ pub fn register(m: &mut VimMachine) {
         (None, Some(VimMode::Search)),
     );
 
+    // d / x in VisualLine — delete the selected blocks and exit to
+    // Normal. Engine emits the action; host applies it to its
+    // anchor→cursor range.
+    bind(
+        m,
+        VimMode::VisualLine,
+        &[ch('d')],
+        (Some(VimAction::DeleteSelection), Some(VimMode::Normal)),
+    );
+    bind(
+        m,
+        VimMode::VisualLine,
+        &[ch('x')],
+        (Some(VimAction::DeleteSelection), Some(VimMode::Normal)),
+    );
+    // y in VisualLine — yank the selected blocks into the host's
+    // register and exit to Normal.
+    bind(
+        m,
+        VimMode::VisualLine,
+        &[ch('y')],
+        (Some(VimAction::YankSelection), Some(VimMode::Normal)),
+    );
+
     // Esc — Insert/Visual/VisualLine → Normal.
     bind(
         m,
