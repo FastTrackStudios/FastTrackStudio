@@ -421,20 +421,153 @@ fn short_uuid(id: &Uuid) -> String {
     id.simple().to_string().chars().take(8).collect()
 }
 
-/// Evaluate a `{{query <expr>}}` body against a resolver. v1
-/// supports a single form: `#<tag>` which returns all pages
-/// tagged with that tag, lowercased. Returns `(results, broken)`;
-/// broken = true when the expression isn't a form we recognize.
-fn eval_query(expr: &str, queries: &QueryResolver) -> (Vec<QueryHit>, bool) {
-    let trimmed = expr.trim();
-    if let Some(tag) = trimmed.strip_prefix('#') {
-        let key = tag.trim().to_lowercase();
-        if let Some(hits) = queries.0.get(&key) {
-            return (hits.clone(), false);
-        }
-        return (Vec::new(), false); // known shape, just no results
+/// Evaluate a `{{query <expr>}}` body against a resolver.
+///
+/// Grammar:
+/// - `#<tag>`                — pages tagged `tag`
+/// - `(and <expr> <expr>…)`  — set intersection
+/// - `(or  <expr> <expr>…)`  — set union
+/// - `(not <expr>)`          — complement against the resolver
+///                             universe (pages with at least one tag)
+///
+/// Returns `(results, broken)`. `broken = true` only when the
+/// expression is structurally unrecognizable; `false` covers
+/// "known shape but no matches."
+pub fn eval_query(expr: &str, queries: &QueryResolver) -> (Vec<QueryHit>, bool) {
+    match parse_query_expr(expr.trim()) {
+        Some(qe) => (eval_parsed(&qe, queries), false),
+        None => (Vec::new(), true),
     }
-    (Vec::new(), true)
+}
+
+/// AST for the query mini-language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryExpr {
+    Tag(String),
+    And(Vec<QueryExpr>),
+    Or(Vec<QueryExpr>),
+    Not(Box<QueryExpr>),
+}
+
+/// Top-level parser entry. Returns `None` on malformed input.
+pub fn parse_query_expr(s: &str) -> Option<QueryExpr> {
+    let s = s.trim();
+    if s.starts_with('#') {
+        let tag = s[1..].trim();
+        if tag.is_empty() {
+            return None;
+        }
+        return Some(QueryExpr::Tag(tag.to_lowercase()));
+    }
+    if s.starts_with('(') && s.ends_with(')') {
+        let inner = &s[1..s.len() - 1];
+        let mut tokens = tokenize_sexp(inner)?;
+        if tokens.is_empty() {
+            return None;
+        }
+        let head = tokens.remove(0);
+        match head.as_str() {
+            "and" => {
+                let args: Option<Vec<QueryExpr>> =
+                    tokens.iter().map(|t| parse_query_expr(t)).collect();
+                args.map(QueryExpr::And)
+            }
+            "or" => {
+                let args: Option<Vec<QueryExpr>> =
+                    tokens.iter().map(|t| parse_query_expr(t)).collect();
+                args.map(QueryExpr::Or)
+            }
+            "not" => {
+                if tokens.len() != 1 {
+                    return None;
+                }
+                parse_query_expr(&tokens[0]).map(|e| QueryExpr::Not(Box::new(e)))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Tokenize the body of an s-expression into top-level tokens,
+/// respecting nested `()` groups. Whitespace separates tokens
+/// outside of parens.
+fn tokenize_sexp(s: &str) -> Option<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                buf.push(c);
+            }
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+                buf.push(c);
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                if !buf.is_empty() {
+                    out.push(std::mem::take(&mut buf));
+                }
+            }
+            _ => buf.push(c),
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    if !buf.is_empty() {
+        out.push(buf);
+    }
+    Some(out)
+}
+
+fn eval_parsed(expr: &QueryExpr, queries: &QueryResolver) -> Vec<QueryHit> {
+    match expr {
+        QueryExpr::Tag(t) => queries.0.get(t).cloned().unwrap_or_default(),
+        QueryExpr::And(children) => {
+            if children.is_empty() {
+                return Vec::new();
+            }
+            let mut acc = eval_parsed(&children[0], queries);
+            for c in &children[1..] {
+                let set = eval_parsed(c, queries);
+                acc.retain(|h| set.iter().any(|s| s.slug == h.slug));
+            }
+            dedupe_sort(acc)
+        }
+        QueryExpr::Or(children) => {
+            let mut acc: Vec<QueryHit> = Vec::new();
+            for c in children {
+                acc.extend(eval_parsed(c, queries));
+            }
+            dedupe_sort(acc)
+        }
+        QueryExpr::Not(inner) => {
+            let exclude = eval_parsed(inner, queries);
+            // Universe = every page hit across the resolver.
+            let mut universe: Vec<QueryHit> = Vec::new();
+            for hits in queries.0.values() {
+                universe.extend(hits.iter().cloned());
+            }
+            let universe = dedupe_sort(universe);
+            universe
+                .into_iter()
+                .filter(|u| !exclude.iter().any(|x| x.slug == u.slug))
+                .collect()
+        }
+    }
+}
+
+fn dedupe_sort(mut v: Vec<QueryHit>) -> Vec<QueryHit> {
+    v.sort_by(|a, b| a.slug.cmp(&b.slug));
+    v.dedup_by(|a, b| a.slug == b.slug);
+    v
 }
 
 #[cfg(test)]
@@ -649,7 +782,7 @@ mod tests {
     #[test]
     fn query_unknown_form_is_broken() {
         let n = parse(
-            "{{query (and #x #y)}}",
+            "{{query (xor #x #y)}}",
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
@@ -659,7 +792,7 @@ mod tests {
         let broken = n
             .iter()
             .any(|x| matches!(x, Node::Query { broken: true, .. }));
-        assert!(broken, "v1 doesn't understand (and ...); should be broken");
+        assert!(broken, "xor isn't a supported operator; should be broken");
     }
 
     #[test]
@@ -788,6 +921,76 @@ mod tests {
         );
         let pe = n.iter().find(|x| matches!(x, Node::PageEmbed { .. }));
         assert!(pe.is_some(), "expected PageEmbed, got {n:?}");
+    }
+
+    #[test]
+    fn query_dsl_and_intersection() {
+        let mut q = HashMap::new();
+        q.insert("a".to_string(), vec![hit("p1"), hit("p2"), hit("p3")]);
+        q.insert("b".to_string(), vec![hit("p2"), hit("p3"), hit("p4")]);
+        let qr = QueryResolver(Arc::new(q));
+        let (results, broken) = eval_query("(and #a #b)", &qr);
+        assert!(!broken);
+        let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["p2", "p3"]);
+    }
+
+    #[test]
+    fn query_dsl_or_union() {
+        let mut q = HashMap::new();
+        q.insert("a".to_string(), vec![hit("p1"), hit("p2")]);
+        q.insert("b".to_string(), vec![hit("p2"), hit("p3")]);
+        let qr = QueryResolver(Arc::new(q));
+        let (results, broken) = eval_query("(or #a #b)", &qr);
+        assert!(!broken);
+        let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["p1", "p2", "p3"]);
+    }
+
+    #[test]
+    fn query_dsl_not_complement() {
+        let mut q = HashMap::new();
+        q.insert("a".to_string(), vec![hit("p1"), hit("p2")]);
+        q.insert("b".to_string(), vec![hit("p2"), hit("p3")]);
+        let qr = QueryResolver(Arc::new(q));
+        // Universe = {p1, p2, p3}; not #a → {p3}
+        let (results, broken) = eval_query("(not #a)", &qr);
+        assert!(!broken);
+        let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["p3"]);
+    }
+
+    #[test]
+    fn query_dsl_nested_and_or() {
+        let mut q = HashMap::new();
+        q.insert("a".to_string(), vec![hit("p1"), hit("p2")]);
+        q.insert("b".to_string(), vec![hit("p3"), hit("p4")]);
+        q.insert("c".to_string(), vec![hit("p2"), hit("p3")]);
+        let qr = QueryResolver(Arc::new(q));
+        // (and (or #a #b) #c) → pages tagged c AND (a OR b)
+        // c={p2,p3}; (a OR b)={p1,p2,p3,p4}; intersection={p2,p3}
+        let (results, broken) = eval_query("(and (or #a #b) #c)", &qr);
+        assert!(!broken);
+        let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["p2", "p3"]);
+    }
+
+    #[test]
+    fn query_dsl_malformed_marks_broken() {
+        let qr = QueryResolver(Arc::new(HashMap::new()));
+        let (_, broken) = eval_query("(unknown #x)", &qr);
+        assert!(broken);
+        let (_, broken) = eval_query("(and #x", &qr);
+        assert!(broken);
+        let (_, broken) = eval_query("just text", &qr);
+        assert!(broken);
+    }
+
+    fn hit(slug: &str) -> QueryHit {
+        QueryHit {
+            slug: slug.into(),
+            title: slug.into(),
+        }
     }
 
     #[test]

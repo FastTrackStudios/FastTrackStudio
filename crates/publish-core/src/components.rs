@@ -664,6 +664,86 @@ pub fn peel_planning(content: &str) -> (PlanningTimestamps, &str) {
 /// sorted list of `(key, display)` pairs. JSON objects are the
 /// only supported shape; anything else returns empty. Values are
 /// stringified compactly so they fit in a chip or table cell.
+/// One drawer section parsed out of block content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Drawer {
+    /// Drawer name (the token between `:`s on the opening line),
+    /// uppercase. Common names: `LOGBOOK`, `PROPERTIES`.
+    pub name: String,
+    /// Lines between the opening `:NAME:` and the closing `:END:`,
+    /// joined by newlines. Empty when the drawer was empty.
+    pub body: String,
+}
+
+/// Strip `:NAME: … :END:` drawer sections from block content.
+/// Returns the extracted drawers (in source order) plus the
+/// content with those sections removed.
+///
+/// Logseq uses drawers for things like LOGBOOK (time tracking
+/// entries) and PROPERTIES (Org-mode-style legacy block props).
+/// We surface them as structured data so the renderer can show
+/// each drawer as a collapsible section.
+pub fn peel_drawers(content: &str) -> (Vec<Drawer>, String) {
+    let mut drawers: Vec<Drawer> = Vec::new();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut iter = content.lines();
+    while let Some(line) = iter.next() {
+        if let Some(name) = drawer_open(line) {
+            // Consume lines until `:END:` (case-insensitive).
+            let mut body: Vec<&str> = Vec::new();
+            let mut closed = false;
+            for inner in iter.by_ref() {
+                if drawer_close(inner) {
+                    closed = true;
+                    break;
+                }
+                body.push(inner);
+            }
+            if closed {
+                drawers.push(Drawer {
+                    name,
+                    body: body.join("\n"),
+                });
+                continue;
+            } else {
+                // Unclosed drawer — preserve the opening line as
+                // literal content so the user doesn't lose data.
+                kept.push(line);
+                kept.extend(body);
+            }
+        } else {
+            kept.push(line);
+        }
+    }
+    (drawers, kept.join("\n"))
+}
+
+/// Match an opening drawer line `:NAME:` (allow surrounding
+/// whitespace). Returns the uppercased name on match.
+fn drawer_open(line: &str) -> Option<String> {
+    let t = line.trim();
+    if t.starts_with(':') && t.ends_with(':') && t.len() >= 3 {
+        let inner = &t[1..t.len() - 1];
+        if inner.eq_ignore_ascii_case("END") {
+            return None;
+        }
+        // Drawer names: word characters, dash, underscore.
+        if !inner.is_empty()
+            && inner
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Some(inner.to_ascii_uppercase());
+        }
+    }
+    None
+}
+
+fn drawer_close(line: &str) -> bool {
+    let t = line.trim();
+    t.eq_ignore_ascii_case(":END:")
+}
+
 /// Strip Logseq-style `key:: value` property lines from block
 /// content. Returns the parsed properties as a sorted JSON
 /// object string (the same shape `properties_json` carries on
@@ -1167,5 +1247,44 @@ mod tests {
         let (json, rest) = peel_block_properties("just text\nmore text");
         assert_eq!(json, "{}");
         assert_eq!(rest, "just text\nmore text");
+    }
+
+    #[test]
+    fn peel_drawers_logbook() {
+        let content = "task body\n:LOGBOOK:\nCLOCK: 2026-05-19 09:00\nCLOCK: 2026-05-19 11:30\n:END:\nmore body";
+        let (drawers, rest) = peel_drawers(content);
+        assert_eq!(drawers.len(), 1);
+        assert_eq!(drawers[0].name, "LOGBOOK");
+        assert!(drawers[0].body.contains("CLOCK: 2026-05-19 09:00"));
+        assert_eq!(rest, "task body\nmore body");
+    }
+
+    #[test]
+    fn peel_drawers_case_insensitive_end() {
+        // `:end:` lowercase should still close.
+        let (drawers, rest) = peel_drawers(":NOTES:\nhello\n:end:");
+        assert_eq!(drawers.len(), 1);
+        assert_eq!(drawers[0].name, "NOTES");
+        assert_eq!(drawers[0].body, "hello");
+        assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn peel_drawers_unclosed_preserved_as_content() {
+        // No `:END:` → entire chunk stays as literal content so
+        // the user doesn't lose data.
+        let (drawers, rest) = peel_drawers(":LOGBOOK:\nclock entry\nmore text");
+        assert!(drawers.is_empty());
+        assert_eq!(rest, ":LOGBOOK:\nclock entry\nmore text");
+    }
+
+    #[test]
+    fn peel_drawers_multiple_sections() {
+        let content = ":PROPERTIES:\nid:: abc\n:END:\nbody\n:LOGBOOK:\nclock\n:END:\ntail";
+        let (drawers, rest) = peel_drawers(content);
+        assert_eq!(drawers.len(), 2);
+        assert_eq!(drawers[0].name, "PROPERTIES");
+        assert_eq!(drawers[1].name, "LOGBOOK");
+        assert_eq!(rest, "body\ntail");
     }
 }
