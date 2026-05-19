@@ -191,6 +191,24 @@ pub enum ContentType {
     // ── Markers ─────────────────────────────────────────────────────────
     /// Individual entry block within the marker / track-list hierarchy
     MarkerEntry = 0x2619,
+
+    // ── Groups (PT 12+) ─────────────────────────────────────────────────
+    /// Edit-groups list block (one per session when any groups are defined).
+    /// Contains a per-track membership table followed by a flat sequence of
+    /// `[u32 namelen][utf-8 name][i16 color]` entries. See
+    /// `docs/converter-frida-discovered-offsets.md` §"`0x4501` / `0x4702`".
+    EditGroupList = 0x4501,
+    /// Stem-mapping list (PT 12+'s "Stem Mapping" feature). Flat list of
+    /// `[u32 namelen][utf-8 name]` entries; starts with built-in stem types
+    /// `Dialog`/`Music`/`Effects`/`Narration`. Used to categorize tracks
+    /// for stem export.
+    StemMappingList = 0x4702,
+
+    /// Internal (non-audio) track entry — Aux Input / Internal Bus / Master
+    /// Fader / Click track. One block per internal track. Name lives at
+    /// payload `+0x1d` (= magic + `0x24`) as a length-prefixed string;
+    /// 6-byte routing UID at `+0x29..+0x2e`.
+    InternalTrackEntry = 0x261e,
 }
 
 impl ContentType {
@@ -272,6 +290,10 @@ impl ContentType {
             0x2029 => Some(Self::MeterBlock),
 
             0x2619 => Some(Self::MarkerEntry),
+
+            0x4501 => Some(Self::EditGroupList),
+            0x4702 => Some(Self::StemMappingList),
+            0x261e => Some(Self::InternalTrackEntry),
 
             _ => None,
         }

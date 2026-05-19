@@ -26,13 +26,22 @@ use std::path::Path;
 /// ```
 pub fn read_session(path: impl AsRef<Path>, target_sample_rate: u32) -> PtResult<ProToolsSession> {
     let mut data = std::fs::read(path.as_ref())?;
+    read_session_from_bytes(data.clone(), target_sample_rate).or_else(|_| {
+        // Fall back to the in-place mutation path if the cloned-buffer
+        // route ever returns an error so the public API stays
+        // permissive.
+        parse::parse_session(&mut data, target_sample_rate)
+    })
+}
 
-    // If target_sample_rate is 0, we'll detect it from the file and use 1:1
-    let target = if target_sample_rate == 0 {
-        0 // parse_session will detect and use session rate
-    } else {
-        target_sample_rate
-    };
-
-    parse::parse_session(&mut data, target)
+/// Parse a Pro Tools session from raw bytes (already-read file content).
+///
+/// Useful for testing write-side round-trips without touching the
+/// filesystem: encrypt a `RawSession`, hand the bytes to
+/// `read_session_from_bytes`, and verify the parsed `ProToolsSession`.
+pub fn read_session_from_bytes(
+    mut data: Vec<u8>,
+    target_sample_rate: u32,
+) -> PtResult<ProToolsSession> {
+    parse::parse_session(&mut data, target_sample_rate)
 }

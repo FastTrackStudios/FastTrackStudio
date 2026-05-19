@@ -143,10 +143,14 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     volume_centibel: 0,
                     mute: false,
                     solo: false,
+                    solo_defeat: false,
+                    inactive: false,
                     pan: 0,
                     alternate_playlists: Vec::new(),
                     output: String::new(),
                     color_byte: 0,
+                    volume_automation: Vec::new(),
+                    mute_automation: Vec::new(),
                     is_folder: false,
                 },
                 channel_pos: ch,
@@ -196,6 +200,9 @@ fn assign_regions_old(
             tracks[track_idx].regions.push(TrackRegion {
                 region_index: raw_index,
                 start_pos: region.start_pos,
+                clip_flag_53: false,
+                clip_muted: false,
+                clip_color: None,
             });
         }
 
@@ -279,6 +286,35 @@ fn collect_slot_regions(
         let is_fade =
             track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01;
 
+        // Per-clip flag at 0x1050 +53 (u8). Discovered via Frida.
+        // 0x1050 is the parent (the track_entry itself).
+        // `track_entry.offset` points at content_type (= magic + 7),
+        // so +53 from offset = +46 from payload start in our parser's
+        // terms = file offset block.offset.saturating_sub(7) + 53.
+        let clip_flag_53 = {
+            let magic = track_entry.offset.saturating_sub(7);
+            data.get(magic + 53).copied().unwrap_or(0) != 0
+        };
+        // Per-clip state from inner 0x104f sub-block. Verified via
+        // Frida probe-and-diff:
+        //   - clip mute at `0x104f +9` u8
+        //   - clip color (palette index) at `0x104f +25..+26` i16 LE
+        let (clip_color, clip_muted) = {
+            let mut color: Option<i16> = None;
+            let mut muted = false;
+            for child in &track_entry.children {
+                if child.content_type_raw == 0x104f {
+                    let magic = child.offset.saturating_sub(7);
+                    if magic + 27 <= data.len() {
+                        muted = data[magic + 9] != 0;
+                        color = Some(i16::from_le_bytes([data[magic + 25], data[magic + 26]]));
+                    }
+                    break;
+                }
+            }
+            (color, muted)
+        };
+
         for sub_entry in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
             let raw_offset = sub_entry.offset + 4;
             if raw_offset + 4 > data.len() {
@@ -335,6 +371,9 @@ fn collect_slot_regions(
                 slot_regions.push(TrackRegion {
                     region_index: raw_index,
                     start_pos: start,
+                    clip_flag_53,
+                    clip_color,
+                    clip_muted,
                 });
             }
         }

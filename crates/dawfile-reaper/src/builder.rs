@@ -868,6 +868,12 @@ impl TrackBuilder {
         self
     }
 
+    /// Set the solo-defeat flag (this track ignores others' solo state).
+    pub fn solo_defeated(mut self) -> Self {
+        self.ensure_mutesolo().solo_defeat = true;
+        self
+    }
+
     /// Mark track as selected.
     pub fn selected(mut self) -> Self {
         self.track.selected = true;

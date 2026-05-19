@@ -41,6 +41,81 @@ pub struct ProToolsSession {
     pub plugins: Vec<PluginEntry>,
     /// I/O channels configured in the session's Hardware Setup and I/O Setup.
     pub io_channels: Vec<IoChannel>,
+    /// I/O routing entries from `0x2602` blocks. PT sessions typically
+    /// contain hundreds of entries; filter to `active == true` for the
+    /// live routings. See [`RoutingEntry`].
+    pub routing_entries: Vec<RoutingEntry>,
+    /// Edit groups (PT 12+) decoded from the session's `0x4501` block.
+    /// Empty when the session has no groups defined. Per-track membership
+    /// not yet decoded — only group names + colors are populated.
+    /// See [`EditGroup`].
+    pub edit_groups: Vec<EditGroup>,
+    /// Stem-mapping classifications (PT 12+) decoded from the session's
+    /// `0x4702` block. Built-in entries start with `Dialog`, `Music`,
+    /// `Effects`, `Narration`. Empty when the session has no mapping.
+    pub stem_mappings: Vec<String>,
+    /// Internal (non-audio) tracks of the session — aux returns, internal
+    /// buses, the master fader, the click metronome track. PT stores these
+    /// separately from the audio/MIDI track lists. Decoded from `0x261e`
+    /// blocks; see [`InternalTrack`].
+    pub internal_tracks: Vec<InternalTrack>,
+}
+
+/// An "internal" PT track — anything that's not an audio or MIDI playback
+/// track. Covers Aux Input, Internal Bus, Master Fader, and the Click track.
+///
+/// Decoded from per-session `0x261e` blocks. Name lives at payload offset
+/// `+0x24` (length-prefixed string). A 6-byte routing UID at `+0x32..+0x37`
+/// links to a `0x2602` routing entry. The kind (aux/bus/master/click) is
+/// not yet decoded — needs more probes to enumerate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InternalTrack {
+    /// Track name as authored in PT (e.g. `"Master"`, `"DRUMS"`, `"Click 1"`).
+    pub name: String,
+    /// 6-byte routing UID. Maps to the `destination_uid` of a
+    /// [`RoutingEntry`] when this track is a routing target.
+    pub routing_uid: [u8; 6],
+}
+
+/// A Pro Tools edit group (PT 12+).
+///
+/// Decoded from the flat name list inside `0x4501`. Per-track membership
+/// information lives in the same block's prefix and is not yet decoded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditGroup {
+    /// Group name as authored in PT.
+    pub name: String,
+    /// Group color palette index. `Some(-2)` (i.e. `0xFFFE` raw) is the
+    /// default "no color" sentinel used elsewhere in the format. Other
+    /// values index the same palette as `Track.color_byte`.
+    pub color: Option<i16>,
+}
+
+/// An I/O routing entry decoded from a `0x2602` block in the session's
+/// routing list. Each entry records one source→destination assignment.
+///
+/// Discovered via Frida byte-read trace on `routing-examples.ptx` and
+/// the LotF session. The block has hundreds of entries on a typical
+/// session — `+10` is the "active" flag (1 = used, 0 = unused); only
+/// entries with `+10 == 1` represent live routings.
+///
+/// Other fields here are surfaced as raw bytes pending semantic
+/// verification (see `docs/converter-frida-discovered-offsets.md`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoutingEntry {
+    /// File offset of the `0x2602` block (block magic position). Useful
+    /// for cross-referencing with raw block tooling.
+    pub block_start: usize,
+    /// `0x2602 +10` u8 boolean — 1 means the routing entry is in use.
+    pub active: bool,
+    /// `0x2602 +33` u8 — secondary flag (varies; semantics TBD).
+    pub flag_33: u8,
+    /// `0x2602 +36` u8 — observed 0/1 alongside active entries.
+    pub flag_36: u8,
+    /// `0x2602 +47..+52` (6 bytes) — suspected destination UID.
+    /// Pattern matches the source-file UID style seen in regions:
+    /// each entry has a distinct 6-byte value when active.
+    pub destination_uid: [u8; 6],
 }
 
 /// A reference to an audio file used in the session.
@@ -52,6 +127,12 @@ pub struct AudioFile {
     pub index: u16,
     /// Length in samples.
     pub length: u64,
+    /// 6-byte UID of the file entry (`0x1003` block payload `+38..+44`
+    /// — i.e. `+45..+51` from block magic, between sentinels `0x2A`
+    /// and `0x80`). Discovered via Frida byte-read trace on the LotF
+    /// session — each file entry has a stable 6-byte UID. Used for
+    /// region → file resolution alongside `AudioRegion.source_file_uid`.
+    pub source_uid: Option<[u8; 6]>,
 }
 
 /// An audio region on the timeline.
@@ -69,6 +150,12 @@ pub struct AudioRegion {
     pub length: u64,
     /// Index of the source audio file in [`ProToolsSession::audio_files`].
     pub audio_file_index: u16,
+    /// 6-byte UID identifying the source audio file. Regions that
+    /// reference the same WAV share this UID. Decoded from payload
+    /// `+54..+60` of the region's inner `0x2628` sub-block —
+    /// discovered via Frida byte-read trace on the LotF user session.
+    /// See `docs/converter-frida-discovered-offsets.md`.
+    pub source_file_uid: Option<[u8; 6]>,
 }
 
 /// A MIDI event within a MIDI region.
@@ -148,10 +235,40 @@ pub struct Track {
     pub volume_centibel: i32,
     /// `true` if the track is muted in PT's Mix window. Decoded from `0x1029` `+5`.
     pub mute: bool,
-    /// `true` if the track is soloed in PT's Mix window. Decoded from
-    /// `0x102d` `+162` (u8). Verified via RPP→PTX probe: `t.soloed()`
-    /// produces `+162 = 0x01`; baseline `0x00`. See `docs/pt-field-map.md`.
+    /// `true` if the track is soloed in PT's Mix window.
+    /// Decoded from `0x102d` `+162` (u8). Verified via RPP→PTX probe:
+    /// `t.soloed()` produces `+162 = 0x01`; baseline `0x00`.
+    /// See `docs/pt-field-map.md`.
     pub solo: bool,
+    /// `true` if the track has solo-defeat set (track ignores other
+    /// tracks' solo state — i.e. always plays even when something else
+    /// is soloed).
+    ///
+    /// Decoded from `0x200b` `+268` (u8). Verified via RPP→PTX probe:
+    /// `t.solo_defeated()` produces `+268 = 0x01`; baseline `0x00`.
+    /// Mirror also at `0x200a +259`. See `docs/pt-field-map.md`.
+    pub solo_defeat: bool,
+    /// `true` if the track appears to be in PT's "Inactive"/bounced-source
+    /// state.
+    ///
+    /// Heuristic: `(0x1029 +5 == 1) AND (0x260a[0] +8 == 1)`. PT sets
+    /// the stored-mute bit AND keeps the send routing enabled for
+    /// tracks that have been marked inactive (e.g. via "Make Inactive"
+    /// menu or "Bounce to Disk → New Track"). Truly user-muted tracks
+    /// have `+5=1 AND +8=0` (send cleared too).
+    ///
+    /// This is the COMPLEMENT of the `mute_resolver` filter: any
+    /// track filtered OUT of `mute=true` because its `+8` was non-zero
+    /// is reported here as `inactive`.
+    ///
+    /// Verified on LotF: the 12 tracks the converter reports as
+    /// MUTESOLO 0 despite +5=1 (SYZ, AC GTR x2, El Gtr 1, Bass Demo,
+    /// MIDI 1, Inst 1 + dups + .02 variants) all match this pattern.
+    ///
+    /// CAVEAT: ground-truth verification requires a PT-authored
+    /// session that we know has explicit inactive tracks. Until then
+    /// this is our best inference of PT's `PTXTrackStateSpec.active`.
+    pub inactive: bool,
     /// Pan position. `-100` = full L, `0` = center, `+100` = full R.
     /// Decoded from `0x1029` `+13` (i32 LE).
     pub pan: i32,
@@ -179,6 +296,25 @@ pub struct Track {
     /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
     /// to REAPER's u32 RGB.
     pub color_byte: u8,
+    /// Volume-automation breakpoints decoded from this track's `0x260a[0]`
+    /// (the first `0x260a` child of the per-track `0x260d` wrapper).
+    ///
+    /// Format: 22-byte header, 6-byte implicit breakpoint at +22, then
+    /// `user_count` breakpoints at +28. Each is
+    /// `u32 LE time_samples + i16 LE value_centibel`.
+    pub volume_automation: Vec<VolumeAutomationBreakpoint>,
+    /// Mute-automation breakpoints decoded from this track's `0x260a[1]`
+    /// (the second `0x260a` under the per-track `0x260d` wrapper —
+    /// position-paired by PT's track-list document order).
+    ///
+    /// Format: 28-byte header, then `N × 6` breakpoint bytes. Each
+    /// breakpoint is `u32 LE time_samples + u8 muted (0/1) + u8 shape`.
+    /// Header `+10` is total count (`1 + user_count`), `+16` is user
+    /// count, `+4` is payload size. See `docs/pt-field-map.md` §
+    /// "Additional probe findings — mute_envelope".
+    ///
+    /// Empty when the track has no automation envelope.
+    pub mute_automation: Vec<MuteAutomationBreakpoint>,
     /// Hierarchy / grouping marker decoded from `0x251a` payload byte
     /// (immediately after the length-prefixed track name).
     ///
@@ -195,6 +331,34 @@ pub struct Track {
     /// We surface the raw byte until a `folder-nesting.ptx` ground-truth
     /// fixture lets us disambiguate `is_folder` vs `is_grouped_child`.
     pub is_folder: bool,
+}
+
+/// A single breakpoint in a volume-automation envelope.
+///
+/// Decoded from `0x260a[0]` per track. Six bytes per point:
+/// `u32 LE time_samples + i16 LE value_centibel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VolumeAutomationBreakpoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// Volume in 0.1 dB units (centibel). `0` = unity; `-60` = -6 dB.
+    pub value_centibel: i16,
+}
+
+/// A single breakpoint in a mute-automation envelope.
+///
+/// Decoded from `0x260a[1]` per track. Six bytes per point:
+/// `u32 LE time_samples + u8 muted + u8 shape`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MuteAutomationBreakpoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// `true` = muted at this time, `false` = un-muted.
+    pub muted: bool,
+    /// Shape byte. `0` = step/square; values verified against REAPER
+    /// `MUTEENV` Square shape only — non-zero shapes are passed
+    /// through verbatim but their semantics are not yet decoded.
+    pub shape: u8,
 }
 
 /// A fade region on a track.
@@ -240,6 +404,25 @@ pub struct TrackRegion {
     pub region_index: u16,
     /// Start position override (if the track assignment overrides the region's start).
     pub start_pos: u64,
+    /// Per-clip flag from `0x1050 +53` (u8 boolean). Semantics not
+    /// fully verified — observed value `1` on rare clips and `0` on
+    /// most. Discovered via Frida byte-read trace on LotF.
+    /// See `docs/converter-frida-discovered-offsets.md`.
+    pub clip_flag_53: bool,
+    /// Per-clip mute state from `0x104f +9` u8. `true` = muted clip.
+    /// Verified via Frida byte-read trace: `clip_muted` probe
+    /// (REAPER item with `.muted()` + real WAV source) produces
+    /// `1` at this byte; `clip_with_wav` produces `0`.
+    pub clip_muted: bool,
+    /// Per-clip color palette index from the inner `0x104f` sub-block
+    /// at payload `+16..+17` (i16 LE). `None` = no `0x104f` child
+    /// present. `Some(-2)` = default/no color. Other values map to
+    /// the same 23×3 PT palette as `Track.color_byte`.
+    ///
+    /// Discovered via Frida byte-read trace; `0x104f` lives at start
+    /// of `0x1050` payload. Field locations within `0x104f` partly
+    /// verified (+25/+26 read as i16 LE `FE FF` = -2 for default).
+    pub clip_color: Option<i16>,
 }
 
 /// A single constant-tempo segment on the session timeline.
@@ -281,6 +464,10 @@ pub struct Marker {
     pub tick_pos: u64,
     /// Position in samples at the session's target sample rate.
     pub sample_pos: u64,
+    /// Marker color as RGB. `None` = default / uncolored. Decoded from
+    /// the per-marker `0x4826` block at payload `+2..+8` (three u16 LE
+    /// triplets, low byte = component).
+    pub color_rgb: Option<(u8, u8, u8)>,
 }
 
 /// A plugin / insert registered in the session's global plugin list.
@@ -331,6 +518,15 @@ pub struct IoChannel {
     pub io_class: u8,
     /// Number of audio channels (1 = mono, 2 = stereo).
     pub channel_count: u8,
+    /// 6-byte UID at `0x1021 +46`. Routing entries (`RoutingEntry`)
+    /// reference channels by this UID via their `destination_uid`
+    /// field — match by `IoChannel.uid == RoutingEntry.destination_uid`
+    /// to resolve a routing assignment to a hardware channel.
+    ///
+    /// Discovered via Frida byte-read trace on LotF — the routing
+    /// dest UIDs were found also occurring inside `0x1021` blocks
+    /// at this offset.
+    pub uid: Option<[u8; 6]>,
 }
 
 /// Strongly-typed view of [`IoChannel::io_class`].
@@ -359,6 +555,25 @@ impl ProToolsSession {
     /// Iterate over every track in the session, audio first then MIDI.
     pub fn all_tracks(&self) -> impl Iterator<Item = &Track> {
         self.audio_tracks.iter().chain(self.midi_tracks.iter())
+    }
+
+    /// Resolve a `RoutingEntry`'s destination UID to the matching
+    /// `IoChannel`. Returns `None` if no channel has a matching UID
+    /// (the entry may point at a bus or internal target not yet
+    /// surfaced).
+    ///
+    /// Verified on LotF: routing entry[0] (`dest_uid=5ecac0f83a49`)
+    /// resolves to `"Analog 1-2"`, entry[1] to `"Analog 3-4"`, etc.
+    pub fn resolve_routing_destination(&self, entry: &RoutingEntry) -> Option<&IoChannel> {
+        self.io_channels
+            .iter()
+            .find(|ch| ch.uid == Some(entry.destination_uid))
+    }
+
+    /// Iterate only the ACTIVE routing entries (those with
+    /// `RoutingEntry.active == true`).
+    pub fn active_routings(&self) -> impl Iterator<Item = &RoutingEntry> {
+        self.routing_entries.iter().filter(|r| r.active)
     }
 
     /// Total active region placements across every audio + MIDI track.

@@ -48,8 +48,157 @@ fn build_rpp(probe: &str) -> String {
         "two_tracks" => {
             b = b.track("Alpha", |t| t).track("Beta", |t| t);
         }
+        "one_track_aaa" => {
+            // Single-track baseline with 3-char name, to compare against
+            // two_tracks_eq trk1 (also "AAA").
+            b = b.track("AAA", |t| t);
+        }
+        "two_tracks_eq" => {
+            // Equal-length names to eliminate the name-length byte-shift
+            // when diffing track1-vs-track2 byte ranges.
+            b = b.track("AAA", |t| t).track("BBB", |t| t);
+        }
+        "three_tracks" => {
+            b = b
+                .track("Alpha", |t| t)
+                .track("Beta", |t| t)
+                .track("Gamma", |t| t);
+        }
         "marker" => {
             b = b.track("ProbeTrack", |t| t).marker(1, 1.0, "M");
+        }
+        "marker_two" => {
+            b = b
+                .track("ProbeTrack", |t| t)
+                .marker(1, 1.0, "M1")
+                .marker(2, 2.5, "M2");
+        }
+        "marker_colored" => {
+            use dawfile_reaper::builder::MarkerBuilder;
+            b = b.track("ProbeTrack", |t| t).add_marker(
+                MarkerBuilder::marker(1, 1.0, "MColor")
+                    .color(0xd86e41 as i32)
+                    .build(),
+            );
+        }
+        "region" => {
+            b = b.track("ProbeTrack", |t| t).region(1, 0.5, 2.5, "R1");
+        }
+        "ten_plain" => {
+            for i in 1..=10 {
+                let n = format!("T{i:02}");
+                b = b.track(&n, |t| t);
+            }
+        }
+        "ten_muted" => {
+            for i in 1..=10 {
+                let n = format!("T{i:02}");
+                b = b.track(&n, |t| t.muted());
+            }
+        }
+        "solo_defeat" => {
+            b = b.track("ProbeTrack", |t| t.solo_defeated());
+        }
+        "fx_disabled" => {
+            b = b.track("ProbeTrack", |t| t.fx_disabled());
+        }
+        "mute_envelope" => {
+            // 2 breakpoints: mute on at t=0, off at t=1.0.
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                        .point(1.0, 1.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "mute_envelope_1pt" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "mute_envelope_3pt" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                        .point(1.0, 1.0, EnvelopePointShape::Square)
+                        .point(2.0, 0.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "mute_envelope_4pt" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("MUTEENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Square)
+                        .point(1.0, 1.0, EnvelopePointShape::Square)
+                        .point(2.0, 0.0, EnvelopePointShape::Square)
+                        .point(3.0, 1.0, EnvelopePointShape::Square)
+                })
+            });
+        }
+        "vol_envelope" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("VOLENV2", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 1.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
+        "pan_envelope" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("PANENV", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
+        "pan_envelope_2" => {
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("PANENV2", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+            });
+        }
+        "pan_envelope_lr" => {
+            // Some REAPER versions use separate L/R envelopes for stereo pan
+            use dawfile_reaper::types::envelope::EnvelopePointShape;
+            b = b.track("ProbeTrack", |t| {
+                t.envelope("PANENV2L", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, 0.5, EnvelopePointShape::Linear)
+                })
+                .envelope("PANENV2R", |e| {
+                    e.active()
+                        .visible()
+                        .point(0.0, 0.0, EnvelopePointShape::Linear)
+                        .point(1.0, -0.5, EnvelopePointShape::Linear)
+                })
+            });
         }
         "send" => {
             b = b.track("Source", |t| t).track("Dest", |t| t.receive(0));
@@ -65,6 +214,205 @@ fn build_rpp(probe: &str) -> String {
         "item_basic" => {
             // Track with one item
             b = b.track("ProbeTrack", |t| t.item(0.0, 1.0, |i| i.name("Clip")));
+        }
+        "clip_with_wav" => {
+            // Track with one item referencing a real WAV file. Converter
+            // requires real audio source to actually emit clip metadata.
+            b = b.track("ProbeTrack", |t| {
+                t.wave_item(0.0, 1.0, "/tmp/pt-re/input/clip_probe.wav")
+            });
+        }
+        "clip_muted" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").muted()
+                })
+            });
+        }
+        "clip_colored" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .color(0x6e41d8)
+                })
+            });
+        }
+        "clip_named" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .name("MyClip")
+                })
+            });
+        }
+        "clip_long_name" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .name("ThisIsALongerClipName")
+                })
+            });
+        }
+        "clip_fadein" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_in(0.25, FadeCurveType::Linear)
+                })
+            });
+        }
+        "clip_fadeout" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_out(0.25, FadeCurveType::Linear)
+                })
+            });
+        }
+        "clip_fadein_long" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_in(0.5, FadeCurveType::Linear)
+                })
+            });
+        }
+        "clip_fadein_xlong" => {
+            use dawfile_reaper::types::item::FadeCurveType;
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .fade_in(0.75, FadeCurveType::Linear)
+                })
+            });
+        }
+        "clip_pitch_up_2" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").pitch(2.0)
+                })
+            });
+        }
+        "clip_pitch_up_7" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").pitch(7.0)
+                })
+            });
+        }
+        "clip_pitch_down_3" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").pitch(-3.0)
+                })
+            });
+        }
+        "clip_slip_quarter" => {
+            // Item plays last 0.75s of source, starting at source-offset 0.25s
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.75, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .slip_offset(0.25)
+                })
+            });
+        }
+        "clip_slip_half" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.5, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .slip_offset(0.5)
+                })
+            });
+        }
+        "midi_one_note" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).note(0, 0, 60, 96, 480))
+                })
+            });
+        }
+        "midi_cc1_only" => {
+            // MIDI item with only a single CC#1 (modwheel) event, no notes
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).cc(0, 0, 1, 64))
+                })
+            });
+        }
+        "midi_cc1_value127" => {
+            // Same as midi_cc1_only but value 127
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).cc(0, 0, 1, 127))
+                })
+            });
+        }
+        "midi_cc7_volume" => {
+            // CC#7 (volume), value 100
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.midi(|m| m.ticks_per_qn(960).cc(0, 0, 7, 100))
+                })
+            });
+        }
+        "clip_slip_eighth" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.875, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .slip_offset(0.125)
+                })
+            });
+        }
+        "clip_playrate_half" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 2.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .playrate(0.5)
+                })
+            });
+        }
+        "clip_playrate_quarter" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 4.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .playrate(0.25)
+                })
+            });
+        }
+        "clip_playrate_double" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 0.5, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                        .playrate(2.0)
+                })
+            });
+        }
+        "clip_selected" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(0.0, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav").selected()
+                })
+            });
+        }
+        "clip_at_offset" => {
+            b = b.track("ProbeTrack", |t| {
+                t.item(2.5, 1.0, |i| {
+                    i.source_wave("/tmp/pt-re/input/clip_probe.wav")
+                })
+            });
+        }
+        "track_selected" => {
+            b = b.track("ProbeTrack", |t| t.selected());
+        }
+        "track_locked" => {
+            b = b.track("ProbeTrack", |t| t.locked());
+        }
+        "track_show_mixer" => {
+            // SHOWINMIX = 1: track visible in mixer
+            b = b.track("ProbeTrack", |t| t);
         }
         _ => panic!("unknown probe: {probe}"),
     }

@@ -220,3 +220,71 @@ fn tier1_total_helpers_consistent() {
         .sum();
     assert_eq!(s.total_active_region_placements(), manual);
 }
+
+#[test]
+fn internal_tracks_decoded_across_fixtures() {
+    // Counts verified manually via cross-fixture string sweep on 0x261e.
+    // See docs/converter-frida-discovered-offsets.md §"Phase E — internal
+    // tracks via real PT fixtures".
+    let cases = [
+        ("HeyLady.ptx", 1, "Click"),
+        ("studio-session-2.ptx", 6, "Master"),
+        ("worship-session.ptx", 7, "DRUMS"),
+        ("orchestral-session.ptx", 7, "Click 1"),
+        ("wonder-session.ptx", 16, "DRUMS"),
+    ];
+    for (fixture, expected_count, expected_name) in cases {
+        let s = read_session(fixture_path(fixture), 48000).expect("should parse");
+        assert_eq!(
+            s.internal_tracks.len(),
+            expected_count,
+            "{fixture}: wrong internal track count"
+        );
+        let names: Vec<&str> = s.internal_tracks.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            names.contains(&expected_name),
+            "{fixture}: missing expected internal track {expected_name:?}, got {names:?}"
+        );
+        // Routing UIDs must be non-zero on all entries.
+        for t in &s.internal_tracks {
+            assert!(
+                t.routing_uid.iter().any(|&b| b != 0),
+                "{fixture}: zero routing UID for {:?}",
+                t.name
+            );
+        }
+    }
+}
+
+#[test]
+fn edit_groups_decoded() {
+    // worship-session has the 4 built-in stem types as edit-group entries.
+    let s = read_session(fixture_path("worship-session.ptx"), 48000).unwrap();
+    let names: Vec<&str> = s.edit_groups.iter().map(|g| g.name.as_str()).collect();
+    for expected in ["Dialog", "Music", "Effects", "Narration"] {
+        assert!(
+            names.contains(&expected),
+            "worship-session missing edit group {expected:?}, got {names:?}"
+        );
+    }
+    // HeyLady has no 0x4501 block; the parser must surface an empty Vec
+    // (not panic, not over-read).
+    let h = read_session(fixture_path("HeyLady.ptx"), 48000).unwrap();
+    assert_eq!(
+        h.edit_groups.len(),
+        0,
+        "HeyLady has no edit groups; got {:?}",
+        h.edit_groups
+    );
+}
+
+#[test]
+fn stem_mappings_decoded() {
+    let s = read_session(fixture_path("orchestral-session.ptx"), 48000).unwrap();
+    // Built-in stem types appear at the top of orchestral's 0x4702.
+    let head: Vec<&str> = s.stem_mappings.iter().take(4).map(|n| n.as_str()).collect();
+    assert!(
+        head.contains(&"Dialog") && head.contains(&"Music") && head.contains(&"Effects"),
+        "orchestral stem_mappings should start with built-in stem types, got {head:?}"
+    );
+}

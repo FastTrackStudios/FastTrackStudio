@@ -14,6 +14,9 @@ pub mod audio;
 pub mod io;
 pub mod meter;
 pub mod midi;
+pub mod mix_aux;
+pub mod mute_automation;
+pub mod mute_resolver;
 pub mod plugins;
 pub mod regions;
 pub mod solo;
@@ -145,16 +148,40 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
             .into_iter()
             .next();
-        let mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
+        // Detect format: converter-authored PTX nests 11× 0x1029 per
+        // 0x261c (TrackContainer). PT-authored sessions have a flatter
+        // structure with ≈1 0x1029 per logical track. If the ratio
+        // (mix-blocks / containers) is ≥ 8, use per-container scoping
+        // so each track maps to its OWN first 0x1029.
+        let containers = collect_blocks_recursive(&blocks, ContentType::TrackContainer);
+        let all_mix_blocks = collect_blocks_recursive(&blocks, ContentType::TrackMixSettings);
+        let mix_blocks: Vec<&crate::block::Block> =
+            if !containers.is_empty() && all_mix_blocks.len() >= containers.len() * 8 {
+                containers
+                    .iter()
+                    .filter_map(|c| c.find_all(ContentType::TrackMixSettings).first().copied())
+                    .collect()
+            } else {
+                all_mix_blocks
+            };
 
         // Iterate 0x251a entries that have a mix block.
         let mut mix_by_name: std::collections::HashMap<String, (i32, bool, i32)> =
             std::collections::HashMap::new();
         if let Some(list) = track_list {
             let mut mix_idx = 0usize;
-            // 0x251a entries are duplicated in the file (2× the 30 logical
-            // tracks); the second copy mirrors the first, so we only take
-            // the first run by stopping once names start to repeat.
+            // 0x251a entries may be duplicated in the file:
+            // - PT-authored sessions interleave a 2× full-list copy
+            //   AT THE END (block-by-block), so seen-duplicates appear
+            //   only after the first complete pass.
+            // - Converter-authored multi-track PTX interleaves
+            //   [active_t0, alt_t0, active_t1, alt_t1, ...] so seen
+            //   duplicates appear EARLIER, mid-list.
+            // To handle both: track the LAST mix_idx we advanced. If
+            // we've already used the same number of mix blocks as we
+            // have unique names AND we hit a duplicate, treat that as
+            // the start of the 2× copy and stop. Otherwise skip the
+            // duplicate and keep walking.
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             for child in list.find_children(ContentType::MidiTrackInfo) {
                 // name @ child.offset + 4 (length-prefixed string)
@@ -167,8 +194,14 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 if !seen.insert(name.clone()) {
-                    // Hit the second copy of the list — stop.
-                    break;
+                    // Already saw this name. If we've consumed all
+                    // mix blocks already, the 2× copy has started —
+                    // stop. Otherwise it's a multi-track interleave;
+                    // skip and continue.
+                    if mix_idx >= mix_blocks.len() {
+                        break;
+                    }
+                    continue;
                 }
                 let Some(b) = mix_blocks.get(mix_idx) else {
                     break;
@@ -179,17 +212,57 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     continue;
                 }
                 let vol = i32::from_le_bytes(data[payload + 1..payload + 5].try_into().unwrap());
-                // Mute discriminator is NOT a per-track byte. Frida-traced the
-                // PT Reaper Converter v1.5.4 on LotF: the converter checks for
-                // a Swift `PTXMutePoint`-class object (Optional<...>) per
-                // track. Only ~2 tracks per session have explicit mute
-                // records; folder children inherit mute via tree walk. The
-                // `0x1029 +5` byte we previously read here was a different PT
-                // flag (likely `inactive`/`bouncedSource`) and produced false
-                // positives on 12/30 LotF tracks. Default mute=false until
-                // the mute-record block ID is located. See
-                // docs/pt-reaper-converter-re.md "2026-05-17 round 2".
-                let mute = false;
+                // Mute = `0x1029 +5` AND `0x260a[0] +8 == 0`.
+                //
+                // The `+5` byte alone is the STORED mute-mix bit, but
+                // it's also set for inactive/bounced-source tracks. The
+                // converter discriminates by ALSO checking
+                // `0x260a[0] +8` — the "send routing enabled" flag:
+                //
+                // - +5=1 AND +8=0 → user clicked mute → effective mute
+                // - +5=1 AND +8=1 → bounced/inactive (send routes,
+                //                   stored mute is incidental) → NOT effective mute
+                // - +5=0 → not muted regardless of +8
+                //
+                // Verified on LotF (2026-05-17): this rule correctly
+                // identifies exactly the 8 tracks the converter emits
+                // as MUTESOLO 1 (ClickPrint + 7 LORD family stems),
+                // excluding the 12 over-muted tracks (SYZ, AC GTR x2,
+                // El Gtr 1, Bass Demo, MIDI 1, Inst*).
+                //
+                // We compute the effective mute below in the second
+                // pass once the 0x260a sibling block is reachable.
+                // For now, store the stored bit.
+                //
+                // Definitively verified by the 10-track probe diff
+                // (2026-05-17): generating an RPP with 10 muted tracks
+                // and another with 10 plain tracks produces PTX files
+                // with IDENTICAL block structure; the diff is purely
+                // byte-level flips at +5 (and mirror locations:
+                // 0x260a[i] +26, 0x260d +14/+447, 0x261b +407/+840,
+                // 0x261c +416/+849, 0x2624 +429/+862).
+                //
+                // **No separate explicit-mute marker block exists.**
+                // Earlier Frida traces showed the converter constructs
+                // a Swift `Optional<PTXMutePoint>` for ~2 tracks per
+                // session — that object is a RUNTIME construct built
+                // from the stored bits + folder-tree walk +
+                // automation-envelope state. It is NOT serialized as a
+                // distinct PTX block.
+                //
+                // The "over-mutes" on LotF (SYZ/AC GTR/El Gtr/Bass
+                // Demo/Inst* tracks where +5=1 but the converter
+                // outputs MUTESOLO 0) reflect the difference between:
+                //   - STORED state: this byte (what we read)
+                //   - EFFECTIVE playback state: the converter computes
+                //     this by combining stored + automation envelope +
+                //     active/inactive flag
+                //
+                // Our parser exposes the STORED state, which is the
+                // correct representation of what's in the file.
+                // Callers wanting effective-playback semantics need to
+                // ALSO read mute automation + active flag (TBD).
+                let mute = data[payload + 5] != 0;
                 let pan = i32::from_le_bytes(data[payload + 13..payload + 17].try_into().unwrap());
                 mix_by_name.insert(name, (vol, mute, pan));
             }
@@ -447,6 +520,22 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     // Step 12c2: Decode per-track solo flag from 0x102d +162.
     solo::apply_solo_state(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
 
+    // Step 12c2.5: Resolve effective mute. The +5 byte we read above
+    // is the stored mix-bit, but PT also sets it for inactive/
+    // bounced-source tracks. The converter discriminates via the
+    // `0x260a[0] +8` "send routing enabled" flag — if non-zero, the
+    // track isn't user-muted, just inactive. See
+    // docs/pt-field-map.md "Effective mute" + parse/mute_resolver.rs.
+    mute_resolver::resolve_effective_mute(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
+
+    // Step 12c2.6: Decode per-track mute-automation envelope from the
+    // second 0x260a child under each 0x260d wrapper.
+    mute_automation::apply_mute_automation(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
+
+    // Step 12c3: Fall back to 0x2624 vol/pan mirrors for converter-
+    // generated PTX where 0x1029 isn't populated.
+    mix_aux::fill_vol_pan_from_2624(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
+
     // Step 12d: Decode per-track `is_folder` flag from 0x251a.
     //
     // The byte at offset (`0x251a` payload + 4 + len(name)) is `0x01` for
@@ -506,6 +595,47 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     let plugins = plugins::parse_plugins(&blocks, &cursor);
     let io_channels = io::parse_io_channels(&blocks, &cursor);
 
+    // Step 14: Parse `0x2602` routing entries. Each entry is a u8-flag
+    // record. The active flag at +10 distinguishes live entries from
+    // template/unused ones. See `docs/converter-frida-discovered-offsets.md`.
+    let routing_entries = {
+        fn collect_recursive<'a>(blocks: &'a [Block], ct_raw: u16, out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == ct_raw {
+                    out.push(b);
+                }
+                collect_recursive(&b.children, ct_raw, out);
+            }
+        }
+        let mut entries = Vec::new();
+        collect_recursive(&blocks, 0x2602, &mut entries);
+        let data = cursor.data();
+        let mut out = Vec::with_capacity(entries.len());
+        for b in entries {
+            let magic = b.offset.saturating_sub(7);
+            if magic + 53 > data.len() {
+                continue;
+            }
+            let active = data[magic + 10] != 0;
+            let flag_33 = data[magic + 33];
+            let flag_36 = data[magic + 36];
+            let mut destination_uid = [0u8; 6];
+            destination_uid.copy_from_slice(&data[magic + 47..magic + 53]);
+            out.push(crate::types::RoutingEntry {
+                block_start: magic,
+                active,
+                flag_33,
+                flag_36,
+                destination_uid,
+            });
+        }
+        out
+    };
+
+    let edit_groups = parse_edit_groups(&blocks, data);
+    let stem_mappings = parse_stem_mappings(&blocks, data);
+    let internal_tracks = parse_internal_tracks(&blocks, data);
+
     Ok(ProToolsSession {
         version,
         session_sample_rate,
@@ -520,7 +650,168 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         midi_tracks,
         plugins,
         io_channels,
+        routing_entries,
+        edit_groups,
+        stem_mappings,
+        internal_tracks,
     })
+}
+
+/// Decode the session's internal/aux/bus track list from `0x261e` blocks.
+///
+/// Each block carries a length-prefixed track name at payload `+0x1d`
+/// (= magic + `0x24`) and a 6-byte routing UID at payload `+0x29..+0x2e`
+/// (= magic + `0x32..+0x37`). The kind (Aux / Internal Bus / Master
+/// Fader / Click) is not yet decoded.
+fn parse_internal_tracks(blocks: &[Block], data: &[u8]) -> Vec<crate::types::InternalTrack> {
+    let mut out = Vec::new();
+    for b in collect_blocks_recursive(blocks, ContentType::InternalTrackEntry) {
+        let magic = b.offset.saturating_sub(7);
+        let block_end = magic + 9 + b.block_size as usize;
+        if magic + 9 >= data.len() || block_end > data.len() {
+            continue;
+        }
+        // Scan forward from payload start for the first `[u32 namelen]
+        // [printable ASCII name of that length]` triple. The block has a
+        // nested header chain (0x261b → 0x102d → 0x2619) whose exact byte
+        // count varies; the name itself is reliably the first sane
+        // length-prefixed string in the payload.
+        let mut name: Option<(usize, String)> = None;
+        let mut p = magic + 9;
+        while p + 4 < block_end && p + 4 < data.len() {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if (2..=64).contains(&nlen) && p + 4 + nlen <= block_end && p + 4 + nlen <= data.len() {
+                let candidate = &data[p + 4..p + 4 + nlen];
+                if candidate.iter().all(|c| (0x20..0x7f).contains(c)) {
+                    name = Some((p, String::from_utf8_lossy(candidate).into_owned()));
+                    break;
+                }
+            }
+            p += 1;
+        }
+        let Some((name_pos, name)) = name else {
+            continue;
+        };
+        // Routing UID: the 6 bytes appear ~14 bytes after the name end,
+        // preceded by `2a 00 00 00` (the same `0x2a` marker seen in source
+        // file UID encoding). Scan for that signature.
+        let uid_search_start = name_pos + 4 + name.len();
+        let mut routing_uid = [0u8; 6];
+        let mut q = uid_search_start;
+        while q + 10 < block_end && q + 10 < data.len() {
+            if data[q] == 0x2a && data[q + 1] == 0 && data[q + 2] == 0 && data[q + 3] == 0 {
+                routing_uid.copy_from_slice(&data[q + 4..q + 10]);
+                break;
+            }
+            q += 1;
+        }
+        out.push(crate::types::InternalTrack { name, routing_uid });
+    }
+    out
+}
+
+/// Walk a `0x4501` payload tail-region and decode the flat group name list.
+///
+/// Each entry is `[u32 LE namelen][utf-8 name][i16 LE color]`. The
+/// per-track membership table preceding the name list is not yet decoded;
+/// we locate the start of the name list by scanning for the first sane
+/// `[len][ASCII-printable name]` pair.
+///
+/// **Preliminary** — the parser is heuristic and may over-read when the
+/// preceding per-track membership table happens to contain byte patterns
+/// matching the `[len][ASCII]` shape. Caller should treat the list as a
+/// best-effort union of stem-types + edit-groups until the membership
+/// table is decoded and we can bound the name list precisely.
+fn parse_edit_groups(blocks: &[Block], data: &[u8]) -> Vec<crate::types::EditGroup> {
+    let mut out = Vec::new();
+    for b in collect_blocks_recursive(blocks, ContentType::EditGroupList) {
+        // Block payload starts at offset = magic + 9.
+        let payload_start = b.offset.saturating_sub(7) + 9;
+        let block_end = b.offset.saturating_sub(7) + b.block_size as usize;
+        if payload_start >= data.len() || block_end > data.len() {
+            continue;
+        }
+        // Scan from payload_start for the first plausible `[u32 namelen]
+        // [printable ASCII name of that length][i16 color]` triple.
+        let mut p = payload_start;
+        let mut found_start = None;
+        while p + 6 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen >= 2 && nlen <= 64 && p + 4 + nlen + 2 <= block_end {
+                let name = &data[p + 4..p + 4 + nlen];
+                if name.iter().all(|c| (0x20..0x7f).contains(c)) {
+                    found_start = Some(p);
+                    break;
+                }
+            }
+            p += 1;
+        }
+        let Some(mut p) = found_start else { continue };
+        // Read entries until the layout no longer matches.
+        while p + 6 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen < 1 || nlen > 64 || p + 4 + nlen + 2 > block_end {
+                break;
+            }
+            let name_bytes = &data[p + 4..p + 4 + nlen];
+            if !name_bytes.iter().all(|c| (0x20..0x7f).contains(c)) {
+                break;
+            }
+            let name = String::from_utf8_lossy(name_bytes).into_owned();
+            let color_raw =
+                i16::from_le_bytes(data[p + 4 + nlen..p + 4 + nlen + 2].try_into().unwrap());
+            let color = if color_raw == -2 {
+                None
+            } else {
+                Some(color_raw)
+            };
+            out.push(crate::types::EditGroup { name, color });
+            p += 4 + nlen + 2;
+        }
+    }
+    out
+}
+
+/// Decode the flat stem-mapping list inside a `0x4702` block. Same layout
+/// as edit groups but without the trailing `i16` color.
+fn parse_stem_mappings(blocks: &[Block], data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    for b in collect_blocks_recursive(blocks, ContentType::StemMappingList) {
+        let payload_start = b.offset.saturating_sub(7) + 9;
+        let block_end = b.offset.saturating_sub(7) + b.block_size as usize;
+        if payload_start >= data.len() || block_end > data.len() {
+            continue;
+        }
+        // The list starts almost immediately — first u32 namelen sits a
+        // few bytes into the payload. Scan for the first valid entry.
+        let mut p = payload_start;
+        let mut found_start = None;
+        while p + 4 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen >= 2 && nlen <= 64 && p + 4 + nlen <= block_end {
+                let name = &data[p + 4..p + 4 + nlen];
+                if name.iter().all(|c| (0x20..0x7f).contains(c)) {
+                    found_start = Some(p);
+                    break;
+                }
+            }
+            p += 1;
+        }
+        let Some(mut p) = found_start else { continue };
+        while p + 4 < block_end {
+            let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
+            if nlen < 1 || nlen > 64 || p + 4 + nlen > block_end {
+                break;
+            }
+            let name_bytes = &data[p + 4..p + 4 + nlen];
+            if !name_bytes.iter().all(|c| (0x20..0x7f).contains(c)) {
+                break;
+            }
+            out.push(String::from_utf8_lossy(name_bytes).into_owned());
+            p += 4 + nlen;
+        }
+    }
+    out
 }
 
 /// Collect every block (and nested child) of the given content type.

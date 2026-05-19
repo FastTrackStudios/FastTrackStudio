@@ -319,10 +319,14 @@ fn parse_midi_tracks(
             volume_centibel: 0,
             mute: false,
             solo: false,
+            solo_defeat: false,
+            inactive: false,
             pan: 0,
             alternate_playlists: Vec::new(),
             output: String::new(),
             color_byte: 0,
+            volume_automation: Vec::new(),
+            mute_automation: Vec::new(),
             is_folder: false,
         });
     }
@@ -366,6 +370,9 @@ fn parse_midi_tracks(
             tracks[track_idx].regions.push(TrackRegion {
                 region_index: raw_index,
                 start_pos: start,
+                clip_flag_53: false,
+                clip_muted: false,
+                clip_color: None,
             });
         }
 
