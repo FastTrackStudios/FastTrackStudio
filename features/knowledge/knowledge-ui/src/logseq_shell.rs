@@ -1057,17 +1057,39 @@ fn EditableBlock(block: Block) -> Element {
             }
             Key::Enter if !shift => {
                 e.prevent_default();
-                // Cursor offset isn't readily available from the
-                // Dioxus KeyboardData, so we split at end-of-content
-                // — a common Logseq gesture (Enter creates a new
-                // sibling below). True split-at-caret follows when
-                // we wire a JS eval to read selectionStart.
-                let offset = current.len();
-                ops.split_block.call((block_id, offset));
+                // Caret-aware split: ask the DOM for the textarea's
+                // selectionStart, then split there. The eval runs
+                // synchronously inside the webview's JS context
+                // (Dioxus desktop), so the await returns quickly
+                // and the split lands at exactly where the user
+                // pressed Enter — matching Logseq's "split at
+                // caret" behavior.
+                let split_cb = ops.split_block;
+                let fallback_len = current.len();
+                let id_str = block_id.simple().to_string();
+                spawn(async move {
+                    let offset = read_selection_start(&id_str).await.unwrap_or(fallback_len);
+                    split_cb.call((block_id, offset));
+                });
             }
             Key::Backspace if current.is_empty() => {
                 e.prevent_default();
                 ops.delete_block.call(block_id);
+            }
+            Key::Backspace => {
+                // For non-empty content, check whether the caret is
+                // at offset 0 — if so, merge with the previous
+                // sibling (Logseq's behavior). Otherwise let the
+                // browser's default delete-one-char run.
+                let delete_cb = ops.delete_block;
+                let id_str = block_id.simple().to_string();
+                let current_clone = current.clone();
+                spawn(async move {
+                    let offset = read_selection_start(&id_str).await.unwrap_or(1);
+                    if offset == 0 && current_clone.is_empty() {
+                        delete_cb.call(block_id);
+                    }
+                });
             }
             _ => {}
         }
@@ -1081,8 +1103,10 @@ fn EditableBlock(block: Block) -> Element {
     };
 
     let value_str = content_signal.read().clone();
+    let id_attr = block_id.simple().to_string();
     rsx! {
         div { style: "flex: 1; min-width: 0;",
+            "data-edit-block": "{id_attr}",
             textarea {
                 class: "ls-block-content",
                 style: "background: transparent; border: 0; resize: none; width: 100%; min-height: 1.5em; color: inherit; font: inherit; outline: none;",
@@ -1094,6 +1118,30 @@ fn EditableBlock(block: Block) -> Element {
                 onmounted: auto_focus,
             }
         }
+    }
+}
+
+/// Read the focused textarea's `selectionStart` for the block
+/// with the given simple-UUID id. Runs via Dioxus's `document::eval`
+/// so the same code path works on desktop (Tao webview) and web
+/// (browser). Returns `None` when the element is absent or the
+/// eval fails — callers should fall back to a default offset.
+async fn read_selection_start(block_simple_id: &str) -> Option<usize> {
+    let script = format!(
+        r#"
+        (function() {{
+            const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
+            if (!wrap) return 0;
+            const ta = wrap.querySelector('textarea');
+            if (!ta) return 0;
+            return ta.selectionStart || 0;
+        }})()
+        "#
+    );
+    let mut handle = document::eval(&script);
+    match handle.recv::<serde_json::Value>().await {
+        Ok(serde_json::Value::Number(n)) => n.as_u64().map(|v| v as usize),
+        _ => None,
     }
 }
 
