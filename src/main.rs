@@ -365,10 +365,19 @@ Cm9
 "#,
 ];
 
+/// Page-scoped keyframes used by the Home hero text + pillar card shine.
+const HOME_KEYFRAMES: &str = "
+@keyframes home-rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes home-gradient { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes pillar-shine { 0% { transform: translateX(-150%) skewX(-20deg); } 100% { transform: translateX(350%) skewX(-20deg); } }
+";
+
 /// Landing page for FastTrackStudio
 #[component]
 fn Home() -> Element {
     rsx! {
+        document::Style { {HOME_KEYFRAMES} }
+
         div {
             class: "relative pt-24",
 
@@ -387,11 +396,13 @@ fn Home() -> Element {
                         h1 {
                             class: "text-balance",
                             div {
-                                class: "text-5xl md:text-6xl lg:text-7xl font-semibold text-primary tracking-tight",
+                                class: "text-5xl md:text-6xl lg:text-7xl font-semibold tracking-tight bg-clip-text text-transparent",
+                                style: "background-image: linear-gradient(110deg, oklch(0.72 0.18 264) 0%, oklch(0.78 0.16 320) 35%, oklch(0.72 0.18 264) 70%); background-size: 220% 100%; animation: home-gradient 9s ease-in-out infinite, home-rise 0.9s ease-out backwards;",
                                 "Workflow-Driven"
                             }
                             div {
                                 class: "mt-2 text-3xl md:text-4xl lg:text-5xl font-light text-muted-foreground tracking-tight",
+                                style: "animation: home-rise 0.9s ease-out 0.25s backwards;",
                                 "Made for Professionals."
                             }
                         }
@@ -403,28 +414,36 @@ fn Home() -> Element {
                                 number: "01",
                                 title: "Open Source",
                                 body: "Licensing practices in the audio software space are heavily anti-consumer. We need highly capable, pleasant tools that respect their users.",
-                                icon: rsx! { Github { class: "w-5 h-5" } }
+                                icon: rsx! { Github { class: "w-5 h-5" } },
+                                accent: "#10b981",
+                                delay_ms: 100
                             }
 
                             PillarCard {
                                 number: "02",
                                 title: "Cross-Platform",
                                 body: "Designed for Linux, macOS, Windows, and embedded use cases. The fracture of available software is degrading quality everywhere.",
-                                icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } }
+                                icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } },
+                                accent: "#38bdf8",
+                                delay_ms: 180
                             }
 
                             PillarCard {
                                 number: "03",
                                 title: "Cross-DAW",
                                 body: "Built around Reaper today, on a core that extends to any DAW exposing the needed APIs. Your workflow shouldn\u{2019}t be locked to one vendor.",
-                                icon: rsx! { Music { class: "w-5 h-5" } }
+                                icon: rsx! { Music { class: "w-5 h-5" } },
+                                accent: "#a78bfa",
+                                delay_ms: 260
                             }
 
                             PillarCard {
                                 number: "04",
                                 title: "Open Format",
                                 body: "Charts, project state, and protocols are documented and free to implement. Interoperability as a foundation, not an afterthought.",
-                                icon: rsx! { FileCode { class: "w-5 h-5" } }
+                                icon: rsx! { FileCode { class: "w-5 h-5" } },
+                                accent: "#fbbf24",
+                                delay_ms: 340
                             }
                         }
                     }
@@ -893,44 +912,66 @@ fn HomeFeature(title: &'static str, description: &'static str, icon: Element) ->
 }
 
 /// One of the four hero-pillar cards sitting beneath the tagline.
-/// Numbered manifesto-style card with icon, animated top accent, hover lift.
+/// Numbered manifesto-style card with icon, animated top accent, shine on hover,
+/// per-card accent color, and a staggered entrance animation.
 #[component]
 fn PillarCard(
     number: &'static str,
     title: &'static str,
     body: &'static str,
     icon: Element,
+    accent: &'static str,
+    delay_ms: u32,
 ) -> Element {
+    let soft = hex_rgba(accent, 0.10);
+    let border = hex_rgba(accent, 0.4);
+    let glow = hex_rgba(accent, 0.18);
+    let style = format!(
+        "--pc-accent: {accent}; --pc-soft: {soft}; --pc-border: {border}; --pc-glow: {glow}; animation: home-rise 0.8s ease-out {delay_ms}ms backwards;"
+    );
+
     rsx! {
         div {
-            class: "group relative overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-card/50 to-card/10 p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:from-card/70 hover:to-card/20 hover:shadow-xl hover:shadow-primary/5",
+            class: "group relative overflow-hidden rounded-xl border border-border/40 bg-gradient-to-br from-card/50 to-card/10 p-6 transition-all duration-300 hover:-translate-y-1 hover:[border-color:var(--pc-border)] hover:from-card/70 hover:to-card/20 hover:[box-shadow:0_18px_40px_-12px_var(--pc-glow),0_0_0_1px_var(--pc-border)]",
+            style: "{style}",
 
-            // Animated top accent line — fades in on hover
+            // Animated top accent line — fades in on hover, tinted to the card accent
             div {
-                class: "absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100",
+                class: "absolute inset-x-0 top-0 h-px opacity-0 transition-opacity duration-300 group-hover:opacity-100",
+                style: "background: linear-gradient(to right, transparent, var(--pc-accent), transparent);",
+            }
+
+            // Shine sweep — only runs on hover
+            div {
+                class: "pointer-events-none absolute inset-0 overflow-hidden",
+                div {
+                    class: "absolute -inset-y-4 left-0 w-1/3 opacity-0 group-hover:opacity-100 group-hover:[animation:pillar-shine_1.1s_ease-out_forwards]",
+                    style: "background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%); transform: translateX(-150%) skewX(-20deg);",
+                }
             }
 
             div {
-                class: "mb-5 flex items-center justify-between",
+                class: "relative z-10 mb-5 flex items-center justify-between",
 
                 div {
-                    class: "inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors duration-300 group-hover:bg-primary/20",
+                    class: "inline-flex h-10 w-10 items-center justify-center rounded-lg transition-colors duration-300",
+                    style: "background-color: var(--pc-soft); color: var(--pc-accent);",
                     {icon}
                 }
 
                 span {
-                    class: "font-mono text-xs tracking-[0.2em] text-muted-foreground/50",
+                    class: "font-mono text-xs tracking-[0.2em] text-muted-foreground/50 transition-colors duration-300 group-hover:[color:var(--pc-accent)]",
                     "{number}"
                 }
             }
 
             h3 {
-                class: "mb-2 text-lg font-semibold text-foreground transition-colors duration-300 group-hover:text-primary",
+                class: "relative z-10 mb-2 text-lg font-semibold text-foreground transition-colors duration-300 group-hover:[color:var(--pc-accent)]",
                 "{title}"
             }
 
             p {
-                class: "text-sm leading-relaxed text-muted-foreground",
+                class: "relative z-10 text-sm leading-relaxed text-muted-foreground",
                 "{body}"
             }
         }
