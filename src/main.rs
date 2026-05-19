@@ -9,9 +9,8 @@ mod state;
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{
-    ArrowLeft, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Circle, Code, ExternalLink,
-    FileCode, FileText, Github, ListMusic, Music, PenLine, PenTool, Play, SkipBack, SkipForward,
-    Square, Users,
+    ArrowLeft, BookOpen, ChevronRight, Circle, ExternalLink, FileCode, FileText, Github, ListMusic,
+    Music, Play, SkipBack, SkipForward, Square,
 };
 use fts_ui::prelude::*;
 
@@ -32,33 +31,16 @@ pub enum Route {
     #[layout(Layout)]
     #[route("/")]
     Home {},
-    #[route("/mission")]
-    Mission {},
-    #[route("/projects")]
-    Projects {},
     #[route("/docs")]
     DocsHome {},
-    #[route("/keyflow/chart")]
-    ChartEditor {},
-    // Keyflow docs
     #[route("/docs/keyflow")]
     DocsKeyflow {},
-    #[route("/docs/keyflow/snippets")]
-    SnippetsBrowser {},
-    #[route("/docs/keyflow/snippets/:id")]
-    SnippetsView { id: String },
-    // Other docs sections
     #[route("/docs/reaper")]
     DocsReaper {},
     #[route("/docs/desktop")]
     DocsDesktop {},
     #[route("/docs/plugins")]
     DocsPlugins {},
-    // Legacy routes - redirect to new ones
-    #[route("/docs/keyflow/chart/tests")]
-    PatternBrowser {},
-    #[route("/docs/keyflow/chart/tests/:id")]
-    PatternView { id: String },
     #[route("/test/render")]
     TestRender {},
     #[route("/test/fx-ui")]
@@ -170,18 +152,11 @@ fn Layout() -> Element {
                             // Show section name based on current route
                             {
                                 let section = match route {
-                                    Route::ChartEditor {} => Some("Keyflow Editor"),
-                                    Route::Mission {} => Some("Our Mission"),
-                                    Route::Projects {} => Some("Projects"),
                                     Route::DocsHome {}
                                     | Route::DocsKeyflow {}
                                     | Route::DocsReaper {}
                                     | Route::DocsDesktop {}
-                                    | Route::DocsPlugins {}
-                                    | Route::SnippetsBrowser {}
-                                    | Route::SnippetsView { .. }
-                                    | Route::PatternBrowser {}
-                                    | Route::PatternView { .. } => Some("Documentation"),
+                                    | Route::DocsPlugins {} => Some("Documentation"),
                                     _ => None,
                                 };
                                 if let Some(name) = section {
@@ -203,33 +178,9 @@ fn Layout() -> Element {
                         class: "hidden md:flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-muted/50",
 
                         NavLink {
-                            to: Route::Mission {},
-                            icon: rsx! { Users { class: "w-4 h-4" } },
-                            label: "Mission"
-                        }
-
-                        NavLink {
-                            to: Route::Projects {},
-                            icon: rsx! { Code { class: "w-4 h-4" } },
-                            label: "Projects"
-                        }
-
-                        NavLink {
                             to: Route::DocsHome {},
                             icon: rsx! { BookOpen { class: "w-4 h-4" } },
                             label: "Docs"
-                        }
-
-                        NavLink {
-                            to: Route::ChartEditor {},
-                            icon: rsx! { PenTool { class: "w-4 h-4" } },
-                            label: "Editor"
-                        }
-
-                        NavLink {
-                            to: Route::SnippetsBrowser {},
-                            icon: rsx! { FileCode { class: "w-4 h-4" } },
-                            label: "Snippets"
                         }
                     }
 
@@ -246,13 +197,6 @@ fn Layout() -> Element {
                             Github { class: "w-5 h-5" }
                         }
 
-                        // Primary CTA button
-                        Link {
-                            to: Route::ChartEditor {},
-                            class: "hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground font-medium text-sm hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 hover:shadow-primary/30",
-                            PenTool { class: "w-4 h-4" }
-                            span { "Try Editor" }
-                        }
                     }
                 }
             }
@@ -478,348 +422,6 @@ fn DecorativeBeams() -> Element {
                 div {
                     class: "absolute rounded-full",
                     style: "width: {w}; height: {h}; {pos} transform: {transform}; background: radial-gradient(50% 50% at 50% 50%, hsla(0,0%,85%,{op_main}) 0, hsla(0,0%,45%,{op_mid}) 80%, transparent 100%);"
-                }
-            }
-        }
-    }
-}
-
-/// Mission / About Us page
-#[component]
-fn Mission() -> Element {
-    rsx! {
-        div {
-            class: "relative pt-24 pb-16",
-
-            // Page header
-            section {
-                class: "relative mx-auto max-w-3xl px-6 py-16 text-center",
-
-                h1 {
-                    class: "text-4xl font-semibold md:text-5xl text-foreground mb-6",
-                    "Our Mission"
-                }
-
-                p {
-                    class: "text-xl text-muted-foreground",
-                    "Why we build FastTrackStudio, and who we build it for."
-                }
-            }
-
-            // Main content
-            article {
-                class: "mx-auto max-w-3xl px-6 space-y-12",
-
-                // The Problem
-                section {
-                    class: "space-y-4",
-
-                    h2 {
-                        class: "text-2xl font-semibold text-foreground",
-                        "The Problem We See"
-                    }
-
-                    p {
-                        class: "text-lg leading-relaxed text-muted-foreground",
-                        "Music production software has long been fragmented along platform lines. High-quality, thoughtfully designed tools are often locked to a single operating system, leaving musicians on Linux \u{2014} and increasingly macOS and Windows \u{2014} choosing between powerful software with poor user experience, or pleasant software that only runs on one platform."
-                    }
-
-                    p {
-                        class: "text-lg leading-relaxed text-muted-foreground",
-                        "Meanwhile, the formats and protocols that connect these tools remain proprietary, making interoperability an afterthought rather than a foundation."
-                    }
-                }
-
-                // Our Approach
-                section {
-                    class: "space-y-4",
-
-                    h2 {
-                        class: "text-2xl font-semibold text-foreground",
-                        "What We Believe"
-                    }
-
-                    div {
-                        class: "space-y-6",
-
-                        MissionPrinciple {
-                            title: "Quality and Craft Are Not Optional",
-                            body: "Every interaction should feel intentional. We invest in GPU-accelerated rendering, sub-frame latency, and refined typography not because they are trendy, but because musicians deserve tools that respect their craft with the same seriousness they bring to their art."
-                        }
-
-                        MissionPrinciple {
-                            title: "Open Standards Move the Whole Industry Forward",
-                            body: "Keyflow is an open chart notation format. Our protocols are documented. Our rendering pipeline is built on open GPU standards. When one tool improves, the ecosystem benefits \u{2014} not just our users, but anyone building for musicians."
-                        }
-
-                        MissionPrinciple {
-                            title: "Every Platform, First-Class",
-                            body: "Linux, macOS, and Windows are equal citizens. We don\u{2019}t port an afterthought \u{2014} we build cross-platform from day one using Rust, ensuring native performance and consistent behavior everywhere musicians work."
-                        }
-
-                        MissionPrinciple {
-                            title: "Pleasant Experience Is a Feature",
-                            body: "Powerful tools don\u{2019}t have to be hostile. We believe the best software disappears into the workflow \u{2014} fast enough that you never wait, intuitive enough that you rarely reach for the manual, and beautiful enough that you enjoy opening it."
-                        }
-                    }
-                }
-
-                // What We're Building
-                section {
-                    class: "space-y-4",
-
-                    h2 {
-                        class: "text-2xl font-semibold text-foreground",
-                        "What We\u{2019}re Building"
-                    }
-
-                    p {
-                        class: "text-lg leading-relaxed text-muted-foreground",
-                        "FastTrackStudio is a suite of audio production tools: a chart notation language and renderer (Keyflow), deep REAPER DAW integration, a desktop performance app, audio plugins, and real-time peer-to-peer collaboration. Everything is built in Rust for reliability and performance, and designed to work together seamlessly or stand alone."
-                    }
-
-                    p {
-                        class: "text-lg leading-relaxed text-muted-foreground",
-                        "We\u{2019}re not trying to replace your DAW. We\u{2019}re building the tools that sit alongside it \u{2014} the chart on your music stand, the setlist on your iPad, the shared session with your bandmate across town \u{2014} and making them as good as they can possibly be."
-                    }
-                }
-
-                // Call to action
-                section {
-                    class: "pt-8 pb-4 border-t border-border/30 text-center space-y-6",
-
-                    p {
-                        class: "text-lg text-muted-foreground",
-                        "Want to see what we\u{2019}re building? Try the chart editor or explore the documentation."
-                    }
-
-                    div {
-                        class: "flex flex-col sm:flex-row items-center justify-center gap-3",
-
-                        Link {
-                            to: Route::ChartEditor {},
-                            class: "inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 rounded-md font-medium transition-colors",
-                            "Try the Editor"
-                        }
-
-                        Link {
-                            to: Route::DocsHome {},
-                            class: "inline-flex items-center justify-center gap-2 border border-border bg-background hover:bg-accent hover:text-accent-foreground h-11 px-8 rounded-md font-medium transition-colors",
-                            "Read the Docs"
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// A single mission principle with title and body text
-#[component]
-fn MissionPrinciple(title: &'static str, body: &'static str) -> Element {
-    rsx! {
-        div {
-            class: "pl-4 border-l-2 border-primary/40",
-
-            h3 {
-                class: "text-lg font-medium text-foreground mb-2",
-                "{title}"
-            }
-
-            p {
-                class: "text-base leading-relaxed text-muted-foreground",
-                "{body}"
-            }
-        }
-    }
-}
-
-/// Projects overview page
-#[component]
-fn Projects() -> Element {
-    rsx! {
-        div {
-            class: "relative pt-24 pb-24",
-
-            // Page header
-            section {
-                class: "relative mx-auto max-w-5xl px-6 pt-16 pb-12 text-center",
-
-                p {
-                    class: "text-sm font-medium tracking-widest uppercase text-primary mb-4",
-                    "Open Source"
-                }
-
-                h1 {
-                    class: "text-4xl font-semibold md:text-5xl text-foreground mb-6",
-                    "Projects"
-                }
-
-                p {
-                    class: "text-lg text-muted-foreground max-w-xl mx-auto",
-                    "Professional Workflow, Open Ecosystem."
-                }
-            }
-
-            // Project grid
-            div {
-                class: "mx-auto max-w-5xl px-6 grid md:grid-cols-2 gap-5",
-
-                ProjectCard {
-                    name: "Keyflow",
-                    tagline: "Chart Notation & Rendering",
-                    description: "Plain-text notation for lead sheets, chord charts, and rhythm charts. Parses to a structured model, lays out with sub-millisecond passes, and renders publication-quality output via Vello\u{2019}s GPU pipeline.",
-                    tags: vec!["notation", "rendering", "vello", "open-format"],
-                    github: "https://github.com/FastTrackStudios/keyflow",
-                    icon: rsx! { FileText { class: "w-5 h-5" } },
-                    accent: "emerald",
-                }
-
-                ProjectCard {
-                    name: "Session",
-                    tagline: "Transport & State Coordination",
-                    description: "The synchronization layer. Manages transport state, playback position, and shared session data across every tool in the ecosystem \u{2014} local or networked.",
-                    tags: vec!["session", "transport", "sync", "protocol"],
-                    github: "https://github.com/FastTrackStudios/session",
-                    icon: rsx! { Music { class: "w-5 h-5" } },
-                    accent: "violet",
-                }
-
-                ProjectCard {
-                    name: "Signal",
-                    tagline: "Audio Plugins & DSP",
-                    description: "Instruments and effects targeting CLAP and VST3 from a single Rust codebase via nih-plug. Custom GPU-accelerated UIs built with the FTS design system.",
-                    tags: vec!["audio", "plugins", "clap", "vst3", "nih-plug"],
-                    github: "https://github.com/FastTrackStudios/signal",
-                    icon: rsx! { fts_ui::lucide_dioxus::SlidersHorizontal { class: "w-5 h-5" } },
-                    accent: "amber",
-                }
-
-                ProjectCard {
-                    name: "DAW",
-                    tagline: "REAPER Integration",
-                    description: "Deep DAW bridge for REAPER. Bidirectional transport control, marker-driven chart navigation, MIDI routing, and real-time state broadcast over the FTS protocol.",
-                    tags: vec!["reaper", "daw", "midi", "extension"],
-                    github: "https://github.com/FastTrackStudios/daw",
-                    icon: rsx! { fts_ui::lucide_dioxus::Monitor { class: "w-5 h-5" } },
-                    accent: "blue",
-                }
-
-                ProjectCard {
-                    name: "Input",
-                    tagline: "Keyboard Design & Ergonomics",
-                    description: "A wiki and design journal documenting keyboard layout decisions for REAPER and the fts-input system. Exploring efficient, ergonomic input mappings for professional audio workflows.",
-                    tags: vec!["keyboard", "ergonomics", "reaper", "input", "wiki"],
-                    github: "https://github.com/FastTrackStudios/input",
-
-                    icon: rsx! { PenTool { class: "w-5 h-5" } },
-                    accent: "cyan",
-                }
-            }
-
-            // Bottom note
-            section {
-                class: "mx-auto max-w-5xl px-6 mt-16 text-center",
-
-                p {
-                    class: "text-sm text-muted-foreground/70",
-                    "Built in Rust. Contributions welcome."
-                }
-            }
-        }
-    }
-}
-
-/// A project card for the Projects grid
-#[component]
-fn ProjectCard(
-    name: &'static str,
-    tagline: &'static str,
-    description: &'static str,
-    tags: Vec<&'static str>,
-    github: &'static str,
-    icon: Element,
-    accent: &'static str,
-) -> Element {
-    let accent_glow = match accent {
-        "emerald" => "group-hover:shadow-emerald-500/5",
-        "violet" => "group-hover:shadow-violet-500/5",
-        "blue" => "group-hover:shadow-blue-500/5",
-        "amber" => "group-hover:shadow-amber-500/5",
-        "cyan" => "group-hover:shadow-cyan-500/5",
-        _ => "group-hover:shadow-primary/5",
-    };
-    let accent_icon_bg = match accent {
-        "emerald" => "bg-emerald-500/10 text-emerald-400",
-        "violet" => "bg-violet-500/10 text-violet-400",
-        "blue" => "bg-blue-500/10 text-blue-400",
-        "amber" => "bg-amber-500/10 text-amber-400",
-        "cyan" => "bg-cyan-500/10 text-cyan-400",
-        _ => "bg-primary/10 text-primary",
-    };
-    let accent_tag = match accent {
-        "emerald" => "text-emerald-400/60",
-        "violet" => "text-violet-400/60",
-        "blue" => "text-blue-400/60",
-        "amber" => "text-amber-400/60",
-        "cyan" => "text-cyan-400/60",
-        _ => "text-primary/60",
-    };
-
-    rsx! {
-        a {
-            href: "{github}",
-            target: "_blank",
-            class: "group rounded-2xl border border-border/50 bg-card/30 hover:bg-card/60 hover:border-border transition-all duration-200 shadow-lg shadow-black/5 {accent_glow} flex flex-col overflow-hidden",
-
-            // Card body
-            div {
-                class: "p-7 flex-1 flex flex-col",
-
-                // Icon bubble + name row
-                div {
-                    class: "flex items-center gap-4 mb-5",
-
-                    div {
-                        class: "w-10 h-10 rounded-xl {accent_icon_bg} flex items-center justify-center shrink-0",
-                        {icon}
-                    }
-
-                    div {
-                        h3 {
-                            class: "text-lg font-semibold text-foreground group-hover:text-foreground transition-colors",
-                            "{name}"
-                        }
-                        p {
-                            class: "text-xs font-medium tracking-wide uppercase text-muted-foreground/70",
-                            "{tagline}"
-                        }
-                    }
-                }
-
-                // Description
-                p {
-                    class: "text-sm leading-relaxed text-muted-foreground mb-6 flex-1",
-                    "{description}"
-                }
-
-                // Tags row
-                div {
-                    class: "flex flex-wrap gap-x-3 gap-y-1 mb-5",
-                    for tag in tags.iter() {
-                        span {
-                            class: "text-xs font-mono {accent_tag}",
-                            "#{tag}"
-                        }
-                    }
-                }
-
-                // Footer: GitHub
-                div {
-                    class: "flex items-center gap-2 pt-4 border-t border-border/30 text-sm text-muted-foreground/60 group-hover:text-muted-foreground transition-colors",
-                    Github { class: "w-4 h-4" }
-                    span { class: "flex-1", "View on GitHub" }
-                    ExternalLink { class: "w-3.5 h-3.5 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200" }
                 }
             }
         }
@@ -1826,26 +1428,6 @@ fn DocsKeyflow() -> Element {
             }
 
             div {
-                class: "grid md:grid-cols-2 gap-6 mb-12",
-                Link { to: Route::SnippetsBrowser {}, class: "group flex items-center gap-4 p-6 rounded-xl border border-border bg-card hover:border-emerald-500/50 transition-all",
-                    div { class: "rounded-lg p-3 bg-emerald-500/10 text-emerald-500", FileCode { class: "w-6 h-6" } }
-                    div {
-                        h3 { class: "font-semibold text-foreground group-hover:text-emerald-500 transition-colors", "Interactive Snippets" }
-                        p { class: "text-sm text-muted-foreground", "Browse and edit example charts" }
-                    }
-                    ChevronRight { class: "w-5 h-5 text-muted-foreground ml-auto" }
-                }
-                Link { to: Route::ChartEditor {}, class: "group flex items-center gap-4 p-6 rounded-xl border border-border bg-card hover:border-emerald-500/50 transition-all",
-                    div { class: "rounded-lg p-3 bg-emerald-500/10 text-emerald-500", PenLine { class: "w-6 h-6" } }
-                    div {
-                        h3 { class: "font-semibold text-foreground group-hover:text-emerald-500 transition-colors", "Chart Editor" }
-                        p { class: "text-sm text-muted-foreground", "Write and export your own charts" }
-                    }
-                    ChevronRight { class: "w-5 h-5 text-muted-foreground ml-auto" }
-                }
-            }
-
-            div {
                 class: "prose prose-invert max-w-none",
                 Heading { level: HeadingLevel::H3, class: "text-foreground mb-6", "Features" }
                 div {
@@ -2011,259 +1593,6 @@ fn FeatureCard(title: &'static str, description: &'static str, icon: Element) ->
 // Snippets Browser
 // =============================================================================
 
-/// Unified snippets browser
-#[component]
-fn SnippetsBrowser() -> Element {
-    let patterns = keyflow::patterns::all_patterns();
-    let first_id = patterns.first().map(|p| p.id).unwrap_or("minimal-chart");
-    rsx! { UnifiedSnippetsView { selected_id: first_id.to_string() } }
-}
-
-#[component]
-fn SnippetsView(id: String) -> Element {
-    rsx! { UnifiedSnippetsView { selected_id: id } }
-}
-
-#[component]
-fn UnifiedSnippetsView(selected_id: String) -> Element {
-    use components::PreviewMode;
-    use keyflow::patterns::{PatternCategory, all_patterns, find_pattern, patterns_by_category};
-
-    let patterns = all_patterns();
-    let pattern = find_pattern(&selected_id);
-
-    let mut expanded_categories = use_signal(|| {
-        PatternCategory::all()
-            .iter()
-            .map(|c| (*c, true))
-            .collect::<std::collections::HashMap<_, _>>()
-    });
-
-    let current_index = patterns
-        .iter()
-        .position(|p| p.id == selected_id)
-        .unwrap_or(0);
-    let prev_pattern = if current_index > 0 {
-        patterns.get(current_index - 1)
-    } else {
-        None
-    };
-    let next_pattern = patterns.get(current_index + 1);
-
-    let mut last_pattern_id = use_signal(|| selected_id.clone());
-    let mut source = use_signal(|| pattern.map(|p| p.source.to_string()).unwrap_or_default());
-    let mut preview_mode = use_signal(|| {
-        pattern
-            .map(|p| {
-                if p.category == PatternCategory::Examples {
-                    PreviewMode::Page
-                } else {
-                    PreviewMode::Snippet
-                }
-            })
-            .unwrap_or(PreviewMode::Snippet)
-    });
-
-    if *last_pattern_id.peek() != selected_id {
-        if let Some(p) = pattern {
-            source.set(p.source.to_string());
-            let new_mode = if p.category == PatternCategory::Examples {
-                PreviewMode::Page
-            } else {
-                PreviewMode::Snippet
-            };
-            preview_mode.set(new_mode);
-        }
-        last_pattern_id.set(selected_id.clone());
-    }
-
-    let mut show_source = use_signal(|| true);
-
-    rsx! {
-        div {
-            class: "flex h-[calc(100vh-4rem)]",
-
-            // Sidebar
-            aside {
-                class: "w-72 bg-sidebar border-r border-sidebar-border flex flex-col",
-                div { class: "p-4 border-b border-sidebar-border",
-                    h2 { class: "text-lg font-semibold text-sidebar-foreground", "Snippets" }
-                    p { class: "text-xs text-muted-foreground mt-1", "{patterns.len()} interactive examples" }
-                }
-                nav {
-                    class: "flex-1 overflow-y-auto p-2",
-                    for category in PatternCategory::all() {
-                        {
-                            let category = *category;
-                            let cat_patterns = patterns_by_category(category);
-                            let is_expanded = expanded_categories.read().get(&category).copied().unwrap_or(true);
-                            let has_selected = cat_patterns.iter().any(|p| p.id == selected_id);
-                            rsx! {
-                                div { class: "mb-2",
-                                    button {
-                                        class: "w-full flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
-                                        onclick: move |_| {
-                                            let mut cats = expanded_categories.write();
-                                            let current = cats.get(&category).copied().unwrap_or(true);
-                                            cats.insert(category, !current);
-                                        },
-                                        span { class: if has_selected { "text-primary" } else { "" }, "{category.label()}" }
-                                        span { class: "text-xs text-muted-foreground",
-                                            if is_expanded {
-                                                ChevronDown { class: "w-4 h-4" }
-                                            } else {
-                                                ChevronRight { class: "w-4 h-4" }
-                                            }
-                                        }
-                                    }
-                                    if is_expanded {
-                                        div { class: "ml-2 mt-1 space-y-0.5",
-                                            for pattern in cat_patterns {
-                                                {
-                                                    let is_selected = pattern.id == selected_id;
-                                                    rsx! {
-                                                        Link {
-                                                            to: Route::SnippetsView { id: pattern.id.to_string() },
-                                                            class: if is_selected {
-                                                                "block px-3 py-1.5 rounded-md text-sm bg-primary/10 text-primary font-medium border-l-2 border-primary"
-                                                            } else {
-                                                                "block px-3 py-1.5 rounded-md text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors border-l-2 border-transparent"
-                                                            },
-                                                            "{pattern.title}"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                div { class: "p-4 border-t border-sidebar-border",
-                    Link { to: Route::ChartEditor {}, class: "flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors",
-                        PenLine { class: "w-4 h-4" }
-                        "Open Full Editor"
-                    }
-                }
-            }
-
-            // Main content
-            div {
-                class: "flex-1 flex flex-col min-w-0",
-                match pattern {
-                    Some(pattern) => rsx! {
-                        header {
-                            class: "px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-card/50",
-                            div { class: "min-w-0",
-                                div { class: "flex items-center gap-3",
-                                    span { class: "text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded", "{pattern.category.label()}" }
-                                    h1 { class: "text-xl font-semibold text-foreground truncate", "{pattern.title}" }
-                                }
-                                p { class: "text-sm text-muted-foreground mt-1 line-clamp-1", "{pattern.description}" }
-                            }
-                            div { class: "flex items-center gap-2 shrink-0 ml-4",
-                                div { class: "flex items-center gap-1",
-                                    if let Some(prev) = prev_pattern {
-                                        Link { to: Route::SnippetsView { id: prev.id.to_string() }, class: "p-2 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors", title: "Previous: {prev.title}", ChevronLeft { class: "w-4 h-4" } }
-                                    } else {
-                                        span { class: "p-2 text-muted-foreground/30", ChevronLeft { class: "w-4 h-4" } }
-                                    }
-                                    span { class: "text-xs text-muted-foreground px-2", "{current_index + 1} / {patterns.len()}" }
-                                    if let Some(next) = next_pattern {
-                                        Link { to: Route::SnippetsView { id: next.id.to_string() }, class: "p-2 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors", title: "Next: {next.title}", ChevronRight { class: "w-4 h-4" } }
-                                    } else {
-                                        span { class: "p-2 text-muted-foreground/30", ChevronRight { class: "w-4 h-4" } }
-                                    }
-                                }
-                                div { class: "w-px h-6 bg-border mx-2" }
-                                button {
-                                    class: if *show_source.read() {
-                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-primary/10 text-primary"
-                                    } else {
-                                        "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-accent transition-colors"
-                                    },
-                                    onclick: move |_| { let current = *show_source.peek(); show_source.set(!current); },
-                                    Code { class: "w-3.5 h-3.5" }
-                                    "Source"
-                                }
-                            }
-                        }
-                        div {
-                            class: "flex-1 flex overflow-hidden",
-                            div { class: "flex-1 overflow-hidden bg-muted/30",
-                                components::DynamicChartRenderer { source: source, mode: preview_mode, canvas_id: Some(format!("snippet-canvas-{}", pattern.id)) }
-                            }
-                            if *show_source.read() {
-                                div { class: "w-96 border-l border-border flex flex-col bg-card shrink-0",
-                                    div { class: "px-4 py-3 border-b border-border flex items-center justify-between shrink-0",
-                                        div { class: "flex items-center gap-2",
-                                            FileCode { class: "w-4 h-4 text-muted-foreground" }
-                                            span { class: "text-sm font-medium text-foreground", "Source" }
-                                        }
-                                        if source.read().as_str() != pattern.source {
-                                            button { class: "text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded hover:bg-accent transition-colors", onclick: move |_| source.set(pattern.source.to_string()), "Reset" }
-                                        }
-                                    }
-                                    div { class: "flex-1 overflow-hidden",
-                                        components::HighlightedEditor { value: source(), on_change: move |v: String| source.set(v), placeholder: "Enter keyflow notation...", textarea_id: Some(format!("snippet-editor-{}", pattern.id)) }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    None => {
-                        rsx! {
-                            div { class: "flex-1 flex flex-col items-center justify-center text-center p-8",
-                                fts_ui::lucide_dioxus::CircleAlert { class: "w-16 h-16 text-muted-foreground/50 mb-4" }
-                                h2 { class: "text-xl font-semibold text-foreground mb-2", "Pattern Not Found" }
-                                p { class: "text-muted-foreground mb-6", "The pattern \"{selected_id}\" doesn't exist." }
-                                Link { to: Route::SnippetsBrowser {}, class: "inline-flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors", "Browse All Snippets" }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// =============================================================================
-// Legacy Routes
-// =============================================================================
-
-#[component]
-fn PatternBrowser() -> Element {
-    let nav = use_navigator();
-    use_effect(move || {
-        nav.push(Route::SnippetsBrowser {});
-    });
-    rsx! { div { class: "flex items-center justify-center h-64 text-muted-foreground", "Redirecting..." } }
-}
-
-#[component]
-fn ChartEditor() -> Element {
-    rsx! { components::ChartEditor {} }
-}
-
-#[component]
-fn PatternView(id: String) -> Element {
-    let nav = use_navigator();
-    let id_clone = id.clone();
-    use_effect(move || {
-        nav.push(Route::SnippetsView {
-            id: id_clone.clone(),
-        });
-    });
-    rsx! { div { class: "flex items-center justify-center h-64 text-muted-foreground", "Redirecting..." } }
-}
-
-// =============================================================================
-// Test Pages
-// =============================================================================
-
-/// Test page for debugging chart rendering
 #[component]
 fn TestRender() -> Element {
     let mut source = use_signal(|| DEMO_CHARTS[0].to_string());
