@@ -511,6 +511,10 @@ pub fn LogseqShell() -> Element {
     let ops = make_block_ops(doc.read().clone(), editing_id, sidebar_stack, zoomed_block);
     use_context_provider(|| ops.clone());
 
+    // Cmd-K command palette state. `Some(query)` while open.
+    let mut cmd_k: Signal<Option<String>> = use_signal(|| None);
+    use_context_provider(|| CommandPaletteState(cmd_k));
+
     // Auto-select the first page when none is active.
     {
         let pages = vault_data.pages.clone();
@@ -532,9 +536,26 @@ pub fn LogseqShell() -> Element {
                     class: "ls-search",
                     r#type: "search",
                     placeholder: "Search… (Ctrl+K)",
+                    onfocus: move |_| cmd_k.set(Some(String::new())),
+                    oninput: move |e: Event<FormData>| cmd_k.set(Some(e.value())),
+                    onkeydown: move |e: Event<KeyboardData>| {
+                        if matches!(e.key(), Key::Escape) {
+                            cmd_k.set(None);
+                        }
+                    },
                 }
                 div { class: "ls-spacer" }
                 div { class: "ls-status", "offline" }
+            }
+            if let Some(q) = cmd_k.read().clone() {
+                CommandPalette {
+                    query: q,
+                    pages: vault_data.pages.clone(),
+                    on_pick_page: move |id| {
+                        active_page_w.set(Some(id));
+                        cmd_k.set(None);
+                    },
+                }
             }
             div { class: "ls-body",
                 LeftSidebar {
@@ -919,6 +940,44 @@ fn PageView(
 }
 
 #[component]
+fn CommandPalette(query: String, pages: Vec<Page>, on_pick_page: EventHandler<Uuid>) -> Element {
+    let q_lower = query.to_lowercase();
+    let mut hits: Vec<Page> = pages
+        .iter()
+        .filter(|p| q_lower.is_empty() || p.basename.to_lowercase().contains(&q_lower))
+        .cloned()
+        .collect();
+    hits.sort_by(|a, b| a.basename.cmp(&b.basename));
+    hits.truncate(15);
+    rsx! {
+        div {
+            style: "position: fixed; top: 3.2rem; left: 50%; transform: translateX(-50%); width: 540px; max-width: 92vw; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.5em; box-shadow: 0 24px 60px rgba(0,0,0,0.45); z-index: 60; max-height: 70vh; overflow-y: auto;",
+            div { style: "padding: 0.4em 0.7em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-bottom: 1px solid var(--ls-border-color);",
+                "Jump to page · matches: {hits.len()}"
+            }
+            if hits.is_empty() {
+                div { style: "padding: 0.8em; color: var(--ls-secondary-text-color); font-style: italic;",
+                    "No pages match. Press Esc to close."
+                }
+            }
+            for p in hits {
+                {
+                    let id = p.id;
+                    rsx! {
+                        div {
+                            key: "{id}",
+                            style: "padding: 0.5em 0.75em; cursor: pointer; border-bottom: 1px solid var(--ls-border-color); color: var(--ls-link-text-color);",
+                            onclick: move |_| on_pick_page.call(id),
+                            "{p.basename}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
 fn RightSidebar(stack: Signal<Vec<SidebarEntry>>, vault: LogseqVault) -> Element {
     let entries = stack.read().clone();
     if entries.is_empty() {
@@ -1225,6 +1284,10 @@ pub(crate) struct TagSearchState(pub Signal<Option<(Uuid, String)>>);
 /// shell would otherwise collide with `editing_id` (same type).
 #[derive(Clone, Copy)]
 pub(crate) struct ZoomState(pub Signal<Option<Uuid>>);
+
+/// Cmd-K command palette state. `Some(query)` while open.
+#[derive(Clone, Copy)]
+pub(crate) struct CommandPaletteState(pub Signal<Option<String>>);
 
 /// One pane in the right sidebar's stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1781,6 +1844,42 @@ fn PageSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> 
             }
         }
     }
+}
+
+/// Format a date as a Logseq journal title — defaults to ISO
+/// 8601 `YYYY-MM-DD`. Mirrors `frontend.date/journal-name`.
+pub fn journal_title(date: chrono::NaiveDate) -> String {
+    date.format("%Y-%m-%d").to_string()
+}
+
+/// Parse a journal title back to a date (`YYYY-MM-DD` only).
+pub fn parse_journal_title(s: &str) -> Option<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok()
+}
+
+/// Natural-language date parser — `today`, `tomorrow`, `yesterday`,
+/// `+N` / `-N` day offsets, and ISO 8601. Subset of Logseq's
+/// `nld-parse`; covers the slash-command + journal-link cases.
+pub fn nld_to_date(input: &str) -> Option<chrono::NaiveDate> {
+    let s = input.trim().to_lowercase();
+    let today = chrono::Local::now().date_naive();
+    match s.as_str() {
+        "today" | "now" => return Some(today),
+        "tomorrow" => return Some(today + chrono::Duration::days(1)),
+        "yesterday" => return Some(today - chrono::Duration::days(1)),
+        _ => {}
+    }
+    if let Some(rest) = s.strip_prefix('+') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Some(today + chrono::Duration::days(n));
+        }
+    }
+    if let Some(rest) = s.strip_prefix('-') {
+        if let Ok(n) = rest.parse::<i64>() {
+            return Some(today - chrono::Duration::days(n));
+        }
+    }
+    parse_journal_title(&s)
 }
 
 /// Return the index of the most recent `ch` that immediately
@@ -2828,6 +2927,43 @@ mod tests {
         let tree = build_block_tree(&blocks);
         let found = find_subtree(&tree, child).expect("subtree present");
         assert_eq!(found.block.id, child);
+    }
+
+    #[test]
+    fn nld_today_yesterday_tomorrow() {
+        let today = chrono::Local::now().date_naive();
+        assert_eq!(nld_to_date("today"), Some(today));
+        assert_eq!(
+            nld_to_date(" Tomorrow "),
+            Some(today + chrono::Duration::days(1))
+        );
+        assert_eq!(
+            nld_to_date("yesterday"),
+            Some(today - chrono::Duration::days(1))
+        );
+        assert_eq!(nld_to_date("now"), Some(today));
+    }
+
+    #[test]
+    fn nld_offset_days() {
+        let today = chrono::Local::now().date_naive();
+        assert_eq!(nld_to_date("+7"), Some(today + chrono::Duration::days(7)));
+        assert_eq!(nld_to_date("-30"), Some(today - chrono::Duration::days(30)));
+    }
+
+    #[test]
+    fn nld_iso_passthrough() {
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 5, 19).unwrap();
+        assert_eq!(nld_to_date("2026-05-19"), Some(d));
+        assert_eq!(journal_title(d), "2026-05-19");
+        assert_eq!(parse_journal_title("2026-05-19"), Some(d));
+    }
+
+    #[test]
+    fn nld_invalid_returns_none() {
+        assert_eq!(nld_to_date("never"), None);
+        assert_eq!(nld_to_date("+notanumber"), None);
+        assert_eq!(parse_journal_title("not-a-date"), None);
     }
 
     #[test]
