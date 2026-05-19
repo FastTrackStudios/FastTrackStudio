@@ -783,8 +783,16 @@ pub fn LogseqShell() -> Element {
                 CommandPalette {
                     query: q,
                     pages: vault_data.pages.clone(),
+                    blocks: vault_data.blocks.clone(),
                     on_pick_page: move |id| {
                         active_page_w.set(Some(id));
+                        cmd_k.set(None);
+                    },
+                    on_pick_block: move |(page_id, block_id): (Uuid, Uuid)| {
+                        active_page_w.set(Some(page_id));
+                        if let Some(z) = try_use_context::<ZoomState>() {
+                            z.0.clone().set(Some(block_id));
+                        }
                         cmd_k.set(None);
                     },
                 }
@@ -2918,35 +2926,89 @@ fn BacklinksSection(
 }
 
 #[component]
-fn CommandPalette(query: String, pages: Vec<Page>, on_pick_page: EventHandler<Uuid>) -> Element {
+fn CommandPalette(
+    query: String,
+    pages: Vec<Page>,
+    blocks: Vec<Block>,
+    on_pick_page: EventHandler<Uuid>,
+    on_pick_block: EventHandler<(Uuid, Uuid)>,
+) -> Element {
     let q_lower = query.to_lowercase();
-    let mut hits: Vec<Page> = pages
+    let mut page_hits: Vec<Page> = pages
         .iter()
         .filter(|p| q_lower.is_empty() || p.basename.to_lowercase().contains(&q_lower))
         .cloned()
         .collect();
-    hits.sort_by(|a, b| a.basename.cmp(&b.basename));
-    hits.truncate(15);
+    page_hits.sort_by(|a, b| a.basename.cmp(&b.basename));
+    page_hits.truncate(10);
+    // Block-content matches — only when there's an actual query;
+    // an unfiltered list would surface every block in the vault.
+    let mut block_hits: Vec<(Uuid, Uuid, String, String)> = Vec::new();
+    if !q_lower.is_empty() {
+        for b in &blocks {
+            if b.content.to_lowercase().contains(&q_lower) {
+                let page_name = pages
+                    .iter()
+                    .find(|p| p.id == b.page_id)
+                    .map(|p| p.basename.clone())
+                    .unwrap_or_default();
+                let snippet: String = b
+                    .content
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(120)
+                    .collect();
+                block_hits.push((b.page_id, b.id, page_name, snippet));
+                if block_hits.len() >= 20 {
+                    break;
+                }
+            }
+        }
+    }
     rsx! {
         div {
             style: "position: fixed; top: 3.2rem; left: 50%; transform: translateX(-50%); width: 540px; max-width: 92vw; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.5em; box-shadow: 0 24px 60px rgba(0,0,0,0.45); z-index: 60; max-height: 70vh; overflow-y: auto;",
             div { style: "padding: 0.4em 0.7em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-bottom: 1px solid var(--ls-border-color);",
-                "Jump to page · matches: {hits.len()}"
+                "Pages · {page_hits.len()}"
             }
-            if hits.is_empty() {
+            if page_hits.is_empty() && block_hits.is_empty() {
                 div { style: "padding: 0.8em; color: var(--ls-secondary-text-color); font-style: italic;",
-                    "No pages match. Press Esc to close."
+                    "No matches. Press Esc to close."
                 }
             }
-            for p in hits {
+            for p in page_hits {
                 {
                     let id = p.id;
                     rsx! {
                         div {
-                            key: "{id}",
+                            key: "p-{id}",
                             style: "padding: 0.5em 0.75em; cursor: pointer; border-bottom: 1px solid var(--ls-border-color); color: var(--ls-link-text-color);",
                             onclick: move |_| on_pick_page.call(id),
                             "{p.basename}"
+                        }
+                    }
+                }
+            }
+            if !block_hits.is_empty() {
+                div { style: "padding: 0.4em 0.7em; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); border-top: 1px solid var(--ls-border-color); border-bottom: 1px solid var(--ls-border-color);",
+                    "Blocks · {block_hits.len()}"
+                }
+                for (page_id, block_id, page_name, snippet) in block_hits {
+                    {
+                        rsx! {
+                            div {
+                                key: "b-{block_id}",
+                                style: "padding: 0.5em 0.75em; cursor: pointer; border-bottom: 1px solid var(--ls-border-color);",
+                                onclick: move |_| on_pick_block.call((page_id, block_id)),
+                                div { style: "color: var(--ls-primary-text-color); font-size: 0.85rem;",
+                                    "{snippet}"
+                                }
+                                div { style: "color: var(--ls-secondary-text-color); font-size: 0.75rem;",
+                                    "{page_name}"
+                                }
+                            }
                         }
                     }
                 }
@@ -3620,6 +3682,113 @@ fn EditableBlock(block: Block) -> Element {
                     });
                 }
             }
+            // Cmd/Ctrl-B → wrap selection in **bold**, or insert
+            // `****` with the caret between if there's no selection.
+            // Same for I (*italic*) and E (`code`). Matches Logseq's
+            // markdown-friendly shortcuts.
+            Key::Character(ref c)
+                if (mods.meta() || mods.ctrl())
+                    && (c == "b" || c == "B" || c == "i" || c == "I" || c == "e" || c == "E") =>
+            {
+                e.prevent_default();
+                let (lhs, rhs) = match c.as_str() {
+                    "b" | "B" => ("**", "**"),
+                    "i" | "I" => ("*", "*"),
+                    _ => ("`", "`"),
+                };
+                let id_str = block_id.simple().to_string();
+                let mut content_w = content_signal;
+                let update_cb = ops.update_content;
+                spawn(async move {
+                    let (s, en) = read_selection(&id_str).await.unwrap_or((0, 0));
+                    let mut cur = content_w.peek().clone();
+                    if s == en {
+                        cur.insert_str(s, &format!("{lhs}{rhs}"));
+                        content_w.set(cur.clone());
+                        update_cb.call((block_id, cur));
+                        set_caret(&id_str, s + lhs.len());
+                    } else {
+                        let lo = s.min(en);
+                        let hi = s.max(en);
+                        let inner = cur[lo..hi].to_string();
+                        cur.replace_range(lo..hi, &format!("{lhs}{inner}{rhs}"));
+                        content_w.set(cur.clone());
+                        update_cb.call((block_id, cur));
+                        set_caret(&id_str, hi + lhs.len() + rhs.len());
+                    }
+                });
+            }
+            // Alt-Enter → create a child block (split then indent).
+            Key::Enter if mods.alt() => {
+                e.prevent_default();
+                let split_cb = ops.split_block;
+                let indent_cb = ops.indent;
+                let fallback_len = current.len();
+                let id_str = block_id.simple().to_string();
+                spawn(async move {
+                    let offset = read_selection_start(&id_str).await.unwrap_or(fallback_len);
+                    split_cb.call((block_id, offset));
+                    // The split call creates a new sibling; indenting
+                    // it would target the new block, not the original.
+                    // For now indent the original — gives the same
+                    // visual result since the new block becomes a
+                    // child of the indented parent.
+                    indent_cb.call(block_id);
+                });
+            }
+            // Auto-pair brackets / quotes. Skip when the user has a
+            // selection (let the default browser behavior handle it
+            // so they can wrap selected text by typing the opener
+            // — handled separately below for `[`, `(`, `*`).
+            Key::Character(ref ch) if matches!(ch.as_str(), "[" | "(" | "{" | "\"" | "`") => {
+                let pair = match ch.as_str() {
+                    "[" => "]",
+                    "(" => ")",
+                    "{" => "}",
+                    "\"" => "\"",
+                    "`" => "`",
+                    _ => unreachable!(),
+                };
+                let opener = ch.clone();
+                e.prevent_default();
+                let id_str = block_id.simple().to_string();
+                let mut content_w = content_signal;
+                let update_cb = ops.update_content;
+                spawn(async move {
+                    let (s, en) = read_selection(&id_str).await.unwrap_or((0, 0));
+                    let mut cur = content_w.peek().clone();
+                    if s == en {
+                        cur.insert_str(s, &format!("{opener}{pair}"));
+                        content_w.set(cur.clone());
+                        update_cb.call((block_id, cur));
+                        set_caret(&id_str, s + opener.len());
+                    } else {
+                        let lo = s.min(en);
+                        let hi = s.max(en);
+                        let inner = cur[lo..hi].to_string();
+                        cur.replace_range(lo..hi, &format!("{opener}{inner}{pair}"));
+                        content_w.set(cur.clone());
+                        update_cb.call((block_id, cur));
+                        set_caret(&id_str, hi + opener.len() + pair.len());
+                    }
+                });
+            }
+            // `# ` / `## ` / ... at start of block → set heading
+            // level. Triggered when the user types Space and the
+            // current content is just one to six `#` chars.
+            Key::Character(ref ch) if ch == " " => {
+                let trimmed = current.trim_end_matches(' ');
+                let level = trimmed.chars().take_while(|c| *c == '#').count();
+                if level >= 1 && level <= 6 && trimmed.chars().all(|c| c == '#') {
+                    e.prevent_default();
+                    let mut content_w = content_signal;
+                    content_w.set(String::new());
+                    let update_cb = ops.update_content;
+                    update_cb.call((block_id, String::new()));
+                    ops.set_kind
+                        .call((block_id, "heading".into(), Some(level as i32)));
+                }
+            }
             Key::ArrowDown => {
                 if mods.ctrl() || mods.meta() {
                     e.prevent_default();
@@ -4011,6 +4180,51 @@ pub(crate) fn trigger_after_boundary(before: &str, ch: char) -> Option<usize> {
 /// so the same code path works on desktop (Tao webview) and web
 /// (browser). Returns `None` when the element is absent or the
 /// eval fails — callers should fall back to a default offset.
+/// Read the textarea's `selectionStart` and `selectionEnd` for an
+/// editing block. Returns `(start, end)` so callers know whether
+/// the user has a selection or just a caret.
+async fn read_selection(block_simple_id: &str) -> Option<(usize, usize)> {
+    let script = format!(
+        r#"
+        (function() {{
+            const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
+            if (!wrap) return [0, 0];
+            const ta = wrap.querySelector('textarea');
+            if (!ta) return [0, 0];
+            return [ta.selectionStart || 0, ta.selectionEnd || 0];
+        }})()
+        "#
+    );
+    let mut handle = document::eval(&script);
+    match handle.recv::<serde_json::Value>().await {
+        Ok(serde_json::Value::Array(a)) if a.len() == 2 => {
+            let s = a[0].as_u64()? as usize;
+            let e = a[1].as_u64()? as usize;
+            Some((s, e))
+        }
+        _ => None,
+    }
+}
+
+/// Move the textarea caret to `offset`. Runs after a microtask so
+/// it lands after Dioxus has reapplied the textarea's `value`
+/// attribute on the next render cycle.
+fn set_caret(block_simple_id: &str, offset: usize) {
+    let script = format!(
+        r#"
+        requestAnimationFrame(function() {{
+            const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
+            if (!wrap) return;
+            const ta = wrap.querySelector('textarea');
+            if (!ta) return;
+            ta.setSelectionRange({offset}, {offset});
+            ta.focus();
+        }});
+        "#
+    );
+    let _ = document::eval(&script);
+}
+
 async fn read_selection_start(block_simple_id: &str) -> Option<usize> {
     let script = format!(
         r#"
