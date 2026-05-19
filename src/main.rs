@@ -1014,6 +1014,7 @@ struct ProjectTheme {
     glyph: &'static str,
     accent: &'static str,
     bg: &'static str,
+    version: &'static str,
     bg_kind: BgKind,
 }
 
@@ -1021,32 +1022,32 @@ const PROJECT_THEMES: &[ProjectTheme] = &[
     ProjectTheme {
         num: "01", name: "Keyflow", tagline: "Charts as code",
         desc: "Plain-text music format that compiles into real lead sheets.",
-        glyph: ".kf", accent: "#a78bfa", bg: "#0d0a14", bg_kind: BgKind::Keyflow,
+        glyph: ".kf", accent: "#a78bfa", bg: "#0d0a14", version: "alpha v.0.0.1", bg_kind: BgKind::Keyflow,
     },
     ProjectTheme {
         num: "02", name: "Session", tagline: "Performance brain",
         desc: "Setlist \u{00B7} song \u{00B7} section navigation across the network.",
-        glyph: "\u{2192}\u{2192}", accent: "#86efac", bg: "#0a1310", bg_kind: BgKind::Session,
+        glyph: "\u{2192}\u{2192}", accent: "#86efac", bg: "#0a1310", version: "alpha v.0.0.1", bg_kind: BgKind::Session,
     },
     ProjectTheme {
         num: "03", name: "Signal", tagline: "The audio rig",
         desc: "Plugin chains, profiles, snapshots, live morphing.",
-        glyph: "\u{224B}", accent: "#60a5fa", bg: "#0a1018", bg_kind: BgKind::Signal,
+        glyph: "\u{224B}", accent: "#60a5fa", bg: "#0a1018", version: "alpha v.0.0.1", bg_kind: BgKind::Signal,
     },
     ProjectTheme {
         num: "04", name: "Input", tagline: "Wiring closet",
         desc: "MIDI, keys, hardware controllers \u{2014} into the action system.",
-        glyph: "I/O", accent: "#a1a1aa", bg: "#0f0f12", bg_kind: BgKind::Input,
+        glyph: "I/O", accent: "#a1a1aa", bg: "#0f0f12", version: "alpha v.0.0.1", bg_kind: BgKind::Input,
     },
     ProjectTheme {
         num: "05", name: "DAW", tagline: "REAPER layer",
         desc: "Unified API. Transport, tracks, FX, project files.",
-        glyph: "\u{23F5}", accent: "#52525b", bg: "#050507", bg_kind: BgKind::Daw,
+        glyph: "\u{23F5}", accent: "#52525b", bg: "#050507", version: "alpha v.0.0.1", bg_kind: BgKind::Daw,
     },
     ProjectTheme {
         num: "06", name: "Plugins", tagline: "DSP suite",
         desc: "In-house CLAP/VST3 plugins with detachable GUI.",
-        glyph: "FX", accent: "#b54234", bg: "#140a08", bg_kind: BgKind::Plugins,
+        glyph: "FX", accent: "#b54234", bg: "#140a08", version: "alpha v.0.0.1", bg_kind: BgKind::Plugins,
     },
 ];
 
@@ -1078,19 +1079,19 @@ fn ProjectTilesGrid() -> Element {
                 class: "mx-auto max-w-6xl px-6",
 
                 div {
-                    class: "mb-12 text-center",
+                    class: "mb-14 text-center",
                     p {
                         class: "font-mono text-xs uppercase tracking-[0.25em] text-muted-foreground/70 mb-3",
                         "Currently in development"
                     }
                     h2 {
-                        class: "text-3xl md:text-4xl font-semibold text-foreground tracking-tight",
-                        "Six projects, one suite."
+                        class: "text-3xl md:text-4xl lg:text-5xl font-semibold text-foreground tracking-tight",
+                        "Check Out the Currently Active Projects"
                     }
                 }
 
                 div {
-                    class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4",
+                    class: "grid grid-cols-1 md:grid-cols-2 gap-5 lg:gap-6",
                     for theme in PROJECT_THEMES.iter().copied() {
                         ProjectTile { theme: theme }
                     }
@@ -1108,7 +1109,7 @@ fn ProjectTile(theme: ProjectTheme) -> Element {
     );
     rsx! {
         div {
-            class: "group relative overflow-hidden rounded-md border p-6 h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
+            class: "group relative overflow-hidden rounded-md border p-7 md:p-8 lg:p-10 lg:min-h-[22rem] h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
             style: "{style}",
 
             // Animated motif painted behind the content
@@ -1121,15 +1122,23 @@ fn ProjectTile(theme: ProjectTheme) -> Element {
                 BgKind::Plugins => rsx! { BgPlugins { color: theme.accent } },
             }
 
-            // Top row: project number + glyph
+            // Top row: project number + version (left), glyph (right)
             div {
-                class: "relative z-10 flex items-start justify-between mb-6",
+                class: "relative z-10 flex items-start justify-between mb-8 lg:mb-10",
                 div {
-                    class: "font-mono text-[0.6rem] uppercase tracking-[0.25em] text-muted-foreground",
-                    "Project {theme.num}"
+                    class: "flex flex-col gap-1",
+                    div {
+                        class: "font-mono text-[0.65rem] lg:text-xs uppercase tracking-[0.25em] text-muted-foreground",
+                        "Project {theme.num}"
+                    }
+                    div {
+                        class: "font-mono text-[0.6rem] lg:text-[0.65rem] uppercase tracking-[0.25em]",
+                        style: "color: {theme.accent}; opacity: 0.75;",
+                        "{theme.version}"
+                    }
                 }
                 div {
-                    class: "font-mono text-[1.05rem] tracking-tight opacity-80",
+                    class: "font-mono text-lg lg:text-xl tracking-tight opacity-80",
                     style: "color: {theme.accent};",
                     "{theme.glyph}"
                 }
@@ -1139,23 +1148,23 @@ fn ProjectTile(theme: ProjectTheme) -> Element {
             div {
                 class: "relative z-10",
                 div {
-                    class: "text-4xl font-semibold tracking-tight text-foreground leading-none",
+                    class: "text-4xl lg:text-6xl font-semibold tracking-tight text-foreground leading-none",
                     "{theme.name}"
                 }
                 div {
-                    class: "font-mono text-[0.7rem] tracking-[0.18em] uppercase mt-2",
+                    class: "font-mono text-[0.7rem] lg:text-xs tracking-[0.18em] uppercase mt-3 lg:mt-4",
                     style: "color: {theme.accent};",
                     "{theme.tagline}"
                 }
                 p {
-                    class: "text-sm leading-relaxed text-muted-foreground mt-3 max-w-[28ch]",
+                    class: "text-sm lg:text-base leading-relaxed text-muted-foreground mt-4 lg:mt-5 max-w-[32ch]",
                     "{theme.desc}"
                 }
             }
 
-            // Accent bar (bottom-left, 48px wide)
+            // Accent bar (bottom-left, wider on desktop)
             div {
-                class: "absolute bottom-0 left-0 h-[2px] w-12 z-10",
+                class: "absolute bottom-0 left-0 h-[2px] w-12 lg:w-16 z-10",
                 style: "background-color: {theme.accent};",
             }
         }
