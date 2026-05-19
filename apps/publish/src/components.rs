@@ -235,24 +235,30 @@ fn PageTreeItem(node: PageTreeNode, current_id: Option<uuid::Uuid>) -> Element {
     }
 }
 
-/// "Linked by" panel rendered below the article. Uses the
-/// `BacklinkEntry` list passed in (precomputed from the
-/// `BacklinkIndex` in `graph.rs`).
+/// "Linked references" panel rendered below the article. Each
+/// entry shows the referring page title + a snippet of the
+/// referring block's content (Logseq's "Linked References"
+/// sidebar shape).
 #[component]
 pub fn BacklinksPanel(entries: Vec<BacklinkEntry>) -> Element {
     if entries.is_empty() {
         return rsx! {};
     }
+    let count = entries.len();
     rsx! {
         section { class: "backlinks",
-            h2 { "Linked by" }
+            h2 {
+                "Linked references "
+                span { class: "backlinks-count", "({count})" }
+            }
             ul {
-                for e in entries {
+                for (i, e) in entries.into_iter().enumerate() {
                     {
                         let href = format!("/{}/", e.slug);
                         rsx! {
-                            li { key: "{e.slug}",
-                                a { href: "{href}", "{e.label}" }
+                            li { key: "{i}",
+                                a { class: "backlink-page", href: "{href}", "{e.label}" }
+                                div { class: "backlink-snippet", "{e.snippet}" }
                             }
                         }
                     }

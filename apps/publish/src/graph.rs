@@ -213,10 +213,16 @@ pub struct BacklinkIndex(pub std::sync::Arc<HashMap<String, Vec<BacklinkEntry>>>
 pub struct BacklinkEntry {
     pub slug: String,
     pub label: String,
+    /// Short snippet of the referring block's content so the
+    /// backlinks panel can show *where* the reference lives, not
+    /// just *which page* it's on. Mirrors Logseq's references
+    /// sidebar layout.
+    pub snippet: String,
 }
 
 /// Build the backlinks index from the same data the graph uses.
-/// Symmetric edges are deduped by (target ← source) pair.
+/// Symmetric edges are deduped by (target ← source-page, source-block) pair
+/// so the same page can show up as a backlink once per referring block.
 pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
     let mut id_to_meta: HashMap<Uuid, (String, String)> = HashMap::new();
     let mut basename_to_slug: HashMap<String, String> = HashMap::new();
@@ -230,11 +236,12 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
     let resolver = WikiResolver(Arc::new(basename_to_slug));
     let block_refs = build_block_ref_resolver(blocks, &id_to_slug);
 
-    // target_slug → set of (source_slug, source_label).
-    // Both wikilinks and block refs contribute backlinks at the
-    // page level — UI today is page-grain, so a `((uuid))` from
-    // page A pointing into page B shows "linked by A" on B.
-    let mut by_target: HashMap<String, std::collections::BTreeMap<String, String>> = HashMap::new();
+    // target_slug → list of BacklinkEntry. We dedupe per
+    // (source-page-slug + block-id) so the same page can contribute
+    // multiple snippets when multiple of its blocks reference the
+    // target — matching Logseq's "Linked references" panel.
+    let mut by_target: HashMap<String, Vec<BacklinkEntry>> = HashMap::new();
+    let mut seen: HashMap<String, std::collections::HashSet<(String, Uuid)>> = HashMap::new();
     for b in blocks {
         let Some((src_slug, src_label)) = id_to_meta.get(&b.page_id) else {
             continue;
@@ -246,6 +253,7 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
         );
+        let snippet = block_snippet(&b.content);
         for n in walk(&parsed) {
             let target = match n {
                 inline::Node::Wikilink {
@@ -263,24 +271,28 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
             if &target == src_slug {
                 continue;
             }
-            by_target
-                .entry(target)
-                .or_default()
-                .insert(src_slug.clone(), src_label.clone());
+            let dedupe_key = (src_slug.clone(), b.id);
+            let already = seen.entry(target.clone()).or_default().insert(dedupe_key);
+            if !already {
+                continue;
+            }
+            by_target.entry(target).or_default().push(BacklinkEntry {
+                slug: src_slug.clone(),
+                label: src_label.clone(),
+                snippet: snippet.clone(),
+            });
         }
     }
-    let map: HashMap<String, Vec<BacklinkEntry>> = by_target
-        .into_iter()
-        .map(|(target, srcs)| {
-            (
-                target,
-                srcs.into_iter()
-                    .map(|(slug, label)| BacklinkEntry { slug, label })
-                    .collect(),
-            )
-        })
-        .collect();
-    BacklinkIndex(Arc::new(map))
+    // Sort entries deterministically by (page label, snippet).
+    for entries in by_target.values_mut() {
+        entries.sort_by(|a, b| {
+            a.label
+                .to_lowercase()
+                .cmp(&b.label.to_lowercase())
+                .then_with(|| a.snippet.cmp(&b.snippet))
+        });
+    }
+    BacklinkIndex(Arc::new(by_target))
 }
 
 /// Dioxus component that renders an empty `<canvas>` plus a

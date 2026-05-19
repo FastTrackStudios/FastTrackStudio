@@ -498,6 +498,44 @@ aside.query .query-results li {
   margin: 0.15em 0;
 }
 
+/* Backlink entries — title + snippet stack. */
+.backlinks .backlinks-count {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.backlinks ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.backlinks li {
+  padding: 0.5em 0.75em;
+  border-left: 2px solid var(--border);
+  margin: 0.4em 0;
+  background: var(--bg-alt);
+  border-radius: 0 0.3em 0.3em 0;
+}
+
+.backlinks li:hover {
+  border-left-color: var(--link);
+}
+
+.backlinks .backlink-page {
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  color: var(--link);
+}
+
+.backlinks .backlink-snippet {
+  margin-top: 0.25em;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 aside.query .query-empty {
   margin: 0.2em 0;
   color: var(--muted);
