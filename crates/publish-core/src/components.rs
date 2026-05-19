@@ -144,6 +144,45 @@ pub struct QueryResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
 #[derive(Clone, Default, PartialEq)]
 pub struct PagePropertyResolver(pub Arc<HashMap<String, HashMap<String, Vec<QueryHit>>>>);
 
+/// Vault asset root, used to rewrite relative image URLs
+/// (`../assets/foo.png`, `assets/foo.png`, `./assets/foo.png`) to
+/// absolute `file://` URLs the renderer can actually load. Empty
+/// means "don't rewrite" — static-site builds leave their URLs as
+/// relative paths because the publisher copies the assets next to
+/// the output HTML.
+#[derive(Clone, Default, PartialEq)]
+pub struct AssetBaseResolver(pub Arc<Option<std::path::PathBuf>>);
+
+impl AssetBaseResolver {
+    pub fn from_root(root: std::path::PathBuf) -> Self {
+        Self(Arc::new(Some(root)))
+    }
+    /// Apply the resolver to a raw `src` URL. Absolute URLs
+    /// (`http://`, `https://`, `file://`, `data:`) pass through
+    /// unchanged.
+    pub fn resolve(&self, url: &str) -> String {
+        if url.starts_with("http://")
+            || url.starts_with("https://")
+            || url.starts_with("file://")
+            || url.starts_with("data:")
+        {
+            return url.to_string();
+        }
+        let Some(root) = self.0.as_ref().as_ref() else {
+            return url.to_string();
+        };
+        // Strip leading `./`, `../`, and `/`. We treat all relative
+        // forms as vault-root-relative since pages can live in
+        // `pages/` or `journals/` and Logseq's `../assets/` form
+        // resolves the same way.
+        let cleaned = url.trim_start_matches("./");
+        let cleaned = cleaned.trim_start_matches("../");
+        let cleaned = cleaned.trim_start_matches('/');
+        let path = root.join(cleaned);
+        format!("file://{}", path.display())
+    }
+}
+
 /// Resolution table: lowercased namespace prefix → matching child
 /// pages. Lets `{{namespace foo/bar}}` block content list every
 /// page under that namespace (alphabetical). Mirrors Logseq's
@@ -997,9 +1036,13 @@ pub fn InlineNode(node: inline::Node) -> Element {
         Node::ExternalLink { label, url } => rsx! {
             a { class: "ext", href: "{url}", target: "_blank", rel: "noopener", "{label}" }
         },
-        Node::Image { alt, url } => rsx! {
-            img { class: "inline-image", src: "{url}", alt: "{alt}", loading: "lazy" }
-        },
+        Node::Image { alt, url } => {
+            let assets = try_use_context::<AssetBaseResolver>().unwrap_or_default();
+            let resolved = assets.resolve(url.as_str());
+            rsx! {
+                img { class: "inline-image", src: "{resolved}", alt: "{alt}", loading: "lazy" }
+            }
+        }
         Node::FootnoteRef(id) => {
             let href = format!("#fn-{id}");
             rsx! {
@@ -1226,6 +1269,42 @@ pub fn InlineNode(node: inline::Node) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asset_base_passes_absolute_urls() {
+        let r = AssetBaseResolver::from_root("/tmp/vault".into());
+        assert_eq!(
+            r.resolve("https://example.com/x.png"),
+            "https://example.com/x.png"
+        );
+        assert_eq!(
+            r.resolve("data:image/png;base64,iVBOR"),
+            "data:image/png;base64,iVBOR"
+        );
+    }
+
+    #[test]
+    fn asset_base_rewrites_relative_urls() {
+        let r = AssetBaseResolver::from_root("/tmp/vault".into());
+        assert_eq!(
+            r.resolve("../assets/foo.png"),
+            "file:///tmp/vault/assets/foo.png"
+        );
+        assert_eq!(
+            r.resolve("./assets/foo.png"),
+            "file:///tmp/vault/assets/foo.png"
+        );
+        assert_eq!(
+            r.resolve("assets/foo.png"),
+            "file:///tmp/vault/assets/foo.png"
+        );
+    }
+
+    #[test]
+    fn asset_base_empty_passes_through() {
+        let r = AssetBaseResolver::default();
+        assert_eq!(r.resolve("../assets/foo.png"), "../assets/foo.png");
+    }
 
     #[test]
     fn peel_todo_marker() {

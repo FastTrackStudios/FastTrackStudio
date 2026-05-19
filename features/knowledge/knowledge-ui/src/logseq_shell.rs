@@ -451,6 +451,11 @@ impl PartialEq for DocHandle {
 pub struct LogseqVault {
     pub pages: Vec<Page>,
     pub blocks: Vec<Block>,
+    /// Root directory of the first vault, when one is set.
+    /// Lets descendants resolve relative asset URLs (e.g.
+    /// `../assets/foo.png`) to a `file://` path the renderer
+    /// can actually load. None for ephemeral vaults.
+    pub root_path: Option<std::path::PathBuf>,
 }
 
 #[component]
@@ -573,6 +578,10 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| resolvers.queries.clone());
     use_context_provider(|| resolvers.namespaces.clone());
     use_context_provider(|| resolvers.properties.clone());
+    use_context_provider(|| match vault_data.root_path.clone() {
+        Some(p) => publish_core::AssetBaseResolver::from_root(p),
+        None => publish_core::AssetBaseResolver::default(),
+    });
 
     let mut active_page_w = active_page;
     let mut panel_w = panel;
@@ -1001,8 +1010,10 @@ fn extract_tags(s: &str) -> Vec<String> {
 }
 
 async fn load_vault(doc: Arc<CrdtDoc>) -> Result<LogseqVault, String> {
+    use knowledge_proto::VaultRepo;
     let pr = PageRepoLoro::new(&doc);
     let br = BlockRepoLoro::new(&doc);
+    let vr = knowledge_crdt::VaultRepoLoro::new(&doc);
     let big = ListPage {
         index: 0,
         size: 100_000,
@@ -1013,11 +1024,21 @@ async fn load_vault(doc: Arc<CrdtDoc>) -> Result<LogseqVault, String> {
         .map_err(|e| format!("page list: {e}"))?
         .items;
     let blocks = br
-        .list(big, None, None)
+        .list(big.clone(), None, None)
         .await
         .map_err(|e| format!("block list: {e}"))?
         .items;
-    Ok(LogseqVault { pages, blocks })
+    let root_path = vr
+        .list(ListPage { index: 0, size: 1 }, None, None)
+        .await
+        .ok()
+        .and_then(|p| p.items.into_iter().next())
+        .and_then(|v| v.root_path.map(std::path::PathBuf::from));
+    Ok(LogseqVault {
+        pages,
+        blocks,
+        root_path,
+    })
 }
 
 #[component]
@@ -1383,7 +1404,7 @@ fn PageView(
                 }
             }
         }
-        BacklinksSection { page: page.clone(), vault: vault_for_backlinks, on_pick_page }
+        BacklinksSection { page: page.clone(), vault: vault_for_backlinks, on_pick_page, zoomed_block_id: zoom_id }
     }
 }
 
@@ -1444,7 +1465,12 @@ fn EmptyPagePlaceholder(page_id: Uuid) -> Element {
 }
 
 #[component]
-fn BacklinksSection(page: Page, vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+fn BacklinksSection(
+    page: Page,
+    vault: LogseqVault,
+    on_pick_page: EventHandler<Uuid>,
+    zoomed_block_id: Option<Uuid>,
+) -> Element {
     use std::collections::HashMap;
     let our_basename_lower = page.basename.to_lowercase();
     let our_aliases_lower: Vec<String> = page.aliases.iter().map(|a| a.to_lowercase()).collect();
@@ -1456,6 +1482,9 @@ fn BacklinksSection(page: Page, vault: LogseqVault, on_pick_page: EventHandler<U
         .collect();
 
     // Group referring page → list of (block_id, snippet).
+    // When `zoomed_block_id` is set, restrict matches to block refs
+    // pointing at *that* block specifically — wikilinks to the page
+    // don't count as backlinks for the zoomed block.
     let mut by_source: HashMap<Uuid, Vec<(Uuid, String)>> = HashMap::new();
     let wikilink_needles: Vec<String> = std::iter::once(our_basename_lower.clone())
         .chain(our_aliases_lower.iter().cloned())
@@ -1466,18 +1495,24 @@ fn BacklinksSection(page: Page, vault: LogseqVault, on_pick_page: EventHandler<U
             continue;
         }
         let content_lower = b.content.to_lowercase();
-        let mut matched = wikilink_needles
-            .iter()
-            .any(|n| content_lower.contains(n.as_str()));
-        if !matched {
-            for id in &our_block_ids {
-                let needle = format!("(({id}))").to_lowercase();
-                if content_lower.contains(&needle) {
-                    matched = true;
-                    break;
+        let matched = if let Some(zid) = zoomed_block_id {
+            let needle = format!("(({zid}))").to_lowercase();
+            content_lower.contains(&needle)
+        } else {
+            let mut m = wikilink_needles
+                .iter()
+                .any(|n| content_lower.contains(n.as_str()));
+            if !m {
+                for id in &our_block_ids {
+                    let needle = format!("(({id}))").to_lowercase();
+                    if content_lower.contains(&needle) {
+                        m = true;
+                        break;
+                    }
                 }
             }
-        }
+            m
+        };
         if matched {
             let snippet = b.content.lines().next().unwrap_or("").to_string();
             by_source
@@ -1499,10 +1534,16 @@ fn BacklinksSection(page: Page, vault: LogseqVault, on_pick_page: EventHandler<U
         };
     }
     let total: usize = by_source.values().map(|v| v.len()).sum();
+    let header = if zoomed_block_id.is_some() {
+        format!("Linked references to this block · {total}")
+    } else {
+        format!("Linked references · {total}")
+    };
+    let zoom_state = try_use_context::<ZoomState>();
     rsx! {
         section { style: "margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--ls-border-color);",
             div { style: "font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); margin-bottom: 0.5em;",
-                "Linked references · {total}"
+                "{header}"
             }
             for (source_page_id, hits) in by_source {
                 {
@@ -1521,9 +1562,22 @@ fn BacklinksSection(page: Page, vault: LogseqVault, on_pick_page: EventHandler<U
                                 "{basename}"
                             }
                             for (b_id, snippet) in hits {
-                                div { key: "{b_id}",
-                                    style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin: 0.15em 0;",
-                                    "{snippet}"
+                                {
+                                    let src_page = source_page_id;
+                                    let block_id = b_id;
+                                    let mut zoom_w = zoom_state;
+                                    rsx! {
+                                        div { key: "{b_id}",
+                                            style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin: 0.15em 0; cursor: pointer;",
+                                            onclick: move |_| {
+                                                on_pick_page.call(src_page);
+                                                if let Some(z) = zoom_w.as_mut() {
+                                                    z.0.set(Some(block_id));
+                                                }
+                                            },
+                                            "{snippet}"
+                                        }
+                                    }
                                 }
                             }
                         }
