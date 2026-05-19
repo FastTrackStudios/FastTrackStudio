@@ -212,6 +212,26 @@ impl PartialEq for WikiNavigator {
     }
 }
 
+/// Resolution table: page slug → preview snippet (first ~140
+/// chars of the page's first block). Drives the hover-preview
+/// tooltip on `[[wikilinks]]` in the live shell. Empty resolver
+/// means previews are disabled.
+#[derive(Clone, Default, PartialEq)]
+pub struct WikiPreviewResolver(pub Arc<HashMap<String, String>>);
+
+/// Optional in-app navigator for `#tag` clicks. The host receives
+/// the lowercased tag name and is expected to surface a tag view
+/// (every block referencing the tag). Static-site builds leave
+/// this unset; the renderer falls back to a plain `<a href>`.
+#[derive(Clone, Default)]
+pub struct TagNavigator(pub Option<Callback<String>>);
+
+impl PartialEq for TagNavigator {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.is_some() == other.0.is_some()
+    }
+}
+
 /// Same shape but for `((uuid))` block-ref clicks. Hosts
 /// receive the target block's UUID.
 #[derive(Clone, Default)]
@@ -1022,7 +1042,9 @@ pub fn InlineNode(node: inline::Node) -> Element {
                 // outside the app. Static-site builds (no
                 // navigator in context) keep the plain `<a href>`.
                 let nav = try_use_context::<WikiNavigator>().and_then(|n| n.0);
-                if let Some(cb) = nav {
+                let previews = try_use_context::<WikiPreviewResolver>().unwrap_or_default();
+                let preview = previews.0.get(&slug).cloned();
+                let link = if let Some(cb) = nav {
                     let slug_for_click = slug.clone();
                     rsx! {
                         span {
@@ -1041,6 +1063,16 @@ pub fn InlineNode(node: inline::Node) -> Element {
                     rsx! {
                         a { class: "{class}", href: "{href}", "{label}" }
                     }
+                };
+                if let Some(snippet) = preview {
+                    rsx! {
+                        span { class: "wikilink-wrap",
+                            {link}
+                            span { class: "wikilink-preview", "{snippet}" }
+                        }
+                    }
+                } else {
+                    link
                 }
             }
         }
@@ -1112,6 +1144,24 @@ pub fn InlineNode(node: inline::Node) -> Element {
                             "Tweet ↗"
                         }
                     }
+                }
+            }
+        }
+        Node::Hashtag(tag) => {
+            let nav = try_use_context::<TagNavigator>().unwrap_or_default();
+            let tag_lower = tag.to_lowercase();
+            if let Some(cb) = nav.0 {
+                let t = tag_lower.clone();
+                rsx! {
+                    button { class: "tag",
+                        onclick: move |_| cb.call(t.clone()),
+                        "#{tag}"
+                    }
+                }
+            } else {
+                let href = format!("/tags/{tag_lower}/");
+                rsx! {
+                    a { class: "tag", href: "{href}", "#{tag}" }
                 }
             }
         }

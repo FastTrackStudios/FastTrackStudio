@@ -300,6 +300,46 @@ html, body {
 }
 .ls-shell .ls-block-content a.wikilink:hover { color: var(--ls-link-text-hover-color); text-decoration: underline; }
 .ls-shell .ls-block-content a.wikilink.broken { color: var(--ls-tag-text-color); opacity: 0.7; text-decoration: underline dotted; }
+.ls-shell .ls-block-content .wikilink-wrap {
+    position: relative;
+    display: inline;
+}
+.ls-shell .ls-block-content .wikilink-preview {
+    position: absolute;
+    left: 0;
+    top: 100%;
+    margin-top: 0.3em;
+    max-width: 360px;
+    padding: 0.5em 0.7em;
+    background: var(--ls-secondary-background-color);
+    border: 1px solid var(--ls-border-color);
+    border-radius: 4px;
+    color: var(--ls-secondary-text-color);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    z-index: 50;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease-in-out 0.25s;
+    white-space: normal;
+}
+.ls-shell .ls-block-content .wikilink-wrap:hover .wikilink-preview {
+    opacity: 1;
+}
+.ls-shell .ls-block-content .tag {
+    display: inline-block;
+    color: var(--ls-tag-text-color);
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    cursor: pointer;
+    text-decoration: none;
+}
+.ls-shell .ls-block-content .tag:hover {
+    text-decoration: underline;
+}
 .ls-shell .ls-block-content a.block-ref,
 .ls-shell .ls-block-content span.block-ref {
     background: var(--ls-tertiary-background-color);
@@ -579,6 +619,7 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| resolvers.namespaces.clone());
     use_context_provider(|| resolvers.properties.clone());
     use_context_provider(|| resolvers.templates.clone());
+    use_context_provider(|| resolvers.previews.clone());
     use_context_provider(|| match vault_data.root_path.clone() {
         Some(p) => publish_core::AssetBaseResolver::from_root(p),
         None => publish_core::AssetBaseResolver::default(),
@@ -655,6 +696,17 @@ pub fn LogseqShell() -> Element {
             }
         })));
     use_context_provider(|| block_ref_nav);
+
+    // Tag navigator — clicks on `#tag` set the active tag view.
+    let active_tag: Signal<Option<String>> = use_signal(|| None);
+    use_context_provider(|| TagViewState(active_tag));
+    let mut active_tag_w = active_tag;
+    let mut active_page_for_tag = active_page;
+    let tag_nav = publish_core::TagNavigator(Some(Callback::new(move |tag: String| {
+        active_page_for_tag.set(None);
+        active_tag_w.set(Some(tag));
+    })));
+    use_context_provider(|| tag_nav);
 
     // BlockOps depends on the sidebar/zoom signals, so it
     // constructs last.
@@ -876,6 +928,7 @@ struct ResolverBundle {
     namespaces: NamespaceResolver,
     properties: publish_core::PagePropertyResolver,
     templates: publish_core::TemplateResolver,
+    previews: publish_core::WikiPreviewResolver,
 }
 
 fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
@@ -1045,7 +1098,95 @@ fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
         namespaces: NamespaceResolver(Arc::new(ns_map)),
         properties: publish_core::PagePropertyResolver(Arc::new(prop_map)),
         templates: publish_core::TemplateResolver(Arc::new(tmpl_map)),
+        previews: {
+            let mut by_slug: HashMap<String, String> = HashMap::new();
+            for (page_id, bs) in &blocks_by_page {
+                if let Some(p) = vault.pages.iter().find(|p| p.id == *page_id) {
+                    let preview = bs
+                        .iter()
+                        .take(3)
+                        .map(|b| b.content.lines().next().unwrap_or("").trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" · ");
+                    let truncated: String = preview.chars().take(140).collect();
+                    if !truncated.is_empty() {
+                        by_slug.insert(slugify(&p.basename), truncated);
+                    }
+                }
+            }
+            publish_core::WikiPreviewResolver(Arc::new(by_slug))
+        },
     }
+}
+
+/// Parse a markdown pipe-table block. Recognized shape:
+///
+/// ```text
+/// | a | b |
+/// |---|---|
+/// | 1 | 2 |
+/// ```
+///
+/// Returns the full row list (header + body) or `None` when the
+/// content doesn't match. The separator row (`|---|---|`) is
+/// consumed and not included in the output.
+fn peel_table(content: &str) -> Option<Vec<Vec<String>>> {
+    let trimmed = content.trim();
+    let lines: Vec<&str> = trimmed.lines().collect();
+    if lines.len() < 2 {
+        return None;
+    }
+    if !lines[0].trim_start().starts_with('|') {
+        return None;
+    }
+    // Separator row: every non-pipe char must be `-`, `:`, or
+    // whitespace, and at least one `-` must appear.
+    let sep = lines[1].trim();
+    if !sep.starts_with('|') {
+        return None;
+    }
+    let sep_chars: &str = sep.trim_matches('|');
+    if !sep_chars.contains('-') {
+        return None;
+    }
+    if !sep_chars
+        .chars()
+        .all(|c| c == '-' || c == ':' || c == '|' || c.is_whitespace())
+    {
+        return None;
+    }
+    let split_row = |line: &str| -> Vec<String> {
+        let inner = line.trim().trim_start_matches('|').trim_end_matches('|');
+        inner.split('|').map(|s| s.trim().to_string()).collect()
+    };
+    let mut rows = vec![split_row(lines[0])];
+    for l in lines.iter().skip(2) {
+        if l.trim().is_empty() {
+            continue;
+        }
+        if !l.trim_start().starts_with('|') {
+            return None;
+        }
+        rows.push(split_row(l));
+    }
+    Some(rows)
+}
+
+/// Peel a fenced code block off a block's content. Recognizes
+/// the standard markdown ```lang ... ``` form (also ``` with no
+/// language). Returns `Some((lang, body))` only when the *entire
+/// trimmed content* is one fenced block — partial matches fall
+/// through to inline parsing.
+fn peel_fenced_code(content: &str) -> Option<(String, String)> {
+    let trimmed = content.trim();
+    let body = trimmed.strip_prefix("```")?;
+    let body = body.strip_suffix("```")?;
+    let (first, rest) = body.split_once('\n')?;
+    let lang = first.trim().to_string();
+    // Drop the trailing newline before the closing fence if present.
+    let code = rest.strip_suffix('\n').unwrap_or(rest).to_string();
+    Some((lang, code))
 }
 
 fn snippet(s: &str, max: usize) -> String {
@@ -1288,6 +1429,23 @@ fn MainArea(
     let _ = on_set_panel;
     let active = *active_page.read();
     let panel_cur = *panel.read();
+    let tag_state = try_use_context::<TagViewState>();
+    let active_tag = tag_state.as_ref().and_then(|s| s.0.read().clone());
+
+    // Tag view supersedes the panel routing when set.
+    if let Some(tag) = active_tag {
+        return rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    TagView {
+                        tag: tag,
+                        vault: vault.clone(),
+                        on_pick_page,
+                    }
+                }
+            }
+        };
+    }
 
     match panel_cur {
         LeftPanel::AllPages => rsx! {
@@ -1319,6 +1477,79 @@ fn MainArea(
                 }
             }
         },
+    }
+}
+
+/// Virtual page listing every block whose content contains `#<tag>`
+/// (with `#` at word boundary). Rendered when a `Hashtag` is
+/// clicked anywhere in the shell. Clicking a hit jumps to that
+/// page; the close button clears the tag view and returns to the
+/// previous page.
+#[component]
+fn TagView(tag: String, vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+    let needle = format!("#{}", tag.to_lowercase());
+    let mut hits: Vec<(Uuid, String, String)> = Vec::new();
+    for b in &vault.blocks {
+        for t in extract_tags(&b.content) {
+            if t.eq_ignore_ascii_case(&tag) {
+                let page_name = vault
+                    .pages
+                    .iter()
+                    .find(|p| p.id == b.page_id)
+                    .map(|p| p.basename.clone())
+                    .unwrap_or_else(|| "(unknown)".into());
+                let snippet = b.content.lines().next().unwrap_or("").to_string();
+                hits.push((b.page_id, page_name, snippet));
+                break;
+            }
+        }
+    }
+    let _ = needle;
+    let count = hits.len();
+    let count_label = if count == 1 {
+        format!("{count} reference")
+    } else {
+        format!("{count} references")
+    };
+    let tag_state = try_use_context::<TagViewState>();
+    let mut clear = move || {
+        if let Some(s) = tag_state.as_ref() {
+            s.0.clone().set(None);
+        }
+    };
+    rsx! {
+        div { style: "display: flex; align-items: baseline; gap: 0.6em;",
+            h1 { class: "ls-page-title", "#{tag}" }
+            span { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem;",
+                "{count_label}"
+            }
+            button {
+                style: "margin-left: auto; background: transparent; border: 1px solid var(--ls-border-color); color: var(--ls-secondary-text-color); padding: 0.2em 0.6em; border-radius: 4px; cursor: pointer;",
+                onclick: move |_| clear(),
+                "Close"
+            }
+        }
+        if hits.is_empty() {
+            div { class: "ls-block-empty", "No blocks reference this tag." }
+        } else {
+            div { style: "margin-top: 1em; display: flex; flex-direction: column; gap: 0.6em;",
+                for (i, (page_id, page_name, snippet)) in hits.into_iter().enumerate() {
+                    div { key: "{i}",
+                        style: "padding: 0.5em 0.7em; border: 1px solid var(--ls-border-color); border-radius: 4px; cursor: pointer;",
+                        onclick: move |_| {
+                            if let Some(s) = tag_state.as_ref() { s.0.clone().set(None); }
+                            on_pick_page.call(page_id);
+                        },
+                        div { style: "color: var(--ls-link-text-color); font-weight: 600; font-size: 0.85rem;",
+                            "{page_name}"
+                        }
+                        div { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin-top: 0.2em;",
+                            "{snippet}"
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1916,6 +2147,78 @@ fn LogseqBlockBody(block: Block) -> Element {
         return rsx! { EditableBlock { block: block.clone() } };
     }
 
+    // Markdown table: `| a | b |\n|---|---|\n| 1 | 2 |`.
+    if let Some(rows) = peel_table(&block.content) {
+        let ops_for_click = ops.clone();
+        let on_click = move |_e: Event<MouseData>| {
+            if let Some(ops) = ops_for_click.as_ref() {
+                ops.enter_edit.call(block_id);
+            }
+        };
+        let header = rows.first().cloned().unwrap_or_default();
+        let body: Vec<Vec<String>> = rows.into_iter().skip(1).collect();
+        return rsx! {
+            div {
+                style: "flex: 1; min-width: 0; cursor: text;",
+                onclick: on_click,
+                table { class: "ls-table",
+                    style: "border-collapse: collapse; margin: 0.4em 0; font-size: 0.9rem;",
+                    thead {
+                        tr {
+                            for (i, cell) in header.iter().enumerate() {
+                                th { key: "{i}",
+                                    style: "border: 1px solid var(--ls-border-color); padding: 0.3em 0.6em; text-align: left; background: var(--ls-secondary-background-color);",
+                                    "{cell}"
+                                }
+                            }
+                        }
+                    }
+                    tbody {
+                        for (r, row) in body.iter().enumerate() {
+                            tr { key: "{r}",
+                                for (c, cell) in row.iter().enumerate() {
+                                    td { key: "{c}",
+                                        style: "border: 1px solid var(--ls-border-color); padding: 0.3em 0.6em;",
+                                        "{cell}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    // Fenced code block: ```lang\n...\n``` — render with
+    // server-side syntax highlighting (syntect) before falling
+    // through to inline parsing. Click-to-edit still works.
+    if let Some((lang, code)) = peel_fenced_code(&block.content) {
+        let highlighted = publish_core::syntax::highlight(&code, &lang);
+        let ops_for_click = ops.clone();
+        let on_click = move |_e: Event<MouseData>| {
+            if let Some(ops) = ops_for_click.as_ref() {
+                ops.enter_edit.call(block_id);
+            }
+        };
+        return rsx! {
+            div {
+                style: "flex: 1; min-width: 0; cursor: text;",
+                onclick: on_click,
+                pre { class: "ls-code-block",
+                    style: "background: var(--ls-secondary-background-color); padding: 0.6em; border-radius: 4px; overflow-x: auto; font-size: 0.85rem;",
+                    if !lang.is_empty() {
+                        div { class: "ls-code-lang",
+                            style: "font-size: 0.7rem; color: var(--ls-secondary-text-color); margin-bottom: 0.3em;",
+                            "{lang}"
+                        }
+                    }
+                    code { dangerous_inner_html: "{highlighted}" }
+                }
+            }
+        };
+    }
+
     let (marker, after_marker) = publish_core::peel_task_marker(&block.content);
     let (plan, after_plan) = publish_core::peel_planning(after_marker);
     let (drawers, after_drawers) = publish_core::peel_drawers(after_plan);
@@ -2035,6 +2338,11 @@ pub(crate) struct TagSearchState(pub Signal<Option<(Uuid, String)>>);
 /// shell would otherwise collide with `editing_id` (same type).
 #[derive(Clone, Copy)]
 pub(crate) struct ZoomState(pub Signal<Option<Uuid>>);
+
+/// Active tag view. `Some("rust")` means the main pane is showing
+/// the tag-results page instead of a regular page.
+#[derive(Clone, Copy)]
+pub(crate) struct TagViewState(pub Signal<Option<String>>);
 
 /// Cmd-K command palette state. `Some(query)` while open.
 #[derive(Clone, Copy)]
@@ -3617,6 +3925,40 @@ fn write_block_markdown(node: &BlockNodeTree, depth: usize, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peel_fenced_code_basic() {
+        let (lang, body) = peel_fenced_code("```rust\nfn x() {}\n```").unwrap();
+        assert_eq!(lang, "rust");
+        assert_eq!(body, "fn x() {}");
+    }
+
+    #[test]
+    fn peel_fenced_code_no_lang() {
+        let (lang, body) = peel_fenced_code("```\nplain text\n```").unwrap();
+        assert_eq!(lang, "");
+        assert_eq!(body, "plain text");
+    }
+
+    #[test]
+    fn peel_fenced_code_rejects_inline() {
+        assert!(peel_fenced_code("just `code` here").is_none());
+    }
+
+    #[test]
+    fn peel_table_basic() {
+        let rows = peel_table("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0], vec!["a", "b"]);
+        assert_eq!(rows[1], vec!["1", "2"]);
+        assert_eq!(rows[2], vec!["3", "4"]);
+    }
+
+    #[test]
+    fn peel_table_rejects_non_table() {
+        assert!(peel_table("not a table").is_none());
+        assert!(peel_table("| a | b |\nno separator\n| 1 | 2 |").is_none());
+    }
 
     /// Helper: build an ephemeral CrdtDoc + seed a single page,
     /// returning (doc, page_id, vault_id).

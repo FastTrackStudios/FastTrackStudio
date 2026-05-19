@@ -105,6 +105,10 @@ pub enum Node {
         contents: Vec<String>,
         broken: bool,
     },
+    /// `#tag` — Logseq-style inline tag. The lowercased name is
+    /// the canonical key; the renderer wraps it in a chip + clicking
+    /// it (via a host-provided navigator) opens the tag page.
+    Hashtag(String),
 }
 
 /// Closed set of media-embed kinds recognized by the parser.
@@ -526,6 +530,27 @@ pub fn parse(
                     i += 1 + end + 1;
                     continue;
                 }
+            }
+        }
+        // #tag — inline hashtag. Requires `#` at start of input or
+        // after whitespace (so `c#sharp` isn't a tag), and at least
+        // one tag-safe char. Stops at whitespace or punctuation.
+        if bytes[i] == b'#' && (i == 0 || (bytes[i - 1] as char).is_whitespace()) {
+            let mut j = i + 1;
+            while j < s.len() {
+                let c = bytes[j] as char;
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == '/' {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j > i + 1 {
+                let tag = &s[i + 1..j];
+                flush(&mut buf, &mut out);
+                out.push(Node::Hashtag(tag.to_string()));
+                i = j;
+                continue;
             }
         }
         let c = s[i..].chars().next().expect("non-empty");
@@ -1052,6 +1077,40 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn hashtag_at_start() {
+        let n = parse(
+            "#rust is fun",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
+        );
+        let h = n.iter().find_map(|x| match x {
+            Node::Hashtag(t) => Some(t.clone()),
+            _ => None,
+        });
+        assert_eq!(h, Some("rust".to_string()));
+    }
+
+    #[test]
+    fn hashtag_in_word_is_text() {
+        let n = parse(
+            "c#sharp",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
+        );
+        assert!(!n.iter().any(|x| matches!(x, Node::Hashtag(_))));
     }
 
     #[test]
