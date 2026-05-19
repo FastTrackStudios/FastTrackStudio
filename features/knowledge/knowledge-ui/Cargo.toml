@@ -64,6 +64,10 @@ js-sys = { workspace = true }
 # workspace's existing pin.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["time"] }
+# Native directory picker for the "Import Logseq graph" button
+# in `logseq_shell`. Wasm targets get the same effect from a
+# file `<input>` chooser (not wired in this slice).
+rfd = "0.15"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

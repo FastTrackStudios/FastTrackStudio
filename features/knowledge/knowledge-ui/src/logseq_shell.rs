@@ -648,6 +648,11 @@ pub fn LogseqShell() -> Element {
     }
     use_context_provider(|| RecentsState(recent_pages));
 
+    // Import toast — `Some(message)` while the result of an
+    // import is shown to the user.
+    let import_toast: Signal<Option<String>> = use_signal(|| None);
+    use_context_provider(|| ImportToastState(import_toast));
+
     rsx! {
         style { dangerous_inner_html: LOGSEQ_CSS }
         div { class: "ls-shell",
@@ -697,6 +702,35 @@ pub fn LogseqShell() -> Element {
                 RightSidebar { stack: sidebar_stack, vault: vault_data.clone() }
             }
             BlockContextMenuOverlay { state: block_menu }
+            ImportToastOverlay { state: import_toast }
+        }
+    }
+}
+
+/// Sticky bottom-right card carrying the current import-toast
+/// message. Auto-clears 4s after appearance via a spawned timer.
+#[component]
+fn ImportToastOverlay(state: Signal<Option<String>>) -> Element {
+    let snap = state.read().clone();
+    let Some(msg) = snap else {
+        return rsx! { div {} };
+    };
+    // Auto-clear after 4s.
+    let mut state_for_timer = state;
+    use_effect(move || {
+        let m = state_for_timer.read().clone();
+        if m.is_some() {
+            spawn(async move {
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                state_for_timer.set(None);
+            });
+        }
+    });
+    rsx! {
+        div {
+            style: "position: fixed; bottom: 1.5em; right: 1.5em; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-active-primary-color); border-radius: 0.5em; padding: 0.7em 1em; color: var(--ls-primary-text-color); box-shadow: 0 12px 30px rgba(0,0,0,0.45); z-index: 80; max-width: 380px;",
+            "{msg}"
         }
     }
 }
@@ -1035,6 +1069,68 @@ fn LeftSidebar(
                     }
                 }
             }
+            div { style: "margin-top: auto; padding: 0.75em 1em; border-top: 1px solid var(--ls-border-color);",
+                ImportGraphButton {}
+            }
+        }
+    }
+}
+
+/// Native directory picker → graph_loader::import_logseq_graph.
+/// On wasm targets this renders as a disabled placeholder
+/// (browser sandbox doesn't allow folder-level access without a
+/// File System Access permission flow we haven't wired yet).
+#[component]
+fn ImportGraphButton() -> Element {
+    let doc = try_use_context::<DocHandle>();
+    let toast = try_use_context::<ImportToastState>();
+    let on_click = move |_e: Event<MouseData>| {
+        let Some(doc) = doc.clone() else { return };
+        let mut toast_sig = toast.map(|t| t.0);
+        #[cfg(not(target_arch = "wasm32"))]
+        spawn(async move {
+            let dir = match rfd::AsyncFileDialog::new()
+                .set_title("Pick a Logseq graph directory")
+                .pick_folder()
+                .await
+            {
+                Some(handle) => handle.path().to_path_buf(),
+                None => return,
+            };
+            match crate::graph_loader::import_logseq_graph(&doc.0, &dir).await {
+                Ok(stats) => {
+                    let msg = format!(
+                        "Imported {} pages · {} blocks · {} journals{}",
+                        stats.pages,
+                        stats.blocks,
+                        stats.journals,
+                        if stats.failures.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {} failures", stats.failures.len())
+                        }
+                    );
+                    if let Some(ref mut s) = toast_sig.as_mut() {
+                        s.set(Some(msg));
+                    }
+                }
+                Err(e) => {
+                    if let Some(ref mut s) = toast_sig.as_mut() {
+                        s.set(Some(format!("Import failed: {e}")));
+                    }
+                }
+            }
+        });
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (doc, toast_sig);
+        }
+    };
+    rsx! {
+        button {
+            style: "width: 100%; background: var(--ls-tertiary-background-color); color: var(--ls-primary-text-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; padding: 0.4em 0.6em; cursor: pointer; font-size: 0.85rem;",
+            onclick: on_click,
+            "Import Logseq graph…"
         }
     }
 }
@@ -1763,6 +1859,12 @@ pub(crate) struct BlockMenuState(pub Signal<Option<(Uuid, i32, i32)>>);
 /// MRU list of recently-visited pages.
 #[derive(Clone, Copy)]
 pub(crate) struct RecentsState(pub Signal<Vec<Uuid>>);
+
+/// `Some(message)` while a transient toast (e.g. import result)
+/// is shown to the user. The Status bar pulls from this; the
+/// import button writes to it.
+#[derive(Clone, Copy)]
+pub(crate) struct ImportToastState(pub Signal<Option<String>>);
 
 /// One pane in the right sidebar's stack.
 #[derive(Clone, Debug, PartialEq, Eq)]
