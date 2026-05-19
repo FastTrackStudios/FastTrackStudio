@@ -134,6 +134,28 @@ async fn import_one_file(
     };
 
     let parsed = parse_logseq_markdown(&raw);
+    // Whiteboard detection — Logseq stores whiteboards as
+    // `<name>.excalidraw.md` with the canvas JSON inside. We don't
+    // ship Excalidraw, but we tag the page with `whiteboard: true`
+    // + stash the raw payload as `excalidraw` so the UI can render
+    // a read-only preview card.
+    let is_whiteboard = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_lowercase().ends_with(".excalidraw.md"))
+        .unwrap_or(false);
+    let frontmatter_json = if is_whiteboard {
+        let mut obj: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&parsed.frontmatter_json).unwrap_or_default();
+        obj.insert("whiteboard".into(), serde_json::Value::Bool(true));
+        obj.insert(
+            "excalidraw".into(),
+            serde_json::Value::String(raw.chars().take(20_000).collect()),
+        );
+        serde_json::Value::Object(obj).to_string()
+    } else {
+        parsed.frontmatter_json
+    };
     let now = Utc::now();
     let page = page_repo
         .create(PageCreate {
@@ -151,7 +173,7 @@ async fn import_one_file(
                 .unwrap_or("md")
                 .to_string(),
             aliases: parsed.aliases,
-            frontmatter_json: parsed.frontmatter_json,
+            frontmatter_json,
             stat_ctime: now,
             stat_mtime: now,
             stat_size: raw.len() as i64,

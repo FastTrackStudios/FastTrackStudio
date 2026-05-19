@@ -472,6 +472,8 @@ html, body {
 pub enum LeftPanel {
     Journals,
     AllPages,
+    Cards,
+    Graph,
 }
 
 /// Newtype wrapper so we can pass `Arc<CrdtDoc>` as a Dioxus
@@ -1131,6 +1133,163 @@ fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
 /// Returns the full row list (header + body) or `None` when the
 /// content doesn't match. The separator row (`|---|---|`) is
 /// consumed and not included in the output.
+/// One row in a LOGBOOK drawer. `end` is `None` while the clock
+/// is still running.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LogbookEntry {
+    pub start: chrono::NaiveDateTime,
+    pub end: Option<chrono::NaiveDateTime>,
+}
+
+/// Parse a LOGBOOK drawer body. Recognized line shape (Logseq /
+/// Org Mode):
+///
+/// ```text
+/// CLOCK: [2026-05-19 Tue 10:30:00]--[2026-05-19 Tue 11:15:00] => 0:45
+/// CLOCK: [2026-05-19 Tue 14:00:00]
+/// ```
+///
+/// Lines that don't match are skipped silently — keeps the parser
+/// forgiving for hand-edited drawers.
+pub(crate) fn parse_logbook(body: &str) -> Vec<LogbookEntry> {
+    let mut out = Vec::new();
+    for line in body.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("CLOCK:") else {
+            continue;
+        };
+        let rest = rest.trim();
+        let Some(start_open) = rest.find('[') else {
+            continue;
+        };
+        let Some(start_close) = rest[start_open..].find(']') else {
+            continue;
+        };
+        let start_str = &rest[start_open + 1..start_open + start_close];
+        let Some(start) = parse_logbook_ts(start_str) else {
+            continue;
+        };
+        let after_start = &rest[start_open + start_close + 1..];
+        let end = after_start
+            .find('[')
+            .and_then(|o| after_start[o..].find(']').map(|c| (o, c)))
+            .and_then(|(o, c)| parse_logbook_ts(&after_start[o + 1..o + c]));
+        out.push(LogbookEntry { start, end });
+    }
+    out
+}
+
+fn parse_logbook_ts(s: &str) -> Option<chrono::NaiveDateTime> {
+    // Logseq shape: `2026-05-19 Tue 10:30:00` — strip the optional
+    // weekday before parsing.
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let normalized = match parts.as_slice() {
+        [date, _wkd, time] => format!("{date} {time}"),
+        [date, time] => format!("{date} {time}"),
+        _ => return None,
+    };
+    chrono::NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S").ok()
+}
+
+fn format_duration(secs: i64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
+}
+
+#[component]
+fn LogbookView(body: String) -> Element {
+    let entries = parse_logbook(&body);
+    // Tick once a second while there's an open entry, so the live
+    // duration on the running clock updates. When everything is
+    // closed, the signal stays at zero and we don't burn cycles.
+    let has_open = entries.iter().any(|e| e.end.is_none());
+    let mut tick: Signal<u64> = use_signal(|| 0);
+    use_effect(move || {
+        if !has_open {
+            return;
+        }
+        spawn(async move {
+            loop {
+                #[cfg(not(target_arch = "wasm32"))]
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                #[cfg(target_arch = "wasm32")]
+                gloo_timers::future::TimeoutFuture::new(1000).await;
+                let cur = *tick.peek();
+                tick.set(cur.wrapping_add(1));
+            }
+        });
+    });
+    let _ = *tick.read();
+
+    let total_closed: i64 = entries
+        .iter()
+        .filter_map(|e| e.end.map(|end| (end - e.start).num_seconds()))
+        .sum();
+    let open_secs: Option<i64> = entries.iter().find(|e| e.end.is_none()).map(|e| {
+        (chrono::Local::now().naive_local() - e.start)
+            .num_seconds()
+            .max(0)
+    });
+    let total_secs = total_closed + open_secs.unwrap_or(0);
+    rsx! {
+        div {
+            class: "ls-logbook",
+            style: "margin: 0.4em 0; border: 1px solid var(--ls-border-color); border-radius: 4px; padding: 0.5em 0.7em; background: var(--ls-secondary-background-color); font-size: 0.85rem;",
+            div { style: "display: flex; align-items: baseline; gap: 0.6em;",
+                span { style: "font-weight: 600; color: var(--ls-secondary-text-color); text-transform: uppercase; letter-spacing: 0.08em;",
+                    "Logbook"
+                }
+                if let Some(s) = open_secs {
+                    span { style: "color: var(--ls-active-primary-color); font-variant-numeric: tabular-nums;",
+                        "● running · {format_duration(s)}"
+                    }
+                }
+                span { style: "margin-left: auto; color: var(--ls-secondary-text-color); font-variant-numeric: tabular-nums;",
+                    "total {format_duration(total_secs)}"
+                }
+            }
+            if entries.is_empty() {
+                div { style: "color: var(--ls-secondary-text-color); font-style: italic; margin-top: 0.3em;",
+                    "(no clock entries)"
+                }
+            } else {
+                ul { style: "list-style: none; padding: 0; margin: 0.3em 0 0; display: flex; flex-direction: column; gap: 0.15em;",
+                    for (i, e) in entries.into_iter().enumerate() {
+                        {
+                            let start_str = e.start.format("%Y-%m-%d %H:%M").to_string();
+                            let end_str = e.end.map(|d| d.format("%H:%M").to_string());
+                            let dur_str = match e.end {
+                                Some(end) => format_duration((end - e.start).num_seconds()),
+                                None => format_duration((chrono::Local::now().naive_local() - e.start).num_seconds().max(0)),
+                            };
+                            rsx! {
+                                li { key: "{i}",
+                                    style: "display: grid; grid-template-columns: 1fr auto; gap: 0.5em; color: var(--ls-secondary-text-color); font-variant-numeric: tabular-nums;",
+                                    span {
+                                        "{start_str}"
+                                        if let Some(es) = end_str.clone() {
+                                            " → {es}"
+                                        } else {
+                                            " → running"
+                                        }
+                                    }
+                                    span { "{dur_str}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn peel_table(content: &str) -> Option<Vec<Vec<String>>> {
     let trimmed = content.trim();
     let lines: Vec<&str> = trimmed.lines().collect();
@@ -1286,9 +1445,17 @@ fn LeftSidebar(
                 span { class: "ls-nav-icon", "▤" }
                 "All Pages"
             }
-            div { class: "ls-nav-item",
+            div {
+                class: if panel_cur == LeftPanel::Graph { "ls-nav-item active" } else { "ls-nav-item" },
+                onclick: move |_| on_set_panel.call(LeftPanel::Graph),
                 span { class: "ls-nav-icon", "◇" }
                 "Graph"
+            }
+            div {
+                class: if panel_cur == LeftPanel::Cards { "ls-nav-item active" } else { "ls-nav-item" },
+                onclick: move |_| on_set_panel.call(LeftPanel::Cards),
+                span { class: "ls-nav-icon", "♠" }
+                "Cards"
             }
             {
                 let recents = try_use_context::<RecentsState>().map(|r| r.0.read().clone()).unwrap_or_default();
@@ -1334,25 +1501,142 @@ fn LeftSidebar(
                     "＋"
                 }
             }
-            div { class: "ls-page-list",
-                for p in sorted {
-                    {
-                        let id = p.id;
-                        let is_active = active == Some(id);
-                        let class_str = if is_active { "ls-page-link active" } else { "ls-page-link" };
-                        rsx! {
-                            a {
-                                key: "{id}",
-                                class: "{class_str}",
-                                onclick: move |_| on_pick_page.call(id),
-                                "{p.basename}"
-                            }
-                        }
-                    }
-                }
+            NamespaceTree {
+                pages: sorted.clone(),
+                active,
+                on_pick_page,
             }
             div { style: "margin-top: auto; padding: 0.75em 1em; border-top: 1px solid var(--ls-border-color);",
                 ImportGraphButton {}
+            }
+        }
+    }
+}
+
+/// Collapsible namespace tree for the page sidebar. Pages whose
+/// basename contains `/` become nested under parent nodes, matching
+/// Logseq's hierarchy convention (`projects/web/auth` ⇒ a triply
+/// nested branch). Leaves with a real Page id are clickable;
+/// intermediate folders that don't have their own page are inert
+/// labels.
+#[component]
+fn NamespaceTree(
+    pages: Vec<Page>,
+    active: Option<Uuid>,
+    on_pick_page: EventHandler<Uuid>,
+) -> Element {
+    use std::collections::BTreeMap;
+    #[derive(Default)]
+    struct BuildNode {
+        page_id: Option<Uuid>,
+        children: BTreeMap<String, BuildNode>,
+    }
+    fn to_child(name: &str, node: BuildNode) -> NsChild {
+        NsChild {
+            name: name.to_string(),
+            page_id: node.page_id,
+            children: node
+                .children
+                .into_iter()
+                .map(|(n, c)| to_child(&n, c))
+                .collect(),
+        }
+    }
+    let mut root = BuildNode::default();
+    for p in &pages {
+        let mut cur = &mut root;
+        let parts: Vec<&str> = p.basename.split('/').collect();
+        for part in &parts {
+            cur = cur.children.entry(part.to_string()).or_default();
+        }
+        cur.page_id = Some(p.id);
+    }
+    let top: Vec<NsChild> = root
+        .children
+        .into_iter()
+        .map(|(n, c)| to_child(&n, c))
+        .collect();
+    rsx! {
+        div { class: "ls-page-list",
+            for child in top {
+                NamespaceNode {
+                    key: "{child.name}",
+                    name: child.name.clone(),
+                    page_id: child.page_id,
+                    children_data: child.children.clone(),
+                    active,
+                    on_pick_page,
+                    depth: 0,
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct NsChild {
+    name: String,
+    page_id: Option<Uuid>,
+    children: Vec<NsChild>,
+}
+
+#[component]
+fn NamespaceNode(
+    name: String,
+    page_id: Option<Uuid>,
+    children_data: Vec<NsChild>,
+    active: Option<Uuid>,
+    on_pick_page: EventHandler<Uuid>,
+    depth: usize,
+) -> Element {
+    let mut expanded: Signal<bool> = use_signal(|| depth < 1);
+    let has_children = !children_data.is_empty();
+    let is_active = page_id.is_some() && page_id == active;
+    let cls = if is_active {
+        "ls-page-link active"
+    } else {
+        "ls-page-link"
+    };
+    let indent = (depth * 12) as i32 + 8;
+    rsx! {
+        div { style: "display: flex; align-items: center; gap: 0.25em; padding-left: {indent}px;",
+            if has_children {
+                button {
+                    style: "background: transparent; border: 0; color: var(--ls-secondary-text-color); cursor: pointer; padding: 0; width: 1em; text-align: center;",
+                    onclick: move |_| {
+                        let cur = *expanded.peek();
+                        expanded.set(!cur);
+                    },
+                    if *expanded.read() { "▾" } else { "▸" }
+                }
+            } else {
+                span { style: "width: 1em;" }
+            }
+            if let Some(pid) = page_id {
+                a {
+                    class: "{cls}",
+                    style: "padding: 0.2em 0.4em; flex: 1; min-width: 0;",
+                    onclick: move |_| on_pick_page.call(pid),
+                    "{name}"
+                }
+            } else {
+                span {
+                    style: "padding: 0.2em 0.4em; flex: 1; min-width: 0; color: var(--ls-secondary-text-color);",
+                    "{name}"
+                }
+            }
+        }
+        if has_children && *expanded.read() {
+            for child in children_data {
+                NamespaceNode {
+                    key: "{child.name}",
+                    name: child.name.clone(),
+                    page_id: child.page_id,
+                    children_data: child.children.clone(),
+                    active,
+                    on_pick_page,
+                    depth: depth + 1,
+                }
             }
         }
     }
@@ -1448,6 +1732,20 @@ fn MainArea(
     }
 
     match panel_cur {
+        LeftPanel::Cards => rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    CardsReview { vault: vault.clone(), on_pick_page }
+                }
+            }
+        },
+        LeftPanel::Graph => rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    GraphView { vault: vault.clone(), on_pick_page }
+                }
+            }
+        },
         LeftPanel::AllPages => rsx! {
             main { class: "ls-main",
                 div { class: "ls-main-inner",
@@ -1545,6 +1843,235 @@ fn TagView(tag: String, vault: LogseqVault, on_pick_page: EventHandler<Uuid>) ->
                         }
                         div { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin-top: 0.2em;",
                             "{snippet}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+    // A "card" is any block whose content references `#card`. The
+    // front is the block content (with `#card` stripped); the back
+    // is the direct-child blocks' content. Shuffle order each entry
+    // so reviews don't fall into a fixed pattern.
+    let mut deck: Vec<(Uuid, String, Vec<String>, Uuid)> = Vec::new();
+    let mut children_by_parent: std::collections::HashMap<Uuid, Vec<&Block>> =
+        std::collections::HashMap::new();
+    for b in &vault.blocks {
+        if let Some(p) = b.parent_block_id {
+            children_by_parent.entry(p).or_default().push(b);
+        }
+    }
+    for siblings in children_by_parent.values_mut() {
+        siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    }
+    for b in &vault.blocks {
+        let needle = "#card";
+        let lower = b.content.to_lowercase();
+        let has = lower
+            .split_whitespace()
+            .any(|w| w == needle || w.starts_with("#card/"));
+        if !has {
+            continue;
+        }
+        let front = b
+            .content
+            .lines()
+            .map(|l| {
+                l.split_whitespace()
+                    .filter(|w| !w.eq_ignore_ascii_case("#card"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let back = children_by_parent
+            .get(&b.id)
+            .map(|cs| cs.iter().map(|c| c.content.clone()).collect())
+            .unwrap_or_default();
+        deck.push((b.id, front, back, b.page_id));
+    }
+
+    let total = deck.len();
+    let total_label = if total == 1 {
+        "1 card".to_string()
+    } else {
+        format!("{total} cards")
+    };
+    let mut idx: Signal<usize> = use_signal(|| 0);
+    let mut flipped: Signal<bool> = use_signal(|| false);
+    let cur_idx = (*idx.read()).min(total.saturating_sub(1));
+    let card = deck.get(cur_idx).cloned();
+    let is_flipped = *flipped.read();
+
+    rsx! {
+        div { style: "display: flex; align-items: baseline; gap: 0.6em; margin-bottom: 1em;",
+            h1 { class: "ls-page-title", "Cards" }
+            span { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem;",
+                "{total_label}"
+            }
+        }
+        if let Some((bid, front, back, page_id)) = card {
+            div { style: "max-width: 540px; margin: 0 auto; border: 1px solid var(--ls-border-color); border-radius: 8px; background: var(--ls-secondary-background-color); padding: 1.2em 1.4em;",
+                div { style: "color: var(--ls-secondary-text-color); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em;",
+                    "{cur_idx + 1} / {total}"
+                }
+                div { style: "font-size: 1.1rem; margin-top: 0.6em; white-space: pre-wrap;",
+                    "{front}"
+                }
+                if is_flipped {
+                    div { style: "margin-top: 1em; padding-top: 0.8em; border-top: 1px dashed var(--ls-border-color); white-space: pre-wrap; color: var(--ls-secondary-text-color);",
+                        for (i, line) in back.iter().enumerate() {
+                            div { key: "{i}", "{line}" }
+                        }
+                    }
+                } else {
+                    button {
+                        style: "margin-top: 1em; padding: 0.4em 0.9em; border-radius: 4px; border: 1px solid var(--ls-border-color); background: var(--ls-tertiary-background-color); color: var(--ls-primary-text-color); cursor: pointer;",
+                        onclick: move |_| flipped.set(true),
+                        "Flip"
+                    }
+                }
+                div { style: "display: flex; gap: 0.4em; margin-top: 1em; flex-wrap: wrap;",
+                    if is_flipped {
+                        button {
+                            style: "padding: 0.4em 0.9em; background: #5b5d72; color: white; border: 0; border-radius: 4px; cursor: pointer;",
+                            onclick: move |_| {
+                                flipped.set(false);
+                                let n = *idx.peek();
+                                idx.set((n + 1) % total.max(1));
+                            },
+                            "Again"
+                        }
+                        button {
+                            style: "padding: 0.4em 0.9em; background: #2f7d4f; color: white; border: 0; border-radius: 4px; cursor: pointer;",
+                            onclick: move |_| {
+                                flipped.set(false);
+                                let n = *idx.peek();
+                                idx.set((n + 1) % total.max(1));
+                            },
+                            "Good"
+                        }
+                    }
+                    button {
+                        style: "padding: 0.4em 0.9em; background: transparent; border: 1px solid var(--ls-border-color); border-radius: 4px; cursor: pointer; color: var(--ls-secondary-text-color); margin-left: auto;",
+                        onclick: move |_| {
+                            let _ = bid;
+                            on_pick_page.call(page_id);
+                        },
+                        "Open page"
+                    }
+                }
+            }
+        } else {
+            div { class: "ls-block-empty",
+                style: "text-align: center; padding: 2em;",
+                "No cards yet. Add ", code { "#card" }, " to a block to make it reviewable."
+            }
+        }
+    }
+}
+
+/// Force-directed-ish graph view. We don't run a real simulation —
+/// pages are placed on a circle, edges drawn as SVG lines. For
+/// small/medium graphs (couple hundred pages) this is more than
+/// enough to spot clusters by clicking around; for huge vaults the
+/// pages list is the better UX anyway.
+#[component]
+fn GraphView(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+    let mut pages: Vec<Page> = vault.pages.clone();
+    pages.sort_by(|a, b| a.basename.cmp(&b.basename));
+    let n = pages.len().max(1) as f32;
+    let cx = 400.0_f32;
+    let cy = 300.0_f32;
+    let r = 230.0_f32;
+    let positions: std::collections::HashMap<Uuid, (f32, f32)> = pages
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let theta = (i as f32) / n * std::f32::consts::TAU;
+            (p.id, (cx + r * theta.cos(), cy + r * theta.sin()))
+        })
+        .collect();
+
+    // Edges: every wikilink target the block content references.
+    // We do a cheap substring scan since the parser results aren't
+    // cached for raw block content in this view.
+    let basename_lower: std::collections::HashMap<String, Uuid> = pages
+        .iter()
+        .map(|p| (p.basename.to_lowercase(), p.id))
+        .collect();
+    let mut edges: Vec<(Uuid, Uuid)> = Vec::new();
+    for b in &vault.blocks {
+        let mut s = b.content.as_str();
+        while let Some(open) = s.find("[[") {
+            s = &s[open + 2..];
+            let Some(close) = s.find("]]") else { break };
+            let target = s[..close]
+                .split('|')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
+            if let Some(t) = basename_lower.get(&target) {
+                if *t != b.page_id {
+                    edges.push((b.page_id, *t));
+                }
+            }
+            s = &s[close + 2..];
+        }
+    }
+    edges.sort();
+    edges.dedup();
+
+    rsx! {
+        h1 { class: "ls-page-title", "Graph" }
+        div { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin-bottom: 0.5em;",
+            "{pages.len()} pages · {edges.len()} links"
+        }
+        svg {
+            width: "800",
+            height: "600",
+            style: "background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 8px;",
+            view_box: "0 0 800 600",
+            for (i, (from, to)) in edges.iter().enumerate() {
+                {
+                    let (x1, y1) = positions.get(from).copied().unwrap_or((cx, cy));
+                    let (x2, y2) = positions.get(to).copied().unwrap_or((cx, cy));
+                    rsx! {
+                        line {
+                            key: "e{i}",
+                            x1: "{x1}", y1: "{y1}", x2: "{x2}", y2: "{y2}",
+                            stroke: "var(--ls-border-color)",
+                            stroke_width: "1",
+                            opacity: "0.6",
+                        }
+                    }
+                }
+            }
+            for (i, p) in pages.iter().enumerate() {
+                {
+                    let (x, y) = positions.get(&p.id).copied().unwrap_or((cx, cy));
+                    let pid = p.id;
+                    let name = p.basename.clone();
+                    rsx! {
+                        g { key: "n{i}",
+                            transform: "translate({x}, {y})",
+                            onclick: move |_| on_pick_page.call(pid),
+                            style: "cursor: pointer;",
+                            circle {
+                                r: "5",
+                                fill: "var(--ls-active-primary-color)",
+                            }
+                            text {
+                                x: "8", y: "4",
+                                fill: "var(--ls-primary-text-color)",
+                                font_size: "11",
+                                "{name}"
+                            }
                         }
                     }
                 }
@@ -1681,6 +2208,20 @@ fn PageView(
                     "{day}"
                 }
             }
+            if !page.aliases.is_empty() {
+                div { style: "display: flex; flex-wrap: wrap; gap: 0.3em; margin-bottom: 0.75em;",
+                    span { style: "color: var(--ls-secondary-text-color); font-size: 0.8rem; align-self: center; text-transform: uppercase; letter-spacing: 0.08em;",
+                        "Aliases"
+                    }
+                    for alias in page.aliases.clone() {
+                        span {
+                            key: "{alias}",
+                            style: "padding: 0.1em 0.5em; background: var(--ls-tertiary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.3em; font-size: 0.8rem; color: var(--ls-link-text-color);",
+                            "{alias}"
+                        }
+                    }
+                }
+            }
             {
                 let frontmatter_chips = publish_core::parse_props(&page.frontmatter_json);
                 if !frontmatter_chips.is_empty() {
@@ -1696,6 +2237,38 @@ fn PageView(
                 } else {
                     rsx! {}
                 }
+            }
+        }
+        {
+            // Whiteboard pages get a placeholder card with the
+            // preserved Excalidraw JSON in a foldable details pane —
+            // we don't ship a canvas editor, so editing happens in
+            // Excalidraw itself, but the data round-trips on save.
+            let fm: serde_json::Value =
+                serde_json::from_str(&page.frontmatter_json).unwrap_or(serde_json::Value::Null);
+            let is_whiteboard = fm.get("whiteboard").and_then(|v| v.as_bool()).unwrap_or(false);
+            let payload = fm.get("excalidraw").and_then(|v| v.as_str()).map(|s| s.to_string());
+            if is_whiteboard {
+                rsx! {
+                    div { style: "border: 1px solid var(--ls-border-color); border-radius: 8px; padding: 1em 1.2em; margin: 0.5em 0 1.5em; background: var(--ls-secondary-background-color);",
+                        div { style: "display: flex; align-items: center; gap: 0.5em; color: var(--ls-secondary-text-color); font-size: 0.85rem;",
+                            span { "◇" }
+                            span { "Whiteboard (read-only here — edit in Excalidraw)" }
+                        }
+                        if let Some(p) = payload {
+                            details { style: "margin-top: 0.6em;",
+                                summary { style: "color: var(--ls-secondary-text-color); font-size: 0.8rem; cursor: pointer;",
+                                    "Show raw payload ({p.len()} chars)"
+                                }
+                                pre { style: "white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow: auto; background: var(--ls-tertiary-background-color); padding: 0.6em; border-radius: 4px; font-size: 0.8rem; margin-top: 0.4em;",
+                                    "{p}"
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                rsx! {}
             }
         }
         if tree_to_show.is_empty() {
@@ -2309,11 +2882,15 @@ fn LogseqBlockBody(block: Block) -> Element {
                 }
             }
             for (i, drawer) in drawers.into_iter().enumerate() {
-                details {
-                    key: "{i}",
-                    class: "ls-drawer",
-                    summary { class: "ls-drawer-name", "{drawer.name}" }
-                    pre { class: "ls-drawer-body", "{drawer.body}" }
+                if drawer.name.eq_ignore_ascii_case("logbook") {
+                    LogbookView { key: "{i}", body: drawer.body.clone() }
+                } else {
+                    details {
+                        key: "{i}",
+                        class: "ls-drawer",
+                        summary { class: "ls-drawer-name", "{drawer.name}" }
+                        pre { class: "ls-drawer-body", "{drawer.body}" }
+                    }
                 }
             }
         }
@@ -3943,6 +4520,26 @@ mod tests {
     #[test]
     fn peel_fenced_code_rejects_inline() {
         assert!(peel_fenced_code("just `code` here").is_none());
+    }
+
+    #[test]
+    fn parse_logbook_closed_and_open() {
+        let body = "CLOCK: [2026-05-19 Tue 10:30:00]--[2026-05-19 Tue 11:15:00] => 0:45\nCLOCK: [2026-05-19 Tue 14:00:00]";
+        let entries = parse_logbook(body);
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].end.is_some());
+        assert!(entries[1].end.is_none());
+        assert_eq!(
+            (entries[0].end.unwrap() - entries[0].start).num_minutes(),
+            45
+        );
+    }
+
+    #[test]
+    fn parse_logbook_skips_garbage() {
+        let entries =
+            parse_logbook("nonsense\nCLOCK: missing brackets\nCLOCK: [2026-05-19 10:00:00]");
+        assert_eq!(entries.len(), 1);
     }
 
     #[test]
