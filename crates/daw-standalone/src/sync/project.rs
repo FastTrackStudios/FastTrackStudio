@@ -179,10 +179,9 @@ impl Projects for Standalone {
                 let summary =
                     crate::project_loader::load_rpp_text(self, &name, path, &text).ok()?;
                 let s = self.state.lock().ok()?;
-                return s
-                    .projects
+                s.projects
                     .get(&summary.project_guid)
-                    .map(|p| p.info.clone());
+                    .map(|p| p.info.clone())
             }
             #[cfg(not(any(feature = "rpp-project", feature = "rpp-project-wasm")))]
             {

@@ -6,9 +6,9 @@ use dawfile_protools::write::{NativeTrackSpec, write_single_track_ptx};
 fn dump_102d_solo_byte(path: &str) -> Option<u8> {
     let raw = std::fs::read(path).ok()?;
     let session = dawfile_protools::parse_raw(raw).ok()?;
-    fn find_102d<'a>(
-        bs: &'a [dawfile_protools::raw_block::RawBlock],
-    ) -> Option<&'a dawfile_protools::raw_block::RawBlock> {
+    fn find_102d(
+        bs: &[dawfile_protools::raw_block::RawBlock],
+    ) -> Option<&dawfile_protools::raw_block::RawBlock> {
         for b in bs {
             if b.content_type_raw == 0x102d {
                 return Some(b);

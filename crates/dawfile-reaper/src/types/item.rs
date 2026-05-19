@@ -956,35 +956,29 @@ impl Item {
             _ => {
                 if let Some(ref mut take) = current_take {
                     match identifier {
-                        "SOFFS" => {
-                            if tokens.len() > 1 {
-                                take.slip_offset = Self::parse_float(&tokens[1])?;
-                            }
+                        "SOFFS" if tokens.len() > 1 => {
+                            take.slip_offset = Self::parse_float(&tokens[1])?;
                         }
-                        "PLAYRATE" => {
-                            if tokens.len() >= 4 {
-                                take.playrate = Some(PlayRateSettings {
-                                    rate: Self::parse_float(&tokens[1])?,
-                                    preserve_pitch: Self::parse_bool(&tokens[2])?,
-                                    pitch_adjust: Self::parse_float(&tokens[3])?,
-                                    pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                                    unknown_field_5: if tokens.len() > 5 {
-                                        Self::parse_int(&tokens[5])?
-                                    } else {
-                                        0
-                                    },
-                                    unknown_field_6: if tokens.len() > 6 {
-                                        Self::parse_float(&tokens[6])?
-                                    } else {
-                                        0.0
-                                    },
-                                });
-                            }
+                        "PLAYRATE" if tokens.len() >= 4 => {
+                            take.playrate = Some(PlayRateSettings {
+                                rate: Self::parse_float(&tokens[1])?,
+                                preserve_pitch: Self::parse_bool(&tokens[2])?,
+                                pitch_adjust: Self::parse_float(&tokens[3])?,
+                                pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
+                                unknown_field_5: if tokens.len() > 5 {
+                                    Self::parse_int(&tokens[5])?
+                                } else {
+                                    0
+                                },
+                                unknown_field_6: if tokens.len() > 6 {
+                                    Self::parse_float(&tokens[6])?
+                                } else {
+                                    0.0
+                                },
+                            });
                         }
-                        "CHANMODE" => {
-                            if tokens.len() > 1 {
-                                take.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
-                            }
+                        "CHANMODE" if tokens.len() > 1 => {
+                            take.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
                         }
                         _ => {}
                     }

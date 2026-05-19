@@ -3,7 +3,7 @@
 use daw_proto::midi::Midi;
 use daw_proto::project::ProjectContext;
 use daw_proto::{Effects, FxChainContext, ItemRef, ProjectInfo, Takes, TrackRef, Tracks};
-use daw_standalone::media_bay::{BayFileResolver, BayView, InMemoryResolver, ReplaceScope};
+use daw_standalone::media_bay::{BayView, InMemoryResolver, ReplaceScope};
 use daw_standalone::sync::Standalone;
 
 fn seeded() -> (Standalone, String) {
@@ -349,7 +349,7 @@ fn build_wav_440hz_1s() -> Vec<u8> {
     let n = sample_rate as usize;
     let mut data = Vec::with_capacity(44 + n * 2);
     data.extend_from_slice(b"RIFF");
-    data.extend_from_slice(&((36 + n as u32 * 2) as u32).to_le_bytes());
+    data.extend_from_slice(&(36 + n as u32 * 2).to_le_bytes());
     data.extend_from_slice(b"WAVE");
     data.extend_from_slice(b"fmt ");
     data.extend_from_slice(&16u32.to_le_bytes());

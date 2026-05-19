@@ -67,7 +67,7 @@ fn collect_solo_defeat_by_name(blocks: &[Block], data: &[u8]) -> HashMap<String,
     }
     build_parents(blocks, None, &mut parents);
 
-    fn find_2619<'a>(b: &'a Block, data: &[u8]) -> Option<String> {
+    fn find_2619(b: &Block, data: &[u8]) -> Option<String> {
         for c in &b.children {
             if c.content_type == Some(ContentType::MarkerEntry) {
                 let p = c.offset + 2;

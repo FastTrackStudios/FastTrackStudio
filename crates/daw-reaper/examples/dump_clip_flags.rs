@@ -13,10 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if r.clip_muted {
                 muted += 1;
             }
-            if let Some(c) = r.clip_color {
-                if c != -2 {
-                    colored += 1;
-                }
+            if let Some(c) = r.clip_color
+                && c != -2
+            {
+                colored += 1;
             }
         }
     }

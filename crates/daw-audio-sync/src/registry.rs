@@ -11,7 +11,7 @@
 //!
 //! The audio thread can't allocate. Slot count is bounded by
 //! [`MAX_PROJECTS`]; project→slot assignments are stored in an
-//! [`ArcSwap`] that the main thread updates and the audio thread reads
+//! `ArcSwap` that the main thread updates and the audio thread reads
 //! wait-free. New projects get the next free slot at first
 //! observation by the bridge's main-thread updater task.
 //!

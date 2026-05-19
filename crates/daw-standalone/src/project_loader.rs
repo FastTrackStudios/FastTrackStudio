@@ -21,9 +21,8 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use dawfile_reaper::types::item::{Item as RppItem, SourceType as RppSourceType, Take as RppTake};
+use dawfile_reaper::types::item::{SourceType as RppSourceType, Take as RppTake};
 use dawfile_reaper::types::project::{DecodeOptions, ReaperProject};
-use dawfile_reaper::types::track::Track as RppTrack;
 use uuid::Uuid;
 
 use daw_proto::item::{FadeShape, Item, SourceType};
@@ -290,36 +289,35 @@ fn populate_tracks(
                     // into MidiNote entries on `p.midi_notes`. The
                     // renderer reads from this map to feed VST3i /
                     // CLAPi at playback.
-                    if take.is_midi {
-                        if let Some(src) = rt_take.source.as_ref() {
-                            if let Some(midi) = src.midi_data.as_ref() {
-                                let decoded = decode_midi_source(midi);
-                                if !decoded.notes.is_empty() {
-                                    p.midi_notes.insert(take.guid.clone(), decoded.notes);
-                                }
-                                if !decoded.ccs.is_empty() {
-                                    p.midi_ccs.insert(take.guid.clone(), decoded.ccs);
-                                }
-                                if !decoded.pitch_bends.is_empty() {
-                                    p.midi_pitch_bends
-                                        .insert(take.guid.clone(), decoded.pitch_bends);
-                                }
-                                if !decoded.program_changes.is_empty() {
-                                    p.midi_program_changes
-                                        .insert(take.guid.clone(), decoded.program_changes);
-                                }
-                                if !decoded.sysex.is_empty() {
-                                    p.midi_sysex.insert(take.guid.clone(), decoded.sysex);
-                                }
-                                if !decoded.channel_pressures.is_empty() {
-                                    p.midi_channel_pressures
-                                        .insert(take.guid.clone(), decoded.channel_pressures);
-                                }
-                                if !decoded.poly_pressures.is_empty() {
-                                    p.midi_poly_pressures
-                                        .insert(take.guid.clone(), decoded.poly_pressures);
-                                }
-                            }
+                    if take.is_midi
+                        && let Some(src) = rt_take.source.as_ref()
+                        && let Some(midi) = src.midi_data.as_ref()
+                    {
+                        let decoded = decode_midi_source(midi);
+                        if !decoded.notes.is_empty() {
+                            p.midi_notes.insert(take.guid.clone(), decoded.notes);
+                        }
+                        if !decoded.ccs.is_empty() {
+                            p.midi_ccs.insert(take.guid.clone(), decoded.ccs);
+                        }
+                        if !decoded.pitch_bends.is_empty() {
+                            p.midi_pitch_bends
+                                .insert(take.guid.clone(), decoded.pitch_bends);
+                        }
+                        if !decoded.program_changes.is_empty() {
+                            p.midi_program_changes
+                                .insert(take.guid.clone(), decoded.program_changes);
+                        }
+                        if !decoded.sysex.is_empty() {
+                            p.midi_sysex.insert(take.guid.clone(), decoded.sysex);
+                        }
+                        if !decoded.channel_pressures.is_empty() {
+                            p.midi_channel_pressures
+                                .insert(take.guid.clone(), decoded.channel_pressures);
+                        }
+                        if !decoded.poly_pressures.is_empty() {
+                            p.midi_poly_pressures
+                                .insert(take.guid.clone(), decoded.poly_pressures);
                         }
                     }
                     takes_out.push(take);
@@ -412,12 +410,11 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
                 let pitch = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
                 let velocity = ev.bytes.get(2).copied().unwrap_or(0) & 0x7F;
                 if velocity == 0 {
-                    if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch)) {
-                        if let Some(n) = notes.get_mut(idx) {
+                    if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch))
+                        && let Some(n) = notes.get_mut(idx) {
                             n.length_ppq = to_ppq(tick.saturating_sub(start_tick));
                             n.velocity = vel;
                         }
-                    }
                 } else {
                     let idx = notes.len();
                     notes.push(MidiNote {
@@ -436,12 +433,11 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
             }
             0x80 => {
                 let pitch = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
-                if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch)) {
-                    if let Some(n) = notes.get_mut(idx) {
+                if let Some((start_tick, vel, idx)) = pending_notes.remove(&(channel, pitch))
+                    && let Some(n) = notes.get_mut(idx) {
                         n.length_ppq = to_ppq(tick.saturating_sub(start_tick));
                         n.velocity = vel;
                     }
-                }
             }
             0xB0 => {
                 // Control Change.
@@ -484,12 +480,12 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
                     selected: false,
                 });
             }
-            0xF0 => {
+            0xF0
                 // SysEx (status 0xF0) — store the entire frame
                 // verbatim including the trailing 0xF7. Other 0xFn
                 // realtime / system messages (clock, start, stop,
                 // active sensing) aren't currently routed.
-                if status == 0xF0 {
+                if status == 0xF0 => {
                     let idx = sysex.len() as u32;
                     sysex.push(MidiSysEx {
                         index: idx,
@@ -497,7 +493,6 @@ fn decode_midi_source(midi: &dawfile_reaper::types::item::MidiSource) -> Decoded
                         data: ev.bytes.clone(),
                     });
                 }
-            }
             0xA0 => {
                 // Poly Pressure (per-note aftertouch).
                 let note = ev.bytes.get(1).copied().unwrap_or(0) & 0x7F;
@@ -769,7 +764,6 @@ fn populate_fx_chains(
 ) {
     use daw_proto::fx::{Effects, FxChainContext};
     use daw_proto::project::ProjectContext;
-    use dawfile_reaper::types::fx_chain::{FxChainNode, PluginType};
 
     // Build (track_guid, fx_chain) pairs. Tracks were added in order
     // so we can correlate by index against the source project.

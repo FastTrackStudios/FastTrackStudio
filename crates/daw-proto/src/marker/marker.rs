@@ -66,6 +66,11 @@ impl Marker {
     }
 }
 
+// Manual impl rather than derived so the position uses the explicit
+// `Position::start()` constructor; semantically equivalent to
+// `Position::default()` today but makes the "marker starts at the
+// session origin" intent obvious.
+#[allow(clippy::derivable_impls)]
 impl Default for Marker {
     fn default() -> Self {
         Self {

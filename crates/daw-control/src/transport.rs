@@ -7,7 +7,6 @@ use crate::Result;
 use daw_proto::{
     LoopRegion, PlayState, ProjectContext, TimeSignature, Transport as TransportState,
 };
-use vox::Rx;
 
 /// Transport handle for a specific project
 ///

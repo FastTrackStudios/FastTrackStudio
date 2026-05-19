@@ -387,16 +387,16 @@ async fn full_session_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()>
 
     // Verify send exists on follower
     let f_tracks = f_proj.tracks().all().await?;
-    if let Some(f_t) = f_tracks.iter().find(|t| t.name == "RenamedTrack") {
-        if let Ok(Some(f_track)) = f_proj.tracks().by_guid(&f_t.guid).await {
-            let f_sends = f_track.sends().all().await?;
-            println!("  [follower] Send count: {}", f_sends.len());
-            assert!(
-                !f_sends.is_empty(),
-                "Follower should have at least one send"
-            );
-            println!("  [follower] Send appeared ✓");
-        }
+    if let Some(f_t) = f_tracks.iter().find(|t| t.name == "RenamedTrack")
+        && let Ok(Some(f_track)) = f_proj.tracks().by_guid(&f_t.guid).await
+    {
+        let f_sends = f_track.sends().all().await?;
+        println!("  [follower] Send count: {}", f_sends.len());
+        assert!(
+            !f_sends.is_empty(),
+            "Follower should have at least one send"
+        );
+        println!("  [follower] Send appeared ✓");
     }
 
     // Change send volume
@@ -417,11 +417,11 @@ async fn full_session_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()>
     tokio::time::sleep(SYNC_WAIT).await;
 
     let f_tracks = f_proj.tracks().all().await?;
-    if let Some(f_t) = f_tracks.iter().find(|t| t.name == "RenamedTrack") {
-        if let Ok(Some(f_track)) = f_proj.tracks().by_guid(&f_t.guid).await {
-            let f_sends = f_track.sends().all().await?;
-            println!("  [follower] Send count after remove: {}", f_sends.len());
-        }
+    if let Some(f_t) = f_tracks.iter().find(|t| t.name == "RenamedTrack")
+        && let Ok(Some(f_track)) = f_proj.tracks().by_guid(&f_t.guid).await
+    {
+        let f_sends = f_track.sends().all().await?;
+        println!("  [follower] Send count after remove: {}", f_sends.len());
     }
     println!("  [follower] Send remove sent ✓");
 

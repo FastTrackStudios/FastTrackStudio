@@ -93,7 +93,7 @@ fn find(blocks: &[RawBlock], ct: ContentType) -> Option<&RawBlock> {
     None
 }
 
-fn collect<'a>(blocks: &'a [RawBlock], ct: ContentType) -> Vec<&'a RawBlock> {
+fn collect(blocks: &[RawBlock], ct: ContentType) -> Vec<&RawBlock> {
     let mut out = Vec::new();
     fn rec<'a>(blocks: &'a [RawBlock], ct: ContentType, out: &mut Vec<&'a RawBlock>) {
         for b in blocks {

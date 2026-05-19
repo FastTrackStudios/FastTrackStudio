@@ -141,12 +141,11 @@ fn collect_clips(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<Pendi
 
         while j < chunks.len() {
             match chunks[j].tag {
-                TAG_TRAK => {
+                TAG_TRAK
                     // 58 bytes = FileDecrypt/Logic ≤11.x; 57 bytes = Fire/Logic 12.x.
-                    if chunks[j].data_len >= 57 {
+                    if chunks[j].data_len >= 57 => {
                         has_audio_trak = true;
                     }
-                }
                 TAG_EVSQ => {
                     evsq_idx = Some(j);
                     break;

@@ -13,13 +13,13 @@ fn fixtures_dir() -> PathBuf {
 fn round_trip_binary() -> PathBuf {
     // Built by `cargo test` automatically via the `required-features` /
     // example dependency. Falls back to `cargo run --example` if not present.
-    let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/debug/examples/round_trip");
-    target_dir
+        .join("target/debug/examples/round_trip")
 }
 
 #[test]

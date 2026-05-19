@@ -7,7 +7,7 @@
 //! Runs as a tokio task at `CORRECTION_HZ` (~20Hz). Each tick:
 //!
 //! 1. Snapshot local position from the [`SnapshotCell`].
-//! 2. Snapshot peer table from [`PeerTable`]; elect the lowest-UUID
+//! 2. Snapshot peer table from `PeerTable`; elect the lowest-UUID
 //!    peer that's actively playing as leader. If we are the leader,
 //!    no correction needed — just hold rate at 1.0.
 //! 3. Project the leader's playhead into our clock domain using

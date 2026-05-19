@@ -337,12 +337,12 @@ pub fn get_track_color(session: &crate::raw_block::RawSession, track_name: &str)
     let containers = collect_blocks_ref_raw(&session.blocks, 0x261c);
     for c in containers {
         let name_in_block = find_2619_name(c, &session.data);
-        if name_in_block.as_deref() == Some(track_name) {
-            if let Some(b) = c.children.iter().find(|x| x.content_type_raw == 0x200b) {
-                let payload = b.start + 9;
-                if payload + 164 <= session.data.len() {
-                    return Some(session.data[payload + 163]);
-                }
+        if name_in_block.as_deref() == Some(track_name)
+            && let Some(b) = c.children.iter().find(|x| x.content_type_raw == 0x200b)
+        {
+            let payload = b.start + 9;
+            if payload + 164 <= session.data.len() {
+                return Some(session.data[payload + 163]);
             }
         }
     }
@@ -440,10 +440,10 @@ pub fn set_track_output(
     Some(splice::replace_string(session, str_offset, new_destination))
 }
 
-fn collect_blocks_ref<'a>(
-    blocks: &'a [crate::raw_block::RawBlock],
+fn collect_blocks_ref(
+    blocks: &[crate::raw_block::RawBlock],
     ct: ContentType,
-) -> Vec<&'a crate::raw_block::RawBlock> {
+) -> Vec<&crate::raw_block::RawBlock> {
     let mut out = Vec::new();
     fn rec<'a>(
         blocks: &'a [crate::raw_block::RawBlock],

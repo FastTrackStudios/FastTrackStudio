@@ -4,7 +4,7 @@
 use dawfile_protools::{block, content_type::ContentType, cursor::Cursor, decrypt};
 use std::env;
 
-fn find_recursive<'a>(blocks: &'a [block::Block], ct: ContentType) -> Option<&'a block::Block> {
+fn find_recursive(blocks: &[block::Block], ct: ContentType) -> Option<&block::Block> {
     for b in blocks {
         if b.content_type == Some(ct) {
             return Some(b);
@@ -79,8 +79,8 @@ fn main() {
 
     // Walk top-level blocks and report the first parent that contains 0x1029 / 0x251a children
     {
-        fn parents_of<'a>(
-            blocks: &'a [block::Block],
+        fn parents_of(
+            blocks: &[block::Block],
             raw: u16,
             depth: usize,
             path: &mut Vec<(u16, usize)>,
@@ -171,7 +171,7 @@ fn main() {
                 b.children.len()
             );
             // 16 bytes per row with offset header
-            for row in 0..((take + 15) / 16) {
+            for row in 0..take.div_ceil(16) {
                 let s = row * 16;
                 let e = (s + 16).min(take);
                 println!(

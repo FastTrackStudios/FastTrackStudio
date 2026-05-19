@@ -327,7 +327,7 @@ fn collect_marker_section_entries<'a>(blocks: &'a [Block], out: &mut Vec<&'a Blo
 /// Returns `None` when no `0x4826` is present (uncolored marker).
 fn decode_marker_color_v12(entry: &Block, data: &[u8]) -> Option<(u8, u8, u8)> {
     // Find the first 0x4826 child anywhere in the entry's subtree.
-    fn find_4826<'a>(b: &'a Block) -> Option<&'a Block> {
+    fn find_4826(b: &Block) -> Option<&Block> {
         if b.content_type_raw == 0x4826 {
             return Some(b);
         }

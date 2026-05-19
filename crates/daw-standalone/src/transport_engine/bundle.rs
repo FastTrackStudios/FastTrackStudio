@@ -218,7 +218,7 @@ pub fn spawn_subscriber_pump(
                     let ev = TransportStreamEvent::State(TransportEvent::TempoChanged {
                         project_guid: project_guid.clone(),
                         tempo: daw_proto::primitives::Tempo::from_bpm(cur_tempo),
-                        time_signature: initial_proto.time_signature.clone(),
+                        time_signature: initial_proto.time_signature,
                     });
                     if tx.send(ev).await.is_err() {
                         return;

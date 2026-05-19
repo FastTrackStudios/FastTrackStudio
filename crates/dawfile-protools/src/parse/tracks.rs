@@ -428,7 +428,7 @@ fn decode_fade_def(def: &Block, data: &[u8]) -> Option<(u64, u64, u8)> {
 
 /// Walk the block tree and collect every `0x262f` fade-definition block in
 /// document order. The fade entry's `+4` field indexes into this list.
-fn collect_fade_defs<'a>(blocks: &'a [Block]) -> Vec<&'a Block> {
+fn collect_fade_defs(blocks: &[Block]) -> Vec<&Block> {
     let mut out = Vec::new();
     fn walk<'a>(b: &'a Block, out: &mut Vec<&'a Block>) {
         if b.content_type == Some(ContentType::FadeDef) {

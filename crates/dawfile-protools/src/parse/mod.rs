@@ -737,7 +737,7 @@ fn parse_edit_groups(blocks: &[Block], data: &[u8]) -> Vec<crate::types::EditGro
         let mut found_start = None;
         while p + 6 < block_end {
             let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
-            if nlen >= 2 && nlen <= 64 && p + 4 + nlen + 2 <= block_end {
+            if (2..=64).contains(&nlen) && p + 4 + nlen + 2 <= block_end {
                 let name = &data[p + 4..p + 4 + nlen];
                 if name.iter().all(|c| (0x20..0x7f).contains(c)) {
                     found_start = Some(p);
@@ -750,7 +750,7 @@ fn parse_edit_groups(blocks: &[Block], data: &[u8]) -> Vec<crate::types::EditGro
         // Read entries until the layout no longer matches.
         while p + 6 < block_end {
             let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
-            if nlen < 1 || nlen > 64 || p + 4 + nlen + 2 > block_end {
+            if !(1..=64).contains(&nlen) || p + 4 + nlen + 2 > block_end {
                 break;
             }
             let name_bytes = &data[p + 4..p + 4 + nlen];
@@ -788,7 +788,7 @@ fn parse_stem_mappings(blocks: &[Block], data: &[u8]) -> Vec<String> {
         let mut found_start = None;
         while p + 4 < block_end {
             let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
-            if nlen >= 2 && nlen <= 64 && p + 4 + nlen <= block_end {
+            if (2..=64).contains(&nlen) && p + 4 + nlen <= block_end {
                 let name = &data[p + 4..p + 4 + nlen];
                 if name.iter().all(|c| (0x20..0x7f).contains(c)) {
                     found_start = Some(p);
@@ -800,7 +800,7 @@ fn parse_stem_mappings(blocks: &[Block], data: &[u8]) -> Vec<String> {
         let Some(mut p) = found_start else { continue };
         while p + 4 < block_end {
             let nlen = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
-            if nlen < 1 || nlen > 64 || p + 4 + nlen > block_end {
+            if !(1..=64).contains(&nlen) || p + 4 + nlen > block_end {
                 break;
             }
             let name_bytes = &data[p + 4..p + 4 + nlen];
@@ -815,7 +815,7 @@ fn parse_stem_mappings(blocks: &[Block], data: &[u8]) -> Vec<String> {
 }
 
 /// Collect every block (and nested child) of the given content type.
-fn collect_blocks_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Vec<&'a Block> {
+fn collect_blocks_recursive(blocks: &[Block], ct: ContentType) -> Vec<&Block> {
     let mut out = Vec::new();
     fn walk<'a>(blocks: &'a [Block], ct: ContentType, out: &mut Vec<&'a Block>) {
         for b in blocks {

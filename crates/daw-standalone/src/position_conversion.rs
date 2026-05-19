@@ -27,8 +27,8 @@ fn bpm_at(daw: &Standalone, guid: &str, _time_seconds: f64) -> f64 {
 fn time_sig_at(daw: &Standalone, guid: &str) -> TimeSignature {
     daw.with_project(guid, |p| {
         TimeSignature::new(
-            p.transport.time_signature.numerator as u32,
-            p.transport.time_signature.denominator as u32,
+            p.transport.time_signature.numerator,
+            p.transport.time_signature.denominator,
         )
     })
     .unwrap_or_else(|_| TimeSignature::new(4, 4))

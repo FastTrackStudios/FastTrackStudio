@@ -258,14 +258,14 @@ impl SynchronizationEngine {
             let peers = self.connected_peer_ids.lock().await;
             let master_id = peers.iter().min().cloned();
             drop(peers);
-            if let Some(master) = master_id {
-                if event.origin_peer != master {
-                    debug!(
-                        "Ignoring transport event from non-master {} (master={})",
-                        event.origin_peer, master
-                    );
-                    return;
-                }
+            if let Some(master) = master_id
+                && event.origin_peer != master
+            {
+                debug!(
+                    "Ignoring transport event from non-master {} (master={})",
+                    event.origin_peer, master
+                );
+                return;
             }
         }
 

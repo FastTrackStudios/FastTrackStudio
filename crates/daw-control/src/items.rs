@@ -5,12 +5,11 @@ use std::sync::Arc;
 use crate::Result;
 use crate::{DawClients, Error, MidiEditor};
 use daw_proto::{
-    ItemEvent, ProjectContext, TakeEvent,
+    ProjectContext,
     item::{FadeShape, Item, ItemRef, Take, TakeRef},
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
-use vox::Rx;
 
 /// Items handle for a specific track
 ///

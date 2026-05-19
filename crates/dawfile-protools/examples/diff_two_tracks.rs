@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = session.cursor().data();
 
     // Walk 0x251a track list in document order to get name -> position.
-    fn first<'a>(blocks: &'a [RawBlock], ct: ContentType) -> Option<&'a RawBlock> {
+    fn first(blocks: &[RawBlock], ct: ContentType) -> Option<&RawBlock> {
         for b in blocks {
             if b.content_type == Some(ct) {
                 return Some(b);

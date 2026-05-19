@@ -5,9 +5,8 @@
 //! transport they already use for ActionRegistry / Track / etc.
 
 use crate::DawClients;
-use daw_proto::dock_host::{DockEvent, DockHandle, DockKind, PanelPixels, UiEventDto};
+use daw_proto::dock_host::{DockHandle, DockKind, PanelPixels, UiEventDto};
 use std::sync::Arc;
-use vox::Tx;
 
 /// Handle for registering and toggling docks via the host adapter.
 pub struct DockHost {

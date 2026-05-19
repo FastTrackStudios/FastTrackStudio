@@ -6,7 +6,7 @@ use dawfile_protools::raw_block::RawBlock;
 fn flatten(blocks: &[RawBlock], out: &mut Vec<(u16, usize, u32, usize)>) {
     fn walk(blocks: &[RawBlock], depth: usize, out: &mut Vec<(u16, usize, u32, usize)>) {
         for b in blocks {
-            out.push((b.content_type_raw, b.start, b.block_size as u32, depth));
+            out.push((b.content_type_raw, b.start, b.block_size, depth));
             walk(&b.children, depth + 1, out);
         }
     }

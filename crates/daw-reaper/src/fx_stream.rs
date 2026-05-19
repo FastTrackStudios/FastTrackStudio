@@ -112,11 +112,11 @@ pub(crate) fn publish_from_callback(event: FxEvent) {
                 };
                 let mut found = false;
                 for ((_, cp), chain) in cache.iter_mut() {
-                    if cp == &chain_part {
-                        if let Some(c) = chain.iter_mut().find(|c| &c.guid == fx_guid) {
-                            c.enabled = *enabled;
-                            found = true;
-                        }
+                    if cp == &chain_part
+                        && let Some(c) = chain.iter_mut().find(|c| &c.guid == fx_guid)
+                    {
+                        c.enabled = *enabled;
+                        found = true;
                     }
                 }
                 found

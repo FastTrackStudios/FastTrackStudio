@@ -707,17 +707,17 @@ impl Engine {
                 // phase correction remains coherent across loop iterations.
                 // jump_offset tracks where we left off (loop end beat),
                 // land_offset tracks where we landed (loop start beat).
-                if let Some((loop_start, loop_end)) = state.loop_range {
-                    if state.position_seconds > loop_start && state.position_seconds < loop_end {
-                        if let Some((start_beat, end_beat)) = state.loop_range_beats {
-                            self.jump_offset = fmod(self.jump_offset + end_beat, 1.0);
-                            self.land_offset = fmod(self.land_offset + start_beat, 1.0);
-                            debug!(
-                                "Link: loop jump — jump_offset={:.3}, land_offset={:.3}",
-                                self.jump_offset, self.land_offset
-                            );
-                        }
-                    }
+                if let Some((loop_start, loop_end)) = state.loop_range
+                    && state.position_seconds > loop_start
+                    && state.position_seconds < loop_end
+                    && let Some((start_beat, end_beat)) = state.loop_range_beats
+                {
+                    self.jump_offset = fmod(self.jump_offset + end_beat, 1.0);
+                    self.land_offset = fmod(self.land_offset + start_beat, 1.0);
+                    debug!(
+                        "Link: loop jump — jump_offset={:.3}, land_offset={:.3}",
+                        self.jump_offset, self.land_offset
+                    );
                 }
             } else {
                 // Non-loop jump (user seek): re-align the beat/time mapping

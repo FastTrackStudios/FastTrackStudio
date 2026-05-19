@@ -34,7 +34,7 @@ pub struct SyncServices {}
 pub fn dispatch_op_sync(
     op: &BatchOp,
     outputs: &[Option<StepOutput>],
-    services: &SyncServices,
+    _services: &SyncServices,
 ) -> Result<StepOutput, String> {
     match op {
         BatchOp::Project(op) => dispatch_project_sync(op, outputs),
@@ -2156,7 +2156,6 @@ fn dispatch_tempo_map_sync(
     outputs: &[Option<StepOutput>],
 ) -> Result<StepOutput, String> {
     use crate::safe_wrappers::tempo as tempo_sw;
-    use crate::safe_wrappers::time_map as tm_sw;
 
     let reaper = Reaper::get();
     let medium = reaper.medium_reaper();

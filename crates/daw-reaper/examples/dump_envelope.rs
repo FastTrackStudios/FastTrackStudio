@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // We need access to children — re-walk blocks tree to find this wrapper as a RawBlock ref.
         // Use parse_raw_blocks_pub on the data directly.
         let blocks = dawfile_protools::raw_block::parse_raw_blocks_pub(&s.data, s.is_bigendian);
-        fn find_wrapper<'a>(blocks: &'a [RawBlock], start: usize) -> Option<&'a RawBlock> {
+        fn find_wrapper(blocks: &[RawBlock], start: usize) -> Option<&RawBlock> {
             for b in blocks {
                 if b.start == start {
                     return Some(b);

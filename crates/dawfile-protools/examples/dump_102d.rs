@@ -1,4 +1,3 @@
-use dawfile_protools::content_type::ContentType;
 use dawfile_protools::raw_block::RawBlock;
 fn main() {
     let path = std::env::args().nth(1).expect("path");
@@ -7,7 +6,9 @@ fn main() {
     let data = session.cursor().data();
     fn walk<'a>(blocks: &'a [RawBlock], out: &mut Vec<&'a RawBlock>) {
         for b in blocks {
-            if b.content_type == Some(ContentType::TrackPerTrackState) {
+            // 0x102d is per-track state (solo flag at +162, etc.) — not
+            // currently surfaced as a named ContentType variant.
+            if b.content_type_raw == 0x102d {
                 out.push(b);
             }
             walk(&b.children, out);

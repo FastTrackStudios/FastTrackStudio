@@ -18,7 +18,6 @@ use std::sync::{Mutex, OnceLock};
 
 use daw_proto::dock_host::{DockEvent, DockHandle, DockHosting, DockKind, PanelPixels, UiEventDto};
 use tokio::sync::broadcast;
-use tracing::{debug, info};
 
 use crate::dock;
 

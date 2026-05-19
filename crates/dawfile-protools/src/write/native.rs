@@ -1518,10 +1518,7 @@ mod tests {
         };
         let session = parse_native(&spec);
         let names: Vec<&str> = session.all_tracks().map(|t| t.name.as_str()).collect();
-        assert!(
-            names.iter().any(|n| *n == "MyTrack"),
-            "expected MyTrack in {names:?}"
-        );
+        assert!(names.contains(&"MyTrack"), "expected MyTrack in {names:?}");
     }
 
     fn parse_multi(specs: &[NativeTrackSpec]) -> crate::types::ProToolsSession {

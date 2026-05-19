@@ -81,10 +81,10 @@ impl MediaBay {
                 let mut paths: std::collections::HashSet<String> = std::collections::HashSet::new();
                 for tl in p.takes.values() {
                     for take in &tl.takes {
-                        if let Some(path) = &take.source_file_path {
-                            if !path.is_empty() {
-                                paths.insert(path.clone());
-                            }
+                        if let Some(path) = &take.source_file_path
+                            && !path.is_empty()
+                        {
+                            paths.insert(path.clone());
                         }
                     }
                 }

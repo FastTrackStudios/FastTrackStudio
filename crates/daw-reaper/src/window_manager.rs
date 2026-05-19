@@ -313,10 +313,10 @@ fn set_toolbar_slot_visible(slot: u32, show: bool) -> Result<(), String> {
     let Some(cmd_id) = toolbar_toggle_command_id(slot) else {
         return Err(format!("toolbar slot {slot} out of range 1..=32"));
     };
-    if let Some(current) = is_toolbar_slot_visible(slot) {
-        if current == show {
-            return Ok(());
-        }
+    if let Some(current) = is_toolbar_slot_visible(slot)
+        && current == show
+    {
+        return Ok(());
     }
     unsafe {
         reaper_low::Reaper::get().Main_OnCommand(cmd_id as i32, 0);
@@ -543,11 +543,11 @@ pub fn debug_log_toolbar_command_names() {
                 },
             )
         };
-        if let Some(name) = name {
-            if name.to_lowercase().contains("toolbar") {
-                tracing::info!(command_id = cmd_id, name = %name, "Toolbar action");
-                hits += 1;
-            }
+        if let Some(name) = name
+            && name.to_lowercase().contains("toolbar")
+        {
+            tracing::info!(command_id = cmd_id, name = %name, "Toolbar action");
+            hits += 1;
         }
     }
     tracing::info!(hits, "Toolbar command-id probe complete");

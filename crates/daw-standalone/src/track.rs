@@ -22,7 +22,7 @@ fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     }
 }
 
-fn find_track_index<'a>(tracks: &'a [Track], r: &TrackRef) -> Option<usize> {
+fn find_track_index(tracks: &[Track], r: &TrackRef) -> Option<usize> {
     match r {
         TrackRef::Guid(guid) => tracks.iter().position(|t| t.guid == *guid),
         TrackRef::Index(idx) => {

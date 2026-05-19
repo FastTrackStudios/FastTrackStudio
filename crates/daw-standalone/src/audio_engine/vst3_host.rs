@@ -38,19 +38,18 @@ use vst3::Steinberg::Vst::{
     IAudioProcessor, IAudioProcessorTrait, IComponent, IComponent_iid, IComponentHandler,
     IComponentHandlerTrait, IComponentTrait, IConnectionPoint, IConnectionPointTrait,
     IEditController, IEditController_iid, IEditControllerTrait, IEventList, IEventListTrait,
-    IHostApplication, IHostApplicationTrait, IMessage, IMidiMapping, IMidiMappingTrait,
-    IParamValueQueue, IParamValueQueueTrait, IParameterChanges, IParameterChangesTrait,
-    MediaTypes_, NoteExpressionTypeID, NoteExpressionValue, NoteExpressionValueEvent, NoteOffEvent,
-    NoteOnEvent, ParamID, ParamValue, ParameterInfo, PolyPressureEvent, ProcessContext,
-    ProcessData, ProcessModes_, ProcessSetup, SpeakerArr, SpeakerArrangement, String128,
-    SymbolicSampleSizes_,
+    IHostApplication, IHostApplicationTrait, IMidiMapping, IMidiMappingTrait, IParamValueQueue,
+    IParamValueQueueTrait, IParameterChanges, IParameterChangesTrait, MediaTypes_,
+    NoteExpressionTypeID, NoteExpressionValue, NoteExpressionValueEvent, NoteOffEvent, NoteOnEvent,
+    ParamID, ParamValue, ParameterInfo, PolyPressureEvent, ProcessContext, ProcessData,
+    ProcessModes_, ProcessSetup, SpeakerArr, SpeakerArrangement, String128, SymbolicSampleSizes_,
 };
 use vst3::Steinberg::{
     FIDString, FUnknown, IBStream, IBStreamTrait, IPluginBaseTrait, IPluginFactory,
     IPluginFactoryTrait, PClassInfo, TUID, char8, char16, int32, int64, kInvalidArgument,
     kNoInterface, kNotImplemented, kResultFalse, kResultOk, kResultTrue, tresult,
 };
-use vst3::{Class, ComPtr, ComWrapper, Interface};
+use vst3::{Class, ComPtr, ComWrapper};
 
 use crate::plugin::{PluginEvents, PluginMidiEvent};
 
@@ -196,10 +195,9 @@ impl Vst3Module {
         unsafe {
             if let Ok(entry) = lib.get::<unsafe extern "system" fn(*mut c_void) -> bool>(
                 module_entry_symbol().as_bytes(),
-            ) {
-                if !entry(ptr::null_mut()) {
-                    return Err(Vst3HostError::ModuleEntry);
-                }
+            ) && !entry(ptr::null_mut())
+            {
+                return Err(Vst3HostError::ModuleEntry);
             }
         }
 
@@ -977,7 +975,7 @@ impl LoadedVst3Plugin {
         let process_context = ProcessContext {
             state: (ProcessContextFlags_::kTempoValid
                 | ProcessContextFlags_::kTimeSigValid
-                | ProcessContextFlags_::kProjectTimeMusicValid) as u32,
+                | ProcessContextFlags_::kProjectTimeMusicValid),
             sampleRate: sample_rate,
             projectTimeSamples: 0,
             systemTime: 0,
@@ -1077,7 +1075,7 @@ impl LoadedVst3Plugin {
                         __field0: Event__type0 {
                             data: DataEvent {
                                 size: owned.len() as u32,
-                                r#type: Vst3DataTypes_::kMidiSysEx as u32,
+                                r#type: Vst3DataTypes_::kMidiSysEx,
                                 bytes: owned.as_ptr(),
                             },
                         },
@@ -1292,14 +1290,14 @@ impl LoadedVst3Plugin {
             }
         }
         // Apply controller-only state (parameter values, UI prefs).
-        if !ctrl_state.is_empty() {
-            if let Some(c) = self.controller.as_mut() {
-                unsafe {
-                    let stream = ComWrapper::new(MemoryStream::new());
-                    stream.buf.borrow_mut().extend_from_slice(ctrl_state);
-                    if let Some(stream_ptr) = stream.to_com_ptr::<IBStream>() {
-                        let _ = c.ptr.setState(stream_ptr.as_ptr());
-                    }
+        if !ctrl_state.is_empty()
+            && let Some(c) = self.controller.as_mut()
+        {
+            unsafe {
+                let stream = ComWrapper::new(MemoryStream::new());
+                stream.buf.borrow_mut().extend_from_slice(ctrl_state);
+                if let Some(stream_ptr) = stream.to_com_ptr::<IBStream>() {
+                    let _ = c.ptr.setState(stream_ptr.as_ptr());
                 }
             }
         }
@@ -1515,7 +1513,7 @@ impl LoadedVst3Plugin {
 
 impl crate::plugin::PluginInstance for SendableVst3Plugin {
     fn descriptor(&self) -> crate::plugin::PluginDescriptor {
-        let d = &(**self).descriptor;
+        let d = &self.descriptor;
         crate::plugin::PluginDescriptor {
             id: tuid_to_hex(&d.cid),
             name: d.name.clone(),
@@ -1525,7 +1523,7 @@ impl crate::plugin::PluginInstance for SendableVst3Plugin {
         }
     }
     fn params(&mut self) -> Vec<crate::plugin::PluginParamInfo> {
-        LoadedVst3Plugin::params(&mut **self)
+        LoadedVst3Plugin::params(self)
             .into_iter()
             .map(|p| crate::plugin::PluginParamInfo {
                 id: p.id,
@@ -1537,23 +1535,23 @@ impl crate::plugin::PluginInstance for SendableVst3Plugin {
             .collect()
     }
     fn param_value(&mut self, id: u32) -> Option<f64> {
-        LoadedVst3Plugin::param_value(&mut **self, id)
+        LoadedVst3Plugin::param_value(self, id)
     }
     fn value_to_text(&mut self, id: u32, v: f64) -> Option<String> {
-        LoadedVst3Plugin::value_to_text(&mut **self, id, v)
+        LoadedVst3Plugin::value_to_text(self, id, v)
     }
     fn text_to_value(&mut self, id: u32, t: &str) -> Option<f64> {
-        LoadedVst3Plugin::text_to_value(&mut **self, id, t)
+        LoadedVst3Plugin::text_to_value(self, id, t)
     }
     fn latency(&mut self) -> u32 {
         // SAFETY: COM call on a still-live IAudioProcessor.
-        unsafe { (**self).processor.getLatencySamples() as u32 }
+        unsafe { self.processor.getLatencySamples() }
     }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
-        LoadedVst3Plugin::prepare(&mut **self, sr, bs).map_err(map_err)
+        LoadedVst3Plugin::prepare(self, sr, bs).map_err(map_err)
     }
     fn is_prepared(&self) -> bool {
-        LoadedVst3Plugin::is_prepared(&**self)
+        LoadedVst3Plugin::is_prepared(self)
     }
     fn process_block(
         &mut self,
@@ -1563,16 +1561,16 @@ impl crate::plugin::PluginInstance for SendableVst3Plugin {
         or: &mut [f32],
         ev: &crate::plugin::PluginEvents<'_>,
     ) -> Result<(), crate::plugin::PluginError> {
-        LoadedVst3Plugin::process_block(&mut **self, il, ir, ol, or, ev).map_err(map_err)
+        LoadedVst3Plugin::process_block(self, il, ir, ol, or, ev).map_err(map_err)
     }
     fn deactivate(&mut self) {
-        LoadedVst3Plugin::deactivate(&mut **self)
+        LoadedVst3Plugin::deactivate(self)
     }
     fn load_state(&mut self, state: &[u8]) -> Result<(), crate::plugin::PluginError> {
-        LoadedVst3Plugin::load_state(&mut **self, state).map_err(map_err)
+        LoadedVst3Plugin::load_state(self, state).map_err(map_err)
     }
     fn save_state(&mut self) -> Result<Vec<u8>, crate::plugin::PluginError> {
-        LoadedVst3Plugin::save_state(&mut **self).map_err(map_err)
+        LoadedVst3Plugin::save_state(self).map_err(map_err)
     }
 }
 
@@ -1709,12 +1707,12 @@ fn resolve_lib_path(bundle: &Path) -> Result<PathBuf, Vst3HostError> {
         }
         // Fall back to first file in the platform dir (some bundles
         // ship a differently-named library).
-        if let Ok(mut entries) = std::fs::read_dir(&dir) {
-            if let Some(Ok(entry)) = entries.next() {
-                let p = entry.path();
-                if p.is_file() {
-                    return Ok(p);
-                }
+        if let Ok(mut entries) = std::fs::read_dir(&dir)
+            && let Some(Ok(entry)) = entries.next()
+        {
+            let p = entry.path();
+            if p.is_file() {
+                return Ok(p);
             }
         }
     }

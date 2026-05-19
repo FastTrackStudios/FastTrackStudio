@@ -1,8 +1,25 @@
 //! DAW Protocol Definitions
 //!
 //! This crate defines the shared types and service interfaces for DAW cells.
+//!
+//! # Glob re-exports
+//!
+//! The per-RPC modules under this crate (`marker`, `track`, `audio_engine`,
+//! `transport`, etc.) each re-export an architect-generated set of names —
+//! `Service`, `Dispatcher`, `descriptor`, `layer`, `serve` — that are
+//! intentionally namespaced per service. When glob-imported at the crate
+//! root the same bare names appear from multiple modules, which the
+//! compiler flags as ambiguous. The marker/region/track/take/tempo_map/
+//! ext_state/window_manager/action_registry modules already use explicit
+//! re-exports to avoid this. The remaining `pub use foo::*` imports below
+//! also pull in these same architect aliases — but only one "wins" the
+//! bare-name binding at the crate root, and no caller relies on
+//! `daw_proto::Service` (they always use the qualified path
+//! `daw_proto::marker::Service`). The lint is therefore harmless and
+//! silenced for the crate.
 
 #![deny(unsafe_code)]
+#![allow(ambiguous_glob_reexports)]
 
 pub mod action_registry;
 pub mod actions;
@@ -49,7 +66,16 @@ pub mod undo;
 pub mod window_geometry;
 pub mod window_manager;
 
-pub use action_registry::*;
+// Explicit re-exports rather than glob — the `service` submodule emits
+// architect `Service`/`Dispatcher`/`descriptor`/`layer`/`serve` names
+// which collide with the same names in other RPC modules. Callers reach
+// those via the fully-qualified `daw_proto::action_registry::*`.
+#[cfg(feature = "vox")]
+pub use action_registry::ActionRegistrationClient;
+pub use action_registry::{
+    ActionEvent, ActionExecutionResult, ActionInfo, ActionListFilter, ActionListRequest,
+    ActionListResponse, ActionOrigin, ActionRegistration, ActionRegistrationRpc, ActionSection,
+};
 pub use actions::*;
 pub use audio_accessor::*;
 pub use audio_engine::*;
@@ -60,7 +86,6 @@ pub use daw::Daw;
 pub use dawfile_service::*;
 pub use dock_host::*;
 pub use error::*;
-pub use ext_state::*;
 pub use fx::*;
 pub use health::*;
 pub use input::*;
@@ -119,4 +144,10 @@ pub use transport::*;
 pub use ui::*;
 pub use undo::*;
 pub use window_geometry::*;
-pub use window_manager::*;
+// Explicit re-exports (see action_registry note above for the rationale).
+#[cfg(feature = "vox")]
+pub use window_manager::WindowManagerClient;
+pub use window_manager::{
+    LayoutPlacement, LayoutToolbar, ModeDockerLayout, MonitorRect, WindowLayout,
+    WindowLayoutOptions, WindowLayoutResult, WindowLayoutSummary, WindowManager, WindowManagerRpc,
+};

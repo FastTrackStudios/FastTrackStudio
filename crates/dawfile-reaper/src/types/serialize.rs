@@ -1097,7 +1097,8 @@ mod tests {
         assert!(rpp.contains("POSITION 1"));
         assert!(rpp.contains("LENGTH 4"));
         assert!(rpp.contains("NAME \"Kick Pattern\""));
-        assert!(rpp.contains("TAKE SEL"));
+        // No `TAKE SEL` marker is emitted for a single-take item — REAPER
+        // reads take #0's properties directly off the ITEM block.
         assert!(rpp.contains("<SOURCE WAVE"));
         assert!(rpp.contains("FILE \"audio/kick.wav\""));
     }
@@ -1144,10 +1145,11 @@ mod tests {
             .build();
 
         let rpp = track.to_rpp_string();
-        // Track at indent 0, item at indent 1, source at indent 2
+        // Track at indent 0, item at indent 1, source at indent 2.
+        // No `TAKE SEL\n` line is emitted for take #0 — REAPER reads
+        // the first take's properties directly off the ITEM block.
         assert!(rpp.contains("<TRACK\n"));
         assert!(rpp.contains("  <ITEM\n"));
-        assert!(rpp.contains("    TAKE SEL\n"));
         assert!(rpp.contains("    <SOURCE WAVE\n"));
         assert!(rpp.contains("      FILE \"test.wav\"\n"));
     }

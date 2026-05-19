@@ -11,7 +11,7 @@ fn main() {
     let session = dawfile_protools::parse_raw(raw).unwrap();
     let data = session.cursor().data();
 
-    fn walk<'a>(b: &'a RawBlock, depth: u32, data: &[u8]) {
+    fn walk(b: &RawBlock, depth: u32, data: &[u8]) {
         let pad = " ".repeat(depth as usize * 2);
         let ct = b.content_type_raw;
         let mut info = format!("{}0x{ct:04x} sz={}", pad, b.block_size);

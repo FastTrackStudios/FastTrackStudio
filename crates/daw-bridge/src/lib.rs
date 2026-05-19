@@ -406,7 +406,7 @@ extern "C" fn timer_callback() {
             let dt = now.duration_since(*guard);
             *guard = now;
             let n = COUNT.fetch_add(1, Ordering::Relaxed);
-            if n % 30 == 0 && n > 0 {
+            if n.is_multiple_of(30) && n > 0 {
                 tracing::info!(tick = n, "FTS_TIMER_PROBE dt={dt:?}");
             }
         }

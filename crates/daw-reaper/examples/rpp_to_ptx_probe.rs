@@ -77,7 +77,7 @@ fn build_rpp(probe: &str) -> String {
             use dawfile_reaper::builder::MarkerBuilder;
             b = b.track("ProbeTrack", |t| t).add_marker(
                 MarkerBuilder::marker(1, 1.0, "MColor")
-                    .color(0xd86e41 as i32)
+                    .color(0xd86e41_i32)
                     .build(),
             );
         }

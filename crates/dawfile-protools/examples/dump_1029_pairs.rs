@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get track names from 0x251a in document order
     let track_list: Option<&RawBlock> = {
-        fn first<'a>(bs: &'a [RawBlock], ct: ContentType) -> Option<&'a RawBlock> {
+        fn first(bs: &[RawBlock], ct: ContentType) -> Option<&RawBlock> {
             for b in bs {
                 if b.content_type == Some(ct) {
                     return Some(b);

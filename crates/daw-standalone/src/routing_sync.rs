@@ -65,11 +65,7 @@ fn track_name_lookup(p: &ProjectState, guid: &str) -> Option<String> {
         .map(|t| t.name.clone())
 }
 
-fn find_route_by_ref<'a>(
-    routes: &'a [TrackRoute],
-    p: &ProjectState,
-    rref: &RouteRef,
-) -> Option<usize> {
+fn find_route_by_ref(routes: &[TrackRoute], p: &ProjectState, rref: &RouteRef) -> Option<usize> {
     match rref {
         RouteRef::Index(i) => {
             let u = *i as usize;

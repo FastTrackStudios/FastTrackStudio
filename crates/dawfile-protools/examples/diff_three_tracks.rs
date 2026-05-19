@@ -5,11 +5,11 @@ use dawfile_protools::content_type::ContentType;
 use dawfile_protools::raw_block::{RawBlock, RawSession};
 use std::collections::{HashMap, HashSet};
 
-fn name_to_1029_map<'a>(session: &'a RawSession) -> HashMap<String, &'a RawBlock> {
+fn name_to_1029_map(session: &RawSession) -> HashMap<String, &RawBlock> {
     let data = session.cursor().data();
     let mut out = HashMap::new();
     let track_list = {
-        fn first<'b>(bs: &'b [RawBlock], ct: ContentType) -> Option<&'b RawBlock> {
+        fn first(bs: &[RawBlock], ct: ContentType) -> Option<&RawBlock> {
             for b in bs {
                 if b.content_type == Some(ct) {
                     return Some(b);

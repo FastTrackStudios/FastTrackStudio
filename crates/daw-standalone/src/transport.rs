@@ -316,7 +316,7 @@ impl Transport for Standalone {
         let Some(guid) = resolve_project(self, &project) else {
             return TimeSignature::default();
         };
-        self.with_project(&guid, |p| p.transport.time_signature.clone())
+        self.with_project(&guid, |p| p.transport.time_signature)
             .unwrap_or_default()
     }
 

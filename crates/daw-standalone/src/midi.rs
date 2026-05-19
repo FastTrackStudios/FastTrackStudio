@@ -528,11 +528,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_ccs.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_cc(v);
-                }
+            if let Some(v) = p.midi_ccs.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_cc(v);
             }
         });
     }
@@ -545,10 +545,10 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_ccs.get_mut(&take_guid) {
-                if let Some(cc) = v.get_mut(index as usize) {
-                    cc.value = value & 0x7F;
-                }
+            if let Some(v) = p.midi_ccs.get_mut(&take_guid)
+                && let Some(cc) = v.get_mut(index as usize)
+            {
+                cc.value = value & 0x7F;
             }
         });
     }
@@ -604,11 +604,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_pitch_bends.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_pb(v);
-                }
+            if let Some(v) = p.midi_pitch_bends.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_pb(v);
             }
         });
     }
@@ -621,10 +621,10 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_pitch_bends.get_mut(&take_guid) {
-                if let Some(pb) = v.get_mut(index as usize) {
-                    pb.value = value.clamp(-8192, 8191);
-                }
+            if let Some(v) = p.midi_pitch_bends.get_mut(&take_guid)
+                && let Some(pb) = v.get_mut(index as usize)
+            {
+                pb.value = value.clamp(-8192, 8191);
             }
         });
     }
@@ -679,11 +679,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_program_changes.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_pc(v);
-                }
+            if let Some(v) = p.midi_program_changes.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_pc(v);
             }
         });
     }
@@ -696,10 +696,10 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_program_changes.get_mut(&take_guid) {
-                if let Some(pc) = v.get_mut(index as usize) {
-                    pc.program = program & 0x7F;
-                }
+            if let Some(v) = p.midi_program_changes.get_mut(&take_guid)
+                && let Some(pc) = v.get_mut(index as usize)
+            {
+                pc.program = program & 0x7F;
             }
         });
     }
@@ -750,11 +750,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_sysex.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_sysex(v);
-                }
+            if let Some(v) = p.midi_sysex.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_sysex(v);
             }
         });
     }
@@ -814,11 +814,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_channel_pressures.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_cp(v);
-                }
+            if let Some(v) = p.midi_channel_pressures.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_cp(v);
             }
         });
     }
@@ -831,10 +831,10 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_channel_pressures.get_mut(&take_guid) {
-                if let Some(cp) = v.get_mut(index as usize) {
-                    cp.pressure = pressure & 0x7F;
-                }
+            if let Some(v) = p.midi_channel_pressures.get_mut(&take_guid)
+                && let Some(cp) = v.get_mut(index as usize)
+            {
+                cp.pressure = pressure & 0x7F;
             }
         });
     }
@@ -891,11 +891,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_poly_pressures.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_pp(v);
-                }
+            if let Some(v) = p.midi_poly_pressures.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_pp(v);
             }
         });
     }
@@ -908,10 +908,10 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_poly_pressures.get_mut(&take_guid) {
-                if let Some(pp) = v.get_mut(index as usize) {
-                    pp.pressure = pressure & 0x7F;
-                }
+            if let Some(v) = p.midi_poly_pressures.get_mut(&take_guid)
+                && let Some(pp) = v.get_mut(index as usize)
+            {
+                pp.pressure = pressure & 0x7F;
             }
         });
     }
@@ -969,11 +969,11 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_note_expressions.get_mut(&take_guid) {
-                if (index as usize) < v.len() {
-                    v.remove(index as usize);
-                    renumber_ne(v);
-                }
+            if let Some(v) = p.midi_note_expressions.get_mut(&take_guid)
+                && (index as usize) < v.len()
+            {
+                v.remove(index as usize);
+                renumber_ne(v);
             }
         });
     }
@@ -986,10 +986,10 @@ impl Midi for Standalone {
             return;
         };
         let _ = self.with_project_mut(&project_guid, |p| {
-            if let Some(v) = p.midi_note_expressions.get_mut(&take_guid) {
-                if let Some(ne) = v.get_mut(index as usize) {
-                    ne.value = value;
-                }
+            if let Some(v) = p.midi_note_expressions.get_mut(&take_guid)
+                && let Some(ne) = v.get_mut(index as usize)
+            {
+                ne.value = value;
             }
         });
     }

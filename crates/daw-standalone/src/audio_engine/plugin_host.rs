@@ -764,7 +764,7 @@ impl LoadedClapPlugin {
 /// underlying type — no recursive trait dispatch.
 impl crate::plugin::PluginInstance for SendableClapPlugin {
     fn descriptor(&self) -> crate::plugin::PluginDescriptor {
-        let d = &(**self).descriptor;
+        let d = &self.descriptor;
         crate::plugin::PluginDescriptor {
             id: d.id.clone(),
             name: d.name.clone(),
@@ -774,7 +774,7 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
         }
     }
     fn params(&mut self) -> Vec<crate::plugin::PluginParamInfo> {
-        LoadedClapPlugin::params(&mut **self)
+        LoadedClapPlugin::params(self)
             .into_iter()
             .map(|p| crate::plugin::PluginParamInfo {
                 id: p.id,
@@ -786,22 +786,22 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
             .collect()
     }
     fn param_value(&mut self, id: u32) -> Option<f64> {
-        LoadedClapPlugin::param_value(&mut **self, id)
+        LoadedClapPlugin::param_value(self, id)
     }
     fn value_to_text(&mut self, id: u32, v: f64) -> Option<String> {
-        LoadedClapPlugin::value_to_text(&mut **self, id, v)
+        LoadedClapPlugin::value_to_text(self, id, v)
     }
     fn text_to_value(&mut self, id: u32, t: &str) -> Option<f64> {
-        LoadedClapPlugin::text_to_value(&mut **self, id, t)
+        LoadedClapPlugin::text_to_value(self, id, t)
     }
     fn latency(&mut self) -> u32 {
-        LoadedClapPlugin::latency(&mut **self)
+        LoadedClapPlugin::latency(self)
     }
     fn prepare(&mut self, sr: f64, bs: u32) -> Result<(), crate::plugin::PluginError> {
-        LoadedClapPlugin::prepare(&mut **self, sr, bs).map_err(map_err)
+        LoadedClapPlugin::prepare(self, sr, bs).map_err(map_err)
     }
     fn is_prepared(&self) -> bool {
-        LoadedClapPlugin::is_prepared(&**self)
+        LoadedClapPlugin::is_prepared(self)
     }
     fn process_block(
         &mut self,
@@ -811,16 +811,16 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
         or: &mut [f32],
         ev: &crate::plugin::PluginEvents<'_>,
     ) -> Result<(), crate::plugin::PluginError> {
-        LoadedClapPlugin::process_block(&mut **self, il, ir, ol, or, ev).map_err(map_err)
+        LoadedClapPlugin::process_block(self, il, ir, ol, or, ev).map_err(map_err)
     }
     fn deactivate(&mut self) {
-        LoadedClapPlugin::deactivate(&mut **self)
+        LoadedClapPlugin::deactivate(self)
     }
     fn load_state(&mut self, state: &[u8]) -> Result<(), crate::plugin::PluginError> {
-        LoadedClapPlugin::load_state(&mut **self, state).map_err(map_err)
+        LoadedClapPlugin::load_state(self, state).map_err(map_err)
     }
     fn save_state(&mut self) -> Result<Vec<u8>, crate::plugin::PluginError> {
-        LoadedClapPlugin::save_state(&mut **self).map_err(map_err)
+        LoadedClapPlugin::save_state(self).map_err(map_err)
     }
 }
 

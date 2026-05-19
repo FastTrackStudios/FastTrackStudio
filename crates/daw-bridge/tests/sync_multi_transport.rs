@@ -170,10 +170,10 @@ async fn poll_ext_state(
 ) -> Result<()> {
     let ext = daw.ext_state();
     for i in 0..retries {
-        if let Ok(Some(val)) = ext.get(section, key).await {
-            if val == expected {
-                return Ok(());
-            }
+        if let Ok(Some(val)) = ext.get(section, key).await
+            && val == expected
+        {
+            return Ok(());
         }
         if i < retries - 1 {
             tokio::time::sleep(Duration::from_millis(interval_ms)).await;
@@ -194,10 +194,10 @@ async fn poll_ext_state_value(
 ) -> Result<String> {
     let ext = daw.ext_state();
     for i in 0..retries {
-        if let Ok(Some(val)) = ext.get(section, key).await {
-            if !val.is_empty() {
-                return Ok(val);
-            }
+        if let Ok(Some(val)) = ext.get(section, key).await
+            && !val.is_empty()
+        {
+            return Ok(val);
         }
         if i < retries - 1 {
             tokio::time::sleep(Duration::from_millis(interval_ms)).await;

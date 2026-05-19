@@ -3,7 +3,7 @@ fn main() {
     let path = std::env::args().nth(1).expect("path");
     let raw = std::fs::read(&path).unwrap();
     let session = dawfile_protools::parse_raw(raw).unwrap();
-    fn walk<'a>(blocks: &'a [RawBlock], depth: u32, path_str: &mut Vec<String>) {
+    fn walk(blocks: &[RawBlock], depth: u32, path_str: &mut Vec<String>) {
         for b in blocks {
             path_str.push(format!("0x{:04x}", b.content_type_raw));
             if b.content_type_raw == 0x200d {

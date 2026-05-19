@@ -5,11 +5,10 @@ use std::sync::Arc;
 use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
-    ProjectContext, RoutingEvent,
+    ProjectContext,
     routing::{RouteLocation, RouteRef, RouteType, SendMode, TrackRoute},
     track::TrackRef,
 };
-use vox::Rx;
 
 /// Sends accessor for a track
 #[derive(Clone)]

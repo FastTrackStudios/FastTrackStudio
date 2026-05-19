@@ -56,10 +56,10 @@ where
             let mut out = Vec::new();
             for take_list in p.takes.values() {
                 for take in &take_list.takes {
-                    if let Some(path) = &take.source_file_path {
-                        if !path.is_empty() {
-                            out.push((take.guid.clone(), path.clone()));
-                        }
+                    if let Some(path) = &take.source_file_path
+                        && !path.is_empty()
+                    {
+                        out.push((take.guid.clone(), path.clone()));
                     }
                 }
             }

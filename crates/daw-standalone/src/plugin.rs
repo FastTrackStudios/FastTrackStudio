@@ -15,13 +15,14 @@ use std::path::Path;
 
 /// Plugin format identifier — used by `Effects::add` to pick the
 /// right backend.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum PluginFormat {
     Clap,
     Vst3,
     Lv2,
     /// Synthetic placeholder (8 generic params, no DSP). Default
     /// when no real backend is available.
+    #[default]
     Synthetic,
 }
 
@@ -53,12 +54,6 @@ pub struct PluginDescriptor {
     pub vendor: String,
     pub version: String,
     pub format: PluginFormat,
-}
-
-impl Default for PluginFormat {
-    fn default() -> Self {
-        Self::Synthetic
-    }
 }
 
 /// A MIDI event scheduled at a sample offset inside the current

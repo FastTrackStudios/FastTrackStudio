@@ -46,10 +46,10 @@ fn insert_guid_mapping(remote_guid: String, local_guid: String) {
 }
 
 fn remove_guid_mapping(remote_guid: &str) {
-    if let Ok(mut lock) = GUID_MAP.lock() {
-        if let Some(map) = lock.as_mut() {
-            map.remove(normalize_guid(remote_guid));
-        }
+    if let Ok(mut lock) = GUID_MAP.lock()
+        && let Some(map) = lock.as_mut()
+    {
+        map.remove(normalize_guid(remote_guid));
     }
 }
 
@@ -92,10 +92,10 @@ fn resolve_marker_id(project_guid: &str, remote_id: u32) -> u32 {
 }
 
 fn remove_marker_mapping(project_guid: &str, remote_id: u32) {
-    if let Ok(mut lock) = MARKER_ID_MAP.lock() {
-        if let Some(map) = lock.as_mut() {
-            map.remove(&(project_guid.to_string(), remote_id));
-        }
+    if let Ok(mut lock) = MARKER_ID_MAP.lock()
+        && let Some(map) = lock.as_mut()
+    {
+        map.remove(&(project_guid.to_string(), remote_id));
     }
 }
 
@@ -248,29 +248,28 @@ async fn apply_transport(
 
     // If both sides are stopped, sync edit cursor position changes without
     // triggering a full state transition (no suppression, no play state change).
-    if transport.play_state == PlayState::Stopped {
-        if let Ok(local) = t.get_state().await {
-            if local.play_state == PlayState::Stopped {
-                if let Some(ref edit_pos) = transport.edit_position.time {
-                    let local_edit = local
-                        .edit_position
-                        .time
-                        .as_ref()
-                        .map(|t| t.as_seconds())
-                        .unwrap_or(0.0);
-                    let remote_edit = edit_pos.as_seconds();
-                    if (remote_edit - local_edit).abs() > 0.001 {
-                        debug!("Syncing edit cursor: {local_edit:.3}s → {remote_edit:.3}s");
-                        let _ = t.set_position(remote_edit).await;
-                    }
-                }
-                // Also sync tempo if changed
-                if (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
-                    let _ = t.set_tempo(transport.tempo.bpm).await;
-                }
-                return;
+    if transport.play_state == PlayState::Stopped
+        && let Ok(local) = t.get_state().await
+        && local.play_state == PlayState::Stopped
+    {
+        if let Some(ref edit_pos) = transport.edit_position.time {
+            let local_edit = local
+                .edit_position
+                .time
+                .as_ref()
+                .map(|t| t.as_seconds())
+                .unwrap_or(0.0);
+            let remote_edit = edit_pos.as_seconds();
+            if (remote_edit - local_edit).abs() > 0.001 {
+                debug!("Syncing edit cursor: {local_edit:.3}s → {remote_edit:.3}s");
+                let _ = t.set_position(remote_edit).await;
             }
         }
+        // Also sync tempo if changed
+        if (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
+            let _ = t.set_tempo(transport.tempo.bpm).await;
+        }
+        return;
     }
 
     // Check if this is a drift-correction heartbeat (both sides playing).
@@ -284,78 +283,75 @@ async fn apply_transport(
     // followers follow the master, not the other way around. Without this
     // guard, a follower broadcasting its stale position during stop→restart
     // causes the master to hard-seek backwards.
-    if transport.play_state == PlayState::Playing {
-        if let Ok(local) = t.get_state().await {
-            if local.play_state == PlayState::Playing {
-                if is_master {
-                    // Master is authoritative — skip follower drift correction
-                    return;
-                }
-                // Compensate for the time gap between reading the two positions:
-                // - Master position was read at `event_created_at_ms`
-                // - Local position was just read (via get_state above)
-                // Both positions are stale, but the local position is more recent.
-                // Adding the time gap to the master position aligns both to the
-                // same effective timestamp.
-                let local_read_at = SyncEvent::now_ms();
-                if let (Some(ref remote_pos), Some(ref local_pos)) = (
-                    transport.playhead_position.time.as_ref(),
-                    local.playhead_position.time.as_ref(),
-                ) {
-                    let latency_compensation = if event_created_at_ms > 0 {
-                        let elapsed_ms = local_read_at.saturating_sub(event_created_at_ms);
-                        (elapsed_ms as f64) / 1000.0
-                    } else {
-                        0.0
-                    };
-                    let estimated_remote = remote_pos.as_seconds() + latency_compensation;
-                    let drift = estimated_remote - local_pos.as_seconds();
+    if transport.play_state == PlayState::Playing
+        && let Ok(local) = t.get_state().await
+        && local.play_state == PlayState::Playing
+    {
+        if is_master {
+            // Master is authoritative — skip follower drift correction
+            return;
+        }
+        // Compensate for the time gap between reading the two positions:
+        // - Master position was read at `event_created_at_ms`
+        // - Local position was just read (via get_state above)
+        // Both positions are stale, but the local position is more recent.
+        // Adding the time gap to the master position aligns both to the
+        // same effective timestamp.
+        let local_read_at = SyncEvent::now_ms();
+        if let (Some(remote_pos), Some(local_pos)) = (
+            transport.playhead_position.time.as_ref(),
+            local.playhead_position.time.as_ref(),
+        ) {
+            let latency_compensation = if event_created_at_ms > 0 {
+                let elapsed_ms = local_read_at.saturating_sub(event_created_at_ms);
+                (elapsed_ms as f64) / 1000.0
+            } else {
+                0.0
+            };
+            let estimated_remote = remote_pos.as_seconds() + latency_compensation;
+            let drift = estimated_remote - local_pos.as_seconds();
 
-                    if link_active {
-                        // Link handles playrate nudging for beat-phase sync.
-                        // PeerMesh only does hard seeks for large position drifts
-                        // (e.g., late-joining follower, seek while playing).
-                        if drift.abs() > drift_corrector.hard_seek_threshold() {
-                            info!(
-                                "Hard seek (Link active): drift={drift:.3}s, seeking to {estimated_remote:.3}s"
-                            );
-                            let _ = t.set_position(estimated_remote).await;
-                        }
-                    } else {
-                        // No Link — full PeerMesh drift correction (playrate + hard seek)
-                        match drift_corrector.correct(drift, local.playrate) {
-                            DriftAction::SetRate { new_playrate } => {
-                                debug!(
-                                    "Drift correction: drift={drift:.4}s, playrate → {new_playrate:.4}"
-                                );
-                                let _ = t.set_playrate(new_playrate).await;
-                            }
-                            DriftAction::Reset => {
-                                debug!("Drift within tolerance, resetting playrate");
-                                let _ = t.set_playrate(1.0).await;
-                            }
-                            DriftAction::HardSeek => {
-                                info!(
-                                    "Hard seek to estimated position {estimated_remote:.3}s (drift={drift:.3}s)"
-                                );
-                                let _ = t.set_position(estimated_remote).await;
-                                let _ = t.set_playrate(1.0).await;
-                            }
-                            DriftAction::None => {}
-                        }
-                    }
-                }
-                // Also sync tempo if it drifted (only when Link isn't handling tempo)
-                if !link_active && (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
+            if link_active {
+                // Link handles playrate nudging for beat-phase sync.
+                // PeerMesh only does hard seeks for large position drifts
+                // (e.g., late-joining follower, seek while playing).
+                if drift.abs() > drift_corrector.hard_seek_threshold() {
                     info!(
-                        "Syncing tempo: remote={:.1} local={:.1}",
-                        transport.tempo.bpm, local.tempo.bpm
+                        "Hard seek (Link active): drift={drift:.3}s, seeking to {estimated_remote:.3}s"
                     );
-                    let _ = t.set_tempo(transport.tempo.bpm).await;
+                    let _ = t.set_position(estimated_remote).await;
                 }
-                return;
+            } else {
+                // No Link — full PeerMesh drift correction (playrate + hard seek)
+                match drift_corrector.correct(drift, local.playrate) {
+                    DriftAction::SetRate { new_playrate } => {
+                        debug!("Drift correction: drift={drift:.4}s, playrate → {new_playrate:.4}");
+                        let _ = t.set_playrate(new_playrate).await;
+                    }
+                    DriftAction::Reset => {
+                        debug!("Drift within tolerance, resetting playrate");
+                        let _ = t.set_playrate(1.0).await;
+                    }
+                    DriftAction::HardSeek => {
+                        info!(
+                            "Hard seek to estimated position {estimated_remote:.3}s (drift={drift:.3}s)"
+                        );
+                        let _ = t.set_position(estimated_remote).await;
+                        let _ = t.set_playrate(1.0).await;
+                    }
+                    DriftAction::None => {}
+                }
             }
         }
+        // Also sync tempo if it drifted (only when Link isn't handling tempo)
+        if !link_active && (transport.tempo.bpm - local.tempo.bpm).abs() > 0.001 {
+            info!(
+                "Syncing tempo: remote={:.1} local={:.1}",
+                transport.tempo.bpm, local.tempo.bpm
+            );
+            let _ = t.set_tempo(transport.tempo.bpm).await;
+        }
+        return;
     }
 
     // Master is authoritative for transport state — never apply state
@@ -697,12 +693,11 @@ async fn apply_fx(
         FxEvent::Removed { context, fx_guid } => {
             let context_key = format!("{context:?}");
             suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
-                    if let Err(e) = fx.remove().await {
-                        warn!("Failed to remove FX {fx_guid}: {e}");
-                    }
-                }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Ok(Some(fx)) = chain.by_guid(fx_guid).await
+                && let Err(e) = fx.remove().await
+            {
+                warn!("Failed to remove FX {fx_guid}: {e}");
             }
         }
         FxEvent::EnabledChanged {
@@ -712,16 +707,16 @@ async fn apply_fx(
         } => {
             let context_key = format!("{context:?}");
             suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
-                    let result = if *enabled {
-                        fx.enable().await
-                    } else {
-                        fx.disable().await
-                    };
-                    if let Err(e) = result {
-                        warn!("Failed to set FX enabled={enabled} on {fx_guid}: {e}");
-                    }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Ok(Some(fx)) = chain.by_guid(fx_guid).await
+            {
+                let result = if *enabled {
+                    fx.enable().await
+                } else {
+                    fx.disable().await
+                };
+                if let Err(e) = result {
+                    warn!("Failed to set FX enabled={enabled} on {fx_guid}: {e}");
                 }
             }
         }
@@ -733,12 +728,11 @@ async fn apply_fx(
         } => {
             let context_key = format!("{context:?}");
             suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
-                    if let Err(e) = fx.move_to(*new_index).await {
-                        warn!("Failed to move FX {fx_guid} to index {new_index}: {e}");
-                    }
-                }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Ok(Some(fx)) = chain.by_guid(fx_guid).await
+                && let Err(e) = fx.move_to(*new_index).await
+            {
+                warn!("Failed to move FX {fx_guid} to index {new_index}: {e}");
             }
         }
         FxEvent::PresetChanged {
@@ -760,16 +754,16 @@ async fn apply_fx(
         } => {
             let context_key = format!("{context:?}");
             suppression.suppress(SuppressionKey::fx_param(&context_key, fx_guid, 0));
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Ok(Some(fx)) = chain.by_guid(fx_guid).await {
-                    let result = if *open {
-                        fx.open_ui().await
-                    } else {
-                        fx.close_ui().await
-                    };
-                    if let Err(e) = result {
-                        warn!("Failed to set FX window open={open} on {fx_guid}: {e}");
-                    }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Ok(Some(fx)) = chain.by_guid(fx_guid).await
+            {
+                let result = if *open {
+                    fx.open_ui().await
+                } else {
+                    fx.close_ui().await
+                };
+                if let Err(e) = result {
+                    warn!("Failed to set FX window open={open} on {fx_guid}: {e}");
                 }
             }
         }
@@ -785,10 +779,10 @@ async fn apply_fx(
             context,
             container_id,
         } => {
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Err(e) = chain.explode_container(container_id).await {
-                    warn!("Failed to remove FX container: {e}");
-                }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Err(e) = chain.explode_container(container_id).await
+            {
+                warn!("Failed to remove FX container: {e}");
             }
         }
         FxEvent::RoutingModeChanged {
@@ -796,10 +790,10 @@ async fn apply_fx(
             container_id,
             mode,
         } => {
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Err(e) = chain.set_routing_mode(container_id, mode.clone()).await {
-                    warn!("Failed to set container routing mode: {e}");
-                }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Err(e) = chain.set_routing_mode(container_id, *mode).await
+            {
+                warn!("Failed to set container routing mode: {e}");
             }
         }
         FxEvent::MovedToContainer {
@@ -808,10 +802,10 @@ async fn apply_fx(
             dest_container,
             ..
         } => {
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Err(e) = chain.move_to_container(node_id, dest_container, 0).await {
-                    warn!("Failed to move FX to container: {e}");
-                }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Err(e) = chain.move_to_container(node_id, dest_container, 0).await
+            {
+                warn!("Failed to move FX to container: {e}");
             }
         }
         FxEvent::ContainerRenamed {
@@ -819,10 +813,10 @@ async fn apply_fx(
             container_id,
             name,
         } => {
-            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await {
-                if let Err(e) = chain.rename_container(container_id, name).await {
-                    warn!("Failed to rename FX container: {e}");
-                }
+            if let Some(chain) = resolve_fx_chain(daw, ctx, context).await
+                && let Err(e) = chain.rename_container(container_id, name).await
+            {
+                warn!("Failed to rename FX container: {e}");
             }
         }
         FxEvent::TreeStructureChanged { context } => {
@@ -1017,14 +1011,12 @@ async fn apply_item(
             suppression.suppress(SuppressionKey::item(item_guid, "active_take"));
             let idx = *new_take_index;
             let local_item_guid = resolve_guid(item_guid);
-            if let Some(project) = resolve_project(daw, ctx).await {
-                if let Ok(Some(item)) = project.items().by_guid(&local_item_guid).await {
-                    if let Ok(Some(take)) = item.takes().by_index(idx).await {
-                        if let Err(e) = take.make_active().await {
-                            warn!("Failed to set active take {idx} on item {item_guid}: {e}");
-                        }
-                    }
-                }
+            if let Some(project) = resolve_project(daw, ctx).await
+                && let Ok(Some(item)) = project.items().by_guid(&local_item_guid).await
+                && let Ok(Some(take)) = item.takes().by_index(idx).await
+                && let Err(e) = take.make_active().await
+            {
+                warn!("Failed to set active take {idx} on item {item_guid}: {e}");
             }
         }
     }
@@ -1137,12 +1129,11 @@ async fn apply_take(
         }
         TakeEvent::Created { item_guid, .. } => {
             suppression.suppress(SuppressionKey::item(item_guid, "take_created"));
-            if let Some(project) = resolve_project(daw, ctx).await {
-                if let Ok(Some(item)) = project.items().by_guid(item_guid).await {
-                    if let Err(e) = item.takes().add().await {
-                        warn!("Failed to add take to item {item_guid}: {e}");
-                    }
-                }
+            if let Some(project) = resolve_project(daw, ctx).await
+                && let Ok(Some(item)) = project.items().by_guid(item_guid).await
+                && let Err(e) = item.takes().add().await
+            {
+                warn!("Failed to add take to item {item_guid}: {e}");
             }
         }
         TakeEvent::Deleted {
@@ -1313,33 +1304,33 @@ async fn apply_routing(
                 &format!("created:{}", route.index),
             ));
             let local_source = resolve_guid(source_track_guid);
-            if let Some(project) = resolve_project(daw, ctx).await {
-                if let Ok(Some(track)) = project.tracks().by_guid(&local_source).await {
-                    match route.route_type {
-                        RouteType::Send => {
-                            if let Some(ref dest_guid) = route.dest_track_guid {
-                                let local_dest = resolve_guid(dest_guid);
-                                if let Err(e) = track.sends().add_to(&local_dest).await {
-                                    warn!(
-                                        "Failed to create send from {local_source} to {local_dest}: {e}"
-                                    );
-                                }
+            if let Some(project) = resolve_project(daw, ctx).await
+                && let Ok(Some(track)) = project.tracks().by_guid(&local_source).await
+            {
+                match route.route_type {
+                    RouteType::Send => {
+                        if let Some(ref dest_guid) = route.dest_track_guid {
+                            let local_dest = resolve_guid(dest_guid);
+                            if let Err(e) = track.sends().add_to(&local_dest).await {
+                                warn!(
+                                    "Failed to create send from {local_source} to {local_dest}: {e}"
+                                );
                             }
                         }
-                        RouteType::HardwareOutput => {
-                            if let Some(hw_idx) = route.hw_output_index {
-                                if let Err(e) = track.hardware_outputs().add(hw_idx).await {
-                                    warn!("Failed to add hardware output {hw_idx}: {e}");
-                                }
-                            }
+                    }
+                    RouteType::HardwareOutput => {
+                        if let Some(hw_idx) = route.hw_output_index
+                            && let Err(e) = track.hardware_outputs().add(hw_idx).await
+                        {
+                            warn!("Failed to add hardware output {hw_idx}: {e}");
                         }
-                        RouteType::Receive => {
-                            // Receives are the inverse of sends — creating a receive on track A
-                            // from track B is the same as creating a send on track B to track A.
-                            debug!(
-                                "Receive creation not directly supported — handled via send creation on source"
-                            );
-                        }
+                    }
+                    RouteType::Receive => {
+                        // Receives are the inverse of sends — creating a receive on track A
+                        // from track B is the same as creating a send on track B to track A.
+                        debug!(
+                            "Receive creation not directly supported — handled via send creation on source"
+                        );
                     }
                 }
             }
@@ -1371,12 +1362,11 @@ async fn apply_routing(
         } => {
             suppression.suppress(SuppressionKey::routing(track_guid, "parent_send"));
             let local_guid = resolve_guid(track_guid);
-            if let Some(project) = resolve_project(daw, ctx).await {
-                if let Ok(Some(track)) = project.tracks().by_guid(&local_guid).await {
-                    if let Err(e) = track.set_parent_send(*enabled).await {
-                        warn!("Failed to set parent send on {local_guid}: {e}");
-                    }
-                }
+            if let Some(project) = resolve_project(daw, ctx).await
+                && let Ok(Some(track)) = project.tracks().by_guid(&local_guid).await
+                && let Err(e) = track.set_parent_send(*enabled).await
+            {
+                warn!("Failed to set parent send on {local_guid}: {e}");
             }
         }
     }
@@ -1540,12 +1530,12 @@ async fn apply_tempo_map(
                     .as_ref()
                     .map(|t| t.as_seconds())
                     .unwrap_or(0.0);
-                if let Ok(idx) = tempo_map.add_point(pos_secs, point.bpm).await {
-                    if let Some(ref ts) = point.time_signature {
-                        let _ = tempo_map
-                            .set_time_signature_at(idx, ts.numerator as i32, ts.denominator as i32)
-                            .await;
-                    }
+                if let Ok(idx) = tempo_map.add_point(pos_secs, point.bpm).await
+                    && let Some(ref ts) = point.time_signature
+                {
+                    let _ = tempo_map
+                        .set_time_signature_at(idx, ts.numerator as i32, ts.denominator as i32)
+                        .await;
                 }
             }
         }

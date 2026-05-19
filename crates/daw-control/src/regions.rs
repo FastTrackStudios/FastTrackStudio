@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use crate::Result;
-use daw_proto::{ProjectContext, Region, RegionEvent};
-use vox::Rx;
+use daw_proto::{ProjectContext, Region};
 
 /// Regions handle for a specific project
 ///

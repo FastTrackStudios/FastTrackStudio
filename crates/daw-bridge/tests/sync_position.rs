@@ -11,7 +11,6 @@
 use std::time::Duration;
 
 use daw::service::PlayState;
-use eyre::Result;
 use reaper_test::reaper_test;
 
 /// Maximum allowed position drift between any two instances (seconds).
@@ -203,13 +202,12 @@ async fn position_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()> {
             handles.push(tokio::spawn(async move {
                 for _ in 0..10 {
                     tokio::time::sleep(Duration::from_millis(500)).await;
-                    if let Ok(proj) = daw.current_project().await {
-                        if let Ok(state) = proj.transport().get_state().await {
-                            if matches!(state.play_state, PlayState::Stopped) {
-                                println!("  [{label}] confirmed stopped");
-                                return Ok::<_, eyre::Report>(());
-                            }
-                        }
+                    if let Ok(proj) = daw.current_project().await
+                        && let Ok(state) = proj.transport().get_state().await
+                        && matches!(state.play_state, PlayState::Stopped)
+                    {
+                        println!("  [{label}] confirmed stopped");
+                        return Ok::<_, eyre::Report>(());
                     }
                 }
                 eyre::bail!("{label} should be stopped within 5 seconds");
@@ -237,13 +235,12 @@ async fn position_sync(ctx: &reaper_test::MultiDawTestContext) -> Result<()> {
             handles.push(tokio::spawn(async move {
                 for _ in 0..20 {
                     tokio::time::sleep(Duration::from_millis(500)).await;
-                    if let Ok(proj) = daw.current_project().await {
-                        if let Ok(state) = proj.transport().get_state().await {
-                            if matches!(state.play_state, PlayState::Playing) {
-                                println!("  [{label}] confirmed playing after restart");
-                                return Ok::<_, eyre::Report>(());
-                            }
-                        }
+                    if let Ok(proj) = daw.current_project().await
+                        && let Ok(state) = proj.transport().get_state().await
+                        && matches!(state.play_state, PlayState::Playing)
+                    {
+                        println!("  [{label}] confirmed playing after restart");
+                        return Ok::<_, eyre::Report>(());
                     }
                 }
                 eyre::bail!("{label} should be playing after restart within 10 seconds");

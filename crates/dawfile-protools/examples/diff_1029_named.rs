@@ -68,7 +68,7 @@ fn main() {
             })
             .collect();
         // only print if at least one differs
-        let first = payloads.first().map(|p| p.get(i).copied()).flatten();
+        let first = payloads.first().and_then(|p| p.get(i).copied());
         let differs = payloads.iter().any(|p| p.get(i).copied() != first);
         if differs {
             println!("+{i:>3}  | {}", line.join(" "));

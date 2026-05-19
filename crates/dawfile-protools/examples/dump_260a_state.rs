@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session = dawfile_protools::parse_raw(raw)?;
     let data = session.cursor().data();
 
-    fn first<'a>(bs: &'a [RawBlock], ct: ContentType) -> Option<&'a RawBlock> {
+    fn first(bs: &[RawBlock], ct: ContentType) -> Option<&RawBlock> {
         for b in bs {
             if b.content_type == Some(ct) {
                 return Some(b);

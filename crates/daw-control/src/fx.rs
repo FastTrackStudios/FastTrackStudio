@@ -6,9 +6,9 @@ use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
-    FxParameter, FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxStateChunk, FxTarget,
-    FxTree, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    FxChannelConfig, FxContainerChannelConfig, FxLatency, FxNodeId, FxParamModulation, FxParameter,
+    FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
+    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };

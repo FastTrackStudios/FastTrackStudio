@@ -13,7 +13,7 @@
 //!   carrying audio host-clock samples. Each successful exchange updates a
 //!   rolling offset + one-way delay estimate.
 //! - **Receive** (continuous): demuxes inbound messages by type, replies
-//!   to pings inline, and updates the [`PeerTable`].
+//!   to pings inline, and updates the `PeerTable`.
 //!
 //! All timestamps are REAPER audio-clock microseconds (`host_micros` from
 //! the latest [`crate::AudioSnapshot`]) so the computed offsets directly

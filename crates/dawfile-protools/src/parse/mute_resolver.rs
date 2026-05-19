@@ -94,7 +94,7 @@ fn collect_routed_track_names(blocks: &[Block], data: &[u8]) -> HashSet<String> 
     routed
 }
 
-fn find_first<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
+fn find_first(blocks: &[Block], ct: ContentType) -> Option<&Block> {
     for b in blocks {
         if b.content_type == Some(ct) {
             return Some(b);

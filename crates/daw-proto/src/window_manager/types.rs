@@ -33,11 +33,12 @@ pub struct MonitorRect {
 /// means "the docker REAPER currently has assigned as docker 0", not
 /// "the top docker". Cross-machine portability requires the user to
 /// keep docker positions consistent or re-save layouts per machine.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Facet)]
 #[facet(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum LayoutPlacement {
     /// Toolbar is hidden in this layout.
+    #[default]
     Hidden,
     /// Toolbar floats as a separate window at the given monitor-relative
     /// rectangle.
@@ -47,12 +48,6 @@ pub enum LayoutPlacement {
     /// Toolbar is docked into one of REAPER's floating docker frames
     /// (free-positioned containers that can hold multiple panels).
     FloatingDocker { docker_id: i32 },
-}
-
-impl Default for LayoutPlacement {
-    fn default() -> Self {
-        LayoutPlacement::Hidden
-    }
 }
 
 /// One toolbar's contribution to a layout.

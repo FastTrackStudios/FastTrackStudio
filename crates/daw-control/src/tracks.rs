@@ -4,11 +4,7 @@ use std::sync::Arc;
 
 use crate::Result;
 use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
-use daw_proto::{
-    FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent,
-    TrackExtStateRequest, TrackRef, track::ReorderTracksBehavior,
-};
-use vox::Rx;
+use daw_proto::{FxChainContext, ProjectContext, Track, TrackRef, track::ReorderTracksBehavior};
 
 /// Tracks handle for a specific project
 ///

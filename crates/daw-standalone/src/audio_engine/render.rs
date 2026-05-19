@@ -227,7 +227,7 @@ impl<'a> ProjectRenderer<'a> {
         // (take volume / pan / mute / pitch) are evaluated per-frame
         // inside mix_item_into_bus via cursors.
         for t in snapshot.iter() {
-            if (any_soloed && !t.soloed) {
+            if any_soloed && !t.soloed {
                 continue;
             }
             let bus = buses.get_mut(&t.guid).expect("bus pre-allocated");

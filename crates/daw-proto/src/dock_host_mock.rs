@@ -1,4 +1,4 @@
-//! In-memory [`DockHostService`] adapter for unit tests.
+//! In-memory [`DockHosting`] adapter for unit tests.
 //!
 //! Records every call into a `Vec<DockOp>` so tests can assert exact
 //! sequences ("show was called once for this handle", "register_dock for
@@ -8,7 +8,7 @@
 //! Pulled in via `cargo features = ["test-utils"]` so production builds
 //! never link this code.
 
-use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels, UiEventDto};
+use crate::dock_host::{DockEvent, DockHandle, DockHosting, DockKind, PanelPixels, UiEventDto};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +45,7 @@ pub struct MockDock {
     pub visible: bool,
 }
 
-/// Pure in-memory [`DockHostService`].
+/// Pure in-memory [`DockHosting`].
 ///
 /// Stores docks in a `HashMap<DockHandle, MockDock>` and tracks every
 /// operation in a `Vec<DockOp>` for assertion. Subscribers receive
@@ -98,7 +98,7 @@ impl MockDockHost {
     }
 
     /// Pre-load a stub pixel buffer the next call to
-    /// [`capture_panel_pixels`](DockHostService::capture_panel_pixels)
+    /// [`capture_panel_pixels`](DockHosting::capture_panel_pixels)
     /// will return for `handle`.
     pub fn set_pixels(&self, handle: DockHandle, pixels: PanelPixels) {
         self.inner.lock().unwrap().pixels.insert(handle, pixels);

@@ -95,8 +95,7 @@ impl TempoMap for Standalone {
         self.with_project(&guid, |p| {
             p.tempo_points
                 .iter()
-                .filter(|pt| pt.position_seconds() <= seconds)
-                .last()
+                .rfind(|pt| pt.position_seconds() <= seconds)
                 .map(|pt| pt.bpm)
                 .unwrap_or_else(|| p.transport.tempo.bpm())
         })
@@ -112,7 +111,7 @@ impl TempoMap for Standalone {
                 .iter()
                 .filter(|pt| pt.position_seconds() <= seconds)
                 .filter_map(|pt| pt.time_signature.as_ref())
-                .last()
+                .next_back()
                 .map(|ts| (ts.numerator as i32, ts.denominator as i32))
                 .unwrap_or((
                     p.transport.time_signature.numerator as i32,

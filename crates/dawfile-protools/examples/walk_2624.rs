@@ -4,7 +4,7 @@ fn main() {
     let raw = std::fs::read(&path).unwrap();
     let session = dawfile_protools::parse_raw(raw).unwrap();
     let data = session.cursor().data();
-    fn walk<'a>(blocks: &'a [RawBlock], depth: u32, data: &[u8], in_2624: bool) {
+    fn walk(blocks: &[RawBlock], depth: u32, data: &[u8], in_2624: bool) {
         let pad = " ".repeat(depth as usize * 2);
         for b in blocks {
             let mut info = format!("{pad}0x{:04x} sz={}", b.content_type_raw, b.block_size);

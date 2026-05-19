@@ -130,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn collect_first<'a>(blocks: &'a [RawBlock], ct: ContentType) -> Option<&'a RawBlock> {
+fn collect_first(blocks: &[RawBlock], ct: ContentType) -> Option<&RawBlock> {
     for b in blocks {
         if b.content_type == Some(ct) {
             return Some(b);

@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("0x260c × {}", v.len());
     for (i, (start, end)) in v.iter().enumerate().take(4) {
         let sz = end - start;
-        if sz < 40 || sz > 60 {
+        if !(40..=60).contains(&sz) {
             continue;
         }
         println!("--- [{i}] @ 0x{start:06x} ({sz} bytes) ---");
