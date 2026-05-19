@@ -664,6 +664,73 @@ pub fn peel_planning(content: &str) -> (PlanningTimestamps, &str) {
 /// sorted list of `(key, display)` pairs. JSON objects are the
 /// only supported shape; anything else returns empty. Values are
 /// stringified compactly so they fit in a chip or table cell.
+/// Strip Logseq-style `key:: value` property lines from block
+/// content. Returns the parsed properties as a sorted JSON
+/// object string (the same shape `properties_json` carries on
+/// the wire) plus the remaining content with those lines
+/// removed.
+///
+/// Recognized lines: any `^[a-z][a-z0-9_-]*:: <value>` at the
+/// start of a line. Keys are normalized to lowercase. The
+/// special key `id` is treated as the block's UUID and is
+/// surfaced separately by callers (it stays in the returned
+/// props so callers can read it once).
+///
+/// Lines are matched per-line; values run to end-of-line and
+/// are trimmed.
+pub fn peel_block_properties(content: &str) -> (String, String) {
+    let mut map = serde_json::Map::new();
+    let mut kept: Vec<&str> = Vec::new();
+    for line in content.lines() {
+        if let Some((key, value)) = parse_property_line(line) {
+            // First write wins — Logseq treats later duplicates
+            // as overrides, but for round-trip we conservatively
+            // keep the first occurrence.
+            map.entry(key).or_insert(serde_json::Value::String(value));
+            continue;
+        }
+        kept.push(line);
+    }
+    if map.is_empty() {
+        return ("{}".to_string(), content.to_string());
+    }
+    let json = serde_json::Value::Object(map).to_string();
+    (json, kept.join("\n"))
+}
+
+/// Match a single line against the `key:: value` property
+/// grammar. Returns `Some((key_lower, value))` on match, `None`
+/// otherwise.
+pub fn parse_property_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim_start();
+    let bytes = trimmed.as_bytes();
+    if bytes.is_empty() || !bytes[0].is_ascii_lowercase() {
+        return None;
+    }
+    // Walk the key: lowercase + digits + dash + underscore.
+    let mut i = 0;
+    while i < bytes.len()
+        && (bytes[i].is_ascii_lowercase()
+            || bytes[i].is_ascii_digit()
+            || bytes[i] == b'-'
+            || bytes[i] == b'_')
+    {
+        i += 1;
+    }
+    // Need at least one key char + the `:: ` separator.
+    if i == 0 || i + 1 >= bytes.len() {
+        return None;
+    }
+    if bytes[i] != b':' || bytes[i + 1] != b':' {
+        return None;
+    }
+    let key = trimmed[..i].to_string();
+    let rest = &trimmed[i + 2..];
+    // Require a space (or end) after `::`.
+    let value = rest.trim_start();
+    Some((key, value.to_string()))
+}
+
 pub fn parse_props(blob: &str) -> Vec<(String, String)> {
     let v: serde_json::Value = match serde_json::from_str(blob) {
         Ok(v) => v,
@@ -1032,5 +1099,62 @@ mod tests {
         let (p, rest) = peel_planning("just content, no planning");
         assert!(p.scheduled.is_empty() && p.deadline.is_empty());
         assert_eq!(rest, "just content, no planning");
+    }
+
+    #[test]
+    fn parse_property_line_basic() {
+        assert_eq!(
+            parse_property_line("priority:: high"),
+            Some(("priority".to_string(), "high".to_string()))
+        );
+        assert_eq!(
+            parse_property_line("  id:: deadbeef"),
+            Some(("id".to_string(), "deadbeef".to_string()))
+        );
+        // Underscore + dash + digits in key.
+        assert_eq!(
+            parse_property_line("foo-bar_2:: baz"),
+            Some(("foo-bar_2".to_string(), "baz".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_property_line_rejects_bad_shapes() {
+        // Uppercase key.
+        assert_eq!(parse_property_line("Priority:: high"), None);
+        // Single colon.
+        assert_eq!(parse_property_line("priority: high"), None);
+        // Empty key.
+        assert_eq!(parse_property_line(":: high"), None);
+        // Not a property line.
+        assert_eq!(parse_property_line("hello world"), None);
+        // Empty.
+        assert_eq!(parse_property_line(""), None);
+    }
+
+    #[test]
+    fn peel_block_properties_strips_lines() {
+        let (json, rest) =
+            peel_block_properties("first line\nstatus:: active\nsecond line\npriority:: high");
+        // Both properties survive.
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["status"], serde_json::json!("active"));
+        assert_eq!(v["priority"], serde_json::json!("high"));
+        // Non-property lines preserved in order.
+        assert_eq!(rest, "first line\nsecond line");
+    }
+
+    #[test]
+    fn peel_block_properties_keeps_first_on_dupe() {
+        let (json, _rest) = peel_block_properties("priority:: high\npriority:: low");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["priority"], serde_json::json!("high"));
+    }
+
+    #[test]
+    fn peel_block_properties_passthrough() {
+        let (json, rest) = peel_block_properties("just text\nmore text");
+        assert_eq!(json, "{}");
+        assert_eq!(rest, "just text\nmore text");
     }
 }
