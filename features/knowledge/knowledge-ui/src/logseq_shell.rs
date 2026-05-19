@@ -1000,6 +1000,7 @@ fn MainArea(
                                 doc: doc.clone(),
                                 page: page.clone(),
                                 blocks: vault.blocks.iter().filter(|b| b.page_id == id).cloned().collect(),
+                                vault: vault.clone(),
                                 on_pick_page,
                             }
                         } else {
@@ -1052,9 +1053,11 @@ fn PageView(
     doc: DocHandle,
     page: Page,
     blocks: Vec<Block>,
+    vault: LogseqVault,
     on_pick_page: EventHandler<Uuid>,
 ) -> Element {
     let _ = doc;
+    let vault_for_backlinks = vault.clone();
     let zoom_state = try_use_context::<ZoomState>();
     let mut zoom_w = zoom_state;
     let zoom_id = zoom_state.as_ref().and_then(|z| *z.0.read());
@@ -1164,6 +1167,98 @@ fn PageView(
                     node: node.clone(),
                     depth: 0,
                     on_pick_page,
+                }
+            }
+        }
+        BacklinksSection { page: page.clone(), vault: vault_for_backlinks, on_pick_page }
+    }
+}
+
+#[component]
+fn BacklinksSection(page: Page, vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element {
+    use std::collections::HashMap;
+    let our_basename_lower = page.basename.to_lowercase();
+    let our_aliases_lower: Vec<String> = page.aliases.iter().map(|a| a.to_lowercase()).collect();
+    let our_block_ids: std::collections::HashSet<Uuid> = vault
+        .blocks
+        .iter()
+        .filter(|b| b.page_id == page.id)
+        .map(|b| b.id)
+        .collect();
+
+    // Group referring page → list of (block_id, snippet).
+    let mut by_source: HashMap<Uuid, Vec<(Uuid, String)>> = HashMap::new();
+    let wikilink_needles: Vec<String> = std::iter::once(our_basename_lower.clone())
+        .chain(our_aliases_lower.iter().cloned())
+        .map(|n| format!("[[{n}]]"))
+        .collect();
+    for b in &vault.blocks {
+        if b.page_id == page.id {
+            continue;
+        }
+        let content_lower = b.content.to_lowercase();
+        let mut matched = wikilink_needles
+            .iter()
+            .any(|n| content_lower.contains(n.as_str()));
+        if !matched {
+            for id in &our_block_ids {
+                let needle = format!("(({id}))").to_lowercase();
+                if content_lower.contains(&needle) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if matched {
+            let snippet = b.content.lines().next().unwrap_or("").to_string();
+            by_source
+                .entry(b.page_id)
+                .or_default()
+                .push((b.id, snippet));
+        }
+    }
+    if by_source.is_empty() {
+        return rsx! {
+            section { style: "margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--ls-border-color);",
+                div { style: "font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color);",
+                    "Linked references"
+                }
+                div { style: "color: var(--ls-secondary-text-color); font-style: italic; font-size: 0.85rem; margin-top: 0.3em;",
+                    "No references yet."
+                }
+            }
+        };
+    }
+    let total: usize = by_source.values().map(|v| v.len()).sum();
+    rsx! {
+        section { style: "margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--ls-border-color);",
+            div { style: "font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); margin-bottom: 0.5em;",
+                "Linked references · {total}"
+            }
+            for (source_page_id, hits) in by_source {
+                {
+                    let basename = vault
+                        .pages
+                        .iter()
+                        .find(|p| p.id == source_page_id)
+                        .map(|p| p.basename.clone())
+                        .unwrap_or_else(|| "—".into());
+                    rsx! {
+                        div { key: "{source_page_id}",
+                            style: "margin: 0.6em 0; padding-left: 0.6em; border-left: 2px solid var(--ls-border-color);",
+                            div {
+                                style: "color: var(--ls-link-text-color); cursor: pointer; font-weight: 600; margin-bottom: 0.25em;",
+                                onclick: move |_| on_pick_page.call(source_page_id),
+                                "{basename}"
+                            }
+                            for (b_id, snippet) in hits {
+                                div { key: "{b_id}",
+                                    style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin: 0.15em 0;",
+                                    "{snippet}"
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
