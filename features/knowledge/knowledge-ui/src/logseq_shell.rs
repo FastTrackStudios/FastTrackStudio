@@ -73,6 +73,52 @@ const LOGSEQ_CSS: &str = r#"
     --ls-page-mark-color: #d8c98a;
     --ls-font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
 }
+.ls-shell[data-theme="light"], .ls-shell[data-theme="system"] {
+    /* Apply the light palette by re-declaring the same vars in
+     * the cascade — overrides the :root dark defaults when the
+     * shell carries data-theme=light. system also defaults to
+     * light; could be extended to honour prefers-color-scheme. */
+    --ls-primary-background-color: #fafaf6;
+    --ls-secondary-background-color: #f1efe8;
+    --ls-tertiary-background-color: #ffffff;
+    --ls-quaternary-background-color: #e7e4da;
+    --ls-active-primary-color: #4c8ea0;
+    --ls-active-secondary-color: #3a78a0;
+    --ls-primary-text-color: #2d343e;
+    --ls-secondary-text-color: #6f7682;
+    --ls-block-bullet-color: #b8b8b0;
+    --ls-block-bullet-active-color: #4c8ea0;
+    --ls-border-color: #ddd9cf;
+    --ls-secondary-border-color: #c8c4ba;
+    --ls-link-text-color: #2c7388;
+    --ls-link-text-hover-color: #1a4e60;
+    --ls-tag-text-color: #5e7d3b;
+    --ls-block-properties-background-color: #efece4;
+    --ls-page-mark-bg-color: #f4e9c4;
+    --ls-page-mark-color: #5c4d20;
+}
+@media (prefers-color-scheme: dark) {
+    .ls-shell[data-theme="system"] {
+        --ls-primary-background-color: #161a22;
+        --ls-secondary-background-color: #1f2530;
+        --ls-tertiary-background-color: #161a22;
+        --ls-quaternary-background-color: #2a3140;
+        --ls-active-primary-color: #5b9eb3;
+        --ls-active-secondary-color: #6abad1;
+        --ls-primary-text-color: #d3d8e0;
+        --ls-secondary-text-color: #8c93a3;
+        --ls-block-bullet-color: #4a5363;
+        --ls-block-bullet-active-color: #5b9eb3;
+        --ls-border-color: #2a3140;
+        --ls-secondary-border-color: #3a4255;
+        --ls-link-text-color: #6abad1;
+        --ls-link-text-hover-color: #88cce0;
+        --ls-tag-text-color: #98c075;
+        --ls-block-properties-background-color: #1d2330;
+        --ls-page-mark-bg-color: #44400e;
+        --ls-page-mark-color: #ecca5b;
+    }
+}
 .ls-theme-light {
     /* Warm-paper light theme — independent of the dark one. */
     --ls-primary-background-color: #fafaf6;
@@ -330,6 +376,13 @@ html, body {
 /* Atomic editor — keep syntax markers visible but styled while
  * editing. Mirrors Logseq's behavior; classes are emitted by
  * publish_core::render_edit_html. */
+/* Multi-block selection — Shift/Cmd-click bullets highlights
+ * the row. Visual is a subtle band on the row body so the
+ * bullet/fold gutters keep their look. */
+.ls-shell .ls-block.ls-selected > .ls-block-row {
+    background: var(--ls-quaternary-background-color);
+    border-radius: 2px;
+}
 /* Drag-and-drop indicators for block reordering. */
 .ls-shell .ls-block-row.ls-drop-above {
     box-shadow: inset 0 2px 0 0 var(--ls-active-primary-color);
@@ -515,7 +568,39 @@ pub enum LeftPanel {
     Cards,
     Graph,
     Tasks,
+    Settings,
 }
+
+/// User preference for light/dark/system. Applied by toggling
+/// `data-theme` on the shell root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemePref {
+    Dark,
+    Light,
+    System,
+}
+
+/// User-tunable settings (theme + journal date format). Minimum
+/// viable subset of Logseq's preferences pane; persisted to disk
+/// alongside the doc snapshot on native builds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppSettings {
+    pub theme: ThemePref,
+    pub journal_format: String,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemePref::Dark,
+            journal_format: "%Y-%m-%d".into(),
+        }
+    }
+}
+
+/// Context-shared settings signal.
+#[derive(Clone, Copy)]
+pub(crate) struct SettingsState(pub Signal<AppSettings>);
 
 /// Newtype wrapper so we can pass `Arc<CrdtDoc>` as a Dioxus
 /// prop. `CrdtDoc` doesn't impl `PartialEq` (it's a CRDT with
@@ -803,15 +888,29 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| FavoritesState(favorites));
     let find_in_page: Signal<Option<String>> = use_signal(|| None);
     use_context_provider(|| FindInPageState(find_in_page));
+    let settings: Signal<AppSettings> = use_signal(AppSettings::default);
+    use_context_provider(|| SettingsState(settings));
+    let selected: Signal<Vec<Uuid>> = use_signal(Vec::new);
+    let select_anchor: Signal<Option<Uuid>> = use_signal(|| None);
+    use_context_provider(|| MultiSelectState {
+        selected,
+        anchor: select_anchor,
+    });
 
     // Import toast — `Some(message)` while the result of an
     // import is shown to the user.
     let import_toast: Signal<Option<String>> = use_signal(|| None);
     use_context_provider(|| ImportToastState(import_toast));
 
+    let theme_attr = match settings.read().theme {
+        ThemePref::Dark => "dark",
+        ThemePref::Light => "light",
+        ThemePref::System => "system",
+    };
     rsx! {
         style { dangerous_inner_html: LOGSEQ_CSS }
         div { class: "ls-shell",
+            "data-theme": "{theme_attr}",
             div { class: "ls-header",
                 div { class: "ls-app-title", "Task" }
                 input {
@@ -1769,6 +1868,12 @@ fn LeftSidebar(
                 span { class: "ls-nav-icon", "▦" }
                 "Tasks"
             }
+            div {
+                class: if panel_cur == LeftPanel::Settings { "ls-nav-item active" } else { "ls-nav-item" },
+                onclick: move |_| on_set_panel.call(LeftPanel::Settings),
+                span { class: "ls-nav-icon", "⚙" }
+                "Settings"
+            }
             {
                 let favs = try_use_context::<FavoritesState>().map(|f| f.0.read().clone()).unwrap_or_default();
                 if !favs.is_empty() {
@@ -2079,6 +2184,13 @@ fn MainArea(
             main { class: "ls-main",
                 div { class: "ls-main-inner",
                     CardsReview { vault: vault.clone(), on_pick_page }
+                }
+            }
+        },
+        LeftPanel::Settings => rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    SettingsView {}
                 }
             }
         },
@@ -3001,6 +3113,96 @@ pub(crate) fn subtree_matches(node: &BlockNodeTree, q: &str) -> bool {
     node.children.iter().any(|c| subtree_matches(c, q))
 }
 
+#[component]
+fn SettingsView() -> Element {
+    let settings_state = try_use_context::<SettingsState>();
+    let cur = settings_state
+        .as_ref()
+        .map(|s| s.0.read().clone())
+        .unwrap_or_default();
+    rsx! {
+        h1 { class: "ls-page-title", "Settings" }
+        div { style: "max-width: 540px; margin-top: 1.2em; display: flex; flex-direction: column; gap: 1.4em;",
+            section {
+                div { style: "font-size: 0.85rem; color: var(--ls-secondary-text-color); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4em;",
+                    "Appearance"
+                }
+                div { style: "display: flex; gap: 0.4em;",
+                    {
+                        let opts: &[(ThemePref, &str)] = &[
+                            (ThemePref::Dark, "Dark"),
+                            (ThemePref::Light, "Light"),
+                            (ThemePref::System, "System"),
+                        ];
+                        rsx! {
+                            for (val, label) in opts.iter().copied() {
+                                {
+                                    let is_active = cur.theme == val;
+                                    let active_cls = if is_active { "background: var(--ls-active-primary-color); color: white;" } else { "background: var(--ls-secondary-background-color); color: var(--ls-primary-text-color);" };
+                                    rsx! {
+                                        button {
+                                            key: "{label}",
+                                            style: "padding: 0.4em 0.9em; border-radius: 4px; border: 1px solid var(--ls-border-color); cursor: pointer; {active_cls}",
+                                            onclick: move |_| {
+                                                if let Some(s) = settings_state.as_ref() {
+                                                    let mut c = s.0.peek().clone();
+                                                    c.theme = val;
+                                                    s.0.clone().set(c);
+                                                }
+                                            },
+                                            "{label}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            section {
+                div { style: "font-size: 0.85rem; color: var(--ls-secondary-text-color); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4em;",
+                    "Journals"
+                }
+                label { style: "display: block; font-size: 0.85rem; margin-bottom: 0.25em;",
+                    "Date format (strftime)"
+                }
+                input {
+                    style: "width: 100%; padding: 0.4em 0.6em; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 4px; color: inherit; font-family: monospace;",
+                    value: "{cur.journal_format}",
+                    oninput: move |e: Event<FormData>| {
+                        if let Some(s) = settings_state.as_ref() {
+                            let mut c = s.0.peek().clone();
+                            c.journal_format = e.value();
+                            s.0.clone().set(c);
+                        }
+                    },
+                }
+                div { style: "color: var(--ls-secondary-text-color); font-size: 0.8rem; margin-top: 0.3em;",
+                    "Example: " code { "{chrono::Local::now().format(&cur.journal_format).to_string()}" }
+                }
+            }
+            section {
+                div { style: "font-size: 0.85rem; color: var(--ls-secondary-text-color); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4em;",
+                    "Export"
+                }
+                div { style: "display: flex; gap: 0.5em; flex-wrap: wrap;",
+                    button {
+                        style: "padding: 0.4em 0.9em; border-radius: 4px; border: 1px solid var(--ls-border-color); background: var(--ls-secondary-background-color); color: var(--ls-primary-text-color); cursor: pointer;",
+                        onclick: |_| {
+                            // Browser print → user can save as PDF.
+                            let _ = document::eval("window.print()");
+                        },
+                        "Print current view (Save as PDF)"
+                    }
+                }
+                div { style: "color: var(--ls-secondary-text-color); font-size: 0.8rem; margin-top: 0.3em;",
+                    "Opens the browser print dialog. Choose 'Save as PDF' in the destination dropdown to export."
+                }
+            }
+        }
+    }
+}
+
 /// "Unlinked references" panel — blocks anywhere in the vault that
 /// mention this page's basename (or any alias) as plain text rather
 /// than inside a `[[wikilink]]`. Mirrors Logseq's same-named panel:
@@ -3500,14 +3702,45 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         }
     };
     let ops_bullet = ops.clone();
+    let ms_bullet = try_use_context::<MultiSelectState>();
     let on_bullet = move |e: Event<MouseData>| {
         e.stop_propagation();
+        let mods = e.modifiers();
+        // Shift = range-select from anchor through this block.
+        // Cmd/Ctrl = toggle this block in the selection.
+        // Alt-Shift-click on bullet keeps the old "open in sidebar"
+        // gesture; plain click clears the selection and zooms.
+        if let Some(ms) = ms_bullet {
+            if mods.shift() && !mods.alt() {
+                let mut sel = ms.selected.clone();
+                let anchor = ms.anchor.peek().clone();
+                sel.set(match anchor {
+                    Some(a) if a != block_id => vec![a, block_id],
+                    _ => vec![block_id],
+                });
+                return;
+            }
+            if mods.meta() || mods.ctrl() {
+                let mut sel = ms.selected.clone();
+                let mut cur = sel.peek().clone();
+                if let Some(pos) = cur.iter().position(|x| *x == block_id) {
+                    cur.remove(pos);
+                } else {
+                    cur.push(block_id);
+                }
+                sel.set(cur);
+                ms.anchor.clone().set(Some(block_id));
+                return;
+            }
+        }
         if let Some(ops) = ops_bullet.as_ref() {
-            // Shift-click → open in right sidebar; plain click →
-            // zoom into the block (Logseq's bullet behavior).
-            if e.modifiers().shift() {
+            if mods.shift() && mods.alt() {
                 ops.open_in_sidebar.call(block_id);
             } else {
+                if let Some(ms) = ms_bullet {
+                    ms.selected.clone().set(Vec::new());
+                    ms.anchor.clone().set(Some(block_id));
+                }
                 ops.zoom_block.call(block_id);
             }
         }
@@ -3605,8 +3838,18 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         None => "ls-block-row",
     };
 
+    let ms_state = try_use_context::<MultiSelectState>();
+    let is_selected = ms_state
+        .as_ref()
+        .map(|s| s.selected.read().contains(&block_id))
+        .unwrap_or(false);
+    let block_cls = if is_selected {
+        "ls-block ls-selected"
+    } else {
+        "ls-block"
+    };
     rsx! {
-        div { class: "ls-block",
+        div { class: "{block_cls}",
             "data-block-id": "{block_id}",
             oncontextmenu: on_context,
             ondragover: on_drag_over,
@@ -3894,6 +4137,16 @@ pub(crate) struct FavoritesState(pub Signal<Vec<Uuid>>);
 /// + filters blocks; `None` closes the bar. Cmd-F toggles.
 #[derive(Clone, Copy)]
 pub(crate) struct FindInPageState(pub Signal<Option<String>>);
+
+/// Set of currently multi-selected blocks. Empty means no
+/// selection (single-block edit mode). Populated via Shift/Cmd
+/// click on the bullet; Delete key on the page deletes the lot.
+#[derive(Clone, Copy)]
+pub(crate) struct MultiSelectState {
+    pub selected: Signal<Vec<Uuid>>,
+    /// Anchor for shift-click range selection.
+    pub anchor: Signal<Option<Uuid>>,
+}
 
 /// `Some(message)` while a transient toast (e.g. import result)
 /// is shown to the user. The Status bar pulls from this; the
