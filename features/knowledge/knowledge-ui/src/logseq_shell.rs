@@ -410,6 +410,36 @@ pub fn LogseqShell() -> Element {
     let active_page: Signal<Option<Uuid>> = use_signal(|| None);
     let panel: Signal<LeftPanel> = use_signal(|| LeftPanel::Journals);
 
+    // Persistence: load any prior snapshot from disk BEFORE
+    // we touch the seed, so warm starts skip seeding. Then
+    // subscribe to local commits and debounce-save the
+    // snapshot back to the same path.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let doc_for_load = doc.read().clone();
+        let mut version_for_load = version;
+        use_hook(move || {
+            let doc = doc_for_load.clone();
+            spawn(async move {
+                if let Some(bytes) = load_persisted_snapshot().await {
+                    if let Err(e) = doc.loro().import(&bytes) {
+                        tracing::warn!(?e, "snapshot import failed");
+                    } else {
+                        version_for_load.with_mut(|v| *v += 1);
+                    }
+                }
+            });
+        });
+
+        let doc_for_save = doc.read().clone();
+        use_hook(move || {
+            let doc = doc_for_save.clone();
+            spawn(async move {
+                run_persistence_loop(doc).await;
+            });
+        });
+    }
+
     // Seed the doc with demo data the first time we render. Same
     // path the live outliner uses — keeps content offline-first.
     let doc_for_seed = doc.read().clone();
@@ -417,6 +447,9 @@ pub fn LogseqShell() -> Element {
     use_hook(move || {
         let doc = doc_for_seed.clone();
         spawn(async move {
+            // Give persistence a moment to drop in real data.
+            #[cfg(not(target_arch = "wasm32"))]
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
             if !crate::seed::doc_has_pages(&doc).await {
                 if let Err(e) = crate::seed::seed_demo(doc.clone()).await {
                     tracing::warn!(?e, "demo seed failed");
@@ -2725,6 +2758,69 @@ pub(crate) fn lexorank_between(a: &str, b: &str) -> String {
     out.push_str(a);
     out.push('m');
     out
+}
+
+/// Filesystem path the desktop binary persists the vault to.
+/// Lives at `$HOME/.task-desktop/vault.loro` on Linux/macOS.
+#[cfg(not(target_arch = "wasm32"))]
+fn persistence_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home)
+        .join(".task-desktop")
+        .join("vault.loro")
+}
+
+/// Read the persisted Loro snapshot, if any. Returns the bytes
+/// or `None` on missing file / read error.
+#[cfg(not(target_arch = "wasm32"))]
+async fn load_persisted_snapshot() -> Option<Vec<u8>> {
+    let path = persistence_path();
+    match tokio::fs::read(&path).await {
+        Ok(b) => {
+            tracing::info!(path = %path.display(), bytes = b.len(), "loaded vault snapshot");
+            Some(b)
+        }
+        Err(_) => None,
+    }
+}
+
+/// Subscribe to local commits and save a snapshot whenever the
+/// doc changes. Debounces saves to at most one per 500ms so a
+/// burst of edits doesn't thrash the filesystem.
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_persistence_loop(doc: Arc<CrdtDoc>) {
+    use futures::StreamExt;
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+    let sub = doc.loro().subscribe_local_update(Box::new(move |_b| {
+        let _ = tx.unbounded_send(());
+        true
+    }));
+    std::mem::forget(sub);
+    let path = persistence_path();
+    if let Some(parent) = path.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    loop {
+        // Wait for first event.
+        if rx.next().await.is_none() {
+            return;
+        }
+        // Coalesce subsequent events for 500ms before saving.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            while rx.next().await.is_some() {}
+        })
+        .await;
+        let bytes = match doc.loro().export(loro::ExportMode::Snapshot) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(?e, "snapshot export failed");
+                continue;
+            }
+        };
+        if let Err(e) = tokio::fs::write(&path, &bytes).await {
+            tracing::warn!(?e, path = %path.display(), "snapshot write failed");
+        }
+    }
 }
 
 /// Export one page's block tree as Markdown.
