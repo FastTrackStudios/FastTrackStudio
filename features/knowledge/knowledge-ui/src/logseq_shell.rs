@@ -376,6 +376,42 @@ html, body {
 /* Atomic editor — keep syntax markers visible but styled while
  * editing. Mirrors Logseq's behavior; classes are emitted by
  * publish_core::render_edit_html. */
+/* PDF macro chip — opens the dedicated reader view. */
+.ls-shell .pdf-macro {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    padding: 0.1em 0.5em;
+    margin: 0 0.1em;
+    background: var(--ls-tertiary-background-color);
+    border: 1px solid var(--ls-border-color);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--ls-link-text-color);
+    cursor: pointer;
+    font-family: inherit;
+}
+.ls-shell .pdf-macro:hover {
+    background: var(--ls-quaternary-background-color);
+}
+/* Video timestamp chip — clickable seek shortcut. */
+.ls-shell .video-timestamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+    padding: 0.1em 0.5em;
+    margin: 0 0.1em;
+    background: var(--ls-tertiary-background-color);
+    border: 1px solid var(--ls-border-color);
+    border-radius: 999px;
+    font-size: 0.85rem;
+    color: var(--ls-link-text-color);
+    cursor: pointer;
+    font-family: inherit;
+}
+.ls-shell .video-timestamp:hover {
+    background: var(--ls-quaternary-background-color);
+}
 /* Multi-block selection — Shift/Cmd-click bullets highlights
  * the row. Visual is a subtle band on the row body so the
  * bullet/fold gutters keep their look. */
@@ -601,6 +637,12 @@ impl Default for AppSettings {
 /// Context-shared settings signal.
 #[derive(Clone, Copy)]
 pub(crate) struct SettingsState(pub Signal<AppSettings>);
+
+/// Active PDF being read. `Some(url)` switches the main pane to
+/// the dedicated PdfReader view; clicking a `{{pdf …}}` macro sets
+/// it; clicking the Close button on the reader clears it.
+#[derive(Clone, Copy)]
+pub(crate) struct ActivePdfState(pub Signal<Option<String>>);
 
 /// Newtype wrapper so we can pass `Arc<CrdtDoc>` as a Dioxus
 /// prop. `CrdtDoc` doesn't impl `PartialEq` (it's a CRDT with
@@ -890,6 +932,33 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| FindInPageState(find_in_page));
     let settings: Signal<AppSettings> = use_signal(AppSettings::default);
     use_context_provider(|| SettingsState(settings));
+    let active_pdf: Signal<Option<String>> = use_signal(|| None);
+    use_context_provider(|| ActivePdfState(active_pdf));
+    // Bridge: the desktop shell installs a JS click delegate that
+    // dispatches `task:open-pdf` custom events; we listen for them
+    // here and route into the ActivePdfState signal so the main
+    // pane swaps to the PdfReader view.
+    let mut active_pdf_w = active_pdf;
+    use_hook(move || {
+        spawn(async move {
+            let mut handle = document::eval(
+                r#"
+                window.addEventListener('task:open-pdf', function(e) {
+                    dioxus.send(e.detail);
+                });
+                "#,
+            );
+            loop {
+                match handle.recv::<serde_json::Value>().await {
+                    Ok(serde_json::Value::String(url)) => {
+                        active_pdf_w.set(Some(url));
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+        });
+    });
     let selected: Signal<Vec<Uuid>> = use_signal(Vec::new);
     let select_anchor: Signal<Option<Uuid>> = use_signal(|| None);
     use_context_provider(|| MultiSelectState {
@@ -2164,6 +2233,18 @@ fn MainArea(
     let tag_state = try_use_context::<TagViewState>();
     let active_tag = tag_state.as_ref().and_then(|s| s.0.read().clone());
 
+    // Active PDF supersedes everything else.
+    let pdf_state = try_use_context::<ActivePdfState>();
+    let pdf_url = pdf_state.as_ref().and_then(|s| s.0.read().clone());
+    if let Some(url) = pdf_url {
+        return rsx! {
+            main { class: "ls-main",
+                div { class: "ls-main-inner",
+                    PdfReader { url: url, active_page: active }
+                }
+            }
+        };
+    }
     // Tag view supersedes the panel routing when set.
     if let Some(tag) = active_tag {
         return rsx! {
@@ -3111,6 +3192,101 @@ pub(crate) fn subtree_matches(node: &BlockNodeTree, q: &str) -> bool {
         return true;
     }
     node.children.iter().any(|c| subtree_matches(c, q))
+}
+
+/// PDF reader view. Embeds the asset PDF via the browser's native
+/// PDF viewer (`<embed type="application/pdf">`) — works for
+/// `file://` and `http(s)://` URLs without bundling PDF.js. Below
+/// the viewer is a highlight-capture form that appends a new
+/// block to a dedicated `hls__<basename>` page so highlights live
+/// next to the source PDF the way Logseq stores them.
+#[component]
+fn PdfReader(url: String, active_page: Option<Uuid>) -> Element {
+    let _ = active_page;
+    let pdf_state = try_use_context::<ActivePdfState>();
+    let page_ops = try_use_context::<PageOps>();
+    let mut text: Signal<String> = use_signal(String::new);
+    let mut page_num: Signal<String> = use_signal(|| "1".into());
+    let basename = url
+        .rsplit('/')
+        .next()
+        .unwrap_or(&url)
+        .trim_end_matches(".pdf")
+        .to_string();
+    let hls_page = format!("hls__{basename}");
+    let close = move |_: Event<MouseData>| {
+        if let Some(s) = pdf_state.as_ref() {
+            s.0.clone().set(None);
+        }
+    };
+    let url_for_embed = url.clone();
+    let hls_for_save = hls_page.clone();
+    let basename_for_save = basename.clone();
+    let on_save = move |_: Event<MouseData>| {
+        let body = text.peek().clone();
+        if body.trim().is_empty() {
+            return;
+        }
+        let page = page_num.peek().clone();
+        let content = format!(
+            "{body}\nls-type:: annotation\nhl-page:: {page}\nhl-source:: [[{hls_target}]]",
+            body = body.trim(),
+            page = page.trim(),
+            hls_target = basename_for_save,
+        );
+        if let Some(ops) = page_ops.as_ref() {
+            ops.append_block_to_page
+                .call((hls_for_save.clone(), content));
+        }
+        text.set(String::new());
+    };
+    rsx! {
+        div { style: "display: flex; align-items: baseline; gap: 0.6em; margin-bottom: 0.8em;",
+            h1 { class: "ls-page-title", "PDF · {basename}" }
+            span { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem;",
+                "highlights → [[{hls_page}]]"
+            }
+            button {
+                style: "margin-left: auto; padding: 0.3em 0.7em; background: transparent; border: 1px solid var(--ls-border-color); border-radius: 4px; cursor: pointer; color: var(--ls-secondary-text-color);",
+                onclick: close,
+                "Close"
+            }
+        }
+        div { style: "display: grid; grid-template-columns: 1fr 320px; gap: 1em; min-height: 70vh;",
+            embed {
+                src: "{url_for_embed}",
+                r#type: "application/pdf",
+                style: "width: 100%; height: 70vh; border: 1px solid var(--ls-border-color); border-radius: 4px; background: var(--ls-secondary-background-color);",
+            }
+            aside { style: "display: flex; flex-direction: column; gap: 0.6em; padding: 0.8em; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 6px;",
+                div { style: "font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ls-secondary-text-color);",
+                    "New highlight"
+                }
+                label { style: "font-size: 0.85rem;", "Selected text" }
+                textarea {
+                    style: "background: var(--ls-tertiary-background-color); border: 1px solid var(--ls-border-color); border-radius: 4px; color: inherit; font: inherit; padding: 0.4em; min-height: 110px; resize: vertical;",
+                    value: "{text.read()}",
+                    oninput: move |e: Event<FormData>| text.set(e.value()),
+                    placeholder: "Paste the highlighted passage…",
+                }
+                label { style: "font-size: 0.85rem;", "Page" }
+                input {
+                    style: "background: var(--ls-tertiary-background-color); border: 1px solid var(--ls-border-color); border-radius: 4px; color: inherit; padding: 0.3em 0.5em; width: 6em;",
+                    r#type: "number",
+                    value: "{page_num.read()}",
+                    oninput: move |e: Event<FormData>| page_num.set(e.value()),
+                }
+                button {
+                    style: "margin-top: 0.4em; padding: 0.4em 0.8em; background: var(--ls-active-primary-color); color: white; border: 0; border-radius: 4px; cursor: pointer;",
+                    onclick: on_save,
+                    "Save highlight"
+                }
+                div { style: "color: var(--ls-secondary-text-color); font-size: 0.75rem; margin-top: 0.4em;",
+                    "Tip: select text in the PDF viewer above, copy it (⌘C), then paste here. The browser's native PDF viewer doesn't expose its selection to the app — manual paste is the workaround until we ship a PDF.js renderer with annotation overlays."
+                }
+            }
+        }
+    }
 }
 
 #[component]
@@ -5234,6 +5410,11 @@ fn TagSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> E
 #[derive(Clone)]
 pub(crate) struct PageOps {
     pub create_page: Callback<String>,
+    /// Append a new block to the named page (creating the page if
+    /// missing). Used by the PDF reader to record highlights and
+    /// by the timestamp slash command. The callback returns nothing
+    /// since the caller doesn't typically need the new id.
+    pub append_block_to_page: Callback<(String, String)>,
     pub rename_page: Callback<(Uuid, String)>,
     pub delete_page: Callback<Uuid>,
 }
@@ -5295,11 +5476,96 @@ fn make_page_ops(doc: Arc<CrdtDoc>, mut active_page: Signal<Option<Uuid>>) -> Pa
         });
         active_page.set(None);
     });
+    let doc_append = doc.clone();
+    let append_block_to_page = Callback::new(move |(basename, content): (String, String)| {
+        let doc = doc_append.clone();
+        spawn(async move {
+            if let Err(e) = append_block_to_page_async(&doc, &basename, &content).await {
+                tracing::warn!(?e, ?basename, "append block failed");
+            }
+        });
+    });
     PageOps {
         create_page,
         rename_page,
         delete_page,
+        append_block_to_page,
     }
+}
+
+/// Find-or-create a page by basename, then append a tail block
+/// with `content`. Used by the PDF reader to record highlights
+/// onto `hls__<filename>` pages.
+async fn append_block_to_page_async(
+    doc: &CrdtDoc,
+    basename: &str,
+    content: &str,
+) -> Result<(), knowledge_proto::architect::RepoError> {
+    let pr = PageRepoLoro::new(doc);
+    let br = BlockRepoLoro::new(doc);
+    let vault_id = first_vault_id(doc).await.unwrap_or(Uuid::nil());
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let pages = pr.list(big.clone(), None, None).await?.items;
+    let now = Utc::now();
+    let page = match pages
+        .iter()
+        .find(|p| p.basename.eq_ignore_ascii_case(basename))
+    {
+        Some(p) => p.clone(),
+        None => {
+            pr.create(knowledge_proto::PageCreate {
+                vault_id,
+                folder_id: None,
+                path: format!("{basename}.md"),
+                basename: basename.to_string(),
+                ext: "md".into(),
+                aliases: Vec::new(),
+                frontmatter_json: "{}".into(),
+                stat_ctime: now,
+                stat_mtime: now,
+                stat_size: 0,
+                is_journal: false,
+                journal_day: None,
+                shadow_for_kind: None,
+                shadow_for_id: None,
+            })
+            .await?
+        }
+    };
+    let blocks = br.list(big, None, None).await?.items;
+    let last_key = blocks
+        .iter()
+        .filter(|b| b.page_id == page.id && b.parent_block_id.is_none())
+        .map(|b| b.sort_key.clone())
+        .max();
+    let sort_key = match last_key {
+        Some(k) => lexorank_after(&k),
+        None => "m".into(),
+    };
+    br.create(knowledge_proto::BlockCreate {
+        vault_id,
+        page_id: page.id,
+        parent_block_id: None,
+        sort_key,
+        content: content.to_string(),
+        kind: "list_item".into(),
+        heading_level: None,
+        list_ordered: false,
+        list_task: None,
+        code_lang: None,
+        callout_kind: None,
+        callout_foldable: false,
+        properties_json: "{}".into(),
+        obsidian_block_id: None,
+        collapsed: false,
+        refs_json: "[]".into(),
+        canvas_node_json: None,
+    })
+    .await?;
+    Ok(())
 }
 
 async fn first_vault_id(doc: &CrdtDoc) -> Option<Uuid> {

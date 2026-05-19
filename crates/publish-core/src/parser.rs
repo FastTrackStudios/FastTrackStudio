@@ -109,6 +109,18 @@ pub enum Node {
     /// the canonical key; the renderer wraps it in a chip + clicking
     /// it (via a host-provided navigator) opens the tag page.
     Hashtag(String),
+    /// `{{pdf <url>}}` — open the referenced PDF in the dedicated
+    /// PDF reader pane. The renderer emits a chip with a
+    /// `data-pdf-url` attribute that a host-installed click
+    /// delegate uses to navigate. Mirrors Logseq's PDF UX where
+    /// every reference to an asset PDF becomes a clickable chip.
+    PdfMacro(String),
+    /// `{{video-timestamp <secs>}}` or `{{youtube-timestamp <secs>}}`
+    /// — clickable timestamp chip. The renderer wires it to seek
+    /// the nearest video / youtube player in the surrounding block
+    /// when clicked. Stored as raw seconds so HH:MM:SS rendering
+    /// is locale-independent.
+    VideoTimestamp(i32),
 }
 
 /// Closed set of media-embed kinds recognized by the parser.
@@ -181,6 +193,39 @@ pub fn parse(
         }
         // {{template <name>}} — expand the named template block's
         // contents inline. `broken: true` when no template matches.
+        // {{video-timestamp <s>}} or {{youtube-timestamp <s>}} —
+        // clickable seek chip. Seconds may be a bare integer or
+        // `HH:MM:SS` / `MM:SS`; we normalize to seconds at parse
+        // time so the renderer doesn't need to.
+        // {{pdf <url>}} — open the referenced PDF in the reader.
+        if s[i..].starts_with("{{pdf") {
+            if let Some(end) = s[i + 5..].find("}}") {
+                let url = s[i + 5..i + 5 + end].trim();
+                if !url.is_empty() {
+                    flush(&mut buf, &mut out);
+                    out.push(Node::PdfMacro(url.to_string()));
+                    i += 5 + end + 2;
+                    continue;
+                }
+            }
+        }
+        let ts_advance = (|| -> Option<(i32, usize)> {
+            for prefix in ["{{video-timestamp", "{{youtube-timestamp"] {
+                if s[i..].starts_with(prefix) {
+                    let end = s[i + prefix.len()..].find("}}")?;
+                    let raw = s[i + prefix.len()..i + prefix.len() + end].trim();
+                    let secs = parse_timestamp_seconds(raw)?;
+                    return Some((secs, prefix.len() + end + 2));
+                }
+            }
+            None
+        })();
+        if let Some((secs, advance)) = ts_advance {
+            flush(&mut buf, &mut out);
+            out.push(Node::VideoTimestamp(secs));
+            i += advance;
+            continue;
+        }
         if s[i..].starts_with("{{template") {
             if let Some(end) = s[i + 10..].find("}}") {
                 let name = s[i + 10..i + 10 + end].trim();
@@ -569,6 +614,40 @@ fn flush(buf: &mut String, out: &mut Vec<Node>) {
 
 /// 8-char prefix of a UUID — used as the visible label for a
 /// broken block reference where we have no snippet to show.
+/// Parse `42`, `1:23`, or `1:23:45` into a count of seconds. Returns
+/// None on garbage input. Whitespace is trimmed by the caller.
+pub fn parse_timestamp_seconds(s: &str) -> Option<i32> {
+    if !s.contains(':') {
+        return s.parse::<i32>().ok().filter(|n| *n >= 0);
+    }
+    let parts: Vec<&str> = s.split(':').collect();
+    let nums: Vec<i32> = parts
+        .iter()
+        .map(|p| p.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    if nums.iter().any(|n| *n < 0) {
+        return None;
+    }
+    match nums.as_slice() {
+        [m, sec] => Some(m * 60 + sec),
+        [h, m, sec] => Some(h * 3600 + m * 60 + sec),
+        _ => None,
+    }
+}
+
+/// Format a seconds count back to HH:MM:SS (drops hours when 0).
+/// Used by the renderer for the chip label.
+pub fn format_timestamp(seconds: i32) -> String {
+    let h = seconds / 3600;
+    let m = (seconds % 3600) / 60;
+    let s = seconds % 60;
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
 /// True when a `![[…]]` target's extension marks it as an image.
 fn is_image_target(target: &str) -> bool {
     let lower = target.to_lowercase();
@@ -1111,6 +1190,34 @@ mod tests {
             &TemplateResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::Hashtag(_))));
+    }
+
+    #[test]
+    fn parse_timestamp_seconds_forms() {
+        assert_eq!(parse_timestamp_seconds("42"), Some(42));
+        assert_eq!(parse_timestamp_seconds("1:30"), Some(90));
+        assert_eq!(parse_timestamp_seconds("1:01:01"), Some(3661));
+        assert_eq!(parse_timestamp_seconds(""), None);
+        assert_eq!(parse_timestamp_seconds("garbage"), None);
+    }
+
+    #[test]
+    fn video_timestamp_macro_parses() {
+        let n = parse(
+            "watch {{video-timestamp 1:30}} now",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+            &TemplateResolver::default(),
+        );
+        let secs = n.iter().find_map(|x| match x {
+            Node::VideoTimestamp(s) => Some(*s),
+            _ => None,
+        });
+        assert_eq!(secs, Some(90));
     }
 
     #[test]

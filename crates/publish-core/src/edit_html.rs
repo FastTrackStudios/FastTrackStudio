@@ -103,11 +103,18 @@ pub fn render_edit_html(source: &str) -> String {
                 continue;
             }
         }
-        // {{ … }} — any macro form.
+        // {{ … }} — any macro form. Video-timestamp gets a
+        // dedicated style so it's recognizable in edit mode.
         if source[i..].starts_with("{{") {
             if let Some(end) = source[i + 2..].find("}}") {
                 let body = &source[i + 2..i + 2 + end];
-                out.push_str("<span class=\"ce-macro\">{{");
+                let trimmed = body.trim();
+                let is_ts = trimmed.starts_with("video-timestamp ")
+                    || trimmed.starts_with("youtube-timestamp ");
+                let class = if is_ts { "ce-timestamp" } else { "ce-macro" };
+                out.push_str("<span class=\"");
+                out.push_str(class);
+                out.push_str("\">{{");
                 out.push_str(&escape_html(body));
                 out.push_str("}}</span>");
                 i += 2 + end + 2;

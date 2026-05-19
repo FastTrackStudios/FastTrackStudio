@@ -1147,6 +1147,28 @@ pub fn InlineNode(node: inline::Node) -> Element {
                 }
             }
         }
+        Node::VideoTimestamp(secs) => {
+            let label = crate::parser::format_timestamp(secs);
+            rsx! {
+                button { class: "video-timestamp",
+                    "data-ts-seconds": "{secs}",
+                    title: "Seek to {label}",
+                    "▶ {label}"
+                }
+            }
+        }
+        Node::PdfMacro(url) => {
+            // Strip vault-relative `../` so the chip label is the
+            // bare filename; the click delegate handles the URL.
+            let label = url.rsplit('/').next().unwrap_or(&url).to_string();
+            rsx! {
+                button { class: "pdf-macro",
+                    "data-pdf-url": "{url}",
+                    title: "Open {url}",
+                    "📄 {label}"
+                }
+            }
+        }
         Node::Hashtag(tag) => {
             let nav = try_use_context::<TagNavigator>().unwrap_or_default();
             let tag_lower = tag.to_lowercase();
