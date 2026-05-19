@@ -527,7 +527,7 @@ pub enum TaskMarker {
 }
 
 impl TaskMarker {
-    fn css_class(self) -> &'static str {
+    pub fn css_class(self) -> &'static str {
         match self {
             Self::Todo => "task-todo",
             Self::Doing => "task-doing",
@@ -538,7 +538,7 @@ impl TaskMarker {
             Self::Cancelled => "task-cancelled",
         }
     }
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Todo => "TODO",
             Self::Doing => "DOING",

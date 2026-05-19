@@ -1072,7 +1072,27 @@ fn BlockView(
         };
     }
     let block_query = crate::query::parse_block_level_query(&content);
-    let inlines = inline_md::parse_inline(&content);
+    // Logseq parity (shared with the static-site renderer): if
+    // the block carries a leading TODO/DOING/etc keyword, peel it
+    // off so the rest of the content renders cleanly with a pill
+    // prefix. Same goes for `SCHEDULED:` / `DEADLINE:` lines that
+    // belong below the body, not inline. `prop:: value` chips come
+    // from the existing `properties_json` blob the CRDT layer
+    // already maintains.
+    let (task_marker, content_after_marker) = publish_core::peel_task_marker(&content);
+    let (planning, content_after_planning) = publish_core::peel_planning(content_after_marker);
+    let prop_chips: Vec<(String, String)> = publish_core::parse_props(&block.properties_json);
+    let task_marker_label = task_marker.map(|m| m.label());
+    let task_marker_cls = task_marker.map(|m| match m {
+        publish_core::TaskMarker::Todo => "task-todo",
+        publish_core::TaskMarker::Doing => "task-doing",
+        publish_core::TaskMarker::Done => "task-done",
+        publish_core::TaskMarker::Later => "task-later",
+        publish_core::TaskMarker::Now => "task-now",
+        publish_core::TaskMarker::Waiting => "task-waiting",
+        publish_core::TaskMarker::Cancelled => "task-cancelled",
+    });
+    let inlines = inline_md::parse_inline(content_after_planning);
     if inlines.is_empty() {
         return rsx! {
             div {
@@ -1094,10 +1114,42 @@ fn BlockView(
             if let Some(g) = task_glyph {
                 span { class: "mr-1 text-muted-foreground/80 select-none font-mono", "{g}" }
             }
+            if let (Some(label), Some(cls)) = (task_marker_label, task_marker_cls) {
+                span {
+                    class: "mr-1.5 inline-block rounded px-1.5 py-0 text-[0.7rem] font-bold uppercase tracking-wider border align-baseline {cls}",
+                    "{label}"
+                }
+            }
             span {
                 "data-block-content": "true",
                 for (i, inline) in inlines.into_iter().enumerate() {
                     InlineNode { key: "{i}", inline, on_navigate_link }
+                }
+            }
+            if !planning.scheduled.is_empty() || !planning.deadline.is_empty() {
+                div { class: "mt-0.5 ml-6 flex flex-wrap gap-1 text-[0.7rem] font-mono",
+                    if !planning.scheduled.is_empty() {
+                        span { class: "inline-flex rounded border border-border overflow-hidden",
+                            span { class: "px-1.5 bg-muted/40 text-muted-foreground font-bold", "SCHEDULED" }
+                            span { class: "px-1.5 tabular-nums", "{planning.scheduled}" }
+                        }
+                    }
+                    if !planning.deadline.is_empty() {
+                        span { class: "inline-flex rounded border border-border overflow-hidden",
+                            span { class: "px-1.5 bg-muted/40 text-destructive font-bold", "DEADLINE" }
+                            span { class: "px-1.5 tabular-nums", "{planning.deadline}" }
+                        }
+                    }
+                }
+            }
+            if !prop_chips.is_empty() {
+                div { class: "mt-0.5 ml-6 flex flex-wrap gap-1 text-[0.7rem]",
+                    for (k, v) in prop_chips {
+                        span { key: "{k}", class: "inline-flex rounded border border-border overflow-hidden",
+                            span { class: "px-1.5 bg-muted/40 text-muted-foreground font-semibold", "{k}" }
+                            span { class: "px-1.5", "{v}" }
+                        }
+                    }
                 }
             }
             if let Some(q) = block_query {
