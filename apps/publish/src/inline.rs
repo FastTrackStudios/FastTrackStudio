@@ -7,7 +7,9 @@
 //! doesn't need context — the AST carries the resolved URL +
 //! snippet directly.
 
-use crate::components::{BlockRefResolver, PageEmbedResolver, WikiResolver};
+use crate::components::{
+    BlockRefResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,16 @@ pub enum Node {
         contents: Vec<String>,
         broken: bool,
     },
+    /// `{{query <expr>}}` — embedded live query. Evaluated at
+    /// parse time against a [`QueryResolver`] and rendered as a
+    /// bullet list of matching pages. v1 supports the form
+    /// `{{query #tag}}`; unknown forms emit `broken: true` and
+    /// render as an inert pill.
+    Query {
+        expr: String,
+        results: Vec<QueryHit>,
+        broken: bool,
+    },
 }
 
 pub fn parse(
@@ -57,12 +69,30 @@ pub fn parse(
     resolver: &WikiResolver,
     blocks: &BlockRefResolver,
     page_embeds: &PageEmbedResolver,
+    queries: &QueryResolver,
 ) -> Vec<Node> {
     let mut out = Vec::new();
     let mut buf = String::new();
     let bytes = s.as_bytes();
     let mut i = 0usize;
     while i < s.len() {
+        // {{query <expr>}} — embedded live query. Match before
+        // emphasis / brackets so the literal sigil wins.
+        if s[i..].starts_with("{{query") {
+            // Need at least `{{query ` followed by `}}` somewhere.
+            if let Some(end) = s[i + 7..].find("}}") {
+                let raw = s[i + 7..i + 7 + end].trim();
+                let (results, broken) = eval_query(raw, queries);
+                flush(&mut buf, &mut out);
+                out.push(Node::Query {
+                    expr: raw.to_string(),
+                    results,
+                    broken,
+                });
+                i += 7 + end + 2;
+                continue;
+            }
+        }
         // ![[Page]] — page embed. Match BEFORE wikilink so the
         // bang prefix wins; mirrors Obsidian's `![[...]]` semantics.
         if s[i..].starts_with("![[") {
@@ -153,7 +183,13 @@ pub fn parse(
         // **bold**
         if s[i..].starts_with("**") {
             if let Some(end) = s[i + 2..].find("**") {
-                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks, page_embeds);
+                let inner = parse(
+                    &s[i + 2..i + 2 + end],
+                    resolver,
+                    blocks,
+                    page_embeds,
+                    queries,
+                );
                 flush(&mut buf, &mut out);
                 out.push(Node::Bold(inner));
                 i += 2 + end + 2;
@@ -163,7 +199,13 @@ pub fn parse(
         // ~~strike~~
         if s[i..].starts_with("~~") {
             if let Some(end) = s[i + 2..].find("~~") {
-                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks, page_embeds);
+                let inner = parse(
+                    &s[i + 2..i + 2 + end],
+                    resolver,
+                    blocks,
+                    page_embeds,
+                    queries,
+                );
                 flush(&mut buf, &mut out);
                 out.push(Node::Strikethrough(inner));
                 i += 2 + end + 2;
@@ -173,7 +215,13 @@ pub fn parse(
         // ==highlight==
         if s[i..].starts_with("==") {
             if let Some(end) = s[i + 2..].find("==") {
-                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks, page_embeds);
+                let inner = parse(
+                    &s[i + 2..i + 2 + end],
+                    resolver,
+                    blocks,
+                    page_embeds,
+                    queries,
+                );
                 flush(&mut buf, &mut out);
                 out.push(Node::Highlight(inner));
                 i += 2 + end + 2;
@@ -183,7 +231,13 @@ pub fn parse(
         // *italic* (not part of `**`)
         if bytes[i] == b'*' && bytes.get(i + 1).copied() != Some(b'*') {
             if let Some(end) = s[i + 1..].find('*') {
-                let inner = parse(&s[i + 1..i + 1 + end], resolver, blocks, page_embeds);
+                let inner = parse(
+                    &s[i + 1..i + 1 + end],
+                    resolver,
+                    blocks,
+                    page_embeds,
+                    queries,
+                );
                 flush(&mut buf, &mut out);
                 out.push(Node::Italic(inner));
                 i += 1 + end + 1;
@@ -220,6 +274,22 @@ fn flush(buf: &mut String, out: &mut Vec<Node>) {
 /// broken block reference where we have no snippet to show.
 fn short_uuid(id: &Uuid) -> String {
     id.simple().to_string().chars().take(8).collect()
+}
+
+/// Evaluate a `{{query <expr>}}` body against a resolver. v1
+/// supports a single form: `#<tag>` which returns all pages
+/// tagged with that tag, lowercased. Returns `(results, broken)`;
+/// broken = true when the expression isn't a form we recognize.
+fn eval_query(expr: &str, queries: &QueryResolver) -> (Vec<QueryHit>, bool) {
+    let trimmed = expr.trim();
+    if let Some(tag) = trimmed.strip_prefix('#') {
+        let key = tag.trim().to_lowercase();
+        if let Some(hits) = queries.0.get(&key) {
+            return (hits.clone(), false);
+        }
+        return (Vec::new(), false); // known shape, just no results
+    }
+    (Vec::new(), true)
 }
 
 #[cfg(test)]
@@ -259,6 +329,7 @@ mod tests {
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -273,6 +344,7 @@ mod tests {
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -287,6 +359,7 @@ mod tests {
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         assert!(matches!(
             n.first().unwrap(),
@@ -301,6 +374,7 @@ mod tests {
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         let bold = match n.first().unwrap() {
             Node::Bold(c) => c,
@@ -318,6 +392,7 @@ mod tests {
             &book(),
             &resolver,
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef {
@@ -342,6 +417,7 @@ mod tests {
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef { broken, .. } => Some(*broken),
@@ -358,7 +434,13 @@ mod tests {
             vec!["line one".to_string(), "line two".to_string()],
         );
         let er = PageEmbedResolver(Arc::new(embeds));
-        let n = parse("![[Foo]] outside", &book(), &empty_blocks(), &er);
+        let n = parse(
+            "![[Foo]] outside",
+            &book(),
+            &empty_blocks(),
+            &er,
+            &QueryResolver::default(),
+        );
         let pe = n.iter().find_map(|x| match x {
             Node::PageEmbed {
                 slug,
@@ -379,12 +461,61 @@ mod tests {
     }
 
     #[test]
+    fn query_tag_resolves_to_pages() {
+        let mut q = HashMap::new();
+        q.insert(
+            "todo".to_string(),
+            vec![
+                QueryHit {
+                    slug: "a".into(),
+                    title: "A".into(),
+                },
+                QueryHit {
+                    slug: "b".into(),
+                    title: "B".into(),
+                },
+            ],
+        );
+        let qr = QueryResolver(Arc::new(q));
+        let n = parse(
+            "{{query #todo}}",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &qr,
+        );
+        let r = n.iter().find_map(|x| match x {
+            Node::Query {
+                results, broken, ..
+            } => Some((results.len(), *broken)),
+            _ => None,
+        });
+        assert_eq!(r, Some((2, false)));
+    }
+
+    #[test]
+    fn query_unknown_form_is_broken() {
+        let n = parse(
+            "{{query (and #x #y)}}",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+        );
+        let broken = n
+            .iter()
+            .any(|x| matches!(x, Node::Query { broken: true, .. }));
+        assert!(broken, "v1 doesn't understand (and ...); should be broken");
+    }
+
+    #[test]
     fn page_embed_unknown_target_is_broken() {
         let n = parse(
             "see ![[Nope]]",
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         let broken = n
             .iter()
@@ -401,6 +532,7 @@ mod tests {
             &book(),
             &empty_blocks(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::BlockRef { .. })));
         let txt: String = n

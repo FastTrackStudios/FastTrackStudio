@@ -5,8 +5,8 @@
 //! drives them and wraps the output in the static `<html>` shell.
 
 use crate::components::{
-    BacklinksPanel, BlockRefResolver, DocBody, PageContent, PageEmbedResolver, Sidebar,
-    WikiResolver,
+    BacklinksPanel, BlockRefResolver, DocBody, PageContent, PageEmbedResolver, QueryResolver,
+    Sidebar, WikiResolver,
 };
 use crate::graph::{BacklinkEntry, GraphView};
 use crate::tags::TagPageEntry;
@@ -21,6 +21,7 @@ pub fn render_page(
     resolver: &WikiResolver,
     block_refs: &BlockRefResolver,
     page_embeds: &PageEmbedResolver,
+    queries: &QueryResolver,
     all_pages: &[Page],
     backlinks: &[BacklinkEntry],
 ) -> String {
@@ -34,6 +35,7 @@ pub fn render_page(
     let resolver_for_root = resolver.clone();
     let block_refs_for_root = block_refs.clone();
     let page_embeds_for_root = page_embeds.clone();
+    let queries_for_root = queries.clone();
     let backlinks = backlinks.to_vec();
 
     let mut vdom = VirtualDom::new_with_props(
@@ -49,6 +51,7 @@ pub fn render_page(
             resolver: resolver_for_root,
             block_refs: block_refs_for_root,
             page_embeds: page_embeds_for_root,
+            queries: queries_for_root,
             backlinks,
         },
     );
@@ -287,11 +290,13 @@ fn Root(
     resolver: WikiResolver,
     block_refs: BlockRefResolver,
     page_embeds: PageEmbedResolver,
+    queries: QueryResolver,
     backlinks: Vec<BacklinkEntry>,
 ) -> Element {
     use_context_provider(|| resolver);
     use_context_provider(|| block_refs);
     use_context_provider(|| page_embeds);
+    use_context_provider(|| queries);
     rsx! {
         DocBody {
             site_title: site_title,
@@ -452,6 +457,7 @@ mod tests {
             &book(),
             &BlockRefResolver::default(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
             &pages,
             &[],
         );
@@ -493,6 +499,7 @@ mod tests {
             &book(),
             &BlockRefResolver(Arc::new(refs)),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
             &[target_page.clone(), host_page.clone()],
             &[],
         );
@@ -543,6 +550,7 @@ mod tests {
             &book(),
             &BlockRefResolver::default(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
             &[p.clone()],
             &[],
         );
@@ -565,6 +573,7 @@ mod tests {
             &book(),
             &BlockRefResolver::default(),
             &PageEmbedResolver::default(),
+            &QueryResolver::default(),
             &[p.clone()],
             &[],
         );

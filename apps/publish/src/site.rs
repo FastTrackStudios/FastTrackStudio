@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::components::{PageEmbedResolver, WikiResolver};
+use crate::components::{PageEmbedResolver, QueryHit, QueryResolver, WikiResolver};
 use crate::graph::build_block_ref_resolver;
 use crate::{feeds, graph, render, search, tags};
 
@@ -105,6 +105,12 @@ pub async fn build(
     }
     let page_embeds = PageEmbedResolver(Arc::new(embed_map));
 
+    // ── Query resolver ───────────────────────────────────
+    // tag → pages with that tag. Built from the TagIndex below
+    // (deferred slightly to keep this section close to its inputs).
+    // Computed at build time so `{{query #tag}}` renders inline
+    // with a static list — no client-side eval needed.
+
     // ── Graph ────────────────────────────────────────────
     let graph_data = graph::compute(&pages, &all_blocks);
     let graph_json =
@@ -120,6 +126,23 @@ pub async fn build(
     // ── Tags index — extract `#tag` from block content ────
     let tag_index = tags::build(&pages, &all_blocks);
 
+    // Build the QueryResolver from the TagIndex — one entry per
+    // tag, with the matching pages as QueryHits. `{{query #tag}}`
+    // bodies resolve against this.
+    let mut query_map: HashMap<String, Vec<QueryHit>> = HashMap::new();
+    let tag_map: &std::collections::BTreeMap<_, _> = tag_index.0.as_ref();
+    for (tag, entries) in tag_map.iter() {
+        let hits: Vec<QueryHit> = entries
+            .iter()
+            .map(|e| QueryHit {
+                slug: e.slug.clone(),
+                title: e.label.clone(),
+            })
+            .collect();
+        query_map.insert(tag.clone(), hits);
+    }
+    let queries = QueryResolver(Arc::new(query_map));
+
     // ── Per-page HTML ────────────────────────────────────
     for page in &pages {
         let slug = slugify(&page.basename);
@@ -132,6 +155,7 @@ pub async fn build(
             &resolver,
             &block_refs,
             &page_embeds,
+            &queries,
             &pages,
             &bl,
         );

@@ -55,6 +55,20 @@ pub struct BlockRefResolver(pub Arc<HashMap<uuid::Uuid, BlockRefTarget>>);
 #[derive(Clone, Default, PartialEq)]
 pub struct PageEmbedResolver(pub Arc<HashMap<String, Vec<String>>>);
 
+/// One row in a `{{query}}` result set — page slug + display title.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryHit {
+    pub slug: String,
+    pub title: String,
+}
+
+/// Resolution table: lowercased tag → matching pages. Lets
+/// `{{query #tag}}` block content evaluate at parse time and
+/// embed the result list inline. Logseq has full Datalog over
+/// blocks; v1 supports tag filtering — the simplest 80% case.
+#[derive(Clone, Default, PartialEq)]
+pub struct QueryResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
+
 /// Outer document. `dioxus-ssr` renders the children as HTML
 /// inside a hand-written `<html>` shell (`crate::render::shell`)
 /// — Dioxus 0.7 doesn't have a first-class `<html>`/`<head>`
@@ -298,7 +312,14 @@ pub fn BlockNode(block: Block) -> Element {
     let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
     let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
     let page_embeds = try_use_context::<PageEmbedResolver>().unwrap_or_default();
-    let inlines = inline::parse(&block.content, &resolver, &block_refs, &page_embeds);
+    let queries = try_use_context::<QueryResolver>().unwrap_or_default();
+    let inlines = inline::parse(
+        &block.content,
+        &resolver,
+        &block_refs,
+        &page_embeds,
+        &queries,
+    );
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
     let anchor = format!("block-{}", block.id.simple());
@@ -313,7 +334,13 @@ pub fn BlockNode(block: Block) -> Element {
         let href = format!("/{page_slug}/#block-{}", target_id.simple());
         let empty_blocks = BlockRefResolver::default();
         let empty_embeds = PageEmbedResolver::default();
-        let target_inlines = inline::parse(&content, &resolver, &empty_blocks, &empty_embeds);
+        let target_inlines = inline::parse(
+            &content,
+            &resolver,
+            &empty_blocks,
+            &empty_embeds,
+            &QueryResolver::default(),
+        );
         return rsx! {
             aside { id: "{anchor}", class: "block-embed",
                 a { class: "block-embed-source", href: "{href}",
@@ -516,6 +543,46 @@ pub fn InlineNode(node: inline::Node) -> Element {
         Node::ExternalLink { label, url } => rsx! {
             a { class: "ext", href: "{url}", target: "_blank", rel: "noopener", "{label}" }
         },
+        Node::Query {
+            expr,
+            results,
+            broken,
+        } => {
+            if broken {
+                rsx! {
+                    span { class: "query broken", title: "unknown query form",
+                        "{{ query {expr} }}"
+                    }
+                }
+            } else {
+                rsx! {
+                    aside { class: "query",
+                        div { class: "query-header",
+                            span { class: "query-expr", "{{ query {expr} }}" }
+                            span { class: "query-count", "{results.len()} match",
+                                if results.len() != 1 { "es" }
+                            }
+                        }
+                        if results.is_empty() {
+                            p { class: "query-empty", "no matches" }
+                        } else {
+                            ul { class: "query-results",
+                                for hit in results {
+                                    {
+                                        let href = format!("/{}/", hit.slug);
+                                        rsx! {
+                                            li { key: "{hit.slug}",
+                                                a { href: "{href}", "{hit.title}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Node::PageEmbed {
             slug,
             label,
@@ -543,7 +610,15 @@ pub fn InlineNode(node: inline::Node) -> Element {
                 let bodies: Vec<Vec<inline::Node>> = contents
                     .iter()
                     .take(10)
-                    .map(|c| inline::parse(c, &resolver, &empty_blocks, &empty_embeds))
+                    .map(|c| {
+                        inline::parse(
+                            c,
+                            &resolver,
+                            &empty_blocks,
+                            &empty_embeds,
+                            &QueryResolver::default(),
+                        )
+                    })
                     .collect();
                 rsx! {
                     aside { class: "page-embed",

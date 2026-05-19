@@ -457,6 +457,62 @@ aside.page-embed .page-embed-body p {
   margin: 0.3em 0;
 }
 
+/* {{query <expr>}} block — evaluated at build time, rendered as
+   a small aside listing matching pages. Mirrors Logseq's
+   advanced-query block. */
+aside.query {
+  margin: 0.75em 0;
+  padding: 0.6em 0.85em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.4em;
+}
+
+aside.query .query-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.4em;
+  border-bottom: 1px dotted var(--border);
+  padding-bottom: 0.3em;
+}
+
+aside.query .query-expr {
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  color: var(--link);
+}
+
+aside.query .query-count {
+  font-variant-numeric: tabular-nums;
+}
+
+aside.query .query-results {
+  list-style: disc inside;
+  margin: 0;
+  padding: 0;
+}
+
+aside.query .query-results li {
+  margin: 0.15em 0;
+}
+
+aside.query .query-empty {
+  margin: 0.2em 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
+span.query.broken {
+  font-family: monospace;
+  color: var(--strike);
+  border: 1px dashed var(--strike);
+  padding: 0.05em 0.35em;
+  border-radius: 0.3em;
+  font-size: 0.85em;
+}
+
 span.page-embed.broken {
   color: var(--strike);
   border: 1px dashed var(--strike);
