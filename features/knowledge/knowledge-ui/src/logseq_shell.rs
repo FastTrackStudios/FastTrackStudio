@@ -330,6 +330,18 @@ html, body {
 /* Atomic editor — keep syntax markers visible but styled while
  * editing. Mirrors Logseq's behavior; classes are emitted by
  * publish_core::render_edit_html. */
+/* Drag-and-drop indicators for block reordering. */
+.ls-shell .ls-block-row.ls-drop-above {
+    box-shadow: inset 0 2px 0 0 var(--ls-active-primary-color);
+}
+.ls-shell .ls-block-row.ls-drop-below {
+    box-shadow: inset 0 -2px 0 0 var(--ls-active-primary-color);
+}
+.ls-shell .ls-block-row.ls-drop-inside {
+    outline: 2px solid var(--ls-active-primary-color);
+    outline-offset: -2px;
+    border-radius: 2px;
+}
 .ls-shell .ls-edit { caret-color: var(--ls-active-primary-color); }
 .ls-shell .ls-edit .ce-bracket { color: var(--ls-secondary-text-color); opacity: 0.6; }
 .ls-shell .ls-edit .ce-wikilink { color: var(--ls-link-text-color); }
@@ -685,6 +697,12 @@ pub fn LogseqShell() -> Element {
     let zoomed_block: Signal<Option<Uuid>> = use_signal(|| None);
     use_context_provider(|| sidebar_stack);
     use_context_provider(|| ZoomState(zoomed_block));
+    let drag_source: Signal<Option<Uuid>> = use_signal(|| None);
+    let drag_hover: Signal<Option<(Uuid, DropPos)>> = use_signal(|| None);
+    use_context_provider(|| DragState {
+        dragging: drag_source,
+        hover: drag_hover,
+    });
 
     // In-app navigators so clicks on `[[Page]]` and `((uuid))`
     // change the active page / zoomed block instead of letting
@@ -3205,11 +3223,90 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         }
     };
 
+    // Drag-and-drop wiring. The bullet is the drag handle (Logseq
+    // convention); each row accepts drops with a three-zone
+    // hit-test (above / inside / below) driven by the y-offset of
+    // the pointer inside the row.
+    let drag_state = try_use_context::<DragState>();
+    let mut drag_source_for_start = drag_state.as_ref().map(|s| s.dragging);
+    let on_drag_start = move |_e: Event<DragData>| {
+        if let Some(ref mut s) = drag_source_for_start {
+            s.set(Some(block_id));
+        }
+    };
+    let mut drag_source_for_end = drag_state.as_ref().map(|s| s.dragging);
+    let mut drag_hover_for_end = drag_state.as_ref().map(|s| s.hover);
+    let on_drag_end = move |_e: Event<DragData>| {
+        if let Some(ref mut s) = drag_source_for_end {
+            s.set(None);
+        }
+        if let Some(ref mut h) = drag_hover_for_end {
+            h.set(None);
+        }
+    };
+    let drag_state_for_over = drag_state;
+    let on_drag_over = move |e: Event<DragData>| {
+        // dragover MUST preventDefault to enable drops.
+        e.prevent_default();
+        // Three-zone hit test using element_coordinates — top 8px
+        // = above, bottom 8px = below, middle = inside. Row height
+        // is typically ~28px so the middle zone wins comfortably
+        // when the user aims at the body.
+        let y = e.data().element_coordinates().y;
+        let zone = if y < 8.0 {
+            DropPos::Above
+        } else if y > 22.0 {
+            DropPos::Below
+        } else {
+            DropPos::Inside
+        };
+        if let Some(state) = drag_state_for_over {
+            if state.dragging.read().is_none() {
+                return;
+            }
+            let cur = *state.hover.read();
+            if cur != Some((block_id, zone)) {
+                state.hover.clone().set(Some((block_id, zone)));
+            }
+        }
+    };
+    let ops_for_drop = ops.clone();
+    let drag_state_for_drop = drag_state;
+    let on_drop = move |e: Event<DragData>| {
+        e.prevent_default();
+        let (source, hover_pos) = match drag_state_for_drop.as_ref() {
+            Some(s) => (*s.dragging.read(), *s.hover.read()),
+            None => (None, None),
+        };
+        if let (Some(src), Some((tgt, pos))) = (source, hover_pos) {
+            if let Some(ops) = ops_for_drop.as_ref() {
+                ops.move_to.call((src, tgt, pos));
+            }
+        }
+        if let Some(s) = drag_state_for_drop.as_ref() {
+            s.dragging.clone().set(None);
+            s.hover.clone().set(None);
+        }
+    };
+    let hover_pos = drag_state
+        .as_ref()
+        .and_then(|s| *s.hover.read())
+        .filter(|(b, _)| *b == block_id)
+        .map(|(_, p)| p);
+    let row_class = match hover_pos {
+        Some(DropPos::Above) => "ls-block-row ls-drop-above",
+        Some(DropPos::Below) => "ls-block-row ls-drop-below",
+        Some(DropPos::Inside) => "ls-block-row ls-drop-inside",
+        None => "ls-block-row",
+    };
+
     rsx! {
         div { class: "ls-block",
             "data-block-id": "{block_id}",
             oncontextmenu: on_context,
-            div { class: "ls-block-row",
+            ondragover: on_drag_over,
+            ondrop: on_drop,
+            div { class: "{row_class}",
                 div {
                     class: if has_children { "ls-fold has-children" } else { "ls-fold" },
                     onclick: on_fold,
@@ -3218,7 +3315,10 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
                 div {
                     class: if has_children { "ls-bullet has-children" } else { "ls-bullet" },
                     onclick: on_bullet,
-                    title: "Click: zoom · Shift-click: open in sidebar",
+                    title: "Click: zoom · Shift-click: open in sidebar · Drag to move",
+                    draggable: "true",
+                    ondragstart: on_drag_start,
+                    ondragend: on_drag_end,
                     div { class: "ls-bullet-dot" }
                 }
                 LogseqBlockBody { block: block.clone() }
@@ -3459,6 +3559,15 @@ pub(crate) struct ZoomState(pub Signal<Option<Uuid>>);
 #[derive(Clone, Copy)]
 pub(crate) struct TagViewState(pub Signal<Option<String>>);
 
+/// Drag state for block reordering. `dragging` is the source
+/// block while a drag is in flight; `hover` is the current drop
+/// target + position (used to render an indicator line).
+#[derive(Clone, Copy)]
+pub(crate) struct DragState {
+    pub dragging: Signal<Option<Uuid>>,
+    pub hover: Signal<Option<(Uuid, DropPos)>>,
+}
+
 /// Cmd-K command palette state. `Some(query)` while open.
 #[derive(Clone, Copy)]
 pub(crate) struct CommandPaletteState(pub Signal<Option<String>>);
@@ -3500,9 +3609,53 @@ fn EditableBlock(block: Block) -> Element {
     let initial_content = block.content.clone();
     let content_signal: Signal<String> = use_signal(|| initial_content.clone());
 
+    // Initialise the editor on mount: focus it, install a paste
+    // handler that strips HTML to plain text, and an IME composition
+    // guard so multi-byte input (CJK / accents) doesn't trigger
+    // input-driven re-renders mid-composition.
+    let init_id = block_id.simple().to_string();
     let auto_focus = move |elem: Event<MountedData>| {
+        let id = init_id.clone();
         spawn(async move {
             let _ = elem.data().set_focus(true).await;
+            let script = format!(
+                r#"
+                (function() {{
+                    const wrap = document.querySelector('[data-edit-block="{id}"]');
+                    if (!wrap) return;
+                    const ed = wrap.querySelector('[contenteditable]');
+                    if (!ed || ed.dataset.ceWired) return;
+                    ed.dataset.ceWired = "1";
+                    // Plain-text paste: pull text/plain out of the
+                    // clipboard and insertText so it lands at caret.
+                    // execCommand is deprecated-but-supported and
+                    // emits an `input` event so our Rust oninput
+                    // picks the change up naturally.
+                    ed.addEventListener('paste', function(e) {{
+                        e.preventDefault();
+                        const cb = e.clipboardData || window.clipboardData;
+                        const text = cb ? cb.getData('text/plain') : '';
+                        if (text) {{
+                            document.execCommand('insertText', false, text);
+                        }}
+                    }});
+                    // IME composition — suppress input handling
+                    // while the user is composing so we don't read
+                    // half-formed glyphs. compositionend triggers a
+                    // final synthetic input event so our handler
+                    // sees the committed text.
+                    ed.dataset.ceComposing = "0";
+                    ed.addEventListener('compositionstart', function() {{
+                        ed.dataset.ceComposing = "1";
+                    }});
+                    ed.addEventListener('compositionend', function() {{
+                        ed.dataset.ceComposing = "0";
+                        ed.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    }});
+                }})();
+                "#
+            );
+            let _ = document::eval(&script);
         });
     };
 
@@ -3520,7 +3673,9 @@ fn EditableBlock(block: Block) -> Element {
         // then push the new source through the signal. Dioxus will
         // reapply the styled innerHTML on the next render; the
         // caret restore happens in requestAnimationFrame so it
-        // lands after that reflow.
+        // lands after that reflow. The eval also bails when the
+        // editor is mid-IME-composition so half-formed glyphs
+        // don't trigger re-renders.
         let id_str = id_str_input.clone();
         let mut content_w_inner = content_w;
         let ops_clone = ops_for_input.clone();
@@ -3530,6 +3685,22 @@ fn EditableBlock(block: Block) -> Element {
         let mut tag_search = tag_search_w;
         let id_str_for_caret = id_str.clone();
         spawn(async move {
+            // Composition guard — set by the JS init handler.
+            let composing_script = format!(
+                r#"
+                (function() {{
+                    const wrap = document.querySelector('[data-edit-block="{id_str}"]');
+                    if (!wrap) return false;
+                    const ed = wrap.querySelector('[contenteditable]');
+                    if (!ed) return false;
+                    return ed.dataset.ceComposing === "1";
+                }})()
+                "#
+            );
+            let mut handle = document::eval(&composing_script);
+            if let Ok(serde_json::Value::Bool(true)) = handle.recv::<serde_json::Value>().await {
+                return;
+            }
             let (off, _) = read_selection(&id_str).await.unwrap_or((0, 0));
             let v = read_editor_text(&id_str).await.unwrap_or_default();
             content_w_inner.set(v.clone());
@@ -3660,6 +3831,27 @@ fn EditableBlock(block: Block) -> Element {
                 } else {
                     ops.indent.call(block_id);
                 }
+            }
+            // Shift+Enter — explicit newline inside the block.
+            // The browser's default `<br>` insertion in
+            // contenteditable round-trips through textContent
+            // unreliably across browsers, so we splice a `\n` at
+            // the caret ourselves.
+            Key::Enter if shift && !mods.alt() && !mods.meta() && !mods.ctrl() => {
+                e.prevent_default();
+                let id_str = block_id.simple().to_string();
+                let mut content_w = content_signal;
+                let update_cb = ops.update_content;
+                spawn(async move {
+                    let (s, en) = read_selection(&id_str).await.unwrap_or((0, 0));
+                    let lo = s.min(en);
+                    let hi = s.max(en);
+                    let mut cur = content_w.peek().clone();
+                    cur.replace_range(lo..hi, "\n");
+                    content_w.set(cur.clone());
+                    update_cb.call((block_id, cur));
+                    set_caret(&id_str, lo + 1);
+                });
             }
             Key::Enter if !shift => {
                 e.prevent_default();
@@ -4577,6 +4769,18 @@ pub(crate) struct BlockOps {
     /// Zoom into the block: navigate so that block is the
     /// effective page root. Mirrors Logseq's bullet-click.
     pub zoom_block: Callback<Uuid>,
+    /// Reparent / reorder a block via drag-and-drop. Args are
+    /// `(source, target, position)` where position is `"above"`,
+    /// `"below"`, or `"inside"` (Logseq's three drop zones).
+    pub move_to: Callback<(Uuid, Uuid, DropPos)>,
+}
+
+/// Where a dragged block lands relative to its drop target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DropPos {
+    Above,
+    Below,
+    Inside,
 }
 
 fn make_block_ops(
@@ -4746,6 +4950,18 @@ fn make_block_ops(
     let zoom_block = Callback::new(move |id: Uuid| {
         zoom_target.set(Some(id));
     });
+    let doc_move_to = doc.clone();
+    let move_to = Callback::new(move |(source, target, pos): (Uuid, Uuid, DropPos)| {
+        let doc = doc_move_to.clone();
+        spawn(async move {
+            if source == target {
+                return;
+            }
+            if let Err(e) = move_block_to_async(&doc, source, target, pos).await {
+                tracing::warn!(?e, ?pos, "drag move failed");
+            }
+        });
+    });
 
     BlockOps {
         enter_edit,
@@ -4763,7 +4979,111 @@ fn make_block_ops(
         toggle_collapsed,
         open_in_sidebar,
         zoom_block,
+        move_to,
     }
+}
+
+/// Move `source` to land relative to `target` per `pos`. Skips
+/// cycles (dropping a block onto its own descendant) so the tree
+/// stays well-formed. Chooses sort_keys that interleave cleanly
+/// using lexorank arithmetic.
+async fn move_block_to_async(
+    doc: &CrdtDoc,
+    source: Uuid,
+    target: Uuid,
+    pos: DropPos,
+) -> Result<(), knowledge_proto::architect::RepoError> {
+    let repo = BlockRepoLoro::new(doc);
+    let big = ListPage {
+        index: 0,
+        size: 100_000,
+    };
+    let all = repo.list(big, None, None).await?.items;
+    let target_block = match all.iter().find(|b| b.id == target) {
+        Some(b) => b.clone(),
+        None => return Err(knowledge_proto::architect::RepoError::NotFound),
+    };
+    // Cycle check — refuse to drop a block into its own subtree.
+    if is_descendant(&all, source, target) {
+        return Ok(());
+    }
+    let (new_parent, new_sort): (Option<Uuid>, String) = match pos {
+        DropPos::Inside => {
+            let last_child_key = all
+                .iter()
+                .filter(|b| b.parent_block_id == Some(target))
+                .map(|b| b.sort_key.clone())
+                .max();
+            let key = match last_child_key {
+                Some(k) => lexorank_after(&k),
+                None => "m".into(),
+            };
+            (Some(target), key)
+        }
+        DropPos::Above | DropPos::Below => {
+            let parent = target_block.parent_block_id;
+            let mut siblings: Vec<&Block> = all
+                .iter()
+                .filter(|b| {
+                    b.parent_block_id == parent
+                        && b.page_id == target_block.page_id
+                        && b.id != source
+                })
+                .collect();
+            siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+            let target_idx = siblings.iter().position(|b| b.id == target).unwrap_or(0);
+            let key = match pos {
+                DropPos::Above => {
+                    let prev = if target_idx == 0 {
+                        None
+                    } else {
+                        Some(siblings[target_idx - 1].sort_key.clone())
+                    };
+                    match prev {
+                        Some(p) => lexorank_between(&p, &target_block.sort_key),
+                        None => lexorank_before(&target_block.sort_key),
+                    }
+                }
+                DropPos::Below => {
+                    let next = siblings.get(target_idx + 1).map(|b| b.sort_key.clone());
+                    match next {
+                        Some(n) => lexorank_between(&target_block.sort_key, &n),
+                        None => lexorank_after(&target_block.sort_key),
+                    }
+                }
+                DropPos::Inside => unreachable!(),
+            };
+            (parent, key)
+        }
+    };
+    repo.update(
+        source,
+        BlockUpdate {
+            parent_block_id: Some(new_parent),
+            sort_key: Some(new_sort),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+fn is_descendant(all: &[Block], ancestor: Uuid, candidate: Uuid) -> bool {
+    if ancestor == candidate {
+        return true;
+    }
+    let mut cur = candidate;
+    for _ in 0..1024 {
+        let Some(b) = all.iter().find(|b| b.id == cur) else {
+            return false;
+        };
+        match b.parent_block_id {
+            Some(p) if p == ancestor => return true,
+            Some(p) => cur = p,
+            None => return false,
+        }
+    }
+    false
 }
 
 /// Swap `block_id` with its previous (`dir = -1`) or next
@@ -5066,6 +5386,26 @@ pub(crate) fn lexorank_after(prev: &str) -> String {
     let mut s = prev.to_string();
     s.push('m');
     s
+}
+
+/// Lexorank "before" — yield a string that sorts strictly less than
+/// `next`. For "aa" this returns "a", for "a" returns "0m". Used
+/// when dropping a block above the first sibling so we need a key
+/// smaller than the current head.
+pub(crate) fn lexorank_before(next: &str) -> String {
+    if next.is_empty() {
+        return "0".into();
+    }
+    let first = next.as_bytes()[0];
+    if first > b'0' {
+        // Use the char one below the first byte.
+        let prev_byte = first - 1;
+        return (prev_byte as char).to_string() + "m";
+    }
+    // First byte is '0' — shrink by prepending a char that sorts
+    // before '0'. Use ' ' (space, ASCII 32) which is fine for
+    // sort keys.
+    format!(" {next}")
 }
 
 /// Lexorank "between" — find a string that sorts strictly
@@ -5669,6 +6009,58 @@ mod tests {
     fn filter_slash_empty_query_returns_all() {
         let hits = filter_slash("");
         assert_eq!(hits.len(), 10); // capped at 10 even though catalog is 11
+    }
+
+    #[test]
+    fn lexorank_before_strictly_less() {
+        let after = "m";
+        let before = lexorank_before(after);
+        assert!(before.as_str() < after, "{before} not < {after}");
+    }
+
+    #[test]
+    fn lexorank_before_handles_zero_prefix() {
+        let after = "0a";
+        let before = lexorank_before(after);
+        assert!(before.as_str() < after, "{before} not < {after}");
+    }
+
+    #[test]
+    fn is_descendant_detects_cycles() {
+        let parent_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        let grandchild_id = Uuid::new_v4();
+        let now = chrono::Utc::now();
+        let mk = |id, parent: Option<Uuid>| Block {
+            id,
+            vault_id: Uuid::nil(),
+            page_id: Uuid::nil(),
+            parent_block_id: parent,
+            sort_key: "m".into(),
+            content: String::new(),
+            kind: "list_item".into(),
+            heading_level: None,
+            list_ordered: false,
+            list_task: None,
+            code_lang: None,
+            callout_kind: None,
+            callout_foldable: false,
+            properties_json: "{}".into(),
+            obsidian_block_id: None,
+            collapsed: false,
+            refs_json: "[]".into(),
+            canvas_node_json: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let blocks = vec![
+            mk(parent_id, None),
+            mk(child_id, Some(parent_id)),
+            mk(grandchild_id, Some(child_id)),
+        ];
+        assert!(is_descendant(&blocks, parent_id, grandchild_id));
+        assert!(is_descendant(&blocks, parent_id, child_id));
+        assert!(!is_descendant(&blocks, child_id, parent_id));
     }
 
     #[test]
