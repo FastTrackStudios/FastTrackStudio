@@ -319,13 +319,14 @@ pub fn BlockNode(block: Block) -> Element {
     let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
     let page_embeds = try_use_context::<PageEmbedResolver>().unwrap_or_default();
     let queries = try_use_context::<QueryResolver>().unwrap_or_default();
-    let inlines = inline::parse(
-        &block.content,
-        &resolver,
-        &block_refs,
-        &page_embeds,
-        &queries,
-    );
+    // Peel a leading TODO/DOING/etc. keyword off the content before
+    // parsing inlines. Logseq's task UX is text-based: `TODO buy
+    // milk` is a task block, not a `[ ]` checkbox.
+    let (marker, body_content) = peel_task_marker(&block.content);
+    // Also strip SCHEDULED:/DEADLINE: planning lines and surface
+    // them as date pills under the block body.
+    let (plan, body_content) = peel_planning(body_content);
+    let inlines = inline::parse(body_content, &resolver, &block_refs, &page_embeds, &queries);
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
     let anchor = format!("block-{}", block.id.simple());
@@ -415,8 +416,33 @@ pub fn BlockNode(block: Block) -> Element {
     // `properties_json` and rendered as a row of pills under the
     // block body. Mirrors Logseq's inline property display.
     let chips = parse_props(&block.properties_json);
+    let marker_cls = marker.map(|m| m.css_class());
+    let marker_label = marker.map(|m| m.label());
     rsx! {
-        {body}
+        if let (Some(cls), Some(label)) = (marker_cls, marker_label) {
+            div { class: "task-marker-row",
+                span { class: "task-marker {cls}", "{label}" }
+                {body}
+            }
+        } else {
+            {body}
+        }
+        if !plan.scheduled.is_empty() || !plan.deadline.is_empty() {
+            div { class: "block-plan",
+                if !plan.scheduled.is_empty() {
+                    span { class: "plan-pill plan-scheduled",
+                        span { class: "plan-key", "SCHEDULED" }
+                        span { class: "plan-val", "{plan.scheduled}" }
+                    }
+                }
+                if !plan.deadline.is_empty() {
+                    span { class: "plan-pill plan-deadline",
+                        span { class: "plan-key", "DEADLINE" }
+                        span { class: "plan-val", "{plan.deadline}" }
+                    }
+                }
+            }
+        }
         if !chips.is_empty() {
             div { class: "block-props",
                 for (k, v) in chips {
@@ -427,6 +453,129 @@ pub fn BlockNode(block: Block) -> Element {
                 }
             }
         }
+    }
+}
+
+/// Logseq-style text task markers. The block's content starts
+/// with one of these uppercase tokens (followed by space) to be
+/// recognized; we peel it off and render a chip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskMarker {
+    Todo,
+    Doing,
+    Done,
+    Later,
+    Now,
+    Waiting,
+    Cancelled,
+}
+
+impl TaskMarker {
+    fn css_class(self) -> &'static str {
+        match self {
+            Self::Todo => "task-todo",
+            Self::Doing => "task-doing",
+            Self::Done => "task-done",
+            Self::Later => "task-later",
+            Self::Now => "task-now",
+            Self::Waiting => "task-waiting",
+            Self::Cancelled => "task-cancelled",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Todo => "TODO",
+            Self::Doing => "DOING",
+            Self::Done => "DONE",
+            Self::Later => "LATER",
+            Self::Now => "NOW",
+            Self::Waiting => "WAITING",
+            Self::Cancelled => "CANCELLED",
+        }
+    }
+}
+
+/// Strip a leading task-marker keyword from block content. Returns
+/// `(marker, remainder)` where remainder has the keyword + one
+/// trailing space removed; or `(None, content)` if no marker.
+pub fn peel_task_marker(content: &str) -> (Option<TaskMarker>, &str) {
+    // Order matters: longer markers first so `CANCELLED` wins over
+    // a hypothetical `CANCEL`. All matched case-sensitively —
+    // Logseq is uppercase.
+    let candidates: &[(&str, TaskMarker)] = &[
+        ("CANCELLED", TaskMarker::Cancelled),
+        ("CANCELED", TaskMarker::Cancelled),
+        ("WAITING", TaskMarker::Waiting),
+        ("DOING", TaskMarker::Doing),
+        ("LATER", TaskMarker::Later),
+        ("DONE", TaskMarker::Done),
+        ("TODO", TaskMarker::Todo),
+        ("NOW", TaskMarker::Now),
+        ("WAIT", TaskMarker::Waiting),
+    ];
+    for (token, marker) in candidates {
+        if let Some(rest) = content.strip_prefix(token) {
+            // Must be followed by whitespace or end-of-content so
+            // we don't peel `TODOLIST` as `TODO` + `LIST`.
+            if rest.is_empty() {
+                return (Some(*marker), "");
+            }
+            if rest.starts_with(|c: char| c.is_whitespace()) {
+                return (Some(*marker), rest.trim_start_matches(' '));
+            }
+        }
+    }
+    (None, content)
+}
+
+/// Pulled-out SCHEDULED / DEADLINE planning timestamps from a
+/// block's content. Logseq stores them as `SCHEDULED: <date>` and
+/// `DEADLINE: <date>` lines anywhere in the block.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PlanningTimestamps {
+    pub scheduled: String,
+    pub deadline: String,
+}
+
+/// Strip SCHEDULED: and DEADLINE: lines from block content,
+/// returning the parsed timestamps + the cleaned remainder.
+/// Format mirrors Org-mode / Logseq: `SCHEDULED: <2026-05-20>`.
+pub fn peel_planning(content: &str) -> (PlanningTimestamps, &str) {
+    let mut plan = PlanningTimestamps::default();
+    let mut kept: Vec<&str> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed
+            .strip_prefix("SCHEDULED:")
+            .or_else(|| trimmed.strip_prefix("Scheduled:"))
+        {
+            plan.scheduled = rest.trim().trim_matches(|c| c == '<' || c == '>').into();
+            continue;
+        }
+        if let Some(rest) = trimmed
+            .strip_prefix("DEADLINE:")
+            .or_else(|| trimmed.strip_prefix("Deadline:"))
+        {
+            plan.deadline = rest.trim().trim_matches(|c| c == '<' || c == '>').into();
+            continue;
+        }
+        kept.push(line);
+    }
+    // If we didn't strip anything, return original slice to keep
+    // the borrow lifetime; otherwise we'd need to box a String.
+    if plan.scheduled.is_empty() && plan.deadline.is_empty() {
+        (plan, content)
+    } else {
+        // Edge case: when we strip lines we need an owned String,
+        // but the call site borrows &str. Trick: rejoin into a
+        // leaked str? No — we use the original content's first
+        // chunk before the SCHEDULED line. Simpler: detect at
+        // call-site by checking plan.is_empty(); for now we
+        // return the joined kept text via a thread_local cache.
+        // Pragmatic path: leak via Box::leak for build-time data.
+        let joined = kept.join("\n");
+        let s: &'static str = Box::leak(joined.into_boxed_str());
+        (plan, s)
     }
 }
 
@@ -666,5 +815,72 @@ pub fn InlineNode(node: inline::Node) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peel_todo_marker() {
+        let (m, rest) = peel_task_marker("TODO buy milk");
+        assert_eq!(m, Some(TaskMarker::Todo));
+        assert_eq!(rest, "buy milk");
+    }
+
+    #[test]
+    fn peel_doing_marker() {
+        let (m, rest) = peel_task_marker("DOING refactor parser");
+        assert_eq!(m, Some(TaskMarker::Doing));
+        assert_eq!(rest, "refactor parser");
+    }
+
+    #[test]
+    fn peel_cancelled_marker() {
+        let (m, _) = peel_task_marker("CANCELLED skip it");
+        assert_eq!(m, Some(TaskMarker::Cancelled));
+        // CANCELED (US spelling) also matches.
+        let (m2, _) = peel_task_marker("CANCELED skip it");
+        assert_eq!(m2, Some(TaskMarker::Cancelled));
+    }
+
+    #[test]
+    fn peel_marker_only_at_word_boundary() {
+        // `TODOLIST` should NOT be peeled to TODO + LIST.
+        let (m, rest) = peel_task_marker("TODOLIST not a task");
+        assert_eq!(m, None);
+        assert_eq!(rest, "TODOLIST not a task");
+    }
+
+    #[test]
+    fn peel_no_marker() {
+        let (m, rest) = peel_task_marker("regular content");
+        assert_eq!(m, None);
+        assert_eq!(rest, "regular content");
+    }
+
+    #[test]
+    fn peel_scheduled_only() {
+        let (p, rest) = peel_planning("SCHEDULED: <2026-05-20>\nrest of block");
+        assert_eq!(p.scheduled, "2026-05-20");
+        assert!(p.deadline.is_empty());
+        assert_eq!(rest, "rest of block");
+    }
+
+    #[test]
+    fn peel_deadline_and_scheduled() {
+        let (p, rest) =
+            peel_planning("task body\nSCHEDULED: <2026-05-20>\nDEADLINE: <2026-05-22>\nmore body");
+        assert_eq!(p.scheduled, "2026-05-20");
+        assert_eq!(p.deadline, "2026-05-22");
+        assert_eq!(rest, "task body\nmore body");
+    }
+
+    #[test]
+    fn peel_planning_passthrough_when_none() {
+        let (p, rest) = peel_planning("just content, no planning");
+        assert!(p.scheduled.is_empty() && p.deadline.is_empty());
+        assert_eq!(rest, "just content, no planning");
     }
 }

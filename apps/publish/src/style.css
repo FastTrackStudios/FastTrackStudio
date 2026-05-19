@@ -559,6 +559,96 @@ span.page-embed.broken {
   font-size: 0.85em;
 }
 
+/* Inline TODO/DOING/etc. task markers — Logseq's text-based
+   task system. Rendered as an uppercase pill prefix to the block
+   body, color-coded by state. */
+.task-marker-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+
+.task-marker-row > :not(.task-marker) {
+  flex: 1;
+}
+
+.task-marker {
+  display: inline-block;
+  padding: 0.05em 0.4em;
+  border-radius: 0.3em;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  vertical-align: 0.1em;
+  text-decoration: none;
+}
+
+.task-marker.task-todo {
+  background: color-mix(in srgb, var(--link) 18%, transparent);
+  color: var(--link);
+  border: 1px solid color-mix(in srgb, var(--link) 35%, transparent);
+}
+.task-marker.task-doing,
+.task-marker.task-now {
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+  color: #f59e0b;
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+}
+.task-marker.task-done {
+  background: color-mix(in srgb, #10b981 18%, transparent);
+  color: #10b981;
+  border: 1px solid color-mix(in srgb, #10b981 35%, transparent);
+}
+.task-marker.task-later,
+.task-marker.task-waiting {
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.task-marker.task-cancelled {
+  background: color-mix(in srgb, var(--strike) 18%, transparent);
+  color: var(--strike);
+  border: 1px solid color-mix(in srgb, var(--strike) 35%, transparent);
+  text-decoration: line-through;
+}
+
+/* SCHEDULED / DEADLINE planning pills under tasks. */
+.block-plan {
+  margin: 0.2em 0 0.4em 1.5em;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.plan-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  border-radius: 0.3em;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.plan-pill .plan-key {
+  padding: 0.05em 0.45em;
+  background: var(--bg-alt);
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  font-weight: 700;
+}
+
+.plan-pill .plan-val {
+  padding: 0.05em 0.5em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-pill.plan-deadline .plan-key {
+  color: var(--strike);
+}
+
 /* Block-level `prop:: value` chips rendered under each block. */
 .block-props {
   margin: 0.2em 0 0.4em 1.5em;

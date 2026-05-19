@@ -64,6 +64,14 @@ pub async fn build(
     for p in &pages {
         let slug = slugify(&p.basename);
         basename_to_slug.insert(p.basename.to_lowercase(), slug.clone());
+        // Page aliases — `aliases: [x, y]` on the Page model lets
+        // `[[X]]` and `[[Y]]` both resolve to the canonical page.
+        // Logseq's `alias::` property convention.
+        for alias in &p.aliases {
+            basename_to_slug
+                .entry(alias.to_lowercase())
+                .or_insert_with(|| slug.clone());
+        }
         id_to_slug.insert(p.id, slug);
     }
     let resolver = WikiResolver(Arc::new(basename_to_slug));
