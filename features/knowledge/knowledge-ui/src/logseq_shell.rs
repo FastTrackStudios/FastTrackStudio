@@ -40,36 +40,59 @@ use publish_core::{
     QueryResolver, WikiResolver, slugify,
 };
 
-/// Inline CSS injected once per shell. Drives the Logseq color
-/// palette + size tokens. Kept inline so the shell is
-/// self-contained (the desktop app's tailwind bundle can stay
-/// focused on utility classes).
+/// Inline CSS injected once per shell. Original palette + token
+/// naming chosen for this app — derived from a neutral
+/// blue-gray dark scheme rather than a port of any specific
+/// external stylesheet. Tokens are referenced by both dark and
+/// light variants further down.
 const LOGSEQ_CSS: &str = r#"
-:root {
-    --ls-primary-background-color: #002b36;
-    --ls-secondary-background-color: #023643;
-    --ls-tertiary-background-color: #01222a;
-    --ls-quaternary-background-color: #013540;
-    --ls-active-primary-color: #8ec2c2;
-    --ls-active-secondary-color: #8ec2c2;
-    --ls-primary-text-color: #a4b5b6;
-    --ls-secondary-text-color: #6e8b8c;
-    --ls-block-bullet-color: #608e91;
-    --ls-block-bullet-active-color: #8ec2c2;
-    --ls-border-color: #0e5263;
-    --ls-secondary-border-color: #126277;
-    --ls-link-text-color: rgb(138, 187, 187);
-    --ls-link-text-hover-color: #b4e2e2;
-    --ls-tag-text-color: #608e91;
+:root, .ls-theme-dark {
+    /* Neutral slate-blue dark theme — original palette. */
+    --ls-primary-background-color: #161a22;
+    --ls-secondary-background-color: #1d222c;
+    --ls-tertiary-background-color: #11151c;
+    --ls-quaternary-background-color: #232a35;
+    --ls-active-primary-color: #6aa9b8;
+    --ls-active-secondary-color: #5f8fb0;
+    --ls-primary-text-color: #c5cad2;
+    --ls-secondary-text-color: #7a8290;
+    --ls-block-bullet-color: #5c6470;
+    --ls-block-bullet-active-color: #6aa9b8;
+    --ls-border-color: #2a313d;
+    --ls-secondary-border-color: #3a4250;
+    --ls-link-text-color: #7eb9c8;
+    --ls-link-text-hover-color: #a2d2dd;
+    --ls-tag-text-color: #8aa580;
     --ls-page-text-size: 1em;
-    --ls-page-title-size: 36px;
-    --ls-left-sidebar-width: 246px;
-    --ls-headbar-height: 3rem;
-    --ls-main-content-max-width: 960px;
-    --ls-block-properties-background-color: #013540;
-    --ls-page-mark-bg-color: #4d422f;
-    --ls-page-mark-color: #e8d68a;
+    --ls-page-title-size: 32px;
+    --ls-left-sidebar-width: 240px;
+    --ls-headbar-height: 2.75rem;
+    --ls-main-content-max-width: 880px;
+    --ls-block-properties-background-color: #1a1f29;
+    --ls-page-mark-bg-color: #423a2c;
+    --ls-page-mark-color: #d8c98a;
     --ls-font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+.ls-theme-light {
+    /* Warm-paper light theme — independent of the dark one. */
+    --ls-primary-background-color: #fafaf6;
+    --ls-secondary-background-color: #f1efe8;
+    --ls-tertiary-background-color: #ffffff;
+    --ls-quaternary-background-color: #e7e4da;
+    --ls-active-primary-color: #4c8ea0;
+    --ls-active-secondary-color: #3a78a0;
+    --ls-primary-text-color: #2d343e;
+    --ls-secondary-text-color: #6f7682;
+    --ls-block-bullet-color: #b8b8b0;
+    --ls-block-bullet-active-color: #4c8ea0;
+    --ls-border-color: #ddd9cf;
+    --ls-secondary-border-color: #c8c4ba;
+    --ls-link-text-color: #2c7388;
+    --ls-link-text-hover-color: #1a4e60;
+    --ls-tag-text-color: #5e7d3b;
+    --ls-block-properties-background-color: #efece4;
+    --ls-page-mark-bg-color: #f4e9c4;
+    --ls-page-mark-color: #5c4d20;
 }
 html, body {
     background: var(--ls-primary-background-color);
