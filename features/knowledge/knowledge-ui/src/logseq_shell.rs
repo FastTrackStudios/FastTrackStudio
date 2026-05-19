@@ -961,13 +961,61 @@ fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
         hits.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
     }
 
+    // Page-property index: walk every page's frontmatter and bucket
+    // (key, value) → [hit]. Scalars index as-is; arrays index each
+    // element so `(property tags rust)` matches a page with
+    // `tags: [rust, web]`.
+    let mut prop_map: HashMap<String, HashMap<String, Vec<QueryHit>>> = HashMap::new();
+    for p in &vault.pages {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(&p.frontmatter_json) else {
+            continue;
+        };
+        let Some(obj) = val.as_object() else { continue };
+        let hit = QueryHit {
+            slug: slugify(&p.basename),
+            title: p.basename.clone(),
+        };
+        for (k, v) in obj {
+            let key = k.to_lowercase();
+            let mut push = |value: String| {
+                prop_map
+                    .entry(key.clone())
+                    .or_default()
+                    .entry(value.to_lowercase())
+                    .or_default()
+                    .push(hit.clone());
+            };
+            match v {
+                serde_json::Value::String(s) => push(s.clone()),
+                serde_json::Value::Bool(b) => push(b.to_string()),
+                serde_json::Value::Number(n) => push(n.to_string()),
+                serde_json::Value::Array(arr) => {
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            push(s.to_string());
+                        } else {
+                            push(item.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for by_val in prop_map.values_mut() {
+        for hits in by_val.values_mut() {
+            hits.sort_by(|a, b| a.slug.cmp(&b.slug));
+            hits.dedup_by(|a, b| a.slug == b.slug);
+        }
+    }
+
     ResolverBundle {
         wiki: WikiResolver(Arc::new(basename_to_slug)),
         block_refs: BlockRefResolver(Arc::new(block_map)),
         page_embeds: PageEmbedResolver(Arc::new(embed_map)),
         queries: QueryResolver(Arc::new(tag_map)),
         namespaces: NamespaceResolver(Arc::new(ns_map)),
-        properties: publish_core::PagePropertyResolver::default(),
+        properties: publish_core::PagePropertyResolver(Arc::new(prop_map)),
     }
 }
 

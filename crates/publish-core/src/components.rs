@@ -1043,6 +1043,12 @@ pub fn InlineNode(node: inline::Node) -> Element {
                 img { class: "inline-image", src: "{resolved}", alt: "{alt}", loading: "lazy" }
             }
         }
+        Node::MathInline(src) => rsx! {
+            span { class: "math math-inline", "{src}" }
+        },
+        Node::MathBlock(src) => rsx! {
+            div { class: "math math-block", "{src}" }
+        },
         Node::FootnoteRef(id) => {
             let href = format!("#fn-{id}");
             rsx! {

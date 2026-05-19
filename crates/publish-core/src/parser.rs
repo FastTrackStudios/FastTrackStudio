@@ -90,6 +90,13 @@ pub enum Node {
         kind: MediaKind,
         target: String,
     },
+    /// `$expr$` — inline LaTeX. The renderer wraps it in a
+    /// `<span class="math math-inline">` and emits the raw source
+    /// as text content; a host-provided MathJax/KaTeX script then
+    /// upgrades the spans client-side.
+    MathInline(String),
+    /// `$$expr$$` — block LaTeX. Same idea, rendered as a `<div>`.
+    MathBlock(String),
 }
 
 /// Closed set of media-embed kinds recognized by the parser.
@@ -114,6 +121,33 @@ pub fn parse(
     let bytes = s.as_bytes();
     let mut i = 0usize;
     while i < s.len() {
+        // $$expr$$ — block math. Match before single-$ inline math
+        // so the longer delimiter wins. Body must be non-empty.
+        if s[i..].starts_with("$$") {
+            if let Some(end) = s[i + 2..].find("$$") {
+                let body = &s[i + 2..i + 2 + end];
+                if !body.trim().is_empty() {
+                    flush(&mut buf, &mut out);
+                    out.push(Node::MathBlock(body.to_string()));
+                    i += 2 + end + 2;
+                    continue;
+                }
+            }
+        }
+        // $expr$ — inline math. Body must be non-empty and the
+        // closing `$` must not be preceded by a space (to avoid
+        // accidentally matching prose with two currency markers).
+        if bytes[i] == b'$' && i + 1 < s.len() && bytes[i + 1] != b'$' {
+            if let Some(end_rel) = s[i + 1..].find('$') {
+                let body = &s[i + 1..i + 1 + end_rel];
+                if !body.is_empty() && !body.starts_with(' ') && !body.ends_with(' ') {
+                    flush(&mut buf, &mut out);
+                    out.push(Node::MathInline(body.to_string()));
+                    i += 1 + end_rel + 1;
+                    continue;
+                }
+            }
+        }
         // {{namespace <prefix>}} — list pages under a namespace.
         if s[i..].starts_with("{{namespace") {
             if let Some(end) = s[i + 11..].find("}}") {
@@ -225,8 +259,12 @@ pub fn parse(
                 continue;
             }
         }
-        // ![[Page]] — page embed. Match BEFORE wikilink so the
-        // bang prefix wins; mirrors Obsidian's `![[...]]` semantics.
+        // ![[Page]] — page embed, OR ![[image.png]] — image
+        // wikilink. Match BEFORE wikilink so the bang prefix wins;
+        // mirrors Obsidian's `![[...]]` semantics. When the target
+        // ends in a known image extension, emit an `Image` with the
+        // file basename as the url (the AssetBaseResolver rewrites
+        // it at render time).
         if s[i..].starts_with("![[") {
             if let Some(end) = s[i + 3..].find("]]") {
                 let body = &s[i + 3..i + 3 + end];
@@ -234,6 +272,15 @@ pub fn parse(
                     Some((t, a)) => (t.trim(), a.trim()),
                     None => (body.trim(), body.trim()),
                 };
+                if is_image_target(target) {
+                    flush(&mut buf, &mut out);
+                    out.push(Node::Image {
+                        alt: alias.to_string(),
+                        url: format!("assets/{target}"),
+                    });
+                    i += 3 + end + 2;
+                    continue;
+                }
                 let key = target.to_lowercase();
                 let slug = resolver.0.get(&key).cloned();
                 let contents = page_embeds.0.get(&key).cloned().unwrap_or_default();
@@ -467,6 +514,19 @@ fn flush(buf: &mut String, out: &mut Vec<Node>) {
 
 /// 8-char prefix of a UUID — used as the visible label for a
 /// broken block reference where we have no snippet to show.
+/// True when a `![[…]]` target's extension marks it as an image.
+fn is_image_target(target: &str) -> bool {
+    let lower = target.to_lowercase();
+    for ext in [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".avif",
+    ] {
+        if lower.ends_with(ext) {
+            return true;
+        }
+    }
+    false
+}
+
 fn short_uuid(id: &Uuid) -> String {
     id.simple().to_string().chars().take(8).collect()
 }
@@ -948,6 +1008,75 @@ mod tests {
                 assert_eq!(alt, "alt text");
                 assert_eq!(url, "https://example.com/x.png");
             }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn inline_math_round_trip() {
+        let n = parse(
+            "result is $a + b$ today",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+        );
+        let m = n.iter().find_map(|x| match x {
+            Node::MathInline(s) => Some(s.clone()),
+            _ => None,
+        });
+        assert_eq!(m, Some("a + b".to_string()));
+    }
+
+    #[test]
+    fn block_math_round_trip() {
+        let n = parse(
+            "$$\\int_0^1 x dx$$",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+        );
+        let m = n.iter().find_map(|x| match x {
+            Node::MathBlock(s) => Some(s.clone()),
+            _ => None,
+        });
+        assert_eq!(m, Some("\\int_0^1 x dx".to_string()));
+    }
+
+    #[test]
+    fn lone_dollar_is_left_as_text() {
+        let n = parse(
+            "costs $5 today",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+        );
+        assert!(!n.iter().any(|x| matches!(x, Node::MathInline(_))));
+    }
+
+    #[test]
+    fn image_wikilink_emits_image_node() {
+        let n = parse(
+            "see ![[diagram.png]]",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
+        );
+        let img = n.iter().find(|x| matches!(x, Node::Image { .. }));
+        assert!(img.is_some(), "expected Image; got {n:?}");
+        match img.unwrap() {
+            Node::Image { url, .. } => assert_eq!(url, "assets/diagram.png"),
             _ => unreachable!(),
         }
     }
