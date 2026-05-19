@@ -1076,7 +1076,7 @@ fn ProjectTilesGrid() -> Element {
             class: "relative z-10 py-24",
 
             div {
-                class: "mx-auto max-w-6xl px-6",
+                class: "mx-auto max-w-7xl px-6",
 
                 div {
                     class: "mb-14 text-center",
@@ -1091,7 +1091,7 @@ fn ProjectTilesGrid() -> Element {
                 }
 
                 div {
-                    class: "grid grid-cols-1 md:grid-cols-2 gap-5 lg:gap-6",
+                    class: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-6",
                     for theme in PROJECT_THEMES.iter().copied() {
                         ProjectTile { theme: theme }
                     }
@@ -1109,7 +1109,7 @@ fn ProjectTile(theme: ProjectTheme) -> Element {
     );
     rsx! {
         div {
-            class: "group relative overflow-hidden rounded-md border p-7 md:p-8 lg:p-10 lg:min-h-[22rem] h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
+            class: "group relative overflow-hidden rounded-md border p-7 md:p-8 lg:min-h-[20rem] h-full transition-all duration-300 hover:-translate-y-0.5 hover:[border-color:var(--pt-accent)]",
             style: "{style}",
 
             // Animated motif painted behind the content
@@ -1148,7 +1148,7 @@ fn ProjectTile(theme: ProjectTheme) -> Element {
             div {
                 class: "relative z-10",
                 div {
-                    class: "text-4xl lg:text-6xl font-semibold tracking-tight text-foreground leading-none",
+                    class: "text-4xl lg:text-5xl font-semibold tracking-tight text-foreground leading-none",
                     "{theme.name}"
                 }
                 div {
