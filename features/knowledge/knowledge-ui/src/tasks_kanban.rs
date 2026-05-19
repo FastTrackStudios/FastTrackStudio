@@ -394,6 +394,10 @@ async fn run_kanban_sync_loop(
     mut version: Signal<u64>,
     mut last_error: Signal<Option<String>>,
 ) {
+    if url.is_empty() {
+        let _ = (doc, &mut version, &mut last_error);
+        return;
+    }
     let sub_client: WorkspaceSyncClient = match connect_client(&url).await {
         Ok(c) => c,
         Err(e) => {

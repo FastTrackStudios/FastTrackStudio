@@ -170,10 +170,28 @@ impl VoxSession {
 ///    :9090, no reverse-proxy in the dev shell).
 pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:9090/vox";
 
+/// Resolved at call time so each surface can choose its default.
+///
+/// - **wasm** (browser bundle): the URL is baked in at compile
+///   time via `TASK_VOX_URL_WEB`; falls back to the local-dev
+///   default. Browser builds always try to sync (no server =
+///   visible failure chip).
+/// - **native** (desktop binary): reads `TASK_VOX_URL` from the
+///   process environment at runtime; returns an EMPTY string
+///   when unset so the desktop app starts in offline-only mode
+///   without spamming connection-refused errors. Set
+///   `TASK_VOX_URL=ws://host:9090/vox` to opt into syncing.
 pub fn vox_url() -> String {
-    option_env!("TASK_VOX_URL_WEB")
-        .unwrap_or(DEFAULT_VOX_URL)
-        .to_string()
+    #[cfg(target_arch = "wasm32")]
+    {
+        option_env!("TASK_VOX_URL_WEB")
+            .unwrap_or(DEFAULT_VOX_URL)
+            .to_string()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("TASK_VOX_URL").unwrap_or_default()
+    }
 }
 
 /// Spawn the session bootstrap. Publishes lifecycle to the

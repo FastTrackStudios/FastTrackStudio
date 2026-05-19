@@ -2933,6 +2933,14 @@ async fn run_sync_loop(
     mut last_error: Signal<Option<String>>,
     mut sync_status: Signal<SyncStatus>,
 ) {
+    // Empty URL = offline-only mode (no server configured). Mark
+    // status accordingly + return; the local CRDT keeps working,
+    // IDB persistence (or the demo seed) supplies the content.
+    if url.is_empty() {
+        sync_status.set(SyncStatus::Offline);
+        let _ = (doc, version, last_error);
+        return;
+    }
     // Subscribe to local commits ONCE — survives across retries.
     // While disconnected the channel buffers; on reconnect we
     // drain it (after shipping the fresh snapshot first).
@@ -3269,6 +3277,12 @@ async fn run_awareness_loop(
     mut remote_cursors: Signal<Vec<RemoteCursor>>,
     doc: Arc<CrdtDoc>,
 ) {
+    // Offline-only mode: no server, no peers, no awareness loop.
+    if url.is_empty() {
+        let _ = (hub, doc);
+        remote_cursors.set(Vec::new());
+        return;
+    }
     // For now, we hard-code the awareness doc id to the org
     // vault — matches what `KnowledgeLive` subscribes to today.
     // Per-project doc routing rides on top later.

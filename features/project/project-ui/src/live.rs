@@ -781,6 +781,10 @@ async fn run_sync_loop(
     mut version: Signal<u64>,
     mut last_error: Signal<Option<String>>,
 ) {
+    if url.is_empty() {
+        let _ = (doc, &mut version, &mut last_error);
+        return;
+    }
     let sub_client: WorkspaceSyncClient = match connect_client(&url).await {
         Ok(c) => c,
         Err(e) => {
@@ -854,7 +858,9 @@ async fn run_sync_loop(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+/// WebSocket-backed vox client. `vox-websocket::WsLink::connect`
+/// works on both native (tokio-tungstenite) and wasm
+/// (web_sys::WebSocket), so the same code path serves both.
 async fn connect_client<C>(url: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxSession,
@@ -867,12 +873,4 @@ where
         .establish::<C>()
         .await
         .map_err(|e| format!("vox establish: {e:?}"))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn connect_client<C>(_url: &str) -> Result<C, String>
-where
-    C: vox_core::FromVoxSession,
-{
-    Err("connect_client only implemented for wasm32".into())
 }
