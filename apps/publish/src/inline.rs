@@ -7,7 +7,7 @@
 //! doesn't need context — the AST carries the resolved URL +
 //! snippet directly.
 
-use crate::components::{BlockRefResolver, WikiResolver};
+use crate::components::{BlockRefResolver, PageEmbedResolver, WikiResolver};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,14 +38,54 @@ pub enum Node {
         snippet: String,
         broken: bool,
     },
+    /// `![[Page]]` — embed the target page inline. Resolved at
+    /// parse time: `slug` is the destination page slug,
+    /// `contents` is the ordered raw block-content strings (will
+    /// be re-parsed with an empty PageEmbedResolver at render
+    /// time to bound recursion). `broken: true` when no page
+    /// matches the basename.
+    PageEmbed {
+        slug: String,
+        label: String,
+        contents: Vec<String>,
+        broken: bool,
+    },
 }
 
-pub fn parse(s: &str, resolver: &WikiResolver, blocks: &BlockRefResolver) -> Vec<Node> {
+pub fn parse(
+    s: &str,
+    resolver: &WikiResolver,
+    blocks: &BlockRefResolver,
+    page_embeds: &PageEmbedResolver,
+) -> Vec<Node> {
     let mut out = Vec::new();
     let mut buf = String::new();
     let bytes = s.as_bytes();
     let mut i = 0usize;
     while i < s.len() {
+        // ![[Page]] — page embed. Match BEFORE wikilink so the
+        // bang prefix wins; mirrors Obsidian's `![[...]]` semantics.
+        if s[i..].starts_with("![[") {
+            if let Some(end) = s[i + 3..].find("]]") {
+                let body = &s[i + 3..i + 3 + end];
+                let (target, alias) = match body.split_once('|') {
+                    Some((t, a)) => (t.trim(), a.trim()),
+                    None => (body.trim(), body.trim()),
+                };
+                let key = target.to_lowercase();
+                let slug = resolver.0.get(&key).cloned();
+                let contents = page_embeds.0.get(&key).cloned().unwrap_or_default();
+                flush(&mut buf, &mut out);
+                out.push(Node::PageEmbed {
+                    broken: slug.is_none(),
+                    slug: slug.unwrap_or_default(),
+                    label: alias.to_string(),
+                    contents,
+                });
+                i += 3 + end + 2;
+                continue;
+            }
+        }
         // ((<uuid>)) — block reference. Match before wikilink so
         // `((` is preferred over a hypothetical bracket sequence.
         // UUID v4 canonical form is 36 chars (8-4-4-4-12 with
@@ -113,7 +153,7 @@ pub fn parse(s: &str, resolver: &WikiResolver, blocks: &BlockRefResolver) -> Vec
         // **bold**
         if s[i..].starts_with("**") {
             if let Some(end) = s[i + 2..].find("**") {
-                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks);
+                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks, page_embeds);
                 flush(&mut buf, &mut out);
                 out.push(Node::Bold(inner));
                 i += 2 + end + 2;
@@ -123,7 +163,7 @@ pub fn parse(s: &str, resolver: &WikiResolver, blocks: &BlockRefResolver) -> Vec
         // ~~strike~~
         if s[i..].starts_with("~~") {
             if let Some(end) = s[i + 2..].find("~~") {
-                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks);
+                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks, page_embeds);
                 flush(&mut buf, &mut out);
                 out.push(Node::Strikethrough(inner));
                 i += 2 + end + 2;
@@ -133,7 +173,7 @@ pub fn parse(s: &str, resolver: &WikiResolver, blocks: &BlockRefResolver) -> Vec
         // ==highlight==
         if s[i..].starts_with("==") {
             if let Some(end) = s[i + 2..].find("==") {
-                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks);
+                let inner = parse(&s[i + 2..i + 2 + end], resolver, blocks, page_embeds);
                 flush(&mut buf, &mut out);
                 out.push(Node::Highlight(inner));
                 i += 2 + end + 2;
@@ -143,7 +183,7 @@ pub fn parse(s: &str, resolver: &WikiResolver, blocks: &BlockRefResolver) -> Vec
         // *italic* (not part of `**`)
         if bytes[i] == b'*' && bytes.get(i + 1).copied() != Some(b'*') {
             if let Some(end) = s[i + 1..].find('*') {
-                let inner = parse(&s[i + 1..i + 1 + end], resolver, blocks);
+                let inner = parse(&s[i + 1..i + 1 + end], resolver, blocks, page_embeds);
                 flush(&mut buf, &mut out);
                 out.push(Node::Italic(inner));
                 i += 1 + end + 1;
@@ -214,7 +254,12 @@ mod tests {
 
     #[test]
     fn wikilink_resolves() {
-        let n = parse("see [[Foo]]", &book(), &empty_blocks());
+        let n = parse(
+            "see [[Foo]]",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
         assert!(matches!(
             n.last().unwrap(),
             Node::Wikilink { broken: false, .. }
@@ -223,7 +268,12 @@ mod tests {
 
     #[test]
     fn wikilink_broken() {
-        let n = parse("see [[Bar]]", &book(), &empty_blocks());
+        let n = parse(
+            "see [[Bar]]",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
         assert!(matches!(
             n.last().unwrap(),
             Node::Wikilink { broken: true, .. }
@@ -232,7 +282,12 @@ mod tests {
 
     #[test]
     fn external_link() {
-        let n = parse("[GitHub](https://github.com)", &book(), &empty_blocks());
+        let n = parse(
+            "[GitHub](https://github.com)",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
         assert!(matches!(
             n.first().unwrap(),
             Node::ExternalLink { url, .. } if url == "https://github.com"
@@ -241,7 +296,12 @@ mod tests {
 
     #[test]
     fn nested_emphasis() {
-        let n = parse("**bold *and italic* end**", &book(), &empty_blocks());
+        let n = parse(
+            "**bold *and italic* end**",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
         let bold = match n.first().unwrap() {
             Node::Bold(c) => c,
             _ => panic!(),
@@ -253,7 +313,12 @@ mod tests {
     fn block_ref_resolves() {
         let id = Uuid::new_v4();
         let resolver = one_block(id, "intro", "intro snippet");
-        let n = parse(&format!("see (({id})) end"), &book(), &resolver);
+        let n = parse(
+            &format!("see (({id})) end"),
+            &book(),
+            &resolver,
+            &PageEmbedResolver::default(),
+        );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef {
                 target_id,
@@ -272,7 +337,12 @@ mod tests {
     #[test]
     fn block_ref_broken_uuid_present_but_unknown() {
         let id = Uuid::new_v4();
-        let n = parse(&format!("see (({id})) end"), &book(), &empty_blocks());
+        let n = parse(
+            &format!("see (({id})) end"),
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef { broken, .. } => Some(*broken),
             _ => None,
@@ -281,10 +351,57 @@ mod tests {
     }
 
     #[test]
+    fn page_embed_resolves_and_carries_contents() {
+        let mut embeds = HashMap::new();
+        embeds.insert(
+            "foo".to_string(),
+            vec!["line one".to_string(), "line two".to_string()],
+        );
+        let er = PageEmbedResolver(Arc::new(embeds));
+        let n = parse("![[Foo]] outside", &book(), &empty_blocks(), &er);
+        let pe = n.iter().find_map(|x| match x {
+            Node::PageEmbed {
+                slug,
+                contents,
+                broken,
+                ..
+            } => Some((slug.clone(), contents.clone(), *broken)),
+            _ => None,
+        });
+        assert_eq!(
+            pe,
+            Some((
+                "foo".to_string(),
+                vec!["line one".to_string(), "line two".to_string()],
+                false
+            ))
+        );
+    }
+
+    #[test]
+    fn page_embed_unknown_target_is_broken() {
+        let n = parse(
+            "see ![[Nope]]",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
+        let broken = n
+            .iter()
+            .any(|x| matches!(x, Node::PageEmbed { broken: true, .. }));
+        assert!(broken, "expected broken PageEmbed; got {n:?}");
+    }
+
+    #[test]
     fn block_ref_not_a_uuid_is_left_alone() {
         // `((not-a-uuid))` should not become a BlockRef — it should
         // fall through to text since the body isn't parseable.
-        let n = parse("see ((not-a-uuid)) end", &book(), &empty_blocks());
+        let n = parse(
+            "see ((not-a-uuid)) end",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+        );
         assert!(!n.iter().any(|x| matches!(x, Node::BlockRef { .. })));
         let txt: String = n
             .iter()

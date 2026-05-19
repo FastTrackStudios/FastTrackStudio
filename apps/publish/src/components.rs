@@ -47,6 +47,14 @@ pub struct BlockRefTarget {
 #[derive(Clone, Default, PartialEq)]
 pub struct BlockRefResolver(pub Arc<HashMap<uuid::Uuid, BlockRefTarget>>);
 
+/// Resolution table: lowercased page basename → ordered list of
+/// block contents (sorted by block sort_key). Lets `![[Page]]`
+/// embed nodes render the target page's blocks inline at parse
+/// time. Bounded to a small per-page max in the builder so a
+/// huge page can't blow up the embedding page.
+#[derive(Clone, Default, PartialEq)]
+pub struct PageEmbedResolver(pub Arc<HashMap<String, Vec<String>>>);
+
 /// Outer document. `dioxus-ssr` renders the children as HTML
 /// inside a hand-written `<html>` shell (`crate::render::shell`)
 /// — Dioxus 0.7 doesn't have a first-class `<html>`/`<head>`
@@ -209,7 +217,8 @@ pub fn BlockNode(block: Block) -> Element {
     };
     let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
     let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
-    let inlines = inline::parse(&block.content, &resolver, &block_refs);
+    let page_embeds = try_use_context::<PageEmbedResolver>().unwrap_or_default();
+    let inlines = inline::parse(&block.content, &resolver, &block_refs, &page_embeds);
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
     let anchor = format!("block-{}", block.id.simple());
@@ -223,7 +232,8 @@ pub fn BlockNode(block: Block) -> Element {
     if let Some((target_id, page_slug, content)) = solo_block_ref(&inlines, &block_refs) {
         let href = format!("/{page_slug}/#block-{}", target_id.simple());
         let empty_blocks = BlockRefResolver::default();
-        let target_inlines = inline::parse(&content, &resolver, &empty_blocks);
+        let empty_embeds = PageEmbedResolver::default();
+        let target_inlines = inline::parse(&content, &resolver, &empty_blocks, &empty_embeds);
         return rsx! {
             aside { id: "{anchor}", class: "block-embed",
                 a { class: "block-embed-source", href: "{href}",
@@ -426,6 +436,49 @@ pub fn InlineNode(node: inline::Node) -> Element {
         Node::ExternalLink { label, url } => rsx! {
             a { class: "ext", href: "{url}", target: "_blank", rel: "noopener", "{label}" }
         },
+        Node::PageEmbed {
+            slug,
+            label,
+            contents,
+            broken,
+        } => {
+            if broken {
+                rsx! {
+                    span {
+                        class: "page-embed broken",
+                        title: "page not found",
+                        "![[{label}]]"
+                    }
+                }
+            } else {
+                // Render the embedded page as an aside with a
+                // header link + each block content reparsed
+                // through the inline parser (empty resolvers to
+                // bound recursion at one level). Limit body count
+                // to 10 to avoid runaway docs.
+                let href = format!("/{slug}/");
+                let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
+                let empty_blocks = BlockRefResolver::default();
+                let empty_embeds = PageEmbedResolver::default();
+                let bodies: Vec<Vec<inline::Node>> = contents
+                    .iter()
+                    .take(10)
+                    .map(|c| inline::parse(c, &resolver, &empty_blocks, &empty_embeds))
+                    .collect();
+                rsx! {
+                    aside { class: "page-embed",
+                        a { class: "page-embed-source", href: "{href}",
+                            "↪ {label}"
+                        }
+                        div { class: "page-embed-body",
+                            for (i, body) in bodies.into_iter().enumerate() {
+                                p { key: "{i}", Inlines { nodes: body } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Node::BlockRef {
             target_id,
             page_slug,

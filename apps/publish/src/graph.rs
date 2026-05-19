@@ -18,7 +18,7 @@
 //! simulation. Good enough up to ~500 nodes; bigger vaults can
 //! upgrade to Pixi/D3 in a later phase.
 
-use crate::components::{BlockRefResolver, BlockRefTarget, WikiResolver};
+use crate::components::{BlockRefResolver, BlockRefTarget, PageEmbedResolver, WikiResolver};
 use crate::inline;
 use crate::site::slugify;
 use dioxus::prelude::*;
@@ -74,7 +74,12 @@ pub fn compute(pages: &[Page], blocks: &[Block]) -> GraphData {
         let Some(src) = id_to_slug.get(&b.page_id) else {
             continue;
         };
-        let nodes = inline::parse(&b.content, &resolver, &block_refs);
+        let nodes = inline::parse(
+            &b.content,
+            &resolver,
+            &block_refs,
+            &PageEmbedResolver::default(),
+        );
         for n in walk(&nodes) {
             match n {
                 inline::Node::Wikilink {
@@ -231,7 +236,12 @@ pub fn build_backlinks(pages: &[Page], blocks: &[Block]) -> BacklinkIndex {
         let Some((src_slug, src_label)) = id_to_meta.get(&b.page_id) else {
             continue;
         };
-        let parsed = inline::parse(&b.content, &resolver, &block_refs);
+        let parsed = inline::parse(
+            &b.content,
+            &resolver,
+            &block_refs,
+            &PageEmbedResolver::default(),
+        );
         for n in walk(&parsed) {
             let target = match n {
                 inline::Node::Wikilink {

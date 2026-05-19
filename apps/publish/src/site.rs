@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::components::WikiResolver;
+use crate::components::{PageEmbedResolver, WikiResolver};
 use crate::graph::build_block_ref_resolver;
 use crate::{feeds, graph, render, search, tags};
 
@@ -88,6 +88,23 @@ pub async fn build(
     // with snippet previews + deep-link hrefs.
     let block_refs = build_block_ref_resolver(&all_blocks, &id_to_slug);
 
+    // ── Page-embed resolver ──────────────────────────────
+    // Basename (lowercased) → ordered block contents. Lets
+    // `![[Page]]` embeds render the target's blocks inline.
+    let mut embed_map: HashMap<String, Vec<String>> = HashMap::new();
+    for p in &pages {
+        let mut bs = blocks_by_page.get(&p.id).cloned().unwrap_or_default();
+        bs.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        let contents: Vec<String> = bs
+            .into_iter()
+            .filter(|b| !b.content.trim().is_empty())
+            .take(50) // hard cap so a giant page can't blow up an embed
+            .map(|b| b.content)
+            .collect();
+        embed_map.insert(p.basename.to_lowercase(), contents);
+    }
+    let page_embeds = PageEmbedResolver(Arc::new(embed_map));
+
     // ── Graph ────────────────────────────────────────────
     let graph_data = graph::compute(&pages, &all_blocks);
     let graph_json =
@@ -114,6 +131,7 @@ pub async fn build(
             &blocks,
             &resolver,
             &block_refs,
+            &page_embeds,
             &pages,
             &bl,
         );

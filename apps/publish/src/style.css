@@ -399,6 +399,46 @@ aside.block-embed .block-embed-body {
   color: var(--text);
 }
 
+/* Page embed (`![[Page]]`) — Obsidian-style inline page embed.
+   Visually heavier than block embed: top border, monospace
+   source link, paragraph stack of the embedded page's first
+   blocks. */
+aside.page-embed {
+  margin: 1em 0;
+  padding: 0.75em 1em;
+  border-top: 2px solid var(--link);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
+  border-radius: 0.5em;
+}
+
+aside.page-embed .page-embed-source {
+  display: block;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-decoration: none;
+  margin-bottom: 0.5em;
+}
+
+aside.page-embed .page-embed-source:hover {
+  color: var(--link);
+}
+
+aside.page-embed .page-embed-body p {
+  margin: 0.3em 0;
+}
+
+span.page-embed.broken {
+  color: var(--strike);
+  border: 1px dashed var(--strike);
+  padding: 0.05em 0.4em;
+  border-radius: 0.3em;
+  font-size: 0.85em;
+}
+
 /* Block-level `prop:: value` chips rendered under each block. */
 .block-props {
   margin: 0.2em 0 0.4em 1.5em;
