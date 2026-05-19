@@ -368,14 +368,6 @@ Cm9
 /// Landing page for FastTrackStudio
 #[component]
 fn Home() -> Element {
-    // Source text state driven by typewriter animation
-    let source = use_signal(|| DEMO_CHARTS[0].to_string());
-    // Use Page mode for proper A4 document appearance
-    let preview_mode = use_signal(|| components::PreviewMode::Page);
-
-    // Create the list of charts for the typewriter
-    let charts: Vec<String> = DEMO_CHARTS.iter().map(|s| s.to_string()).collect();
-
     rsx! {
         div {
             class: "relative pt-24",
@@ -437,13 +429,6 @@ fn Home() -> Element {
                         }
                     }
                 }
-            }
-
-            // 3D Carousel — outside the overflow-hidden hero section so sticky works
-            ShowcaseCarousel {
-                source: source,
-                preview_mode: preview_mode,
-                charts: charts.clone()
             }
 
             ProjectTilesGrid {}
