@@ -452,28 +452,6 @@ fn Home() -> Element {
 
             ProjectTilesGrid {}
 
-            // Setlist Control Preview section
-            section {
-                class: "relative z-10 py-24 bg-card/30",
-
-                div {
-                    class: "mx-auto max-w-5xl px-6",
-
-                    div {
-                        class: "text-center mb-12",
-                        h2 {
-                            class: "text-3xl font-bold text-foreground mb-4",
-                            "Live Performance Control"
-                        }
-                        p {
-                            class: "text-lg text-muted-foreground max-w-2xl mx-auto",
-                            "Navigate your setlist with ease. Real-time section tracking, song navigation, and transport controls all in one unified view."
-                        }
-                    }
-
-                    SetlistPreviewCard {}
-                }
-            }
         }
     }
 }
