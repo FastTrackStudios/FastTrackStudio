@@ -27,8 +27,9 @@ pub mod syntax;
 pub use components::{
     BacklinkEntry, BacklinksPanel, BlockNode, BlockRefNavigator, BlockRefResolver, BlockRefTarget,
     DocBody, Drawer, InlineNode, Inlines, NamespaceResolver, PageContent, PageEmbedResolver,
-    PageTreeNode, PlanningTimestamps, QueryHit, QueryResolver, Sidebar, TaskMarker, WikiNavigator,
-    WikiResolver, build_page_tree, parse_property_line, parse_props, peel_block_properties,
-    peel_drawers, peel_planning, peel_task_marker, slugify,
+    PagePropertyResolver, PageTreeNode, PlanningTimestamps, QueryHit, QueryResolver, Sidebar,
+    TaskMarker, WikiNavigator, WikiResolver, build_page_tree, extract_youtube_id,
+    parse_property_line, parse_props, peel_block_properties, peel_drawers, peel_planning,
+    peel_task_marker, slugify,
 };
 pub use parser::{Node, parse};

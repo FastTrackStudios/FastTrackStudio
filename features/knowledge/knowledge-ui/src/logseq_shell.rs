@@ -572,6 +572,7 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| resolvers.page_embeds.clone());
     use_context_provider(|| resolvers.queries.clone());
     use_context_provider(|| resolvers.namespaces.clone());
+    use_context_provider(|| resolvers.properties.clone());
 
     let mut active_page_w = active_page;
     let mut panel_w = panel;
@@ -863,6 +864,7 @@ struct ResolverBundle {
     page_embeds: PageEmbedResolver,
     queries: QueryResolver,
     namespaces: NamespaceResolver,
+    properties: publish_core::PagePropertyResolver,
 }
 
 fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
@@ -956,6 +958,7 @@ fn build_resolvers(vault: &LogseqVault) -> ResolverBundle {
         page_embeds: PageEmbedResolver(Arc::new(embed_map)),
         queries: QueryResolver(Arc::new(tag_map)),
         namespaces: NamespaceResolver(Arc::new(ns_map)),
+        properties: publish_core::PagePropertyResolver::default(),
     }
 }
 
@@ -1786,6 +1789,7 @@ fn LogseqBlockBody(block: Block) -> Element {
     let (plan, after_plan) = publish_core::peel_planning(after_marker);
     let (drawers, after_drawers) = publish_core::peel_drawers(after_plan);
     let after_drawers_owned: String = after_drawers;
+    let properties = use_context::<publish_core::PagePropertyResolver>();
     let inlines = publish_core::parse(
         &after_drawers_owned,
         &resolver,
@@ -1793,6 +1797,7 @@ fn LogseqBlockBody(block: Block) -> Element {
         &page_embeds,
         &queries,
         &namespaces,
+        &properties,
     );
     let chips = publish_core::parse_props(&block.properties_json);
 

@@ -8,7 +8,8 @@
 //! snippet directly.
 
 use crate::components::{
-    BlockRefResolver, NamespaceResolver, PageEmbedResolver, QueryHit, QueryResolver, WikiResolver,
+    BlockRefResolver, NamespaceResolver, PageEmbedResolver, PagePropertyResolver, QueryHit,
+    QueryResolver, WikiResolver,
 };
 use uuid::Uuid;
 
@@ -106,6 +107,7 @@ pub fn parse(
     page_embeds: &PageEmbedResolver,
     queries: &QueryResolver,
     namespaces: &NamespaceResolver,
+    properties: &PagePropertyResolver,
 ) -> Vec<Node> {
     let mut out = Vec::new();
     let mut buf = String::new();
@@ -212,7 +214,7 @@ pub fn parse(
             // Need at least `{{query ` followed by `}}` somewhere.
             if let Some(end) = s[i + 7..].find("}}") {
                 let raw = s[i + 7..i + 7 + end].trim();
-                let (results, broken) = eval_query(raw, queries);
+                let (results, broken) = eval_query(raw, queries, properties);
                 flush(&mut buf, &mut out);
                 out.push(Node::Query {
                     expr: raw.to_string(),
@@ -375,6 +377,7 @@ pub fn parse(
                     page_embeds,
                     queries,
                     namespaces,
+                    properties,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Bold(inner));
@@ -392,6 +395,7 @@ pub fn parse(
                     page_embeds,
                     queries,
                     namespaces,
+                    properties,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Strikethrough(inner));
@@ -409,6 +413,7 @@ pub fn parse(
                     page_embeds,
                     queries,
                     namespaces,
+                    properties,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Highlight(inner));
@@ -426,6 +431,7 @@ pub fn parse(
                     page_embeds,
                     queries,
                     namespaces,
+                    properties,
                 );
                 flush(&mut buf, &mut out);
                 out.push(Node::Italic(inner));
@@ -477,9 +483,13 @@ fn short_uuid(id: &Uuid) -> String {
 /// Returns `(results, broken)`. `broken = true` only when the
 /// expression is structurally unrecognizable; `false` covers
 /// "known shape but no matches."
-pub fn eval_query(expr: &str, queries: &QueryResolver) -> (Vec<QueryHit>, bool) {
+pub fn eval_query(
+    expr: &str,
+    queries: &QueryResolver,
+    properties: &PagePropertyResolver,
+) -> (Vec<QueryHit>, bool) {
     match parse_query_expr(expr.trim()) {
-        Some(qe) => (eval_parsed(&qe, queries), false),
+        Some(qe) => (eval_parsed(&qe, queries, properties), false),
         None => (Vec::new(), true),
     }
 }
@@ -491,6 +501,9 @@ pub enum QueryExpr {
     And(Vec<QueryExpr>),
     Or(Vec<QueryExpr>),
     Not(Box<QueryExpr>),
+    /// `(property <key> <value>)` — pages whose frontmatter has
+    /// `<key>:: <value>`. Both are lowercased for matching.
+    PageProperty(String, String),
 }
 
 /// Top-level parser entry. Returns `None` on malformed input.
@@ -526,6 +539,15 @@ pub fn parse_query_expr(s: &str) -> Option<QueryExpr> {
                     return None;
                 }
                 parse_query_expr(&tokens[0]).map(|e| QueryExpr::Not(Box::new(e)))
+            }
+            "property" => {
+                if tokens.len() != 2 {
+                    return None;
+                }
+                Some(QueryExpr::PageProperty(
+                    tokens[0].to_lowercase(),
+                    tokens[1].to_lowercase(),
+                ))
             }
             _ => None,
         }
@@ -571,16 +593,26 @@ fn tokenize_sexp(s: &str) -> Option<Vec<String>> {
     Some(out)
 }
 
-fn eval_parsed(expr: &QueryExpr, queries: &QueryResolver) -> Vec<QueryHit> {
+fn eval_parsed(
+    expr: &QueryExpr,
+    queries: &QueryResolver,
+    properties: &PagePropertyResolver,
+) -> Vec<QueryHit> {
     match expr {
         QueryExpr::Tag(t) => queries.0.get(t).cloned().unwrap_or_default(),
+        QueryExpr::PageProperty(k, v) => properties
+            .0
+            .get(k)
+            .and_then(|m| m.get(v))
+            .cloned()
+            .unwrap_or_default(),
         QueryExpr::And(children) => {
             if children.is_empty() {
                 return Vec::new();
             }
-            let mut acc = eval_parsed(&children[0], queries);
+            let mut acc = eval_parsed(&children[0], queries, properties);
             for c in &children[1..] {
-                let set = eval_parsed(c, queries);
+                let set = eval_parsed(c, queries, properties);
                 acc.retain(|h| set.iter().any(|s| s.slug == h.slug));
             }
             dedupe_sort(acc)
@@ -588,16 +620,24 @@ fn eval_parsed(expr: &QueryExpr, queries: &QueryResolver) -> Vec<QueryHit> {
         QueryExpr::Or(children) => {
             let mut acc: Vec<QueryHit> = Vec::new();
             for c in children {
-                acc.extend(eval_parsed(c, queries));
+                acc.extend(eval_parsed(c, queries, properties));
             }
             dedupe_sort(acc)
         }
         QueryExpr::Not(inner) => {
-            let exclude = eval_parsed(inner, queries);
-            // Universe = every page hit across the resolver.
+            let exclude = eval_parsed(inner, queries, properties);
+            // Universe = every page hit across both resolvers
+            // (tags + properties). Conservative; in practice the
+            // tag index already covers "every page" since we
+            // index pages by their tags.
             let mut universe: Vec<QueryHit> = Vec::new();
             for hits in queries.0.values() {
                 universe.extend(hits.iter().cloned());
+            }
+            for kmap in properties.0.values() {
+                for hits in kmap.values() {
+                    universe.extend(hits.iter().cloned());
+                }
             }
             let universe = dedupe_sort(universe);
             universe
@@ -653,6 +693,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -669,6 +710,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         assert!(matches!(
             n.last().unwrap(),
@@ -685,6 +727,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         assert!(matches!(
             n.first().unwrap(),
@@ -701,6 +744,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let bold = match n.first().unwrap() {
             Node::Bold(c) => c,
@@ -720,6 +764,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef {
@@ -746,6 +791,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::BlockRef { broken, .. } => Some(*broken),
@@ -769,6 +815,7 @@ mod tests {
             &er,
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let pe = n.iter().find_map(|x| match x {
             Node::PageEmbed {
@@ -813,6 +860,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &qr,
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let r = n.iter().find_map(|x| match x {
             Node::Query {
@@ -832,6 +880,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let broken = n
             .iter()
@@ -848,6 +897,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let broken = n
             .iter()
@@ -866,6 +916,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::BlockRef { .. })));
         let txt: String = n
@@ -888,6 +939,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let img = n.iter().find(|x| matches!(x, Node::Image { .. }));
         assert!(img.is_some());
@@ -910,6 +962,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         assert!(n.iter().any(|x| matches!(x, Node::PageEmbed { .. })));
         assert!(!n.iter().any(|x| matches!(x, Node::Image { .. })));
@@ -924,6 +977,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let fr = n.iter().find_map(|x| match x {
             Node::FootnoteRef(id) => Some(id.clone()),
@@ -943,6 +997,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         assert!(!n.iter().any(|x| matches!(x, Node::FootnoteRef(_))));
     }
@@ -962,6 +1017,7 @@ mod tests {
             &er,
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let pe = n.iter().find(|x| matches!(x, Node::PageEmbed { .. }));
         assert!(pe.is_some(), "expected PageEmbed, got {n:?}");
@@ -973,7 +1029,7 @@ mod tests {
         q.insert("a".to_string(), vec![hit("p1"), hit("p2"), hit("p3")]);
         q.insert("b".to_string(), vec![hit("p2"), hit("p3"), hit("p4")]);
         let qr = QueryResolver(Arc::new(q));
-        let (results, broken) = eval_query("(and #a #b)", &qr);
+        let (results, broken) = eval_query("(and #a #b)", &qr, &PagePropertyResolver::default());
         assert!(!broken);
         let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
         assert_eq!(slugs, vec!["p2", "p3"]);
@@ -985,7 +1041,7 @@ mod tests {
         q.insert("a".to_string(), vec![hit("p1"), hit("p2")]);
         q.insert("b".to_string(), vec![hit("p2"), hit("p3")]);
         let qr = QueryResolver(Arc::new(q));
-        let (results, broken) = eval_query("(or #a #b)", &qr);
+        let (results, broken) = eval_query("(or #a #b)", &qr, &PagePropertyResolver::default());
         assert!(!broken);
         let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
         assert_eq!(slugs, vec!["p1", "p2", "p3"]);
@@ -998,7 +1054,7 @@ mod tests {
         q.insert("b".to_string(), vec![hit("p2"), hit("p3")]);
         let qr = QueryResolver(Arc::new(q));
         // Universe = {p1, p2, p3}; not #a → {p3}
-        let (results, broken) = eval_query("(not #a)", &qr);
+        let (results, broken) = eval_query("(not #a)", &qr, &PagePropertyResolver::default());
         assert!(!broken);
         let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
         assert_eq!(slugs, vec!["p3"]);
@@ -1013,20 +1069,36 @@ mod tests {
         let qr = QueryResolver(Arc::new(q));
         // (and (or #a #b) #c) → pages tagged c AND (a OR b)
         // c={p2,p3}; (a OR b)={p1,p2,p3,p4}; intersection={p2,p3}
-        let (results, broken) = eval_query("(and (or #a #b) #c)", &qr);
+        let (results, broken) =
+            eval_query("(and (or #a #b) #c)", &qr, &PagePropertyResolver::default());
         assert!(!broken);
         let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
         assert_eq!(slugs, vec!["p2", "p3"]);
     }
 
     #[test]
+    fn query_dsl_property_filter() {
+        let qr = QueryResolver(Arc::new(HashMap::new()));
+        let mut by_key: HashMap<String, HashMap<String, Vec<QueryHit>>> = HashMap::new();
+        let mut by_val: HashMap<String, Vec<QueryHit>> = HashMap::new();
+        by_val.insert("active".to_string(), vec![hit("p1"), hit("p2")]);
+        by_val.insert("done".to_string(), vec![hit("p3")]);
+        by_key.insert("status".to_string(), by_val);
+        let pr = PagePropertyResolver(Arc::new(by_key));
+        let (results, broken) = eval_query("(property status active)", &qr, &pr);
+        assert!(!broken);
+        let slugs: Vec<&str> = results.iter().map(|h| h.slug.as_str()).collect();
+        assert_eq!(slugs, vec!["p1", "p2"]);
+    }
+
+    #[test]
     fn query_dsl_malformed_marks_broken() {
         let qr = QueryResolver(Arc::new(HashMap::new()));
-        let (_, broken) = eval_query("(unknown #x)", &qr);
+        let (_, broken) = eval_query("(unknown #x)", &qr, &PagePropertyResolver::default());
         assert!(broken);
-        let (_, broken) = eval_query("(and #x", &qr);
+        let (_, broken) = eval_query("(and #x", &qr, &PagePropertyResolver::default());
         assert!(broken);
-        let (_, broken) = eval_query("just text", &qr);
+        let (_, broken) = eval_query("just text", &qr, &PagePropertyResolver::default());
         assert!(broken);
     }
 
@@ -1046,6 +1118,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let media = n.iter().find_map(|x| match x {
             Node::Media { kind, target } => Some((*kind, target.clone())),
@@ -1066,6 +1139,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let kinds: Vec<MediaKind> = n
             .iter()
@@ -1112,6 +1186,7 @@ mod tests {
             &PageEmbedResolver::default(),
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         let br = n.iter().find(|x| matches!(x, Node::BlockRef { .. }));
         assert!(

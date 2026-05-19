@@ -133,9 +133,16 @@ pub struct QueryHit {
 /// Resolution table: lowercased tag → matching pages. Lets
 /// `{{query #tag}}` block content evaluate at parse time and
 /// embed the result list inline. Logseq has full Datalog over
-/// blocks; v1 supports tag filtering — the simplest 80% case.
+/// blocks; we support tag filtering + page-property filtering
+/// via the s-expression DSL (see `parser::eval_query`).
 #[derive(Clone, Default, PartialEq)]
 pub struct QueryResolver(pub Arc<HashMap<String, Vec<QueryHit>>>);
+
+/// Resolution table for `(property <key> <value>)` queries.
+/// Inner map: `key` → `value` → matching pages. Keys + values
+/// are lowercased on the way in to make matching forgiving.
+#[derive(Clone, Default, PartialEq)]
+pub struct PagePropertyResolver(pub Arc<HashMap<String, HashMap<String, Vec<QueryHit>>>>);
 
 /// Resolution table: lowercased namespace prefix → matching child
 /// pages. Lets `{{namespace foo/bar}}` block content list every
@@ -427,6 +434,7 @@ pub fn BlockNode(block: Block) -> Element {
     // them as date pills under the block body.
     let (plan, body_content) = peel_planning(body_content);
     let namespaces = try_use_context::<NamespaceResolver>().unwrap_or_default();
+    let properties = try_use_context::<PagePropertyResolver>().unwrap_or_default();
     let inlines = inline::parse(
         body_content,
         &resolver,
@@ -434,6 +442,7 @@ pub fn BlockNode(block: Block) -> Element {
         &page_embeds,
         &queries,
         &namespaces,
+        &properties,
     );
     // Block-anchor id — lets `((uuid))` references in other pages
     // deep-link to this block. Mirrors Logseq's `#block-<uuid>`.
@@ -456,6 +465,7 @@ pub fn BlockNode(block: Block) -> Element {
             &empty_embeds,
             &QueryResolver::default(),
             &NamespaceResolver::default(),
+            &PagePropertyResolver::default(),
         );
         return rsx! {
             aside { id: "{anchor}", class: "block-embed",
@@ -1148,6 +1158,7 @@ pub fn InlineNode(node: inline::Node) -> Element {
                             &empty_embeds,
                             &QueryResolver::default(),
                             &NamespaceResolver::default(),
+                            &PagePropertyResolver::default(),
                         )
                     })
                     .collect();
