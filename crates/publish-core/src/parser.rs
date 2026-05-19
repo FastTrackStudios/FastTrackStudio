@@ -69,6 +69,17 @@ pub enum Node {
         prefix: String,
         results: Vec<QueryHit>,
     },
+    /// `![alt](url)` — inline markdown image. Distinct from
+    /// `![[Page]]` page-embed, which is matched first.
+    Image {
+        alt: String,
+        url: String,
+    },
+    /// `[^id]` — superscript footnote reference. The definition
+    /// `[^id]: body` block is treated as a normal paragraph by
+    /// this inline parser; rendering renders the definitions
+    /// separately at block level.
+    FootnoteRef(String),
 }
 
 pub fn parse(
@@ -100,6 +111,55 @@ pub fn parse(
                 });
                 i += 11 + end + 2;
                 continue;
+            }
+        }
+        // {{embed [[Page]]}} or {{embed ((uuid))}} — Logseq's
+        // embed macro. Lower into the corresponding PageEmbed or
+        // BlockRef so the downstream renderer doesn't need new
+        // node variants. Recognized payloads:
+        //   {{embed [[Page]]}}     → PageEmbed
+        //   {{embed ((uuid))}}     → BlockRef
+        if s[i..].starts_with("{{embed") {
+            if let Some(end) = s[i + 7..].find("}}") {
+                let raw = s[i + 7..i + 7 + end].trim();
+                // Page-embed form.
+                if let Some(inner) = raw.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) {
+                    let (target, alias) = match inner.split_once('|') {
+                        Some((t, a)) => (t.trim(), a.trim()),
+                        None => (inner.trim(), inner.trim()),
+                    };
+                    let key = target.to_lowercase();
+                    let slug = resolver.0.get(&key).cloned();
+                    let contents = page_embeds.0.get(&key).cloned().unwrap_or_default();
+                    flush(&mut buf, &mut out);
+                    out.push(Node::PageEmbed {
+                        broken: slug.is_none(),
+                        slug: slug.unwrap_or_default(),
+                        label: alias.to_string(),
+                        contents,
+                    });
+                    i += 7 + end + 2;
+                    continue;
+                }
+                // Block-embed form.
+                if let Some(inner) = raw.strip_prefix("((").and_then(|r| r.strip_suffix("))")) {
+                    if let Ok(id) = Uuid::parse_str(inner.trim()) {
+                        flush(&mut buf, &mut out);
+                        let target = blocks.0.get(&id);
+                        out.push(Node::BlockRef {
+                            target_id: id,
+                            page_slug: target.map(|t| t.page_slug.clone()).unwrap_or_default(),
+                            snippet: target
+                                .map(|t| t.snippet.clone())
+                                .unwrap_or_else(|| short_uuid(&id)),
+                            broken: target.is_none(),
+                        });
+                        i += 7 + end + 2;
+                        continue;
+                    }
+                }
+                // Unrecognized embed payload — fall through and
+                // let text accumulate.
             }
         }
         // {{query <expr>}} — embedded live query. Match before
@@ -162,6 +222,61 @@ pub fn parse(
                     });
                     i += 2 + end + 2;
                     continue;
+                }
+            }
+        }
+        // ![alt](url) — inline markdown image. Matches AFTER
+        // `![[Page]]` so the page-embed form wins; before `[
+        // label](url)` so the bang prefix isn't confused with a
+        // text-emoji.
+        if bytes[i] == b'!' && bytes.get(i + 1).copied() == Some(b'[') {
+            // Skip if this is actually `![[...`.
+            if bytes.get(i + 2).copied() != Some(b'[') {
+                if let Some(alt_end) = s[i + 2..].find(']') {
+                    let after = i + 2 + alt_end + 1;
+                    if bytes.get(after).copied() == Some(b'(') {
+                        if let Some(url_end) = s[after + 1..].find(')') {
+                            let alt = &s[i + 2..i + 2 + alt_end];
+                            let url = &s[after + 1..after + 1 + url_end];
+                            if !url.is_empty() && !url.contains(' ') {
+                                flush(&mut buf, &mut out);
+                                out.push(Node::Image {
+                                    alt: alt.to_string(),
+                                    url: url.to_string(),
+                                });
+                                i = after + 1 + url_end + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // [^id] — footnote reference. Matches before plain `[a](b)`
+        // so the caret prefix isn't consumed as a label.
+        if bytes[i] == b'[' && bytes.get(i + 1).copied() == Some(b'^') {
+            if let Some(end) = s[i + 2..].find(']') {
+                let id = &s[i + 2..i + 2 + end];
+                // Validate the id contains only sane chars.
+                if !id.is_empty()
+                    && id
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    // Make sure this isn't actually the start of
+                    // a `[^id]: body` definition — those are
+                    // block-level, parsed by the renderer
+                    // separately. Heuristic: leave the inline
+                    // ref to be parsed; definitions only appear
+                    // at start of content with a `:` after `]`.
+                    let after = i + 2 + end + 1;
+                    let is_definition = i == 0 && bytes.get(after).copied() == Some(b':');
+                    if !is_definition {
+                        flush(&mut buf, &mut out);
+                        out.push(Node::FootnoteRef(id.to_string()));
+                        i = after;
+                        continue;
+                    }
                 }
             }
         }
@@ -585,5 +700,112 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
         assert!(txt.contains("((not-a-uuid))"));
+    }
+
+    #[test]
+    fn parses_image() {
+        let n = parse(
+            "before ![alt text](https://example.com/x.png) after",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        let img = n.iter().find(|x| matches!(x, Node::Image { .. }));
+        assert!(img.is_some());
+        match img.unwrap() {
+            Node::Image { alt, url } => {
+                assert_eq!(alt, "alt text");
+                assert_eq!(url, "https://example.com/x.png");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn image_does_not_swallow_page_embed() {
+        // `![[Page]]` is the page-embed form, not an image.
+        let n = parse(
+            "see ![[Foo]]",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        assert!(n.iter().any(|x| matches!(x, Node::PageEmbed { .. })));
+        assert!(!n.iter().any(|x| matches!(x, Node::Image { .. })));
+    }
+
+    #[test]
+    fn parses_footnote_ref() {
+        let n = parse(
+            "see[^1] for details",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        let fr = n.iter().find_map(|x| match x {
+            Node::FootnoteRef(id) => Some(id.clone()),
+            _ => None,
+        });
+        assert_eq!(fr, Some("1".to_string()));
+    }
+
+    #[test]
+    fn footnote_definition_not_treated_as_inline_ref() {
+        // `[^id]:` at start of content is a definition line; the
+        // inline parser shouldn't emit a FootnoteRef for it.
+        let n = parse(
+            "[^id]: this is a footnote definition",
+            &book(),
+            &empty_blocks(),
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        assert!(!n.iter().any(|x| matches!(x, Node::FootnoteRef(_))));
+    }
+
+    #[test]
+    fn embed_macro_page_form() {
+        let mut embeds = std::collections::HashMap::new();
+        embeds.insert(
+            "foo".to_string(),
+            vec!["line one".to_string(), "line two".to_string()],
+        );
+        let er = PageEmbedResolver(std::sync::Arc::new(embeds));
+        let n = parse(
+            "{{embed [[Foo]]}}",
+            &book(),
+            &empty_blocks(),
+            &er,
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        let pe = n.iter().find(|x| matches!(x, Node::PageEmbed { .. }));
+        assert!(pe.is_some(), "expected PageEmbed, got {n:?}");
+    }
+
+    #[test]
+    fn embed_macro_block_form() {
+        let id = Uuid::new_v4();
+        let resolver = one_block(id, "p", "snippet");
+        let n = parse(
+            &format!("{{{{embed (({id}))}}}}"),
+            &book(),
+            &resolver,
+            &PageEmbedResolver::default(),
+            &QueryResolver::default(),
+            &NamespaceResolver::default(),
+        );
+        let br = n.iter().find(|x| matches!(x, Node::BlockRef { .. }));
+        assert!(
+            br.is_some(),
+            "expected BlockRef from embed macro, got {n:?}"
+        );
     }
 }

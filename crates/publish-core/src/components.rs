@@ -868,6 +868,17 @@ pub fn InlineNode(node: inline::Node) -> Element {
         Node::ExternalLink { label, url } => rsx! {
             a { class: "ext", href: "{url}", target: "_blank", rel: "noopener", "{label}" }
         },
+        Node::Image { alt, url } => rsx! {
+            img { class: "inline-image", src: "{url}", alt: "{alt}", loading: "lazy" }
+        },
+        Node::FootnoteRef(id) => {
+            let href = format!("#fn-{id}");
+            rsx! {
+                sup { class: "footnote-ref",
+                    a { href: "{href}", "[{id}]" }
+                }
+            }
+        }
         Node::Namespace { prefix, results } => {
             rsx! {
                 aside { class: "namespace",
