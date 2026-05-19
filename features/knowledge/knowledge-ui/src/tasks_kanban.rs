@@ -462,7 +462,10 @@ async fn run_kanban_sync_loop(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+/// WebSocket-backed vox client. `vox-websocket::WsLink::connect`
+/// implements both `tokio-tungstenite` on native and
+/// `web_sys::WebSocket` on wasm, so the same code path works
+/// for the desktop binary and the browser bundle.
 async fn connect_client<C>(url: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxSession,
@@ -475,12 +478,4 @@ where
         .establish::<C>()
         .await
         .map_err(|e| format!("vox establish: {e:?}"))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn connect_client<C>(_url: &str) -> Result<C, String>
-where
-    C: vox_core::FromVoxSession,
-{
-    Err("connect_client only implemented for wasm32".into())
 }

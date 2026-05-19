@@ -53,3 +53,10 @@ gloo-timers = { workspace = true }
 indexed_db_futures = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 js-sys = { workspace = true }
+
+# Native (desktop) needs tokio's timer for the sync-retry sleep
+# and persistence work that the browser gets from gloo + the
+# IDB futures crate. `tokio = { workspace = true }` reuses the
+# workspace's existing pin.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["time"] }

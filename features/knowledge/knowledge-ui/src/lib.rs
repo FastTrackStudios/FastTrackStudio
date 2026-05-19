@@ -15,6 +15,7 @@ pub mod live;
 pub mod outliner;
 pub mod properties_pane;
 pub mod query;
+pub mod seed;
 pub mod tasks_kanban;
 pub mod up_tree;
 pub mod view_mode;

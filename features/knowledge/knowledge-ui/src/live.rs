@@ -129,6 +129,29 @@ pub fn KnowledgeLive(vox_url: String) -> Element {
         });
     });
 
+    // Offline-first demo seed — when the local doc has no pages
+    // (cold start, no server, no IDB snapshot), populate it with a
+    // small set of pages + blocks that exercise every Logseq
+    // feature. Hydration races with the IDB load; the
+    // `doc_has_pages` check inside the seeder makes it a no-op
+    // when IDB beats us to it, and the sync loop's `apply_remote`
+    // is idempotent so the server can override later if it
+    // disagrees. Net effect: `just desktop` shows real content
+    // instantly, no server required.
+    let doc_for_seed = local_doc.read().clone();
+    use_hook(move || {
+        let doc = doc_for_seed.clone();
+        spawn(async move {
+            // Give IDB a moment to drop in real data first.
+            sleep_ms(50).await;
+            if !crate::seed::doc_has_pages(&doc).await {
+                if let Err(e) = crate::seed::seed_demo(doc).await {
+                    tracing::warn!(?e, "demo seed failed");
+                }
+            }
+        });
+    });
+
     // Browser-native online/offline watcher. Polls `navigator.onLine`
     // every 2s and forces SyncStatus → Offline when the OS reports
     // no network. Doesn't override Online — the sync loop is the
@@ -3214,8 +3237,9 @@ async fn run_network_watcher(mut sync_status: Signal<SyncStatus>) {
 }
 
 /// Sleep for `ms` milliseconds. Browser uses `gloo_timers`;
-/// native is a no-op stub (the sync loop only runs on wasm in
-/// practice — `connect_client` errs on native).
+/// native uses `tokio::time::sleep` since `connect_client` now
+/// works on both targets and the sync loop runs on the desktop
+/// binary too.
 async fn sleep_ms(ms: u32) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -3223,7 +3247,7 @@ async fn sleep_ms(ms: u32) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = ms;
+        tokio::time::sleep(std::time::Duration::from_millis(ms as u64)).await;
     }
 }
 
@@ -3461,7 +3485,10 @@ async fn run_awareness_loop(
     futures::future::join3(inbound, pub_loop, janitor).await;
 }
 
-#[cfg(target_arch = "wasm32")]
+/// WebSocket-backed vox client. `vox-websocket::WsLink::connect`
+/// implements both `tokio-tungstenite` on native and
+/// `web_sys::WebSocket` on wasm, so the same code path works
+/// for the desktop binary and the browser bundle.
 async fn connect_client<C>(url: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxSession,
@@ -3474,12 +3501,4 @@ where
         .establish::<C>()
         .await
         .map_err(|e| format!("vox establish: {e:?}"))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn connect_client<C>(_url: &str) -> Result<C, String>
-where
-    C: vox_core::FromVoxSession,
-{
-    Err("connect_client only implemented for wasm32".into())
 }
