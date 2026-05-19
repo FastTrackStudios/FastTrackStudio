@@ -1568,6 +1568,9 @@ fn EditableBlock(block: Block) -> Element {
 
     let value_str = content_signal.read().clone();
     let id_attr = block_id.simple().to_string();
+    // Auto-grow row count from content. Cap at 12 so a giant
+    // block doesn't push the whole outliner around.
+    let row_count = value_str.lines().count().max(1).min(12).to_string();
     let slash_open = slash_state
         .as_ref()
         .and_then(|s| s.0.read().clone())
@@ -1595,7 +1598,7 @@ fn EditableBlock(block: Block) -> Element {
             textarea {
                 class: "ls-block-content",
                 style: "background: transparent; border: 0; resize: none; width: 100%; min-height: 1.5em; color: inherit; font: inherit; outline: none;",
-                rows: "1",
+                rows: "{row_count}",
                 value: "{value_str}",
                 oninput: on_input,
                 onkeydown: on_keydown,
@@ -2724,6 +2727,80 @@ pub(crate) fn lexorank_between(a: &str, b: &str) -> String {
     out
 }
 
+/// Export one page's block tree as Markdown.
+///
+/// Indent units are two spaces per nesting level, mirroring the
+/// shape Logseq writes on disk. Headings render via `# ` prefix;
+/// list_item / paragraph kinds use `- `; code blocks fence with
+/// ```` ```lang ```` / ` ``` `. Output preserves source text
+/// verbatim — inline markup is already encoded in `content`.
+pub fn export_page_markdown(page: &Page, blocks: &[Block]) -> String {
+    let mut sorted = blocks.to_vec();
+    sorted.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let tree = build_block_tree(&sorted);
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", page.basename));
+    for node in tree {
+        write_block_markdown(&node, 0, &mut out);
+    }
+    out
+}
+
+fn write_block_markdown(node: &BlockNodeTree, depth: usize, out: &mut String) {
+    let indent = "  ".repeat(depth);
+    match node.block.kind.as_str() {
+        "heading" => {
+            let level = node.block.heading_level.unwrap_or(1).clamp(1, 6) as usize;
+            out.push_str(&indent);
+            out.push_str(&"#".repeat(level));
+            out.push(' ');
+            out.push_str(&node.block.content);
+            out.push('\n');
+        }
+        "code" => {
+            let lang = node.block.code_lang.as_deref().unwrap_or("");
+            out.push_str(&indent);
+            out.push_str("```");
+            out.push_str(lang);
+            out.push('\n');
+            out.push_str(&node.block.content);
+            out.push('\n');
+            out.push_str(&indent);
+            out.push_str("```\n");
+        }
+        _ => {
+            // Paragraph or list_item — both render as a bullet
+            // line so the markdown round-trips cleanly through
+            // Logseq's reader.
+            out.push_str(&indent);
+            out.push_str("- ");
+            // Multi-line block content: indent continuation lines
+            // so they belong to the same bullet.
+            let mut first = true;
+            for line in node.block.content.lines() {
+                if first {
+                    out.push_str(line);
+                    out.push('\n');
+                    first = false;
+                } else {
+                    out.push_str(&indent);
+                    out.push_str("  ");
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            if first {
+                // Empty block — emit a placeholder so structure
+                // stays.
+                out.push('\n');
+            }
+        }
+    }
+    for child in &node.children {
+        write_block_markdown(child, depth + 1, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2904,6 +2981,63 @@ mod tests {
         assert_eq!(next, Some(a1));
         let prev = neighbor_in_doc_order(&doc, b, -1).await;
         assert_eq!(prev, Some(a1));
+    }
+
+    #[test]
+    fn export_page_markdown_renders_tree() {
+        let now = Utc::now();
+        let page_id = Uuid::new_v4();
+        let parent_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        let mk = |id, parent, kind: &str, content: &str, hl: Option<i32>| Block {
+            id,
+            vault_id: Uuid::nil(),
+            page_id,
+            parent_block_id: parent,
+            sort_key: "a".into(),
+            kind: kind.into(),
+            content: content.into(),
+            heading_level: hl,
+            list_ordered: false,
+            list_task: None,
+            code_lang: None,
+            callout_kind: None,
+            callout_foldable: false,
+            properties_json: "{}".into(),
+            obsidian_block_id: None,
+            collapsed: false,
+            refs_json: "[]".into(),
+            canvas_node_json: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let blocks = vec![
+            mk(parent_id, None, "heading", "Top", Some(1)),
+            mk(child_id, Some(parent_id), "paragraph", "Hello", None),
+        ];
+        let page = Page {
+            id: page_id,
+            vault_id: Uuid::nil(),
+            folder_id: None,
+            path: "p.md".into(),
+            basename: "P".into(),
+            ext: "md".into(),
+            aliases: Vec::new(),
+            frontmatter_json: "{}".into(),
+            stat_ctime: now,
+            stat_mtime: now,
+            stat_size: 0,
+            is_journal: false,
+            journal_day: None,
+            shadow_for_kind: None,
+            shadow_for_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let md = export_page_markdown(&page, &blocks);
+        assert!(md.contains("# P"));
+        assert!(md.contains("# Top"));
+        assert!(md.contains("  - Hello"));
     }
 
     #[test]
