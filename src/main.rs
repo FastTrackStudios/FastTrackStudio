@@ -1439,19 +1439,20 @@ fn ShowcaseCarousel(
     rsx! {
         // Outer wrapper hosts native horizontal scroll. No height runway, no sticky,
         // no scroll hijack — user controls vertical scroll, can pan horizontally if curious.
+        // 3D perspective + skew only kick in at md+ — mobile gets a flat horizontal strip
+        // with viewport-capped card widths.
         div {
             class: "relative w-full overflow-x-auto overflow-y-hidden",
             style: "-webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%); mask-image: linear-gradient(to bottom, black 40%, transparent 100%);",
 
             div {
-                style: "perspective: 1200px;",
+                class: "md:[perspective:1200px]",
 
                 div {
-                    class: "pl-8 md:pl-16 lg:pl-32 pr-8",
-                    style: "transform: rotateX(20deg) skewX(0.36rad);",
+                    class: "pl-4 md:pl-16 lg:pl-32 pr-4 md:pr-8 md:[transform:rotateX(20deg)_skewX(0.36rad)]",
 
                     div {
-                        class: "h-[44rem] lg:h-[52rem]",
+                        class: "h-[28rem] md:h-[44rem] lg:h-[52rem]",
 
                         div {
                             class: "flex",
@@ -1464,7 +1465,7 @@ fn ShowcaseCarousel(
                                         div {
                                             key: "{i}",
                                             class: "shrink-0",
-                                            style: "width: {card_width}px;",
+                                            style: "width: min({card_width}px, 88vw);",
 
                                             match i {
                                                 0 => rsx! {
@@ -1499,8 +1500,7 @@ fn KeyflowShowcaseCard(
 ) -> Element {
     rsx! {
         div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
-            style: "height: 600px;",
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
 
             // Window header
             div {
@@ -1568,8 +1568,7 @@ fn DesktopShowcaseCard() -> Element {
 
     rsx! {
         div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
-            style: "height: 600px;",
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
 
             div {
                 class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
@@ -1616,8 +1615,7 @@ fn DesktopShowcaseCard() -> Element {
 fn ReaperShowcaseCard() -> Element {
     rsx! {
         div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
-            style: "height: 600px;",
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
 
             div {
                 class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
@@ -1689,8 +1687,7 @@ fn ReaperShowcaseCard() -> Element {
 fn PluginsShowcaseCard() -> Element {
     rsx! {
         div {
-            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full",
-            style: "height: 600px;",
+            class: "rounded-lg border border-border bg-card overflow-hidden shadow-2xl w-full h-full",
 
             div {
                 class: "flex items-center gap-2 px-4 py-3 border-b border-border bg-zinc-900/80",
