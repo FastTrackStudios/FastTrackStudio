@@ -510,6 +510,8 @@ pub fn LogseqShell() -> Element {
     // constructs last.
     let ops = make_block_ops(doc.read().clone(), editing_id, sidebar_stack, zoomed_block);
     use_context_provider(|| ops.clone());
+    let page_ops = make_page_ops(doc.read().clone(), active_page);
+    use_context_provider(|| page_ops.clone());
 
     // Cmd-K command palette state. `Some(query)` while open.
     let mut cmd_k: Signal<Option<String>> = use_signal(|| None);
@@ -771,7 +773,20 @@ fn LeftSidebar(
                 span { class: "ls-nav-icon", "◇" }
                 "Graph"
             }
-            div { class: "ls-sidebar-section", "Pages" }
+            div { class: "ls-sidebar-section",
+                style: "display: flex; justify-content: space-between; align-items: center;",
+                span { "Pages" }
+                button {
+                    style: "background: transparent; border: 0; color: var(--ls-secondary-text-color); cursor: pointer; font-size: 0.9rem; padding: 0 0.4em;",
+                    title: "New page",
+                    onclick: move |_| {
+                        if let Some(ops) = try_use_context::<PageOps>() {
+                            ops.create_page.call(format!("Untitled {}", chrono::Local::now().format("%H:%M:%S")));
+                        }
+                    },
+                    "＋"
+                }
+            }
             div { class: "ls-page-list",
                 for p in sorted {
                     {
@@ -2058,6 +2073,91 @@ fn TagSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> E
             }
         }
     }
+}
+
+/// Page-level operations: create / rename / delete. Constructed
+/// alongside `BlockOps` and provided via Dioxus context.
+#[derive(Clone)]
+pub(crate) struct PageOps {
+    pub create_page: Callback<String>,
+    pub rename_page: Callback<(Uuid, String)>,
+    pub delete_page: Callback<Uuid>,
+}
+
+fn make_page_ops(doc: Arc<CrdtDoc>, mut active_page: Signal<Option<Uuid>>) -> PageOps {
+    let doc_create = doc.clone();
+    let create_page = Callback::new(move |basename: String| {
+        let doc = doc_create.clone();
+        spawn(async move {
+            let pr = PageRepoLoro::new(&doc);
+            let now = Utc::now();
+            let vault_id = first_vault_id(&doc).await.unwrap_or(Uuid::nil());
+            match pr
+                .create(knowledge_proto::PageCreate {
+                    vault_id,
+                    folder_id: None,
+                    path: format!("{basename}.md"),
+                    basename: basename.clone(),
+                    ext: "md".into(),
+                    aliases: Vec::new(),
+                    frontmatter_json: "{}".into(),
+                    stat_ctime: now,
+                    stat_mtime: now,
+                    stat_size: 0,
+                    is_journal: false,
+                    journal_day: None,
+                    shadow_for_kind: None,
+                    shadow_for_id: None,
+                })
+                .await
+            {
+                Ok(p) => active_page.set(Some(p.id)),
+                Err(e) => tracing::warn!(?e, "create page failed"),
+            }
+        });
+    });
+    let doc_rename = doc.clone();
+    let rename_page = Callback::new(move |(id, basename): (Uuid, String)| {
+        let doc = doc_rename.clone();
+        spawn(async move {
+            let pr = PageRepoLoro::new(&doc);
+            let upd = knowledge_proto::PageUpdate {
+                basename: Some(basename),
+                ..Default::default()
+            };
+            if let Err(e) = pr.update(id, upd).await {
+                tracing::warn!(?e, "rename failed");
+            }
+        });
+    });
+    let doc_delete = doc.clone();
+    let delete_page = Callback::new(move |id: Uuid| {
+        let doc = doc_delete.clone();
+        spawn(async move {
+            let pr = PageRepoLoro::new(&doc);
+            if let Err(e) = pr.delete(id).await {
+                tracing::warn!(?e, "delete page failed");
+            }
+        });
+        active_page.set(None);
+    });
+    PageOps {
+        create_page,
+        rename_page,
+        delete_page,
+    }
+}
+
+async fn first_vault_id(doc: &CrdtDoc) -> Option<Uuid> {
+    use knowledge_proto::VaultRepo;
+    let vr = knowledge_crdt::VaultRepoLoro::new(doc);
+    let big = ListPage { index: 0, size: 1 };
+    vr.list(big, None, None)
+        .await
+        .ok()?
+        .items
+        .first()
+        .map(|v| v.id)
 }
 
 /// Per-block editing callbacks the shell threads to descendant
