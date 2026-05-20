@@ -804,19 +804,39 @@ pub fn LogseqShell() -> Element {
     let vault_data = vault_signal.read().clone();
     // Cold-start: when the vault loads for the first time and no
     // page is active yet, jump to "Home" so the user lands on
-    // their scratch-pad. Falls back to the journal for today if
-    // no Home page exists yet.
+    // their scratch-pad. The vault loads async, so we MUST read
+    // vault_signal *inside* the effect so the effect re-fires
+    // when the load completes; a captured snapshot would freeze
+    // at the empty initial value.
     {
         let mut active_w = active_page;
-        let pages_snapshot = vault_data.pages.clone();
+        let vault_for_effect = vault_signal;
         use_effect(move || {
+            let v = vault_for_effect.read();
             if active_w.peek().is_some() {
                 return;
             }
-            let home = pages_snapshot
+            // Pick, in order: a page literally called "Home",
+            // today's journal, "Welcome", or the alphabetically
+            // first page. That way the user always lands somewhere
+            // visible after the vault loads.
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let pick = v
+                .pages
                 .iter()
-                .find(|p| p.basename.eq_ignore_ascii_case("Home"));
-            if let Some(p) = home {
+                .find(|p| p.basename.eq_ignore_ascii_case("Home"))
+                .or_else(|| v.pages.iter().find(|p| p.basename == today))
+                .or_else(|| {
+                    v.pages
+                        .iter()
+                        .find(|p| p.basename.eq_ignore_ascii_case("Welcome"))
+                })
+                .or_else(|| {
+                    let mut sorted: Vec<_> = v.pages.iter().collect();
+                    sorted.sort_by(|a, b| a.basename.cmp(&b.basename));
+                    sorted.first().copied()
+                });
+            if let Some(p) = pick {
                 active_w.set(Some(p.id));
             }
         });
