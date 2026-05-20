@@ -118,19 +118,11 @@ pub fn all_commands() -> Vec<CommandEntry> {
     ]);
 
     // Group: Format
+    // Bold (Cmd-B), Italic (Cmd-I), Inline code (Cmd-E), and
+    // Link (Cmd-K) live in keyboard shortcuts — see
+    // `components::EditableBlock::on_keydown`. Mirrors Logseq's
+    // split between the slash menu and its toolbar shortcuts.
     out.extend([
-        CommandEntry {
-            label: "Bold",
-            group: "Format",
-            desc: "Wrap selection with **bold**",
-            kind: CommandKind::InsertSnippet("****", 2),
-        },
-        CommandEntry {
-            label: "Italic",
-            group: "Format",
-            desc: "Wrap selection with *italic*",
-            kind: CommandKind::InsertSnippet("**", 1),
-        },
         CommandEntry {
             label: "Highlight",
             group: "Format",
@@ -142,18 +134,6 @@ pub fn all_commands() -> Vec<CommandEntry> {
             group: "Format",
             desc: "Wrap selection with ~~strike~~",
             kind: CommandKind::InsertSnippet("~~~~", 2),
-        },
-        CommandEntry {
-            label: "Inline code",
-            group: "Format",
-            desc: "Wrap selection with `code`",
-            kind: CommandKind::InsertSnippet("``", 1),
-        },
-        CommandEntry {
-            label: "Link",
-            group: "Format",
-            desc: "[label](url)",
-            kind: CommandKind::InsertSnippet("[]()", 3),
         },
         CommandEntry {
             label: "Image",

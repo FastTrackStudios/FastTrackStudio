@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::components::{SlashMenu, slash_move, slash_run};
 use crate::handler::{
-    delete_block, exit_edit, indent_block, outdent_block, split_block, update_block_content,
+    FormatResult, delete_block, exit_edit, format_link, format_text, indent_block, outdent_block,
+    split_block, update_block_content,
 };
 use crate::state::{AppState, SlashState};
 
@@ -128,6 +129,49 @@ pub fn EditableBlock(block_id: Uuid) -> Element {
                     exit_edit(state);
                 }
             }
+            // Cmd/Ctrl + B / I / E / K — inline format shortcuts.
+            // Ports Logseq's format-text! algorithm: wrap the
+            // current selection in the pattern, or unwrap if it's
+            // already wrapped. Empty selection lands the caret
+            // between the two markers ("****" → caret at offset 2).
+            Key::Character(ref c)
+                if (mods.meta() || mods.ctrl())
+                    && !mods.shift()
+                    && matches!(c.as_str(), "b" | "B" | "i" | "I" | "e" | "E" | "k" | "K") =>
+            {
+                e.prevent_default();
+                let pattern = match c.as_str() {
+                    "b" | "B" => Some("**"),
+                    "i" | "I" => Some("*"),
+                    "e" | "E" => Some("`"),
+                    _ => None, // Cmd-K → link
+                };
+                let id = block_id.simple().to_string();
+                let cur_value = state
+                    .vault
+                    .read()
+                    .blocks
+                    .iter()
+                    .find(|b| b.id == block_id)
+                    .map(|b| b.content.clone())
+                    .unwrap_or_default();
+                let is_link = pattern.is_none();
+                dioxus::core::spawn_forever(async move {
+                    let (s, en) = read_selection(&id)
+                        .await
+                        .unwrap_or((cur_value.len(), cur_value.len()));
+                    let FormatResult {
+                        new_value,
+                        selection,
+                    } = if is_link {
+                        format_link(&cur_value, s, en)
+                    } else {
+                        format_text(&cur_value, s, en, pattern.unwrap())
+                    };
+                    update_block_content(state, block_id, new_value);
+                    set_selection(&id, selection.0, selection.1);
+                });
+            }
             Key::Escape => {
                 e.prevent_default();
                 exit_edit(state);
@@ -155,6 +199,50 @@ pub fn EditableBlock(block_id: Uuid) -> Element {
             SlashMenu {}
         }
     }
+}
+
+/// Read the current `selectionStart` / `selectionEnd` of the
+/// textarea hosting block `id`. Returns `None` when the textarea
+/// isn't in the DOM (an unmount race) so callers can fall back
+/// to end-of-content.
+async fn read_selection(id: &str) -> Option<(usize, usize)> {
+    let script = format!(
+        r#"
+        (function() {{
+            const wrap = document.querySelector('[data-edit-block="{id}"]');
+            if (!wrap) return null;
+            const ta = wrap.querySelector('textarea');
+            if (!ta) return null;
+            return [ta.selectionStart || 0, ta.selectionEnd || 0];
+        }})()
+        "#
+    );
+    let mut handle = document::eval(&script);
+    match handle.recv::<serde_json::Value>().await {
+        Ok(serde_json::Value::Array(a)) if a.len() == 2 => {
+            Some((a[0].as_u64()? as usize, a[1].as_u64()? as usize))
+        }
+        _ => None,
+    }
+}
+
+/// Park the textarea selection at `(start, end)`. Runs in a
+/// `requestAnimationFrame` so it lands after Dioxus re-applies
+/// the `value` attribute on the next render.
+fn set_selection(id: &str, start: usize, end: usize) {
+    let script = format!(
+        r#"
+        requestAnimationFrame(function() {{
+            const wrap = document.querySelector('[data-edit-block="{id}"]');
+            if (!wrap) return;
+            const ta = wrap.querySelector('textarea');
+            if (!ta) return;
+            ta.focus();
+            try {{ ta.setSelectionRange({start}, {end}); }} catch (_) {{}}
+        }});
+        "#
+    );
+    let _ = document::eval(&script);
 }
 
 /// Find the position + body of an open slash-command pattern in

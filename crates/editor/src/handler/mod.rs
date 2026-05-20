@@ -7,6 +7,7 @@
 pub mod block;
 pub mod commands;
 pub mod editor;
+pub mod format;
 pub mod page;
 pub mod persist;
 
@@ -16,5 +17,6 @@ pub use commands::{
     filter as filter_commands, run_command,
 };
 pub use editor::{enter_edit, exit_edit};
+pub use format::{FormatResult, format_link, format_text};
 pub use page::{create_page, open_page};
 pub use persist::save_page;
