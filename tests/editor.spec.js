@@ -268,17 +268,21 @@ test.describe("editor", () => {
   });
 
   test.describe("toggle_bold (command logic)", () => {
-    // These tests load the playground with an empty seed via
-    // `?seed=` AND with the live-preview decoration disabled
-    // via `?nodeco=1`. That isolates the toggle_bold command
-    // logic — the DOM↔state round-trip with no Hidden tiles
-    // and no shape-shifting render. The decoration-aware path
-    // has known races with fast typing (see FUTURE comment in
-    // editor.rs) that we'll close in a follow-up; these tests
-    // verify the *command* now and the *decoration interplay*
-    // separately.
     test.beforeEach(async ({ page }) => {
-      // Live-preview decoration ON to verify the race fix.
+      // Catch page errors / browser-side panics in this
+      // describe block too (the outer beforeEach's listener
+      // doesn't survive the page.goto inside this beforeEach).
+      page.on("pageerror", (err) => {
+        // Log to stdout AND attach for the trace viewer.
+        console.error("PAGEERROR:", err.message);
+        console.error(err.stack);
+        throw err;
+      });
+      page.on("console", (msg) => {
+        if (msg.type() === "error") {
+          console.error("CONSOLE ERROR:", msg.text());
+        }
+      });
       await page.goto("/?seed=");
       await editor(page).waitFor();
     });
