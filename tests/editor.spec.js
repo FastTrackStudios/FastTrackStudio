@@ -298,12 +298,13 @@ test.describe("editor", () => {
       await editor(page).focus();
       await setCaret(page, 0);
       await page.keyboard.insertText("**hi**");
-      // Wait for state to catch up.
+      // Wait for BOTH state AND DOM to catch up before
+      // setCaret, otherwise setCaret walks a DOM that hasn't
+      // been rendered with the new tile tree yet.
       await expect.poll(async () => (await readState(page)).text).toBe("**hi**");
-      // Position cursor between "hi" and the closing "**".
-      // visible-text-offset 4 maps to doc 4 (no Hidden tiles
-      // when caret is on the span — it'd be a markers-visible
-      // render).
+      await expect
+        .poll(async () => await page.locator(".cm-line").first().textContent())
+        .toBe("**hi**");
       await setCaret(page, 4);
       await expect
         .poll(async () => (await readState(page)).head)
@@ -315,24 +316,36 @@ test.describe("editor", () => {
     });
 
     test("Mod-B sequence builds Testing **Bold** suffix", async ({ page }) => {
-      // The user-requested end-to-end variant. With a clean
-      // seed there's no welcome-text hidden-marker noise.
+      // The user-requested end-to-end variant. Sync against
+      // both Rust state AND DOM between each step so the next
+      // setCaret/insertText sees the correct DOM.
+      const syncDom = async (expected) => {
+        await expect.poll(async () => (await readState(page)).text).toBe(expected);
+        await expect
+          .poll(async () => {
+            const lines = page.locator(".cm-line");
+            const n = await lines.count();
+            let acc = "";
+            for (let i = 0; i < n; i++) {
+              if (i > 0) acc += "\n";
+              acc += (await lines.nth(i).textContent()) || "";
+            }
+            return acc;
+          })
+          .toBe(expected);
+      };
       await editor(page).focus();
       await setCaret(page, 0);
       await page.keyboard.insertText("Testing ");
-      await expect.poll(async () => (await readState(page)).text).toBe("Testing ");
+      await syncDom("Testing ");
       await page.keyboard.press("ControlOrMeta+b");
-      await expect.poll(async () => (await readState(page)).text).toBe("Testing ****");
+      await syncDom("Testing ****");
       await page.keyboard.insertText("This Is Bold");
-      await expect
-        .poll(async () => (await readState(page)).text)
-        .toBe("Testing **This Is Bold**");
+      await syncDom("Testing **This Is Bold**");
       await page.keyboard.press("ControlOrMeta+b");
-      // After the close, head should be 24 (past closing **).
       await expect.poll(async () => (await readState(page)).head).toBe("24");
       await page.keyboard.insertText(" This Isn't Bold");
-      const expected = "Testing **This Is Bold** This Isn't Bold";
-      await expect.poll(async () => (await readState(page)).text).toBe(expected);
+      await syncDom("Testing **This Is Bold** This Isn't Bold");
     });
 
     test("literal **bold** typing produces the same final text", async ({

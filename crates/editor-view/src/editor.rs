@@ -289,18 +289,14 @@ pub fn Editor(
                             const mo = new MutationObserver(() => {{
                                 if (composing) return;
                                 el.dataset.muting = '1';
-                                // Safety net — if no writeback
-                                // arrives (no state change), the
-                                // flag clears so future
-                                // selectionchange isn't lost.
-                                // Multiple rAFs ahead so the
-                                // writeback (whose effect fires
-                                // in the same tick as the
-                                // resulting render) has time to
-                                // win the race and clear early.
-                                requestAnimationFrame(() => requestAnimationFrame(() => {{
+                                // Cleared either by the writeback
+                                // effect (fast path) or this rAF
+                                // safety net (slow path when no
+                                // writeback runs because state
+                                // didn't change).
+                                requestAnimationFrame(() => {{
                                     delete el.dataset.muting;
-                                }}));
+                                }});
                                 sendInput();
                             }});
                             mo.observe(el, {{
@@ -370,13 +366,31 @@ pub fn Editor(
     // any future cursor-moving command actually move the caret.
     {
         let id = editor_id.clone();
+        let deco_source_wb = decorations;
         use_effect(move || {
             let s = state.read();
-            let doc = s.doc.to_string();
             let p = s.selection.primary();
             let from = p.from();
             let to = p.to();
-            let doc_json = serde_json::to_string(&doc).unwrap_or_else(|_| "\"\"".into());
+            // Compute the visible text the DOM SHOULD have right
+            // now, derived from state + decorations through the
+            // tile tree. Comparing against state.doc directly
+            // (the bug we just chased) doesn't work because
+            // Hidden tiles legitimately make DOM textContent
+            // shorter than state.doc; writeback would bail
+            // permanently and DOM Selection would never resync.
+            let decorations: Vec<DecoratedRange> = match deco_source_wb {
+                Some(src) => {
+                    let mut v = src(&s);
+                    v.sort_by_key(|d| d.from);
+                    v
+                }
+                None => Vec::new(),
+            };
+            let (arena, root) = build_tiles(&s.doc.to_string(), &decorations);
+            let expected_visible = VisibleText::from_arena(&arena, root).text;
+            let expected_visible_json =
+                serde_json::to_string(&expected_visible).unwrap_or_else(|_| "\"\"".into());
             let script = format!(
                 r#"
                 (function() {{
@@ -384,12 +398,13 @@ pub fn Editor(
                     if (!el) return;
                     if (el.dataset.composing === '1') return;
                     // Compare the DOM's *visible* representation
-                    // (line text joined with \n) against state.doc.
-                    // `el.textContent` would miss the newlines
-                    // between block-level `<div class="cm-line">`
-                    // children and never match a multi-line doc.
-                    // This is the same readText() shape the input
-                    // bridge uses.
+                    // against what state's tile tree EXPECTS the
+                    // DOM to look like. Both are computed
+                    // identically (line text joined with \n).
+                    // Comparing against `state.doc` would always
+                    // fail when Hidden tiles trim chars from the
+                    // rendered output (markdown markers etc.) and
+                    // permanently lock out writeback.
                     const visibleNow = (function() {{
                         const lines = el.querySelectorAll('.cm-line');
                         if (!lines.length) return el.textContent;
@@ -397,7 +412,7 @@ pub fn Editor(
                             .map(l => l.textContent)
                             .join('\n');
                     }})();
-                    if (visibleNow !== {doc_json}) return;
+                    if (visibleNow !== {expected_visible_json}) return;
 
                     // Build a Range targeting the requested doc
                     // positions via tile lookup. Each rendered
