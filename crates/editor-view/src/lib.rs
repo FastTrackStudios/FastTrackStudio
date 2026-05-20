@@ -8,5 +8,6 @@ pub use editor_state;
 
 mod editor;
 pub mod render;
+pub mod tile;
 
 pub use editor::{DecorationSource, Editor};
