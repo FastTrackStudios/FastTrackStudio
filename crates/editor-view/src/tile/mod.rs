@@ -38,6 +38,7 @@ pub mod dom_pos;
 pub mod flag;
 pub mod line;
 pub mod mark;
+pub mod patch;
 pub mod pos;
 pub mod render_dx;
 pub mod text;
@@ -102,6 +103,9 @@ pub enum TileBody {
     /// Inline / block widget. v1 holds the rendered HTML
     /// (placeholder until we have a typed `Widget` trait).
     Widget { html: String },
+    /// LineTile with extra CSS classes from `Decoration::line`.
+    /// Space-joined onto the base `cm-line` class by the patcher.
+    Line { extra_classes: Vec<String> },
 }
 
 /// One tile in the arena. Shared fields up top, kind in

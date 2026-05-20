@@ -23,7 +23,29 @@ pub fn new_line_tile() -> Tile {
         children: Vec::new(),
         length: 0,
         kind: TileKind::Line,
-        body: TileBody::Empty,
+        body: TileBody::Line {
+            extra_classes: Vec::new(),
+        },
         flags: TileFlagSet::empty(),
+    }
+}
+
+/// Append a class to the LineTile's `extra_classes`. No-op if
+/// the class is already present (idempotent — multiple Line
+/// decorations of the same class collapse).
+pub fn push_line_class(tile: &mut Tile, class: &str) {
+    if let TileBody::Line { extra_classes } = &mut tile.body {
+        if !extra_classes.iter().any(|c| c == class) {
+            extra_classes.push(class.to_string());
+        }
+    }
+}
+
+/// Read the extra classes of a LineTile. Empty slice for tiles
+/// without any Line decorations.
+pub fn line_extra_classes(tile: &Tile) -> &[String] {
+    match &tile.body {
+        TileBody::Line { extra_classes } => extra_classes,
+        _ => &[],
     }
 }

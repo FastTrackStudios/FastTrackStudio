@@ -45,7 +45,7 @@ use editor_state::{DecoratedRange, DecorationKind};
 
 use crate::tile::arena::{Arena, TileId};
 use crate::tile::flag::{TileFlag, TileFlagSet};
-use crate::tile::line::new_line_tile;
+use crate::tile::line::{new_line_tile, push_line_class};
 use crate::tile::mark::{MarkSpec, new_mark_tile};
 use crate::tile::text::new_text_tile;
 use crate::tile::widget::{new_widget_buffer_tile, new_widget_tile};
@@ -169,6 +169,10 @@ impl<'a> TileBuilder<'a> {
                     }
                     EventKind::Widget { length, ref html } => {
                         self.emit_widget(html, length, &active_marks);
+                    }
+                    EventKind::Line(ref class) => {
+                        let line_id = self.ensure_line();
+                        push_line_class(self.arena.get_mut(line_id), class);
                     }
                 }
             }
@@ -394,6 +398,7 @@ enum EventKind {
     ReplaceStart { to: usize },
     ReplaceEnd,
     Widget { length: usize, html: String },
+    Line(String),
 }
 
 /// Turn a decoration set into start/end events.
@@ -401,8 +406,8 @@ fn collect_events(decorations: &[DecoratedRange]) -> Vec<Event> {
     let mut out = Vec::new();
     for d in decorations {
         match &d.kind {
-            DecorationKind::Mark { class } => {
-                let spec = MarkSpec::span_class(class);
+            DecorationKind::Mark { class, attrs } => {
+                let spec = MarkSpec::span_class(class).with_attrs(attrs.clone());
                 out.push(Event {
                     at: d.from,
                     kind: EventKind::MarkStart(spec.clone()),
@@ -431,8 +436,11 @@ fn collect_events(decorations: &[DecoratedRange]) -> Vec<Event> {
                     },
                 });
             }
-            DecorationKind::Line { .. } => {
-                // Line decorations not handled in Phase 6.
+            DecorationKind::Line { class } => {
+                out.push(Event {
+                    at: d.from,
+                    kind: EventKind::Line(class.clone()),
+                });
             }
         }
     }
@@ -533,6 +541,34 @@ mod tests {
         let l2 = arena.get(doc).children[1];
         assert_eq!(arena.get(l2).length, 0);
         assert!(!arena.get(l2).break_after());
+    }
+
+    #[test]
+    fn line_decoration_attaches_class_to_line() {
+        let decs = vec![Decoration::line(0, "md-h1")];
+        let (arena, doc) = build_tiles("# title", &decs);
+        let line = arena.get(doc).children[0];
+        assert_eq!(
+            crate::tile::line::line_extra_classes(arena.get(line)),
+            &["md-h1".to_string()]
+        );
+    }
+
+    #[test]
+    fn multiple_line_decorations_concatenate() {
+        // Second line gets two classes; first line stays bare.
+        let decs = vec![
+            Decoration::line(3, "md-h1"),
+            Decoration::line(3, "active"),
+        ];
+        let (arena, doc) = build_tiles("ab\ncd", &decs);
+        let l1 = arena.get(doc).children[0];
+        let l2 = arena.get(doc).children[1];
+        assert!(crate::tile::line::line_extra_classes(arena.get(l1)).is_empty());
+        assert_eq!(
+            crate::tile::line::line_extra_classes(arena.get(l2)),
+            &["md-h1".to_string(), "active".to_string()]
+        );
     }
 
     #[test]

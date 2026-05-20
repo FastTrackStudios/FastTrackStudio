@@ -44,7 +44,7 @@ use editor_state::{
 };
 
 use crate::tile::build::build_tiles;
-use crate::tile::render_dx::render_tile;
+use crate::tile::patch::build_patch;
 use crate::tile::visible::VisibleText;
 
 /// Decoration source — a pure fn that produces decorations for
@@ -71,20 +71,10 @@ pub fn Editor(
     #[props(default)] keymap: Option<Keymap>,
     #[props(default)] decorations: Option<DecorationSource>,
 ) -> Element {
-    let text = state.read().doc.to_string();
-    // Run decoration sources, merge, sort. Build the tile
-    // tree — Phase 6 port of CM6's buildtile.ts. The flat-Vec
-    // segment path that lived in `render::render` has been
-    // replaced by the full tile-tree path through `build_tiles`
-    // + `render_tile`.
-    let decs: Vec<DecoratedRange> = if let Some(src) = decorations {
-        let mut v = src(&state.read());
-        v.sort_by_key(|d| d.from);
-        v
-    } else {
-        Vec::new()
-    };
-    let (arena, doc_tile) = build_tiles(&text, &decs);
+    // Tile-tree build moved into the imperative-patch
+    // `use_effect` below. The component body itself no longer
+    // computes a render — it just allocates the editor id and
+    // schedules effects.
     let editor_id = use_hook(|| {
         let n = EDITOR_INSTANCE.fetch_add(1, Ordering::Relaxed);
         format!("editor-{n}")
@@ -137,6 +127,38 @@ pub fn Editor(
                             // as Hidden (Replace) decorations exist.
                             // CM6's equivalent walk is in
                             // `view/src/docview.ts:282` (posFromDOM).
+                            // Rust doc positions are UTF-8 byte
+                            // offsets. JS string offsets are UTF-16
+                            // code units. ASCII coincides, but
+                            // anything outside Latin-1 (em-dash,
+                            // emoji, CJK, …) makes them diverge.
+                            // Convert at the boundary.
+                            function utf16ToBytes(str, off) {{
+                                let bytes = 0;
+                                let i = 0;
+                                while (i < off) {{
+                                    const c = str.charCodeAt(i);
+                                    if (c < 0x80) {{ bytes += 1; i += 1; }}
+                                    else if (c < 0x800) {{ bytes += 2; i += 1; }}
+                                    else if (c >= 0xD800 && c <= 0xDBFF) {{ bytes += 4; i += 2; }}
+                                    else {{ bytes += 3; i += 1; }}
+                                }}
+                                return bytes;
+                            }}
+                            function bytesToUtf16(str, bytes) {{
+                                let b = 0;
+                                let i = 0;
+                                while (i < str.length && b < bytes) {{
+                                    const c = str.charCodeAt(i);
+                                    if (c < 0x80) {{ b += 1; i += 1; }}
+                                    else if (c < 0x800) {{ b += 2; i += 1; }}
+                                    else if (c >= 0xD800 && c <= 0xDBFF) {{ b += 4; i += 2; }}
+                                    else {{ b += 3; i += 1; }}
+                                }}
+                                return i;
+                            }}
+                            function utf8Len(str) {{ return utf16ToBytes(str, str.length); }}
+
                             function tilePosOf(node) {{
                                 let n = node;
                                 while (n && n !== el) {{
@@ -148,12 +170,101 @@ pub fn Editor(
                                 }}
                                 return 0; // fall back to doc start
                             }}
+                            // Sum visible chars contributed by `node`
+                            // and all descendants. Doesn't include
+                            // line-break "\n"s — those live between
+                            // sibling `.cm-line` divs, and posFromDOM
+                            // only descends *inside* one node.
+                            function visTextLen(node) {{
+                                if (!node) return 0;
+                                if (node.nodeType === 3) return node.nodeValue.length;
+                                let n = 0;
+                                for (const c of node.childNodes) n += visTextLen(c);
+                                return n;
+                            }}
+                            // Convert a (container, offset) pair to a
+                            // doc-space position. Mirrors CM6's
+                            // `posFromDOM` (`docview.ts:282`).
+                            //
+                            // - Text node: ancestor's data-tile-pos
+                            //   + offset within text. The simple
+                            //   case.
+                            // - Element node: offset is a *child
+                            //   index*. The cursor is just before
+                            //   childNodes[offset]; we recurse into
+                            //   either that child (offset 0) or the
+                            //   previous sibling's end (offset > 0).
+                            //   Browsers place the cursor at element
+                            //   level when the click hits non-text
+                            //   space inside a line div.
+                            function posFromDOM(container, offset) {{
+                                if (!container) return 0;
+                                if (container.nodeType === 3) {{
+                                    return tilePosOf(container)
+                                        + utf16ToBytes(container.nodeValue, offset);
+                                }}
+                                const kids = container.childNodes;
+                                // Element-level "after last child":
+                                // if the container itself is a
+                                // tile (`data-tile-pos` +
+                                // `data-tile-len`), return its
+                                // END position. This accounts for
+                                // Hidden ranges whose bytes have
+                                // no visible characters but still
+                                // occupy doc space (list markers,
+                                // task markers, code fences).
+                                // Without this, sendSel reports
+                                // the widget's start position and
+                                // state.selection collapses onto
+                                // the *before-hidden* doc offset.
+                                if (kids.length === 0
+                                    && container.dataset
+                                    && container.dataset.tilePos != null) {{
+                                    const p = parseInt(container.dataset.tilePos, 10);
+                                    const l = parseInt(container.dataset.tileLen || '0', 10);
+                                    return p + (offset >= 1 ? l : 0);
+                                }}
+                                if (kids.length === 0) return tilePosOf(container);
+                                if (offset >= kids.length) {{
+                                    if (container.dataset
+                                        && container.dataset.tilePos != null
+                                        && container.dataset.tileLen != null) {{
+                                        return parseInt(container.dataset.tilePos, 10)
+                                            + parseInt(container.dataset.tileLen, 10);
+                                    }}
+                                    const last = kids[kids.length - 1];
+                                    if (last.nodeType === 3) {{
+                                        return tilePosOf(last) + utf8Len(last.nodeValue);
+                                    }}
+                                    let n = last;
+                                    while (n.nodeType === 1 && n.lastChild) n = n.lastChild;
+                                    if (n.nodeType === 3) {{
+                                        return tilePosOf(n) + utf8Len(n.nodeValue);
+                                    }}
+                                    return tilePosOf(last);
+                                }}
+                                const next = kids[offset];
+                                if (next.nodeType === 3) return tilePosOf(next);
+                                let n = next;
+                                while (n.nodeType === 1 && n.firstChild) n = n.firstChild;
+                                if (n.nodeType === 3) return tilePosOf(n);
+                                return tilePosOf(next);
+                            }}
                             function selOffsets() {{
                                 const s = window.getSelection();
                                 if (!s || s.rangeCount === 0) return [0, 0];
+                                // anchor/focus carry direction;
+                                // start/end always sort. We send
+                                // [anchor, head] so backward
+                                // selections survive the round trip.
+                                if (s.anchorNode && el.contains(s.anchorNode)) {{
+                                    const a = posFromDOM(s.anchorNode, s.anchorOffset);
+                                    const h = posFromDOM(s.focusNode, s.focusOffset);
+                                    return [a, h];
+                                }}
                                 const r = s.getRangeAt(0);
-                                const a = tilePosOf(r.startContainer) + r.startOffset;
-                                const b = tilePosOf(r.endContainer) + r.endOffset;
+                                const a = posFromDOM(r.startContainer, r.startOffset);
+                                const b = posFromDOM(r.endContainer, r.endOffset);
                                 return [a, b];
                             }}
                             // Reconstruct doc text from the
@@ -168,12 +279,32 @@ pub fn Editor(
                             // the doc — diffs would then think
                             // the user deleted every newline on
                             // every keystroke.
+                            // Reconstruct doc text from the
+                            // tile-tree-rendered DOM, skipping any
+                            // widget content (`contenteditable=
+                            // false` spans rendered as decorations
+                            // — checkboxes, bullet markers, code-
+                            // block lang labels, copy buttons).
+                            // Without the skip, widget characters
+                            // leak into `textContent`, the input
+                            // diff treats them as user-typed bytes
+                            // and tries to insert them into
+                            // state.doc.
+                            function visText(node) {{
+                                if (!node) return '';
+                                if (node.nodeType === 3) return node.nodeValue;
+                                if (node.nodeType !== 1) return '';
+                                if (node.classList && node.classList.contains('editor-widget')) {{
+                                    return '';
+                                }}
+                                let s = '';
+                                for (const c of node.childNodes) s += visText(c);
+                                return s;
+                            }}
                             function readText() {{
                                 const lines = el.querySelectorAll('.cm-line');
-                                if (!lines.length) return el.textContent;
-                                return Array.from(lines)
-                                    .map(l => l.textContent)
-                                    .join('\n');
+                                if (!lines.length) return visText(el);
+                                return Array.from(lines).map(visText).join('\n');
                             }}
                             function sendInput() {{
                                 const [a, b] = selOffsets();
@@ -290,9 +421,15 @@ pub fn Editor(
                                 const t = evt.inputType;
                                 if (t === 'insertParagraph' || t === 'insertLineBreak') {{
                                     evt.preventDefault();
+                                    // Route through the list-aware
+                                    // Enter handler so pressing
+                                    // Enter on a `- foo` / `1. foo`
+                                    // / `- [x] foo` line continues
+                                    // the list. Falls back to a
+                                    // plain `\n` insert if the
+                                    // line isn't a list item.
                                     dioxus.send({{
-                                        kind: 'before-input-insert',
-                                        text: '\n',
+                                        kind: 'enter-continue-list',
                                         sel: selOffsets(),
                                     }});
                                     return;
@@ -383,6 +520,267 @@ pub fn Editor(
                             }});
                             mo.observe(el, observeOpts);
 
+                            // ── Imperative DOM patcher ──────
+                            // Bypasses Dioxus's reconciler for
+                            // the editor's contents. CM6 does
+                            // this for the same reasons: VDOMs
+                            // can't safely manage a
+                            // contenteditable across the kinds
+                            // of structural transitions
+                            // decoration-aware rendering needs.
+                            //
+                            // `applyPatch(descs)` diffs the
+                            // serialized tile tree against the
+                            // live DOM and applies minimal
+                            // mutations. Wrapped in
+                            // disconnect/observe so the
+                            // MutationObserver doesn't see our
+                            // own writes.
+                            function patchAttrs(elem, attrs) {{
+                                const want = new Set();
+                                for (const [k, v] of attrs) {{
+                                    want.add(k);
+                                    if (k === 'data-widget-html') {{
+                                        if (elem.innerHTML !== v) elem.innerHTML = v;
+                                    }} else if (elem.getAttribute(k) !== v) {{
+                                        elem.setAttribute(k, v);
+                                    }}
+                                }}
+                                // Remove attrs not in want.
+                                for (let i = elem.attributes.length - 1; i >= 0; i--) {{
+                                    const name = elem.attributes[i].name;
+                                    if (!want.has(name)) {{
+                                        elem.removeAttribute(name);
+                                    }}
+                                }}
+                            }}
+
+                            function patchChildren(parent, descs) {{
+                                // Two-pass: collect existing
+                                // children, then walk desired
+                                // descs and either reuse-by-key,
+                                // reuse-by-tag-at-position, or
+                                // create-new. Trailing extras
+                                // get removed.
+                                let i = 0;
+                                for (const d of descs) {{
+                                    if (d.text !== undefined) {{
+                                        const at = parent.childNodes[i];
+                                        if (at && at.nodeType === 3) {{
+                                            if (at.nodeValue !== d.text) {{
+                                                // Chromium collapses
+                                                // the Selection when
+                                                // a Text node's data
+                                                // is reassigned via
+                                                // `nodeValue =` /
+                                                // `data =`. Use
+                                                // `replaceData` for
+                                                // the minimal diff
+                                                // so the cursor
+                                                // stays where it
+                                                // visually is.
+                                                const oldT = at.nodeValue;
+                                                const newT = d.text;
+                                                let pre = 0;
+                                                const maxPre = Math.min(oldT.length, newT.length);
+                                                while (pre < maxPre
+                                                    && oldT.charCodeAt(pre) === newT.charCodeAt(pre))
+                                                    pre++;
+                                                let suf = 0;
+                                                const maxSuf = Math.min(
+                                                    oldT.length - pre,
+                                                    newT.length - pre
+                                                );
+                                                while (suf < maxSuf
+                                                    && oldT.charCodeAt(oldT.length - 1 - suf)
+                                                       === newT.charCodeAt(newT.length - 1 - suf))
+                                                    suf++;
+                                                const oldMid = oldT.length - pre - suf;
+                                                const insMid = newT.substring(pre, newT.length - suf);
+                                                at.replaceData(pre, oldMid, insMid);
+                                            }}
+                                        }} else {{
+                                            const tn = document.createTextNode(d.text);
+                                            parent.insertBefore(tn, at || null);
+                                        }}
+                                        i++;
+                                        continue;
+                                    }}
+                                    const tag = d.tag;
+                                    let key = null;
+                                    for (const [k, v] of d.attrs) {{
+                                        if (k === 'data-tile-pos') {{ key = v; break; }}
+                                    }}
+                                    // Try the element at `i`.
+                                    let cand = parent.childNodes[i];
+                                    if (cand
+                                        && cand.nodeType === 1
+                                        && cand.tagName.toLowerCase() === tag
+                                        && (key == null
+                                            || cand.dataset.tilePos === key)) {{
+                                        patchAttrs(cand, d.attrs);
+                                        if (tag !== 'br'
+                                            && !d.attrs.some(([k]) => k === 'data-widget-html')) {{
+                                            patchChildren(cand, d.kids || []);
+                                        }}
+                                        i++;
+                                        continue;
+                                    }}
+                                    // Look ahead for a matching
+                                    // keyed child elsewhere.
+                                    let found = null;
+                                    if (key != null) {{
+                                        for (let j = i; j < parent.childNodes.length; j++) {{
+                                            const c = parent.childNodes[j];
+                                            if (c.nodeType === 1
+                                                && c.tagName.toLowerCase() === tag
+                                                && c.dataset
+                                                && c.dataset.tilePos === key) {{
+                                                found = c;
+                                                break;
+                                            }}
+                                        }}
+                                    }}
+                                    if (found) {{
+                                        parent.insertBefore(found, parent.childNodes[i] || null);
+                                        patchAttrs(found, d.attrs);
+                                        if (tag !== 'br'
+                                            && !d.attrs.some(([k]) => k === 'data-widget-html')) {{
+                                            patchChildren(found, d.kids || []);
+                                        }}
+                                        i++;
+                                        continue;
+                                    }}
+                                    // Create.
+                                    const elem = document.createElement(tag);
+                                    patchAttrs(elem, d.attrs);
+                                    if (tag !== 'br'
+                                        && !d.attrs.some(([k]) => k === 'data-widget-html')) {{
+                                        patchChildren(elem, d.kids || []);
+                                    }}
+                                    parent.insertBefore(elem, parent.childNodes[i] || null);
+                                    i++;
+                                }}
+                                while (parent.childNodes.length > i) {{
+                                    parent.removeChild(parent.lastChild);
+                                }}
+                            }}
+
+                            // Selection placement — same data-tile-pos
+                            // walk as the writeback effect, but
+                            // run *inside* applyPatch so it
+                            // happens AFTER DOM restructuring.
+                            // Without this, a state change that
+                            // reshapes the tile tree (e.g. live-
+                            // preview hiding markdown markers when
+                            // the caret leaves a span) destroys
+                            // the cursor's anchor text node, the
+                            // browser silently parks the cursor
+                            // somewhere unrelated, and the next
+                            // keystroke goes to the wrong place.
+                            function placeSelection(anchor, head) {{
+                                const tiles = el.querySelectorAll('[data-tile-pos]');
+                                const textRanges = [];
+                                const emptyTiles = [];
+                                tiles.forEach(node => {{
+                                    const pos = parseInt(node.dataset.tilePos, 10);
+                                    const text = node.firstChild;
+                                    if (text && text.nodeType === 3) {{
+                                        const len = utf8Len(text.nodeValue);
+                                        if (len) textRanges.push({{pos, end: pos + len, text}});
+                                        else emptyTiles.push({{pos, node}});
+                                    }} else {{
+                                        emptyTiles.push({{pos, node}});
+                                    }}
+                                }});
+                                textRanges.sort((a,b) => a.pos - b.pos);
+                                emptyTiles.sort((a,b) => a.pos - b.pos);
+                                // Returns [node, offset] for a doc
+                                // byte position, using the same
+                                // tile lookup the writeback used to.
+                                function resolve(target) {{
+                                    for (const t of textRanges) {{
+                                        if (target > t.pos && target < t.end) {{
+                                            return [t.text, bytesToUtf16(t.text.nodeValue, target - t.pos)];
+                                        }}
+                                    }}
+                                    for (const t of emptyTiles) {{
+                                        if (t.pos === target) return [t.node, 0];
+                                    }}
+                                    for (const t of textRanges) {{
+                                        if (target >= t.pos && target <= t.end) {{
+                                            return [t.text, bytesToUtf16(t.text.nodeValue, target - t.pos)];
+                                        }}
+                                    }}
+                                    // Line-tile fallback: when typing a list
+                                    // marker like `- ` empties the line of
+                                    // text (the marker is fully replaced and
+                                    // the only child is the bullet widget),
+                                    // the cursor target may fall inside a
+                                    // line tile but outside any text run.
+                                    // Place it at the end of the matching
+                                    // line div so the next keystroke lands
+                                    // where the user expects.
+                                    const lineTiles = el.querySelectorAll('div.cm-line[data-tile-pos]');
+                                    for (const ln of lineTiles) {{
+                                        const lpos = parseInt(ln.dataset.tilePos, 10);
+                                        const llen = parseInt(ln.dataset.tileLen || '0', 10);
+                                        if (target >= lpos && target <= lpos + llen) {{
+                                            return [ln, ln.childNodes.length];
+                                        }}
+                                    }}
+                                    return [el, el.childNodes.length];
+                                }}
+                                const [aNode, aOff] = resolve(anchor);
+                                const [hNode, hOff] = resolve(head);
+                                const sel = window.getSelection();
+                                if (sel) {{
+                                    // setBaseAndExtent preserves
+                                    // direction (anchor → head).
+                                    // Range/addRange would always
+                                    // normalize to start<=end and
+                                    // break shift+arrow-left.
+                                    sel.setBaseAndExtent(aNode, aOff, hNode, hOff);
+                                }}
+                            }}
+
+                            function applyPatch(payloadJson) {{
+                                if (composing) return;
+                                let payload;
+                                try {{ payload = JSON.parse(payloadJson); }}
+                                catch (_) {{ return; }}
+                                const descs = payload.patches || payload;
+                                const sel = payload.selection || null;
+                                // Cache the source doc so the copy
+                                // handler can emit markdown source
+                                // instead of the rendered DOM.
+                                if (typeof payload.doc === 'string') {{
+                                    window['__cm_doc_{id}'] = payload.doc;
+                                }}
+                                mo.disconnect();
+                                el.dataset.writing = '1';
+                                el.dataset.muting = '1';
+                                try {{
+                                    patchChildren(el, descs);
+                                    if (sel) placeSelection(sel.anchor, sel.head);
+                                }} finally {{
+                                    mo.takeRecords();
+                                    mo.observe(el, observeOpts);
+                                    requestAnimationFrame(() => {{
+                                        delete el.dataset.writing;
+                                        delete el.dataset.muting;
+                                    }});
+                                }}
+                            }}
+                            window['__cm_patch_{id}'] = function(descsJson) {{
+                                window['__cm_pending_{id}'] = descsJson;
+                                applyPatch(descsJson);
+                            }};
+                            // Replay anything the Dioxus effect
+                            // stashed before the bridge attached.
+                            const _pending = window['__cm_pending_{id}'];
+                            if (_pending != null) applyPatch(_pending);
+
 
                             // Selection-only events. `selectionchange`
                             // is the canonical event for caret
@@ -421,6 +819,117 @@ pub fn Editor(
                             el.addEventListener('keyup',   sendSel);
                             el.addEventListener('mouseup', sendSel);
                             el.addEventListener('focus',   sendSel);
+                            // Copy/cut: substitute the source
+                            // markdown for the rendered DOM. The
+                            // browser's default would copy what's
+                            // visible (widget characters, hidden
+                            // markers, etc.) which round-trips to
+                            // nothing useful.
+                            function sourceSlice() {{
+                                const doc = window['__cm_doc_{id}'];
+                                if (typeof doc !== 'string') return null;
+                                const [a, b] = selOffsets();
+                                const from = Math.min(a, b);
+                                const to = Math.max(a, b);
+                                if (from === to) return null;
+                                // selOffsets returns byte offsets;
+                                // slice the doc by codepoints by
+                                // walking utf-8 byte counts.
+                                let i = 0;
+                                let bytes = 0;
+                                let start = 0;
+                                while (i < doc.length && bytes < from) {{
+                                    const c = doc.charCodeAt(i);
+                                    if (c < 0x80) {{ bytes += 1; i += 1; }}
+                                    else if (c < 0x800) {{ bytes += 2; i += 1; }}
+                                    else if (c >= 0xD800 && c <= 0xDBFF) {{ bytes += 4; i += 2; }}
+                                    else {{ bytes += 3; i += 1; }}
+                                }}
+                                start = i;
+                                while (i < doc.length && bytes < to) {{
+                                    const c = doc.charCodeAt(i);
+                                    if (c < 0x80) {{ bytes += 1; i += 1; }}
+                                    else if (c < 0x800) {{ bytes += 2; i += 1; }}
+                                    else if (c >= 0xD800 && c <= 0xDBFF) {{ bytes += 4; i += 2; }}
+                                    else {{ bytes += 3; i += 1; }}
+                                }}
+                                return doc.slice(start, i);
+                            }}
+                            el.addEventListener('copy', evt => {{
+                                const slice = sourceSlice();
+                                if (slice == null) return;
+                                evt.clipboardData.setData('text/plain', slice);
+                                evt.preventDefault();
+                            }});
+                            el.addEventListener('cut', evt => {{
+                                const slice = sourceSlice();
+                                if (slice == null) return;
+                                evt.clipboardData.setData('text/plain', slice);
+                                evt.preventDefault();
+                                // Let the existing input handlers
+                                // delete the selected range as if
+                                // the user pressed Backspace over it.
+                                const [a, b] = selOffsets();
+                                dioxus.send({{
+                                    kind: 'before-input-delete-backward',
+                                    sel: [Math.min(a,b), Math.max(a,b)],
+                                }});
+                            }});
+                            // Link click handling. Plain click on a
+                            // link/wikilink span navigates. To
+                            // *edit* the link text instead, use
+                            // the keyboard (arrow into it from an
+                            // adjacent position). Mirrors
+                            // Obsidian's preview-side behavior.
+                            el.addEventListener('click', evt => {{
+                                let n = evt.target;
+                                while (n && n !== el) {{
+                                    if (n.nodeType === 1 && n.dataset
+                                        && n.dataset.copyFrom != null) {{
+                                        evt.preventDefault();
+                                        const from = parseInt(n.dataset.copyFrom, 10);
+                                        const to   = parseInt(n.dataset.copyTo, 10);
+                                        dioxus.send({{ kind: 'copy-range', from, to }});
+                                        n.classList.add('copied');
+                                        setTimeout(() => n.classList.remove('copied'), 800);
+                                        return;
+                                    }}
+                                    if (n.nodeType === 1 && n.dataset
+                                        && n.dataset.taskPos != null) {{
+                                        evt.preventDefault();
+                                        evt.stopPropagation();
+                                        // Clicking a contenteditable=false
+                                        // widget would otherwise create a
+                                        // selection wrapping it; collapse it
+                                        // so the user doesn't see a wide
+                                        // highlight.
+                                        const sel = window.getSelection();
+                                        if (sel) sel.removeAllRanges();
+                                        const p = parseInt(n.dataset.taskPos, 10);
+                                        if (!isNaN(p)) {{
+                                            dioxus.send({{ kind: 'task-toggle', pos: p }});
+                                        }}
+                                        return;
+                                    }}
+                                    if (n.nodeType === 1 && n.dataset
+                                        && n.dataset.href) {{
+                                        const href = n.dataset.href;
+                                        // Clear caret state so the
+                                        // link span goes back to
+                                        // live-preview (the browser
+                                        // had already parked the
+                                        // caret inside it as part
+                                        // of the click). Rust drops
+                                        // selection to caret(0).
+                                        dioxus.send({{ kind: 'link-clicked', href }});
+                                        if (/^https?:/i.test(href)) {{
+                                            window.open(href, '_blank', 'noopener');
+                                        }}
+                                        return;
+                                    }}
+                                    n = n.parentNode;
+                                }}
+                            }});
                             sendSel();
                         }}
                         attach();
@@ -435,175 +944,6 @@ pub fn Editor(
         });
     }
 
-    // ── state → DOM: caret writeback for programmatic edits ──────
-    //
-    // Runs every render. Reads state.selection's primary range,
-    // checks the live DOM against state.doc — if the DOM hasn't
-    // caught up yet (still mid-typing), we skip so we don't fight
-    // the user. When they match, we set the DOM Selection to the
-    // state's caret. This is what lets `Mod-A` (select_all) and
-    // any future cursor-moving command actually move the caret.
-    {
-        let id = editor_id.clone();
-        let deco_source_wb = decorations;
-        use_effect(move || {
-            let s = state.read();
-            let p = s.selection.primary();
-            let from = p.from();
-            let to = p.to();
-            // Compute the visible text the DOM SHOULD have right
-            // now, derived from state + decorations through the
-            // tile tree. Comparing against state.doc directly
-            // (the bug we just chased) doesn't work because
-            // Hidden tiles legitimately make DOM textContent
-            // shorter than state.doc; writeback would bail
-            // permanently and DOM Selection would never resync.
-            let decorations: Vec<DecoratedRange> = match deco_source_wb {
-                Some(src) => {
-                    let mut v = src(&s);
-                    v.sort_by_key(|d| d.from);
-                    v
-                }
-                None => Vec::new(),
-            };
-            let (arena, root) = build_tiles(&s.doc.to_string(), &decorations);
-            let expected_visible = VisibleText::from_arena(&arena, root).text;
-            let expected_visible_json =
-                serde_json::to_string(&expected_visible).unwrap_or_else(|_| "\"\"".into());
-            let script = format!(
-                r#"
-                (function() {{
-                    const el = document.querySelector('[data-editor-id="{id}"]');
-                    if (!el) return;
-                    if (el.dataset.composing === '1') return;
-                    // Compare the DOM's *visible* representation
-                    // against what state's tile tree EXPECTS the
-                    // DOM to look like. Both are computed
-                    // identically (line text joined with \n).
-                    // Comparing against `state.doc` would always
-                    // fail when Hidden tiles trim chars from the
-                    // rendered output (markdown markers etc.) and
-                    // permanently lock out writeback.
-                    const visibleNow = (function() {{
-                        const lines = el.querySelectorAll('.cm-line');
-                        if (!lines.length) return el.textContent;
-                        return Array.from(lines)
-                            .map(l => l.textContent)
-                            .join('\n');
-                    }})();
-                    if (visibleNow !== {expected_visible_json}) return;
-
-                    // Build a Range targeting the requested doc
-                    // positions via tile lookup. Each rendered
-                    // tile carries `data-tile-pos`; for a target
-                    // doc position we find the tile whose
-                    // `[pos, pos + length)` covers it, then place
-                    // the Range inside its text descendant at
-                    // `target - tile_pos`. Mirrors CM6's
-                    // `domAtPos` (`docview.ts:320`).
-                    const targetRange = document.createRange();
-                    const tiles = el.querySelectorAll('[data-tile-pos]');
-                    // Two range tables: text-containing tiles
-                    // (preferred when target is strictly inside
-                    // them) and empty tiles like Mark<br>
-                    // (preferred ONLY when target matches the
-                    // tile's zero-length range — gives the
-                    // cursor somewhere to land inside an empty
-                    // Mark so subsequent typing stays in the
-                    // span).
-                    const textRanges = [];
-                    const emptyTiles = [];
-                    tiles.forEach(node => {{
-                        const pos = parseInt(node.dataset.tilePos, 10);
-                        const text = node.firstChild;
-                        if (text && text.nodeType === 3 /* TEXT */) {{
-                            const len = text.nodeValue.length;
-                            if (len) textRanges.push({{ pos, end: pos + len, node, text }});
-                            else emptyTiles.push({{ pos, node }});
-                        }} else {{
-                            // Element child (e.g., <br> in an
-                            // empty Mark, or nested spans). The
-                            // tile itself is the cursor anchor.
-                            emptyTiles.push({{ pos, node }});
-                        }}
-                    }});
-                    textRanges.sort((a, b) => a.pos - b.pos);
-                    emptyTiles.sort((a, b) => a.pos - b.pos);
-                    function placeEdge(target, which) {{
-                        // First pass: STRICTLY inside a text run.
-                        for (const r of textRanges) {{
-                            if (target > r.pos && target < r.end) {{
-                                const off = target - r.pos;
-                                if (which === 'start') targetRange.setStart(r.text, off);
-                                else                   targetRange.setEnd(r.text, off);
-                                return;
-                            }}
-                        }}
-                        // Second pass: at the boundary. Prefer
-                        // an empty tile at this exact position —
-                        // typically an empty MarkTile we want
-                        // the cursor INSIDE.
-                        for (const t of emptyTiles) {{
-                            if (t.pos === target) {{
-                                if (which === 'start') targetRange.setStart(t.node, 0);
-                                else                   targetRange.setEnd(t.node, 0);
-                                return;
-                            }}
-                        }}
-                        // Third pass: boundary fallback to a
-                        // text tile (end of a tile or start of
-                        // the next).
-                        for (const r of textRanges) {{
-                            if (target >= r.pos && target <= r.end) {{
-                                const off = target - r.pos;
-                                if (which === 'start') targetRange.setStart(r.text, off);
-                                else                   targetRange.setEnd(r.text, off);
-                                return;
-                            }}
-                        }}
-                        // Past the last tile — pin to editor.
-                        if (which === 'start') targetRange.setStart(el, el.childNodes.length);
-                        else                   targetRange.setEnd(el, el.childNodes.length);
-                    }}
-                    placeEdge({from}, 'start');
-                    placeEdge({to}, 'end');
-
-                    const sel = window.getSelection();
-                    // Skip if DOM already matches — `setBaseAndExtent`
-                    // re-emits a selectionchange and our DOM→state
-                    // bridge would treat that as a fresh edit.
-                    if (sel && sel.rangeCount === 1) {{
-                        const cur = sel.getRangeAt(0);
-                        if (cur.startContainer === targetRange.startContainer
-                            && cur.startOffset === targetRange.startOffset
-                            && cur.endContainer === targetRange.endContainer
-                            && cur.endOffset === targetRange.endOffset) {{
-                            return;
-                        }}
-                    }}
-                    // Flag-based write boundary. CM6's actual
-                    // `observer.ignore()` pattern (disconnect +
-                    // takeRecords + observe) is too aggressive
-                    // for our use case because Dioxus's use_effect
-                    // is not synchronous with the surrounding
-                    // render — user typing that arrives DURING
-                    // the writeback would be discarded by
-                    // takeRecords. Sticking with `writing` /
-                    // `muting` flags which suppress without
-                    // dropping queued mutations.
-                    el.dataset.writing = '1';
-                    sel.removeAllRanges();
-                    sel.addRange(targetRange);
-                    delete el.dataset.muting;
-                    requestAnimationFrame(() => {{
-                        delete el.dataset.writing;
-                    }});
-                }})();
-                "#
-            );
-            let _ = document::eval(&script);
-        });
-    }
 
     // ── onkeydown: keymap dispatch ───────────────────────────────
     let keymap_for_keys = keymap.clone();
@@ -632,26 +972,84 @@ pub fn Editor(
         }
     };
 
+    // ── Imperative DOM patch effect ──────────────────────────
+    //
+    // Fires on every state change. Serializes the tile tree to
+    // a `Patch` description and hands it to the JS-side
+    // `__cm_patch_<id>` function set up in the bridge.
+    //
+    // Dioxus reconciler stays out of the editor's content
+    // entirely — we render only an empty `<div data-editor-id>`
+    // and the patcher fills + maintains everything inside.
+    // CM6 model.
+    {
+        let id = editor_id.clone();
+        let deco_source_patch = decorations;
+        use_effect(move || {
+            let s = state.read();
+            let decorations: Vec<DecoratedRange> = match deco_source_patch {
+                Some(src) => {
+                    let mut v = src(&s);
+                    v.sort_by_key(|d| d.from);
+                    v
+                }
+                None => Vec::new(),
+            };
+            let (arena, root) = build_tiles(&s.doc.to_string(), &decorations);
+            let patch = build_patch(&arena, root);
+            let primary = s.selection.primary();
+            // Send anchor/head separately (not sorted) so JS uses
+            // `setBaseAndExtent` and preserves direction. Otherwise
+            // shift+arrow-left wouldn't extend backward — every
+            // restored selection would have its head at the right
+            // edge, and the keyboard would extend further right.
+            // Send the full doc text along with the patch so the
+            // JS-side copy handler can produce *source* markdown
+            // when the user copies — the rendered DOM differs
+            // (widgets replace markers, ` ``` ` fences are
+            // hidden, etc.), and copying the rendered view would
+            // be uneditable on paste.
+            let payload = serde_json::json!({
+                "patches": patch,
+                "doc": s.doc.to_string(),
+                "selection": {
+                    "anchor": primary.anchor,
+                    "head": primary.head,
+                },
+            });
+            let patch_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
+            let patch_json_lit =
+                serde_json::to_string(&patch_json).unwrap_or_else(|_| "\"\"".into());
+            let script = format!(
+                r#"
+                (function() {{
+                    const payload = {patch_json_lit};
+                    // Always stash the latest payload — the
+                    // bridge consumes it on attach so we never
+                    // race patches against in-flight retries.
+                    window['__cm_pending_{id}'] = payload;
+                    const fn = window['__cm_patch_{id}'];
+                    if (typeof fn === 'function') fn(payload);
+                }})();
+                "#
+            );
+            let _ = document::eval(&script);
+        });
+    }
+
     rsx! {
         div {
             class: "editor-root",
             "data-editor-id": "{editor_id}",
             // `plaintext-only` strips formatting from paste +
-            // disables rich-text execCommands. Chromium/WebKit
-            // support it; Firefox falls back to "true". Cursor
-            // can still be placed inside child spans under this
-            // mode — which is exactly what's needed for
-            // decorated text.
+            // disables rich-text execCommands.
             contenteditable: "plaintext-only",
             spellcheck: "false",
             onkeydown: on_keydown,
-            // Children: render the tile tree. Each composite
-            // tile becomes a `<span data-tile-id="N">`; text
-            // tiles emit a bare text node so the
-            // Dioxus-reconciler-no-op trick (matching DOM
-            // text → no DOM mutation) still holds during
-            // typing. See `tile::render_dx::render_tile`.
-            {render_tile(&arena, doc_tile)}
+            // No children in rsx — Dioxus only sees / manages
+            // the outer div's attributes. The interior is owned
+            // by the imperative patcher above. Dioxus's
+            // reconciler never touches our editor content.
         }
     }
 }
@@ -725,18 +1123,40 @@ fn handle_bridge_msg(
                 return;
             }
             // Translate each visible-space change to doc space.
-            // s_off / e_off from the JS bridge already arrive in
-            // doc space (via data-tile-pos), so they need no
-            // mapping.
+            //
+            // Special-case the common typing path: when the
+            // pre-typing selection is a caret and the diff is a
+            // single insertion, anchor the insert at
+            // `cur.selection.head` (doc space, authoritative)
+            // instead of mapping through `visible_to_doc`. Without
+            // this, typing right after a Hidden range — e.g.
+            // after a list marker like `- [ ] ` whose bytes
+            // contribute 0 visible chars — lands on the *start*
+            // of the hidden range, dropping the typed text before
+            // the marker bytes in the doc.
+            let primary = cur.selection.primary();
+            let vis_vec: Vec<Change> = vis_changes.iter().cloned().collect();
+            let single_caret_insert = primary.anchor == primary.head
+                && vis_vec.len() == 1
+                && vis_vec[0].from == vis_vec[0].to;
             let mut doc_changes: Vec<Change> = Vec::new();
-            for c in vis_changes.iter() {
-                let doc_from = old_visible.visible_to_doc(c.from);
-                let doc_to = old_visible.visible_to_doc(c.to);
+            if single_caret_insert {
+                let head = primary.head.min(cur.doc.len());
                 doc_changes.push(Change {
-                    from: doc_from,
-                    to: doc_to,
-                    inserted: c.inserted.clone(),
+                    from: head,
+                    to: head,
+                    inserted: vis_vec[0].inserted.clone(),
                 });
+            } else {
+                for c in vis_vec.iter() {
+                    let doc_from = old_visible.visible_to_doc(c.from);
+                    let doc_to = old_visible.visible_to_doc(c.to);
+                    doc_changes.push(Change {
+                        from: doc_from,
+                        to: doc_to,
+                        inserted: c.inserted.clone(),
+                    });
+                }
             }
             let changes = Changes::from_sorted(doc_changes);
             let new_doc_len = cur.doc.len() as isize + changes
@@ -895,6 +1315,85 @@ fn handle_bridge_msg(
         }
         "composition-end" => {
             tracing::debug!("editor.composition.end");
+        }
+        "enter-continue-list" => {
+            // The JS bridge intercepts Enter at the beforeinput
+            // stage so the browser doesn't insert its own DOM
+            // change. We re-apply the keymap's
+            // `enter_continue_list` here against the selection
+            // the browser saw at that moment — using
+            // `state.selection` directly would race against the
+            // in-flight `sel` message from the click that
+            // preceded Enter.
+            let cur_clone = {
+                let cur = state.read().clone();
+                let doc_len = cur.doc.len();
+                let from = s_off.min(doc_len);
+                let to = e_off.min(doc_len).max(from);
+                EditorState {
+                    selection: Selection::single(Range::new(from, to)),
+                    ..cur
+                }
+            };
+            if let Some(spec) = editor_state::commands::enter_continue_list(&cur_clone) {
+                state.set(cur_clone.update(spec.annotate("origin", "enter")));
+            }
+        }
+        "copy-range" => {
+            // Code-block header copy button. We don't have a
+            // clipboard API hooked up Rust-side yet, so bounce
+            // the slice back to JS for `navigator.clipboard.writeText`.
+            let from = v.get("from").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let to = v.get("to").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let cur = state.read();
+            let doc = cur.doc.to_string();
+            let from = from.min(doc.len());
+            let to = to.min(doc.len()).max(from);
+            let slice = doc[from..to].to_string();
+            let escaped = slice.replace('\\', "\\\\").replace('`', "\\`");
+            let script = format!(
+                r#"navigator.clipboard && navigator.clipboard.writeText(`{escaped}`);"#
+            );
+            let _ = document::eval(&script);
+        }
+        "task-toggle" => {
+            // Click on a task checkbox widget. `pos` is the byte
+            // offset of the line start. Flip the `[ ]` ↔ `[x]`
+            // bracket two bytes in.
+            let pos = v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let cur = state.read().clone();
+            let doc = cur.doc.to_string();
+            let bracket_idx = pos + 3; // `- [` → bracket at +3
+            let next_char = doc.as_bytes().get(bracket_idx).copied();
+            let new_char = match next_char {
+                Some(b' ') => "x",
+                Some(b'x') | Some(b'X') => " ",
+                _ => return,
+            };
+            let changes = Changes::replace(bracket_idx..bracket_idx + 1, new_char);
+            // Explicit caret so a queued `sel` message from the
+            // browser's widget-click selection can't leave the
+            // user staring at a wide highlight after the toggle.
+            let new_sel = Selection::caret(bracket_idx + 1);
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "task-toggle"),
+            ));
+        }
+        "link-clicked" => {
+            // User clicked a link/wikilink. The browser placed
+            // the caret inside the link body as part of the
+            // click; that would re-reveal the link's markers
+            // via `cursor_touches`. Drop selection to caret(0)
+            // so live-preview applies cleanly.
+            let cur = state.read().clone();
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .selection(Selection::caret(0))
+                    .annotate("origin", "link-clicked"),
+            ));
         }
         _ => {}
     }

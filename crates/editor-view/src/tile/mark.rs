@@ -25,6 +25,10 @@ pub struct MarkSpec {
     /// CSS class on the wrapper. Multiple classes are
     /// space-joined.
     pub class: String,
+    /// Extra HTML attributes copied verbatim onto the rendered
+    /// element. Used for things like `data-href` on link spans
+    /// so the JS click handler knows where to navigate.
+    pub attrs: Vec<(String, String)>,
     /// Inclusive at start — typing at the boundary becomes
     /// part of the mark.
     pub inclusive_start: bool,
@@ -38,9 +42,14 @@ impl MarkSpec {
         Self {
             tag: "span".into(),
             class: class.into(),
+            attrs: Vec::new(),
             inclusive_start: false,
             inclusive_end: false,
         }
+    }
+    pub fn with_attrs(mut self, attrs: Vec<(String, String)>) -> Self {
+        self.attrs = attrs;
+        self
     }
 }
 
