@@ -1024,10 +1024,10 @@ pub fn LogseqShell() -> Element {
                         // user's click visibly does nothing.
                         active_page_w.set(Some(id));
                         panel_w.set(LeftPanel::Journals);
-                        if let Some(t) = try_use_context::<TagViewState>() {
+                        if let Some(t) = try_consume_context::<TagViewState>() {
                             t.0.clone().set(None);
                         }
-                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                        if let Some(p) = try_consume_context::<ActivePdfState>() {
                             p.0.clone().set(None);
                         }
                         cmd_k.set(None);
@@ -1035,13 +1035,13 @@ pub fn LogseqShell() -> Element {
                     on_pick_block: move |(page_id, block_id): (Uuid, Uuid)| {
                         active_page_w.set(Some(page_id));
                         panel_w.set(LeftPanel::Journals);
-                        if let Some(t) = try_use_context::<TagViewState>() {
+                        if let Some(t) = try_consume_context::<TagViewState>() {
                             t.0.clone().set(None);
                         }
-                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                        if let Some(p) = try_consume_context::<ActivePdfState>() {
                             p.0.clone().set(None);
                         }
-                        if let Some(z) = try_use_context::<ZoomState>() {
+                        if let Some(z) = try_consume_context::<ZoomState>() {
                             z.0.clone().set(Some(block_id));
                         }
                         cmd_k.set(None);
@@ -1055,20 +1055,20 @@ pub fn LogseqShell() -> Element {
                     panel,
                     on_set_panel: move |p| {
                         panel_w.set(p);
-                        if let Some(t) = try_use_context::<TagViewState>() {
+                        if let Some(t) = try_consume_context::<TagViewState>() {
                             t.0.clone().set(None);
                         }
-                        if let Some(pdf) = try_use_context::<ActivePdfState>() {
+                        if let Some(pdf) = try_consume_context::<ActivePdfState>() {
                             pdf.0.clone().set(None);
                         }
                     },
                     on_pick_page: move |id| {
                         active_page_w.set(Some(id));
                         panel_w.set(LeftPanel::Journals);
-                        if let Some(t) = try_use_context::<TagViewState>() {
+                        if let Some(t) = try_consume_context::<TagViewState>() {
                             t.0.clone().set(None);
                         }
-                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                        if let Some(p) = try_consume_context::<ActivePdfState>() {
                             p.0.clone().set(None);
                         }
                     },
@@ -1081,10 +1081,10 @@ pub fn LogseqShell() -> Element {
                     on_pick_page: move |id| {
                         active_page_w.set(Some(id));
                         panel_w.set(LeftPanel::Journals);
-                        if let Some(t) = try_use_context::<TagViewState>() {
+                        if let Some(t) = try_consume_context::<TagViewState>() {
                             t.0.clone().set(None);
                         }
-                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                        if let Some(p) = try_consume_context::<ActivePdfState>() {
                             p.0.clone().set(None);
                         }
                     },
@@ -1132,7 +1132,7 @@ fn BlockContextMenuOverlay(state: Signal<Option<(Uuid, i32, i32)>>) -> Element {
     let Some((block_id, x, y)) = snap else {
         return rsx! { div {} };
     };
-    let ops = try_use_context::<BlockOps>();
+    let ops = try_consume_context::<BlockOps>();
     let style = format!(
         "position: fixed; top: {y}px; left: {x}px; min-width: 200px; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; box-shadow: 0 12px 30px rgba(0,0,0,0.45); z-index: 70;"
     );
@@ -1606,7 +1606,7 @@ fn LogbookView(body: String, block_id: Uuid, block_content: String) -> Element {
                     let entries_for_click = entries.clone();
                     let content_for_click = block_content.clone();
                     let has_running = open_secs.is_some();
-                    let ops = try_use_context::<BlockOps>();
+                    let ops = try_consume_context::<BlockOps>();
                     let label = if has_running { "Clock out" } else { "Clock in" };
                     rsx! {
                         button {
@@ -2003,7 +2003,7 @@ fn LeftSidebar(
                 "Settings"
             }
             {
-                let favs = try_use_context::<FavoritesState>().map(|f| f.0.read().clone()).unwrap_or_default();
+                let favs = try_consume_context::<FavoritesState>().map(|f| f.0.read().clone()).unwrap_or_default();
                 if !favs.is_empty() {
                     rsx! {
                         div { class: "ls-sidebar-section", "Favorites" }
@@ -2034,7 +2034,7 @@ fn LeftSidebar(
                 }
             }
             {
-                let recents = try_use_context::<RecentsState>().map(|r| r.0.read().clone()).unwrap_or_default();
+                let recents = try_consume_context::<RecentsState>().map(|r| r.0.read().clone()).unwrap_or_default();
                 if !recents.is_empty() {
                     rsx! {
                         div { class: "ls-sidebar-section", "Recent" }
@@ -2070,7 +2070,7 @@ fn LeftSidebar(
                     style: "background: transparent; border: 0; color: var(--ls-secondary-text-color); cursor: pointer; font-size: 0.9rem; padding: 0 0.4em;",
                     title: "New page",
                     onclick: move |_| {
-                        if let Some(ops) = try_use_context::<PageOps>() {
+                        if let Some(ops) = try_consume_context::<PageOps>() {
                             ops.create_page.call(format!("Untitled {}", chrono::Local::now().format("%H:%M:%S")));
                         }
                     },
@@ -2224,8 +2224,8 @@ fn NamespaceNode(
 /// File System Access permission flow we haven't wired yet).
 #[component]
 fn ImportGraphButton() -> Element {
-    let doc = try_use_context::<DocHandle>();
-    let toast = try_use_context::<ImportToastState>();
+    let doc = try_consume_context::<DocHandle>();
+    let toast = try_consume_context::<ImportToastState>();
     let on_click = move |_e: Event<MouseData>| {
         let Some(doc) = doc.clone() else { return };
         let mut toast_sig = toast.map(|t| t.0);
@@ -2289,11 +2289,11 @@ fn MainArea(
     let _ = on_set_panel;
     let active = *active_page.read();
     let panel_cur = *panel.read();
-    let tag_state = try_use_context::<TagViewState>();
+    let tag_state = try_consume_context::<TagViewState>();
     let active_tag = tag_state.as_ref().and_then(|s| s.0.read().clone());
 
     // Active PDF supersedes everything else.
-    let pdf_state = try_use_context::<ActivePdfState>();
+    let pdf_state = try_consume_context::<ActivePdfState>();
     let pdf_url = pdf_state.as_ref().and_then(|s| s.0.read().clone());
     if let Some(url) = pdf_url {
         return rsx! {
@@ -2411,7 +2411,7 @@ fn TagView(tag: String, vault: LogseqVault, on_pick_page: EventHandler<Uuid>) ->
     } else {
         format!("{count} references")
     };
-    let tag_state = try_use_context::<TagViewState>();
+    let tag_state = try_consume_context::<TagViewState>();
     let mut clear = move || {
         if let Some(s) = tag_state.as_ref() {
             s.0.clone().set(None);
@@ -2576,7 +2576,7 @@ fn CardsReview(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
                 div { style: "display: flex; gap: 0.4em; margin-top: 1em; flex-wrap: wrap;",
                     if is_flipped {
                         {
-                            let ops = try_use_context::<BlockOps>();
+                            let ops = try_consume_context::<BlockOps>();
                             let card_full = card.full_content.clone();
                             let card_id = card.block_id;
                             let prev_interval = card.interval_days;
@@ -2689,8 +2689,8 @@ fn TasksKanban(vault: LogseqVault, on_pick_page: EventHandler<Uuid>) -> Element 
         (TaskMarker::Done, "DONE"),
         (TaskMarker::Cancelled, "CANCELLED"),
     ];
-    let zoom_state = try_use_context::<ZoomState>();
-    let ops = try_use_context::<BlockOps>();
+    let zoom_state = try_consume_context::<ZoomState>();
+    let ops = try_consume_context::<BlockOps>();
     rsx! {
         h1 { class: "ls-page-title", "Tasks" }
         div { style: "color: var(--ls-secondary-text-color); font-size: 0.85rem; margin-bottom: 0.8em;",
@@ -2912,7 +2912,7 @@ fn PageView(
 ) -> Element {
     let _ = doc;
     let vault_for_backlinks = vault.clone();
-    let zoom_state = try_use_context::<ZoomState>();
+    let zoom_state = try_consume_context::<ZoomState>();
     let mut zoom_w = zoom_state;
     let zoom_id = zoom_state.as_ref().and_then(|z| *z.0.read());
 
@@ -2969,7 +2969,7 @@ fn PageView(
                             e.prevent_default();
                             let new_name = editing_title_w.peek().clone().unwrap_or_default();
                             if !new_name.trim().is_empty() {
-                                if let Some(ops) = try_use_context::<PageOps>() {
+                                if let Some(ops) = try_consume_context::<PageOps>() {
                                     ops.rename_page.call((page_id_for_title, new_name.trim().to_string()));
                                 }
                             }
@@ -2994,7 +2994,7 @@ fn PageView(
                     "{page.basename}"
                 }
                 {
-                    let fav_state = try_use_context::<FavoritesState>();
+                    let fav_state = try_consume_context::<FavoritesState>();
                     let pid = page_id_for_title;
                     let is_fav = fav_state
                         .as_ref()
@@ -3091,7 +3091,7 @@ fn PageView(
             }
         }
         {
-            let find = try_use_context::<FindInPageState>()
+            let find = try_consume_context::<FindInPageState>()
                 .as_ref()
                 .and_then(|f| f.0.read().clone());
             if let Some(q) = find {
@@ -3105,7 +3105,7 @@ fn PageView(
             EmptyPagePlaceholder { page_id: page.id }
         } else {
             {
-                let find_q = try_use_context::<FindInPageState>()
+                let find_q = try_consume_context::<FindInPageState>()
                     .as_ref()
                     .and_then(|f| f.0.read().clone())
                     .filter(|q| !q.trim().is_empty())
@@ -3145,8 +3145,8 @@ fn PageView(
 fn EmptyPagePlaceholder(page_id: Uuid) -> Element {
     // Inline button that creates the page's first block + drops
     // into edit mode so the user can start typing immediately.
-    let doc_ctx = try_use_context::<DocHandle>();
-    let editing_id = try_use_context::<Signal<Option<Uuid>>>();
+    let doc_ctx = try_consume_context::<DocHandle>();
+    let editing_id = try_consume_context::<Signal<Option<Uuid>>>();
     let on_start = move |_e: Event<MouseData>| {
         let Some(handle) = doc_ctx.clone() else {
             return;
@@ -3203,7 +3203,7 @@ fn EmptyPagePlaceholder(page_id: Uuid) -> Element {
 /// content). Esc closes; mirrors Cmd-F in most editors.
 #[component]
 fn FindInPageBar(initial_query: String) -> Element {
-    let find_state = try_use_context::<FindInPageState>();
+    let find_state = try_consume_context::<FindInPageState>();
     let mut value: Signal<String> = use_signal(|| initial_query.clone());
     rsx! {
         div {
@@ -3262,8 +3262,8 @@ pub(crate) fn subtree_matches(node: &BlockNodeTree, q: &str) -> bool {
 #[component]
 fn PdfReader(url: String, active_page: Option<Uuid>) -> Element {
     let _ = active_page;
-    let pdf_state = try_use_context::<ActivePdfState>();
-    let page_ops = try_use_context::<PageOps>();
+    let pdf_state = try_consume_context::<ActivePdfState>();
+    let page_ops = try_consume_context::<PageOps>();
     let mut text: Signal<String> = use_signal(String::new);
     let mut page_num: Signal<String> = use_signal(|| "1".into());
     let basename = url
@@ -3350,7 +3350,7 @@ fn PdfReader(url: String, active_page: Option<Uuid>) -> Element {
 
 #[component]
 fn SettingsView() -> Element {
-    let settings_state = try_use_context::<SettingsState>();
+    let settings_state = try_consume_context::<SettingsState>();
     let cur = settings_state
         .as_ref()
         .map(|s| s.0.read().clone())
@@ -3476,7 +3476,7 @@ fn UnlinkedReferencesSection(
         return rsx! {};
     }
     let total: usize = by_source.values().map(|v| v.len()).sum();
-    let zoom_state = try_use_context::<ZoomState>();
+    let zoom_state = try_consume_context::<ZoomState>();
     rsx! {
         section {
             style: "margin-top: 1.5em; padding-top: 1em; border-top: 1px solid var(--ls-border-color);",
@@ -3664,7 +3664,7 @@ fn BacklinksSection(
     } else {
         format!("Linked references · {total}")
     };
-    let zoom_state = try_use_context::<ZoomState>();
+    let zoom_state = try_consume_context::<ZoomState>();
     rsx! {
         section { style: "margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--ls-border-color);",
             div { style: "font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ls-secondary-text-color); margin-bottom: 0.5em;",
@@ -3927,7 +3927,7 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
     let block = node.block.clone();
     let block_id = block.id;
     let is_collapsed = block.collapsed;
-    let ops = try_use_context::<BlockOps>();
+    let ops = try_consume_context::<BlockOps>();
 
     let ops_fold = ops.clone();
     let on_fold = move |e: Event<MouseData>| {
@@ -3937,7 +3937,7 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         }
     };
     let ops_bullet = ops.clone();
-    let ms_bullet = try_use_context::<MultiSelectState>();
+    let ms_bullet = try_consume_context::<MultiSelectState>();
     let on_bullet = move |e: Event<MouseData>| {
         e.stop_propagation();
         let mods = e.modifiers();
@@ -3986,7 +3986,7 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         ""
     };
 
-    let block_menu_state = try_use_context::<BlockMenuState>();
+    let block_menu_state = try_consume_context::<BlockMenuState>();
     let on_context = move |e: Event<MouseData>| {
         e.prevent_default();
         let coords = e.data().client_coordinates();
@@ -4000,7 +4000,7 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
     // convention); each row accepts drops with a three-zone
     // hit-test (above / inside / below) driven by the y-offset of
     // the pointer inside the row.
-    let drag_state = try_use_context::<DragState>();
+    let drag_state = try_consume_context::<DragState>();
     let mut drag_source_for_start = drag_state.as_ref().map(|s| s.dragging);
     let on_drag_start = move |_e: Event<DragData>| {
         if let Some(ref mut s) = drag_source_for_start {
@@ -4073,7 +4073,7 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
         None => "ls-block-row",
     };
 
-    let ms_state = try_use_context::<MultiSelectState>();
+    let ms_state = try_consume_context::<MultiSelectState>();
     let is_selected = ms_state
         .as_ref()
         .map(|s| s.selected.read().contains(&block_id))
@@ -4124,13 +4124,13 @@ fn LogseqBlockNode(node: BlockNodeTree, depth: usize, on_pick_page: EventHandler
 
 #[component]
 fn LogseqBlockBody(block: Block) -> Element {
-    let resolver = try_use_context::<WikiResolver>().unwrap_or_default();
-    let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
-    let page_embeds = try_use_context::<PageEmbedResolver>().unwrap_or_default();
-    let queries = try_use_context::<QueryResolver>().unwrap_or_default();
-    let namespaces = try_use_context::<NamespaceResolver>().unwrap_or_default();
-    let editing_id = try_use_context::<Signal<Option<Uuid>>>();
-    let ops = try_use_context::<BlockOps>();
+    let resolver = try_consume_context::<WikiResolver>().unwrap_or_default();
+    let block_refs = try_consume_context::<BlockRefResolver>().unwrap_or_default();
+    let page_embeds = try_consume_context::<PageEmbedResolver>().unwrap_or_default();
+    let queries = try_consume_context::<QueryResolver>().unwrap_or_default();
+    let namespaces = try_consume_context::<NamespaceResolver>().unwrap_or_default();
+    let editing_id = try_consume_context::<Signal<Option<Uuid>>>();
+    let ops = try_consume_context::<BlockOps>();
 
     let block_id = block.id;
     let is_editing = editing_id
@@ -4257,7 +4257,7 @@ fn LogseqBlockBody(block: Block) -> Element {
     // `caretPositionFromPoint` to drop the caret exactly where
     // the user clicked rather than at offset 0.
     let ops_for_click = ops.clone();
-    let pending = try_use_context::<PendingEditClick>();
+    let pending = try_consume_context::<PendingEditClick>();
     let on_static_click = move |e: Event<MouseData>| {
         if let Some(p) = pending.as_ref() {
             let c = e.data().client_coordinates();
@@ -4421,9 +4421,9 @@ pub enum SidebarEntry {
 /// Escape exits edit mode.
 #[component]
 fn EditableBlock(block: Block) -> Element {
-    let ops = try_use_context::<BlockOps>();
-    let slash_state = try_use_context::<SlashState>();
-    let page_search_state = try_use_context::<PageSearchState>();
+    let ops = try_consume_context::<BlockOps>();
+    let slash_state = try_consume_context::<SlashState>();
+    let page_search_state = try_consume_context::<PageSearchState>();
     let block_id = block.id;
     let initial_content = block.content.clone();
     let content_signal: Signal<String> = use_signal(|| initial_content.clone());
@@ -4442,7 +4442,7 @@ fn EditableBlock(block: Block) -> Element {
     // guard so multi-byte input (CJK / accents) doesn't trigger
     // input-driven re-renders mid-composition.
     let init_id = block_id.simple().to_string();
-    let pending_click_state = try_use_context::<PendingEditClick>();
+    let pending_click_state = try_consume_context::<PendingEditClick>();
     let auto_focus = move |elem: Event<MountedData>| {
         let id = init_id.clone();
         // Pull the click coordinates out *before* we spawn so the
@@ -4522,8 +4522,8 @@ fn EditableBlock(block: Block) -> Element {
         });
     };
 
-    let block_ref_state = try_use_context::<BlockRefState>();
-    let tag_search_state = try_use_context::<TagSearchState>();
+    let block_ref_state = try_consume_context::<BlockRefState>();
+    let tag_search_state = try_consume_context::<TagSearchState>();
     let ops_for_input = ops.clone();
     let mut content_w = content_signal;
     let id_str_input = block_id.simple().to_string();
@@ -4532,13 +4532,11 @@ fn EditableBlock(block: Block) -> Element {
     let block_ref_w = block_ref_state;
     let tag_search_w = tag_search_state;
     let on_input = move |_e: Event<FormData>| {
-        // contenteditable: read textContent + caret offset via eval,
-        // then push the new source through the signal. Dioxus will
-        // reapply the styled innerHTML on the next render; the
-        // caret restore happens in requestAnimationFrame so it
-        // lands after that reflow. The eval also bails when the
-        // editor is mid-IME-composition so half-formed glyphs
-        // don't trigger re-renders.
+        // DOM-authoritative editing: read textContent into the
+        // signal + CRDT, but DON'T touch innerHTML or the caret
+        // — the browser already placed the typed character at the
+        // right spot. The composition guard still applies so
+        // half-formed IME glyphs don't fire CRDT updates.
         let id_str = id_str_input.clone();
         let mut content_w_inner = content_w;
         let ops_clone = ops_for_input.clone();
@@ -4546,9 +4544,7 @@ fn EditableBlock(block: Block) -> Element {
         let mut page_search = page_search_w;
         let mut block_ref = block_ref_w;
         let mut tag_search = tag_search_w;
-        let id_str_for_caret = id_str.clone();
         spawn(async move {
-            // Composition guard — set by the JS init handler.
             let composing_script = format!(
                 r#"
                 (function() {{
@@ -4586,7 +4582,6 @@ fn EditableBlock(block: Block) -> Element {
             if let Some(ops) = ops_clone.as_ref() {
                 ops.update_content.call((block_id, v.clone()));
             }
-            set_caret(&id_str_for_caret, off);
             // Detect all four popup triggers in one pass — first
             // match wins. Order matters: longer literal sigils
             // (`[[`, `((`) before single chars (`/`, `#`).
@@ -4718,19 +4713,7 @@ fn EditableBlock(block: Block) -> Element {
             // the caret ourselves.
             Key::Enter if shift && !mods.alt() && !mods.meta() && !mods.ctrl() => {
                 e.prevent_default();
-                let id_str = block_id.simple().to_string();
-                let mut content_w = content_signal;
-                let update_cb = ops.update_content;
-                spawn(async move {
-                    let (s, en) = read_selection(&id_str).await.unwrap_or((0, 0));
-                    let lo = s.min(en);
-                    let hi = s.max(en);
-                    let mut cur = content_w.peek().clone();
-                    cur.replace_range(lo..hi, "\n");
-                    content_w.set(cur.clone());
-                    update_cb.call((block_id, cur));
-                    set_caret(&id_str, lo + 1);
-                });
+                dom_splice(&block_id.simple().to_string(), "\n", 0);
             }
             Key::Enter if !shift => {
                 e.prevent_default();
@@ -4800,21 +4783,15 @@ fn EditableBlock(block: Block) -> Element {
             {
                 e.prevent_default();
                 let mut stack = undo_stack.peek().clone();
-                // Keep at least one entry (the initial) so a long
-                // undo press doesn't crash by popping the only one.
                 if stack.len() > 1 {
                     let cur_val = content_signal.peek().clone();
-                    let target = stack.pop().unwrap();
+                    let _ = stack.pop();
                     let prev = stack.last().cloned().unwrap_or_default();
                     undo_stack.set(stack);
                     let mut r = redo_stack.peek().clone();
                     r.push(cur_val);
                     redo_stack.set(r);
-                    let _ = target;
-                    let mut content_w = content_signal;
-                    content_w.set(prev.clone());
-                    ops.update_content.call((block_id, prev.clone()));
-                    set_caret(&block_id.simple().to_string(), prev.len());
+                    dom_set_text(&block_id.simple().to_string(), &prev, prev.len());
                 }
             }
             Key::Character(ref c)
@@ -4829,16 +4806,13 @@ fn EditableBlock(block: Block) -> Element {
                     let mut s = undo_stack.peek().clone();
                     s.push(cur_val);
                     undo_stack.set(s);
-                    let mut content_w = content_signal;
-                    content_w.set(target.clone());
-                    ops.update_content.call((block_id, target.clone()));
-                    set_caret(&block_id.simple().to_string(), target.len());
+                    dom_set_text(&block_id.simple().to_string(), &target, target.len());
                 }
             }
             // Cmd/Ctrl-F → open the find-in-page bar.
             Key::Character(ref c) if (mods.meta() || mods.ctrl()) && (c == "f" || c == "F") => {
                 e.prevent_default();
-                if let Some(s) = try_use_context::<FindInPageState>() {
+                if let Some(s) = try_consume_context::<FindInPageState>() {
                     s.0.clone().set(Some(String::new()));
                 }
             }
@@ -4857,24 +4831,22 @@ fn EditableBlock(block: Block) -> Element {
                     _ => ("`", "`"),
                 };
                 let id_str = block_id.simple().to_string();
-                let mut content_w = content_signal;
-                let update_cb = ops.update_content;
                 spawn(async move {
                     let (s, en) = read_selection(&id_str).await.unwrap_or((0, 0));
-                    let mut cur = content_w.peek().clone();
                     if s == en {
-                        cur.insert_str(s, &format!("{lhs}{rhs}"));
-                        content_w.set(cur.clone());
-                        update_cb.call((block_id, cur));
-                        set_caret(&id_str, s + lhs.len());
+                        // Empty selection — drop in `lhs+rhs` and
+                        // park the caret between them.
+                        dom_splice(&id_str, &format!("{lhs}{rhs}"), rhs.chars().count());
                     } else {
+                        // The browser already has the selection
+                        // active; dom_splice will pull its text via
+                        // range.toString() — but we use the source
+                        // signal here for simplicity.
+                        let cur = content_signal.peek().clone();
                         let lo = s.min(en);
                         let hi = s.max(en);
-                        let inner = cur[lo..hi].to_string();
-                        cur.replace_range(lo..hi, &format!("{lhs}{inner}{rhs}"));
-                        content_w.set(cur.clone());
-                        update_cb.call((block_id, cur));
-                        set_caret(&id_str, hi + lhs.len() + rhs.len());
+                        let inner = cur.get(lo..hi).unwrap_or("").to_string();
+                        dom_splice(&id_str, &format!("{lhs}{inner}{rhs}"), 0);
                     }
                 });
             }
@@ -4912,24 +4884,16 @@ fn EditableBlock(block: Block) -> Element {
                 let opener = ch.clone();
                 e.prevent_default();
                 let id_str = block_id.simple().to_string();
-                let mut content_w = content_signal;
-                let update_cb = ops.update_content;
                 spawn(async move {
                     let (s, en) = read_selection(&id_str).await.unwrap_or((0, 0));
-                    let mut cur = content_w.peek().clone();
                     if s == en {
-                        cur.insert_str(s, &format!("{opener}{pair}"));
-                        content_w.set(cur.clone());
-                        update_cb.call((block_id, cur));
-                        set_caret(&id_str, s + opener.len());
+                        dom_splice(&id_str, &format!("{opener}{pair}"), pair.chars().count());
                     } else {
+                        let cur = content_signal.peek().clone();
                         let lo = s.min(en);
                         let hi = s.max(en);
-                        let inner = cur[lo..hi].to_string();
-                        cur.replace_range(lo..hi, &format!("{opener}{inner}{pair}"));
-                        content_w.set(cur.clone());
-                        update_cb.call((block_id, cur));
-                        set_caret(&id_str, hi + opener.len() + pair.len());
+                        let inner = cur.get(lo..hi).unwrap_or("").to_string();
+                        dom_splice(&id_str, &format!("{opener}{inner}{pair}"), 0);
                     }
                 });
             }
@@ -4941,10 +4905,7 @@ fn EditableBlock(block: Block) -> Element {
                 let level = trimmed.chars().take_while(|c| *c == '#').count();
                 if level >= 1 && level <= 6 && trimmed.chars().all(|c| c == '#') {
                     e.prevent_default();
-                    let mut content_w = content_signal;
-                    content_w.set(String::new());
-                    let update_cb = ops.update_content;
-                    update_cb.call((block_id, String::new()));
+                    dom_set_text(&block_id.simple().to_string(), "", 0);
                     ops.set_kind
                         .call((block_id, "heading".into(), Some(level as i32)));
                 }
@@ -4980,14 +4941,21 @@ fn EditableBlock(block: Block) -> Element {
 
     let value_str = content_signal.read().clone();
     let id_attr = block_id.simple().to_string();
-    // Logseq-style "atomic editor": render the current source as
-    // HTML with semantic spans so tokens (wikilinks, refs, bold)
-    // appear styled while the user types, but syntax markers stay
-    // visible. The contenteditable's `textContent` is the canonical
-    // source — `oninput` reads it and updates the signal, after
-    // which Dioxus reapplies the innerHTML and `set_caret` restores
-    // the caret position on the next frame.
-    let rendered_html = publish_core::render_edit_html(&value_str);
+    // Atomic editor: the contenteditable is *DOM-authoritative*
+    // during editing — Logseq works the same way. We compute the
+    // initial styled HTML once when the block enters edit mode
+    // and stash it in a signal whose value never changes again
+    // (drives dangerous_inner_html as a constant). The user's
+    // typing mutates the DOM directly; oninput reads textContent
+    // into the source signal so the CRDT stays in sync, but it
+    // never re-applies innerHTML, so the caret + the just-typed
+    // characters survive untouched. Static re-styling happens when
+    // the block exits edit mode and switches back to the read-only
+    // BlockNode renderer.
+    let _ = value_str;
+    let initial_html_signal: Signal<String> =
+        use_signal(|| publish_core::render_edit_html(&initial_content));
+    let initial_html = initial_html_signal.read().clone();
     let slash_open = slash_state
         .as_ref()
         .and_then(|s| s.0.read().clone())
@@ -5017,7 +4985,7 @@ fn EditableBlock(block: Block) -> Element {
                 style: "background: transparent; border: 0; width: 100%; min-height: 1.5em; color: inherit; font: inherit; outline: none; white-space: pre-wrap; word-break: break-word;",
                 contenteditable: "true",
                 spellcheck: "true",
-                dangerous_inner_html: "{rendered_html}",
+                dangerous_inner_html: "{initial_html}",
                 oninput: on_input,
                 onkeydown: on_keydown,
                 onblur: on_blur,
@@ -5133,8 +5101,8 @@ fn filter_slash(query: &str) -> Vec<&'static SlashCommand> {
 #[component]
 fn SlashPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
     let hits = filter_slash(&query);
-    let ops = try_use_context::<BlockOps>();
-    let slash_state = try_use_context::<SlashState>();
+    let ops = try_consume_context::<BlockOps>();
+    let slash_state = try_consume_context::<SlashState>();
     rsx! {
         div { class: "ls-popup",
             style: "position: absolute; top: 100%; left: 0; margin-top: 0.25em; min-width: 280px; max-height: 280px; overflow-y: auto; background: var(--ls-secondary-background-color); border: 1px solid var(--ls-border-color); border-radius: 0.4em; z-index: 50; box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
@@ -5148,50 +5116,39 @@ fn SlashPalette(block_id: Uuid, query: String, content: Signal<String>) -> Eleme
                     let mut slash_w = slash_state;
                     let mut content_w = content;
                     let query_for_click = query.clone();
+                    let id_for_click = block_id.simple().to_string();
                     let onclick = move |_e: Event<MouseData>| {
-                        // Strip the `/query` from the current content
-                        // and apply the effect.
+                        // Strip the `/query` from the current content,
+                        // apply the effect, and push the result to the
+                        // DOM via dom_set_text — oninput cascades the
+                        // change back into content_w + CRDT.
                         let mut cur = content_w.peek().clone();
                         if let Some(pos) = trigger_after_boundary(&cur, '/') {
                             cur.replace_range(pos..pos + 1 + query_for_click.len(), "");
-                            content_w.set(cur.clone());
-                            if let Some(ops) = ops.as_ref() {
-                                ops.update_content.call((block_id, cur.clone()));
-                            }
                         }
                         match &effect {
                             SlashEffect::SetKind(kind, hl) => {
+                                dom_set_text(&id_for_click, &cur, cur.len());
                                 if let Some(ops) = ops.as_ref() {
                                     ops.set_kind.call((block_id, kind.to_string(), *hl));
                                 }
                             }
                             SlashEffect::InsertText(text) => {
-                                let mut c = content_w.peek().clone();
-                                c.insert_str(0, text);
-                                content_w.set(c.clone());
-                                if let Some(ops) = ops.as_ref() {
-                                    ops.update_content.call((block_id, c));
-                                }
+                                cur.insert_str(0, text);
+                                dom_set_text(&id_for_click, &cur, cur.len());
                             }
                             SlashEffect::InsertToday => {
-                                let today = chrono::Local::now().format("[[%Y-%m-%d]]").to_string();
-                                let mut c = content_w.peek().clone();
-                                c.push_str(&today);
-                                content_w.set(c.clone());
-                                if let Some(ops) = ops.as_ref() {
-                                    ops.update_content.call((block_id, c));
-                                }
+                                let today =
+                                    chrono::Local::now().format("[[%Y-%m-%d]]").to_string();
+                                cur.push_str(&today);
+                                dom_set_text(&id_for_click, &cur, cur.len());
                             }
                             SlashEffect::InsertTomorrow => {
                                 let t = (chrono::Local::now() + chrono::Duration::days(1))
                                     .format("[[%Y-%m-%d]]")
                                     .to_string();
-                                let mut c = content_w.peek().clone();
-                                c.push_str(&t);
-                                content_w.set(c.clone());
-                                if let Some(ops) = ops.as_ref() {
-                                    ops.update_content.call((block_id, c));
-                                }
+                                cur.push_str(&t);
+                                dom_set_text(&id_for_click, &cur, cur.len());
                             }
                         }
                         if let Some(ref mut s) = slash_w.as_mut() {
@@ -5218,9 +5175,9 @@ fn SlashPalette(block_id: Uuid, query: String, content: Signal<String>) -> Eleme
 
 #[component]
 fn PageSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
-    let wiki = try_use_context::<WikiResolver>().unwrap_or_default();
-    let ops = try_use_context::<BlockOps>();
-    let page_search_state = try_use_context::<PageSearchState>();
+    let wiki = try_consume_context::<WikiResolver>().unwrap_or_default();
+    let ops = try_consume_context::<BlockOps>();
+    let page_search_state = try_consume_context::<PageSearchState>();
     let q_lower = query.to_lowercase();
     let mut hits: Vec<(String, String)> = wiki
         .0
@@ -5245,23 +5202,19 @@ fn PageSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> 
             for (name, _slug) in hits {
                 {
                     let name_for_click = name.clone();
-                    let ops = ops.clone();
-                    let mut content_w = content;
+                    let _ = ops.clone();
+                    let content_w = content;
                     let mut page_search_w = page_search_state;
                     let query_for_click = query.clone();
+                    let id_for_click = block_id.simple().to_string();
                     let onclick = move |_e: Event<MouseData>| {
                         let mut cur = content_w.peek().clone();
-                        // Find the `[[query` we matched and replace it
-                        // with `[[Name]]`.
                         if let Some(pos) = cur.rfind("[[") {
                             let end = pos + 2 + query_for_click.len();
                             let end = end.min(cur.len());
                             let replacement = format!("[[{}]]", name_for_click);
                             cur.replace_range(pos..end, &replacement);
-                            content_w.set(cur.clone());
-                            if let Some(ops) = ops.as_ref() {
-                                ops.update_content.call((block_id, cur));
-                            }
+                            dom_set_text(&id_for_click, &cur, cur.len());
                         }
                         if let Some(ref mut s) = page_search_w.as_mut() {
                             s.0.set(None);
@@ -5404,6 +5357,112 @@ async fn read_editor_text(block_simple_id: &str) -> Option<String> {
     }
 }
 
+/// Escape a string for safe inclusion inside a single-quoted JS
+/// literal — backslashes, quotes, newlines, carriage returns.
+fn js_escape_single(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\'' => out.push_str("\\'"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// DOM-side splice: replace the current selection (or insert at the
+/// caret if there is none) with `text`, then move the caret back
+/// `caret_back` characters. After the splice we fire a synthetic
+/// `input` event so the Rust oninput handler picks the change up
+/// for the source signal + CRDT sync.
+fn dom_splice(block_simple_id: &str, text: &str, caret_back: usize) {
+    let escaped = js_escape_single(text);
+    let script = format!(
+        r#"
+        (function() {{
+            const ed = document.querySelector('[data-edit-block="{block_simple_id}"] [contenteditable]');
+            if (!ed) return;
+            const sel = window.getSelection();
+            if (!sel || !sel.rangeCount) {{
+                ed.focus();
+            }}
+            // Make sure the selection still belongs to the editor.
+            const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+            if (!range || !ed.contains(range.startContainer)) {{
+                const r = document.createRange();
+                r.selectNodeContents(ed);
+                r.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(r);
+            }}
+            const cur = sel.getRangeAt(0);
+            cur.deleteContents();
+            const node = document.createTextNode('{escaped}');
+            cur.insertNode(node);
+            const after = document.createRange();
+            after.setStartAfter(node);
+            after.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(after);
+            for (let i = 0; i < {caret_back}; i++) {{
+                if (typeof sel.modify === 'function') {{
+                    sel.modify('move', 'backward', 'character');
+                }}
+            }}
+            ed.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }})();
+        "#
+    );
+    let _ = document::eval(&script);
+}
+
+/// Replace the editor's entire textContent with `text` and park the
+/// caret at character offset `caret`. Used by undo / redo where
+/// individual splices won't do. Fires a synthetic input event.
+fn dom_set_text(block_simple_id: &str, text: &str, caret: usize) {
+    let escaped = js_escape_single(text);
+    let script = format!(
+        r#"
+        (function() {{
+            const ed = document.querySelector('[data-edit-block="{block_simple_id}"] [contenteditable]');
+            if (!ed) return;
+            ed.textContent = '{escaped}';
+            let remaining = {caret};
+            const walker = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT, null);
+            let node = walker.nextNode();
+            let target = null;
+            let target_off = 0;
+            while (node) {{
+                const len = node.textContent.length;
+                if (remaining <= len) {{
+                    target = node;
+                    target_off = remaining;
+                    break;
+                }}
+                remaining -= len;
+                node = walker.nextNode();
+            }}
+            const r = document.createRange();
+            if (target) {{
+                r.setStart(target, target_off);
+            }} else {{
+                r.selectNodeContents(ed);
+                r.collapse(false);
+            }}
+            r.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+            ed.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }})();
+        "#
+    );
+    let _ = document::eval(&script);
+}
+
 /// Move the contenteditable caret to character `offset` (relative
 /// to the editor's `textContent`). Walks the editor's text nodes to
 /// find the matching position, then sets the Selection. Runs inside
@@ -5456,9 +5515,9 @@ async fn read_selection_start(block_simple_id: &str) -> Option<usize> {
 
 #[component]
 fn BlockRefPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
-    let block_refs = try_use_context::<BlockRefResolver>().unwrap_or_default();
-    let ops = try_use_context::<BlockOps>();
-    let block_ref_state = try_use_context::<BlockRefState>();
+    let block_refs = try_consume_context::<BlockRefResolver>().unwrap_or_default();
+    let ops = try_consume_context::<BlockOps>();
+    let block_ref_state = try_consume_context::<BlockRefState>();
     let q_lower = query.to_lowercase();
     let mut hits: Vec<(Uuid, String)> = block_refs
         .0
@@ -5485,10 +5544,11 @@ fn BlockRefPalette(block_id: Uuid, query: String, content: Signal<String>) -> El
             for (id, snippet) in hits {
                 {
                     let id_for_click = id;
-                    let ops = ops.clone();
-                    let mut content_w = content;
+                    let _ = ops.clone();
+                    let content_w = content;
                     let mut block_ref_w = block_ref_state;
                     let query_for_click = query.clone();
+                    let block_simple = block_id.simple().to_string();
                     let onclick = move |_e: Event<MouseData>| {
                         let mut cur = content_w.peek().clone();
                         if let Some(pos) = cur.rfind("((") {
@@ -5496,10 +5556,7 @@ fn BlockRefPalette(block_id: Uuid, query: String, content: Signal<String>) -> El
                             let end = end.min(cur.len());
                             let replacement = format!("(({}))", id_for_click);
                             cur.replace_range(pos..end, &replacement);
-                            content_w.set(cur.clone());
-                            if let Some(ops) = ops.as_ref() {
-                                ops.update_content.call((block_id, cur));
-                            }
+                            dom_set_text(&block_simple, &cur, cur.len());
                         }
                         if let Some(ref mut s) = block_ref_w.as_mut() {
                             s.0.set(None);
@@ -5523,9 +5580,9 @@ fn BlockRefPalette(block_id: Uuid, query: String, content: Signal<String>) -> El
 
 #[component]
 fn TagSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> Element {
-    let queries_ctx = try_use_context::<QueryResolver>().unwrap_or_default();
-    let ops = try_use_context::<BlockOps>();
-    let tag_state = try_use_context::<TagSearchState>();
+    let queries_ctx = try_consume_context::<QueryResolver>().unwrap_or_default();
+    let ops = try_consume_context::<BlockOps>();
+    let tag_state = try_consume_context::<TagSearchState>();
     let q_lower = query.to_lowercase();
     let mut hits: Vec<String> = queries_ctx
         .0
@@ -5550,10 +5607,11 @@ fn TagSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> E
             for tag in hits {
                 {
                     let tag_for_click = tag.clone();
-                    let ops = ops.clone();
-                    let mut content_w = content;
+                    let _ = ops.clone();
+                    let content_w = content;
                     let mut tag_w = tag_state;
                     let query_for_click = query.clone();
+                    let block_simple = block_id.simple().to_string();
                     let onclick = move |_e: Event<MouseData>| {
                         let mut cur = content_w.peek().clone();
                         if let Some(pos) = cur.rfind('#') {
@@ -5561,10 +5619,7 @@ fn TagSearchPalette(block_id: Uuid, query: String, content: Signal<String>) -> E
                             let end = end.min(cur.len());
                             let replacement = format!("#{}", tag_for_click);
                             cur.replace_range(pos..end, &replacement);
-                            content_w.set(cur.clone());
-                            if let Some(ops) = ops.as_ref() {
-                                ops.update_content.call((block_id, cur));
-                            }
+                            dom_set_text(&block_simple, &cur, cur.len());
                         }
                         if let Some(ref mut s) = tag_w.as_mut() {
                             s.0.set(None);
