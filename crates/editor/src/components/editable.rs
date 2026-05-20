@@ -7,7 +7,9 @@
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::handler::{exit_edit, split_block, update_block_content};
+use crate::handler::{
+    delete_block, exit_edit, indent_block, outdent_block, split_block, update_block_content,
+};
 use crate::state::AppState;
 
 #[component]
@@ -30,29 +32,60 @@ pub fn EditableBlock(block_id: Uuid) -> Element {
         exit_edit(state);
     };
     let on_keydown = move |e: Event<KeyboardData>| {
-        // Enter splits the block at the caret.
-        if matches!(e.key(), Key::Enter) && !e.modifiers().shift() {
-            e.prevent_default();
-            // We don't have the caret offset here without an
-            // eval round-trip; for v1 we split at end-of-line
-            // (= end of value). Refinement: stash caret on a
-            // selectionchange listener and read it sync.
-            let v = state
-                .vault
-                .read()
-                .blocks
-                .iter()
-                .find(|b| b.id == block_id)
-                .map(|b| b.content.clone())
-                .unwrap_or_default();
-            let len = v.len();
-            if let Some(new_id) = split_block(state, block_id, len, &v) {
-                state.editing_block.clone().set(Some(new_id));
+        let key = e.key();
+        let mods = e.modifiers();
+        match key {
+            // Enter: split the block at the caret. v1 splits at
+            // end-of-content; a caret-aware version follows once
+            // we wire a selectionchange listener.
+            Key::Enter if !mods.shift() => {
+                e.prevent_default();
+                let v = state
+                    .vault
+                    .read()
+                    .blocks
+                    .iter()
+                    .find(|b| b.id == block_id)
+                    .map(|b| b.content.clone())
+                    .unwrap_or_default();
+                let len = v.len();
+                if let Some(new_id) = split_block(state, block_id, len, &v) {
+                    state.editing_block.clone().set(Some(new_id));
+                }
             }
-        }
-        if matches!(e.key(), Key::Escape) {
-            e.prevent_default();
-            exit_edit(state);
+            // Tab: indent the block — make it a child of its
+            // previous sibling. Shift-Tab: outdent — move one
+            // level closer to root.
+            Key::Tab => {
+                e.prevent_default();
+                if mods.shift() {
+                    outdent_block(state, block_id);
+                } else {
+                    indent_block(state, block_id);
+                }
+            }
+            // Backspace on an empty block deletes it and exits
+            // edit mode. Logseq's same rule.
+            Key::Backspace => {
+                let is_empty = state
+                    .vault
+                    .read()
+                    .blocks
+                    .iter()
+                    .find(|b| b.id == block_id)
+                    .map(|b| b.content.is_empty())
+                    .unwrap_or(false);
+                if is_empty {
+                    e.prevent_default();
+                    delete_block(state, block_id);
+                    exit_edit(state);
+                }
+            }
+            Key::Escape => {
+                e.prevent_default();
+                exit_edit(state);
+            }
+            _ => {}
         }
     };
     let on_mount = move |elem: Event<MountedData>| {
