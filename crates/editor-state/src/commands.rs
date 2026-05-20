@@ -29,6 +29,140 @@ pub fn insert_newline(state: &EditorState) -> Option<TransactionSpec> {
 /// plain const for now and can be promoted to config later.
 pub const INDENT_UNIT: &str = "  ";
 
+/// Try CM6-style "insertBracket" behavior for the given inserted
+/// character. Returns a [`TransactionSpec`] when the character
+/// should be handled specially (auto-close, skip-over, wrap-
+/// selection) and `None` for plain insertion. Mirrors
+/// `closebrackets/src/closebrackets.ts:129` (`insertBracket`).
+///
+/// Behaviors:
+/// - `(` / `[` / `{` with an empty caret → insert `()` with
+///   caret between.
+/// - Same with a non-empty selection → wrap the selection.
+/// - `)` / `]` / `}` adjacent to a matching close → skip over
+///   it instead of inserting (caret moves +1, no text change).
+/// - `'` / `"` / `` ` `` (same-char pairs): tap-to-skip when
+///   the next char is already that quote.
+pub fn insert_bracket(state: &EditorState, input: &str) -> Option<TransactionSpec> {
+    if input.chars().count() != 1 {
+        return None;
+    }
+    let ch = input.chars().next().unwrap();
+    let (open, close, same) = match ch {
+        '(' => ('(', ')', false),
+        '[' => ('[', ']', false),
+        '{' => ('{', '}', false),
+        ')' | ']' | '}' => return handle_close(state, ch),
+        '\'' => ('\'', '\'', true),
+        '"' => ('"', '"', true),
+        '`' => ('`', '`', true),
+        _ => return None,
+    };
+
+    let p = state.selection.primary();
+    let (from, to) = (p.from(), p.to());
+    let doc = state.doc.to_string();
+
+    // Non-empty selection: wrap.
+    if from != to {
+        let mut inserted = String::new();
+        inserted.push(open);
+        inserted.push_str(&doc[from..to]);
+        inserted.push(close);
+        let caret_anchor = from;
+        let caret_head = from + inserted.len();
+        return Some(
+            TransactionSpec::new()
+                .changes(Changes::replace(from..to, &inserted))
+                .selection(Selection::single(Range::new(caret_anchor, caret_head))),
+        );
+    }
+
+    // Caret. For same-char quotes: skip if the next byte is the
+    // same quote (covers re-typing a closing quote you don't
+    // need to write).
+    if same {
+        let next_byte = doc.as_bytes().get(from).copied();
+        if next_byte == Some(ch as u8) {
+            return Some(
+                TransactionSpec::new()
+                    .selection(Selection::caret(from + 1)),
+            );
+        }
+    }
+
+    // Auto-close only if the next char is whitespace, EOL, or
+    // a "closing-before" char (`)`, `]`, `}`, `,`, `;`, `:`,
+    // `>`). Mirrors CM6's `before` config
+    // (`closebrackets.ts:21`).
+    let next_byte = doc.as_bytes().get(from).copied();
+    let can_close = match next_byte {
+        None => true,
+        Some(b) => b == b' ' || b == b'\n' || b == b'\t'
+            || matches!(b, b')' | b']' | b'}' | b',' | b';' | b':' | b'>'),
+    };
+    if !can_close {
+        return None;
+    }
+    let mut pair = String::new();
+    pair.push(open);
+    pair.push(close);
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::insert(from, &pair))
+            .selection(Selection::caret(from + open.len_utf8())),
+    )
+}
+
+/// Skip past a close bracket if the next byte is that exact
+/// close and would be the matching one — `closebrackets.ts:180`
+/// (`handleClose`). v1 takes a lighter heuristic than CM6
+/// (which tracks "auto-inserted" via a StateField): if the
+/// next char matches the closer the user typed, skip; otherwise
+/// fall through to plain insert.
+fn handle_close(state: &EditorState, close_char: char) -> Option<TransactionSpec> {
+    let p = state.selection.primary();
+    if p.anchor != p.head {
+        return None;
+    }
+    let from = p.head;
+    let next = state.doc.to_string().as_bytes().get(from).copied();
+    if next == Some(close_char as u8) {
+        return Some(
+            TransactionSpec::new().selection(Selection::caret(from + 1)),
+        );
+    }
+    None
+}
+
+/// CM6's `deleteBracketPair`
+/// (`closebrackets/src/closebrackets.ts:96`). When Backspace is
+/// pressed on a caret sitting between a matching `()` / `[]` /
+/// `{}` / `''` / `""` / ` `` ` pair, delete both characters at
+/// once instead of just the opening one.
+pub fn delete_bracket_pair(state: &EditorState) -> Option<TransactionSpec> {
+    let p = state.selection.primary();
+    if p.anchor != p.head || p.head == 0 {
+        return None;
+    }
+    let doc = state.doc.to_string();
+    let bytes = doc.as_bytes();
+    let prev = bytes.get(p.head - 1).copied()?;
+    let next = bytes.get(p.head).copied()?;
+    let matches = matches!(
+        (prev, next),
+        (b'(', b')') | (b'[', b']') | (b'{', b'}') | (b'\'', b'\'') | (b'"', b'"') | (b'`', b'`')
+    );
+    if !matches {
+        return None;
+    }
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::delete(p.head - 1..p.head + 1))
+            .selection(Selection::caret(p.head - 1)),
+    )
+}
+
 /// Enter — but if the caret is on a list / task item, continue
 /// the list on the next line. On an *empty* list item (marker
 /// + whitespace only), instead remove the marker, exiting the
@@ -411,7 +545,14 @@ fn parse_list_continuation(line: &str) -> Option<ListContinuation> {
 /// Delete the character before the caret. With a non-empty
 /// selection, deletes the selection. Bound by convention to
 /// `Backspace`.
+///
+/// First tries [`delete_bracket_pair`] so Backspace between an
+/// empty `()` / `[]` / `{}` / `""` / `''` / ` `` ` pair deletes
+/// both characters, matching CM6's `closeBracketsKeymap`.
 pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
+    if let Some(spec) = delete_bracket_pair(state) {
+        return Some(spec);
+    }
     let p = state.selection.primary();
     let (from, to) = (p.from(), p.to());
     if from != to {
@@ -420,8 +561,6 @@ pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
     if from == 0 {
         return None;
     }
-    // For now we step one byte. A future commit will step by
-    // grapheme cluster so we don't split multi-byte chars.
     Some(TransactionSpec::new().changes(Changes::delete(from - 1..from)))
 }
 
@@ -522,6 +661,66 @@ mod tests {
         let next = s.update(enter_continue_list(&s).unwrap());
         assert_eq!(next.doc.to_string(), "1. foo\n2. ");
         assert_eq!(next.selection.primary().head, 10);
+    }
+
+    #[test]
+    fn bracket_open_inserts_pair_with_caret_between() {
+        let s = at("", 0);
+        let next = s.update(insert_bracket(&s, "(").unwrap());
+        assert_eq!(next.doc.to_string(), "()");
+        assert_eq!(next.selection.primary().head, 1);
+    }
+
+    #[test]
+    fn bracket_open_does_not_close_when_next_is_word_char() {
+        let s = at("foo", 0);
+        // Next byte is 'f' — should NOT auto-close.
+        assert!(insert_bracket(&s, "(").is_none());
+    }
+
+    #[test]
+    fn bracket_open_wraps_selection() {
+        let mut s = EditorState::new("hello");
+        s.selection = Selection::single(Range::new(0, 5));
+        let next = s.update(insert_bracket(&s, "(").unwrap());
+        assert_eq!(next.doc.to_string(), "(hello)");
+        let p = next.selection.primary();
+        assert_eq!((p.from(), p.to()), (0, 7));
+    }
+
+    #[test]
+    fn bracket_close_skips_over_matching_close() {
+        // Setup: caret at position 4 in "abc)def".
+        let s = at("abc)def", 3);
+        // Type `)` — should skip the existing close instead of
+        // inserting a duplicate.
+        let next = s.update(insert_bracket(&s, ")").unwrap());
+        assert_eq!(next.doc.to_string(), "abc)def");
+        assert_eq!(next.selection.primary().head, 4);
+    }
+
+    #[test]
+    fn quote_skips_when_next_is_same_quote() {
+        // Caret at 1 sits between `a` and `"`. Typing `"` should
+        // hop over the existing quote instead of inserting another.
+        let s = at("a\"b", 1);
+        let next = s.update(insert_bracket(&s, "\"").unwrap());
+        assert_eq!(next.doc.to_string(), "a\"b");
+        assert_eq!(next.selection.primary().head, 2);
+    }
+
+    #[test]
+    fn delete_bracket_pair_collapses_empty_pair() {
+        let s = at("()", 1);
+        let next = s.update(delete_bracket_pair(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "");
+        assert_eq!(next.selection.primary().head, 0);
+    }
+
+    #[test]
+    fn delete_bracket_pair_no_op_outside_pair() {
+        let s = at("(a)", 2);
+        assert!(delete_bracket_pair(&s).is_none());
     }
 
     #[test]

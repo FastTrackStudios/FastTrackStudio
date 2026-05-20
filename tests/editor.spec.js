@@ -290,6 +290,39 @@ test.describe("editor", () => {
       .toBe("ab — cd\nX");
   });
 
+  test("Bracket auto-closes and caret lands between", async ({ page }) => {
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("(");
+    await expect.poll(async () => (await readState(page)).text).toBe("()");
+    await expect.poll(async () => (await readState(page)).head).toBe("1");
+  });
+
+  test("Typing close bracket adjacent skips over", async ({ page }) => {
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("(");
+    await expect.poll(async () => (await readState(page)).text).toBe("()");
+    // Caret should be at 1 between `()`. Typing `)` should skip.
+    await page.keyboard.insertText(")");
+    await expect.poll(async () => (await readState(page)).text).toBe("()");
+    await expect.poll(async () => (await readState(page)).head).toBe("2");
+  });
+
+  test("Backspace between empty pair deletes both", async ({ page }) => {
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("(");
+    await page.keyboard.press("Backspace");
+    await expect.poll(async () => (await readState(page)).text).toBe("");
+  });
+
   test("Enter on a list item continues the list and cursor lands after marker", async ({
     page,
   }) => {

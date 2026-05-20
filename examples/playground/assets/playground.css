@@ -150,6 +150,17 @@ section h2 {
     vertical-align: super;
 }
 
+.editor-root .md-bracket-match {
+    background: #2f3a55;
+    color: #79b8ff;
+    border-bottom: 1.5px solid #5a7fd6;
+}
+.editor-root .md-bracket-mismatch {
+    background: #5a1d22;
+    color: #ff5370;
+    border-bottom: 1.5px solid #ff5370;
+}
+
 /* ── Block-level live preview ─────────────────────────────── */
 .editor-root .cm-line.md-h1,
 .editor-root .cm-line.md-h2,
@@ -246,6 +257,16 @@ section h2 {
     color: #ffffff;
 }
 
+.editor-root .cm-line {
+    /* Long prose wraps to the next visual row instead of
+       horizontal-scrolling off the side. Mirrors CM6's
+       `EditorView.lineWrapping` config. The browser handles
+       arrow-up/down on wrapped rows natively because we use
+       a real contenteditable. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
 .editor-root .cm-line.md-code-block {
     font-family: var(--mono);
     background: #1d2030;

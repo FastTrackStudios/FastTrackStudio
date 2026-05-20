@@ -57,6 +57,13 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
                     span.class,
                     vec![("data-href".into(), h)],
                 ));
+                if !cursor_touches(primary, span.outer.clone()) {
+                    // Caret elsewhere: treat the link as one
+                    // atomic unit. Clicks anywhere inside snap
+                    // to the nearer edge so the user never lands
+                    // in the hidden marker bytes (`](url)` etc.).
+                    out.push(Decoration::atomic(span.outer.clone()));
+                }
             } else {
                 out.push(Decoration::mark(span.body.clone(), span.class));
             }

@@ -31,6 +31,14 @@ pub enum DecorationKind {
     /// Add a CSS class to the line element containing the
     /// position. Used for the active-line highlight.
     Line { class: String },
+    /// Treat the range as a single indivisible unit for cursor
+    /// purposes. A caret landing inside snaps to the nearer
+    /// edge; a non-empty selection that overlaps extends to
+    /// cover the whole range. Behavior-only — does not change
+    /// rendering. Ports CM6's `atomicRanges` facet
+    /// (`view/src/extension.ts:295`, applied by
+    /// `view/src/cursor.ts:skipAtomicRanges`).
+    Atomic,
 }
 
 /// A decoration is just an inclusive-start, exclusive-end byte
@@ -94,9 +102,42 @@ impl DecoratedRange {
             },
         }
     }
+    pub fn atomic(range: std::ops::Range<usize>) -> Self {
+        Self {
+            from: range.start,
+            to: range.end,
+            kind: DecorationKind::Atomic,
+        }
+    }
 
     pub fn byte_range(&self) -> std::ops::Range<usize> {
         self.from..self.to
+    }
+}
+
+/// Snap `pos` out of any atomic range it lands strictly inside,
+/// preferring the nearer edge (CM6 picks the nearer edge when
+/// `bias == 0`). Used to keep callers' selections from landing
+/// in the middle of an atomic region. No-op when `pos` is at a
+/// range boundary or no atomic range contains it.
+///
+/// Ports CM6's `skipAtomicRanges` (`view/src/cursor.ts`).
+pub fn skip_atomic(decs: &[DecoratedRange], pos: usize) -> usize {
+    let mut p = pos;
+    loop {
+        let mut moved = false;
+        for d in decs {
+            if !matches!(d.kind, DecorationKind::Atomic) {
+                continue;
+            }
+            if p > d.from && p < d.to {
+                p = if p - d.from <= d.to - p { d.from } else { d.to };
+                moved = true;
+            }
+        }
+        if !moved {
+            return p;
+        }
     }
 }
 
@@ -128,6 +169,9 @@ impl Decoration {
     }
     pub fn line(at: usize, class: impl Into<String>) -> DecoratedRange {
         DecoratedRange::line(at, class)
+    }
+    pub fn atomic(range: std::ops::Range<usize>) -> DecoratedRange {
+        DecoratedRange::atomic(range)
     }
 }
 

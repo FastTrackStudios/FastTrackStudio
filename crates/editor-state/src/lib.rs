@@ -6,6 +6,7 @@
 //! Rust-type mapping. Reference source at
 //! `~/Development/research/codemirror/state/src/`.
 
+pub mod bracket_match;
 pub mod change;
 pub mod command;
 pub mod commands;

@@ -442,6 +442,21 @@ pub fn Editor(
                                 // span is the destabilizing
                                 // factor, not typing in general.
                                 if (t === 'insertText' && typeof evt.data === 'string') {{
+                                    // Bracket / quote auto-pair —
+                                    // CM6's `closebrackets` extension.
+                                    // Route through Rust so the
+                                    // resulting Changes go through
+                                    // the same Transaction pipeline as
+                                    // everything else (history etc.).
+                                    if (/^[\(\[\{{\)\]\}}\'\"`]$/.test(evt.data)) {{
+                                        evt.preventDefault();
+                                        dioxus.send({{
+                                            kind: 'insert-bracket',
+                                            text: evt.data,
+                                            sel: selOffsets(),
+                                        }});
+                                        return;
+                                    }}
                                     const s = window.getSelection();
                                     let inEmptyMark = false;
                                     if (s && s.rangeCount > 0) {{
@@ -1119,7 +1134,7 @@ fn handle_bridge_msg(
             // Diff in visible space.
             let vis_changes = diff_text(&old_visible.text, new_visible);
             if vis_changes.is_empty() {
-                push_selection(&mut state, &cur, s_off, e_off);
+                push_selection(&mut state, &cur, deco_source, s_off, e_off);
                 return;
             }
             // Translate each visible-space change to doc space.
@@ -1211,7 +1226,7 @@ fn handle_bridge_msg(
         }
         "sel" => {
             let cur = state.read().clone();
-            push_selection(&mut state, &cur, s_off, e_off);
+            push_selection(&mut state, &cur, deco_source, s_off, e_off);
         }
         "before-input-insert" => {
             // CM6-style author-the-edit-ourselves path. The JS
@@ -1316,6 +1331,39 @@ fn handle_bridge_msg(
         "composition-end" => {
             tracing::debug!("editor.composition.end");
         }
+        "insert-bracket" => {
+            // CM6-style auto-pair / skip-over / wrap-selection
+            // for `()`/`[]`/`{}`/`""`/`''`/` `` `. The bracket
+            // char comes through the beforeinput intercept so
+            // the browser never inserts the raw char; the Rust
+            // command authors the Change.
+            let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let cur_clone = {
+                let cur = state.read().clone();
+                let doc_len = cur.doc.len();
+                let from = s_off.min(doc_len);
+                let to = e_off.min(doc_len).max(from);
+                EditorState {
+                    selection: Selection::single(Range::new(from, to)),
+                    ..cur
+                }
+            };
+            if let Some(spec) = editor_state::commands::insert_bracket(&cur_clone, text) {
+                state.set(cur_clone.update(spec.annotate("origin", "insert-bracket")));
+            } else {
+                // No bracket logic applied — fall back to plain
+                // insert at the captured selection.
+                let p = cur_clone.selection.primary();
+                let changes = editor_state::Changes::replace(p.from()..p.to(), text);
+                let caret = p.from() + text.len();
+                state.set(cur_clone.update(
+                    editor_state::TransactionSpec::new()
+                        .changes(changes)
+                        .selection(editor_state::Selection::caret(caret))
+                        .annotate("origin", "insert-bracket-plain"),
+                ));
+            }
+        }
         "enter-continue-list" => {
             // The JS bridge intercepts Enter at the beforeinput
             // stage so the browser doesn't insert its own DOM
@@ -1412,10 +1460,24 @@ fn handle_bridge_msg(
 /// the update — state remains authoritative. Mirrors CM6's
 /// `domobserver` ignoring DOM selection changes that are
 /// derivable from current state.
-fn push_selection(state: &mut Signal<EditorState>, cur: &EditorState, s: usize, e: usize) {
+fn push_selection(
+    state: &mut Signal<EditorState>,
+    cur: &EditorState,
+    deco_source: Option<DecorationSource>,
+    s: usize,
+    e: usize,
+) {
     let doc_len = cur.doc.len();
-    let s = s.min(doc_len);
-    let e = e.min(doc_len);
+    let mut s = s.min(doc_len);
+    let mut e = e.min(doc_len);
+    // Atomic-range snap: if either endpoint lands strictly
+    // inside an atomic decoration, jump it to the nearer edge.
+    // Mirrors CM6's `skipAtomicRanges` (`view/src/cursor.ts`).
+    if let Some(src) = deco_source {
+        let decs = src(cur);
+        s = editor_state::decoration::skip_atomic(&decs, s);
+        e = editor_state::decoration::skip_atomic(&decs, e);
+    }
     let cur_primary = cur.selection.primary();
     if cur_primary.anchor == s && cur_primary.head == e {
         return;

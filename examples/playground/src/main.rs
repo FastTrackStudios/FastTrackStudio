@@ -3,7 +3,21 @@
 //! can see selection / doc / transactions while typing.
 
 use dioxus::prelude::*;
-use editor::{commands, editor_view, markdown, Editor, EditorState, Keymap};
+use editor::{
+    bracket_match, commands, editor_view, markdown, DecoratedRange, Editor, EditorState, Keymap,
+};
+
+/// Combined decoration source — markdown live-preview plus
+/// bracket-pair highlighting. The view's `DecorationSource` is a
+/// plain `fn(&EditorState) -> Vec<DecoratedRange>` so composition
+/// is just concatenation; the inner builders dedupe nothing, but
+/// our overlapping mark spans on brackets sit next to each other
+/// without conflict.
+fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
+    let mut out = markdown::live_preview(state);
+    out.extend(bracket_match::bracket_match(state));
+    out
+}
 
 const STYLE: Asset = asset!("/assets/playground.css");
 
@@ -239,7 +253,7 @@ fn App() -> Element {
                             Editor {
                                 state,
                                 keymap: keymap.clone(),
-                                decorations: markdown::live_preview
+                                decorations: combined_decorations
                                     as editor_view::DecorationSource,
                             }
                         }

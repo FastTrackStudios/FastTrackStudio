@@ -442,6 +442,12 @@ fn collect_events(decorations: &[DecoratedRange]) -> Vec<Event> {
                     kind: EventKind::Line(class.clone()),
                 });
             }
+            DecorationKind::Atomic => {
+                // Atomic is a behavior-only marker — consumed
+                // by `decoration::skip_atomic` at the view layer
+                // (selection placement) and ignored by the tile
+                // builder. No DOM effect.
+            }
         }
     }
     out
