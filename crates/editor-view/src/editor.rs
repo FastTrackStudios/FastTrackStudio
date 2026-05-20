@@ -163,18 +163,30 @@ pub fn Editor(
                                 dioxus.send({{ kind: 'sel', sel: [a, b] }});
                             }}
 
-                            // Composition guard. While an IME
-                            // composition is active we skip
-                            // sendInput; the final composed
-                            // text comes through on
-                            // compositionend.
+                            // Composition guard. Mirrors CM6's
+                            // pause-during-composition pattern:
+                            // - sendInput skipped while composing
+                            // - state→DOM selection writeback
+                            //   also reads this flag (via the
+                            //   `data-composing` attribute on the
+                            //   root) and bails so it doesn't
+                            //   fight the IME for the Selection
+                            // - compositionend flushes one
+                            //   sendInput with the final text
+                            // - compositionend also notifies Rust
+                            //   via a typed message so any
+                            //   composition-aware code can react
                             let composing = false;
                             el.addEventListener('compositionstart', () => {{
                                 composing = true;
+                                el.dataset.composing = '1';
+                                dioxus.send({{ kind: 'composition-start' }});
                             }});
                             el.addEventListener('compositionend', () => {{
                                 composing = false;
+                                delete el.dataset.composing;
                                 sendInput();
+                                dioxus.send({{ kind: 'composition-end' }});
                             }});
 
                             // MutationObserver — catches every
@@ -236,6 +248,11 @@ pub fn Editor(
                 (function() {{
                     const el = document.querySelector('[data-editor-id="{id}"]');
                     if (!el) return;
+                    // Phase 10 composition guard: while an IME
+                    // composition is active, leave the Selection
+                    // alone. The IME owns it; touching it here
+                    // would abort the composition.
+                    if (el.dataset.composing === '1') return;
                     // If the DOM hasn't caught up with state.doc
                     // yet, the user just typed and selection from
                     // state would be stale — skip and let the next
@@ -403,6 +420,15 @@ fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
         "sel" => {
             let cur = state.read().clone();
             push_selection(&mut state, &cur, s_off, e_off);
+        }
+        "composition-start" => {
+            // Inform extensions (none yet) that composition has
+            // begun. The actual pause behavior lives in JS via
+            // the `data-composing` attribute the bridge sets.
+            tracing::debug!("editor.composition.start");
+        }
+        "composition-end" => {
+            tracing::debug!("editor.composition.end");
         }
         _ => {}
     }
