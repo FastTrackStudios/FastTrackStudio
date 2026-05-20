@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::components::EditableBlock;
+use crate::format::{Inlines, parse_inline};
 use crate::handler::enter_edit;
 use crate::state::AppState;
 
@@ -37,11 +38,26 @@ pub fn BlockNode(block_id: Uuid) -> Element {
                 } else {
                     {
                         let is_empty = block.content.trim().is_empty();
-                        let cls = if is_empty { "editor-block-body empty" } else { "editor-block-body" };
+                        let cls = if is_empty {
+                            "editor-block-body empty"
+                        } else {
+                            "editor-block-body"
+                        };
+                        // Static render: parse the raw markdown
+                        // through the inline tokenizer and emit
+                        // rich elements (wikilinks, bold, code,
+                        // tags, …). Mirrors Logseq's
+                        // `inline-text` → `map-inline` →
+                        // `inline` dispatch path.
+                        let nodes = parse_inline(&block.content);
                         rsx! {
                             div { class: "{cls}",
                                 onclick: on_static_click,
-                                if is_empty { "—" } else { "{block.content}" }
+                                if is_empty {
+                                    "—"
+                                } else {
+                                    Inlines { nodes }
+                                }
                             }
                         }
                     }
