@@ -150,11 +150,30 @@ pub fn Editor(
                                 const b = tilePosOf(r.endContainer) + r.endOffset;
                                 return [a, b];
                             }}
+                            // Reconstruct doc text from the
+                            // tile-tree-rendered DOM. Each LineTile
+                            // renders as `<div class="cm-line">`;
+                            // BreakAfter on a line means there's
+                            // a `\n` between it and the next line.
+                            // textContent alone *doesn't* include
+                            // those newlines (it just concats text
+                            // descendants), so naively reading
+                            // textContent would drop every `\n` in
+                            // the doc — diffs would then think
+                            // the user deleted every newline on
+                            // every keystroke.
+                            function readText() {{
+                                const lines = el.querySelectorAll('.cm-line');
+                                if (!lines.length) return el.textContent;
+                                return Array.from(lines)
+                                    .map(l => l.textContent)
+                                    .join('\n');
+                            }}
                             function sendInput() {{
                                 const [a, b] = selOffsets();
                                 dioxus.send({{
                                     kind: 'input',
-                                    text: el.textContent,
+                                    text: readText(),
                                     sel: [a, b]
                                 }});
                             }}
@@ -221,13 +240,21 @@ pub fn Editor(
                                 subtree: true,
                             }});
 
-                            // Selection-only events still flow
-                            // via the same listeners as Phase 7
-                            // — these don't change the doc, so
-                            // they bypass the observer.
+                            // Selection-only events. `selectionchange`
+                            // is the canonical event for caret
+                            // movement (covers programmatic
+                            // updates that keyup/mouseup miss).
+                            // It fires on `document`, not the
+                            // element — we filter to selections
+                            // that intersect our editor.
+                            document.addEventListener('selectionchange', () => {{
+                                const s = window.getSelection();
+                                if (s && s.anchorNode && el.contains(s.anchorNode)) {{
+                                    sendSel();
+                                }}
+                            }});
                             el.addEventListener('keyup',   sendSel);
                             el.addEventListener('mouseup', sendSel);
-                            el.addEventListener('select',  sendSel);
                             el.addEventListener('focus',   sendSel);
                             sendSel();
                         }}
