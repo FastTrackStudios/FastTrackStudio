@@ -34,7 +34,10 @@
 
 pub mod arena;
 pub mod flag;
+pub mod mark;
 pub mod pos;
+pub mod text;
+pub mod widget;
 
 pub use arena::{Arena, TileId};
 pub use flag::TileFlag;
@@ -80,17 +83,19 @@ pub enum TileKind {
 /// each `TileKind` adds is summarized in the variant docs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum TileBody {
-    /// Doc / Line / Mark / BlockWrapper bodies are all empty
-    /// for now — their state lives in the shared
-    /// `children` list. CM6's classes add attribute caches
-    /// (`MarkTile.attrs`) and break-character tracking; we'll
-    /// land those when we wire them through buildtile.
+    /// Doc / Line / BlockWrapper bodies are all empty for now —
+    /// their state lives in the shared `children` list. We
+    /// extend as buildtile teaches us what each composite needs
+    /// to carry.
     #[default]
     Empty,
     /// Inline text run. Holds the text itself.
     Text { text: String },
-    /// Inline / block widget. Holds the rendered HTML
-    /// (placeholder until we have a typed Widget trait).
+    /// Wrapper with a mark decoration applied to children
+    /// (bold/italic/code/etc.).
+    Mark { spec: mark::MarkSpec },
+    /// Inline / block widget. v1 holds the rendered HTML
+    /// (placeholder until we have a typed `Widget` trait).
     Widget { html: String },
 }
 
