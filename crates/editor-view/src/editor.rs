@@ -194,13 +194,69 @@ pub fn Editor(
                             // drag-drop, IME). CM6 reference:
                             // `view/src/domobserver.ts:103+`
                             // (the `observe` method).
-                            const mo = new MutationObserver(() => {{
+                            //
+                            // Phase 12 precise mutation reading
+                            // tries to compute a typed
+                            // [from, to, text] Change directly
+                            // from the MutationRecord for the
+                            // common single-characterData case
+                            // (= every normal keystroke). Other
+                            // mutations fall back to sendInput
+                            // (full re-read). Precise mode gives
+                            // us correct undo grouping and is
+                            // O(tile text size) instead of
+                            // O(doc length) per keystroke.
+                            const mo = new MutationObserver(records => {{
                                 if (composing) return;
+                                if (records.length === 1
+                                    && records[0].type === 'characterData') {{
+                                    const r = records[0];
+                                    const node = r.target;
+                                    const parent = node.parentElement;
+                                    if (parent
+                                        && parent.dataset
+                                        && parent.dataset.tilePos != null) {{
+                                        const tilePos = parseInt(
+                                            parent.dataset.tilePos, 10
+                                        );
+                                        const oldText = r.oldValue || '';
+                                        const newText = node.nodeValue || '';
+                                        // Trim common prefix.
+                                        let start = 0;
+                                        const minLen = Math.min(
+                                            oldText.length, newText.length
+                                        );
+                                        while (start < minLen
+                                            && oldText.charCodeAt(start)
+                                               === newText.charCodeAt(start)) {{
+                                            start++;
+                                        }}
+                                        // Trim common suffix.
+                                        let oEnd = oldText.length;
+                                        let nEnd = newText.length;
+                                        while (oEnd > start && nEnd > start
+                                            && oldText.charCodeAt(oEnd - 1)
+                                               === newText.charCodeAt(nEnd - 1)) {{
+                                            oEnd--; nEnd--;
+                                        }}
+                                        const [a, b] = selOffsets();
+                                        dioxus.send({{
+                                            kind: 'mutate',
+                                            from: tilePos + start,
+                                            to:   tilePos + oEnd,
+                                            text: newText.slice(start, nEnd),
+                                            sel:  [a, b],
+                                        }});
+                                        return;
+                                    }}
+                                }}
+                                // Anything else: full re-read.
                                 sendInput();
                             }});
                             mo.observe(el, {{
                                 childList: true,
                                 characterData: true,
+                                characterDataOldValue: true,
                                 subtree: true,
                             }});
 
@@ -420,6 +476,43 @@ fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
         "sel" => {
             let cur = state.read().clone();
             push_selection(&mut state, &cur, s_off, e_off);
+        }
+        "mutate" => {
+            // Phase 12 precise mutation path. The JS bridge
+            // already computed a single typed Change targeting
+            // [from, to) in doc space. Apply directly without
+            // re-diffing the whole text.
+            let from = v
+                .get("from")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0) as usize;
+            let to = v
+                .get("to")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0) as usize;
+            let text = v
+                .get("text")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string();
+            let cur = state.read().clone();
+            // Clamp against the live doc as a safety net —
+            // if the precise change is somehow stale we'd
+            // rather no-op than panic.
+            let doc_len = cur.doc.len();
+            let from = from.min(doc_len);
+            let to = to.min(doc_len).max(from);
+            tracing::debug!(from, to, len_inserted = text.len(), "editor.mutate");
+            let changes = Changes::replace(from..to, text);
+            let s_off = s_off.min(doc_len);
+            let e_off = e_off.min(doc_len).max(s_off);
+            let new_sel = Selection::single(Range::new(s_off, e_off));
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "input"),
+            ));
         }
         "composition-start" => {
             // Inform extensions (none yet) that composition has
