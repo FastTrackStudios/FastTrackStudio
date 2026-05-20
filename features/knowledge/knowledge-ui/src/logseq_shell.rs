@@ -945,6 +945,8 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| FavoritesState(favorites));
     let find_in_page: Signal<Option<String>> = use_signal(|| None);
     use_context_provider(|| FindInPageState(find_in_page));
+    let pending_click: Signal<Option<(f64, f64)>> = use_signal(|| None);
+    use_context_provider(|| PendingEditClick(pending_click));
     let settings: Signal<AppSettings> = use_signal(AppSettings::default);
     use_context_provider(|| SettingsState(settings));
     // Bridge: the desktop shell installs a JS click delegate that
@@ -4250,9 +4252,17 @@ fn LogseqBlockBody(block: Block) -> Element {
     let is_empty = inlines.is_empty();
 
     // Single click anywhere on the static body switches to edit
-    // mode. Mirrors Logseq's "click content to edit" gesture.
+    // mode. We also stash the click's page coordinates so the
+    // contenteditable, when it mounts on the next render, can use
+    // `caretPositionFromPoint` to drop the caret exactly where
+    // the user clicked rather than at offset 0.
     let ops_for_click = ops.clone();
-    let on_static_click = move |_e: Event<MouseData>| {
+    let pending = try_use_context::<PendingEditClick>();
+    let on_static_click = move |e: Event<MouseData>| {
+        if let Some(p) = pending.as_ref() {
+            let c = e.data().client_coordinates();
+            p.0.clone().set(Some((c.x, c.y)));
+        }
         if let Some(ops) = ops_for_click.as_ref() {
             ops.enter_edit.call(block_id);
         }
@@ -4371,6 +4381,14 @@ pub(crate) struct FavoritesState(pub Signal<Vec<Uuid>>);
 #[derive(Clone, Copy)]
 pub(crate) struct FindInPageState(pub Signal<Option<String>>);
 
+/// Page-coordinate snapshot of the click that just kicked a block
+/// into edit mode. The contenteditable's onmounted hook reads
+/// this, uses `caretPositionFromPoint` to land the caret exactly
+/// where the user clicked, then clears it. Without this, every
+/// click would land the caret at offset 0.
+#[derive(Clone, Copy)]
+pub(crate) struct PendingEditClick(pub Signal<Option<(f64, f64)>>);
+
 /// Set of currently multi-selected blocks. Empty means no
 /// selection (single-block edit mode). Populated via Shift/Cmd
 /// click on the bullet; Delete key on the page deletes the lot.
@@ -4424,45 +4442,80 @@ fn EditableBlock(block: Block) -> Element {
     // guard so multi-byte input (CJK / accents) doesn't trigger
     // input-driven re-renders mid-composition.
     let init_id = block_id.simple().to_string();
+    let pending_click_state = try_use_context::<PendingEditClick>();
     let auto_focus = move |elem: Event<MountedData>| {
         let id = init_id.clone();
+        // Pull the click coordinates out *before* we spawn so the
+        // signal read happens in the render thread.
+        let click_xy = pending_click_state.as_ref().and_then(|p| *p.0.read());
+        if let Some(p) = pending_click_state.as_ref() {
+            p.0.clone().set(None);
+        }
         spawn(async move {
             let _ = elem.data().set_focus(true).await;
+            // Best-effort caret placement at the click point —
+            // `caretPositionFromPoint` is the standards-track API,
+            // `caretRangeFromPoint` is the webkit fallback. If the
+            // click landed outside any text node (e.g. on the
+            // trailing whitespace), the helpers return null and we
+            // fall back to the default focus position.
+            let caret_js = match click_xy {
+                Some((x, y)) => format!(
+                    r#"
+                    (function() {{
+                        const ed = document.querySelector('[data-edit-block="{id}"] [contenteditable]');
+                        if (!ed) return;
+                        let range = null;
+                        if (document.caretPositionFromPoint) {{
+                            const p = document.caretPositionFromPoint({x}, {y});
+                            if (p) {{
+                                range = document.createRange();
+                                range.setStart(p.offsetNode, p.offset);
+                                range.collapse(true);
+                            }}
+                        }} else if (document.caretRangeFromPoint) {{
+                            range = document.caretRangeFromPoint({x}, {y});
+                        }}
+                        if (range && ed.contains(range.startContainer)) {{
+                            const sel = window.getSelection();
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                        }}
+                    }})();
+                    "#
+                ),
+                None => String::new(),
+            };
             let script = format!(
                 r#"
                 (function() {{
                     const wrap = document.querySelector('[data-edit-block="{id}"]');
                     if (!wrap) return;
                     const ed = wrap.querySelector('[contenteditable]');
-                    if (!ed || ed.dataset.ceWired) return;
-                    ed.dataset.ceWired = "1";
-                    // Plain-text paste: pull text/plain out of the
-                    // clipboard and insertText so it lands at caret.
-                    // execCommand is deprecated-but-supported and
-                    // emits an `input` event so our Rust oninput
-                    // picks the change up naturally.
-                    ed.addEventListener('paste', function(e) {{
-                        e.preventDefault();
-                        const cb = e.clipboardData || window.clipboardData;
-                        const text = cb ? cb.getData('text/plain') : '';
-                        if (text) {{
-                            document.execCommand('insertText', false, text);
-                        }}
-                    }});
-                    // IME composition — suppress input handling
-                    // while the user is composing so we don't read
-                    // half-formed glyphs. compositionend triggers a
-                    // final synthetic input event so our handler
-                    // sees the committed text.
-                    ed.dataset.ceComposing = "0";
-                    ed.addEventListener('compositionstart', function() {{
-                        ed.dataset.ceComposing = "1";
-                    }});
-                    ed.addEventListener('compositionend', function() {{
+                    if (!ed) return;
+                    if (!ed.dataset.ceWired) {{
+                        ed.dataset.ceWired = "1";
+                        // Plain-text paste.
+                        ed.addEventListener('paste', function(e) {{
+                            e.preventDefault();
+                            const cb = e.clipboardData || window.clipboardData;
+                            const text = cb ? cb.getData('text/plain') : '';
+                            if (text) {{
+                                document.execCommand('insertText', false, text);
+                            }}
+                        }});
+                        // IME composition guard.
                         ed.dataset.ceComposing = "0";
-                        ed.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    }});
+                        ed.addEventListener('compositionstart', function() {{
+                            ed.dataset.ceComposing = "1";
+                        }});
+                        ed.addEventListener('compositionend', function() {{
+                            ed.dataset.ceComposing = "0";
+                            ed.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        }});
+                    }}
                 }})();
+                {caret_js}
                 "#
             );
             let _ = document::eval(&script);
