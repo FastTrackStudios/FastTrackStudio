@@ -50,6 +50,22 @@ fn rpp_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Format a string as an RPP token: bare when it's a "simple" identifier
+/// (alphanumeric / underscore / dash / dot, no spaces or special chars),
+/// otherwise wrap in double quotes with `rpp_escape`. The official PT
+/// Reaper Converter uses the same rule (`NAME ClickPrint_03` vs
+/// `NAME "10 REASON WHY demo"`).
+fn rpp_token(s: &str) -> String {
+    let needs_quotes = s.is_empty()
+        || s.chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.'));
+    if needs_quotes {
+        format!("\"{}\"", rpp_escape(s))
+    } else {
+        s.to_string()
+    }
+}
+
 fn fade_curve_to_i32(c: &FadeCurveType) -> i32 {
     match c {
         FadeCurveType::Linear => 0,
@@ -342,7 +358,7 @@ impl Take {
             }
         }
         if !self.name.is_empty() {
-            out.push_str(&format!("{}NAME \"{}\"\n", indent, rpp_escape(&self.name)));
+            out.push_str(&format!("{}NAME {}\n", indent, rpp_token(&self.name)));
         }
         if let Some(vp) = &self.volpan {
             out.push_str(&format!(
@@ -449,7 +465,7 @@ impl RppSerialize for Item {
             out.push_str(&format!("{}IID {}\n", inner, iid));
         }
         if !self.name.is_empty() {
-            out.push_str(&format!("{}NAME \"{}\"\n", inner, rpp_escape(&self.name)));
+            out.push_str(&format!("{}NAME {}\n", inner, rpp_token(&self.name)));
         }
         if let Some(vp) = &self.volpan {
             out.push_str(&format!(
@@ -591,10 +607,19 @@ impl RppSerialize for Track {
 
         let inner = format!("{}  ", indent);
 
-        out.push_str(&format!("{}<TRACK\n", indent));
-        out.push_str(&format!("{}NAME \"{}\"\n", inner, rpp_escape(&self.name)));
+        // Inline GUID form on the `<TRACK` line itself is what the official
+        // PT Reaper Converter emits (and what REAPER produces when saving).
+        // The redundant `TRACKID` line that follows is also emitted by
+        // REAPER and keeps backwards-compatibility with older tooling that
+        // looks only at the line form.
         if let Some(id) = &self.track_id {
-            out.push_str(&format!("{}TRACKID \"{}\"\n", inner, rpp_escape(id)));
+            out.push_str(&format!("{}<TRACK {}\n", indent, id));
+        } else {
+            out.push_str(&format!("{}<TRACK\n", indent));
+        }
+        out.push_str(&format!("{}NAME {}\n", inner, rpp_token(&self.name)));
+        if let Some(id) = &self.track_id {
+            out.push_str(&format!("{}TRACKID {}\n", inner, id));
         }
         if let Some(pc) = self.peak_color {
             out.push_str(&format!("{}PEAKCOL {}\n", inner, pc));
@@ -631,15 +656,14 @@ impl RppSerialize for Track {
                 inner, vp.volume, vp.pan, vp.pan_law
             ));
         }
-        if let Some(ms) = &self.mutesolo {
-            out.push_str(&format!(
-                "{}MUTESOLO {} {} {}\n",
-                inner,
-                b(ms.mute),
-                track_solo_to_i32(&ms.solo),
-                b(ms.solo_defeat)
-            ));
-        }
+        // Always emit MUTESOLO, even at the default (`0 0 0`). REAPER tolerates
+        // its absence, but matching the official PT Reaper Converter (which
+        // always emits it) keeps line-by-line diffs stable.
+        let (m, s, sd) = match &self.mutesolo {
+            Some(ms) => (b(ms.mute), track_solo_to_i32(&ms.solo), b(ms.solo_defeat)),
+            None => (0, 0, 0),
+        };
+        out.push_str(&format!("{}MUTESOLO {} {} {}\n", inner, m, s, sd));
         if self.invert_phase {
             out.push_str(&format!("{}IPHASE {}\n", inner, b(self.invert_phase)));
         }
@@ -753,6 +777,10 @@ impl RppSerialize for Track {
             ));
         }
         out.push_str(&format!("{}NCHAN {}\n", inner, self.channel_count));
+        // The master-send-channel-count line. REAPER inherits the value from
+        // NCHAN by default; the official PT Reaper Converter always emits
+        // it explicitly. Including it keeps line-by-line diffs stable.
+        out.push_str(&format!("{}MAINSEND_NCH {}\n", inner, self.channel_count));
         if let Some(cfg) = &self.rec_cfg {
             out.push_str(&format!("{}RECCFG {}\n", inner, cfg));
         }
@@ -1047,7 +1075,11 @@ mod tests {
 
         let rpp = track.to_rpp_string();
         assert!(rpp.starts_with("<TRACK\n"));
-        assert!(rpp.contains("NAME \"Guitar\""));
+        // Simple identifiers like "Guitar" emit bare (no surrounding quotes)
+        // to match the official PT Reaper Converter's token style. Names
+        // with spaces or special chars are still quoted — see
+        // `test_track_name_with_spaces` for that path.
+        assert!(rpp.contains("NAME Guitar\n"));
         assert!(rpp.contains("VOLPAN 0.8 -0.25 -1"));
         assert!(rpp.contains("MUTESOLO 0 0 0"));
         assert!(rpp.contains("NCHAN 2"));
@@ -1055,7 +1087,7 @@ mod tests {
         // omits it. We verify that FX-DISABLED tracks DO emit `FX 0`
         // in `test_track_fx_disabled` below.
         assert!(!rpp.contains("FX 1"));
-        assert!(rpp.contains("FX 0") == false);
+        assert!(!rpp.contains("FX 0"));
         assert!(rpp.ends_with(">\n"));
     }
 
