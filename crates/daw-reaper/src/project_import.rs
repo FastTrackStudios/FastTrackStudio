@@ -233,6 +233,39 @@ fn import_ableton(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 
 // ── Track builders ─────────────────────────────────────────────────────────
 
+/// Synthesize a deterministic REAPER-style GUID from a stable input string.
+///
+/// REAPER's `TRACKID` is canonically `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`.
+/// We derive 16 bytes via SHA-256 of the input and format them as a v4-shaped
+/// UUID so re-running the conversion on the same PT session produces the
+/// same GUID for the same track (matters for round-trip identity and for
+/// tools that diff converter output).
+fn deterministic_guid(seed: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    // Two 64-bit hashes of the seed give us 128 bits of GUID material.
+    // We don't need cryptographic strength here — just stability + low
+    // collision risk across at most a few hundred tracks per session.
+    let mut h1 = DefaultHasher::new();
+    seed.hash(&mut h1);
+    let lo = h1.finish();
+    let mut h2 = DefaultHasher::new();
+    "salt:".hash(&mut h2);
+    seed.hash(&mut h2);
+    let hi = h2.finish();
+    format!(
+        "{{{:08X}-{:04X}-{:04X}-{:04X}-{:012X}}}",
+        (hi >> 32) as u32,
+        (hi >> 16) as u16,
+        // Variant + version bits zeroed to keep this trivially distinguishable
+        // from a true v4 UUID — REAPER doesn't care, but it makes the source
+        // of the GUID self-documenting.
+        hi as u16,
+        (lo >> 48) as u16,
+        lo & 0x0000_FFFF_FFFF_FFFFu64,
+    )
+}
+
 fn apply_common_track_props(
     t: TrackBuilder,
     common: &dawfile_ableton::TrackCommon,
@@ -614,8 +647,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         let is_folder_start = track.is_folder;
         let end_levels = folder_end_levels.get(plan_idx).copied().unwrap_or(0);
         plan_idx += 1;
+        let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx - 1, track.name));
         builder = builder.track(&display_name, |t| {
-            let mut t = t;
+            let mut t = t
+                .guid(&track_guid)
+                .automation_mode(dawfile_reaper::types::track::AutomationMode::Read);
             if is_folder_start {
                 t = t.folder_start();
             }
@@ -792,8 +828,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         let is_folder_start = track.is_folder;
         let end_levels = folder_end_levels.get(plan_idx).copied().unwrap_or(0);
         plan_idx += 1;
+        let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx - 1, track.name));
         builder = builder.track(&display_name, |t| {
-            let mut t = t;
+            let mut t = t
+                .guid(&track_guid)
+                .automation_mode(dawfile_reaper::types::track::AutomationMode::Read);
             if is_folder_start {
                 t = t.folder_start();
             }
