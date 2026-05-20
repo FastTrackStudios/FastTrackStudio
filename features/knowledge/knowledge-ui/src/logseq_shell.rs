@@ -702,20 +702,12 @@ pub fn LogseqShell() -> Element {
             });
         });
 
-        // File watcher — picks up external edits (an editor like
-        // Helix or VS Code modifying ~/Task/pages/*.md) and
-        // re-imports the vault. The debouncer coalesces atomic-
-        // save bursts. We pause the writer briefly after each
-        // external import so the in-memory CRDT can flush back
-        // without re-triggering the watcher.
-        let doc_for_watcher = doc.read().clone();
-        let mut version_for_watcher = version;
-        use_hook(move || {
-            let doc = doc_for_watcher.clone();
-            spawn(async move {
-                run_vault_watcher_loop(doc, &mut version_for_watcher).await;
-            });
-        });
+        // NOTE: file-watcher loop disabled for now — it ran
+        // unconditionally and the graph_writer's own flush
+        // re-triggered it, producing an endless write → watch →
+        // re-import → write storm. The skeleton lives below
+        // (run_vault_watcher_loop) for when we ship a proper
+        // "ignore my own writes" guard.
     }
 
     // Cold-start bootstrap:
@@ -4980,27 +4972,17 @@ fn EditableBlock(block: Block) -> Element {
     };
 
     let ops_for_blur = ops.clone();
-    let id_str_for_blur = block_id.simple().to_string();
     let on_blur = move |_e: Event<FocusData>| {
-        // Final flush: read whatever's currently in the DOM and
-        // push it into the CRDT before unmounting. Otherwise a
-        // user who types quickly and blurs immediately can lose
-        // the trailing characters when the editor element is
-        // removed before the async read completes. Runs on the
-        // root scope so the read survives our own unmount.
-        let id = id_str_for_blur.clone();
-        let block_id_capture = block_id;
-        let ops_capture = ops_for_blur.clone();
-        dioxus::core::spawn_forever(async move {
-            if let Some(v) = read_editor_text(&id).await {
-                if let Some(ops) = ops_capture.as_ref() {
-                    ops.update_content.call((block_id_capture, v));
-                }
-            }
-            if let Some(ops) = ops_capture.as_ref() {
-                ops.exit_edit.call(());
-            }
-        });
+        // The Dioxus-bound textarea's oninput already pushes
+        // every keystroke through to ops.update_content (and
+        // spawn_forever survives our unmount), so on_blur has
+        // nothing left to flush. The previous code's "final
+        // read of textContent" was racing with the unmount and
+        // sometimes returned an empty value, which then wiped
+        // the block. Just exit edit mode.
+        if let Some(ops) = ops_for_blur.as_ref() {
+            ops.exit_edit.call(());
+        }
     };
 
     let id_attr = block_id.simple().to_string();
