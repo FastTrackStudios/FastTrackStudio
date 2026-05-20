@@ -133,15 +133,15 @@ fn DebugPanel(state: Signal<EditorState>) -> Element {
     rsx! {
         dl { class: "debug-grid",
             dt { "doc length" }
-            dd { "{len} bytes" }
+            dd { id: "dbg-len", "{len}" }
             dt { "ranges" }
-            dd { "{ranges}" }
+            dd { id: "dbg-ranges", "{ranges}" }
             dt { "primary anchor" }
-            dd { "{primary.anchor}" }
+            dd { id: "dbg-anchor", "{primary.anchor}" }
             dt { "primary head" }
-            dd { "{primary.head}" }
+            dd { id: "dbg-head", "{primary.head}" }
         }
         h3 { "doc.to_string()" }
-        pre { class: "debug-text", "{text}" }
+        pre { id: "dbg-text", class: "debug-text", "{text}" }
     }
 }
