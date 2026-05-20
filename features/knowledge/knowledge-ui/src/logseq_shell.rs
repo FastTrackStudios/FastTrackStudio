@@ -4537,6 +4537,12 @@ fn EditableBlock(block: Block) -> Element {
         // — the browser already placed the typed character at the
         // right spot. The composition guard still applies so
         // half-formed IME glyphs don't fire CRDT updates.
+        //
+        // We use `spawn_forever` (root-scope) so the eval read +
+        // CRDT update survive even when the user blurs the
+        // contenteditable mid-task — otherwise scope cancellation
+        // would drop the in-flight read and the edit would never
+        // reach the CRDT.
         let id_str = id_str_input.clone();
         let mut content_w_inner = content_w;
         let ops_clone = ops_for_input.clone();
@@ -4544,7 +4550,7 @@ fn EditableBlock(block: Block) -> Element {
         let mut page_search = page_search_w;
         let mut block_ref = block_ref_w;
         let mut tag_search = tag_search_w;
-        spawn(async move {
+        dioxus::core::spawn_forever(async move {
             let composing_script = format!(
                 r#"
                 (function() {{
@@ -4561,7 +4567,13 @@ fn EditableBlock(block: Block) -> Element {
                 return;
             }
             let (off, _) = read_selection(&id_str).await.unwrap_or((0, 0));
-            let v = read_editor_text(&id_str).await.unwrap_or_default();
+            // None means the element was unmounted before the eval
+            // returned — skip the update to avoid blanking the block.
+            // Some("") is a legitimate empty edit (user deleted all
+            // content) and IS pushed.
+            let Some(v) = read_editor_text(&id_str).await else {
+                return;
+            };
             // Undo checkpoint: push to stack when the diff from
             // the last waypoint exceeds UNDO_DELTA chars, then
             // clear redo so a fresh edit doesn't re-rewind.
@@ -4933,10 +4945,27 @@ fn EditableBlock(block: Block) -> Element {
     };
 
     let ops_for_blur = ops.clone();
+    let id_str_for_blur = block_id.simple().to_string();
     let on_blur = move |_e: Event<FocusData>| {
-        if let Some(ops) = ops_for_blur.as_ref() {
-            ops.exit_edit.call(());
-        }
+        // Final flush: read whatever's currently in the DOM and
+        // push it into the CRDT before unmounting. Otherwise a
+        // user who types quickly and blurs immediately can lose
+        // the trailing characters when the editor element is
+        // removed before the async read completes. Runs on the
+        // root scope so the read survives our own unmount.
+        let id = id_str_for_blur.clone();
+        let block_id_capture = block_id;
+        let ops_capture = ops_for_blur.clone();
+        dioxus::core::spawn_forever(async move {
+            if let Some(v) = read_editor_text(&id).await {
+                if let Some(ops) = ops_capture.as_ref() {
+                    ops.update_content.call((block_id_capture, v));
+                }
+            }
+            if let Some(ops) = ops_capture.as_ref() {
+                ops.exit_edit.call(());
+            }
+        });
     };
 
     let value_str = content_signal.read().clone();
@@ -5336,16 +5365,20 @@ async fn read_selection(block_simple_id: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// Read the `textContent` of the contenteditable. The user's typed
-/// source — used to drive signal updates on every input.
+/// Read the `textContent` of the contenteditable. Returns `None`
+/// when the editor element isn't in the DOM (e.g. it was already
+/// unmounted between the input event and this eval returning) —
+/// callers MUST distinguish that case from a genuine empty edit
+/// so they don't blank the block on unmount races. A real empty
+/// editor yields `Some(String::new())`.
 async fn read_editor_text(block_simple_id: &str) -> Option<String> {
     let script = format!(
         r#"
         (function() {{
             const wrap = document.querySelector('[data-edit-block="{block_simple_id}"]');
-            if (!wrap) return "";
+            if (!wrap) return null;
             const ed = wrap.querySelector('[contenteditable]');
-            if (!ed) return "";
+            if (!ed) return null;
             return ed.textContent || "";
         }})()
         "#
@@ -5877,8 +5910,11 @@ fn make_block_ops(
     });
     let doc_update = doc.clone();
     let update_content = Callback::new(move |(id, content): (Uuid, String)| {
+        // spawn_forever runs in the root scope so the CRDT write
+        // survives even if EditableBlock unmounts (e.g. the user
+        // types then immediately blurs, which destroys our scope).
         let doc = doc_update.clone();
-        spawn(async move {
+        dioxus::core::spawn_forever(async move {
             let repo = BlockRepoLoro::new(&doc);
             let upd = BlockUpdate {
                 content: Some(content),
