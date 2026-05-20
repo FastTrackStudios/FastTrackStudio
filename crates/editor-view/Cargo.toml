@@ -11,3 +11,4 @@ rust-version.workspace = true
 editor-state = { workspace = true }
 dioxus = { workspace = true }
 tracing = { workspace = true }
+serde_json = { workspace = true }
