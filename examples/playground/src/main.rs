@@ -3,7 +3,7 @@
 //! can see selection / doc / transactions while typing.
 
 use dioxus::prelude::*;
-use editor::{Editor, EditorState};
+use editor::{Editor, EditorState, Keymap, commands};
 
 const STYLE: Asset = asset!("/assets/playground.css");
 
@@ -81,6 +81,16 @@ fn App() -> Element {
         )
     });
 
+    // Minimal demo keymap. The browser already handles
+    // Backspace/Delete/Enter for the textarea — these bindings
+    // intercept and route them through commands instead, so we
+    // can see them flow through the State → Transaction loop in
+    // the debug panel.
+    let keymap = Keymap::new()
+        .with("Mod-a", commands::select_all as _)
+        .with("Backspace", commands::delete_backward as _)
+        .with("Delete", commands::delete_forward as _);
+
     rsx! {
         document::Link { rel: "stylesheet", href: STYLE }
         div { class: "page",
@@ -92,7 +102,7 @@ fn App() -> Element {
                 section { class: "editor-pane",
                     h2 { "Editor" }
                     div { class: "editor-frame",
-                        Editor { state }
+                        Editor { state, keymap: keymap.clone() }
                     }
                 }
                 section { class: "debug-pane",

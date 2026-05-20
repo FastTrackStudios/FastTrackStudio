@@ -3,3 +3,8 @@
 
 pub use editor_state::*;
 pub use editor_view::Editor;
+
+/// Built-in commands. Re-exported as `editor::commands::*`.
+pub mod commands {
+    pub use editor_state::commands::*;
+}

@@ -32,7 +32,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use editor_state::{Changes, EditorState, Range, Selection, TransactionSpec};
+use editor_state::{Changes, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec};
 
 /// Per-instance id allocator. Each `<Editor>` mounts with a
 /// unique `data-editor-id`, used by the JS bridge to find the
@@ -48,21 +48,39 @@ static EDITOR_INSTANCE: AtomicU64 = AtomicU64::new(0);
 /// the embedding app can: persist it, send transactions from
 /// remote peers, snapshot for undo, etc. — the editor is just a
 /// view.
+/// `keymap` is optional. When `None`, the browser handles every
+/// key as default-textarea behavior. When `Some(map)`, each
+/// `onkeydown` looks for a binding; if one matches *and* its
+/// command returns `Some(spec)`, we `preventDefault` and apply
+/// the transaction. Unmatched keys fall through to the browser.
 #[component]
-pub fn Editor(state: Signal<EditorState>) -> Element {
+pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keymap>) -> Element {
     let text = state.read().doc.to_string();
     let editor_id = use_hook(|| {
         let n = EDITOR_INSTANCE.fetch_add(1, Ordering::Relaxed);
         format!("editor-{n}")
     });
 
-    // Selection round-trip. Once on mount we install JS event
-    // listeners on the textarea that push `[selectionStart,
-    // selectionEnd]` back to Rust via `dioxus.send` whenever the
-    // caret moves (typing, arrow keys, click, focus, drag-select).
-    // The recv loop turns each into a selection-only
-    // transaction. `dioxus-send` keeps the channel open across
-    // many messages — perfect for a long-lived stream.
+    // Selection round-trip: DOM → state only. We install JS
+    // listeners on the textarea that fire `dioxus.send` whenever
+    // the caret moves *from a non-typing source* (arrow keys,
+    // click, drag-select, focus). The recv loop turns each into
+    // a selection-only transaction.
+    //
+    // **Critically, we do NOT listen on the `input` event.**
+    // oninput already maps the selection through the change set
+    // (After bias for the caret). Adding an async hop from the
+    // input event creates a race: by the time recv runs the user
+    // has often typed another char, and we'd then write a stale
+    // selection back. Letting only keyup/mouseup/select/focus
+    // through means the stream only carries *intentional* caret
+    // moves, never the just-typed-something case.
+    //
+    // We also intentionally skip the reverse direction (state →
+    // DOM `setSelectionRange`) for now — nothing in v0 changes
+    // selection programmatically. Re-add when commands need it,
+    // with transaction-origin tagging so writeback doesn't fight
+    // typing.
     {
         let id = editor_id.clone();
         use_hook(move || {
@@ -77,12 +95,11 @@ pub fn Editor(state: Signal<EditorState>) -> Element {
                                 ta.selectionStart || 0,
                                 ta.selectionEnd   || 0,
                             ]);
-                            ta.addEventListener('input',     send);
-                            ta.addEventListener('keyup',     send);
-                            ta.addEventListener('mouseup',   send);
-                            ta.addEventListener('focus',     send);
-                            ta.addEventListener('select',    send);
-                            send(); // initial fire
+                            ta.addEventListener('keyup',   send);
+                            ta.addEventListener('mouseup', send);
+                            ta.addEventListener('select',  send);
+                            ta.addEventListener('focus',   send);
+                            send(); // initial fire so state has the right caret on mount
                         }}
                         attach();
                     }})();
@@ -97,13 +114,14 @@ pub fn Editor(state: Signal<EditorState>) -> Element {
                     let s = arr[0].as_u64().unwrap_or(0) as usize;
                     let e = arr[1].as_u64().unwrap_or(0) as usize;
                     let cur = state.read().clone();
+                    // Clamp against the live doc — a stale recv
+                    // from before a recent delete could otherwise
+                    // produce a selection past the doc end.
+                    let doc_len = cur.doc.len();
+                    let s = s.min(doc_len);
+                    let e = e.min(doc_len);
                     let cur_primary = cur.selection.primary();
                     if cur_primary.anchor == s && cur_primary.head == e {
-                        // No-op selection update — skip the
-                        // transaction so we don't churn signals
-                        // on every keystroke (input fires twice
-                        // — once from oninput, once from the JS
-                        // listener).
                         continue;
                     }
                     tracing::trace!(
@@ -120,34 +138,41 @@ pub fn Editor(state: Signal<EditorState>) -> Element {
         });
     }
 
-    // DOM ← state: when something *other* than the user (a
-    // command, undo, remote CRDT op) changes selection, push the
-    // new range to the textarea so the caret matches. We skip
-    // pure-typing changes by comparing against the last-seen DOM
-    // selection — `setSelectionRange` on an already-correct
-    // range is a no-op but the round-trip is still wasted work.
-    //
-    // Effect runs on every render where the selection signal
-    // changed. The DOM read happens via JS; if it matches, we
-    // bail. If it doesn't, we write.
-    {
-        let id = editor_id.clone();
-        use_effect(move || {
-            let p = state.read().selection.primary();
-            let (s, e) = (p.from(), p.to());
-            let script = format!(
-                r#"
-                (function() {{
-                    const ta = document.querySelector('[data-editor-id="{id}"]');
-                    if (!ta) return;
-                    if (ta.selectionStart === {s} && ta.selectionEnd === {e}) return;
-                    try {{ ta.setSelectionRange({s}, {e}); }} catch (_) {{}}
-                }})();
-                "#
-            );
-            let _ = document::eval(&script);
-        });
-    }
+    // onkeydown → keymap lookup → transaction. Each rendered
+    // closure captures the latest keymap clone; cheap because
+    // Keymap is a `Vec<KeyBinding>` of small structs.
+    let keymap_for_keys = keymap.clone();
+    let on_keydown = move |evt: Event<KeyboardData>| {
+        let Some(ref km) = keymap_for_keys else {
+            return;
+        };
+        let mods = evt.modifiers();
+        let key_str = match evt.key() {
+            Key::Character(c) => c,
+            // Display for Key emits W3C key names — "Enter",
+            // "ArrowUp", "Backspace", etc. — matching the
+            // convention CM6 uses in its key-spec strings.
+            other => other.to_string(),
+        };
+        // `Mod` resolves to Cmd on Mac (Meta), Ctrl elsewhere.
+        // We don't know the platform from inside the event so we
+        // accept both — a binding like "Mod-z" matches whichever
+        // the user actually pressed.
+        let press = KeySpec {
+            key: key_str,
+            ctrl: mods.ctrl(),
+            alt: mods.alt(),
+            shift: mods.shift(),
+            meta: mods.meta(),
+            r#mod: mods.ctrl() || mods.meta(),
+        };
+        let cur = state.read().clone();
+        if let Some(spec) = km.dispatch(&press, &cur) {
+            evt.prevent_default();
+            tracing::debug!(?press, "editor.keymap.fire");
+            state.set(cur.update(spec));
+        }
+    };
 
     let on_input = move |evt: Event<FormData>| {
         // v0: full-text replacement. The DOM hands us the new
@@ -183,6 +208,7 @@ pub fn Editor(state: Signal<EditorState>) -> Element {
             rows: "{rows}",
             value: "{text}",
             oninput: on_input,
+            onkeydown: on_keydown,
         }
     }
 }

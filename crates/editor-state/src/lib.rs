@@ -7,6 +7,8 @@
 //! `~/Development/research/codemirror/state/src/`.
 
 pub mod change;
+pub mod command;
+pub mod commands;
 pub mod decoration;
 pub mod doc;
 pub mod selection;
@@ -14,6 +16,7 @@ pub mod state;
 pub mod transaction;
 
 pub use change::{Change, Changes};
+pub use command::{Command, KeyBinding, KeySpec, Keymap};
 pub use decoration::{Decoration, DecorationKind, DecorationSet, DecoratedRange};
 pub use doc::Doc;
 pub use selection::{Range, Selection};
