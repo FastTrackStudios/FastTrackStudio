@@ -41,6 +41,7 @@ pub mod mark;
 pub mod pos;
 pub mod render_dx;
 pub mod text;
+pub mod visible;
 pub mod widget;
 
 pub use arena::{Arena, TileId};

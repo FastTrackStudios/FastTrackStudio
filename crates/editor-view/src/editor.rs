@@ -39,11 +39,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use editor_state::{
-    Changes, DecoratedRange, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec,
+    Change, Changes, DecoratedRange, EditorState, KeySpec, Keymap, Range, Selection,
+    TransactionSpec,
 };
 
 use crate::tile::build::build_tiles;
 use crate::tile::render_dx::render_tile;
+use crate::tile::visible::VisibleText;
 
 /// Decoration source — a pure fn that produces decorations for
 /// the current state. Multiple sources can be combined; the view
@@ -108,6 +110,10 @@ pub fn Editor(
     // flow via `sel` messages as in Phase 7.
     {
         let id = editor_id.clone();
+        // Capture the decoration source so the spawn closure
+        // can rebuild the tile tree + visible-text mirror when
+        // diffing each input message.
+        let deco_source = decorations;
         use_hook(move || {
             spawn(async move {
                 let script = format!(
@@ -178,6 +184,12 @@ pub fn Editor(
                                 }});
                             }}
                             function sendSel() {{
+                                // Skip during programmatic
+                                // writes — the DOM selection is
+                                // mid-update from our use_effect
+                                // and may be clamped vs what
+                                // state intends (Hidden tiles).
+                                if (el.dataset.writing === '1') return;
                                 const [a, b] = selOffsets();
                                 dioxus.send({{ kind: 'sel', sel: [a, b] }});
                             }}
@@ -214,6 +226,37 @@ pub fn Editor(
                             // `view/src/domobserver.ts:103+`
                             // (the `observe` method).
                             //
+                            // beforeinput interception — ports
+                            // CM6's `view/src/domchange.ts`
+                            // strategy of authoring edits
+                            // ourselves rather than reading the
+                            // DOM back after a browser-chosen
+                            // mutation. For inputType events we
+                            // can map cleanly (Enter, Backspace,
+                            // typed chars on some IMEs), we
+                            // preventDefault and send a typed
+                            // message; Rust applies the Change
+                            // and Dioxus re-renders the DOM the
+                            // way *we* want it (e.g., a new
+                            // LineTile div, not a plain <br>).
+                            //
+                            // Inputs we don't recognize fall
+                            // through to the MutationObserver
+                            // path below.
+                            el.addEventListener('beforeinput', evt => {{
+                                if (composing) return;
+                                const t = evt.inputType;
+                                if (t === 'insertParagraph' || t === 'insertLineBreak') {{
+                                    evt.preventDefault();
+                                    dioxus.send({{
+                                        kind: 'before-input-insert',
+                                        text: '\n',
+                                        sel: selOffsets(),
+                                    }});
+                                }}
+                                // Other inputTypes fall through.
+                            }});
+
                             // MutationObserver — full re-read on
                             // every mutation. Phase 12's precise
                             // single-record path is parked: each
@@ -247,7 +290,20 @@ pub fn Editor(
                             // It fires on `document`, not the
                             // element — we filter to selections
                             // that intersect our editor.
+                            //
+                            // The state→DOM selection writeback
+                            // effect sets `el.dataset.writing`
+                            // around its setSelectionRange call;
+                            // we skip the listener while that
+                            // flag is set so our own write
+                            // doesn't loop back through the
+                            // bridge and clamp the state-side
+                            // selection to whatever the browser
+                            // could actually represent (which
+                            // is shorter than state.doc when
+                            // Hidden tiles are involved).
                             document.addEventListener('selectionchange', () => {{
+                                if (el.dataset.writing === '1') return;
                                 const s = window.getSelection();
                                 if (s && s.anchorNode && el.contains(s.anchorNode)) {{
                                     sendSel();
@@ -264,7 +320,7 @@ pub fn Editor(
                 );
                 let mut handle = document::eval(&script);
                 while let Ok(v) = handle.recv::<serde_json::Value>().await {
-                    handle_bridge_msg(state, &v);
+                    handle_bridge_msg(state, deco_source, &v);
                 }
             });
         });
@@ -353,8 +409,17 @@ pub fn Editor(
                             return;
                         }}
                     }}
+                    // Set the writing flag so our own
+                    // selectionchange listener (below) skips
+                    // this synthetic event. Cleared async via
+                    // requestAnimationFrame — selectionchange
+                    // dispatches before that fires.
+                    el.dataset.writing = '1';
                     sel.removeAllRanges();
                     sel.addRange(targetRange);
+                    requestAnimationFrame(() => {{
+                        delete el.dataset.writing;
+                    }});
                 }})();
                 "#
             );
@@ -413,10 +478,15 @@ pub fn Editor(
     }
 }
 
-/// Handle one `dioxus.send` message from the JS bridge. Lives
-/// outside the component for testability — given a state Signal
-/// and the parsed JSON, mutate.
-fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
+/// Handle one `dioxus.send` message from the JS bridge.
+/// Decoration source is threaded through so we can rebuild the
+/// tile tree + visible-text mirror to translate visible-space
+/// edits back to doc space.
+fn handle_bridge_msg(
+    mut state: Signal<EditorState>,
+    deco_source: Option<DecorationSource>,
+    v: &serde_json::Value,
+) {
     let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("");
     let sel = v.get("sel").and_then(|s| s.as_array());
     let (s_off, e_off) = match sel {
@@ -429,35 +499,63 @@ fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
 
     match kind {
         "input" => {
-            let new_text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let new_visible = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
             let cur = state.read().clone();
-            let old_text = cur.doc.to_string();
-            if old_text == new_text {
-                // Selection-only update (e.g., an empty input
-                // event from IME, or a Dioxus echo where DOM
-                // matches state). Treat like a `sel` message
-                // — `push_selection` is itself a no-op when
-                // the selection also matches.
+            // Rebuild the tile tree + visible-text mirror that
+            // the DOM is currently showing, so we can diff
+            // against the SAME visible text the browser just
+            // mutated. Without this step, Hidden decorations
+            // (markdown markers, etc.) would make state.doc
+            // longer than DOM textContent and the diff would
+            // attribute the difference to "user deleted hidden
+            // bytes" on every keystroke.
+            let decorations: Vec<DecoratedRange> = match deco_source {
+                Some(src) => {
+                    let mut v = src(&cur);
+                    v.sort_by_key(|d| d.from);
+                    v
+                }
+                None => Vec::new(),
+            };
+            let (arena, root) = build_tiles(&cur.doc.to_string(), &decorations);
+            let old_visible = VisibleText::from_arena(&arena, root);
+            if old_visible.text == new_visible {
+                // No textual change — selection-only update.
                 push_selection(&mut state, &cur, s_off, e_off);
                 return;
             }
-            // Minimal diff: trim common prefix + suffix, then
-            // splice the middle. Good enough for single
-            // character typing AND multi-char paste/delete.
-            let changes = diff_text(&old_text, new_text);
-            if changes.is_empty() {
-                // Defensive: diff_text shouldn't return empty
-                // for different strings, but if it does, treat
-                // as a no-op edit and just sync selection.
+            // Diff in visible space.
+            let vis_changes = diff_text(&old_visible.text, new_visible);
+            if vis_changes.is_empty() {
                 push_selection(&mut state, &cur, s_off, e_off);
                 return;
             }
-            let new_len = new_text.len();
-            let s_off = s_off.min(new_len);
-            let e_off = e_off.min(new_len).max(s_off);
+            // Translate each visible-space change to doc space.
+            // s_off / e_off from the JS bridge already arrive in
+            // doc space (via data-tile-pos), so they need no
+            // mapping.
+            let mut doc_changes: Vec<Change> = Vec::new();
+            for c in vis_changes.iter() {
+                let doc_from = old_visible.visible_to_doc(c.from);
+                let doc_to = old_visible.visible_to_doc(c.to);
+                doc_changes.push(Change {
+                    from: doc_from,
+                    to: doc_to,
+                    inserted: c.inserted.clone(),
+                });
+            }
+            let changes = Changes::from_sorted(doc_changes);
+            let new_doc_len = cur.doc.len() as isize + changes
+                .iter()
+                .map(|c| c.delta())
+                .sum::<isize>();
+            let new_doc_len = new_doc_len.max(0) as usize;
+            let s_off = s_off.min(new_doc_len);
+            let e_off = e_off.min(new_doc_len).max(s_off);
             tracing::debug!(
-                old_len = old_text.len(),
-                new_len,
+                old_visible_len = old_visible.text.len(),
+                new_visible_len = new_visible.len(),
+                new_doc_len,
                 sel_start = s_off,
                 sel_end = e_off,
                 "editor.input"
@@ -473,6 +571,33 @@ fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
         "sel" => {
             let cur = state.read().clone();
             push_selection(&mut state, &cur, s_off, e_off);
+        }
+        "before-input-insert" => {
+            // CM6-style author-the-edit-ourselves path. The JS
+            // bridge preventDefault'd the browser's intended
+            // mutation; we apply our own Change so the
+            // resulting DOM is whatever the tile-tree render
+            // produces (e.g., a new LineTile <div>, not a stray
+            // browser <br>).
+            //
+            // s_off / e_off arrive in doc space (selOffsets
+            // uses data-tile-pos). The insertion replaces any
+            // selected range with the provided text.
+            let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let cur = state.read().clone();
+            let doc_len = cur.doc.len();
+            let from = s_off.min(doc_len);
+            let to = e_off.min(doc_len).max(from);
+            tracing::debug!(from, to, inserted_len = text.len(), "editor.before_input");
+            let changes = Changes::replace(from..to, text);
+            let caret = from + text.len();
+            let new_sel = Selection::single(Range::caret(caret));
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "before-input"),
+            ));
         }
         "composition-start" => {
             // Inform extensions (none yet) that composition has

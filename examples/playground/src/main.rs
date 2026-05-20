@@ -3,7 +3,7 @@
 //! can see selection / doc / transactions while typing.
 
 use dioxus::prelude::*;
-use editor::{Editor, EditorState, Keymap, commands};
+use editor::{Editor, EditorState, Keymap, commands, editor_view, markdown};
 
 const STYLE: Asset = asset!("/assets/playground.css");
 
@@ -74,20 +74,11 @@ fn App() -> Element {
     // new state on every input. We mirror it into the debug
     // panel so changes are visible as you type.
     let state = use_signal(|| {
-        // Plain text seed for now. The `markdown::live_preview`
-        // decoration source is correct in principle but exposes
-        // a known bug in our DOM-input path: when Hidden tiles
-        // remove bytes from the rendered output, textContent is
-        // shorter than state.doc. The full-re-read input handler
-        // then diffs the *visible* text against the full doc
-        // and drops hidden bytes on every keystroke. Re-enable
-        // live preview here once the input path builds a typed
-        // visible-text mirror and translates offsets through the
-        // tile tree (FUTURE: src/editor.rs handle_bridge_msg).
         EditorState::new(
-            "Welcome to the Editor playground.\n\n\
-             Type anywhere. Every keystroke flows through a \
-             Transaction; the state is mirrored to the right.",
+            "Welcome to the **Editor** playground.\n\n\
+             Try typing some **bold**, *italic*, or `code`. \
+             The markers stay visible only when your caret is \
+             on the word — move away and they fade.",
         )
     });
 
@@ -115,12 +106,7 @@ fn App() -> Element {
                         Editor {
                             state,
                             keymap: keymap.clone(),
-                            // FUTURE: re-wire markdown::live_preview
-                            // once the input bridge handles
-                            // Hidden→visible-text offset
-                            // translation through the tile tree.
-                            // For now plain text only so the
-                            // doc-DOM round-trip is 1:1.
+                            decorations: markdown::live_preview as editor_view::DecorationSource,
                         }
                     }
                 }
