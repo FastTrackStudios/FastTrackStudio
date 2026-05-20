@@ -38,6 +38,7 @@ pub mod dom_pos;
 pub mod flag;
 pub mod mark;
 pub mod pos;
+pub mod render_dx;
 pub mod text;
 pub mod widget;
 

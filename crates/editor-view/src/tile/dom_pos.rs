@@ -15,7 +15,7 @@
 //! tiles, prefer the one on this side.
 
 use crate::tile::arena::{Arena, TileId};
-use crate::tile::pos::{pos_at_end, pos_at_start};
+use crate::tile::pos::pos_at_start;
 
 /// Side bias for boundary resolution. Mirrors CM6's
 /// `side: -1 | 1` (`docview.ts:320`).
@@ -176,6 +176,7 @@ mod tests {
 
     #[test]
     fn pos_at_end_of_doc_is_doc_length() {
+        use crate::tile::pos::pos_at_end;
         let (arena, doc) = build_tiles("hello", &[]);
         assert_eq!(pos_at_end(&arena, doc), 5);
     }

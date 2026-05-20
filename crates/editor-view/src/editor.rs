@@ -42,7 +42,8 @@ use editor_state::{
     Changes, DecoratedRange, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec,
 };
 
-use crate::render::{self, Segment};
+use crate::tile::build::build_tiles;
+use crate::tile::render_dx::render_tile;
 
 /// Decoration source — a pure fn that produces decorations for
 /// the current state. Multiple sources can be combined; the view
@@ -69,8 +70,11 @@ pub fn Editor(
     #[props(default)] decorations: Option<DecorationSource>,
 ) -> Element {
     let text = state.read().doc.to_string();
-    // Run decoration sources, merge, sort. Empty / no source ⇒
-    // one undecorated text segment covering the whole doc.
+    // Run decoration sources, merge, sort. Build the tile
+    // tree — Phase 6 port of CM6's buildtile.ts. The flat-Vec
+    // segment path that lived in `render::render` has been
+    // replaced by the full tile-tree path through `build_tiles`
+    // + `render_tile`.
     let decs: Vec<DecoratedRange> = if let Some(src) = decorations {
         let mut v = src(&state.read());
         v.sort_by_key(|d| d.from);
@@ -78,7 +82,7 @@ pub fn Editor(
     } else {
         Vec::new()
     };
-    let segments = render::render(&text, &decs);
+    let (arena, doc_tile) = build_tiles(&text, &decs);
     let editor_id = use_hook(|| {
         let n = EDITOR_INSTANCE.fetch_add(1, Ordering::Relaxed);
         format!("editor-{n}")
@@ -284,50 +288,14 @@ pub fn Editor(
             contenteditable: "plaintext-only",
             spellcheck: "false",
             onkeydown: on_keydown,
-            // Children: render the doc as the rendered segment
-            // stream. For undecorated text this collapses to a
-            // single text node — same Dioxus-reconciler-no-op
-            // behavior that keeps the caret stable during
-            // typing. For decorated text we emit `<span>`s with
-            // class names; the browser still treats the result
-            // as one continuous text stream for cursor purposes
-            // (per `plaintext-only` semantics).
-            for seg in segments.iter() {
-                {render_segment(seg)}
-            }
+            // Children: render the tile tree. Each composite
+            // tile becomes a `<span data-tile-id="N">`; text
+            // tiles emit a bare text node so the
+            // Dioxus-reconciler-no-op trick (matching DOM
+            // text → no DOM mutation) still holds during
+            // typing. See `tile::render_dx::render_tile`.
+            {render_tile(&arena, doc_tile)}
         }
-    }
-}
-
-/// Convert one `Segment` into a Dioxus element.
-///
-/// - `Text` with empty class → bare text node (no wrapping
-///   span) so the un-decorated common case still produces the
-///   exact same DOM shape as Phase A. This is what lets typing
-///   on a doc with no decorations stay a no-op for the
-///   reconciler.
-/// - `Text` with classes → `<span class="…">`.
-/// - `Hidden` → nothing (omit from the DOM).
-/// - `Widget` → `dangerous_inner_html` with the source's raw
-///   HTML. v1 widgets are static strings; future widgets can
-///   carry richer payloads.
-fn render_segment(seg: &Segment) -> Element {
-    match seg {
-        Segment::Text { text, classes, .. } => {
-            if classes.is_empty() {
-                rsx! { "{text}" }
-            } else {
-                rsx! { span { class: "{classes}", "{text}" } }
-            }
-        }
-        Segment::Hidden { .. } => rsx! {},
-        Segment::Widget { html, .. } => rsx! {
-            span {
-                class: "editor-widget",
-                contenteditable: "false",
-                dangerous_inner_html: "{html}"
-            }
-        },
     }
 }
 
