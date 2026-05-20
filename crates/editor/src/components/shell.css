@@ -173,6 +173,59 @@
     padding: 0 0.25em;
     border-radius: 3px;
 }
+/* Slash-command popup. Anchored just below the editing
+   textarea via `.editor-edit-wrap` (position: relative). */
+.editor-edit-wrap {
+    position: relative;
+}
+.slash-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.25em;
+    min-width: 280px;
+    max-width: 380px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--ed-bg-2);
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    z-index: 60;
+    font-size: 0.9rem;
+}
+.slash-menu .slash-group {
+    padding: 0.35em 0.7em;
+    font-size: 0.7rem;
+    color: var(--ed-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--ed-border);
+}
+.slash-menu .slash-row {
+    padding: 0.4em 0.7em;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.slash-menu .slash-row:hover,
+.slash-menu .slash-row.selected {
+    background: rgba(91, 158, 179, 0.18);
+}
+.slash-menu .slash-row-label {
+    color: var(--ed-fg);
+    font-weight: 500;
+}
+.slash-menu .slash-row-desc {
+    color: var(--ed-fg-muted);
+    font-size: 0.78rem;
+    margin-top: 0.15em;
+}
+.slash-menu .slash-empty {
+    padding: 0.8em 0.7em;
+    color: var(--ed-fg-muted);
+    font-style: italic;
+}
 .editor-textarea {
     width: 100%;
     background: transparent;

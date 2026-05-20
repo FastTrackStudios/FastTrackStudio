@@ -60,6 +60,22 @@ pub struct AppState {
     /// Bumped after every successful disk reload — descendants
     /// that snapshot the vault can subscribe.
     pub vault_revision: Signal<u64>,
+    /// Slash-menu state. `Some({ block, query, slash_start })` when
+    /// the menu is open inside a block; `None` when closed.
+    pub slash: Signal<Option<SlashState>>,
+}
+
+/// What the slash-menu needs to know about: which block hosts
+/// the open menu, the substring after `/` the user has typed so
+/// far, and the byte offset of the `/` in the block content
+/// (so the runner can replace `/query` with the command result).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlashState {
+    pub block_id: Uuid,
+    pub query: String,
+    pub slash_start: usize,
+    /// Highlighted row in the filtered list (0-based).
+    pub selected: usize,
 }
 
 impl AppState {
@@ -73,6 +89,7 @@ impl AppState {
             pane: Signal::new(Pane::Outliner),
             vault_root: Signal::new(default_vault_root()),
             vault_revision: Signal::new(0),
+            slash: Signal::new(None),
         }
     }
 }
