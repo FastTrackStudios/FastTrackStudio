@@ -63,11 +63,17 @@ js-sys = { workspace = true }
 # IDB futures crate. `tokio = { workspace = true }` reuses the
 # workspace's existing pin.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "sync"] }
 # Native directory picker for the "Import Logseq graph" button
 # in `logseq_shell`. Wasm targets get the same effect from a
 # file `<input>` chooser (not wired in this slice).
 rfd = "0.15"
+# Watch the vault directory for external edits — `notify` picks
+# up filesystem events, `notify-debouncer-mini` coalesces a burst
+# of writes (e.g. an editor's atomic-save dance) into a single
+# event so we don't re-import 12 times in 200ms.
+notify = "8"
+notify-debouncer-mini = "0.6"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

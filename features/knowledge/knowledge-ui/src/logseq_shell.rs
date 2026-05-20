@@ -701,6 +701,21 @@ pub fn LogseqShell() -> Element {
                 crate::graph_writer::run_disk_writer_loop(doc).await;
             });
         });
+
+        // File watcher — picks up external edits (an editor like
+        // Helix or VS Code modifying ~/Task/pages/*.md) and
+        // re-imports the vault. The debouncer coalesces atomic-
+        // save bursts. We pause the writer briefly after each
+        // external import so the in-memory CRDT can flush back
+        // without re-triggering the watcher.
+        let doc_for_watcher = doc.read().clone();
+        let mut version_for_watcher = version;
+        use_hook(move || {
+            let doc = doc_for_watcher.clone();
+            spawn(async move {
+                run_vault_watcher_loop(doc, &mut version_for_watcher).await;
+            });
+        });
     }
 
     // Cold-start bootstrap:
@@ -5765,6 +5780,99 @@ async fn append_block_to_page_async(
     })
     .await?;
     Ok(())
+}
+
+/// Watch the vault's `pages/` + `journals/` directories for
+/// external edits and re-import the graph when something
+/// changes. Logseq-style live filesystem sync — edit a `.md`
+/// file in any editor and the app picks it up.
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_vault_watcher_loop(doc: Arc<CrdtDoc>, version: &mut Signal<u64>) {
+    use notify::RecursiveMode;
+    use notify_debouncer_mini::new_debouncer;
+    use std::time::Duration;
+
+    // Resolve the vault root by reading the first vault. We
+    // retry until one exists since seeding races with this loop.
+    let root = loop {
+        if let Some(r) = first_vault_root(&doc).await {
+            break r;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    let pages_dir = root.join("pages");
+    let journals_dir = root.join("journals");
+    let _ = std::fs::create_dir_all(&pages_dir);
+    let _ = std::fs::create_dir_all(&journals_dir);
+
+    // notify is sync; bridge via tokio's unbounded channel so the
+    // async receive side stays clean.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let mut debouncer = match new_debouncer(
+        Duration::from_millis(500),
+        move |res: notify_debouncer_mini::DebounceEventResult| {
+            if res.is_ok() {
+                let _ = tx.send(());
+            }
+        },
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(?e, "filesystem watcher init failed");
+            return;
+        }
+    };
+    if let Err(e) = debouncer
+        .watcher()
+        .watch(&pages_dir, RecursiveMode::NonRecursive)
+    {
+        tracing::warn!(?e, "watch pages/ failed");
+    }
+    if let Err(e) = debouncer
+        .watcher()
+        .watch(&journals_dir, RecursiveMode::NonRecursive)
+    {
+        tracing::warn!(?e, "watch journals/ failed");
+    }
+    tracing::info!(?root, "vault watcher active");
+
+    // Keep the debouncer alive for the lifetime of the loop —
+    // dropping it stops the watcher thread.
+    let _debouncer = debouncer;
+
+    loop {
+        if rx.recv().await.is_none() {
+            break;
+        }
+        // Drain any backlog before re-importing.
+        while rx.try_recv().is_ok() {}
+        tracing::info!("vault watcher: reimporting from disk");
+        match crate::graph_loader::import_logseq_graph(&doc, &root).await {
+            Ok(stats) => {
+                tracing::info!(?stats, "vault watcher: reimport ok");
+                version.with_mut(|v| *v += 1);
+            }
+            Err(e) => tracing::warn!(?e, "vault watcher: reimport failed"),
+        }
+    }
+}
+
+/// No-op watcher on wasm — filesystem APIs aren't available.
+#[cfg(target_arch = "wasm32")]
+async fn run_vault_watcher_loop(_doc: Arc<CrdtDoc>, _version: &mut Signal<u64>) {}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn first_vault_root(doc: &CrdtDoc) -> Option<std::path::PathBuf> {
+    use knowledge_proto::VaultRepo;
+    let vr = knowledge_crdt::VaultRepoLoro::new(doc);
+    let big = ListPage { index: 0, size: 1 };
+    vr.list(big, None, None)
+        .await
+        .ok()?
+        .items
+        .into_iter()
+        .next()
+        .and_then(|v| v.root_path.map(std::path::PathBuf::from))
 }
 
 async fn first_vault_id(doc: &CrdtDoc) -> Option<Uuid> {
