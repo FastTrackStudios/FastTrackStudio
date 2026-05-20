@@ -128,7 +128,7 @@ test.describe("editor", () => {
     // and contains some recognizable substring.
     expect(Number(state.len)).toBeGreaterThan(0);
     expect(state.text).toContain("Editor");
-    expect(state.text.toLowerCase()).toContain("typing");
+    expect(state.text.toLowerCase()).toContain("preview");
   });
 
   test("types a character and the state grows by one", async ({ page }) => {
@@ -205,25 +205,20 @@ test.describe("editor", () => {
   test("markdown bold round-trips through the visible-text mirror", async ({
     page,
   }) => {
-    // After the visible-text + offset-translation work in
-    // tile/visible.rs, typing into a doc with Hidden markdown
-    // markers should NOT drop the markers. We type at the end
-    // of the doc and confirm doc.len() == before + 1, *not*
-    // before + 1 - (number of currently-hidden markers).
-    const before = Number((await readState(page)).len);
+    // Hidden markdown markers ( `**…**` etc. ) shrink the rendered
+    // visible text, but typing should not drop the underlying
+    // bytes from state.doc. Use a clean seed so we control the
+    // exact bytes we're checking for.
+    await page.goto("/?seed=hello%20**world**%20after");
+    await editor(page).waitFor();
+    await expect.poll(async () => (await readState(page)).len).toBe("21");
     await editor(page).focus();
-    // Place caret at the END of the visible content. Visible
-    // length < doc length when markers are hidden, so we use
-    // a very large offset and let setCaret clamp.
     await setCaret(page, 100_000);
     await page.keyboard.insertText("x");
-    await waitForLen(page, before + 1);
+    await waitForLen(page, 22);
     const after = await readState(page);
-    expect(Number(after.len)).toBe(before + 1);
-    // The doc should still contain all the original markdown
-    // markers — not just the visible bold text.
-    expect(after.text).toContain("**Editor**");
-    expect(after.text).toContain("**bold**");
+    expect(Number(after.len)).toBe(22);
+    expect(after.text).toContain("**world**");
     expect(after.text.endsWith("x")).toBeTruthy();
   });
 
@@ -245,6 +240,135 @@ test.describe("editor", () => {
       .toBeGreaterThan(linesBefore);
     const linesAfter = await page.locator(".cm-line").count();
     expect(linesAfter).toBeGreaterThan(linesBefore);
+  });
+
+  test("shift+arrow-left extends selection backward", async ({ page }) => {
+    // Regression: backward-direction selections were collapsing
+    // because placeSelection used `Range`/`addRange` which always
+    // normalize start<=end. The browser would then think the
+    // focus was on the right and shift+arrow-left would just
+    // shrink the right edge instead of extending the left.
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("abcdef");
+    await expect.poll(async () => (await readState(page)).len).toBe("6");
+    // Move to position 5 with ArrowLeft (works against current
+    // DOM state — setCaret races the patcher on a fresh insert).
+    await page.keyboard.press("End");
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(async () => (await readState(page)).head).toBe("5");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await page.keyboard.press("Shift+ArrowLeft");
+    await expect.poll(async () => (await readState(page)).head).toBe("2");
+    const s = await readState(page);
+    expect(Number(s.anchor)).toBe(5);
+    expect(Number(s.head)).toBe(2);
+  });
+
+  test("Enter at end of line with multi-byte chars splits AFTER the text", async ({
+    page,
+  }) => {
+    // User-reported regression: hitting Enter at the end of a
+    // line that contains an em-dash (3 UTF-8 bytes / 1 UTF-16
+    // code unit) stranded the trailing characters on the new
+    // line. Root cause: doc positions are UTF-8 byte offsets
+    // but JS string offsets are UTF-16 code units; the cursor
+    // walked 2 bytes short per em-dash.
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("ab — cd");
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("X");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("ab — cd\nX");
+  });
+
+  test("Enter on a list item continues the list and cursor lands after marker", async ({
+    page,
+  }) => {
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    // Type the first item then Enter then type next.
+    await page.keyboard.insertText("- foo");
+    await expect.poll(async () => (await readState(page)).text).toBe("- foo");
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("- foo\n- ");
+    await page.keyboard.insertText("bar");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("- foo\n- bar");
+  });
+
+  test("Enter on a numbered list continues and increments", async ({ page }) => {
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("1. foo");
+    await expect.poll(async () => (await readState(page)).text).toBe("1. foo");
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("1. foo\n2. ");
+    await page.keyboard.insertText("bar");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("1. foo\n2. bar");
+  });
+
+  test("Enter on a task item continues with unchecked box", async ({ page }) => {
+    await page.goto("/?seed=");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("- [x] done");
+    await expect.poll(async () => (await readState(page)).text).toBe("- [x] done");
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("- [x] done\n- [ ] ");
+    await page.keyboard.insertText("next");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("- [x] done\n- [ ] next");
+  });
+
+  test("Enter at end of decorated line splits AFTER the visible text", async ({
+    page,
+  }) => {
+    // User-reported regression: clicking at the end of a line
+    // that contains a `**bold**` span (markers hidden) and
+    // pressing Enter moved trailing chars to the new line.
+    // Root cause: browsers place the cursor at element-level
+    // (cm-line div's child-index offset) when the click lands
+    // past the last text node — selOffsets was reading that
+    // offset as a character offset, which pointed to a position
+    // inside the doc instead of at its visible end.
+    await page.goto("/?seed=Hello%20**bold**%20world.");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    // Click at the visible end-of-line: place cursor at element
+    // level via a click in the line div past its last text.
+    const lineHandle = page.locator(".cm-line").first();
+    const box = await lineHandle.boundingBox();
+    await page.mouse.click(box.x + box.width - 2, box.y + box.height / 2);
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("X");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("Hello **bold** world.\nX");
   });
 
   test("markdown bold via literal ** markers", async ({ page }) => {
@@ -344,8 +468,51 @@ test.describe("editor", () => {
     //
     // For users today: select text BEFORE Mod-B to wrap a
     // selection — that path works perfectly.
-    test.skip("Mod-B sequence: typing inside empty span", async () => {});
-    test.skip("Mod-B sequence builds Testing **Bold** suffix", async () => {});
+    test("Mod-B sequence: typing inside empty span", async ({ page }) => {
+      // Mod-B at start of empty doc → `****` with caret between.
+      // Typing then has to drop characters INSIDE the empty Mark
+      // span. The empty→non-empty Mark transition used to hang
+      // the page under Dioxus's VDOM reconciler; with imperative
+      // patching it should work.
+      await editor(page).focus();
+      await setCaret(page, 0);
+      await page.keyboard.press("ControlOrMeta+b");
+      await expect.poll(async () => (await readState(page)).text).toBe("****");
+      await page.keyboard.insertText("X");
+      await expect.poll(async () => (await readState(page)).text).toBe("**X**");
+    });
+
+    test("Mod-B sequence builds Testing **Bold** suffix", async ({ page }) => {
+      const syncDom = async (expected) => {
+        await expect.poll(async () => (await readState(page)).text).toBe(expected);
+        await expect
+          .poll(async () => {
+            const lines = page.locator(".cm-line");
+            const n = await lines.count();
+            let acc = "";
+            for (let i = 0; i < n; i++) {
+              if (i > 0) acc += "\n";
+              acc += (await lines.nth(i).textContent()) || "";
+            }
+            return acc;
+          })
+          .toBe(expected);
+      };
+      await editor(page).focus();
+      await setCaret(page, 0);
+      await page.keyboard.insertText("Testing ");
+      await syncDom("Testing ");
+      await page.keyboard.press("ControlOrMeta+b");
+      await syncDom("Testing ****");
+      await page.keyboard.insertText("This Is Bold");
+      await syncDom("Testing **This Is Bold**");
+      await page.keyboard.press("ControlOrMeta+b");
+      await expect.poll(async () => (await readState(page)).head).toBe("24");
+      await page.keyboard.insertText(" This Isn't Bold");
+      await expect
+        .poll(async () => (await readState(page)).text)
+        .toBe("Testing **This Is Bold** This Isn't Bold");
+    });
 
     test("literal **bold** typing produces the same final text", async ({
       page,
@@ -603,6 +770,29 @@ test.describe("editor", () => {
           before + 1
         );
       }
+    });
+
+    test("typing past a closing marker doesn't garble the text", async ({
+      page,
+    }) => {
+      // User-reported regression: typing
+      //   "Something **Testing** Landed Here"
+      // produced
+      //   "Somlandeedherething **Testing**"
+      // because the caret transitioned from inside the bold span
+      // (markers visible, one big text node) to outside (markers
+      // hidden, multiple tiles). The DOM restructured, the cursor
+      // was orphaned, and the next chars landed at offset 0.
+      await page.goto("/?seed=");
+      await editor(page).waitFor();
+      await editor(page).focus();
+      await setCaret(page, 0);
+      await page.keyboard.insertText("Something ");
+      await page.keyboard.insertText("**Testing** ");
+      await page.keyboard.insertText("Landed Here");
+      await expect
+        .poll(async () => (await readState(page)).text)
+        .toBe("Something **Testing** Landed Here");
     });
 
     test("cursor doesn't collapse when caret crosses decoration boundary", async ({

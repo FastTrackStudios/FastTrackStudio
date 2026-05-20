@@ -1,9 +1,9 @@
-//! Dogfooding app for the editor crate. Hosts an `<Editor>`
+//! Testing app for the editor crate. Hosts an `<Editor>`
 //! plus a debug panel that mirrors the live `EditorState` so we
 //! can see selection / doc / transactions while typing.
 
 use dioxus::prelude::*;
-use editor::{Editor, EditorState, Keymap, commands, editor_view, markdown};
+use editor::{commands, editor_view, markdown, Editor, EditorState, Keymap};
 
 const STYLE: Asset = asset!("/assets/playground.css");
 
@@ -21,7 +21,7 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn init_tracing() {
     use tracing_subscriber::{
-        EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+        fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
     };
     // Logfile in the repo's target/ dir so it tags along with
     // builds and is gitignored. `daily` rolls without bound; for
@@ -155,10 +155,49 @@ fn App() -> Element {
     let state = use_signal(|| {
         let seed = read_seed_query().unwrap_or_else(|| {
             String::from(
-                "Welcome to the **Editor** playground.\n\n\
-                 Try typing some **bold**, *italic*, or `code`. \
-                 The markers stay visible only when your caret is \
-                 on the word — move away and they fade.",
+                "# Welcome to the Editor playground\n\
+                 \n\
+                 ## Inline styles\n\
+                 \n\
+                 **bold**, *italic*, ***bold italic***, ~~strikethrough~~, \
+                 ==highlight==, and `inline code`.\n\
+                 \n\
+                 Links: [Anthropic](https://anthropic.com), \
+                 wikilinks like [[Page Name]], \
+                 tags like #editor #live-preview, \
+                 and footnote refs like this[^1].\n\
+                 \n\
+                 ## Block styles\n\
+                 \n\
+                 > Blockquotes look like this.\n\
+                 > Multi-line works too.\n\
+                 \n\
+                 - Unordered list item\n\
+                 - Another item\n\
+                 \n\
+                 1. Ordered list\n\
+                 2. Stays numbered\n\
+                 \n\
+                 - [ ] Click the checkbox to toggle\n\
+                 - [x] Done\n\
+                 \n\
+                 ---\n\
+                 \n\
+                 ## Code fences with syntax highlighting\n\
+                 \n\
+                 ```rust\n\
+                 fn greet(name: &str) -> String {\n\
+                     format!(\"Hello, {name}!\")\n\
+                 }\n\
+                 ```\n\
+                 \n\
+                 ```python\n\
+                 def greet(name):\n\
+                     return f\"Hello, {name}!\"\n\
+                 ```\n\
+                 \n\
+                 Markers stay visible while your caret is on the span — \
+                 move away and they fade out.",
             )
         });
         EditorState::new(seed)
@@ -169,10 +208,17 @@ fn App() -> Element {
     // intercept and route them through commands instead, so we
     // can see them flow through the State → Transaction loop in
     // the debug panel.
+    // Enter is handled by the view's beforeinput bridge (which
+    // routes it through `enter_continue_list` Rust-side) rather
+    // than the keymap, so the browser's default
+    // `insertParagraph` never sneaks a stray `\n` in alongside
+    // our authored change.
     let keymap = Keymap::new()
         .with("Mod-a", commands::select_all as _)
         .with("Mod-b", commands::toggle_bold as _)
         .with("Mod-i", commands::toggle_italic as _)
+        .with("Tab", commands::indent_more as _)
+        .with("Shift-Tab", commands::indent_less as _)
         .with("Backspace", commands::delete_backward as _)
         .with("Delete", commands::delete_forward as _);
 
@@ -181,7 +227,7 @@ fn App() -> Element {
         div { class: "page",
             header { class: "page-header",
                 h1 { "Editor" }
-                p { class: "subtitle", "Dogfooding playground" }
+                p { class: "subtitle", "Text playground" }
             }
             div { class: "split",
                 section { class: "editor-pane",
