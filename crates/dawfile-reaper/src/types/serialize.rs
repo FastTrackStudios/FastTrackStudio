@@ -613,8 +613,15 @@ impl RppSerialize for Track {
         ));
 
         if let Some(vp) = &self.volpan {
+            // REAPER's TRACK-level VOLPAN takes 5 fields:
+            //   vol pan pan_law pan_mode_2 show_pan_widget
+            // The trailing two are reserved/UI flags; the official
+            // PT Reaper Converter (and our setlist/convert paths)
+            // emit `-1 1` as the defaults. The dawfile-reaper parser
+            // (io.rs:226) reads only the first three and ignores
+            // extras, so round-trip is lossless.
             out.push_str(&format!(
-                "{}VOLPAN {} {} {}\n",
+                "{}VOLPAN {} {} {} -1 1\n",
                 inner, vp.volume, vp.pan, vp.pan_law
             ));
         }
