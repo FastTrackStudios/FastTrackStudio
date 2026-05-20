@@ -37,10 +37,22 @@ pub async fn seed_demo(doc: Arc<CrdtDoc>) -> Result<(), RepoError> {
     let page_repo = PageRepoLoro::new(&doc);
     let block_repo = BlockRepoLoro::new(&doc);
 
+    // Vault lives at `~/Task/` by default — Logseq-style local
+    // graph. graph_writer mirrors every commit back to
+    // `~/Task/pages/*.md` and `~/Task/journals/*.md`, so the
+    // user (or another editor) can read the canonical source on
+    // disk. We create the directory tree up front so the first
+    // write doesn't race.
+    let default_root = default_vault_root();
+    if let Some(root) = &default_root {
+        let _ = std::fs::create_dir_all(root.join("pages"));
+        let _ = std::fs::create_dir_all(root.join("journals"));
+        let _ = std::fs::create_dir_all(root.join("assets"));
+    }
     let vault = vault_repo
         .create(VaultCreate {
-            name: "Demo Vault".into(),
-            root_path: None,
+            name: "Task".into(),
+            root_path: default_root.as_ref().map(|p| p.to_string_lossy().into()),
             use_markdown_links: false,
             new_link_format: "shortest".into(),
             attachment_folder_path: String::new(),
@@ -49,6 +61,7 @@ pub async fn seed_demo(doc: Arc<CrdtDoc>) -> Result<(), RepoError> {
         })
         .await?;
 
+    let home = mk_page(&page_repo, vault.id, "Home", None, now).await?;
     let welcome = mk_page(&page_repo, vault.id, "Welcome", None, now).await?;
     let tasks = mk_page(&page_repo, vault.id, "Tasks", None, now).await?;
     let projects_alpha = mk_page(&page_repo, vault.id, "Projects/Alpha", None, now).await?;
@@ -59,6 +72,52 @@ pub async fn seed_demo(doc: Arc<CrdtDoc>) -> Result<(), RepoError> {
         &now.format("%Y-%m-%d").to_string(),
         Some(now.format("%Y-%m-%d").to_string()),
         now,
+    )
+    .await?;
+
+    // ── Home page ─ scratch-pad, auto-opens on cold start ─
+    mk_block(
+        &block_repo,
+        vault.id,
+        home,
+        "a",
+        "heading",
+        "Home",
+        Some(1),
+        "{}",
+    )
+    .await?;
+    mk_block(
+        &block_repo,
+        vault.id,
+        home,
+        "b",
+        "paragraph",
+        "Welcome to your Task vault. This is your scratch-pad — anything you write here lives in `~/Task/pages/Home.md`.",
+        None,
+        "{}",
+    )
+    .await?;
+    mk_block(
+        &block_repo,
+        vault.id,
+        home,
+        "c",
+        "paragraph",
+        "Try a wikilink: [[Welcome]] · A tag: #demo · A query: {{query #demo}}",
+        None,
+        "{}",
+    )
+    .await?;
+    mk_block(
+        &block_repo,
+        vault.id,
+        home,
+        "d",
+        "paragraph",
+        "Press ⌘K to search. The sidebar (Cards / Tasks / Graph / Settings) lives on the left.",
+        None,
+        "{}",
     )
     .await?;
 
@@ -248,6 +307,21 @@ pub async fn seed_demo(doc: Arc<CrdtDoc>) -> Result<(), RepoError> {
     .await?;
 
     Ok(())
+}
+
+/// Resolve the default vault root: `~/Task/`. Returns None when
+/// the home directory can't be looked up (very rare) or when
+/// we're building for wasm where filesystem access is sandboxed.
+pub fn default_vault_root() -> Option<std::path::PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+        Some(home.join("Task"))
+    }
 }
 
 async fn mk_page(

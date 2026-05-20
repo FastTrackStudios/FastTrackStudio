@@ -718,22 +718,45 @@ pub fn LogseqShell() -> Element {
         });
     }
 
-    // Seed the doc with demo data the first time we render. Same
-    // path the live outliner uses — keeps content offline-first.
+    // Cold-start bootstrap:
+    //   1. If the doc already has pages, do nothing.
+    //   2. Else, if `~/Task/pages/` exists and has `.md` files,
+    //      import them via graph_loader so the on-disk vault is
+    //      the source of truth.
+    //   3. Else, run seed_demo which creates a vault rooted at
+    //      `~/Task/` so graph_writer starts persisting from the
+    //      first edit.
     let doc_for_seed = doc.read().clone();
     let mut version_for_seed = version;
     use_hook(move || {
         let doc = doc_for_seed.clone();
         spawn(async move {
-            // Give persistence a moment to drop in real data.
             #[cfg(not(target_arch = "wasm32"))]
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            if !crate::seed::doc_has_pages(&doc).await {
-                if let Err(e) = crate::seed::seed_demo(doc.clone()).await {
-                    tracing::warn!(?e, "demo seed failed");
-                }
-                version_for_seed.with_mut(|v| *v += 1);
+            if crate::seed::doc_has_pages(&doc).await {
+                return;
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if let Some(root) = crate::seed::default_vault_root() {
+                    let has_disk_content = root.join("pages").exists()
+                        && std::fs::read_dir(root.join("pages"))
+                            .map(|mut d| d.next().is_some())
+                            .unwrap_or(false);
+                    if has_disk_content {
+                        match crate::graph_loader::import_logseq_graph(&doc, &root).await {
+                            Ok(stats) => tracing::info!(?stats, "imported vault from disk"),
+                            Err(e) => tracing::warn!(?e, "vault import failed"),
+                        }
+                        version_for_seed.with_mut(|v| *v += 1);
+                        return;
+                    }
+                }
+            }
+            if let Err(e) = crate::seed::seed_demo(doc.clone()).await {
+                tracing::warn!(?e, "demo seed failed");
+            }
+            version_for_seed.with_mut(|v| *v += 1);
         });
     });
 
@@ -779,6 +802,25 @@ pub fn LogseqShell() -> Element {
         });
     }
     let vault_data = vault_signal.read().clone();
+    // Cold-start: when the vault loads for the first time and no
+    // page is active yet, jump to "Home" so the user lands on
+    // their scratch-pad. Falls back to the journal for today if
+    // no Home page exists yet.
+    {
+        let mut active_w = active_page;
+        let pages_snapshot = vault_data.pages.clone();
+        use_effect(move || {
+            if active_w.peek().is_some() {
+                return;
+            }
+            let home = pages_snapshot
+                .iter()
+                .find(|p| p.basename.eq_ignore_ascii_case("Home"));
+            if let Some(p) = home {
+                active_w.set(Some(p.id));
+            }
+        });
+    }
 
     // Resolvers for publish-core renderer.
     let resolvers = build_resolvers(&vault_data);
