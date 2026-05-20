@@ -4352,6 +4352,15 @@ fn EditableBlock(block: Block) -> Element {
     let block_id = block.id;
     let initial_content = block.content.clone();
     let content_signal: Signal<String> = use_signal(|| initial_content.clone());
+    // Per-block undo + redo stacks. The browser's contenteditable
+    // undo is invalidated every time we reapply
+    // `dangerous_inner_html`, so we maintain our own ring buffers.
+    // A waypoint lands in `undo_stack` whenever the source diverges
+    // from the last waypoint by more than `UNDO_DELTA` chars (cheap
+    // proxy for "user paused or did something meaningful").
+    let mut undo_stack: Signal<Vec<String>> = use_signal(|| vec![initial_content.clone()]);
+    let mut redo_stack: Signal<Vec<String>> = use_signal(Vec::new);
+    const UNDO_DELTA: usize = 12;
 
     // Initialise the editor on mount: focus it, install a paste
     // handler that strips HTML to plain text, and an IME composition
@@ -4447,6 +4456,22 @@ fn EditableBlock(block: Block) -> Element {
             }
             let (off, _) = read_selection(&id_str).await.unwrap_or((0, 0));
             let v = read_editor_text(&id_str).await.unwrap_or_default();
+            // Undo checkpoint: push to stack when the diff from
+            // the last waypoint exceeds UNDO_DELTA chars, then
+            // clear redo so a fresh edit doesn't re-rewind.
+            {
+                let last = undo_stack.peek().last().cloned().unwrap_or_default();
+                let differ = (v.len() as isize - last.len() as isize).unsigned_abs() as usize;
+                if differ >= UNDO_DELTA {
+                    let mut s = undo_stack.peek().clone();
+                    s.push(v.clone());
+                    if s.len() > 100 {
+                        s.remove(0);
+                    }
+                    undo_stack.set(s);
+                    redo_stack.set(Vec::new());
+                }
+            }
             content_w_inner.set(v.clone());
             if let Some(ops) = ops_clone.as_ref() {
                 ops.update_content.call((block_id, v.clone()));
@@ -4653,6 +4678,51 @@ fn EditableBlock(block: Block) -> Element {
                             prev_cb.call(bid);
                         }
                     });
+                }
+            }
+            // Cmd/Ctrl-Z → block-level undo. Cmd-Shift-Z (or
+            // Ctrl-Y) → redo. Pops from the matching stack, pushes
+            // the current source onto the opposite stack, restores
+            // the popped value through update_content + signal, and
+            // parks the caret at the end of the restored text.
+            Key::Character(ref c)
+                if (mods.meta() || mods.ctrl()) && !mods.shift() && (c == "z" || c == "Z") =>
+            {
+                e.prevent_default();
+                let mut stack = undo_stack.peek().clone();
+                // Keep at least one entry (the initial) so a long
+                // undo press doesn't crash by popping the only one.
+                if stack.len() > 1 {
+                    let cur_val = content_signal.peek().clone();
+                    let target = stack.pop().unwrap();
+                    let prev = stack.last().cloned().unwrap_or_default();
+                    undo_stack.set(stack);
+                    let mut r = redo_stack.peek().clone();
+                    r.push(cur_val);
+                    redo_stack.set(r);
+                    let _ = target;
+                    let mut content_w = content_signal;
+                    content_w.set(prev.clone());
+                    ops.update_content.call((block_id, prev.clone()));
+                    set_caret(&block_id.simple().to_string(), prev.len());
+                }
+            }
+            Key::Character(ref c)
+                if (mods.meta() || mods.ctrl())
+                    && ((mods.shift() && (c == "z" || c == "Z")) || (c == "y" || c == "Y")) =>
+            {
+                e.prevent_default();
+                let mut r = redo_stack.peek().clone();
+                if let Some(target) = r.pop() {
+                    redo_stack.set(r);
+                    let cur_val = content_signal.peek().clone();
+                    let mut s = undo_stack.peek().clone();
+                    s.push(cur_val);
+                    undo_stack.set(s);
+                    let mut content_w = content_signal;
+                    content_w.set(target.clone());
+                    ops.update_content.call((block_id, target.clone()));
+                    set_caret(&block_id.simple().to_string(), target.len());
                 }
             }
             // Cmd/Ctrl-F → open the find-in-page bar.
