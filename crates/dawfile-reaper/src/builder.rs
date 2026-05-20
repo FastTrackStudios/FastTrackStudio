@@ -856,6 +856,16 @@ impl TrackBuilder {
         self
     }
 
+    /// Set the track's automation mode (corresponds to REAPER's `AUTOMODE`
+    /// line). PT-imported tracks default to [`AutomationMode::Read`] so
+    /// REAPER plays back any imported automation envelopes; standalone
+    /// REAPER projects authored from scratch typically leave this at the
+    /// builder default (`TrimRead`).
+    pub fn automation_mode(mut self, mode: crate::types::track::AutomationMode) -> Self {
+        self.track.automation_mode = mode;
+        self
+    }
+
     /// Mark track as muted.
     pub fn muted(mut self) -> Self {
         self.ensure_mutesolo().mute = true;

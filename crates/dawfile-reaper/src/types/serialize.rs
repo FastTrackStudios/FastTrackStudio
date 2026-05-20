@@ -602,7 +602,13 @@ impl RppSerialize for Track {
         if let Some(beat) = self.beat {
             out.push_str(&format!("{}BEAT {}\n", inner, beat));
         }
-        out.push_str(&format!("{}SEL {}\n", inner, b(self.selected)));
+        // Only emit SEL when it's non-default. REAPER treats absent SEL as 0
+        // (track not in the editor selection); we don't need to bake the
+        // default in to every track and the official PT Reaper Converter
+        // also omits it for unselected tracks.
+        if self.selected {
+            out.push_str(&format!("{}SEL {}\n", inner, b(self.selected)));
+        }
         if self.locked {
             out.push_str(&format!("{}LOCK {}\n", inner, b(self.locked)));
         }
@@ -757,7 +763,12 @@ impl RppSerialize for Track {
                 rpp_escape(mcm)
             ));
         }
-        out.push_str(&format!("{}FX {}\n", inner, b(self.fx_enabled)));
+        // `FX 1` (FX-enabled) is the REAPER default — only emit when
+        // disabled. The official PT Reaper Converter also omits it for
+        // FX-enabled tracks.
+        if !self.fx_enabled {
+            out.push_str(&format!("{}FX {}\n", inner, b(self.fx_enabled)));
+        }
         if let Some(perf) = self.perf {
             out.push_str(&format!("{}PERF {}\n", inner, perf));
         }
@@ -1040,7 +1051,11 @@ mod tests {
         assert!(rpp.contains("VOLPAN 0.8 -0.25 -1"));
         assert!(rpp.contains("MUTESOLO 0 0 0"));
         assert!(rpp.contains("NCHAN 2"));
-        assert!(rpp.contains("FX 1"));
+        // `FX 1` (FX-enabled) is the REAPER default; the serializer
+        // omits it. We verify that FX-DISABLED tracks DO emit `FX 0`
+        // in `test_track_fx_disabled` below.
+        assert!(!rpp.contains("FX 1"));
+        assert!(rpp.contains("FX 0") == false);
         assert!(rpp.ends_with(">\n"));
     }
 
