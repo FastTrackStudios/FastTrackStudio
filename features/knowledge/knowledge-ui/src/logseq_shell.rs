@@ -830,11 +830,20 @@ pub fn LogseqShell() -> Element {
         dragging: drag_source,
         hover: drag_hover,
     });
+    // Active PDF lives up here so the navigators can clear it when
+    // the user clicks a [[wikilink]] / ((blockref)) chip.
+    let active_pdf: Signal<Option<String>> = use_signal(|| None);
+    use_context_provider(|| ActivePdfState(active_pdf));
 
     // In-app navigators so clicks on `[[Page]]` and `((uuid))`
     // change the active page / zoomed block instead of letting
-    // the webview try to navigate to a non-existent URL.
+    // the webview try to navigate to a non-existent URL. Every
+    // navigator that opens a page also bounces the panel back to
+    // Journals and clears tag / PDF overrides so the new page is
+    // actually visible.
     let mut active_page_for_wiki = active_page;
+    let mut panel_for_wiki = panel;
+    let mut active_pdf_for_wiki = active_pdf;
     let wiki_resolver_for_nav = resolvers.wiki.clone();
     let pages_for_nav = vault_data.pages.clone();
     let wiki_nav = publish_core::WikiNavigator(Some(Callback::new(move |slug: String| {
@@ -849,6 +858,8 @@ pub fn LogseqShell() -> Element {
                 .find(|p| p.basename.to_lowercase() == name)
             {
                 active_page_for_wiki.set(Some(p.id));
+                panel_for_wiki.set(LeftPanel::Journals);
+                active_pdf_for_wiki.set(None);
             }
         }
     })));
@@ -858,6 +869,8 @@ pub fn LogseqShell() -> Element {
     let pages_for_block_nav = vault_data.pages.clone();
     let mut active_page_for_block = active_page;
     let mut zoom_for_block = zoomed_block;
+    let mut panel_for_block = panel;
+    let mut active_pdf_for_block = active_pdf;
     let block_ref_nav =
         publish_core::BlockRefNavigator(Some(Callback::new(move |target: Uuid| {
             if let Some(b_target) = block_refs_for_nav.0.get(&target) {
@@ -868,6 +881,8 @@ pub fn LogseqShell() -> Element {
                 {
                     active_page_for_block.set(Some(p.id));
                     zoom_for_block.set(Some(target));
+                    panel_for_block.set(LeftPanel::Journals);
+                    active_pdf_for_block.set(None);
                 }
             }
         })));
@@ -932,8 +947,6 @@ pub fn LogseqShell() -> Element {
     use_context_provider(|| FindInPageState(find_in_page));
     let settings: Signal<AppSettings> = use_signal(AppSettings::default);
     use_context_provider(|| SettingsState(settings));
-    let active_pdf: Signal<Option<String>> = use_signal(|| None);
-    use_context_provider(|| ActivePdfState(active_pdf));
     // Bridge: the desktop shell installs a JS click delegate that
     // dispatches `task:open-pdf` custom events; we listen for them
     // here and route into the ActivePdfState signal so the main
@@ -1003,11 +1016,29 @@ pub fn LogseqShell() -> Element {
                     pages: vault_data.pages.clone(),
                     blocks: vault_data.blocks.clone(),
                     on_pick_page: move |id| {
+                        // Picking a page must always swap back to
+                        // Journals — otherwise the main pane stays
+                        // on Graph/Cards/Tasks/Settings and the
+                        // user's click visibly does nothing.
                         active_page_w.set(Some(id));
+                        panel_w.set(LeftPanel::Journals);
+                        if let Some(t) = try_use_context::<TagViewState>() {
+                            t.0.clone().set(None);
+                        }
+                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                            p.0.clone().set(None);
+                        }
                         cmd_k.set(None);
                     },
                     on_pick_block: move |(page_id, block_id): (Uuid, Uuid)| {
                         active_page_w.set(Some(page_id));
+                        panel_w.set(LeftPanel::Journals);
+                        if let Some(t) = try_use_context::<TagViewState>() {
+                            t.0.clone().set(None);
+                        }
+                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                            p.0.clone().set(None);
+                        }
                         if let Some(z) = try_use_context::<ZoomState>() {
                             z.0.clone().set(Some(block_id));
                         }
@@ -1020,15 +1051,41 @@ pub fn LogseqShell() -> Element {
                     pages: vault_data.pages.clone(),
                     active_page,
                     panel,
-                    on_set_panel: move |p| panel_w.set(p),
-                    on_pick_page: move |id| active_page_w.set(Some(id)),
+                    on_set_panel: move |p| {
+                        panel_w.set(p);
+                        if let Some(t) = try_use_context::<TagViewState>() {
+                            t.0.clone().set(None);
+                        }
+                        if let Some(pdf) = try_use_context::<ActivePdfState>() {
+                            pdf.0.clone().set(None);
+                        }
+                    },
+                    on_pick_page: move |id| {
+                        active_page_w.set(Some(id));
+                        panel_w.set(LeftPanel::Journals);
+                        if let Some(t) = try_use_context::<TagViewState>() {
+                            t.0.clone().set(None);
+                        }
+                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                            p.0.clone().set(None);
+                        }
+                    },
                 }
                 MainArea {
                     doc: doc_handle.clone(),
                     vault: vault_data.clone(),
                     active_page,
                     panel,
-                    on_pick_page: move |id| active_page_w.set(Some(id)),
+                    on_pick_page: move |id| {
+                        active_page_w.set(Some(id));
+                        panel_w.set(LeftPanel::Journals);
+                        if let Some(t) = try_use_context::<TagViewState>() {
+                            t.0.clone().set(None);
+                        }
+                        if let Some(p) = try_use_context::<ActivePdfState>() {
+                            p.0.clone().set(None);
+                        }
+                    },
                     on_set_panel: move |p| panel_w.set(p),
                 }
                 RightSidebar { stack: sidebar_stack, vault: vault_data.clone() }
