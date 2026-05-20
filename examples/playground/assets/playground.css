@@ -347,6 +347,10 @@ section h2 {
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 16px;
+    /* Grid items default to `min-width: auto` which sizes to
+       content. Long unbroken doc text would otherwise blow out
+       the column and shove the editor pane sideways. */
+    min-width: 0;
 }
 
 .debug-grid {
@@ -384,7 +388,10 @@ section h2 {
     font-family: var(--mono);
     font-size: 12px;
     white-space: pre-wrap;
-    word-wrap: break-word;
+    /* Break unbroken sequences (URLs, long no-space text) so
+       the doc preview never widens its grid track. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
     max-height: 320px;
     overflow: auto;
 }
