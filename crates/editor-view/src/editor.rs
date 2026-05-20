@@ -185,11 +185,12 @@ pub fn Editor(
                             }}
                             function sendSel() {{
                                 // Skip during programmatic
-                                // writes — the DOM selection is
-                                // mid-update from our use_effect
-                                // and may be clamped vs what
-                                // state intends (Hidden tiles).
+                                // writes (Phase 10) and during
+                                // the brief window after a DOM
+                                // mutation where Selection may
+                                // be orphaned and unreliable.
                                 if (el.dataset.writing === '1') return;
+                                if (el.dataset.muting === '1') return;
                                 const [a, b] = selOffsets();
                                 dioxus.send({{ kind: 'sel', sel: [a, b] }});
                             }}
@@ -258,23 +259,24 @@ pub fn Editor(
                             }});
 
                             // MutationObserver — full re-read on
-                            // every mutation. Phase 12's precise
-                            // single-record path is parked: each
-                            // mutate message was an *incremental*
-                            // delta dependent on the DOM state at
-                            // mutation time, which races with
-                            // Dioxus's render echo and can desync
-                            // state from DOM. The full re-read is
-                            // self-contained — each sendInput
-                            // captures the COMPLETE textContent
-                            // at that moment, so the Rust-side
-                            // diff is robust regardless of
-                            // ordering. We'll re-introduce precise
-                            // mode once we have transaction-origin
-                            // tagging in Dioxus to suppress
-                            // observer fires from our own writes.
+                            // every mutation. The `muting` flag
+                            // it sets ALSO suppresses
+                            // selectionchange-driven sendSel for
+                            // one frame, because Dioxus's
+                            // node-replace renders (driven by
+                            // decoration shape changes) orphan
+                            // DOM Selection and emit a bogus
+                            // selectionchange BEFORE the
+                            // writeback effect can resync. That
+                            // bogus event would otherwise
+                            // clobber state.selection with the
+                            // orphaned position.
                             const mo = new MutationObserver(() => {{
                                 if (composing) return;
+                                el.dataset.muting = '1';
+                                requestAnimationFrame(() => {{
+                                    delete el.dataset.muting;
+                                }});
                                 sendInput();
                             }});
                             mo.observe(el, {{
@@ -303,7 +305,15 @@ pub fn Editor(
                             // is shorter than state.doc when
                             // Hidden tiles are involved).
                             document.addEventListener('selectionchange', () => {{
+                                // Skip during our own writes
+                                // (Phase 10) and during the
+                                // frame following a DOM mutation
+                                // (Dioxus decoration churn —
+                                // Selection may be orphaned and
+                                // reading it would clobber state
+                                // with garbage).
                                 if (el.dataset.writing === '1') return;
+                                if (el.dataset.muting === '1') return;
                                 const s = window.getSelection();
                                 if (s && s.anchorNode && el.contains(s.anchorNode)) {{
                                     sendSel();
@@ -349,7 +359,21 @@ pub fn Editor(
                     const el = document.querySelector('[data-editor-id="{id}"]');
                     if (!el) return;
                     if (el.dataset.composing === '1') return;
-                    if (el.textContent !== {doc_json}) return;
+                    // Compare the DOM's *visible* representation
+                    // (line text joined with \n) against state.doc.
+                    // `el.textContent` would miss the newlines
+                    // between block-level `<div class="cm-line">`
+                    // children and never match a multi-line doc.
+                    // This is the same readText() shape the input
+                    // bridge uses.
+                    const visibleNow = (function() {{
+                        const lines = el.querySelectorAll('.cm-line');
+                        if (!lines.length) return el.textContent;
+                        return Array.from(lines)
+                            .map(l => l.textContent)
+                            .join('\n');
+                    }})();
+                    if (visibleNow !== {doc_json}) return;
 
                     // Build a Range targeting the requested doc
                     // positions via tile lookup. Each rendered
@@ -641,6 +665,22 @@ fn push_selection(state: &mut Signal<EditorState>, cur: &EditorState, s: usize, 
             incoming_from,
             incoming_to,
             "editor.selection.ignored_clamp"
+        );
+        return;
+    }
+    // Orphaned-selection guard: a (0, 0) coming in when cur is
+    // non-zero is almost always the Dioxus reconciler removing
+    // the text node our Selection was anchored to and the
+    // browser falling back to editor-root position 0. Real
+    // jumps-to-doc-start come from `Home` / arrow / click —
+    // those events have separate paths (keyup, mouseup,
+    // click) AND the user can re-place the caret if our guess
+    // was wrong.
+    if s == 0 && e == 0 && cur_primary.head != 0 && cur_primary.anchor != 0 {
+        tracing::trace!(
+            cur_anchor = cur_primary.anchor,
+            cur_head = cur_primary.head,
+            "editor.selection.ignored_orphan"
         );
         return;
     }

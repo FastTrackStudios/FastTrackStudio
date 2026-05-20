@@ -278,7 +278,8 @@ test.describe("editor", () => {
     // verify the *command* now and the *decoration interplay*
     // separately.
     test.beforeEach(async ({ page }) => {
-      await page.goto("/?seed=&nodeco=1");
+      // Live-preview decoration ON to verify the race fix.
+      await page.goto("/?seed=");
       await editor(page).waitFor();
     });
 
@@ -319,9 +320,16 @@ test.describe("editor", () => {
       await editor(page).focus();
       await setCaret(page, 0);
       await page.keyboard.insertText("Testing ");
+      await expect.poll(async () => (await readState(page)).text).toBe("Testing ");
       await page.keyboard.press("ControlOrMeta+b");
+      await expect.poll(async () => (await readState(page)).text).toBe("Testing ****");
       await page.keyboard.insertText("This Is Bold");
+      await expect
+        .poll(async () => (await readState(page)).text)
+        .toBe("Testing **This Is Bold**");
       await page.keyboard.press("ControlOrMeta+b");
+      // After the close, head should be 24 (past closing **).
+      await expect.poll(async () => (await readState(page)).head).toBe("24");
       await page.keyboard.insertText(" This Isn't Bold");
       const expected = "Testing **This Is Bold** This Isn't Bold";
       await expect.poll(async () => (await readState(page)).text).toBe(expected);
