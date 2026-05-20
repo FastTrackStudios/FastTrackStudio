@@ -1,0 +1,12 @@
+# Dioxus CLI config — applies workspace-wide unless overridden.
+# Run the playground with:  dx serve --package playground --platform web
+
+[application]
+name = "playground"
+
+[web.app]
+title = "Editor"
+
+[web.watcher]
+reload_html = true
+watch_path = ["crates", "examples"]

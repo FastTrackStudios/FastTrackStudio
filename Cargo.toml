@@ -4,6 +4,7 @@ members = [
     "crates/editor-state",
     "crates/editor-view",
     "crates/editor",
+    "examples/playground",
 ]
 
 [workspace.package]
@@ -18,6 +19,7 @@ rust-version = "1.80"
 # Internal
 editor-state = { path = "crates/editor-state" }
 editor-view = { path = "crates/editor-view" }
+editor = { path = "crates/editor" }
 
 # UI
 dioxus = "0.7"
