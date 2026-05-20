@@ -348,15 +348,7 @@ pub fn Editor(
                 (function() {{
                     const el = document.querySelector('[data-editor-id="{id}"]');
                     if (!el) return;
-                    // Phase 10 composition guard: while an IME
-                    // composition is active, leave the Selection
-                    // alone. The IME owns it; touching it here
-                    // would abort the composition.
                     if (el.dataset.composing === '1') return;
-                    // If the DOM hasn't caught up with state.doc
-                    // yet, the user just typed and selection from
-                    // state would be stale — skip and let the next
-                    // tick handle it.
                     if (el.textContent !== {doc_json}) return;
 
                     // Build a Range targeting the requested doc
@@ -412,8 +404,7 @@ pub fn Editor(
                     // Set the writing flag so our own
                     // selectionchange listener (below) skips
                     // this synthetic event. Cleared async via
-                    // requestAnimationFrame — selectionchange
-                    // dispatches before that fires.
+                    // requestAnimationFrame.
                     el.dataset.writing = '1';
                     sel.removeAllRanges();
                     sel.addRange(targetRange);
@@ -614,12 +605,43 @@ fn handle_bridge_msg(
 
 /// Push a selection-only transaction if the new range differs
 /// from the current state.
+///
+/// Clamp-detection guard: when state has a selection that
+/// covers more doc than the DOM can currently represent (e.g.,
+/// after `select_all` on a doc with Hidden markdown markers,
+/// state is `(0, doc.len)` but DOM Selection clamps to visible
+/// content's end), the next `selectionchange`/`keyup` would
+/// otherwise read the clamped value and shrink state. We
+/// recognize this as "DOM is a strict subset of cur" and skip
+/// the update — state remains authoritative. Mirrors CM6's
+/// `domobserver` ignoring DOM selection changes that are
+/// derivable from current state.
 fn push_selection(state: &mut Signal<EditorState>, cur: &EditorState, s: usize, e: usize) {
     let doc_len = cur.doc.len();
     let s = s.min(doc_len);
     let e = e.min(doc_len);
     let cur_primary = cur.selection.primary();
     if cur_primary.anchor == s && cur_primary.head == e {
+        return;
+    }
+    // Clamp detection: cur has a non-caret selection extending
+    // past where DOM ends (head/anchor at doc end), and the
+    // incoming range is a subset of cur. Trust state.
+    let cur_from = cur_primary.from();
+    let cur_to = cur_primary.to();
+    let incoming_from = s.min(e);
+    let incoming_to = s.max(e);
+    let cur_nontrivial = cur_from != cur_to;
+    let incoming_is_subset = incoming_from >= cur_from && incoming_to <= cur_to;
+    let cur_reaches_doc_end = cur_to == doc_len;
+    if cur_nontrivial && incoming_is_subset && cur_reaches_doc_end && incoming_to < cur_to {
+        tracing::trace!(
+            cur_from,
+            cur_to,
+            incoming_from,
+            incoming_to,
+            "editor.selection.ignored_clamp"
+        );
         return;
     }
     tracing::trace!(

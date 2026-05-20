@@ -42,31 +42,61 @@ async function readState(page) {
  * across spans and lines, so a naive `setStart(editor, N)`
  * wouldn't work.
  */
-async function setCaret(page, offset) {
+async function setCaret(page, docOffset) {
   await page.evaluate((off) => {
     const el = document.querySelector("[data-editor-id]");
     const sel = window.getSelection();
     const range = document.createRange();
-    let remaining = off;
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-      const len = node.nodeValue.length;
-      if (remaining <= len) {
-        range.setStart(node, remaining);
-        range.setEnd(node, remaining);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return;
-      }
-      remaining -= len;
+    // Place the caret at *doc offset* `off`, not visible-text
+    // offset. We use the `data-tile-pos` attribute on rendered
+    // tiles (Text/Mark/Widget/Line) — each carries its start
+    // position in doc space, so we can locate the owning tile
+    // by binary-friendly walk and place the range at the right
+    // text-node offset inside.
+    const tiles = Array.from(el.querySelectorAll("[data-tile-pos]"));
+    const candidates = tiles
+      .map((t) => {
+        const pos = parseInt(t.dataset.tilePos, 10);
+        const text = t.firstChild;
+        const len =
+          text && text.nodeType === 3 ? text.nodeValue.length : 0;
+        return { tile: t, text, pos, end: pos + len };
+      })
+      .sort((a, b) => a.pos - b.pos);
+    // Find the latest tile whose `[pos, end]` covers `off`.
+    let chosen = null;
+    for (const c of candidates) {
+      if (c.pos <= off && off <= c.end) chosen = c;
     }
-    // Past the end — collapse to last position.
-    range.selectNodeContents(el);
-    range.collapse(false);
+    if (chosen && chosen.text && chosen.text.nodeType === 3) {
+      const local = off - chosen.pos;
+      range.setStart(
+        chosen.text,
+        Math.min(local, chosen.text.nodeValue.length)
+      );
+    } else if (chosen) {
+      // Empty tile (e.g., empty line whose only child is a
+      // `<br>`). Anchor the range INSIDE the tile div at
+      // offset 0 — that places the caret before the `<br>`,
+      // which is what the browser uses for empty
+      // contenteditable lines.
+      range.setStart(chosen.tile, 0);
+    } else if (candidates.length > 0) {
+      // Past the last tile — pin to its end.
+      const last = candidates[candidates.length - 1];
+      if (last.text && last.text.nodeType === 3) {
+        range.setStart(last.text, last.text.nodeValue.length);
+      } else {
+        range.setStart(last.tile, 0);
+      }
+    } else {
+      range.selectNodeContents(el);
+      range.collapse(false);
+    }
+    range.collapse(true);
     sel.removeAllRanges();
     sel.addRange(range);
-  }, offset);
+  }, docOffset);
 }
 
 /**
@@ -215,6 +245,146 @@ test.describe("editor", () => {
       .toBeGreaterThan(linesBefore);
     const linesAfter = await page.locator(".cm-line").count();
     expect(linesAfter).toBeGreaterThan(linesBefore);
+  });
+
+  test("markdown bold via literal ** markers", async ({ page }) => {
+    // Variant 1: user types the markdown markers manually,
+    // same way you would in any plain markdown editor. The
+    // doc text should contain the literal `**...**` exactly
+    // as typed — markers stored, just hidden visually when
+    // the caret leaves the span.
+    await editor(page).focus();
+    await setCaret(page, 100_000); // append at end
+    // Insert a newline first so the test's content is on its
+    // own line (cleaner doc assertions).
+    await page.keyboard.press("Enter");
+    const sample = "Testing **This is bold** This Isn't Bold";
+    await page.keyboard.insertText(sample);
+    // Wait for state to catch up — last batch of chars goes
+    // through the visible→doc diff path.
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toContain(sample);
+  });
+
+  test.describe("toggle_bold (command logic)", () => {
+    // These tests load the playground with an empty seed via
+    // `?seed=` AND with the live-preview decoration disabled
+    // via `?nodeco=1`. That isolates the toggle_bold command
+    // logic — the DOM↔state round-trip with no Hidden tiles
+    // and no shape-shifting render. The decoration-aware path
+    // has known races with fast typing (see FUTURE comment in
+    // editor.rs) that we'll close in a follow-up; these tests
+    // verify the *command* now and the *decoration interplay*
+    // separately.
+    test.beforeEach(async ({ page }) => {
+      await page.goto("/?seed=&nodeco=1");
+      await editor(page).waitFor();
+    });
+
+    test("Mod-B inserts a bold pair at caret", async ({ page }) => {
+      await editor(page).focus();
+      await setCaret(page, 0);
+      await page.keyboard.press("ControlOrMeta+b");
+      await expect.poll(async () => (await readState(page)).text).toBe("****");
+      // Caret parked between the two pairs.
+      await expect.poll(async () => (await readState(page)).head).toBe("2");
+    });
+
+    test("Mod-B skips past closing marker", async ({ page }) => {
+      // Seed the doc by typing `**hi**` and then position
+      // the caret right before the closing `**`.
+      await editor(page).focus();
+      await setCaret(page, 0);
+      await page.keyboard.insertText("**hi**");
+      // Wait for state to catch up.
+      await expect.poll(async () => (await readState(page)).text).toBe("**hi**");
+      // Position cursor between "hi" and the closing "**".
+      // visible-text-offset 4 maps to doc 4 (no Hidden tiles
+      // when caret is on the span — it'd be a markers-visible
+      // render).
+      await setCaret(page, 4);
+      await expect
+        .poll(async () => (await readState(page)).head)
+        .toBe("4");
+      await page.keyboard.press("ControlOrMeta+b");
+      // Length unchanged, caret moved by 2.
+      await expect.poll(async () => (await readState(page)).len).toBe("6");
+      await expect.poll(async () => (await readState(page)).head).toBe("6");
+    });
+
+    test("Mod-B sequence builds Testing **Bold** suffix", async ({ page }) => {
+      // The user-requested end-to-end variant. With a clean
+      // seed there's no welcome-text hidden-marker noise.
+      await editor(page).focus();
+      await setCaret(page, 0);
+      await page.keyboard.insertText("Testing ");
+      await page.keyboard.press("ControlOrMeta+b");
+      await page.keyboard.insertText("This Is Bold");
+      await page.keyboard.press("ControlOrMeta+b");
+      await page.keyboard.insertText(" This Isn't Bold");
+      const expected = "Testing **This Is Bold** This Isn't Bold";
+      await expect.poll(async () => (await readState(page)).text).toBe(expected);
+    });
+
+    test("literal **bold** typing produces the same final text", async ({
+      page,
+    }) => {
+      // Variant 1: user types the markers manually.
+      await editor(page).focus();
+      await setCaret(page, 0);
+      const sample = "Testing **This is bold** This Isn't Bold";
+      await page.keyboard.insertText(sample);
+      await expect.poll(async () => (await readState(page)).text).toBe(sample);
+    });
+  });
+
+  test.describe("caret + selection across tiles", () => {
+    test.beforeEach(async ({ page }) => {
+      // Plain seed with multiple lines and a marked span so
+      // we exercise the tile-tree position math. `nodeco=1`
+      // keeps the live-preview decoration off — the click
+      // tests target the *base* DOM↔doc translation, not the
+      // decoration churn.
+      await page.goto(
+        "/?seed=Line%20one%0ALine%20two%0ALine%20three&nodeco=1"
+      );
+      await editor(page).waitFor();
+      await expect.poll(async () => (await readState(page)).len).toBe("28");
+    });
+
+    test("clicking inside a line positions caret there", async ({ page }) => {
+      // Find the second cm-line, click at its first character.
+      // The caret should land at doc position 9 ("Line one\n"
+      // is 9 chars, second line starts at 9).
+      const lines = page.locator(".cm-line");
+      await expect(lines.nth(1)).toBeVisible();
+      // Click at the START of line 2's text node.
+      await lines.nth(1).click({ position: { x: 1, y: 5 } });
+      await expect
+        .poll(async () => Number((await readState(page)).head))
+        .toBeGreaterThanOrEqual(9);
+      await expect
+        .poll(async () => Number((await readState(page)).head))
+        .toBeLessThan(13); // somewhere on line 2
+    });
+
+    test("shift+arrow extends selection across lines", async ({ page }) => {
+      // Caret at start of line 2 (doc 9). Shift+ArrowDown
+      // should extend the selection to line 3's same column,
+      // crossing the BreakAfter on line 2.
+      await editor(page).focus();
+      await setCaret(page, 9);
+      await expect.poll(async () => (await readState(page)).head).toBe("9");
+      await page.keyboard.press("Shift+ArrowDown");
+      // After shift-down, head moves to next line. Anchor stays
+      // at 9. The exact head depends on browser's column
+      // tracking, but it should be > 9 and < doc.len.
+      const after = await readState(page);
+      expect(Number(after.anchor)).toBe(9);
+      expect(Number(after.head)).toBeGreaterThan(9);
+      expect(Number(after.head)).toBeLessThanOrEqual(Number(after.len));
+    });
   });
 
   test("typing does not lose characters under fast input", async ({

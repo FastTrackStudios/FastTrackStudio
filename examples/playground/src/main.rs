@@ -67,19 +67,101 @@ fn init_tracing() {
     // same stream.
 }
 
+/// Look for a `?seed=...` query param in the page URL and
+/// percent-decode it. Returns `Some` only on the web target;
+/// on desktop there's no URL so we always use the default
+/// seed.
+///
+/// Hand-rolled parser instead of `web_sys::UrlSearchParams` —
+/// the latter pulls in a transitive `getrandom 0.3` dep that
+/// needs the `wasm_js` feature flag we're not configuring.
+#[cfg(target_arch = "wasm32")]
+fn read_seed_query() -> Option<String> {
+    let window = web_sys::window()?;
+    let search = window.location().search().ok()?;
+    // search starts with `?` — strip it and split on `&`.
+    let trimmed = search.strip_prefix('?').unwrap_or(&search);
+    for pair in trimmed.split('&') {
+        if let Some(rest) = pair.strip_prefix("seed=") {
+            return Some(percent_decode(rest));
+        }
+    }
+    None
+}
+
+/// Look for `?flag` or `?flag=1` etc. — returns true when the
+/// query string contains the named flag with a truthy value.
+fn read_query_flag(_name: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return false,
+        };
+        let search = window.location().search().unwrap_or_default();
+        let trimmed = search.strip_prefix('?').unwrap_or(&search);
+        for pair in trimmed.split('&') {
+            let (k, v) = match pair.split_once('=') {
+                Some((k, v)) => (k, v),
+                None => (pair, "1"),
+            };
+            if k == _name {
+                return matches!(v, "1" | "true" | "yes" | "on" | "");
+            }
+        }
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn percent_decode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            let h = bytes.next().and_then(|x| (x as char).to_digit(16));
+            let l = bytes.next().and_then(|x| (x as char).to_digit(16));
+            if let (Some(h), Some(l)) = (h, l) {
+                out.push(((h * 16 + l) as u8) as char);
+            }
+        } else if b == b'+' {
+            out.push(' ');
+        } else {
+            out.push(b as char);
+        }
+    }
+    out
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_seed_query() -> Option<String> {
+    None
+}
+
 #[component]
 fn App() -> Element {
     // The whole editor state lives in this signal — the
     // `<Editor>` component reads it for rendering and writes a
     // new state on every input. We mirror it into the debug
     // panel so changes are visible as you type.
+    // Initial seed text. Tests can override via `?seed=` query
+    // (URL-decoded) so they don't have to start from the
+    // welcome message — useful for isolating decoration-aware
+    // typing tests from the markdown in the default seed.
     let state = use_signal(|| {
-        EditorState::new(
-            "Welcome to the **Editor** playground.\n\n\
-             Try typing some **bold**, *italic*, or `code`. \
-             The markers stay visible only when your caret is \
-             on the word — move away and they fade.",
-        )
+        let seed = read_seed_query().unwrap_or_else(|| {
+            String::from(
+                "Welcome to the **Editor** playground.\n\n\
+                 Try typing some **bold**, *italic*, or `code`. \
+                 The markers stay visible only when your caret is \
+                 on the word — move away and they fade.",
+            )
+        });
+        EditorState::new(seed)
     });
 
     // Minimal demo keymap. The browser already handles
@@ -89,6 +171,8 @@ fn App() -> Element {
     // the debug panel.
     let keymap = Keymap::new()
         .with("Mod-a", commands::select_all as _)
+        .with("Mod-b", commands::toggle_bold as _)
+        .with("Mod-i", commands::toggle_italic as _)
         .with("Backspace", commands::delete_backward as _)
         .with("Delete", commands::delete_forward as _);
 
@@ -103,10 +187,15 @@ fn App() -> Element {
                 section { class: "editor-pane",
                     h2 { "Editor" }
                     div { class: "editor-frame",
-                        Editor {
-                            state,
-                            keymap: keymap.clone(),
-                            decorations: markdown::live_preview as editor_view::DecorationSource,
+                        if read_query_flag("nodeco") {
+                            Editor { state, keymap: keymap.clone() }
+                        } else {
+                            Editor {
+                                state,
+                                keymap: keymap.clone(),
+                                decorations: markdown::live_preview
+                                    as editor_view::DecorationSource,
+                            }
                         }
                     }
                 }

@@ -103,13 +103,32 @@ pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
         }
         TileKind::Line => {
             let pos = crate::tile::pos::pos_at_start(arena, tile);
-            rsx! {
-                div {
-                    class: "cm-line",
-                    "data-tile-id": "{tid}",
-                    "data-tile-pos": "{pos}",
-                    for &child in &t.children {
-                        {render_tile(arena, child)}
+            // Empty lines render with a `<br>` so the contenteditable
+            // browser has somewhere to anchor the cursor. Without
+            // it, `<div class="cm-line">` is zero-height and
+            // Selection lands at the div root (offset 0) which
+            // walks past our data-tile-pos. `<br>` doesn't add
+            // visible text (matches our LineTile semantics where
+            // the `\n` belongs to BreakAfter, not the line's
+            // content).
+            if t.children.is_empty() {
+                rsx! {
+                    div {
+                        class: "cm-line",
+                        "data-tile-id": "{tid}",
+                        "data-tile-pos": "{pos}",
+                        br {}
+                    }
+                }
+            } else {
+                rsx! {
+                    div {
+                        class: "cm-line",
+                        "data-tile-id": "{tid}",
+                        "data-tile-pos": "{pos}",
+                        for &child in &t.children {
+                            {render_tile(arena, child)}
+                        }
                     }
                 }
             }

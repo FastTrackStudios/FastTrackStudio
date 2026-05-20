@@ -115,21 +115,32 @@ pub struct KeySpec {
 }
 
 impl KeySpec {
-    /// Match this spec against an *actual* keystroke. The match
-    /// is symmetric on `key` (case-insensitive for single chars)
-    /// and exact on modifier flags.
+    /// Match this spec against an *actual* keystroke.
+    /// - `key` is compared case-insensitively for single chars
+    ///   (so `Mod-z` matches both `z` and `Z` presses).
+    /// - `alt` and `shift` must match exactly.
+    /// - `Mod` is platform-normalized: a spec with `mod=true`
+    ///   accepts a press that has *either* `ctrl=true` (Linux/
+    ///   Windows) or `meta=true` (macOS). A spec with explicit
+    ///   `ctrl` or `meta` requires exact equality.
+    ///
+    /// This mirrors CM6's behavior where `"Mod-z"` resolves to
+    /// the platform-appropriate modifier at parse / dispatch time.
     pub fn matches(&self, other: &KeySpec) -> bool {
         let key_eq = if self.key.len() == 1 && other.key.len() == 1 {
             self.key.eq_ignore_ascii_case(&other.key)
         } else {
             self.key == other.key
         };
-        key_eq
-            && self.ctrl == other.ctrl
-            && self.alt == other.alt
-            && self.shift == other.shift
-            && self.meta == other.meta
-            && self.r#mod == other.r#mod
+        if !key_eq {
+            return false;
+        }
+        let mod_match = if self.r#mod {
+            other.ctrl || other.meta
+        } else {
+            self.ctrl == other.ctrl && self.meta == other.meta
+        };
+        mod_match && self.alt == other.alt && self.shift == other.shift
     }
 }
 
@@ -204,16 +215,47 @@ mod tests {
         let bound = KeySpec::from("Mod-z");
         // Capital Z from a shift-held keypress — should still
         // match `Mod-z` because the binding doesn't include
-        // shift.
+        // shift. The press carries platform-actual `ctrl=true`
+        // (Linux) — matches() resolves `Mod` against it.
         let pressed = KeySpec {
             key: "Z".into(),
+            ctrl: true,
             r#mod: true,
             shift: false,
-            ctrl: false,
             alt: false,
             meta: false,
         };
         assert!(bound.matches(&pressed));
+    }
+
+    #[test]
+    fn keyspec_mod_accepts_ctrl_or_meta() {
+        let bound = KeySpec::from("Mod-b");
+        let linux_press = KeySpec {
+            key: "b".into(),
+            ctrl: true,
+            r#mod: true,
+            ..Default::default()
+        };
+        let mac_press = KeySpec {
+            key: "b".into(),
+            meta: true,
+            r#mod: true,
+            ..Default::default()
+        };
+        assert!(bound.matches(&linux_press));
+        assert!(bound.matches(&mac_press));
+    }
+
+    #[test]
+    fn keyspec_explicit_ctrl_doesnt_match_meta() {
+        let bound = KeySpec::from("Ctrl-b");
+        let mac_press = KeySpec {
+            key: "b".into(),
+            meta: true,
+            ..Default::default()
+        };
+        assert!(!bound.matches(&mac_press));
     }
 
     #[test]
@@ -243,8 +285,12 @@ mod tests {
     fn keymap_runs_matched_command() {
         let km = Keymap::new().with("Mod-a", select_all);
         let state = EditorState::new("hello");
+        // Press needs an actual platform mod (ctrl or meta)
+        // for `Mod-` bindings to match — the keymap matcher
+        // is platform-aware, not just label-aware.
         let press = KeySpec {
             key: "a".into(),
+            ctrl: true,
             r#mod: true,
             ..Default::default()
         };
@@ -261,6 +307,7 @@ mod tests {
         let state = EditorState::new("hello");
         let press = KeySpec {
             key: "b".into(),
+            ctrl: true,
             r#mod: true,
             ..Default::default()
         };
@@ -286,6 +333,7 @@ mod tests {
         let state = EditorState::new("hello");
         let press = KeySpec {
             key: "a".into(),
+            ctrl: true,
             r#mod: true,
             ..Default::default()
         };

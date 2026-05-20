@@ -41,6 +41,64 @@ pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().changes(Changes::delete(from - 1..from)))
 }
 
+/// Toggle bold markdown markers (`**…**`) at the caret /
+/// around the current selection. Behavior:
+///
+/// - **Empty caret, doc[caret..] starts with `**`**: caret is
+///   sitting just before a closing marker (typical "I'm done
+///   typing bold content" case). Skip past it — no doc change,
+///   just move the caret +2.
+/// - **Empty caret elsewhere**: insert `****` and park the
+///   caret between the markers, so subsequent typing goes
+///   inside the bold span.
+/// - **Non-empty selection**: wrap the selection with `**…**`,
+///   keeping the wrapped range selected.
+///
+/// Bound by convention to `Mod-b`.
+pub fn toggle_bold(state: &EditorState) -> Option<TransactionSpec> {
+    toggle_marker(state, "**")
+}
+
+/// Same as [`toggle_bold`] but with single `*…*` for italic.
+/// Bound to `Mod-i`.
+pub fn toggle_italic(state: &EditorState) -> Option<TransactionSpec> {
+    toggle_marker(state, "*")
+}
+
+fn toggle_marker(state: &EditorState, marker: &str) -> Option<TransactionSpec> {
+    let sel = state.selection.primary();
+    let from = sel.from();
+    let to = sel.to();
+    let doc = state.doc.to_string();
+    let m = marker;
+    let mlen = m.len();
+
+    if from == to {
+        // Empty caret. If the next bytes are the marker, skip
+        // past it — closes an open span the user just filled.
+        if doc.get(from..).map_or(false, |s| s.starts_with(m)) {
+            return Some(TransactionSpec::new().selection(Selection::caret(from + mlen)));
+        }
+        // Open a new span: insert "marker + marker" with caret
+        // in the middle.
+        let pair = format!("{m}{m}");
+        return Some(
+            TransactionSpec::new()
+                .changes(Changes::insert(from, pair))
+                .selection(Selection::caret(from + mlen)),
+        );
+    }
+    // Wrap the selection.
+    let selected = doc.get(from..to).unwrap_or("");
+    let wrapped = format!("{m}{selected}{m}");
+    let new_to = from + wrapped.len();
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::replace(from..to, wrapped))
+            .selection(Selection::single(Range::new(from, new_to))),
+    )
+}
+
 /// Delete the character after the caret. With a non-empty
 /// selection, deletes the selection. Bound by convention to
 /// `Delete`.
@@ -92,5 +150,48 @@ mod tests {
         s.selection = Selection::single(Range::new(1, 4));
         let next = s.update(delete_backward(&s).unwrap());
         assert_eq!(next.doc.to_string(), "ho");
+    }
+
+    #[test]
+    fn toggle_bold_with_empty_caret_inserts_pair() {
+        let mut s = EditorState::new("Testing ");
+        s.selection = Selection::caret(8);
+        let next = s.update(toggle_bold(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "Testing ****");
+        // Caret parked between the markers.
+        assert_eq!(next.selection.primary().head, 10);
+        assert_eq!(next.selection.primary().anchor, 10);
+    }
+
+    #[test]
+    fn toggle_bold_skips_past_closing_marker() {
+        // "Testing **bold**" with caret at 14 (just after
+        // "bold", before closing "**"). Pressing toggle_bold
+        // should move caret to 16 without changing doc.
+        let mut s = EditorState::new("Testing **bold**");
+        s.selection = Selection::caret(14);
+        let next = s.update(toggle_bold(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "Testing **bold**"); // unchanged
+        assert_eq!(next.selection.primary().head, 16);
+    }
+
+    #[test]
+    fn toggle_bold_wraps_selection() {
+        let mut s = EditorState::new("Make this bold");
+        s.selection = Selection::single(Range::new(5, 9)); // "this"
+        let next = s.update(toggle_bold(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "Make **this** bold");
+        let p = next.selection.primary();
+        assert_eq!(p.from(), 5);
+        assert_eq!(p.to(), 13); // covers **this**
+    }
+
+    #[test]
+    fn toggle_italic_uses_single_marker() {
+        let mut s = EditorState::new("foo");
+        s.selection = Selection::caret(3);
+        let next = s.update(toggle_italic(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "foo**");
+        assert_eq!(next.selection.primary().head, 4);
     }
 }
