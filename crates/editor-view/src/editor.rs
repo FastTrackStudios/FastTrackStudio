@@ -418,19 +418,57 @@ pub fn Editor(
                     // `domAtPos` (`docview.ts:320`).
                     const targetRange = document.createRange();
                     const tiles = el.querySelectorAll('[data-tile-pos]');
-                    // Build a sorted (pos, end, element) list once.
-                    const ranges = [];
+                    // Two range tables: text-containing tiles
+                    // (preferred when target is strictly inside
+                    // them) and empty tiles like Mark<br>
+                    // (preferred ONLY when target matches the
+                    // tile's zero-length range — gives the
+                    // cursor somewhere to land inside an empty
+                    // Mark so subsequent typing stays in the
+                    // span).
+                    const textRanges = [];
+                    const emptyTiles = [];
                     tiles.forEach(node => {{
                         const pos = parseInt(node.dataset.tilePos, 10);
                         const text = node.firstChild;
-                        const len = (text && text.nodeType === 3 /* TEXT */)
-                            ? text.nodeValue.length
-                            : 0;
-                        if (len) ranges.push({{ pos, end: pos + len, node, text }});
+                        if (text && text.nodeType === 3 /* TEXT */) {{
+                            const len = text.nodeValue.length;
+                            if (len) textRanges.push({{ pos, end: pos + len, node, text }});
+                            else emptyTiles.push({{ pos, node }});
+                        }} else {{
+                            // Element child (e.g., <br> in an
+                            // empty Mark, or nested spans). The
+                            // tile itself is the cursor anchor.
+                            emptyTiles.push({{ pos, node }});
+                        }}
                     }});
-                    ranges.sort((a, b) => a.pos - b.pos);
+                    textRanges.sort((a, b) => a.pos - b.pos);
+                    emptyTiles.sort((a, b) => a.pos - b.pos);
                     function placeEdge(target, which) {{
-                        for (const r of ranges) {{
+                        // First pass: STRICTLY inside a text run.
+                        for (const r of textRanges) {{
+                            if (target > r.pos && target < r.end) {{
+                                const off = target - r.pos;
+                                if (which === 'start') targetRange.setStart(r.text, off);
+                                else                   targetRange.setEnd(r.text, off);
+                                return;
+                            }}
+                        }}
+                        // Second pass: at the boundary. Prefer
+                        // an empty tile at this exact position —
+                        // typically an empty MarkTile we want
+                        // the cursor INSIDE.
+                        for (const t of emptyTiles) {{
+                            if (t.pos === target) {{
+                                if (which === 'start') targetRange.setStart(t.node, 0);
+                                else                   targetRange.setEnd(t.node, 0);
+                                return;
+                            }}
+                        }}
+                        // Third pass: boundary fallback to a
+                        // text tile (end of a tile or start of
+                        // the next).
+                        for (const r of textRanges) {{
                             if (target >= r.pos && target <= r.end) {{
                                 const off = target - r.pos;
                                 if (which === 'start') targetRange.setStart(r.text, off);
@@ -438,7 +476,7 @@ pub fn Editor(
                                 return;
                             }}
                         }}
-                        // Past the last tile — pin to the editor.
+                        // Past the last tile — pin to editor.
                         if (which === 'start') targetRange.setStart(el, el.childNodes.length);
                         else                   targetRange.setEnd(el, el.childNodes.length);
                     }}

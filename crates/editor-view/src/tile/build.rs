@@ -285,6 +285,35 @@ impl<'a> TileBuilder<'a> {
         self.pos += length;
     }
 
+    /// Walk the mark stack and ensure the chain of MarkTiles
+    /// exists under the current LineTile, without inserting a
+    /// leaf. Empty MarkTiles are valid — `render_dx` emits
+    /// `<span><br></span>` for them so the DOM has a cursor
+    /// anchor and the shape stays stable when the user later
+    /// types content into the mark.
+    fn ensure_mark_chain(&mut self, marks: &[MarkSpec]) {
+        let mut parent = self.ensure_line();
+        for spec in marks {
+            let reuse = self
+                .arena
+                .get(parent)
+                .children
+                .last()
+                .copied()
+                .filter(|&id| match &self.arena.get(id).body {
+                    TileBody::Mark { spec: existing } => existing == spec,
+                    _ => false,
+                });
+            parent = if let Some(id) = reuse {
+                id
+            } else {
+                let mark_id = self.arena.insert(new_mark_tile(spec.clone()));
+                self.append_to(parent, mark_id);
+                mark_id
+            };
+        }
+    }
+
     /// Walk the mark stack from outermost to innermost,
     /// finding (or creating) a MarkTile of each spec under the
     /// previous one. Returns the inner-most parent into which

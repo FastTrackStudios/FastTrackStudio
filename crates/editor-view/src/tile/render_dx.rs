@@ -65,6 +65,18 @@ pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
             let pos = crate::tile::pos::pos_at_start(arena, tile);
             // v1 only emits `<span>` from buildtile; once tag
             // variation lands we'll match on `spec.tag`.
+            //
+            // Empty MarkTiles still render as a span — they
+            // act as a stable insertion point for the cursor
+            // and keep the DOM shape consistent when the mark
+            // later fills with content. We don't add any
+            // placeholder inside (no <br>, no ZWSP): the
+            // writeback's `placeEdge` second pass detects
+            // empty tiles and sets the range to `(span, 0)`,
+            // which lets the browser place the caret inside
+            // the otherwise-empty span. (CSS `:empty:before {
+            // content: "\200B" }` could be added later if some
+            // browsers need a visual anchor.)
             rsx! {
                 span {
                     class: "{class}",
