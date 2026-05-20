@@ -12,8 +12,13 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecorationKind {
     /// Wrap the covered range in an element with the given CSS
-    /// class. Bold, italic, link, etc.
-    Mark { class: String },
+    /// class. Bold, italic, link, etc. `attrs` are extra HTML
+    /// attributes copied verbatim onto the span (e.g.
+    /// `data-href` for clickable links).
+    Mark {
+        class: String,
+        attrs: Vec<(String, String)>,
+    },
     /// Remove the covered range from the rendered output (the
     /// document still contains it). Used to hide markdown
     /// markers like `**` once the cursor leaves the span.
@@ -45,6 +50,21 @@ impl DecoratedRange {
             to: range.end,
             kind: DecorationKind::Mark {
                 class: class.into(),
+                attrs: Vec::new(),
+            },
+        }
+    }
+    pub fn mark_with_attrs(
+        range: std::ops::Range<usize>,
+        class: impl Into<String>,
+        attrs: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            from: range.start,
+            to: range.end,
+            kind: DecorationKind::Mark {
+                class: class.into(),
+                attrs,
             },
         }
     }
@@ -93,6 +113,13 @@ impl Decoration {
     pub fn mark(range: std::ops::Range<usize>, class: impl Into<String>) -> DecoratedRange {
         DecoratedRange::mark(range, class)
     }
+    pub fn mark_with_attrs(
+        range: std::ops::Range<usize>,
+        class: impl Into<String>,
+        attrs: Vec<(String, String)>,
+    ) -> DecoratedRange {
+        DecoratedRange::mark_with_attrs(range, class, attrs)
+    }
     pub fn replace(range: std::ops::Range<usize>) -> DecoratedRange {
         DecoratedRange::replace(range)
     }
@@ -116,7 +143,8 @@ mod tests {
         assert_eq!(
             d.kind,
             DecorationKind::Mark {
-                class: "bold".into()
+                class: "bold".into(),
+                attrs: Vec::new(),
             }
         );
     }
