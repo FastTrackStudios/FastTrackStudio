@@ -4774,19 +4774,16 @@ fn EditableBlock(block: Block) -> Element {
             }
             Key::Enter if !shift => {
                 e.prevent_default();
-                // Caret-aware split: ask the DOM for the textarea's
-                // selectionStart, then split there. The eval runs
-                // synchronously inside the webview's JS context
-                // (Dioxus desktop), so the await returns quickly
-                // and the split lands at exactly where the user
-                // pressed Enter — matching Logseq's "split at
-                // caret" behavior.
-                let split_cb = ops.split_block;
-                let fallback_len = current.len();
+                // Read the live caret + textContent in one shot,
+                // then call split_block_with_text so the split uses
+                // exactly what's in the DOM right now — bypasses
+                // any pending CRDT writes that haven't landed yet.
+                let split_with_text = ops.split_block_with_text;
                 let id_str = block_id.simple().to_string();
-                spawn(async move {
-                    let offset = read_selection_start(&id_str).await.unwrap_or(fallback_len);
-                    split_cb.call((block_id, offset));
+                dioxus::core::spawn_forever(async move {
+                    let offset = read_selection_start(&id_str).await.unwrap_or(0);
+                    let v = read_editor_text(&id_str).await.unwrap_or_default();
+                    split_with_text.call((block_id, v, offset));
                 });
             }
             Key::Backspace if current.is_empty() => {
@@ -5903,6 +5900,10 @@ pub(crate) struct BlockOps {
     pub exit_edit: Callback<()>,
     pub update_content: Callback<(Uuid, String)>,
     pub split_block: Callback<(Uuid, usize)>,
+    /// Same as `split_block` but takes the latest in-editor text
+    /// directly so the split uses what's currently in the DOM
+    /// rather than the (possibly stale) CRDT snapshot.
+    pub split_block_with_text: Callback<(Uuid, String, usize)>,
     pub indent: Callback<Uuid>,
     pub outdent: Callback<Uuid>,
     pub delete_block: Callback<Uuid>,
@@ -5974,17 +5975,23 @@ fn make_block_ops(
     let mut editing_split = editing_id;
     let split_block = Callback::new(move |(id, offset): (Uuid, usize)| {
         let doc = doc_split.clone();
-        spawn(async move {
+        dioxus::core::spawn_forever(async move {
             if let Err(e) = split_block_async(&doc, id, offset).await {
                 tracing::warn!(?e, "split failed");
-                return;
             }
-            // After the split, focus the new sibling so the user
-            // keeps typing into it. We reuse the parent block id
-            // → won't be exactly right but `enter_edit` lands on
-            // a sane block.
         });
         editing_split.set(None);
+    });
+    let doc_split_text = doc.clone();
+    let mut editing_split_text = editing_id;
+    let split_block_with_text = Callback::new(move |(id, text, offset): (Uuid, String, usize)| {
+        let doc = doc_split_text.clone();
+        dioxus::core::spawn_forever(async move {
+            if let Err(e) = split_block_with_text_async(&doc, id, Some(&text), offset).await {
+                tracing::warn!(?e, "split-with-text failed");
+            }
+        });
+        editing_split_text.set(None);
     });
     let doc_indent = doc.clone();
     let indent = Callback::new(move |id: Uuid| {
@@ -6125,6 +6132,7 @@ fn make_block_ops(
         exit_edit,
         update_content,
         split_block,
+        split_block_with_text,
         indent,
         outdent,
         delete_block,
@@ -6367,6 +6375,20 @@ async fn split_block_async(
     block_id: Uuid,
     offset: usize,
 ) -> Result<Uuid, knowledge_proto::architect::RepoError> {
+    split_block_with_text_async(doc, block_id, None, offset).await
+}
+
+/// Same as `split_block_async`, but uses `text` as the source of
+/// truth for the split (when provided) rather than reading the
+/// block's current content from the repo. Lets the editor avoid
+/// a race where the user's most-recent typing hasn't been
+/// committed to the CRDT before Enter fires the split.
+async fn split_block_with_text_async(
+    doc: &CrdtDoc,
+    block_id: Uuid,
+    text: Option<&str>,
+    offset: usize,
+) -> Result<Uuid, knowledge_proto::architect::RepoError> {
     let repo = BlockRepoLoro::new(doc);
     let big = ListPage {
         index: 0,
@@ -6377,7 +6399,10 @@ async fn split_block_async(
         Some(b) => b.clone(),
         None => return Err(knowledge_proto::architect::RepoError::NotFound),
     };
-    let content = target.content.clone();
+    let content = match text {
+        Some(t) => t.to_string(),
+        None => target.content.clone(),
+    };
     let off = offset.min(content.len());
     let (left, right) = content.split_at(off);
 
