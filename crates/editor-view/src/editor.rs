@@ -29,10 +29,30 @@
 //! text already matches state.doc (preventing the writeback
 //! from fighting in-flight typing).
 
+// Component props derive PartialEq on a `fn`-pointer field
+// (DecorationSource); within a single binary fn-ptr equality is
+// reliable enough for prop-diff purposes. The lint guards
+// against codegen-unit splits that don't happen in our build.
+#![allow(unpredictable_function_pointer_comparisons)]
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use editor_state::{Changes, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec};
+use editor_state::{
+    Changes, DecoratedRange, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec,
+};
+
+use crate::render::{self, Segment};
+
+/// Decoration source — a pure fn that produces decorations for
+/// the current state. Multiple sources can be combined; the view
+/// concatenates and sorts before rendering.
+///
+/// Conceptually mirrors CM6's `EditorView.decorations` facet —
+/// extensions contribute decorations, the view merges. Using a
+/// plain `fn` keeps the v1 surface tiny; we can swap to a trait
+/// object for stateful sources later.
+pub type DecorationSource = fn(&EditorState) -> Vec<DecoratedRange>;
 
 /// Per-instance id allocator — each `<Editor>` mount gets a
 /// unique `data-editor-id` for the JS bridge to find it.
@@ -43,8 +63,22 @@ static EDITOR_INSTANCE: AtomicU64 = AtomicU64::new(0);
 /// binding whose command returns `Some(spec)` and we
 /// `preventDefault` + apply. Unmatched keys fall through.
 #[component]
-pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keymap>) -> Element {
+pub fn Editor(
+    state: Signal<EditorState>,
+    #[props(default)] keymap: Option<Keymap>,
+    #[props(default)] decorations: Option<DecorationSource>,
+) -> Element {
     let text = state.read().doc.to_string();
+    // Run decoration sources, merge, sort. Empty / no source ⇒
+    // one undecorated text segment covering the whole doc.
+    let decs: Vec<DecoratedRange> = if let Some(src) = decorations {
+        let mut v = src(&state.read());
+        v.sort_by_key(|d| d.from);
+        v
+    } else {
+        Vec::new()
+    };
+    let segments = render::render(&text, &decs);
     let editor_id = use_hook(|| {
         let n = EDITOR_INSTANCE.fetch_add(1, Ordering::Relaxed);
         format!("editor-{n}")
@@ -243,18 +277,57 @@ pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keyma
             "data-editor-id": "{editor_id}",
             // `plaintext-only` strips formatting from paste +
             // disables rich-text execCommands. Chromium/WebKit
-            // support it; Firefox falls back to "true". For our
-            // app this is the right default.
+            // support it; Firefox falls back to "true". Cursor
+            // can still be placed inside child spans under this
+            // mode — which is exactly what's needed for
+            // decorated text.
             contenteditable: "plaintext-only",
             spellcheck: "false",
             onkeydown: on_keydown,
-            // Children: render the doc text. The key trick is
-            // that when the DOM already has this text (user just
-            // typed it), Dioxus's reconciler is a no-op and the
-            // cursor isn't disturbed. Programmatic state changes
-            // are the only path that mutates the DOM here.
-            "{text}"
+            // Children: render the doc as the rendered segment
+            // stream. For undecorated text this collapses to a
+            // single text node — same Dioxus-reconciler-no-op
+            // behavior that keeps the caret stable during
+            // typing. For decorated text we emit `<span>`s with
+            // class names; the browser still treats the result
+            // as one continuous text stream for cursor purposes
+            // (per `plaintext-only` semantics).
+            for seg in segments.iter() {
+                {render_segment(seg)}
+            }
         }
+    }
+}
+
+/// Convert one `Segment` into a Dioxus element.
+///
+/// - `Text` with empty class → bare text node (no wrapping
+///   span) so the un-decorated common case still produces the
+///   exact same DOM shape as Phase A. This is what lets typing
+///   on a doc with no decorations stay a no-op for the
+///   reconciler.
+/// - `Text` with classes → `<span class="…">`.
+/// - `Hidden` → nothing (omit from the DOM).
+/// - `Widget` → `dangerous_inner_html` with the source's raw
+///   HTML. v1 widgets are static strings; future widgets can
+///   carry richer payloads.
+fn render_segment(seg: &Segment) -> Element {
+    match seg {
+        Segment::Text { text, classes, .. } => {
+            if classes.is_empty() {
+                rsx! { "{text}" }
+            } else {
+                rsx! { span { class: "{classes}", "{text}" } }
+            }
+        }
+        Segment::Hidden { .. } => rsx! {},
+        Segment::Widget { html, .. } => rsx! {
+            span {
+                class: "editor-widget",
+                contenteditable: "false",
+                dangerous_inner_html: "{html}"
+            }
+        },
     }
 }
 

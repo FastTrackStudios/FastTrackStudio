@@ -7,5 +7,6 @@
 pub use editor_state;
 
 mod editor;
+pub mod render;
 
-pub use editor::Editor;
+pub use editor::{DecorationSource, Editor};

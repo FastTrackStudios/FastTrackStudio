@@ -2,7 +2,7 @@
 //! the state + view surface from one place.
 
 pub use editor_state::*;
-pub use editor_view::Editor;
+pub use editor_view::{self, Editor};
 
 /// Built-in commands. Re-exported as `editor::commands::*`.
 pub mod commands {

@@ -3,7 +3,7 @@
 //! can see selection / doc / transactions while typing.
 
 use dioxus::prelude::*;
-use editor::{Editor, EditorState, Keymap, commands};
+use editor::{Editor, EditorState, Keymap, commands, editor_view, markdown};
 
 const STYLE: Asset = asset!("/assets/playground.css");
 
@@ -75,9 +75,11 @@ fn App() -> Element {
     // panel so changes are visible as you type.
     let state = use_signal(|| {
         EditorState::new(
-            "Welcome to the Editor playground.\n\nType anywhere — \
-             every keystroke flows through a Transaction and you'll \
-             see the resulting state on the right.",
+            "Welcome to the **Editor** playground.\n\n\
+             Try typing some **bold**, *italic*, or `code`. The \
+             markers stay visible only when your caret is on the \
+             word — move away and they fade into the rendered \
+             output, just like Obsidian.",
         )
     });
 
@@ -102,7 +104,11 @@ fn App() -> Element {
                 section { class: "editor-pane",
                     h2 { "Editor" }
                     div { class: "editor-frame",
-                        Editor { state, keymap: keymap.clone() }
+                        Editor {
+                            state,
+                            keymap: keymap.clone(),
+                            decorations: markdown::live_preview as editor_view::DecorationSource,
+                        }
                     }
                 }
                 section { class: "debug-pane",

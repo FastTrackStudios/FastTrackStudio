@@ -11,6 +11,7 @@ pub mod command;
 pub mod commands;
 pub mod decoration;
 pub mod doc;
+pub mod markdown;
 pub mod selection;
 pub mod state;
 pub mod transaction;

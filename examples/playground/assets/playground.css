@@ -83,6 +83,25 @@ section h2 {
 
 .editor-root:focus { outline: none; }
 
+/* Live-preview decoration classes — emitted by editor-state's
+   markdown::live_preview. Visual styling only; the document
+   text itself is unchanged. */
+.editor-root .md-bold {
+    font-weight: 700;
+    color: #e8eaf0;
+}
+.editor-root .md-italic {
+    font-style: italic;
+    color: #e8eaf0;
+}
+.editor-root .md-code {
+    font-family: var(--mono);
+    background: #1d2030;
+    padding: 0 4px;
+    border-radius: 3px;
+    color: #b8d4ff;
+}
+
 .debug-pane {
     background: var(--bg-elev);
     border: 1px solid var(--border);
