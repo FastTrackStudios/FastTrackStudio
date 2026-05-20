@@ -8,7 +8,63 @@ use editor::{Editor, EditorState};
 const STYLE: Asset = asset!("/assets/playground.css");
 
 fn main() {
+    init_tracing();
+    tracing::info!("playground starting");
     dioxus::launch(App);
+}
+
+/// Initialize tracing for the desktop binary: stdout + a rolling
+/// logfile so we can tail edits while developing. The logfile
+/// goes in the repo's `target/` (gitignored). Web target skips
+/// this entirely — wasm can't write files; that path will get a
+/// `tracing-wasm` subscriber in a follow-up commit.
+#[cfg(not(target_arch = "wasm32"))]
+fn init_tracing() {
+    use tracing_subscriber::{
+        EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt,
+    };
+    // Logfile in the repo's target/ dir so it tags along with
+    // builds and is gitignored. `daily` rolls without bound; for
+    // a dev playground that's fine.
+    let log_dir = std::path::Path::new("target");
+    let _ = std::fs::create_dir_all(log_dir);
+    let file_appender = tracing_appender::rolling::daily(log_dir, "playground.log");
+    // `_guard` must outlive the process so we don't lose buffered
+    // writes on shutdown. Leak it intentionally — the binary's
+    // lifetime is the right scope.
+    let (nb_writer, guard) = tracing_appender::non_blocking(file_appender);
+    std::mem::forget(guard);
+
+    let env_filter = || {
+        EnvFilter::try_from_env("EDITOR_LOG")
+            .or_else(|_| EnvFilter::try_new("info,editor=debug,editor_view=debug,playground=debug"))
+            .unwrap()
+    };
+
+    let stdout_layer = fmt::layer()
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_filter(env_filter());
+    let file_layer = fmt::layer()
+        .with_writer(nb_writer)
+        .with_ansi(false)
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_filter(env_filter());
+
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
+}
+
+#[cfg(target_arch = "wasm32")]
+fn init_tracing() {
+    // No-op on wasm for now. A follow-up commit will wire
+    // `tracing-wasm` so the browser DevTools console gets the
+    // same stream.
 }
 
 #[component]

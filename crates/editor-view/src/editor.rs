@@ -39,6 +39,13 @@ pub fn Editor(state: Signal<EditorState>) -> Element {
         let new_text = evt.value();
         let old = state.read().clone();
         let old_len = old.doc.len();
+        let new_len = new_text.len();
+        tracing::debug!(
+            old_len,
+            new_len,
+            delta = new_len as isize - old_len as isize,
+            "editor.input"
+        );
         let changes = Changes::replace(0..old_len, new_text);
         state.set(old.update(TransactionSpec::new().changes(changes)));
     };

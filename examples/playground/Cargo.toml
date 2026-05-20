@@ -11,6 +11,13 @@ publish = false
 [dependencies]
 editor = { workspace = true }
 dioxus = { workspace = true }
+tracing = { workspace = true }
+
+# File / stdout logging is desktop-only — wasm can't open files.
+# A future commit can add `tracing-wasm` for the browser path.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
 
 # Switch platforms with --no-default-features --features web|desktop.
 [features]
