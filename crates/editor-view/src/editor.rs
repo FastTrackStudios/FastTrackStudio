@@ -88,14 +88,24 @@ pub fn Editor(
         format!("editor-{n}")
     });
 
-    // ── DOM → state: input + selection bridge ────────────────────
+    // ── DOM → state: MutationObserver + selection bridge ─────────
     //
-    // Once on mount we install a single JS listener that wires up
-    // multiple DOM events and streams them back via dioxus.send.
-    // Each `input` message carries the new textContent + the
-    // current Selection so we can update doc and caret atomically.
-    // Other events (keyup/mouseup/select/focus) carry just
-    // selection for caret moves without text changes.
+    // Ports CM6's `view/src/domobserver.ts` at v1 scope. A
+    // `MutationObserver` on the editor root catches every kind
+    // of edit (typing, paste, drag-drop, IME) — broader than
+    // the `input` event we used before. On each mutation batch
+    // we read the current textContent + selection and send to
+    // Rust for diff + Transaction.
+    //
+    // Composition handling: between `compositionstart` and
+    // `compositionend` we *skip* mutation handling — the IME's
+    // intermediate states aren't useful and would corrupt the
+    // doc mid-composition. On `compositionend` we flush a
+    // single update with the final text. (CM6 does the same
+    // pause-resume pattern.)
+    //
+    // Selection-only moves (keyup/mouseup/select/focus) still
+    // flow via `sel` messages as in Phase 7.
     {
         let id = editor_id.clone();
         use_hook(move || {
@@ -152,7 +162,40 @@ pub fn Editor(
                                 const [a, b] = selOffsets();
                                 dioxus.send({{ kind: 'sel', sel: [a, b] }});
                             }}
-                            el.addEventListener('input',   sendInput);
+
+                            // Composition guard. While an IME
+                            // composition is active we skip
+                            // sendInput; the final composed
+                            // text comes through on
+                            // compositionend.
+                            let composing = false;
+                            el.addEventListener('compositionstart', () => {{
+                                composing = true;
+                            }});
+                            el.addEventListener('compositionend', () => {{
+                                composing = false;
+                                sendInput();
+                            }});
+
+                            // MutationObserver — catches every
+                            // kind of DOM change (typing, paste,
+                            // drag-drop, IME). CM6 reference:
+                            // `view/src/domobserver.ts:103+`
+                            // (the `observe` method).
+                            const mo = new MutationObserver(() => {{
+                                if (composing) return;
+                                sendInput();
+                            }});
+                            mo.observe(el, {{
+                                childList: true,
+                                characterData: true,
+                                subtree: true,
+                            }});
+
+                            // Selection-only events still flow
+                            // via the same listeners as Phase 7
+                            // — these don't change the doc, so
+                            // they bypass the observer.
                             el.addEventListener('keyup',   sendSel);
                             el.addEventListener('mouseup', sendSel);
                             el.addEventListener('select',  sendSel);
