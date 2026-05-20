@@ -582,8 +582,24 @@ fn handle_bridge_msg(
             let (arena, root) = build_tiles(&cur.doc.to_string(), &decorations);
             let old_visible = VisibleText::from_arena(&arena, root);
             if old_visible.text == new_visible {
-                // No textual change — selection-only update.
-                push_selection(&mut state, &cur, s_off, e_off);
+                // Text-unchanged `input` event = Dioxus echo
+                // (a mutation we caused via re-render, not user
+                // typing). The selection on this message comes
+                // from DOM Selection AFTER our reconciler may
+                // have removed/recreated text nodes the cursor
+                // was anchored to. That Selection is therefore
+                // unreliable — it often points to a fallback
+                // position (start of a sibling tile, parent
+                // element offset, etc.) that has nothing to do
+                // with user intent.
+                //
+                // CM6 has the same defense in `domobserver`:
+                // selection reads that come from our own DOM
+                // writes (rather than user actions) are ignored.
+                // The dedicated `sel` channel
+                // (selectionchange/keyup/mouseup/focus/click)
+                // is the ONLY trusted source for selection
+                // updates that aren't part of a Change.
                 return;
             }
             // Diff in visible space.
