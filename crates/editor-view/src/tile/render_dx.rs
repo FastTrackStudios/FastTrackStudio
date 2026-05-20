@@ -34,65 +34,44 @@ pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
             }
         },
         TileKind::Text => {
-            // Leaf: a bare text node. Wrapping in a span just
-            // for `data-tile-id` would break the "matches DOM"
-            // trick that keeps the cursor stable during typing
-            // — Dioxus's text-node reconciler is a no-op for
-            // unchanged text. Instead, we emit a zero-width
-            // sentinel right after the text that JS uses to
-            // associate the previous text node with this tile.
+            // Wrap in a span carrying `data-tile-pos` so the
+            // JS bridge can translate `Selection.anchorNode`
+            // (the text node inside) directly to a doc offset
+            // without walking the rest of the document. This
+            // is CM6's `dom.cmTile` expando
+            // (`tile.ts:11-12`) in data-attribute form.
             //
-            // Wait — actually the parent (often a MarkTile or
-            // the DocTile div) carries data-tile-id, and the
-            // text node is its direct child. The JS bridge can
-            // walk up from a text node to its parent element
-            // and read the parent's data-tile-id. For text
-            // tiles whose parent is the Doc, the doc itself
-            // gets data-tile-id. For mark-wrapped text, the
-            // MarkTile span carries it. Both cases: walk up
-            // one level.
-            //
-            // What's missing in v1: when the same parent has
-            // multiple text children (two adjacent TextTiles
-            // under one MarkTile), JS can't tell which one a
-            // given anchor sits in. We address that by always
-            // inserting a comment-or-empty span between
-            // adjacent text-only siblings — but in practice
-            // buildtile merges them into a single TextTile
-            // (see Phase 6's same-mark merging). The "two
-            // adjacent text tiles under doc" case happens
-            // around mark/hidden/widget boundaries, where the
-            // intermediate tile gives JS its bearings.
+            // Wrapping in a span doesn't disturb the cursor on
+            // typing: the *text node* is what mutates when the
+            // user types, and Dioxus's reconciler is a no-op
+            // when its rendered text matches what the DOM
+            // already has. The span's `data-tile-pos`
+            // attribute stays the same unless this tile's
+            // position changes (which only happens when an
+            // earlier tile changes size — not on local typing).
             let text = text_of(t);
-            rsx! { "{text}" }
+            let pos = crate::tile::pos::pos_at_start(arena, tile);
+            rsx! {
+                span {
+                    "data-tile-id": "{tid}",
+                    "data-tile-pos": "{pos}",
+                    "{text}"
+                }
+            }
         }
         TileKind::Mark => {
             let spec = mark_spec_of(t).clone();
-            let tag = spec.tag;
             let class = spec.class;
-            // Dioxus's `tag!` macro is per-element, so we
-            // expand the few we care about. v1 only emits
-            // `<span>` from buildtile; once we add tag
-            // variation we'll generalize.
-            if tag == "span" {
-                rsx! {
-                    span {
-                        class: "{class}",
-                        "data-tile-id": "{tid}",
-                        for &child in &t.children {
-                            {render_tile(arena, child)}
-                        }
-                    }
-                }
-            } else {
-                // Future: pluggable tag rendering.
-                rsx! {
-                    span {
-                        class: "{class}",
-                        "data-tile-id": "{tid}",
-                        for &child in &t.children {
-                            {render_tile(arena, child)}
-                        }
+            let pos = crate::tile::pos::pos_at_start(arena, tile);
+            // v1 only emits `<span>` from buildtile; once tag
+            // variation lands we'll match on `spec.tag`.
+            rsx! {
+                span {
+                    class: "{class}",
+                    "data-tile-id": "{tid}",
+                    "data-tile-pos": "{pos}",
+                    for &child in &t.children {
+                        {render_tile(arena, child)}
                     }
                 }
             }
@@ -110,11 +89,13 @@ pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
                 // by construction (the bytes aren't rendered).
                 rsx! {}
             } else {
+                let pos = crate::tile::pos::pos_at_start(arena, tile);
                 rsx! {
                     span {
                         class: "editor-widget",
                         contenteditable: "false",
                         "data-tile-id": "{tid}",
+                        "data-tile-pos": "{pos}",
                         dangerous_inner_html: "{html}"
                     }
                 }

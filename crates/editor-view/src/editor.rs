@@ -106,33 +106,38 @@ pub fn Editor(
                         function attach() {{
                             const el = document.querySelector('[data-editor-id="{id}"]');
                             if (!el) {{ setTimeout(attach, 30); return; }}
-                            // For a single-text-node contenteditable
-                            // the DOM selection's anchorOffset is a
-                            // char offset in that text node — same as
-                            // our byte offset for ASCII content. We'll
-                            // upgrade to walking the DOM tree when we
-                            // emit decoration spans.
+                            // Tile-tree-aware DOM → doc offset
+                            // translation. Walks up from the
+                            // selection's anchor/focus to the
+                            // nearest ancestor carrying
+                            // `data-tile-pos` (set by render_dx.rs),
+                            // reads that as the tile's start
+                            // position in the doc, and adds the
+                            // text-node offset within the tile.
+                            //
+                            // Replaces the old TreeWalker-based
+                            // approach which assumed visible-text
+                            // offset == doc offset — wrong as soon
+                            // as Hidden (Replace) decorations exist.
+                            // CM6's equivalent walk is in
+                            // `view/src/docview.ts:282` (posFromDOM).
+                            function tilePosOf(node) {{
+                                let n = node;
+                                while (n && n !== el) {{
+                                    if (n.nodeType === 1 /* ELEMENT */
+                                        && n.dataset && n.dataset.tilePos != null) {{
+                                        return parseInt(n.dataset.tilePos, 10);
+                                    }}
+                                    n = n.parentNode;
+                                }}
+                                return 0; // fall back to doc start
+                            }}
                             function selOffsets() {{
                                 const s = window.getSelection();
                                 if (!s || s.rangeCount === 0) return [0, 0];
                                 const r = s.getRangeAt(0);
-                                // Walk to a numeric offset within el.
-                                const off = (node, n) => {{
-                                    if (!el.contains(node)) return null;
-                                    let total = 0;
-                                    const walker = document.createTreeWalker(
-                                        el, NodeFilter.SHOW_TEXT, null
-                                    );
-                                    let t;
-                                    while ((t = walker.nextNode())) {{
-                                        if (t === node) return total + n;
-                                        total += t.nodeValue.length;
-                                    }}
-                                    return null;
-                                }};
-                                const a = off(r.startContainer, r.startOffset);
-                                const b = off(r.endContainer, r.endOffset);
-                                if (a === null || b === null) return [0, 0];
+                                const a = tilePosOf(r.startContainer) + r.startOffset;
+                                const b = tilePosOf(r.endContainer) + r.endOffset;
                                 return [a, b];
                             }}
                             function sendInput() {{
@@ -194,37 +199,42 @@ pub fn Editor(
                     // tick handle it.
                     if (el.textContent !== {doc_json}) return;
 
-                    // Build a Range that targets the requested
-                    // byte/char offsets, walking text descendants.
+                    // Build a Range targeting the requested doc
+                    // positions via tile lookup. Each rendered
+                    // tile carries `data-tile-pos`; for a target
+                    // doc position we find the tile whose
+                    // `[pos, pos + length)` covers it, then place
+                    // the Range inside its text descendant at
+                    // `target - tile_pos`. Mirrors CM6's
+                    // `domAtPos` (`docview.ts:320`).
                     const targetRange = document.createRange();
-                    const setEnd = (offset, which) => {{
-                        let remaining = offset;
-                        const walker = document.createTreeWalker(
-                            el, NodeFilter.SHOW_TEXT, null
-                        );
-                        let node;
-                        while ((node = walker.nextNode())) {{
-                            const len = node.nodeValue.length;
-                            if (remaining <= len) {{
-                                if (which === 'start') {{
-                                    targetRange.setStart(node, remaining);
-                                }} else {{
-                                    targetRange.setEnd(node, remaining);
-                                }}
-                                return true;
+                    const tiles = el.querySelectorAll('[data-tile-pos]');
+                    // Build a sorted (pos, end, element) list once.
+                    const ranges = [];
+                    tiles.forEach(node => {{
+                        const pos = parseInt(node.dataset.tilePos, 10);
+                        const text = node.firstChild;
+                        const len = (text && text.nodeType === 3 /* TEXT */)
+                            ? text.nodeValue.length
+                            : 0;
+                        if (len) ranges.push({{ pos, end: pos + len, node, text }});
+                    }});
+                    ranges.sort((a, b) => a.pos - b.pos);
+                    function placeEdge(target, which) {{
+                        for (const r of ranges) {{
+                            if (target >= r.pos && target <= r.end) {{
+                                const off = target - r.pos;
+                                if (which === 'start') targetRange.setStart(r.text, off);
+                                else                   targetRange.setEnd(r.text, off);
+                                return;
                             }}
-                            remaining -= len;
                         }}
-                        // Past the end — pin to el.
-                        if (which === 'start') {{
-                            targetRange.setStart(el, el.childNodes.length);
-                        }} else {{
-                            targetRange.setEnd(el, el.childNodes.length);
-                        }}
-                        return true;
-                    }};
-                    setEnd({from}, 'start');
-                    setEnd({to}, 'end');
+                        // Past the last tile — pin to the editor.
+                        if (which === 'start') targetRange.setStart(el, el.childNodes.length);
+                        else                   targetRange.setEnd(el, el.childNodes.length);
+                    }}
+                    placeEdge({from}, 'start');
+                    placeEdge({to}, 'end');
 
                     const sel = window.getSelection();
                     // Skip if DOM already matches — `setBaseAndExtent`
