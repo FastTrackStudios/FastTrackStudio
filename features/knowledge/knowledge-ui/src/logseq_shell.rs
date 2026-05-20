@@ -682,33 +682,18 @@ pub fn LogseqShell() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let doc_for_load = doc.read().clone();
-        let mut version_for_load = version;
-        use_hook(move || {
-            let doc = doc_for_load.clone();
-            spawn(async move {
-                if let Some(bytes) = load_persisted_snapshot().await {
-                    if let Err(e) = doc.loro().import(&bytes) {
-                        tracing::warn!(?e, "snapshot import failed");
-                    } else {
-                        version_for_load.with_mut(|v| *v += 1);
-                    }
-                }
-            });
-        });
-
-        let doc_for_save = doc.read().clone();
-        use_hook(move || {
-            let doc = doc_for_save.clone();
-            spawn(async move {
-                run_persistence_loop(doc).await;
-            });
-        });
+        // Markdown files in ~/Task/{pages,journals}/ ARE the
+        // source of truth. We deliberately skip the .loro
+        // snapshot load so the user sees what's on disk —
+        // edits in another editor are picked up on next launch,
+        // and the CRDT-backed binary cache can never disagree
+        // with the files the user can see.
+        let _ = doc_for_load;
+        let _ = version;
 
         // Disk-writer loop — mirrors every commit out to
         // `<vault.root_path>/pages/*.md` and
-        // `<vault.root_path>/journals/*.md` for vaults that
-        // have an on-disk home. Ephemeral vaults (seed-only)
-        // skip the write because their root_path is None.
+        // `<vault.root_path>/journals/*.md`.
         let doc_for_writer = doc.read().clone();
         use_hook(move || {
             let doc = doc_for_writer.clone();
