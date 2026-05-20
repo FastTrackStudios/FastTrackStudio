@@ -1,58 +1,47 @@
-//! The `<Editor>` Dioxus component. v0 scaffold — renders the
-//! current document's text into a `<textarea>` and syncs typing
-//! back via `oninput`.
+//! The `<Editor>` Dioxus component.
 //!
-//! **Why textarea and not contenteditable in v0?** Dioxus's
-//! `Event<FormData>::value()` reads the `.value` DOM property,
-//! which exists on `<textarea>` / `<input>` but **not** on a
-//! contenteditable element — that text lives in `.textContent`.
-//! Using `evt.value()` on contenteditable returns `""` on every
-//! keystroke, so the doc immediately collapses to empty (we hit
-//! this; the logs are diagnostic). Textarea avoids the issue
-//! entirely and proves the State → render → input → Transaction
-//! loop with no JS bridge. Contenteditable comes back in v1
-//! when we add decoration rendering — at that point we need
-//! `document::eval` to read `textContent` AND careful caret
-//! preservation across re-renders, both worthwhile but out of
-//! scope for v0.
+//! v1 architecture: a `<div contenteditable="plaintext-only">`
+//! whose text content is bound to `state.doc`. Phase A here is
+//! plain text only (a single rendered text child). Phase B adds
+//! decoration rendering as per-segment spans.
 //!
-//! What's intentionally missing in v0 (each its own future commit):
+//! ## Why contenteditable now (and how the cursor stays put)
 //!
-//! - Selection round-trip (DOM Selection ↔ Rust `Selection`).
-//!   For now selection lives in the browser; we only mirror text.
-//! - Decoration rendering (Mark / Replace / Widget / Line).
-//!   This is what forces the contenteditable swap.
-//! - Keymap dispatch (we let the browser handle keys for now).
-//! - History / undo.
+//! Contenteditable lets us render styled text (decorations) and
+//! still get a real caret. Textarea can't show inline styles.
 //!
-//! Today this component is the smallest thing that proves the
-//! `EditorState → render → input event → Transaction → new
-//! EditorState` loop works end-to-end.
+//! The trick to not eating the cursor on every re-render is:
+//! **render the same text Dioxus already has in the DOM**.
+//! Typing flow:
+//!
+//!   1. user presses 'a' → browser updates DOM textContent to "...a"
+//!   2. our JS bridge reads the new textContent, computes a diff
+//!      against the old `state.doc`, and applies a Transaction
+//!   3. Dioxus re-renders. The text child is `"{text}"` where
+//!      text == the new doc, which equals what the DOM already
+//!      contains. Dioxus's reconciler sees text node value
+//!      unchanged → emits no DOM mutation → caret untouched.
+//!
+//! For programmatic edits (a command, undo, remote CRDT op) the
+//! state diverges from the DOM. Dioxus updates the text node;
+//! the browser parks the caret at offset 0. A `use_effect`
+//! restores it from `state.selection` — but only when the DOM
+//! text already matches state.doc (preventing the writeback
+//! from fighting in-flight typing).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use editor_state::{Changes, EditorState, KeySpec, Keymap, Range, Selection, TransactionSpec};
 
-/// Per-instance id allocator. Each `<Editor>` mounts with a
-/// unique `data-editor-id`, used by the JS bridge to find the
-/// textarea this component owns (multiple editors per page is
-/// fine — they get distinct ids).
+/// Per-instance id allocator — each `<Editor>` mount gets a
+/// unique `data-editor-id` for the JS bridge to find it.
 static EDITOR_INSTANCE: AtomicU64 = AtomicU64::new(0);
 
-/// Props: a Signal carrying the current `EditorState`. The
-/// component reads it for rendering and writes a new state when
-/// the user types.
-///
-/// Owning the state via Signal (rather than internally) means
-/// the embedding app can: persist it, send transactions from
-/// remote peers, snapshot for undo, etc. — the editor is just a
-/// view.
-/// `keymap` is optional. When `None`, the browser handles every
-/// key as default-textarea behavior. When `Some(map)`, each
-/// `onkeydown` looks for a binding; if one matches *and* its
-/// command returns `Some(spec)`, we `preventDefault` and apply
-/// the transaction. Unmatched keys fall through to the browser.
+/// `keymap` is optional. When `None` the browser handles every
+/// key. When `Some`, each `onkeydown` looks for a matching
+/// binding whose command returns `Some(spec)` and we
+/// `preventDefault` + apply. Unmatched keys fall through.
 #[component]
 pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keymap>) -> Element {
     let text = state.read().doc.to_string();
@@ -61,26 +50,14 @@ pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keyma
         format!("editor-{n}")
     });
 
-    // Selection round-trip: DOM → state only. We install JS
-    // listeners on the textarea that fire `dioxus.send` whenever
-    // the caret moves *from a non-typing source* (arrow keys,
-    // click, drag-select, focus). The recv loop turns each into
-    // a selection-only transaction.
+    // ── DOM → state: input + selection bridge ────────────────────
     //
-    // **Critically, we do NOT listen on the `input` event.**
-    // oninput already maps the selection through the change set
-    // (After bias for the caret). Adding an async hop from the
-    // input event creates a race: by the time recv runs the user
-    // has often typed another char, and we'd then write a stale
-    // selection back. Letting only keyup/mouseup/select/focus
-    // through means the stream only carries *intentional* caret
-    // moves, never the just-typed-something case.
-    //
-    // We also intentionally skip the reverse direction (state →
-    // DOM `setSelectionRange`) for now — nothing in v0 changes
-    // selection programmatically. Re-add when commands need it,
-    // with transaction-origin tagging so writeback doesn't fight
-    // typing.
+    // Once on mount we install a single JS listener that wires up
+    // multiple DOM events and streams them back via dioxus.send.
+    // Each `input` message carries the new textContent + the
+    // current Selection so we can update doc and caret atomically.
+    // Other events (keyup/mouseup/select/focus) carry just
+    // selection for caret moves without text changes.
     {
         let id = editor_id.clone();
         use_hook(move || {
@@ -89,17 +66,55 @@ pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keyma
                     r#"
                     (function() {{
                         function attach() {{
-                            const ta = document.querySelector('[data-editor-id="{id}"]');
-                            if (!ta) {{ setTimeout(attach, 30); return; }}
-                            const send = () => dioxus.send([
-                                ta.selectionStart || 0,
-                                ta.selectionEnd   || 0,
-                            ]);
-                            ta.addEventListener('keyup',   send);
-                            ta.addEventListener('mouseup', send);
-                            ta.addEventListener('select',  send);
-                            ta.addEventListener('focus',   send);
-                            send(); // initial fire so state has the right caret on mount
+                            const el = document.querySelector('[data-editor-id="{id}"]');
+                            if (!el) {{ setTimeout(attach, 30); return; }}
+                            // For a single-text-node contenteditable
+                            // the DOM selection's anchorOffset is a
+                            // char offset in that text node — same as
+                            // our byte offset for ASCII content. We'll
+                            // upgrade to walking the DOM tree when we
+                            // emit decoration spans.
+                            function selOffsets() {{
+                                const s = window.getSelection();
+                                if (!s || s.rangeCount === 0) return [0, 0];
+                                const r = s.getRangeAt(0);
+                                // Walk to a numeric offset within el.
+                                const off = (node, n) => {{
+                                    if (!el.contains(node)) return null;
+                                    let total = 0;
+                                    const walker = document.createTreeWalker(
+                                        el, NodeFilter.SHOW_TEXT, null
+                                    );
+                                    let t;
+                                    while ((t = walker.nextNode())) {{
+                                        if (t === node) return total + n;
+                                        total += t.nodeValue.length;
+                                    }}
+                                    return null;
+                                }};
+                                const a = off(r.startContainer, r.startOffset);
+                                const b = off(r.endContainer, r.endOffset);
+                                if (a === null || b === null) return [0, 0];
+                                return [a, b];
+                            }}
+                            function sendInput() {{
+                                const [a, b] = selOffsets();
+                                dioxus.send({{
+                                    kind: 'input',
+                                    text: el.textContent,
+                                    sel: [a, b]
+                                }});
+                            }}
+                            function sendSel() {{
+                                const [a, b] = selOffsets();
+                                dioxus.send({{ kind: 'sel', sel: [a, b] }});
+                            }}
+                            el.addEventListener('input',   sendInput);
+                            el.addEventListener('keyup',   sendSel);
+                            el.addEventListener('mouseup', sendSel);
+                            el.addEventListener('select',  sendSel);
+                            el.addEventListener('focus',   sendSel);
+                            sendSel();
                         }}
                         attach();
                     }})();
@@ -107,40 +122,95 @@ pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keyma
                 );
                 let mut handle = document::eval(&script);
                 while let Ok(v) = handle.recv::<serde_json::Value>().await {
-                    let Some(arr) = v.as_array() else { continue };
-                    if arr.len() != 2 {
-                        continue;
-                    }
-                    let s = arr[0].as_u64().unwrap_or(0) as usize;
-                    let e = arr[1].as_u64().unwrap_or(0) as usize;
-                    let cur = state.read().clone();
-                    // Clamp against the live doc — a stale recv
-                    // from before a recent delete could otherwise
-                    // produce a selection past the doc end.
-                    let doc_len = cur.doc.len();
-                    let s = s.min(doc_len);
-                    let e = e.min(doc_len);
-                    let cur_primary = cur.selection.primary();
-                    if cur_primary.anchor == s && cur_primary.head == e {
-                        continue;
-                    }
-                    tracing::trace!(
-                        old_anchor = cur_primary.anchor,
-                        old_head = cur_primary.head,
-                        new_start = s,
-                        new_end = e,
-                        "editor.selection"
-                    );
-                    let new_sel = Selection::single(Range::new(s, e));
-                    state.set(cur.update(TransactionSpec::new().selection(new_sel)));
+                    handle_bridge_msg(state, &v);
                 }
             });
         });
     }
 
-    // onkeydown → keymap lookup → transaction. Each rendered
-    // closure captures the latest keymap clone; cheap because
-    // Keymap is a `Vec<KeyBinding>` of small structs.
+    // ── state → DOM: caret writeback for programmatic edits ──────
+    //
+    // Runs every render. Reads state.selection's primary range,
+    // checks the live DOM against state.doc — if the DOM hasn't
+    // caught up yet (still mid-typing), we skip so we don't fight
+    // the user. When they match, we set the DOM Selection to the
+    // state's caret. This is what lets `Mod-A` (select_all) and
+    // any future cursor-moving command actually move the caret.
+    {
+        let id = editor_id.clone();
+        use_effect(move || {
+            let s = state.read();
+            let doc = s.doc.to_string();
+            let p = s.selection.primary();
+            let from = p.from();
+            let to = p.to();
+            let doc_json = serde_json::to_string(&doc).unwrap_or_else(|_| "\"\"".into());
+            let script = format!(
+                r#"
+                (function() {{
+                    const el = document.querySelector('[data-editor-id="{id}"]');
+                    if (!el) return;
+                    // If the DOM hasn't caught up with state.doc
+                    // yet, the user just typed and selection from
+                    // state would be stale — skip and let the next
+                    // tick handle it.
+                    if (el.textContent !== {doc_json}) return;
+
+                    // Build a Range that targets the requested
+                    // byte/char offsets, walking text descendants.
+                    const targetRange = document.createRange();
+                    const setEnd = (offset, which) => {{
+                        let remaining = offset;
+                        const walker = document.createTreeWalker(
+                            el, NodeFilter.SHOW_TEXT, null
+                        );
+                        let node;
+                        while ((node = walker.nextNode())) {{
+                            const len = node.nodeValue.length;
+                            if (remaining <= len) {{
+                                if (which === 'start') {{
+                                    targetRange.setStart(node, remaining);
+                                }} else {{
+                                    targetRange.setEnd(node, remaining);
+                                }}
+                                return true;
+                            }}
+                            remaining -= len;
+                        }}
+                        // Past the end — pin to el.
+                        if (which === 'start') {{
+                            targetRange.setStart(el, el.childNodes.length);
+                        }} else {{
+                            targetRange.setEnd(el, el.childNodes.length);
+                        }}
+                        return true;
+                    }};
+                    setEnd({from}, 'start');
+                    setEnd({to}, 'end');
+
+                    const sel = window.getSelection();
+                    // Skip if DOM already matches — `setBaseAndExtent`
+                    // re-emits a selectionchange and our DOM→state
+                    // bridge would treat that as a fresh edit.
+                    if (sel && sel.rangeCount === 1) {{
+                        const cur = sel.getRangeAt(0);
+                        if (cur.startContainer === targetRange.startContainer
+                            && cur.startOffset === targetRange.startOffset
+                            && cur.endContainer === targetRange.endContainer
+                            && cur.endOffset === targetRange.endOffset) {{
+                            return;
+                        }}
+                    }}
+                    sel.removeAllRanges();
+                    sel.addRange(targetRange);
+                }})();
+                "#
+            );
+            let _ = document::eval(&script);
+        });
+    }
+
+    // ── onkeydown: keymap dispatch ───────────────────────────────
     let keymap_for_keys = keymap.clone();
     let on_keydown = move |evt: Event<KeyboardData>| {
         let Some(ref km) = keymap_for_keys else {
@@ -149,15 +219,8 @@ pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keyma
         let mods = evt.modifiers();
         let key_str = match evt.key() {
             Key::Character(c) => c,
-            // Display for Key emits W3C key names — "Enter",
-            // "ArrowUp", "Backspace", etc. — matching the
-            // convention CM6 uses in its key-spec strings.
             other => other.to_string(),
         };
-        // `Mod` resolves to Cmd on Mac (Meta), Ctrl elsewhere.
-        // We don't know the platform from inside the event so we
-        // accept both — a binding like "Mod-z" matches whichever
-        // the user actually pressed.
         let press = KeySpec {
             key: key_str,
             ctrl: mods.ctrl(),
@@ -174,41 +237,199 @@ pub fn Editor(state: Signal<EditorState>, #[props(default)] keymap: Option<Keyma
         }
     };
 
-    let on_input = move |evt: Event<FormData>| {
-        // v0: full-text replacement. The DOM hands us the new
-        // string; we diff naively by creating a Changes that
-        // wipes the old text and inserts the new. Later commits
-        // will compute a minimal diff (or read InputEvent
-        // ranges) so undo and CRDT ops are well-shaped.
-        let new_text = evt.value();
-        let old = state.read().clone();
-        let old_len = old.doc.len();
-        let new_len = new_text.len();
-        tracing::debug!(
-            old_len,
-            new_len,
-            delta = new_len as isize - old_len as isize,
-            "editor.input"
-        );
-        let changes = Changes::replace(0..old_len, new_text);
-        state.set(old.update(TransactionSpec::new().changes(changes)));
-    };
-
-    // `rows` grows to fit content so multi-line input doesn't
-    // hide rows. Capped so a huge paste doesn't take over the
-    // viewport. Newline-count + 1 because `str::lines()` ignores
-    // a trailing newline (the Shift-Enter-just-pressed case).
-    let rows = (text.bytes().filter(|c| *c == b'\n').count() + 1).clamp(4, 40) as i64;
-
     rsx! {
-        textarea {
+        div {
             class: "editor-root",
             "data-editor-id": "{editor_id}",
+            // `plaintext-only` strips formatting from paste +
+            // disables rich-text execCommands. Chromium/WebKit
+            // support it; Firefox falls back to "true". For our
+            // app this is the right default.
+            contenteditable: "plaintext-only",
             spellcheck: "false",
-            rows: "{rows}",
-            value: "{text}",
-            oninput: on_input,
             onkeydown: on_keydown,
+            // Children: render the doc text. The key trick is
+            // that when the DOM already has this text (user just
+            // typed it), Dioxus's reconciler is a no-op and the
+            // cursor isn't disturbed. Programmatic state changes
+            // are the only path that mutates the DOM here.
+            "{text}"
         }
+    }
+}
+
+/// Handle one `dioxus.send` message from the JS bridge. Lives
+/// outside the component for testability — given a state Signal
+/// and the parsed JSON, mutate.
+fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
+    let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+    let sel = v.get("sel").and_then(|s| s.as_array());
+    let (s_off, e_off) = match sel {
+        Some(a) if a.len() == 2 => (
+            a[0].as_u64().unwrap_or(0) as usize,
+            a[1].as_u64().unwrap_or(0) as usize,
+        ),
+        _ => (0, 0),
+    };
+
+    match kind {
+        "input" => {
+            let new_text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
+            let cur = state.read().clone();
+            let old_text = cur.doc.to_string();
+            if old_text == new_text {
+                // Selection-only update (e.g., an empty input
+                // event from IME). Treat like a `sel` message.
+                push_selection(&mut state, &cur, s_off, e_off);
+                return;
+            }
+            // Minimal diff: trim common prefix + suffix, then
+            // splice the middle. Good enough for single
+            // character typing AND multi-char paste/delete. CRDT
+            // integration later can produce finer-grained ops.
+            let changes = diff_text(&old_text, new_text);
+            let new_len = new_text.len();
+            let s_off = s_off.min(new_len);
+            let e_off = e_off.min(new_len).max(s_off);
+            tracing::debug!(
+                old_len = old_text.len(),
+                new_len,
+                sel_start = s_off,
+                sel_end = e_off,
+                "editor.input"
+            );
+            let new_sel = Selection::single(Range::new(s_off, e_off));
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "input"),
+            ));
+        }
+        "sel" => {
+            let cur = state.read().clone();
+            push_selection(&mut state, &cur, s_off, e_off);
+        }
+        _ => {}
+    }
+}
+
+/// Push a selection-only transaction if the new range differs
+/// from the current state.
+fn push_selection(state: &mut Signal<EditorState>, cur: &EditorState, s: usize, e: usize) {
+    let doc_len = cur.doc.len();
+    let s = s.min(doc_len);
+    let e = e.min(doc_len);
+    let cur_primary = cur.selection.primary();
+    if cur_primary.anchor == s && cur_primary.head == e {
+        return;
+    }
+    tracing::trace!(
+        old_anchor = cur_primary.anchor,
+        old_head = cur_primary.head,
+        new_start = s,
+        new_end = e,
+        "editor.selection"
+    );
+    let new_sel = Selection::single(Range::new(s, e));
+    state.set(cur.update(
+        TransactionSpec::new()
+            .selection(new_sel)
+            .annotate("origin", "input"),
+    ));
+}
+
+/// Compute a minimal `Changes` between two strings by trimming
+/// common prefix + suffix and replacing the diff in the middle.
+/// O(n) — good enough for typing and small pastes; replace with
+/// a proper diff algorithm later if we want minimal ops for
+/// large pastes too.
+fn diff_text(old: &str, new: &str) -> Changes {
+    let ob = old.as_bytes();
+    let nb = new.as_bytes();
+    let mut start = 0;
+    while start < ob.len() && start < nb.len() && ob[start] == nb[start] {
+        start += 1;
+    }
+    let mut o_end = ob.len();
+    let mut n_end = nb.len();
+    while o_end > start && n_end > start && ob[o_end - 1] == nb[n_end - 1] {
+        o_end -= 1;
+        n_end -= 1;
+    }
+    // Walk back to a UTF-8 boundary in case our binary trim
+    // landed in the middle of a multi-byte sequence.
+    while start > 0 && !old.is_char_boundary(start) {
+        start -= 1;
+    }
+    while o_end < ob.len() && !old.is_char_boundary(o_end) {
+        o_end += 1;
+    }
+    while n_end < nb.len() && !new.is_char_boundary(n_end) {
+        n_end += 1;
+    }
+    let inserted = &new[start..n_end];
+    Changes::replace(start..o_end, inserted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_appends_one_char() {
+        let c = diff_text("hello", "helloa");
+        let cs: Vec<_> = c.iter().cloned().collect();
+        assert_eq!(cs.len(), 1);
+        let only = &cs[0];
+        assert_eq!(only.from, 5);
+        assert_eq!(only.to, 5);
+        assert_eq!(only.inserted, "a");
+    }
+
+    #[test]
+    fn diff_inserts_in_middle() {
+        let c = diff_text("hello world", "hello big world");
+        let cs: Vec<_> = c.iter().cloned().collect();
+        assert_eq!(cs.len(), 1);
+        let only = &cs[0];
+        assert_eq!(only.from, 6);
+        assert_eq!(only.to, 6);
+        assert_eq!(only.inserted, "big ");
+    }
+
+    #[test]
+    fn diff_deletes_one_char() {
+        let c = diff_text("helloa", "hello");
+        let cs: Vec<_> = c.iter().cloned().collect();
+        assert_eq!(cs.len(), 1);
+        let only = &cs[0];
+        assert_eq!(only.from, 5);
+        assert_eq!(only.to, 6);
+        assert_eq!(only.inserted, "");
+    }
+
+    #[test]
+    fn diff_replaces_range() {
+        let c = diff_text("hello world", "hello RUST");
+        let cs: Vec<_> = c.iter().cloned().collect();
+        assert_eq!(cs.len(), 1);
+        let only = &cs[0];
+        assert_eq!(only.from, 6);
+        assert_eq!(only.to, 11);
+        assert_eq!(only.inserted, "RUST");
+    }
+
+    #[test]
+    fn diff_identical_is_empty() {
+        let c = diff_text("hello", "hello");
+        let cs: Vec<_> = c.iter().cloned().collect();
+        assert_eq!(cs.len(), 1);
+        // Trim-and-replace algorithm returns a no-op
+        // `replace(5..5, "")`. Functionally equivalent to empty
+        // for our apply path; could collapse in a follow-up.
+        let only = &cs[0];
+        assert_eq!(only.from, only.to);
+        assert_eq!(only.inserted, "");
     }
 }
