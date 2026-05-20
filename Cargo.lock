@@ -3041,6 +3041,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "editor"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "indexmap",
+ "notify",
+ "notify-debouncer-mini",
+ "publish-core",
+ "rfd 0.15.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "editor-types"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9711,6 +9730,7 @@ dependencies = [
  "crdt",
  "dioxus",
  "dioxus-router",
+ "editor",
  "fake",
  "fts-ui",
  "futures-channel",

@@ -43,6 +43,7 @@ knowledge-proto = { path = "features/knowledge/knowledge-proto" }
 knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
 knowledge-ui = { path = "features/knowledge/knowledge-ui" }
 publish-core = { path = "crates/publish-core" }
+editor = { path = "crates/editor" }
 attachments-proto = { path = "features/attachments/attachments-proto" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 

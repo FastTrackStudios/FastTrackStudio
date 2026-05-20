@@ -1,0 +1,121 @@
+/* Editor — minimal Logseq-flavored shell. We rely on the host
+   theme tokens (`--ls-*`) when present, with sensible fallbacks
+   so the crate also works standalone. */
+:root {
+    --ed-bg: var(--ls-primary-background-color, #161a22);
+    --ed-bg-2: var(--ls-secondary-background-color, #1f2530);
+    --ed-fg: var(--ls-primary-text-color, #d3d8e0);
+    --ed-fg-muted: var(--ls-secondary-text-color, #8c93a3);
+    --ed-border: var(--ls-border-color, #2a3140);
+    --ed-accent: var(--ls-active-primary-color, #5b9eb3);
+    --ed-link: var(--ls-link-text-color, #6abad1);
+}
+
+.editor-shell {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 100vh;
+    background: var(--ed-bg);
+    color: var(--ed-fg);
+    font-family: system-ui, sans-serif;
+    font-size: 14px;
+}
+.editor-sidebar {
+    background: var(--ed-bg-2);
+    border-right: 1px solid var(--ed-border);
+    padding: 0.8em 0.4em;
+    overflow-y: auto;
+}
+.editor-sidebar h2 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ed-fg-muted);
+    margin: 0.8em 0.5em 0.4em;
+    font-weight: 600;
+}
+.editor-sidebar .nav-item,
+.editor-sidebar .page-link {
+    display: block;
+    padding: 0.3em 0.6em;
+    border-radius: 4px;
+    color: var(--ed-fg);
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.editor-sidebar .nav-item:hover,
+.editor-sidebar .page-link:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.editor-sidebar .nav-item.active,
+.editor-sidebar .page-link.active {
+    background: rgba(91, 158, 179, 0.18);
+    color: var(--ed-link);
+}
+.editor-main {
+    overflow-y: auto;
+}
+.editor-pane {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2em 2em 4em;
+}
+.editor-pane h1 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    margin: 0 0 0.6em;
+}
+
+/* Block list. */
+.editor-block-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1em;
+}
+.editor-block {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4em;
+    padding: 0.15em 0;
+}
+.editor-bullet {
+    flex: none;
+    width: 1em;
+    height: 1.5em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ed-fg-muted);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-bullet::before { content: "•"; }
+.editor-block-body {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.55;
+    cursor: text;
+}
+.editor-block-body.empty {
+    color: var(--ed-fg-muted);
+    font-style: italic;
+}
+.editor-block-children {
+    margin-left: 1.4em;
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
+    padding-left: 0.4em;
+}
+.editor-textarea {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    padding: 0;
+    overflow: hidden;
+    min-height: 1.5em;
+}
