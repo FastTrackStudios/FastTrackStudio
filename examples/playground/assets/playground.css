@@ -217,9 +217,22 @@ section h2 {
    editable. Two classes instead of one to avoid CSS having to
    guess whether the line is "current". */
 .editor-root .cm-line.md-hr {
+    /* Keep a full text row of height so the HR doesn't pull the
+       next line up. The dashes are hidden by Replace; an invisible
+       (pseudo) character inside the line gives the row its
+       natural height. The border-top draws the rule centered-ish
+       within that row via padding offset. */
+    position: relative;
+    color: transparent;
+    user-select: none;
+}
+.editor-root .cm-line.md-hr::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
     border-top: 1px solid #4a526a;
-    min-height: 0;
-    line-height: 0;
 }
 .editor-root .cm-line.md-hr-active {
     color: #6a7392;
