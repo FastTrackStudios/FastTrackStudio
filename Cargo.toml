@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/editor-state",
+    "crates/editor-syntax",
     "crates/editor-view",
     "crates/editor",
     "examples/playground",
@@ -18,11 +19,17 @@ rust-version = "1.80"
 [workspace.dependencies]
 # Internal
 editor-state = { path = "crates/editor-state" }
+editor-syntax = { path = "crates/editor-syntax" }
 editor-view = { path = "crates/editor-view" }
 editor = { path = "crates/editor" }
 
 # UI
 dioxus = "0.7"
+
+# Syntax highlighting (tree-sitter via Arborium)
+arborium = { version = "2.16.0", default-features = false }
+arborium-theme = "2.16.0"
+arborium-tree-sitter = "2.16.0"
 
 # Doc model
 ropey = "1.6"
