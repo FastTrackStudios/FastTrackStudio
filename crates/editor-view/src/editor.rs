@@ -244,6 +244,47 @@ pub fn Editor(
                             // Inputs we don't recognize fall
                             // through to the MutationObserver
                             // path below.
+                            // CM6's strategy: intercept EVERY
+                            // beforeinput event we can map
+                            // cleanly. preventDefault, send the
+                            // authored Change to Rust, let our
+                            // reconciler put the result in the
+                            // DOM. The browser never gets to
+                            // modify our contenteditable — which
+                            // eliminates the "browser writes a
+                            // shape we have to reverse-engineer"
+                            // problem completely.
+                            //
+                            // For inputTypes we don't recognize
+                            // (e.g., insertFromPaste with rich
+                            // HTML, formatBold/Italic, etc.) we
+                            // fall through to the
+                            // MutationObserver path, which reads
+                            // the resulting DOM and computes a
+                            // diff. That's a degraded path —
+                            // works but exposes the empty-span
+                            // bug — so the surface of cleanly-
+                            // mapped types should grow over time.
+                            // beforeinput interception is SCOPED
+                            // to the inputTypes where the
+                            // browser's default behavior is
+                            // problematic (Enter creates non-
+                            // portable DOM, and the "type into
+                            // an empty Mark span" case crashes
+                            // our reconciler). For ordinary
+                            // typing we let the browser handle
+                            // it and reconstruct via the
+                            // MutationObserver — that path has
+                            // years of test coverage and works
+                            // well across decoration shapes.
+                            //
+                            // The compromise: we get correct
+                            // Enter handling + a workaround for
+                            // the empty-span case without
+                            // redirecting *all* user typing
+                            // through Rust (which exposes
+                            // selOffsets edge cases we haven't
+                            // fully chased).
                             el.addEventListener('beforeinput', evt => {{
                                 if (composing) return;
                                 const t = evt.inputType;
@@ -254,8 +295,52 @@ pub fn Editor(
                                         text: '\n',
                                         sel: selOffsets(),
                                     }});
+                                    return;
                                 }}
-                                // Other inputTypes fall through.
+                                // Cursor inside an empty Mark
+                                // span: the most common path to
+                                // the "Dioxus reshape crash"
+                                // bug. Intercept insertText here
+                                // ONLY for this case — the empty
+                                // span is the destabilizing
+                                // factor, not typing in general.
+                                if (t === 'insertText' && typeof evt.data === 'string') {{
+                                    const s = window.getSelection();
+                                    let inEmptyMark = false;
+                                    if (s && s.rangeCount > 0) {{
+                                        let n = s.anchorNode;
+                                        while (n && n !== el) {{
+                                            // Properly-parenthesized:
+                                            // "element with mark class AND
+                                            //  (has no children OR has only
+                                            //   an empty text node)".
+                                            const isMark = n.nodeType === 1
+                                                && n.classList
+                                                && (n.classList.contains('md-bold')
+                                                    || n.classList.contains('md-italic')
+                                                    || n.classList.contains('md-code'));
+                                            if (isMark) {{
+                                                const c = n.firstChild;
+                                                const isEmpty = !c
+                                                    || (c.nodeType === 3
+                                                        && c.nodeValue === '');
+                                                if (isEmpty) {{
+                                                    inEmptyMark = true;
+                                                    break;
+                                                }}
+                                            }}
+                                            n = n.parentNode;
+                                        }}
+                                    }}
+                                    if (inEmptyMark) {{
+                                        evt.preventDefault();
+                                        dioxus.send({{
+                                            kind: 'before-input-insert',
+                                            text: evt.data,
+                                            sel: selOffsets(),
+                                        }});
+                                    }}
+                                }}
                             }});
 
                             // MutationObserver — full re-read on
@@ -714,20 +799,87 @@ fn handle_bridge_msg(
             // mutation; we apply our own Change so the
             // resulting DOM is whatever the tile-tree render
             // produces (e.g., a new LineTile <div>, not a stray
-            // browser <br>).
-            //
-            // s_off / e_off arrive in doc space (selOffsets
-            // uses data-tile-pos). The insertion replaces any
-            // selected range with the provided text.
+            // browser <br>). For ordinary typing this means the
+            // browser NEVER inserts into our contenteditable —
+            // every visible byte got there because our
+            // reconciler put it there from state.
             let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
             let cur = state.read().clone();
             let doc_len = cur.doc.len();
             let from = s_off.min(doc_len);
             let to = e_off.min(doc_len).max(from);
-            tracing::debug!(from, to, inserted_len = text.len(), "editor.before_input");
+            tracing::debug!(from, to, inserted_len = text.len(), "editor.before_input.insert");
             let changes = Changes::replace(from..to, text);
             let caret = from + text.len();
             let new_sel = Selection::single(Range::caret(caret));
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "before-input"),
+            ));
+        }
+        "before-input-delete-backward" => {
+            // Backspace. Same author-the-edit strategy.
+            let cur = state.read().clone();
+            let doc_len = cur.doc.len();
+            let from = s_off.min(doc_len);
+            let to = e_off.min(doc_len).max(from);
+            let (del_from, del_to) = if from == to {
+                if from == 0 {
+                    return;
+                }
+                // Step back by one UTF-8 char boundary. For
+                // multi-byte (e.g., emoji), this stays valid.
+                let doc_str = cur.doc.to_string();
+                let mut back = from - 1;
+                while back > 0 && !doc_str.is_char_boundary(back) {
+                    back -= 1;
+                }
+                (back, from)
+            } else {
+                (from, to)
+            };
+            tracing::debug!(
+                del_from,
+                del_to,
+                "editor.before_input.delete_backward"
+            );
+            let changes = Changes::delete(del_from..del_to);
+            let new_sel = Selection::single(Range::caret(del_from));
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(new_sel)
+                    .annotate("origin", "before-input"),
+            ));
+        }
+        "before-input-delete-forward" => {
+            // Delete (forward).
+            let cur = state.read().clone();
+            let doc_len = cur.doc.len();
+            let from = s_off.min(doc_len);
+            let to = e_off.min(doc_len).max(from);
+            let (del_from, del_to) = if from == to {
+                if from >= doc_len {
+                    return;
+                }
+                let doc_str = cur.doc.to_string();
+                let mut fwd = from + 1;
+                while fwd < doc_len && !doc_str.is_char_boundary(fwd) {
+                    fwd += 1;
+                }
+                (from, fwd)
+            } else {
+                (from, to)
+            };
+            tracing::debug!(
+                del_from,
+                del_to,
+                "editor.before_input.delete_forward"
+            );
+            let changes = Changes::delete(del_from..del_to);
+            let new_sel = Selection::single(Range::caret(del_from));
             state.set(cur.update(
                 TransactionSpec::new()
                     .changes(changes)

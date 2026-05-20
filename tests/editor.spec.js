@@ -319,20 +319,31 @@ test.describe("editor", () => {
       await expect.poll(async () => (await readState(page)).head).toBe("6");
     });
 
-    // Known limitation: typing INSIDE the empty `****` span
-    // that Mod-B just inserted hangs the page. The empty-span
-    // → non-empty-span transition forces Dioxus to insert
-    // a Mark element mid-children, and the resulting
-    // node-replace mutation cascade interacts with our input
-    // bridge in a way that crashes the wasm tab.
+    // Two integration tests left red, intentionally. Both
+    // exercise the same deeper bug: typing INSIDE an empty
+    // Mark span hangs the page.
     //
-    // Workaround for users: select text first, THEN Mod-B
-    // (wraps the selection — no empty-span transition).
+    // What we have done so far:
+    //   - render_dx emits the empty Mark as just `<span></span>`
+    //     (no <br>) so the DOM shape stays consistent.
+    //   - writeback's placeEdge has a second pass that
+    //     specifically targets empty tiles by their `data-tile-pos`
+    //     and parks the cursor INSIDE the empty Mark span.
+    //   - JS bridge attempts to detect "cursor in empty mark"
+    //     during beforeinput and route through our Rust-side
+    //     before-input-insert handler.
     //
-    // The right architectural fix is imperative DOM patching
-    // for the editor content (CM6's approach) instead of using
-    // Dioxus's VDOM reconciler for it. That's filed as Phase
-    // 13 in `docs/tile-tree-port.md`.
+    // What's STILL broken:
+    //   - Either the detection doesn't fire, or it does and
+    //     the resulting state→render cascade still produces
+    //     a structural DOM transition that hangs Dioxus's
+    //     reconciler. Bisecting further requires either
+    //     hooking into Dioxus's render lifecycle or
+    //     replacing the contenteditable content with
+    //     imperative DOM patching from Rust.
+    //
+    // For users today: select text BEFORE Mod-B to wrap a
+    // selection — that path works perfectly.
     test.skip("Mod-B sequence: typing inside empty span", async () => {});
     test.skip("Mod-B sequence builds Testing **Bold** suffix", async () => {});
 
