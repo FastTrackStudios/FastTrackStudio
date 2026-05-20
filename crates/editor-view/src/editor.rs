@@ -195,68 +195,29 @@ pub fn Editor(
                             // `view/src/domobserver.ts:103+`
                             // (the `observe` method).
                             //
-                            // Phase 12 precise mutation reading
-                            // tries to compute a typed
-                            // [from, to, text] Change directly
-                            // from the MutationRecord for the
-                            // common single-characterData case
-                            // (= every normal keystroke). Other
-                            // mutations fall back to sendInput
-                            // (full re-read). Precise mode gives
-                            // us correct undo grouping and is
-                            // O(tile text size) instead of
-                            // O(doc length) per keystroke.
-                            const mo = new MutationObserver(records => {{
+                            // MutationObserver — full re-read on
+                            // every mutation. Phase 12's precise
+                            // single-record path is parked: each
+                            // mutate message was an *incremental*
+                            // delta dependent on the DOM state at
+                            // mutation time, which races with
+                            // Dioxus's render echo and can desync
+                            // state from DOM. The full re-read is
+                            // self-contained — each sendInput
+                            // captures the COMPLETE textContent
+                            // at that moment, so the Rust-side
+                            // diff is robust regardless of
+                            // ordering. We'll re-introduce precise
+                            // mode once we have transaction-origin
+                            // tagging in Dioxus to suppress
+                            // observer fires from our own writes.
+                            const mo = new MutationObserver(() => {{
                                 if (composing) return;
-                                if (records.length === 1
-                                    && records[0].type === 'characterData') {{
-                                    const r = records[0];
-                                    const node = r.target;
-                                    const parent = node.parentElement;
-                                    if (parent
-                                        && parent.dataset
-                                        && parent.dataset.tilePos != null) {{
-                                        const tilePos = parseInt(
-                                            parent.dataset.tilePos, 10
-                                        );
-                                        const oldText = r.oldValue || '';
-                                        const newText = node.nodeValue || '';
-                                        // Trim common prefix.
-                                        let start = 0;
-                                        const minLen = Math.min(
-                                            oldText.length, newText.length
-                                        );
-                                        while (start < minLen
-                                            && oldText.charCodeAt(start)
-                                               === newText.charCodeAt(start)) {{
-                                            start++;
-                                        }}
-                                        // Trim common suffix.
-                                        let oEnd = oldText.length;
-                                        let nEnd = newText.length;
-                                        while (oEnd > start && nEnd > start
-                                            && oldText.charCodeAt(oEnd - 1)
-                                               === newText.charCodeAt(nEnd - 1)) {{
-                                            oEnd--; nEnd--;
-                                        }}
-                                        const [a, b] = selOffsets();
-                                        dioxus.send({{
-                                            kind: 'mutate',
-                                            from: tilePos + start,
-                                            to:   tilePos + oEnd,
-                                            text: newText.slice(start, nEnd),
-                                            sel:  [a, b],
-                                        }});
-                                        return;
-                                    }}
-                                }}
-                                // Anything else: full re-read.
                                 sendInput();
                             }});
                             mo.observe(el, {{
                                 childList: true,
                                 characterData: true,
-                                characterDataOldValue: true,
                                 subtree: true,
                             }});
 
@@ -446,15 +407,24 @@ fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
             let old_text = cur.doc.to_string();
             if old_text == new_text {
                 // Selection-only update (e.g., an empty input
-                // event from IME). Treat like a `sel` message.
+                // event from IME, or a Dioxus echo where DOM
+                // matches state). Treat like a `sel` message
+                // — `push_selection` is itself a no-op when
+                // the selection also matches.
                 push_selection(&mut state, &cur, s_off, e_off);
                 return;
             }
             // Minimal diff: trim common prefix + suffix, then
             // splice the middle. Good enough for single
-            // character typing AND multi-char paste/delete. CRDT
-            // integration later can produce finer-grained ops.
+            // character typing AND multi-char paste/delete.
             let changes = diff_text(&old_text, new_text);
+            if changes.is_empty() {
+                // Defensive: diff_text shouldn't return empty
+                // for different strings, but if it does, treat
+                // as a no-op edit and just sync selection.
+                push_selection(&mut state, &cur, s_off, e_off);
+                return;
+            }
             let new_len = new_text.len();
             let s_off = s_off.min(new_len);
             let e_off = e_off.min(new_len).max(s_off);
@@ -476,43 +446,6 @@ fn handle_bridge_msg(mut state: Signal<EditorState>, v: &serde_json::Value) {
         "sel" => {
             let cur = state.read().clone();
             push_selection(&mut state, &cur, s_off, e_off);
-        }
-        "mutate" => {
-            // Phase 12 precise mutation path. The JS bridge
-            // already computed a single typed Change targeting
-            // [from, to) in doc space. Apply directly without
-            // re-diffing the whole text.
-            let from = v
-                .get("from")
-                .and_then(|x| x.as_u64())
-                .unwrap_or(0) as usize;
-            let to = v
-                .get("to")
-                .and_then(|x| x.as_u64())
-                .unwrap_or(0) as usize;
-            let text = v
-                .get("text")
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string();
-            let cur = state.read().clone();
-            // Clamp against the live doc as a safety net —
-            // if the precise change is somehow stale we'd
-            // rather no-op than panic.
-            let doc_len = cur.doc.len();
-            let from = from.min(doc_len);
-            let to = to.min(doc_len).max(from);
-            tracing::debug!(from, to, len_inserted = text.len(), "editor.mutate");
-            let changes = Changes::replace(from..to, text);
-            let s_off = s_off.min(doc_len);
-            let e_off = e_off.min(doc_len).max(s_off);
-            let new_sel = Selection::single(Range::new(s_off, e_off));
-            state.set(cur.update(
-                TransactionSpec::new()
-                    .changes(changes)
-                    .selection(new_sel)
-                    .annotate("origin", "input"),
-            ));
         }
         "composition-start" => {
             // Inform extensions (none yet) that composition has
