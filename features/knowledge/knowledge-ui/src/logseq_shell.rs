@@ -981,6 +981,51 @@ pub fn LogseqShell() -> Element {
         anchor: select_anchor,
     });
 
+    // Global Cmd/Ctrl-K — opens the command palette. We listen
+    // at window level via a JS keydown delegate that dispatches a
+    // custom event, then bridge it back to Rust over a
+    // dioxus.send channel. Same pattern as the PDF open bridge
+    // above. Esc closes the palette.
+    let mut cmd_k_for_keys = cmd_k;
+    use_hook(move || {
+        spawn(async move {
+            let mut handle = document::eval(
+                r#"
+                if (!window.__taskCmdKWired) {
+                    window.__taskCmdKWired = true;
+                    window.addEventListener('keydown', function(e) {
+                        if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+                            e.preventDefault();
+                            // Focus the header search box so the
+                            // user can start typing immediately.
+                            requestAnimationFrame(function() {
+                                const inp = document.querySelector('.ls-search');
+                                if (inp) {
+                                    inp.focus();
+                                    if (inp.select) inp.select();
+                                }
+                            });
+                            dioxus.send({ op: 'open' });
+                        } else if (e.key === 'Escape') {
+                            dioxus.send({ op: 'close' });
+                        }
+                    });
+                }
+                "#,
+            );
+            loop {
+                match handle.recv::<serde_json::Value>().await {
+                    Ok(v) => match v.get("op").and_then(|x| x.as_str()) {
+                        Some("open") => cmd_k_for_keys.set(Some(String::new())),
+                        Some("close") => cmd_k_for_keys.set(None),
+                        _ => continue,
+                    },
+                    Err(_) => break,
+                }
+            }
+        });
+    });
+
     // Import toast — `Some(message)` while the result of an
     // import is shown to the user.
     let import_toast: Signal<Option<String>> = use_signal(|| None);
