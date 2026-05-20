@@ -395,6 +395,226 @@ test.describe("editor", () => {
     });
   });
 
+  test.describe("cursor preservation", () => {
+    // Regression coverage for the "every render resets the
+    // cursor to position 0" bug. The bug was: the state→DOM
+    // selection writeback compared `el.textContent` against
+    // `state.doc`, but textContent doesn't include `\n` between
+    // block children — so multi-line docs always failed the
+    // check, the writeback never ran, and the cursor sat
+    // wherever Dioxus's reconciler had dropped it after each
+    // mutation (often offset 0).
+    //
+    // Each test below pins down a different way the bug
+    // surfaced. Add new tests here when you find another.
+    test.beforeEach(async ({ page }) => {
+      // Use `nodeco=1` for the basic cases — the bug exists
+      // independent of decorations. Decoration-specific
+      // variants live in the separate block below.
+      await page.goto(
+        "/?seed=Line%20one%0ALine%20two%0ALine%20three&nodeco=1"
+      );
+      await editor(page).waitFor();
+      await expect.poll(async () => (await readState(page)).len).toBe("28");
+    });
+
+    test("cursor stays at end-of-doc after typing a character", async ({
+      page,
+    }) => {
+      await editor(page).focus();
+      // Place at end of doc (pos 28).
+      await setCaret(page, 28);
+      await expect.poll(async () => (await readState(page)).head).toBe("28");
+      await page.keyboard.insertText("X");
+      // Cursor should be at 29, NOT 0.
+      await expect.poll(async () => (await readState(page)).head).toBe("29");
+      await expect.poll(async () => (await readState(page)).text).toBe(
+        "Line one\nLine two\nLine threeX"
+      );
+    });
+
+    test("cursor stays mid-line after typing", async ({ page }) => {
+      // Caret in the middle of line 2 (between "Line " and
+      // "two"). doc pos = 9 + 5 = 14.
+      await editor(page).focus();
+      await setCaret(page, 14);
+      await expect.poll(async () => (await readState(page)).head).toBe("14");
+      await page.keyboard.insertText("X");
+      // Cursor advances to 15 — NOT 0, NOT end-of-doc.
+      await expect.poll(async () => (await readState(page)).head).toBe("15");
+    });
+
+    test("cursor stays through multiple keystrokes in middle of doc", async ({
+      page,
+    }) => {
+      // Type a multi-char burst in the middle and verify the
+      // cursor advances one char per char, never resetting.
+      await editor(page).focus();
+      await setCaret(page, 14);
+      const before = "abcde";
+      for (let i = 0; i < before.length; i++) {
+        await page.keyboard.insertText(before[i]);
+        // After each char, cursor must be at the previous
+        // position + 1 — never 0, never anywhere else.
+        const expected = String(14 + i + 1);
+        await expect
+          .poll(async () => (await readState(page)).head)
+          .toBe(expected);
+      }
+    });
+
+    test("cursor stays after backspace mid-line", async ({ page }) => {
+      await editor(page).focus();
+      await setCaret(page, 14);
+      await expect.poll(async () => (await readState(page)).head).toBe("14");
+      await page.keyboard.press("Backspace");
+      // Cursor moves to 13, NOT to 0.
+      await expect.poll(async () => (await readState(page)).head).toBe("13");
+    });
+
+    test("cursor stays after pressing Enter mid-line", async ({ page }) => {
+      // Enter is routed through beforeinput-insert which splits
+      // a line — exactly the kind of structural mutation that
+      // used to orphan the cursor.
+      await editor(page).focus();
+      await setCaret(page, 14);
+      await page.keyboard.press("Enter");
+      // Cursor moves +1 (past the inserted \n), NOT 0.
+      await expect.poll(async () => (await readState(page)).head).toBe("15");
+      // And there's an extra line now.
+      const after = await readState(page);
+      expect(Number(after.len)).toBe(29);
+    });
+
+    test("cursor across many small edits never collapses to 0", async ({
+      page,
+    }) => {
+      // The deepest version of the regression: a long sequence
+      // of typing + backspace + arrow operations. After each
+      // step the cursor must be at a sensible non-zero
+      // position. We log every cursor jump so any future
+      // regression points at the specific operation.
+      await editor(page).focus();
+      await setCaret(page, 9); // start of line 2
+      await expect.poll(async () => (await readState(page)).head).toBe("9");
+      for (const ch of "Hello") {
+        const before = Number((await readState(page)).head);
+        await page.keyboard.insertText(ch);
+        const after = Number((await readState(page)).head);
+        expect(after, `after typing '${ch}' from ${before}`).toBe(before + 1);
+      }
+      // ArrowLeft x3: each step head -= 1, never collapses.
+      for (let i = 0; i < 3; i++) {
+        const before = Number((await readState(page)).head);
+        await page.keyboard.press("ArrowLeft");
+        const after = Number((await readState(page)).head);
+        expect(after, `after ArrowLeft from ${before}`).toBe(before - 1);
+      }
+      // Backspace twice: head -= 1, len -= 1, never collapses.
+      for (let i = 0; i < 2; i++) {
+        const before = Number((await readState(page)).head);
+        const lenBefore = Number((await readState(page)).len);
+        await page.keyboard.press("Backspace");
+        const after = await readState(page);
+        expect(Number(after.head), `head after BS from ${before}`).toBe(
+          before - 1
+        );
+        expect(Number(after.len), `len after BS from ${lenBefore}`).toBe(
+          lenBefore - 1
+        );
+      }
+    });
+
+    test("cursor never resets to 0 across many random renders", async ({
+      page,
+    }) => {
+      // Stress-style. Type a bunch of chars at the end of the
+      // doc. Each render emits a new tile arena (fresh
+      // data-tile-ids), which used to be what triggered the
+      // bug. Asserts the cursor matches what it should be at
+      // every step.
+      await editor(page).focus();
+      await setCaret(page, 28);
+      const expectedFinal = 28 + 30;
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.insertText("z");
+        const got = Number((await readState(page)).head);
+        // The cursor must NEVER be 0 once we've started typing.
+        expect(got, `iteration ${i}`).toBeGreaterThan(0);
+      }
+      // Final position lands at end of inserts.
+      await expect
+        .poll(async () => Number((await readState(page)).head))
+        .toBe(expectedFinal);
+    });
+  });
+
+  test.describe("cursor preservation with live-preview decorations", () => {
+    // Same regressions as the block above, but with the
+    // markdown decoration source ON. Decoration shape changes
+    // mid-typing (e.g., cursor leaving a `**...**` span makes
+    // the markers hide → tile-tree rebuilds → text nodes get
+    // replaced) are the most aggressive form of the "cursor
+    // gets orphaned" bug. These tests pin it down.
+    test.beforeEach(async ({ page }) => {
+      // Seed: "hello **world** after" — 21 doc bytes. When
+      // caret sits outside the **world** span, live_preview
+      // hides the markers (Hidden tiles), so the rendered
+      // visible text is "hello world after" (17 chars).
+      await page.goto("/?seed=hello%20**world**%20after");
+      await editor(page).waitFor();
+      await expect.poll(async () => (await readState(page)).len).toBe("21");
+    });
+
+    test("typing after a decorated span keeps cursor at end", async ({
+      page,
+    }) => {
+      await editor(page).focus();
+      // Place caret at end of doc (pos 21).
+      await setCaret(page, 21);
+      await expect.poll(async () => (await readState(page)).head).toBe("21");
+      await page.keyboard.insertText("!");
+      // Cursor at 22, NOT 0.
+      await expect.poll(async () => (await readState(page)).head).toBe("22");
+    });
+
+    test("cursor advances each step when typing many chars at end", async ({
+      page,
+    }) => {
+      await editor(page).focus();
+      await setCaret(page, 21);
+      for (let i = 0; i < 10; i++) {
+        const before = Number((await readState(page)).head);
+        await page.keyboard.insertText("x");
+        const after = Number((await readState(page)).head);
+        expect(after, `step ${i}: head went ${before} → ${after}`).toBe(
+          before + 1
+        );
+      }
+    });
+
+    test("cursor doesn't collapse when caret crosses decoration boundary", async ({
+      page,
+    }) => {
+      // Place caret inside the **world** span at doc 9 (the
+      // 'w'). live_preview keeps markers visible while caret
+      // touches the span. Move caret right past the closing
+      // `**` (doc 15) — markers should now hide, which
+      // rebuilds the tile tree. The crucial property is
+      // "cursor does NOT collapse to 0" — what the
+      // user-reported bug looked like.
+      await editor(page).focus();
+      await setCaret(page, 9);
+      await expect.poll(async () => (await readState(page)).head).toBe("9");
+      for (let i = 0; i < 8; i++) {
+        await page.keyboard.press("ArrowRight");
+      }
+      const head = Number((await readState(page)).head);
+      expect(head, "cursor did NOT collapse to 0").toBeGreaterThan(0);
+      expect(head).toBeGreaterThan(9);
+    });
+  });
+
   test("typing does not lose characters under fast input", async ({
     page,
   }) => {

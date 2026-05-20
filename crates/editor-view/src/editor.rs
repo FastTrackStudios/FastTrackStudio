@@ -565,17 +565,44 @@ fn handle_bridge_msg(
                 .map(|c| c.delta())
                 .sum::<isize>();
             let new_doc_len = new_doc_len.max(0) as usize;
-            let s_off = s_off.min(new_doc_len);
-            let e_off = e_off.min(new_doc_len).max(s_off);
+            // Compute the new caret from the diff itself rather
+            // than trust the sel field from the JS bridge. After
+            // Dioxus's reconciler removes/re-creates the text
+            // nodes our DOM Selection was anchored to, the
+            // browser falls back to whatever position it can
+            // find (often the start of the next/prev text tile),
+            // and that bogus position used to leak into
+            // state.selection — causing the cursor to jump
+            // backward mid-typing. The diff knows the user's
+            // INTENT: each Change ends at change.from +
+            // inserted.len() in post-change doc space.
+            let intended_caret = changes
+                .iter()
+                .last()
+                .map(|c| {
+                    // Pre-change `c.from` plus the inserted
+                    // length plus accumulated delta from prior
+                    // changes.
+                    let prior_delta: isize = changes
+                        .iter()
+                        .take_while(|x| (*x).from < c.from)
+                        .map(|x| x.delta())
+                        .sum();
+                    (c.from as isize + prior_delta + c.inserted.len() as isize)
+                        .max(0) as usize
+                })
+                .unwrap_or(s_off)
+                .min(new_doc_len);
             tracing::debug!(
                 old_visible_len = old_visible.text.len(),
                 new_visible_len = new_visible.len(),
                 new_doc_len,
-                sel_start = s_off,
-                sel_end = e_off,
+                intended_caret,
+                js_sel_start = s_off,
+                js_sel_end = e_off,
                 "editor.input"
             );
-            let new_sel = Selection::single(Range::new(s_off, e_off));
+            let new_sel = Selection::caret(intended_caret);
             state.set(cur.update(
                 TransactionSpec::new()
                     .changes(changes)

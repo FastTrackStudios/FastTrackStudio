@@ -4,17 +4,26 @@ Browser tests for the Editor playground. Modeled on Dioxus's own
 [`playwright-tests`](https://github.com/DioxusLabs/dioxus/tree/main/packages/playwright-tests)
 setup.
 
-## First-time setup
+## Running (quick)
+
+From the **repo root**:
 
 ```sh
-# from this directory:
-pnpm install               # or `npm install`
-pnpm install-browsers      # downloads Chromium for Playwright
+just test                        # headless, full suite
+just test-headed                 # opens a real Chromium window
+just test-ui                     # interactive Playwright UI
+just test-only "cursor stays"    # filter by substring
 ```
 
-## Running
+`just test` handles `pnpm install` for you. Chromium and Node
+come from the nix flake — no `pnpm install-browsers` step.
+
+## Running (without `just`)
+
+From this directory:
 
 ```sh
+pnpm install               # one-time
 pnpm test                  # headless
 pnpm test:headed           # opens a real Chromium window
 pnpm test:ui               # interactive UI mode
