@@ -110,18 +110,24 @@ mod tests {
     use crate::tile::build::build_tiles;
     use editor_state::Decoration;
 
+    /// Helper: the (sole) LineTile under the doc.
+    fn first_line(arena: &Arena, doc: TileId) -> TileId {
+        arena.get(doc).children[0]
+    }
+
     #[test]
     fn pos_from_tile_plain_text() {
-        // "hello" → Doc → Text(0..5). Tile + offset 3 → pos 3.
+        // "hello" → Doc → Line → Text(0..5). Tile + offset 3
+        // → pos 3 (LineTile contributes 0 since it's at start).
         let (arena, doc) = build_tiles("hello", &[]);
-        let text = arena.get(doc).children[0];
+        let text = arena.get(first_line(&arena, doc)).children[0];
         assert_eq!(pos_from_tile(&arena, text, 3), 3);
     }
 
     #[test]
     fn leaf_at_pos_in_plain_text() {
         let (arena, doc) = build_tiles("hello", &[]);
-        let text = arena.get(doc).children[0];
+        let text = arena.get(first_line(&arena, doc)).children[0];
         let (got, off) = leaf_at_pos(&arena, doc, 3, Side::After);
         assert_eq!(got, text);
         assert_eq!(off, 3);
@@ -129,11 +135,10 @@ mod tests {
 
     #[test]
     fn leaf_at_pos_after_mark() {
-        // "he<bold>ll</bold>o" — at pos 3 (inside bold), leaf
-        // should be the inner TextTile of the MarkTile.
         let decs = vec![Decoration::mark(2..4, "bold")];
         let (arena, doc) = build_tiles("hello", &decs);
-        let mark = arena.get(doc).children[1];
+        let line = first_line(&arena, doc);
+        let mark = arena.get(line).children[1];
         let inner_text = arena.get(mark).children[0];
         let (got, off) = leaf_at_pos(&arena, doc, 3, Side::After);
         assert_eq!(got, inner_text);
@@ -142,11 +147,10 @@ mod tests {
 
     #[test]
     fn leaf_at_pos_at_boundary_side_after_picks_right() {
-        // pos 2 is the boundary between Text(0..2) and Mark(2..4).
-        // Side::After should pick the bold side.
         let decs = vec![Decoration::mark(2..4, "bold")];
         let (arena, doc) = build_tiles("hello", &decs);
-        let mark = arena.get(doc).children[1];
+        let line = first_line(&arena, doc);
+        let mark = arena.get(line).children[1];
         let inner_text = arena.get(mark).children[0];
         let (got, off) = leaf_at_pos(&arena, doc, 2, Side::After);
         assert_eq!(got, inner_text);
@@ -157,7 +161,8 @@ mod tests {
     fn leaf_at_pos_at_boundary_side_before_picks_left() {
         let decs = vec![Decoration::mark(2..4, "bold")];
         let (arena, doc) = build_tiles("hello", &decs);
-        let first_text = arena.get(doc).children[0];
+        let line = first_line(&arena, doc);
+        let first_text = arena.get(line).children[0];
         let (got, off) = leaf_at_pos(&arena, doc, 2, Side::Before);
         assert_eq!(got, first_text);
         assert_eq!(off, 2);
@@ -165,11 +170,10 @@ mod tests {
 
     #[test]
     fn leaf_at_pos_with_replace_lands_on_hidden() {
-        // "**bold**" with replace(0..2): leaf at pos 1 should
-        // be the hidden widget, not a text tile.
         let decs = vec![Decoration::replace(0..2)];
         let (arena, doc) = build_tiles("**bold**", &decs);
-        let hidden = arena.get(doc).children[0];
+        let line = first_line(&arena, doc);
+        let hidden = arena.get(line).children[0];
         let (got, _off) = leaf_at_pos(&arena, doc, 1, Side::After);
         assert_eq!(got, hidden);
     }

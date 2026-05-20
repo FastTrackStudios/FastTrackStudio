@@ -83,6 +83,14 @@ section h2 {
 
 .editor-root:focus { outline: none; }
 
+/* One logical line. Mirrors CM6's .cm-line. The empty selector
+   gives lines a min-height so an empty line still has a visible
+   row to click into; line-height comes from .editor-root. */
+.editor-root .cm-line {
+    display: block;
+    min-height: 1lh;
+}
+
 /* Live-preview decoration classes — emitted by editor-state's
    markdown::live_preview. Visual styling only; the document
    text itself is unchanged. */

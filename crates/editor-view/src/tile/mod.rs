@@ -36,6 +36,7 @@ pub mod arena;
 pub mod build;
 pub mod dom_pos;
 pub mod flag;
+pub mod line;
 pub mod mark;
 pub mod pos;
 pub mod render_dx;

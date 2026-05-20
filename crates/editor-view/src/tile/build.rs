@@ -3,25 +3,25 @@
 //! `view/src/buildtile.ts:39+` (the `TileBuilder` class) +
 //! the main `TileUpdate.build` entry point.
 //!
-//! ## Phase 5 scope: flat under Doc
-//!
-//! Per the port roadmap (`docs/tile-tree-port.md`), this first
-//! pass produces a **flat** tree:
+//! ## Tree shape (Phase 8: with LineTiles)
 //!
 //! ```text
 //! DocTile
-//! ├── TextTile  "he"
-//! ├── MarkTile (md-bold)
-//! │   └── TextTile  "llo"
-//! ├── WidgetTile (hidden, replaces "**")
-//! ├── TextTile  " world"
-//! └── ...
+//! ├── LineTile (length=5, breakAfter=true)
+//! │   ├── TextTile  "he"
+//! │   ├── MarkTile (md-bold)
+//! │   │   └── TextTile  "llo"
+//! ├── LineTile (length=6, breakAfter=false)
+//! │   └── TextTile  "world!"
 //! ```
 //!
-//! No `LineTile` between `DocTile` and inline children yet —
-//! that lands in Phase 8 once we have block-level decorations
-//! to motivate it. Newlines are still respected: TextTiles
-//! never span a `\n`.
+//! Each logical line becomes a `LineTile` child of `DocTile`.
+//! Inline content (text, marks, widgets, hidden replacements)
+//! lives inside the current `LineTile`. The `\n` byte itself
+//! is *not* a tile — it's represented by the `BreakAfter` flag
+//! on the preceding line, contributing 1 to its
+//! `length + break_after` accounting. A trailing `\n` produces
+//! a final empty `LineTile`.
 //!
 //! ## What's NOT here yet, intentionally
 //!
@@ -44,7 +44,8 @@
 use editor_state::{DecoratedRange, DecorationKind};
 
 use crate::tile::arena::{Arena, TileId};
-use crate::tile::flag::TileFlagSet;
+use crate::tile::flag::{TileFlag, TileFlagSet};
+use crate::tile::line::new_line_tile;
 use crate::tile::mark::{MarkSpec, new_mark_tile};
 use crate::tile::text::new_text_tile;
 use crate::tile::widget::{new_widget_buffer_tile, new_widget_tile};
@@ -79,6 +80,11 @@ pub fn build_tiles(text: &str, decorations: &[DecoratedRange]) -> (Arena, TileId
 struct TileBuilder<'a> {
     arena: &'a mut Arena,
     root: TileId,
+    /// Current LineTile under which inline children are
+    /// appended. `None` between lines (e.g. right after a
+    /// `\n`) — re-created lazily by [`Self::ensure_line`].
+    /// Mirrors CM6's `TileBuilder.curLine` (`buildtile.ts:40`).
+    cur_line: Option<TileId>,
     /// Doc byte offset where the next emitted tile starts.
     pos: usize,
 }
@@ -88,8 +94,35 @@ impl<'a> TileBuilder<'a> {
         Self {
             arena,
             root,
+            cur_line: None,
             pos: 0,
         }
+    }
+
+    /// Lazily create the current LineTile, attaching it to
+    /// the Doc. Called from every emit_* method — guarantees
+    /// inline content always has a line to live in.
+    fn ensure_line(&mut self) -> TileId {
+        if let Some(id) = self.cur_line {
+            return id;
+        }
+        let line_id = self.arena.insert(new_line_tile());
+        self.arena.get_mut(line_id).parent = Some(self.root);
+        self.arena.get_mut(self.root).children.push(line_id);
+        self.cur_line = Some(line_id);
+        line_id
+    }
+
+    /// Close the current LineTile by marking it `BreakAfter`.
+    /// Next emit will start a fresh line via `ensure_line`.
+    /// Mirrors `TileBuilder.endLine` (`buildtile.ts:125`) — the
+    /// observable effect, anyway; CM6 also flushes widget
+    /// buffers and emits any line decorations, which we'll
+    /// fold in once those land.
+    fn end_line(&mut self) {
+        let line_id = self.ensure_line();
+        self.arena.get_mut(line_id).flags.insert(TileFlag::BreakAfter);
+        self.cur_line = None;
     }
 
     /// Main loop. Walks `text` + `decorations` together and
@@ -178,12 +211,20 @@ impl<'a> TileBuilder<'a> {
                 break;
             }
         }
+        // Ensure at least one LineTile exists, and that the
+        // doc *ends* with a non-breaking LineTile (so a
+        // trailing `\n` or an empty doc still has a place for
+        // the caret to land). CM6 always renders at least one
+        // line; without this our contenteditable would
+        // sometimes have zero `<div class="cm-line">` children.
+        self.ensure_line();
     }
 
     /// Emit text spanning `slice` under the current mark stack.
-    /// Splits at `\n` so a single text tile never crosses a
-    /// line break (consistent with CM6's `LineView`-per-line
-    /// model, even though we don't have LineView yet).
+    /// On every `\n` we [`end_line`], so the next emit starts a
+    /// fresh LineTile. CM6's analogous flow lives in
+    /// `buildtile.ts` where text is broken at line boundaries
+    /// by the calling iteration loop.
     fn emit_text_run(&mut self, slice: &str, marks: &[MarkSpec]) {
         let mut local = 0;
         for (i, ch) in slice.char_indices() {
@@ -191,9 +232,11 @@ impl<'a> TileBuilder<'a> {
                 if i > local {
                     self.emit_text(&slice[local..i], marks);
                 }
-                // Newline char itself becomes part of nothing —
-                // it lives in the doc but isn't a tile. We
-                // still advance pos so positions stay right.
+                // Newline closes the current LineTile.
+                // `pos` advances by 1 to account for the \n in
+                // doc bytes, but no tile owns the byte —
+                // `BreakAfter` on the line stores the fact.
+                self.end_line();
                 self.pos += 1;
                 local = i + 1;
             }
@@ -230,13 +273,14 @@ impl<'a> TileBuilder<'a> {
     /// doc bytes; no DOM is produced (renderer skips Widget
     /// tiles with empty html and no widget content).
     fn emit_hidden(&mut self, length: usize) {
+        let line_id = self.ensure_line();
         let mut flags = TileFlagSet::empty();
         // Mark with both IncStart + IncEnd so adjacent typing
         // doesn't accidentally extend into the hidden range.
-        flags.insert(crate::tile::flag::TileFlag::IncStart);
-        flags.insert(crate::tile::flag::TileFlag::IncEnd);
+        flags.insert(TileFlag::IncStart);
+        flags.insert(TileFlag::IncEnd);
         let hidden = self.arena.insert(new_widget_tile("", length, flags));
-        self.append_to(self.root, hidden);
+        self.append_to(line_id, hidden);
         self.bump_lengths_up(hidden, length);
         self.pos += length;
     }
@@ -244,13 +288,14 @@ impl<'a> TileBuilder<'a> {
     /// Walk the mark stack from outermost to innermost,
     /// finding (or creating) a MarkTile of each spec under the
     /// previous one. Returns the inner-most parent into which
-    /// the caller should insert their text/widget tile.
+    /// the caller should insert their text/widget tile. Always
+    /// rooted in the current LineTile.
     fn insert_under_marks(
         &mut self,
         marks: &[MarkSpec],
         emit_leaf: impl FnOnce(&mut Arena) -> TileId,
     ) -> TileId {
-        let mut parent = self.root;
+        let mut parent = self.ensure_line();
         for spec in marks {
             // Try to reuse the parent's last child if it's the
             // same mark (CM6's `ensureMarks` open-stack logic
@@ -380,31 +425,40 @@ mod tests {
     }
 
     #[test]
-    fn empty_text_no_decorations_makes_lone_doc() {
+    fn empty_text_no_decorations_makes_one_empty_line() {
         let (arena, doc) = build_tiles("", &[]);
-        assert_eq!(arena.get(doc).kind, TileKind::Doc);
-        assert!(arena.get(doc).children.is_empty());
+        // Doc has at least one LineTile so the caret has
+        // somewhere to land.
+        assert_eq!(children_kinds(&arena, doc), vec![TileKind::Line]);
+        let line = arena.get(doc).children[0];
+        assert_eq!(arena.get(line).length, 0);
         assert_eq!(arena.get(doc).length, 0);
     }
 
     #[test]
-    fn plain_text_one_text_tile() {
+    fn plain_text_one_line_with_text() {
         let (arena, doc) = build_tiles("hello", &[]);
-        assert_eq!(children_kinds(&arena, doc), vec![TileKind::Text]);
-        let text = arena.get(doc).children[0];
+        assert_eq!(children_kinds(&arena, doc), vec![TileKind::Line]);
+        let line = arena.get(doc).children[0];
+        assert_eq!(arena.get(line).length, 5);
+        assert_eq!(children_kinds(&arena, line), vec![TileKind::Text]);
+        let text = arena.get(line).children[0];
         assert_eq!(arena.get(text).length, 5);
     }
 
     #[test]
-    fn one_mark_wraps_text() {
+    fn one_mark_wraps_text_inside_line() {
         let decs = vec![Decoration::mark(2..4, "bold")];
         let (arena, doc) = build_tiles("hello", &decs);
-        // Expected: Text(0..2), Mark(2..4){Text}, Text(4..5)
-        let kids = children_kinds(&arena, doc);
-        assert_eq!(kids, vec![TileKind::Text, TileKind::Mark, TileKind::Text]);
-        let mark = arena.get(doc).children[1];
+        let line = arena.get(doc).children[0];
+        let line_kids = children_kinds(&arena, line);
+        // Line contains: Text, Mark, Text
+        assert_eq!(
+            line_kids,
+            vec![TileKind::Text, TileKind::Mark, TileKind::Text]
+        );
+        let mark = arena.get(line).children[1];
         assert_eq!(arena.get(mark).length, 2);
-        // The mark wraps a single text tile.
         assert_eq!(arena.get(mark).children.len(), 1);
     }
 
@@ -412,34 +466,44 @@ mod tests {
     fn replace_emits_hidden_widget() {
         let decs = vec![Decoration::replace(0..2)];
         let (arena, doc) = build_tiles("**bold**", &decs);
-        let kids = children_kinds(&arena, doc);
-        // First child should be a Widget (hidden) for the replace.
-        assert!(matches!(kids[0], TileKind::Widget));
-        let hidden = arena.get(doc).children[0];
-        assert_eq!(arena.get(hidden).length, 2);
+        let line = arena.get(doc).children[0];
+        let first_inline = arena.get(line).children[0];
+        assert!(matches!(arena.get(first_inline).kind, TileKind::Widget));
+        assert_eq!(arena.get(first_inline).length, 2);
     }
 
     #[test]
-    fn doc_length_sums_children() {
+    fn doc_length_sums_lines() {
         let decs = vec![Decoration::mark(2..4, "bold")];
         let (arena, doc) = build_tiles("hello", &decs);
+        assert_eq!(arena.get(doc).length, 5);
+        let line = arena.get(doc).children[0];
+        assert_eq!(arena.get(line).length, 5);
+    }
+
+    #[test]
+    fn newline_splits_into_two_line_tiles() {
+        let (arena, doc) = build_tiles("ab\ncd", &[]);
+        let kids = children_kinds(&arena, doc);
+        assert_eq!(kids, vec![TileKind::Line, TileKind::Line]);
+        let l1 = arena.get(doc).children[0];
+        let l2 = arena.get(doc).children[1];
+        assert_eq!(arena.get(l1).length, 2);
+        assert_eq!(arena.get(l2).length, 2);
+        assert!(arena.get(l1).break_after());
+        assert!(!arena.get(l2).break_after());
+        // l1 length(2) + break(1) + l2 length(2) = 5 ✓
         assert_eq!(arena.get(doc).length, 5);
     }
 
     #[test]
-    fn newline_does_not_split_text_tile_in_phase5() {
-        // Phase 5 has no LineTile; the only effect of a `\n`
-        // in v1 is that it ends one text tile and starts
-        // another (preserving positions). Verify both tiles
-        // get created and pos accounting is correct.
-        let (arena, doc) = build_tiles("ab\ncd", &[]);
+    fn trailing_newline_produces_empty_final_line() {
+        let (arena, doc) = build_tiles("ab\n", &[]);
         let kids = children_kinds(&arena, doc);
-        assert_eq!(kids, vec![TileKind::Text, TileKind::Text]);
-        let first = arena.get(doc).children[0];
-        let second = arena.get(doc).children[1];
-        assert_eq!(arena.get(first).length, 2);
-        assert_eq!(arena.get(second).length, 2);
-        assert_eq!(arena.get(doc).length, 5); // 2 + 1 (\n) + 2
+        assert_eq!(kids, vec![TileKind::Line, TileKind::Line]);
+        let l2 = arena.get(doc).children[1];
+        assert_eq!(arena.get(l2).length, 0);
+        assert!(!arena.get(l2).break_after());
     }
 
     #[test]
@@ -451,12 +515,11 @@ mod tests {
             Decoration::mark(2..4, "bold"),
         ];
         let (arena, doc) = build_tiles("abcd", &decs);
-        // Only one Mark child under Doc; covers full range.
-        let kids = children_kinds(&arena, doc);
+        let line = arena.get(doc).children[0];
+        let kids = children_kinds(&arena, line);
         assert_eq!(kids, vec![TileKind::Mark]);
-        let mark = arena.get(doc).children[0];
+        let mark = arena.get(line).children[0];
         assert_eq!(arena.get(mark).length, 4);
-        // Two text children inside the same mark.
         assert_eq!(arena.get(mark).children.len(), 2);
     }
 }

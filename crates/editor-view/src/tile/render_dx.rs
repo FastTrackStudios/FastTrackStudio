@@ -101,13 +101,32 @@ pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
                 }
             }
         }
-        // Block layer not in Phase 5 — emit children flat for
-        // now. Phase 8 makes these honest LineTile/BlockTile
-        // wrappers.
-        TileKind::Line | TileKind::BlockWrapper => rsx! {
-            for &child in &t.children {
-                {render_tile(arena, child)}
+        TileKind::Line => {
+            let pos = crate::tile::pos::pos_at_start(arena, tile);
+            rsx! {
+                div {
+                    class: "cm-line",
+                    "data-tile-id": "{tid}",
+                    "data-tile-pos": "{pos}",
+                    for &child in &t.children {
+                        {render_tile(arena, child)}
+                    }
+                }
             }
-        },
+        }
+        TileKind::BlockWrapper => {
+            // Same shape as Line for now; v1 has no block
+            // decorations carrying their own DOM.
+            let pos = crate::tile::pos::pos_at_start(arena, tile);
+            rsx! {
+                div {
+                    "data-tile-id": "{tid}",
+                    "data-tile-pos": "{pos}",
+                    for &child in &t.children {
+                        {render_tile(arena, child)}
+                    }
+                }
+            }
+        }
     }
 }
