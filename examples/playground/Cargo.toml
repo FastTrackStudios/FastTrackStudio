@@ -10,4 +10,10 @@ publish = false
 
 [dependencies]
 editor = { workspace = true }
-dioxus = { workspace = true, features = ["web"] }
+dioxus = { workspace = true }
+
+# Switch platforms with --no-default-features --features web|desktop.
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop"]
+web = ["dioxus/web"]
