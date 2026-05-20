@@ -210,17 +210,19 @@ section h2 {
     user-select: none;
 }
 
+/* HR — single row in both states. When caret is off the line,
+   the `---` source is hidden via Replace and `border-top` on
+   the line itself draws the rule. When caret is on the line
+   (`md-hr-active`), the dashes show in a muted style so they're
+   editable. Two classes instead of one to avoid CSS having to
+   guess whether the line is "current". */
 .editor-root .cm-line.md-hr {
-    text-align: center;
-    color: transparent;
-    position: relative;
-    user-select: none;
-}
-.editor-root .cm-line.md-hr::after {
-    content: "";
-    display: block;
     border-top: 1px solid #4a526a;
-    margin: 0.5em 0;
+    min-height: 0;
+    line-height: 0;
+}
+.editor-root .cm-line.md-hr-active {
+    color: #6a7392;
 }
 
 .editor-root .cm-line.md-list-item,

@@ -196,12 +196,17 @@ fn scan_blocks(
 
         // ── HR ─────────────────────────────────────────────
         if is_hr(line) {
-            out.push(Decoration::line(line_from, "md-hr"));
-            // Hide the dashes when caret isn't on the line; the
-            // CSS draws a horizontal rule via `::after`. When the
-            // caret IS on the line, leave the dashes visible so
-            // the user can edit them.
-            if !cursor_touches(primary, line_from..line_to) {
+            // Two states:
+            //   `md-hr-active` while the caret is on the line —
+            //     just dim the `---` text, leave it on one row
+            //     so the user can edit it.
+            //   `md-hr` otherwise — hide the text bytes and let
+            //     CSS render a single-row horizontal rule via
+            //     the line's own border-top.
+            if cursor_touches(primary, line_from..line_to) {
+                out.push(Decoration::line(line_from, "md-hr-active"));
+            } else {
+                out.push(Decoration::line(line_from, "md-hr"));
                 out.push(Decoration::replace(line_from..line_to));
             }
             continue;
@@ -868,6 +873,19 @@ mod tests {
         let s = state("---", 100);
         let decs = live_preview(&s);
         assert!(has_line_class(&decs, 0, "md-hr"));
+    }
+
+    #[test]
+    fn hr_active_class_when_caret_on_line() {
+        let s = state("---", 1);
+        let decs = live_preview(&s);
+        assert!(has_line_class(&decs, 0, "md-hr-active"));
+        // And the `---` source isn't replaced — user can edit.
+        let has_replace = decs.iter().any(|d| {
+            d.from == 0 && d.to == 3
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(!has_replace);
     }
 
     #[test]
