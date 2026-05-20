@@ -271,12 +271,36 @@ pub fn Editor(
                             // bogus event would otherwise
                             // clobber state.selection with the
                             // orphaned position.
+                            // CM6's `domobserver` pauses around
+                            // its own writes; the `muting` flag
+                            // is the analogue. We DO NOT clear
+                            // it on rAF — the selection
+                            // writeback effect (use_effect on
+                            // state changes) is responsible for
+                            // clearing it once it has written
+                            // the correct DOM Selection. That
+                            // way any selectionchange fired
+                            // during the writeback's
+                            // setSelectionRange is also covered.
+                            // If no writeback runs (e.g., the
+                            // observer fire produced no state
+                            // change), a safety rAF clears the
+                            // flag so we don't permanently mute.
                             const mo = new MutationObserver(() => {{
                                 if (composing) return;
                                 el.dataset.muting = '1';
-                                requestAnimationFrame(() => {{
+                                // Safety net — if no writeback
+                                // arrives (no state change), the
+                                // flag clears so future
+                                // selectionchange isn't lost.
+                                // Multiple rAFs ahead so the
+                                // writeback (whose effect fires
+                                // in the same tick as the
+                                // resulting render) has time to
+                                // win the race and clear early.
+                                requestAnimationFrame(() => requestAnimationFrame(() => {{
                                     delete el.dataset.muting;
-                                }});
+                                }}));
                                 sendInput();
                             }});
                             mo.observe(el, {{
@@ -425,13 +449,21 @@ pub fn Editor(
                             return;
                         }}
                     }}
-                    // Set the writing flag so our own
-                    // selectionchange listener (below) skips
-                    // this synthetic event. Cleared async via
-                    // requestAnimationFrame.
+                    // CM6-style write boundary: while our own
+                    // setSelectionRange is in flight, suppress
+                    // observer/listener-driven sendSel. Same
+                    // pattern as `muting` — but `writing` covers
+                    // the writeback's own emitted selectionchange.
                     el.dataset.writing = '1';
                     sel.removeAllRanges();
                     sel.addRange(targetRange);
+                    // Clear `muting` (set earlier by the
+                    // MutationObserver that triggered this
+                    // render) NOW that we've successfully
+                    // resynced DOM Selection from state. Without
+                    // this, a stale `muting='1'` would persist
+                    // until the rAF safety-net fired.
+                    delete el.dataset.muting;
                     requestAnimationFrame(() => {{
                         delete el.dataset.writing;
                     }});
