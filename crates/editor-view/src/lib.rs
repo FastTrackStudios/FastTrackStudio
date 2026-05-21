@@ -8,6 +8,7 @@ pub use editor_state;
 
 mod bridge;
 mod editor;
+pub mod slash;
 pub mod tile;
 
 pub use editor::{DecorationSource, Editor};
