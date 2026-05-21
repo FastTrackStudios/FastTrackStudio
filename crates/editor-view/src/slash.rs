@@ -161,11 +161,13 @@ pub fn detect_slash(doc: &str, caret: usize) -> Option<(usize, String)> {
     while i > 0 {
         let c = bytes[i - 1];
         if c == b'/' {
-            // The `/` must be at start-of-line or preceded by
-            // whitespace — otherwise `https://` would trigger.
-            let preceded_by_word =
-                i >= 2 && !(bytes[i - 2] as char).is_whitespace();
-            if preceded_by_word {
+            // Reject URL-shaped patterns: `://` (after a scheme
+            // like `https:`) and `//` (already inside a URL).
+            // Everything else triggers — typing `/` after
+            // ordinary text in the middle of a paragraph should
+            // open the menu, the way Notion / most modern
+            // editors do it.
+            if i >= 2 && (bytes[i - 2] == b':' || bytes[i - 2] == b'/') {
                 return None;
             }
             let query = segment[i..].to_string();
@@ -554,7 +556,23 @@ mod tests {
 
     #[test]
     fn detect_slash_ignores_url_form() {
-        assert_eq!(detect_slash("https://anthropic.com", 21), None);
+        // `://` after a scheme — common URL pattern, must not
+        // open the menu when the cursor is right after the
+        // second `/`.
+        assert_eq!(detect_slash("https://", 8), None);
+        // Inside a URL path, e.g. `https://foo/bar` — the
+        // second `/` is preceded by another `/` already in
+        // the URL.
+        assert_eq!(detect_slash("foo//", 5), None);
+    }
+
+    #[test]
+    fn detect_slash_triggers_after_ordinary_text() {
+        // Typing `/` at the end of normal prose should open
+        // the menu — matches Notion / most modern editors. The
+        // previous Logseq-strict behavior wouldn't fire here.
+        assert_eq!(detect_slash("hello/", 6), Some((5, "".to_string())));
+        assert_eq!(detect_slash("hello/cal", 9), Some((5, "cal".to_string())));
     }
 
     #[test]

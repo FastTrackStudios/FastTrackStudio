@@ -1053,15 +1053,26 @@ test.describe("editor", () => {
       .toMatch(/# $/);
   });
 
-  test("slash mid-word does NOT open the menu", async ({ page }) => {
+  test("slash inside a URL does NOT open the menu", async ({ page }) => {
     const len = Number((await readState(page)).len);
     await editor(page).focus();
     await setCaret(page, len);
-    // Type `wo` then `/` then `rd` — the `/` is mid-word, so
-    // detect_slash should refuse it (matches Logseq behavior:
-    // protects URLs like `https://`).
-    await page.keyboard.insertText("\nwo/rd");
+    // `://` URL pattern shouldn't trigger; the `/` after the
+    // scheme colon is suppressed by detect_slash.
+    await page.keyboard.insertText("\nhttps://");
     await expect(page.locator(".slash-menu")).toHaveCount(0);
+  });
+
+  test("slash after ordinary text opens the menu", async ({ page }) => {
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len);
+    // Typing `/` at the end of prose should open the menu
+    // (Notion-style — the previous Logseq-strict rule was too
+    // restrictive in a markdown editor where users type
+    // continuously).
+    await page.keyboard.insertText("\nhello/");
+    await expect(page.locator(".slash-menu")).toBeVisible();
   });
 
   // ── Wikilink rendering ─────────────────────────────────────
