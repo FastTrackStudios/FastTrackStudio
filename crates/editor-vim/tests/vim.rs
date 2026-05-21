@@ -89,6 +89,42 @@ fn yyp_duplicates_line() {
 }
 
 #[test]
+fn big_w_advances_past_punctuation() {
+    // `foo.bar baz` — `foo.bar` is one WORD, so W from 0 lands
+    // at the start of `baz` (byte 8), not at the `.`.
+    let mut vim = VimState::new();
+    let s = state_with_caret("foo.bar baz", 0);
+    let s = drive(s, &mut vim, &["W"]);
+    assert_eq!(s.selection.primary().head, 8);
+}
+
+#[test]
+fn big_b_walks_back_past_punctuation() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("foo.bar baz", 11);
+    let s = drive(s, &mut vim, &["B"]);
+    assert_eq!(s.selection.primary().head, 8);
+}
+
+#[test]
+fn big_e_lands_on_last_byte_of_word() {
+    // From pos 0 in `foo.bar baz`, E lands on byte 6 (the `r`).
+    let mut vim = VimState::new();
+    let s = state_with_caret("foo.bar baz", 0);
+    let s = drive(s, &mut vim, &["E"]);
+    assert_eq!(s.selection.primary().head, 6);
+}
+
+#[test]
+fn count_three_big_w() {
+    // `a.b c.d e.f g` — three WORDs forward from 0 → start of `g`.
+    let mut vim = VimState::new();
+    let s = state_with_caret("a.b c.d e.f g", 0);
+    let s = drive(s, &mut vim, &["3", "W"]);
+    assert_eq!(s.selection.primary().head, 12);
+}
+
+#[test]
 fn count_three_w() {
     let mut vim = VimState::new();
     let s = state_with_caret("a b c d", 0);

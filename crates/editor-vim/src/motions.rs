@@ -17,6 +17,9 @@ pub enum Motion {
     WordForward,  // w
     WordBackward, // b
     WordEnd,      // e
+    WORDForward,  // W — whitespace-only delimited
+    WORDBackward, // B
+    WORDEnd,      // E
     LineStart,    // 0
     LineEnd,      // $
     FirstNonblank, // ^
@@ -46,6 +49,9 @@ impl Motion {
             'w' => Self::WordForward,
             'b' => Self::WordBackward,
             'e' => Self::WordEnd,
+            'W' => Self::WORDForward,
+            'B' => Self::WORDBackward,
+            'E' => Self::WORDEnd,
             '0' => Self::LineStart,
             '$' => Self::LineEnd,
             '^' => Self::FirstNonblank,
@@ -79,6 +85,9 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
         Motion::WordForward => word_forward(state, pos, count),
         Motion::WordBackward => word_backward(state, pos, count),
         Motion::WordEnd => word_end(state, pos, count),
+        Motion::WORDForward => big_word_forward(state, pos, count),
+        Motion::WORDBackward => big_word_backward(state, pos, count),
+        Motion::WORDEnd => big_word_end(state, pos, count),
         Motion::LineStart => line_start(state, pos),
         Motion::LineEnd => line_end_n(state, pos, count),
         Motion::FirstNonblank => line_first_nonblank(state, pos),
@@ -291,6 +300,82 @@ fn word_end(state: &EditorState, pos: usize, n: usize) -> usize {
         }
         let cls = classify(bytes[p]);
         while p + 1 < bytes.len() && classify(bytes[p + 1]) == cls {
+            p += 1;
+        }
+    }
+    p
+}
+
+// --- WORD motions ----------------------------------------------
+//
+// A "WORD" (uppercase in :help WORD) is any maximal run of
+// non-whitespace bytes. Only ASCII space / tab / newline count
+// as whitespace here — punctuation is part of the WORD.
+
+fn is_ws(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n')
+}
+
+fn big_word_forward(state: &EditorState, pos: usize, n: usize) -> usize {
+    let s = state.doc.to_string();
+    let bytes = s.as_bytes();
+    let mut p = pos;
+    for _ in 0..n {
+        if p >= bytes.len() {
+            break;
+        }
+        // Skip the current run of non-whitespace.
+        while p < bytes.len() && !is_ws(bytes[p]) {
+            p += 1;
+        }
+        // Skip the whitespace gap.
+        while p < bytes.len() && is_ws(bytes[p]) {
+            p += 1;
+        }
+    }
+    p
+}
+
+fn big_word_backward(state: &EditorState, pos: usize, n: usize) -> usize {
+    let s = state.doc.to_string();
+    let bytes = s.as_bytes();
+    let mut p = pos;
+    for _ in 0..n {
+        if p == 0 {
+            break;
+        }
+        p -= 1;
+        // Skip whitespace going left.
+        while p > 0 && is_ws(bytes[p]) {
+            p -= 1;
+        }
+        // Walk to the start of the current non-whitespace run.
+        while p > 0 && !is_ws(bytes[p - 1]) {
+            p -= 1;
+        }
+    }
+    p
+}
+
+fn big_word_end(state: &EditorState, pos: usize, n: usize) -> usize {
+    let s = state.doc.to_string();
+    let bytes = s.as_bytes();
+    let mut p = pos;
+    for _ in 0..n {
+        if p + 1 >= bytes.len() {
+            p = bytes.len();
+            break;
+        }
+        p += 1;
+        // Skip whitespace forward.
+        while p < bytes.len() && is_ws(bytes[p]) {
+            p += 1;
+        }
+        if p >= bytes.len() {
+            break;
+        }
+        // Walk to the last byte of the current non-whitespace run.
+        while p + 1 < bytes.len() && !is_ws(bytes[p + 1]) {
             p += 1;
         }
     }

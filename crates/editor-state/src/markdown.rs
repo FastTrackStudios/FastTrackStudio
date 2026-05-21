@@ -408,11 +408,12 @@ fn scan_blocks(
         if let Some((prefix_end, checked)) = parse_task_marker(line) {
             let abs_prefix_end = line_from + prefix_end;
             out.push(Decoration::line(line_from, "md-task"));
-            // Always hide the `- [ ]` / `- [x]` source and show
-            // the clickable checkbox widget — Obsidian behavior.
-            // Revealing the source on cursor-touch makes the
-            // checkbox flicker away every time the user edits
-            // the line text, which is exactly the wrong UX.
+            // The checkbox widget is always emitted so it stays
+            // clickable regardless of caret position. The source
+            // bytes are hidden via Replace only when the caret is
+            // off the line — when the user is editing the line
+            // we keep them visible so they can mutate the marker
+            // directly and clicks/motions land on real text.
             let html = if checked {
                 format!(
                     r#"<span class="md-task-checkbox checked" data-task-pos="{p}">✓</span>"#,
@@ -424,7 +425,14 @@ fn scan_blocks(
                     p = line_from
                 )
             };
-            out.push(Decoration::replace(line_from..abs_prefix_end));
+            if cursor_touches(primary, line_from..line_to) {
+                out.push(Decoration::mark(
+                    line_from..abs_prefix_end,
+                    "md-task-marker-active",
+                ));
+            } else {
+                out.push(Decoration::replace(line_from..abs_prefix_end));
+            }
             out.push(Decoration::widget(line_from, html));
             continue;
         }
@@ -479,22 +487,29 @@ fn scan_blocks(
         if let Some(marker_end) = parse_list_marker(line) {
             let abs_marker_end = line_from + marker_end;
             out.push(Decoration::line(line_from, "md-list-item"));
-            // Always render the bullet/number widget. The marker
-            // source bytes stay in the doc but stay hidden — the
-            // bullet is what users care about, and revealing the
-            // raw `- ` on cursor-touch made the list bullet flick
-            // away every keystroke.
-            let kind_byte = line.trim_start().as_bytes()[0];
-            let widget_html = if kind_byte.is_ascii_digit() {
-                let leading = line.len() - line.trim_start().len();
-                let num_end = marker_end - 2 - leading;
-                let num = &line.trim_start()[..num_end];
-                format!(r#"<span class="md-list-marker">{num}.&nbsp;</span>"#)
+            // Caret on the line: keep the raw `- ` / `1. ` source
+            // visible (muted) so clicks land on real text and vim
+            // motions don't fall through the Replace into the
+            // line-tile end fallback. Off the line: hide source
+            // and render the bullet/number widget.
+            if cursor_touches(primary, line_from..line_to) {
+                out.push(Decoration::mark(
+                    line_from..abs_marker_end,
+                    "md-list-marker-active",
+                ));
             } else {
-                r#"<span class="md-list-marker">-&nbsp;</span>"#.into()
-            };
-            out.push(Decoration::replace(line_from..abs_marker_end));
-            out.push(Decoration::widget(line_from, widget_html));
+                let kind_byte = line.trim_start().as_bytes()[0];
+                let widget_html = if kind_byte.is_ascii_digit() {
+                    let leading = line.len() - line.trim_start().len();
+                    let num_end = marker_end - 2 - leading;
+                    let num = &line.trim_start()[..num_end];
+                    format!(r#"<span class="md-list-marker">{num}.&nbsp;</span>"#)
+                } else {
+                    r#"<span class="md-list-marker">-&nbsp;</span>"#.into()
+                };
+                out.push(Decoration::replace(line_from..abs_marker_end));
+                out.push(Decoration::widget(line_from, widget_html));
+            }
             continue;
         }
     }
@@ -1548,6 +1563,50 @@ mod tests {
         let s = state("1. first", 100);
         let decs = live_preview(&s);
         assert!(has_line_class(&decs, 0, "md-list-item"));
+    }
+
+    #[test]
+    fn list_with_caret_on_line_keeps_source_visible() {
+        // Caret on the bullet line — no Replace, no widget; the
+        // `- ` source stays editable. Same pattern as headings.
+        let s = state("- item", 3);
+        let decs = live_preview(&s);
+        let has_replace = decs.iter().any(|d| {
+            d.from == 0 && d.to == 2
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(!has_replace, "marker source must stay visible while caret is on the line");
+        let has_widget = decs
+            .iter()
+            .any(|d| matches!(&d.kind, crate::decoration::DecorationKind::Widget { .. }));
+        assert!(!has_widget, "no bullet widget while caret is on the line");
+    }
+
+    #[test]
+    fn ordered_list_with_caret_on_line_keeps_source_visible() {
+        let s = state("1. foo", 3);
+        let decs = live_preview(&s);
+        let has_replace = decs.iter().any(|d| {
+            d.from == 0 && d.to == 3
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(!has_replace);
+    }
+
+    #[test]
+    fn task_with_caret_on_line_keeps_source_visible() {
+        // Caret on the line: source bytes stay editable (no
+        // Replace) but the checkbox widget is still emitted so
+        // it remains clickable.
+        let s = state("- [ ] todo", 4);
+        let decs = live_preview(&s);
+        let has_replace = decs
+            .iter()
+            .any(|d| matches!(d.kind, crate::decoration::DecorationKind::Replace));
+        assert!(!has_replace);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html } if html.contains("md-task-checkbox")));
+        assert!(has_widget);
     }
 
     #[test]

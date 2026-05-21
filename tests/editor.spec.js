@@ -868,6 +868,51 @@ test.describe("editor", () => {
     });
   });
 
+  test("caret can land at pos 0 on an ordered list line", async ({ page }) => {
+    // Regression: list-marker Replace decorations used to swallow
+    // the marker bytes, so the cursor couldn't land at byte 0 of
+    // a list line — placeSelection fell through to the line-tile
+    // end fallback. After the fix, the marker source stays visible
+    // when the caret is on the line, so placing the caret at
+    // pos 0 actually sticks instead of bouncing to end-of-line.
+    await page.goto("/?seed=1.%20foo&novim=1");
+    await editor(page).waitFor();
+    await expect.poll(async () => (await readState(page)).text).toBe("1. foo");
+    await editor(page).focus();
+    await setCaret(page, 0);
+    // Give the bridge a tick to sync the DOM selection back to state.
+    await expect.poll(async () => (await readState(page)).head).toBe("0");
+  });
+
+  test("vim b on a list line walks left without bouncing to EOL", async ({
+    page,
+  }) => {
+    // With vim on, repeated `b` from the end of `1. foo` must
+    // eventually land at byte 0 and stop. Before the fix, the
+    // list-marker Replace bytes were unreachable so placeSelection
+    // bounced the caret to end-of-line on every `b` keypress.
+    await page.goto("/?seed=1.%20foo");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await expect.poll(async () => (await readState(page)).text).toBe("1. foo");
+    await setCaret(page, 6); // end of line
+    await expect.poll(async () => (await readState(page)).head).toBe("6");
+    // `b` repeatedly — at most a handful of steps to land at 0.
+    let last = 6;
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press("b");
+      const head = Number((await readState(page)).head);
+      // Never bounces to EOL after the first step.
+      expect(head, `iter ${i} (prev ${last})`).toBeLessThanOrEqual(last);
+      last = head;
+      if (head === 0) break;
+    }
+    expect(last).toBe(0);
+    // One more `b` at pos 0 must stay at 0 — no infinite bounce.
+    await page.keyboard.press("b");
+    await expect.poll(async () => (await readState(page)).head).toBe("0");
+  });
+
   test("typing does not lose characters under fast input", async ({
     page,
   }) => {
