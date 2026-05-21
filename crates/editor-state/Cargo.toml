@@ -12,6 +12,13 @@ editor-syntax = { workspace = true, features = ["default-langs"] }
 ropey = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# wasm-only: `performance.now()` for the live-preview perf
+# trace (native uses `Instant`, which traps on wasm32-unknown-
+# unknown).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Performance"] }
 
 [features]
 default = []

@@ -30,17 +30,15 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     let primary = state.selection.primary();
     let mut out = Vec::new();
 
-    // Block-level pass first. It computes the byte ranges that
-    // live *inside* code fences so the inline pass below can
-    // skip them (the content is source code, not markdown).
+    // Per-step timing for the perf trace. The cost in this fn is
+    // dominated by `emit_fence_tokens` (tree-sitter) on docs
+    // with code fences; the rest is O(doc-length) byte walking.
+    let t_blocks = now_ms_native();
     let fenced_ranges = scan_blocks(&text, primary, &mut out);
+    let blocks_ms = now_ms_native() - t_blocks;
 
-    // Inline pass — same as before, with two filters:
-    //   1. spans whose body falls inside a code fence are
-    //      dropped (markdown inside `code` doesn't get parsed).
-    //   2. tags must start at column 0 of a line OR after a
-    //      non-word char — but never on a heading line, where
-    //      the leading `#` is the heading marker.
+    let t_inline = now_ms_native();
+    let inline_decs_before = out.len();
     for span in find_spans(&text) {
         if in_fenced_code(&fenced_ranges, span.outer.start) {
             continue;
@@ -77,7 +75,38 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             }
         }
     }
+    let inline_ms = now_ms_native() - t_inline;
+    let inline_decs = out.len() - inline_decs_before;
+    tracing::debug!(
+        doc_len = text.len(),
+        block_decs = inline_decs_before,
+        inline_decs,
+        fence_count = fenced_ranges.len(),
+        blocks_ms = %format!("{:.2}", blocks_ms),
+        inline_ms = %format!("{:.2}", inline_ms),
+        "md.live_preview"
+    );
     out
+}
+
+/// Wall-clock milliseconds. wasm-safe alias around the
+/// view-layer `now_ms`; mirrored here so editor-state stays
+/// free of dioxus deps.
+fn now_ms_native() -> f64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::sync::OnceLock;
+        static START: OnceLock<std::time::Instant> = OnceLock::new();
+        let s = START.get_or_init(std::time::Instant::now);
+        s.elapsed().as_secs_f64() * 1000.0
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now())
+            .unwrap_or(0.0)
+    }
 }
 
 fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
@@ -440,6 +469,11 @@ fn find_fence_close(
 /// Slice the fenced-body bytes between `content_start` and the
 /// matching closing fence (or doc end), run the syntax highlighter,
 /// and emit one `Mark` decoration per token.
+///
+/// Memoized by `(lang, body)` — typing OUTSIDE a fence shouldn't
+/// re-parse the fence with tree-sitter on every keystroke. The
+/// cache is bounded so it doesn't grow forever; entries evict
+/// LRU-style when the bound is hit.
 fn emit_fence_tokens(
     text: &str,
     content_start: usize,
@@ -448,20 +482,78 @@ fn emit_fence_tokens(
     lang: editor_syntax::Lang,
     out: &mut Vec<DecoratedRange>,
 ) {
+    let t_find = now_ms_native();
     let end = find_fence_close(text, content_start, marker_char, marker_len);
+    let find_ms = now_ms_native() - t_find;
     if end <= content_start {
         return;
     }
     let body = &text[content_start..end];
-    for tok in editor_syntax::highlight(lang, body) {
+    let t_tok = now_ms_native();
+    let cached = with_fence_cache(|cache| cache.get(lang, body));
+    let was_cached = cached.is_some();
+    let tokens = match cached {
+        Some(toks) => toks,
+        None => {
+            let toks = editor_syntax::highlight(lang, body);
+            with_fence_cache(|cache| cache.put(lang, body.to_string(), toks.clone()));
+            toks
+        }
+    };
+    let tok_ms = now_ms_native() - t_tok;
+    tracing::trace!(
+        body_len = body.len(),
+        token_count = tokens.len(),
+        cache_hit = was_cached,
+        find_ms = %format!("{:.2}", find_ms),
+        tokenize_ms = %format!("{:.2}", tok_ms),
+        "md.fence_tokens"
+    );
+    for tok in tokens {
         let abs_from = content_start + tok.start;
         let abs_to = content_start + tok.end;
-        // Tag-prefixed class so theme CSS (`md-tok-k` etc.) can
-        // style it. The tags Arborium emits are already short
-        // (`k`/`s`/`c`/...) so the resulting selectors stay tight.
         let class = format!("md-tok-{}", tok.tag);
         out.push(Decoration::mark(abs_from..abs_to, class));
     }
+}
+
+/// Bounded LRU-ish cache of `(lang, body) -> tokens`. Sized for
+/// the common case of a handful of fences in a doc. Tree-sitter
+/// parses are the per-keystroke cost we want to avoid.
+struct FenceCache {
+    entries: Vec<(editor_syntax::Lang, String, Vec<editor_syntax::Token>)>,
+    cap: usize,
+}
+
+impl FenceCache {
+    fn new(cap: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(cap),
+            cap,
+        }
+    }
+    fn get(&mut self, lang: editor_syntax::Lang, body: &str) -> Option<Vec<editor_syntax::Token>> {
+        let idx = self.entries.iter().position(|(l, b, _)| *l == lang && b == body)?;
+        // Move to back so this entry is "freshest".
+        let hit = self.entries.remove(idx);
+        let toks = hit.2.clone();
+        self.entries.push(hit);
+        Some(toks)
+    }
+    fn put(&mut self, lang: editor_syntax::Lang, body: String, toks: Vec<editor_syntax::Token>) {
+        if self.entries.len() >= self.cap {
+            self.entries.remove(0);
+        }
+        self.entries.push((lang, body, toks));
+    }
+}
+
+fn with_fence_cache<R>(f: impl FnOnce(&mut FenceCache) -> R) -> R {
+    thread_local! {
+        static CACHE: std::cell::RefCell<FenceCache> =
+            std::cell::RefCell::new(FenceCache::new(16));
+    }
+    CACHE.with(|c| f(&mut c.borrow_mut()))
 }
 
 fn is_closing_fence(line: &str, marker_char: u8, marker_len: usize) -> bool {
