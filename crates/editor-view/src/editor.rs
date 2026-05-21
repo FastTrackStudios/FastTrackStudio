@@ -749,8 +749,33 @@ pub fn Editor(
                                 characterData: true,
                                 subtree: true,
                             }};
-                            const mo = new MutationObserver(() => {{
+                            // Skip mutation records whose target is
+                            // inside a widget tile (`.editor-widget`).
+                            // Widgets host their own contenteditable
+                            // inputs (frontmatter property cells,
+                            // chip-add boxes) and rendered SVGs whose
+                            // text nodes would otherwise be read into
+                            // the doc's textContent and confuse the
+                            // diff. The DOM patcher writes inside
+                            // widgets all the time (re-render);
+                            // forwarding those to `sendInput` would
+                            // mistakenly try to apply the widget
+                            // contents as a doc edit.
+                            const isWidgetMutation = (rec) => {{
+                                let n = rec.target;
+                                while (n && n !== el) {{
+                                    if (n.nodeType === 1
+                                        && n.classList
+                                        && n.classList.contains('editor-widget')) {{
+                                        return true;
+                                    }}
+                                    n = n.parentNode;
+                                }}
+                                return false;
+                            }};
+                            const mo = new MutationObserver(records => {{
                                 if (composing) return;
+                                if (records.every(isWidgetMutation)) return;
                                 el.dataset.muting = '1';
                                 requestAnimationFrame(() => {{
                                     delete el.dataset.muting;

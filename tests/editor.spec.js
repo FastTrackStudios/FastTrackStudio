@@ -1038,16 +1038,18 @@ test.describe("editor", () => {
     const beforeLen = Number((await readState(page)).len);
     await editor(page).focus();
     await setCaret(page, beforeLen);
-    // `/h1` filters to "Heading 1" which is the first row in
-    // the Heading group.
-    await page.keyboard.insertText("\n/heading 1");
+    // Query has to be space-free — `detect_slash` closes the
+    // menu when a whitespace char appears in the segment after
+    // the trigger (matches Notion / Logseq). `/heading` is
+    // unambiguous: it matches all six Heading rows; the first
+    // (Heading 1) is selected by default.
+    await page.keyboard.insertText("\n/heading");
     await expect(page.locator(".slash-menu")).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page.locator(".slash-menu")).toHaveCount(0);
-    // After picking Heading 1, the line should be a `# ` prefix
-    // (slash + query removed, heading set on the now-empty
-    // line). Body of the doc should end with `# ` or contain it
-    // somewhere near the tail.
+    // After picking Heading 1, the line should end with `# `
+    // (slash + query removed, heading prefix applied to the
+    // now-empty line).
     await expect
       .poll(async () => (await readState(page)).text)
       .toMatch(/# $/);
