@@ -31,16 +31,19 @@ at the same time and can switch between them.
   vox-oriented. Extend with a `kind` discriminator.
 - [`crates/vault/src/vault.rs`](../crates/vault/src/vault.rs)
   is the in-memory snapshot for the local case.
-- [`crates/vault-sync/src/lib.rs`](../crates/vault-sync/src/lib.rs)
-  is the remote client.
+- [`crates/vault-sync-proto/src/lib.rs`](../crates/vault-sync-proto/src/lib.rs)
+  defines the `VaultSync` vox service. The remote backend wraps
+  the architect-emitted `VaultSyncClient` connected over vox —
+  same client type used on native and wasm.
 
 ## Sketch
 
 ```rust
 enum VaultBackend {
-    Local { path: PathBuf, vault: Arc<RwLock<vault::Vault>> },
-    Remote { client: vault_sync::VaultClient,
-             cache:  Arc<RwLock<vault::Vault>> }, // optional mirror
+    Local  { path: PathBuf, vault: Arc<RwLock<vault::Vault>> },
+    Remote { client:   vault_sync_proto::VaultSyncClient,
+             vault_id: String,
+             cache:    Arc<RwLock<vault::Vault>> }, // optional mirror
 }
 
 struct ServerEntry {
@@ -76,7 +79,8 @@ Open questions:
    the existing remote shape default. Migrate any callers.
 2. Add a `VaultBackend` enum (likely in a new
    `crates/vault-host` crate, or as a module on `task-ui`)
-   that wraps either `vault::Vault` or `vault_sync::VaultClient`.
+   that wraps either `vault::Vault` or
+   `vault_sync_proto::VaultSyncClient`.
 3. Wire a single Local backend into the desktop launcher,
    pointing at `~/Documents/Task`. This is functionally a
    no-op for current users (same as today) but exercises
@@ -90,8 +94,10 @@ Open questions:
 
 ## Out of scope
 
-- Web / wasm — separate plan
-  (`plans/vault-sync-web-transport.md`).
+- Web / wasm transport — no longer a separate concern.
+  `vault_sync_proto::VaultSyncClient` builds for both native
+  and wasm already; the same `VaultBackend::Remote` shape
+  works on the web app once it adopts it.
 - Cross-server links (a `[[Page]]` in vault A pointing at
   vault B). Solvable later via per-server prefixes; ignore
   it for now.

@@ -42,6 +42,8 @@ project-crdt = { workspace = true }
 knowledge-proto = { workspace = true }
 knowledge-crdt = { workspace = true }
 attachments-proto = { workspace = true }
+vault-sync-proto = { workspace = true }
+vox = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server-axum"] }
 architect-auth = { workspace = true, features = ["full"] }
@@ -61,8 +63,6 @@ chrono = { workspace = true }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 walkdir = { workspace = true }
-# vault_sync tests use `tower::util::ServiceExt::oneshot` to
-# drive the axum router without spinning up a TCP listener.
 tower = { version = "0.5", features = ["util"] }
 knowledge-crdt = { workspace = true }
-vault-sync = { workspace = true }
+vault-sync-proto = { workspace = true }

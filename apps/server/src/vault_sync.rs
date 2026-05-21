@@ -1,53 +1,44 @@
-//! File-replication sync for the vault layer.
+//! File-replication sync for the vault layer — vox-shaped.
 //!
 //! Phase 2 of the sync architecture (see
-//! `plans/sync-architecture.md`): per-file get / put / delete
-//! with sha256-based conflict detection. No structural
-//! awareness of markdown content — that lives in `vault` +
-//! the editor. The server is a thin store keyed by
-//! `(vault_id, rel_path)` → blob + sha256 + mtime.
+//! `plans/sync-architecture.md`): per-file get / put / delete with
+//! sha256-based conflict detection. No structural awareness of
+//! markdown content — that lives in `vault` + the editor. The
+//! server is a thin store keyed by `(vault_id, rel_path)` → blob
+//! + sha256 + mtime.
+//!
+//! Conflict policy: **last-writer-wins with `IfMatch`**.
+//! [`IfMatch::CreateOnly`] = "create only, fail on existing";
+//! [`IfMatch::Sha`] = "update only if server's current sha
+//! matches"; [`IfMatch::Force`] = "overwrite unconditionally"
+//! (only safe for the first push of a brand-new vault).
 //!
 //! Modeled on
 //! [`vrtmrz/obsidian-livesync`](https://github.com/vrtmrz/obsidian-livesync)'s
 //! HTTP shape but storage is the filesystem (one folder per
-//! vault under [`vault_root`]) rather than CouchDB. Easier to
-//! debug; we don't need revision history at this phase.
+//! vault under `root`) rather than CouchDB.
 //!
-//! Conflict policy: **last-writer-wins with `If-Match`**. The
-//! client sends the sha it last saw (`If-Match: <hex>`); if
-//! the server's current sha differs, the response is `412
-//! Precondition Failed` with the server's content and sha so
-//! the client can show a 3-way merge. New files send
-//! `If-Match: *` to mean "create only, fail on existing".
-//!
-//! Routes:
-//! - `GET    /vault/:id/manifest`     → list of all files +
-//!   sha + mtime.
-//! - `GET    /vault/:id/file/*path`   → file content.
-//! - `PUT    /vault/:id/file/*path`   → upload; `If-Match`
-//!   guards.
-//! - `DELETE /vault/:id/file/*path`   → remove; `If-Match`
-//!   guards.
+//! This module is the *server-side* implementation of
+//! [`vault_sync_proto::VaultSync`]. Both native and wasm clients
+//! consume the generated `VaultSyncClient` against the same
+//! `/vox` route every other architect/vox service uses; there is
+//! no separate REST surface.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::Router;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path as AxumPath, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{any, delete, get, put};
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, RwLock, broadcast};
+use vault_sync_proto::{
+    DeleteFileArg, FileBytes, GetFileArg, IfMatch, Manifest, ManifestEntry, PutAck, PutFileArg,
+    VaultEvent, VaultIdArg, VaultSync, VaultSyncError,
+};
 
-/// Shared state for the vault-sync routes. One process can
-/// serve many vaults — `root` is the parent directory under
-/// which each vault lives at `{root}/{vault_id}/`. A `Mutex`
-/// per-vault would be more granular, but we keep it simple
-/// for v1.
+/// Server-side filesystem state. One process can serve many
+/// vaults — `root` is the parent directory under which each
+/// vault lives at `{root}/{vault_id}/`. Cheap to `Clone` —
+/// `Arc`s inside.
 #[derive(Clone)]
 pub struct VaultSyncState {
     pub root: PathBuf,
@@ -57,9 +48,9 @@ pub struct VaultSyncState {
     /// matters.
     write_lock: Arc<Mutex<()>>,
     /// Per-vault broadcast channels. PUT / DELETE handlers
-    /// publish a [`VaultEvent`] here; the WS endpoint
-    /// subscribes per connection. Capacity 256 — bursts of
-    /// rapid edits get coalesced client-side.
+    /// publish a [`VaultEvent`] here; `subscribe` subscribes
+    /// per connection. Capacity 256 — bursts of rapid edits
+    /// get coalesced client-side.
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<VaultEvent>>>>,
 }
 
@@ -91,141 +82,155 @@ impl VaultSyncState {
         self.root.join(vault_id)
     }
 
-    fn file_path(&self, vault_id: &str, rel: &str) -> Result<PathBuf, SyncError> {
+    fn file_path(&self, vault_id: &str, rel: &str) -> Result<PathBuf, VaultSyncError> {
         // Refuse anything that could traverse out of the vault
-        // dir. `rel` arrives URL-decoded from the router; reject
-        // `..`, absolute paths, and Windows drive letters
-        // defensively.
+        // dir. Reject `..`, absolute paths, and Windows drive
+        // letters defensively.
         if rel.is_empty()
             || rel.starts_with('/')
             || rel.starts_with('\\')
             || rel.contains("..")
             || rel.contains(':')
         {
-            return Err(SyncError::BadPath);
+            return Err(VaultSyncError::BadPath);
         }
         Ok(self.vault_dir(vault_id).join(rel))
     }
 }
 
-/// Public router. Mount onto the main `Router` with
-/// `.merge(vault_sync_router().with_state(vault_state))`.
-/// Returned without state attached so the caller can wire it
-/// up alongside the rest of the router builder; matches the
-/// `attachments::attachment_router` pattern.
-pub fn router() -> Router<VaultSyncState> {
-    Router::new()
-        .route("/vault/{vault_id}/manifest", get(manifest))
-        .route("/vault/{vault_id}/subscribe", any(subscribe_ws))
-        .route("/vault/{vault_id}/file/{*path}", get(get_file))
-        .route("/vault/{vault_id}/file/{*path}", put(put_file))
-        .route("/vault/{vault_id}/file/{*path}", delete(delete_file))
-}
+impl VaultSync for VaultSyncState {
+    async fn manifest(&self, req: VaultIdArg) -> Result<Manifest, VaultSyncError> {
+        let dir = self.vault_dir(&req.vault_id);
+        if !dir.exists() {
+            return Ok(Manifest {
+                vault_id: req.vault_id,
+                files: Vec::new(),
+            });
+        }
+        let mut entries = Vec::new();
+        collect(&dir, &dir, &mut entries)?;
+        Ok(Manifest {
+            vault_id: req.vault_id,
+            files: entries,
+        })
+    }
 
-/// One change event on a vault. Sent to every WS subscriber
-/// whenever a PUT or DELETE handler completes successfully.
-/// JSON-serialized over the wire — same shape clients see in
-/// manifest entries, plus an `op` discriminator.
-#[derive(Clone, Debug, Serialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum VaultEvent {
-    /// File was created or modified. `sha256` is the new
-    /// content's digest; clients can skip the pull when their
-    /// local sha already matches (echo from their own push).
-    Put {
-        path: String,
-        sha256: String,
-        mtime_ms: i64,
-        size: u64,
-    },
-    /// File was removed.
-    Delete { path: String },
-}
+    async fn get_file(&self, req: GetFileArg) -> Result<FileBytes, VaultSyncError> {
+        let abs = self.file_path(&req.vault_id, &req.path)?;
+        if !abs.exists() {
+            return Err(VaultSyncError::NotFound);
+        }
+        let bytes = std::fs::read(&abs).map_err(io_err)?;
+        Ok(FileBytes(bytes))
+    }
 
-async fn subscribe_ws(
-    State(state): State<VaultSyncState>,
-    AxumPath(vault_id): AxumPath<String>,
-    ws: WebSocketUpgrade,
-) -> Response {
-    let tx = state.channel(&vault_id).await;
-    let mut rx = tx.subscribe();
-    ws.on_upgrade(move |socket| async move {
-        run_subscriber(socket, &mut rx).await;
-    })
-}
+    async fn put_file(&self, req: PutFileArg) -> Result<PutAck, VaultSyncError> {
+        let abs = self.file_path(&req.vault_id, &req.path)?;
+        let _g = self.write_lock.lock().await;
+        let existing_sha = if abs.exists() {
+            let bytes = std::fs::read(&abs).map_err(io_err)?;
+            Some(sha256_hex(&bytes))
+        } else {
+            None
+        };
+        // IfMatch semantics:
+        //   CreateOnly → fail if file exists.
+        //   Sha(hex)   → fail unless the server's current sha matches.
+        //   Force      → unconditional write (client overwriting blindly;
+        //                only safe on first push of a brand-new vault).
+        match (&req.if_match, existing_sha.as_deref()) {
+            (IfMatch::CreateOnly, Some(_)) => return Err(conflict(&abs, existing_sha.as_deref())),
+            (IfMatch::Sha(want), Some(have)) if want != have => {
+                return Err(conflict(&abs, existing_sha.as_deref()));
+            }
+            _ => {}
+        }
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent).map_err(io_err)?;
+        }
+        // Atomic write via temp+rename so concurrent reads never
+        // see a half-written body.
+        let tmp = abs.with_extension(format!(
+            "{}.tmp.{}",
+            abs.extension().and_then(|s| s.to_str()).unwrap_or(""),
+            std::process::id()
+        ));
+        std::fs::write(&tmp, &req.bytes).map_err(io_err)?;
+        std::fs::rename(&tmp, &abs).map_err(io_err)?;
+        let new_sha = sha256_hex(&req.bytes);
+        let mtime_ms = std::fs::metadata(&abs)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        drop(_g);
+        let tx = self.channel(&req.vault_id).await;
+        let _ = tx.send(VaultEvent::Put {
+            path: req.path.clone(),
+            sha256: new_sha.clone(),
+            mtime_ms,
+            size: req.bytes.len() as u64,
+        });
+        Ok(PutAck {
+            sha256: new_sha,
+            mtime_ms,
+        })
+    }
 
-async fn run_subscriber(mut socket: WebSocket, rx: &mut broadcast::Receiver<VaultEvent>) {
-    loop {
-        tokio::select! {
-            // Forward broadcast events as JSON text frames.
-            msg = rx.recv() => match msg {
+    async fn delete_file(&self, req: DeleteFileArg) -> Result<(), VaultSyncError> {
+        let abs = self.file_path(&req.vault_id, &req.path)?;
+        let _g = self.write_lock.lock().await;
+        if !abs.exists() {
+            // Idempotent: missing path = success, no broadcast.
+            return Ok(());
+        }
+        if let IfMatch::Sha(want) = &req.if_match {
+            let bytes = std::fs::read(&abs).map_err(io_err)?;
+            let have = sha256_hex(&bytes);
+            if *want != have {
+                return Err(VaultSyncError::Conflict {
+                    server_sha: have,
+                    server_bytes: bytes,
+                });
+            }
+        }
+        std::fs::remove_file(&abs).map_err(io_err)?;
+        drop(_g);
+        let tx = self.channel(&req.vault_id).await;
+        let _ = tx.send(VaultEvent::Delete {
+            path: req.path.clone(),
+        });
+        Ok(())
+    }
+
+    async fn subscribe(&self, req: VaultIdArg, output: vox::Tx<VaultEvent>) {
+        let tx = self.channel(&req.vault_id).await;
+        let mut rx = tx.subscribe();
+        loop {
+            match rx.recv().await {
                 Ok(evt) => {
-                    let json = match serde_json::to_string(&evt) {
-                        Ok(s) => s,
-                        Err(_) => continue,
-                    };
-                    if socket.send(Message::Text(json.into())).await.is_err() {
+                    if output.send(evt).await.is_err() {
                         return;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // Subscriber missed events because we hit
-                    // the channel cap. Send a hint so the
-                    // client knows to re-pull the manifest.
-                    let _ = socket
-                        .send(Message::Text(r#"{"op":"resync"}"#.into()))
-                        .await;
-                }
                 Err(broadcast::error::RecvError::Closed) => return,
-            },
-            // Drain inbound (we don't expect client → server
-            // messages on this socket; pong frames pass
-            // through). Closing the WS ends the loop.
-            inbound = socket.recv() => match inbound {
-                Some(Ok(Message::Close(_))) | None => return,
-                Some(Ok(_)) => continue,
-                Some(Err(_)) => return,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // Subscriber missed events because we hit the
+                    // channel cap. Send a hint so the client knows
+                    // to re-pull the manifest.
+                    if output.send(VaultEvent::Resync).await.is_err() {
+                        return;
+                    }
+                }
             }
         }
     }
 }
 
-#[derive(Serialize)]
-struct ManifestEntry {
-    path: String,
-    sha256: String,
-    mtime_ms: i64,
-    size: u64,
-}
-
-#[derive(Serialize)]
-struct Manifest {
-    vault_id: String,
-    files: Vec<ManifestEntry>,
-}
-
-async fn manifest(
-    State(state): State<VaultSyncState>,
-    AxumPath(vault_id): AxumPath<String>,
-) -> Result<axum::Json<Manifest>, SyncError> {
-    let dir = state.vault_dir(&vault_id);
-    if !dir.exists() {
-        return Ok(axum::Json(Manifest {
-            vault_id,
-            files: Vec::new(),
-        }));
-    }
-    let mut entries = Vec::new();
-    collect(&dir, &dir, &mut entries)?;
-    Ok(axum::Json(Manifest {
-        vault_id,
-        files: entries,
-    }))
-}
-
-fn collect(root: &Path, dir: &Path, out: &mut Vec<ManifestEntry>) -> Result<(), SyncError> {
-    for entry in std::fs::read_dir(dir).map_err(SyncError::io)? {
-        let entry = entry.map_err(SyncError::io)?;
+fn collect(root: &Path, dir: &Path, out: &mut Vec<ManifestEntry>) -> Result<(), VaultSyncError> {
+    for entry in std::fs::read_dir(dir).map_err(io_err)? {
+        let entry = entry.map_err(io_err)?;
         let path = entry.path();
         if path.is_dir() {
             collect(root, &path, out)?;
@@ -233,13 +238,13 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<ManifestEntry>) -> Result<(), 
         }
         let rel = path
             .strip_prefix(root)
-            .map_err(|_| SyncError::Internal("strip prefix".into()))?
+            .map_err(|_| VaultSyncError::Internal("strip prefix".into()))?
             .to_string_lossy()
             .replace('\\', "/");
-        let bytes = std::fs::read(&path).map_err(SyncError::io)?;
+        let bytes = std::fs::read(&path).map_err(io_err)?;
         let sha256 = sha256_hex(&bytes);
         let mtime_ms = std::fs::metadata(&path)
-            .map_err(SyncError::io)?
+            .map_err(io_err)?
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -255,136 +260,16 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<ManifestEntry>) -> Result<(), 
     Ok(())
 }
 
-async fn get_file(
-    State(state): State<VaultSyncState>,
-    AxumPath((vault_id, rel)): AxumPath<(String, String)>,
-) -> Result<Response, SyncError> {
-    let abs = state.file_path(&vault_id, &rel)?;
-    if !abs.exists() {
-        return Err(SyncError::NotFound);
-    }
-    let bytes = std::fs::read(&abs).map_err(SyncError::io)?;
-    let sha = sha256_hex(&bytes);
-    let mtime_ms = std::fs::metadata(&abs)
-        .map_err(SyncError::io)?
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    let mut headers = HeaderMap::new();
-    headers.insert("X-Vault-Sha256", HeaderValue::from_str(&sha).unwrap());
-    headers.insert("X-Vault-Mtime-Ms", HeaderValue::from(mtime_ms));
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/octet-stream"),
-    );
-    Ok((StatusCode::OK, headers, bytes).into_response())
-}
-
-async fn put_file(
-    State(state): State<VaultSyncState>,
-    AxumPath((vault_id, rel)): AxumPath<(String, String)>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Result<Response, SyncError> {
-    let abs = state.file_path(&vault_id, &rel)?;
-    let if_match = headers
-        .get("If-Match")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let _g = state.write_lock.lock().await;
-    let existing_sha = if abs.exists() {
-        let bytes = std::fs::read(&abs).map_err(SyncError::io)?;
-        Some(sha256_hex(&bytes))
-    } else {
-        None
-    };
-    // If-Match semantics:
-    //   `Some("*")` → create only; fail if file exists.
-    //   `Some(hex)` → update only; fail unless the server's
-    //                 current sha matches.
-    //   `None`      → unconditional write (client is overwriting
-    //                 blindly; only safe on first push of a
-    //                 brand-new vault).
-    if let Some(want) = &if_match {
-        match (want.as_str(), existing_sha.as_deref()) {
-            ("*", Some(_)) => return conflict(&abs, existing_sha.as_deref()),
-            (h, Some(have)) if h != have => return conflict(&abs, existing_sha.as_deref()),
-            _ => {}
-        }
-    }
-    if let Some(parent) = abs.parent() {
-        std::fs::create_dir_all(parent).map_err(SyncError::io)?;
-    }
-    // Atomic write via temp+rename so concurrent reads never
-    // see a half-written body.
-    let tmp = abs.with_extension(format!(
-        "{}.tmp.{}",
-        abs.extension().and_then(|s| s.to_str()).unwrap_or(""),
-        std::process::id()
-    ));
-    std::fs::write(&tmp, &body).map_err(SyncError::io)?;
-    std::fs::rename(&tmp, &abs).map_err(SyncError::io)?;
-    let new_sha = sha256_hex(&body);
-    let mtime_ms = std::fs::metadata(&abs)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    // Drop the write lock before publishing — broadcast::send
-    // is non-blocking, but keeps the critical section minimal.
-    drop(_g);
-    let tx = state.channel(&vault_id).await;
-    let _ = tx.send(VaultEvent::Put {
-        path: rel.clone(),
-        sha256: new_sha.clone(),
-        mtime_ms,
-        size: body.len() as u64,
-    });
-    let mut resp_headers = HeaderMap::new();
-    resp_headers.insert("X-Vault-Sha256", HeaderValue::from_str(&new_sha).unwrap());
-    Ok((StatusCode::OK, resp_headers, new_sha).into_response())
-}
-
-async fn delete_file(
-    State(state): State<VaultSyncState>,
-    AxumPath((vault_id, rel)): AxumPath<(String, String)>,
-    headers: HeaderMap,
-) -> Result<StatusCode, SyncError> {
-    let abs = state.file_path(&vault_id, &rel)?;
-    let if_match = headers
-        .get("If-Match")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let _g = state.write_lock.lock().await;
-    if !abs.exists() {
-        return Ok(StatusCode::NOT_FOUND);
-    }
-    if let Some(want) = if_match {
-        let bytes = std::fs::read(&abs).map_err(SyncError::io)?;
-        let have = sha256_hex(&bytes);
-        if want != have {
-            return Err(SyncError::Conflict {
-                server_sha: have,
-                server_bytes: bytes,
-            });
-        }
-    }
-    std::fs::remove_file(&abs).map_err(SyncError::io)?;
-    drop(_g);
-    let tx = state.channel(&vault_id).await;
-    let _ = tx.send(VaultEvent::Delete { path: rel.clone() });
-    Ok(StatusCode::OK)
-}
-
-fn conflict(abs: &Path, existing_sha: Option<&str>) -> Result<Response, SyncError> {
-    let bytes = std::fs::read(abs).map_err(SyncError::io)?;
-    Err(SyncError::Conflict {
+fn conflict(abs: &Path, existing_sha: Option<&str>) -> VaultSyncError {
+    let bytes = std::fs::read(abs).unwrap_or_default();
+    VaultSyncError::Conflict {
         server_sha: existing_sha.unwrap_or("").to_string(),
         server_bytes: bytes,
-    })
+    }
+}
+
+fn io_err(e: std::io::Error) -> VaultSyncError {
+    VaultSyncError::Io(e.to_string())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -399,57 +284,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum SyncError {
-    #[error("io: {0}")]
-    Io(String),
-    #[error("bad path")]
-    BadPath,
-    #[error("not found")]
-    NotFound,
-    #[error("conflict")]
-    Conflict {
-        server_sha: String,
-        server_bytes: Vec<u8>,
-    },
-    #[error("internal: {0}")]
-    Internal(String),
-}
-
-impl SyncError {
-    fn io(e: std::io::Error) -> Self {
-        Self::Io(e.to_string())
-    }
-}
-
-impl IntoResponse for SyncError {
-    fn into_response(self) -> Response {
-        match self {
-            SyncError::NotFound => (StatusCode::NOT_FOUND, "not found").into_response(),
-            SyncError::BadPath => (StatusCode::BAD_REQUEST, "bad path").into_response(),
-            SyncError::Io(m) => (StatusCode::INTERNAL_SERVER_ERROR, m).into_response(),
-            SyncError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m).into_response(),
-            SyncError::Conflict {
-                server_sha,
-                server_bytes,
-            } => {
-                let mut headers = HeaderMap::new();
-                headers.insert(
-                    "X-Vault-Sha256",
-                    HeaderValue::from_str(&server_sha).unwrap(),
-                );
-                (StatusCode::PRECONDITION_FAILED, headers, server_bytes).into_response()
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
-    use tower::util::ServiceExt;
 
     fn make_state() -> (tempfile::TempDir, VaultSyncState) {
         let tmp = tempfile::tempdir().unwrap();
@@ -457,138 +294,107 @@ mod tests {
         (tmp, state)
     }
 
-    fn make_app(state: VaultSyncState) -> Router {
-        super::router().with_state(state)
-    }
-
     #[tokio::test]
     async fn manifest_empty_vault() {
         let (_tmp, state) = make_state();
-        let app = make_app(state);
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/vault/v1/manifest")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+        let m = state
+            .manifest(VaultIdArg {
+                vault_id: "v1".into(),
+            })
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(m.vault_id, "v1");
+        assert!(m.files.is_empty());
     }
 
     #[tokio::test]
     async fn put_then_get_round_trips() {
         let (_tmp, state) = make_state();
-        let app = make_app(state);
-        let put = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/hello.md")
-                    .header("If-Match", "*")
-                    .body(Body::from("body"))
-                    .unwrap(),
-            )
+        state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "hello.md".into(),
+                bytes: b"body".to_vec(),
+                if_match: IfMatch::CreateOnly,
+            })
             .await
             .unwrap();
-        assert_eq!(put.status(), StatusCode::OK);
-        let get = app
-            .oneshot(
-                Request::builder()
-                    .uri("/vault/v1/file/hello.md")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+        let got = state
+            .get_file(GetFileArg {
+                vault_id: "v1".into(),
+                path: "hello.md".into(),
+            })
             .await
             .unwrap();
-        assert_eq!(get.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(get.into_body(), 1024).await.unwrap();
-        assert_eq!(&body[..], b"body");
+        assert_eq!(got.0, b"body");
     }
 
     #[tokio::test]
-    async fn if_match_star_refuses_existing_file() {
+    async fn if_match_create_only_refuses_existing_file() {
         let (_tmp, state) = make_state();
-        let app = make_app(state);
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/x.md")
-                    .header("If-Match", "*")
-                    .body(Body::from("first"))
-                    .unwrap(),
-            )
+        state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "x.md".into(),
+                bytes: b"first".to_vec(),
+                if_match: IfMatch::CreateOnly,
+            })
             .await
             .unwrap();
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/x.md")
-                    .header("If-Match", "*")
-                    .body(Body::from("second"))
-                    .unwrap(),
-            )
+        let err = state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "x.md".into(),
+                bytes: b"second".to_vec(),
+                if_match: IfMatch::CreateOnly,
+            })
             .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
+            .unwrap_err();
+        assert!(matches!(err, VaultSyncError::Conflict { .. }));
     }
 
     #[tokio::test]
-    async fn if_match_with_stale_sha_returns_412() {
+    async fn if_match_sha_mismatch_returns_conflict() {
         let (_tmp, state) = make_state();
-        let app = make_app(state);
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/x.md")
-                    .header("If-Match", "*")
-                    .body(Body::from("v1"))
-                    .unwrap(),
-            )
+        state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "x.md".into(),
+                bytes: b"v1".to_vec(),
+                if_match: IfMatch::CreateOnly,
+            })
             .await
             .unwrap();
-        let stale = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/x.md")
-                    .header("If-Match", "deadbeef")
-                    .body(Body::from("v2"))
-                    .unwrap(),
-            )
+        let err = state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "x.md".into(),
+                bytes: b"v2".to_vec(),
+                if_match: IfMatch::Sha("deadbeef".into()),
+            })
             .await
-            .unwrap();
-        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+            .unwrap_err();
+        match err {
+            VaultSyncError::Conflict { server_bytes, .. } => {
+                assert_eq!(server_bytes, b"v1");
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
     }
 
     #[tokio::test]
     async fn rejects_traversal_attempts() {
         let (_tmp, state) = make_state();
-        let app = make_app(state);
-        // `..` in the rel path gets normalized by Axum's path
-        // matcher, so trigger our explicit guard by sending a
-        // suspicious literal.
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/..%2Fescape.md")
-                    .body(Body::from("x"))
-                    .unwrap(),
-            )
+        let err = state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "../escape.md".into(),
+                bytes: b"x".to_vec(),
+                if_match: IfMatch::Force,
+            })
             .await
-            .unwrap();
-        assert!(matches!(
-            resp.status(),
-            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND
-        ));
+            .unwrap_err();
+        assert!(matches!(err, VaultSyncError::BadPath));
     }
 
     #[tokio::test]
@@ -596,16 +402,13 @@ mod tests {
         let (_tmp, state) = make_state();
         let tx = state.channel("v1").await;
         let mut rx = tx.subscribe();
-        let app = make_app(state);
-        let _ = app
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/hello.md")
-                    .header("If-Match", "*")
-                    .body(Body::from("hi"))
-                    .unwrap(),
-            )
+        state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "hello.md".into(),
+                bytes: b"hi".to_vec(),
+                if_match: IfMatch::CreateOnly,
+            })
             .await
             .unwrap();
         let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
@@ -624,29 +427,23 @@ mod tests {
     #[tokio::test]
     async fn delete_broadcasts_event() {
         let (_tmp, state) = make_state();
-        let app = make_app(state.clone());
-        let _ = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("PUT")
-                    .uri("/vault/v1/file/gone.md")
-                    .header("If-Match", "*")
-                    .body(Body::from("x"))
-                    .unwrap(),
-            )
+        state
+            .put_file(PutFileArg {
+                vault_id: "v1".into(),
+                path: "gone.md".into(),
+                bytes: b"x".to_vec(),
+                if_match: IfMatch::CreateOnly,
+            })
             .await
             .unwrap();
         let tx = state.channel("v1").await;
         let mut rx = tx.subscribe();
-        let _ = app
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/vault/v1/file/gone.md")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+        state
+            .delete_file(DeleteFileArg {
+                vault_id: "v1".into(),
+                path: "gone.md".into(),
+                if_match: IfMatch::Force,
+            })
             .await
             .unwrap();
         let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())

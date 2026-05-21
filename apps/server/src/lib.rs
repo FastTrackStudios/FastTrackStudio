@@ -354,6 +354,12 @@ pub struct AppState {
     pub indexer: KnowledgeIndexer,
     pub attachments: Arc<attachments::AttachmentServiceImpl>,
     pub anonymous_claim: AnonymousClaimServiceImpl<AuthSeaOrmStorage>,
+    /// Phase 2 vault file-replication. Carries the per-vault
+    /// filesystem root + the broadcast channels behind
+    /// [`vault_sync_proto::VaultSync`]. Mounted as one more arm on
+    /// the `/vox` route alongside every other architect/vox
+    /// service.
+    pub vault_sync: vault_sync::VaultSyncState,
 }
 
 impl AppState {
@@ -478,6 +484,21 @@ impl AppState {
             public_base_url,
         ));
 
+        // Phase 2 — vault file-replication. Storage root defaults
+        // to `$XDG_DATA_HOME/task-server/vaults` (or
+        // `~/.local/share/task-server/vaults`), overridable via
+        // `TASK_SERVER_VAULT_ROOT` for tests / containers.
+        let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs_local_share()
+                    .unwrap_or_else(|| std::path::PathBuf::from("./vaults"))
+                    .join("task-server")
+                    .join("vaults")
+            });
+        let vault_sync_state = vault_sync::VaultSyncState::new(vault_root)
+            .map_err(|e| eyre::eyre!("vault_sync state: {e}"))?;
+
         // Phase 8 — anonymous claim service. Holds the in-memory
         // (peer_id -> user_id) table; the dispatcher's
         // `InstallSessionMiddleware` copies the caller's session
@@ -507,6 +528,7 @@ impl AppState {
             indexer,
             attachments: attachment_service,
             anonymous_claim: anonymous_claim_service,
+            vault_sync: vault_sync_state,
         })
     }
 }
@@ -878,28 +900,15 @@ pub fn router(state: AppState) -> Router {
     };
     let blob_router = attachments::attachment_router().with_state(blob_state);
 
-    // Vault file-replication sync (phase 2). Mounted alongside
-    // the vox CRDT routes; the two sync layers are orthogonal —
-    // vox handles structured Loro entities, vault_sync handles
-    // raw markdown files. Storage root defaults to
-    // `~/.local/share/task-server/vaults` but can be overridden
-    // by `TASK_SERVER_VAULT_ROOT`.
-    let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs_local_share()
-                .unwrap_or_else(|| std::path::PathBuf::from("./vaults"))
-                .join("task-server")
-                .join("vaults")
-        });
-    let vault_state = vault_sync::VaultSyncState::new(vault_root).expect("vault_sync state");
-    let vault_router = vault_sync::router().with_state(vault_state);
+    // Vault file-replication (phase 2) is now another
+    // `#[vox::service]` mounted as one more arm in `vox_ws_handler`
+    // — no separate REST router, no separate WS upgrade. Storage
+    // root + broadcast channels live on `state.vault_sync`.
 
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/vox", get(vox_ws_handler))
         .merge(blob_router)
-        .merge(vault_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
@@ -968,6 +977,7 @@ async fn vox_ws_handler(
         let share_service = state.share_service.clone();
         let attachment_service = state.attachments.clone();
         let anonymous_claim = state.anonymous_claim.clone();
+        let vault_sync_state = state.vault_sync.clone();
         let vault_repo = (*state.vault_repo).clone();
         let folder_repo = (*state.folder_repo).clone();
         let page_repo = (*state.page_repo).clone();
@@ -1045,6 +1055,11 @@ async fn vox_ws_handler(
                 }
                 "BaseRepo" => {
                     connection.handle_with(BaseRepoDispatcher::new(base_repo.clone()));
+                    Ok(())
+                }
+                "VaultSync" => {
+                    use vault_sync_proto::VaultSyncDispatcher;
+                    connection.handle_with(VaultSyncDispatcher::new(vault_sync_state.clone()));
                     Ok(())
                 }
                 other => {
