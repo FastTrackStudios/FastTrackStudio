@@ -1,0 +1,27 @@
+[package]
+name = "vault"
+description = "Filesystem-backed vault: reads + writes `.md` files, indexes block IDs and refs. Sits below the editor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Vault is native-only (file IO + watching). The `#![cfg(not(wasm))]`
+# at the crate root keeps wasm builds happy.
+walkdir = { workspace = true }
+notify = "8"
+notify-debouncer-mini = "0.7"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+# `editor-state::markdown::parse_frontmatter` + the block-id
+# parser. We depend on the editor for the *parsing*; the vault
+# owns the file storage + index layer above it.
+editor-state = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

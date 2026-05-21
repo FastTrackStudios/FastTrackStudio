@@ -3477,7 +3477,7 @@ dependencies = [
  "dioxus",
  "indexmap",
  "notify",
- "notify-debouncer-mini",
+ "notify-debouncer-mini 0.6.0",
  "publish-core",
  "rfd 0.15.4",
  "serde",
@@ -6182,7 +6182,7 @@ dependencies = [
  "knowledge-proto",
  "loro",
  "notify",
- "notify-debouncer-mini",
+ "notify-debouncer-mini 0.6.0",
  "project-proto",
  "publish-core",
  "regex",
@@ -7411,6 +7411,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "notify-debouncer-mini"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17849edfaabd9a5fef1c606d99cfc615a8e99f7ac4366406d86c7942a3184cf2"
+dependencies = [
+ "log",
+ "notify",
+ "notify-types",
+ "tempfile",
+]
+
+[[package]]
 name = "notify-types"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7734,7 +7746,7 @@ dependencies = [
  "futures",
  "knowledge-proto",
  "notify",
- "notify-debouncer-mini",
+ "notify-debouncer-mini 0.6.0",
  "regex",
  "serde",
  "serde_json",
@@ -12321,6 +12333,21 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "vault"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "editor-state",
+ "notify",
+ "notify-debouncer-mini 0.7.0",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
 
 [[package]]
 name = "vcpkg"
