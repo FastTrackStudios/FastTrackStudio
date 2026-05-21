@@ -233,3 +233,50 @@ fn g_tilde_doubled_toggles_case_of_line() {
     let s = drive(s, &mut vim, &["g", "~", "~"]);
     assert_eq!(s.doc.to_string(), "hELLO wORLD");
 }
+
+#[test]
+fn star_jumps_to_next_occurrence_of_word_under_caret() {
+    let mut vim = VimState::new();
+    // Caret at 0 ("f" of first "foo"). `*` should jump to the
+    // start of the SECOND "foo".
+    let s = state_with_caret("foo bar foo baz", 0);
+    let s = drive(s, &mut vim, &["*"]);
+    assert_eq!(s.selection.primary().head, 8);
+}
+
+#[test]
+fn hash_jumps_to_previous_occurrence() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("foo bar foo baz", 8);
+    let s = drive(s, &mut vim, &["#"]);
+    assert_eq!(s.selection.primary().head, 0);
+}
+
+#[test]
+fn n_repeats_last_search_forward() {
+    let mut vim = VimState::new();
+    // `foo` appears 3 times. `*` jumps to occurrence 2; `n`
+    // jumps to occurrence 3.
+    let s = state_with_caret("foo bar foo baz foo end", 0);
+    let s = drive(s, &mut vim, &["*", "n"]);
+    assert_eq!(s.selection.primary().head, 16);
+}
+
+#[test]
+fn capital_n_reverses_search_direction() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("foo bar foo baz foo end", 0);
+    // `*` → occurrence 2 (pos 8). `N` reverses → back to 0.
+    let s = drive(s, &mut vim, &["*", "N"]);
+    assert_eq!(s.selection.primary().head, 0);
+}
+
+#[test]
+fn star_requires_whole_word_match() {
+    let mut vim = VimState::new();
+    // Caret on `foo` — `*` must skip `foobar` and land on the
+    // standalone `foo`.
+    let s = state_with_caret("foo foobar baz foo end", 0);
+    let s = drive(s, &mut vim, &["*"]);
+    assert_eq!(s.selection.primary().head, 15);
+}

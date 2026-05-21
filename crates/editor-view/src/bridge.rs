@@ -343,6 +343,59 @@ pub(crate) fn handle_bridge_msg(
                 PropValue::List(items)
             });
         }
+        "prop-add" => {
+            // Append a new key with an empty value at the end
+            // of the frontmatter block, just before the closing
+            // `---`. The user is left focused on the
+            // contenteditable add-row cell (cleared by JS); the
+            // next live-preview pass renders the new row and
+            // they can click into it to set a value.
+            let Some(key) = v.get("key").and_then(|k| k.as_str()) else { return };
+            let key = key.trim();
+            if key.is_empty() {
+                return;
+            }
+            let cur = state.read().clone();
+            let doc = cur.doc.to_string();
+            let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else { return };
+            // Reject duplicates so we don't end up with two
+            // entries the parser would collapse.
+            if fm.props.iter().any(|p| p.key == key) {
+                return;
+            }
+            let insert_at = fm.closer.start;
+            let new_text = editor_state::markdown::serialize_property(
+                key,
+                &editor_state::markdown::PropValue::Empty,
+            );
+            let changes = Changes::insert(insert_at, &new_text);
+            let prev_sel = cur.selection.clone();
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(prev_sel)
+                    .annotate("origin", "prop-add"),
+            ));
+        }
+        "prop-remove" => {
+            // Delete the entire `prop.range` for the named key.
+            let Some(key) = v.get("key").and_then(|k| k.as_str()) else { return };
+            let cur = state.read().clone();
+            let doc = cur.doc.to_string();
+            let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else { return };
+            let Some(prop) = fm.props.iter().find(|p| p.key == key) else { return };
+            let changes = Changes::delete(prop.range.clone());
+            // Caret stays put — the deletion is below it in most
+            // cases (closer is at the end of the FM range), and
+            // map_through handles the rest.
+            let prev_sel = cur.selection.clone();
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .changes(changes)
+                    .selection(prev_sel)
+                    .annotate("origin", "prop-remove"),
+            ));
+        }
         "prop-list-remove" => {
             apply_property_change(state, v, |old, _ty, value| {
                 use editor_state::markdown::PropValue;

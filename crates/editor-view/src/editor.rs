@@ -1228,6 +1228,14 @@ pub fn Editor(
                                     evt.target.textContent = '';
                                     return;
                                 }}
+                                if (role === 'row-add' && evt.key === 'Enter') {{
+                                    evt.preventDefault();
+                                    const key = propValueText(evt.target);
+                                    if (!key) return;
+                                    dioxus.send({{ kind: 'prop-add', key }});
+                                    evt.target.textContent = '';
+                                    return;
+                                }}
                             }});
                             el.addEventListener('click', evt => {{
                                 const role = evt.target.dataset.editRole;
@@ -1250,6 +1258,18 @@ pub fn Editor(
                                     if (chip && row) {{
                                         sendPropEdit(row, 'prop-list-remove', {{
                                             value: chip.dataset.chipValue || '',
+                                        }});
+                                    }}
+                                    return;
+                                }}
+                                if (role === 'row-remove') {{
+                                    evt.preventDefault();
+                                    evt.stopPropagation();
+                                    const row = evt.target.closest('.md-property-row');
+                                    if (row) {{
+                                        dioxus.send({{
+                                            kind: 'prop-remove',
+                                            key: row.dataset.propKey,
                                         }});
                                     }}
                                     return;

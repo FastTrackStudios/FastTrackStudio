@@ -45,6 +45,19 @@ deferred. Listed in rough do-this-first order.
   compiles at 2 per `live_preview`. LRU cap raised 32 → 128.
   Pasting a doc full of fresh equations no longer freezes —
   math fills in over a few render cycles.
+- ✅ **Add / remove property rows**: each row has a hover-shown
+  × handle (`prop-remove` → `Changes::delete(prop.range)`); a
+  "+ Add property" cell at the bottom of the panel commits a
+  new empty key on Enter (`prop-add` → insert at
+  `fm.closer.start`).
+- ✅ **Multiline YAML scalars**: parser handles `key: |\n  …`
+  block scalars (auto-detected indent, blank lines preserved
+  inside the block, trailing blanks stripped). Serializer
+  emits `|` when a text value contains `\n`. Round-trip tested.
+- ✅ **Vim search**: `*` / `#` search for the word under
+  caret (whole-word match, wraps at doc bounds); `n` / `N`
+  repeat / reverse. Last search lives in `VimState.last_search`.
+  5 new tests.
 
 Still pending below.
 

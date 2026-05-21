@@ -45,6 +45,9 @@ pub struct VimState {
     /// the resolved range gets case-changed. Holds the case op
     /// (`'u'`/`'U'`/`'~'`).
     pub pending_g_case: Option<char>,
+    /// Most recent `*` / `#` search target, with the direction
+    /// the user initiated it in. `n` / `N` repeat against this.
+    pub last_search: Option<(String, bool)>,
     /// Anchor offset for visual mode. `None` outside visual.
     pub visual_anchor: Option<usize>,
     pub registers: Registers,
@@ -412,6 +415,10 @@ fn single_char_normal_command(
                     .selection(Selection::caret(from)),
             )
         }
+        '*' => search_word_under_caret(state, vim, /*forward=*/ true),
+        '#' => search_word_under_caret(state, vim, /*forward=*/ false),
+        'n' => search_repeat(state, vim, /*reverse=*/ false),
+        'N' => search_repeat(state, vim, /*reverse=*/ true),
         'J' => Some(join_lines(state, vim)),
         'C' => {
             // Change to end of line. `c$` shorthand.
@@ -768,6 +775,124 @@ fn paste(state: &EditorState, vim: &mut VimState, before: bool) -> TransactionSp
     TransactionSpec::new()
         .changes(Changes::insert(pos, text))
         .selection(Selection::caret(new_caret))
+}
+
+/// `*` / `#` — find the word under the caret, then jump to its
+/// next/previous whole-word occurrence. Stores the word + the
+/// initial direction in `vim.last_search` so `n` / `N` can
+/// repeat it without re-reading the doc.
+fn search_word_under_caret(
+    state: &EditorState,
+    vim: &mut VimState,
+    forward: bool,
+) -> Option<TransactionSpec> {
+    let doc = state.doc.to_string();
+    let bytes = doc.as_bytes();
+    let pos = caret(state);
+    // Identify the word containing the caret (or the next word
+    // forward, if the caret is on whitespace).
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut start = pos;
+    while start > 0 && start <= bytes.len() && is_word(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = start;
+    while end < bytes.len() && is_word(bytes[end]) {
+        end += 1;
+    }
+    if start == end {
+        // No word at the caret — try the next word forward.
+        let mut p = pos;
+        while p < bytes.len() && !is_word(bytes[p]) {
+            p += 1;
+        }
+        if p >= bytes.len() {
+            vim.clear_pending();
+            return None;
+        }
+        start = p;
+        end = p;
+        while end < bytes.len() && is_word(bytes[end]) {
+            end += 1;
+        }
+    }
+    let word = doc[start..end].to_string();
+    vim.last_search = Some((word.clone(), forward));
+    vim.clear_pending();
+    Some(jump_to_word(&doc, &word, pos, forward))
+}
+
+/// `n` / `N` — repeat the last `*`/`#` search. `reverse=true`
+/// flips the stored direction (that's `N`).
+fn search_repeat(
+    state: &EditorState,
+    vim: &mut VimState,
+    reverse: bool,
+) -> Option<TransactionSpec> {
+    let (word, dir) = vim.last_search.clone()?;
+    let effective = dir ^ reverse;
+    let doc = state.doc.to_string();
+    vim.clear_pending();
+    Some(jump_to_word(&doc, &word, caret(state), effective))
+}
+
+/// Walk the doc for the next/previous whole-word occurrence of
+/// `word` relative to `from`, wrapping at the doc bounds. Empty
+/// `word` is a no-op (returns a caret-only spec at `from`).
+fn jump_to_word(doc: &str, word: &str, from: usize, forward: bool) -> TransactionSpec {
+    if word.is_empty() {
+        return TransactionSpec::new().selection(Selection::caret(from));
+    }
+    let bytes = doc.as_bytes();
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let whole_match_at = |i: usize| -> bool {
+        if i + word.len() > bytes.len() {
+            return false;
+        }
+        if &doc[i..i + word.len()] != word {
+            return false;
+        }
+        let left_ok = i == 0 || !is_word(bytes[i - 1]);
+        let right_ok = i + word.len() == bytes.len() || !is_word(bytes[i + word.len()]);
+        left_ok && right_ok
+    };
+    if forward {
+        let mut i = from + 1;
+        while i < bytes.len() {
+            if whole_match_at(i) {
+                return TransactionSpec::new().selection(Selection::caret(i));
+            }
+            i += 1;
+        }
+        // Wrap.
+        let mut i = 0;
+        while i <= from {
+            if whole_match_at(i) {
+                return TransactionSpec::new().selection(Selection::caret(i));
+            }
+            i += 1;
+        }
+    } else {
+        let mut i = from.saturating_sub(1);
+        loop {
+            if whole_match_at(i) {
+                return TransactionSpec::new().selection(Selection::caret(i));
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        // Wrap.
+        let mut i = bytes.len().saturating_sub(1);
+        while i > from {
+            if whole_match_at(i) {
+                return TransactionSpec::new().selection(Selection::caret(i));
+            }
+            i -= 1;
+        }
+    }
+    TransactionSpec::new().selection(Selection::caret(from))
 }
 
 fn join_lines(state: &EditorState, vim: &mut VimState) -> TransactionSpec {

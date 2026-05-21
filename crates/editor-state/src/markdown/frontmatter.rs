@@ -152,7 +152,50 @@ fn parse_frontmatter_body(
         }
         let rest = line[colon + 1..].trim();
         let mut prop_end = line_with_nl;
-        let value = if rest.is_empty() {
+        // YAML `|` literal block scalar: `key: |` followed by
+        // indented lines preserves the line breaks as the value.
+        // Strip the leading indent (whichever depth the first
+        // line uses) from each continuation line.
+        let value = if rest == "|" {
+            let mut lines: Vec<String> = Vec::new();
+            let mut indent: Option<usize> = None;
+            let mut j = line_with_nl;
+            while j < body_end {
+                let sub_from = j;
+                while j < body_end && bytes[j] != b'\n' {
+                    j += 1;
+                }
+                let sub_line = &text[sub_from..j];
+                let sub_nl = if j < body_end { j + 1 } else { j };
+                let sub_indent =
+                    sub_line.bytes().take_while(|&b| b == b' ' || b == b'\t').count();
+                if sub_line.trim().is_empty() {
+                    // Blank line: part of the block if any
+                    // content follows at the right indent.
+                    if indent.is_some() {
+                        lines.push(String::new());
+                        prop_end = sub_nl;
+                    }
+                    j = sub_nl;
+                    continue;
+                }
+                let need = *indent.get_or_insert(sub_indent);
+                if sub_indent < need {
+                    break;
+                }
+                lines.push(sub_line[need..].to_string());
+                prop_end = sub_nl;
+                j = sub_nl;
+            }
+            i = prop_end;
+            // Drop trailing blank lines so the value isn't padded
+            // by whatever blank lines sat between the block and
+            // the next key (or the closing `---`).
+            while lines.last().is_some_and(|s| s.is_empty()) {
+                lines.pop();
+            }
+            PropValue::Text(lines.join("\n"))
+        } else if rest.is_empty() {
             // Block list: peek indented `- item` lines and pull
             // them into this property.
             let mut items: Vec<String> = Vec::new();
@@ -273,7 +316,13 @@ pub(crate) fn render_properties_html(props: &[Property], active_idx: Option<usiz
         html.push_str(r#"<div class="md-property-key">"#);
         html.push_str(&key_attr);
         html.push_str("</div>");
+        // Row gutter — × button shows on hover to remove the
+        // whole property. Sits in the value column so the key
+        // column stays tightly aligned.
         html.push_str(r#"<div class="md-property-value">"#);
+        html.push_str(
+            r#"<span class="md-property-row-remove" data-edit-role="row-remove" tabindex="0" title="Remove property">×</span>"#,
+        );
         match &p.value {
             PropValue::Empty => {
                 html.push_str(
@@ -323,6 +372,12 @@ pub(crate) fn render_properties_html(props: &[Property], active_idx: Option<usiz
         }
         html.push_str("</div></div>");
     }
+    // Bottom "+ Add property" affordance. Clicking it focuses a
+    // contenteditable key cell; Enter on a non-empty key
+    // dispatches `prop-add`.
+    html.push_str(
+        r#"<div class="md-property-add-row"><span class="md-property-add" contenteditable="plaintext-only" spellcheck="false" data-edit-role="row-add" data-placeholder="+ Add property"></span></div>"#,
+    );
     html.push_str("</div>");
     html
 }
@@ -343,6 +398,18 @@ fn format_number(n: f64) -> String {
 /// `text[range]` as-is.
 pub fn serialize_property(key: &str, value: &PropValue) -> String {
     match value {
+        PropValue::Text(s) if s.contains('\n') => {
+            // Multi-line scalar — emit as a `|` block so the
+            // newlines round-trip. Each line gets a two-space
+            // indent, matching what the parser expects.
+            let mut out = format!("{key}: |\n");
+            for line in s.split('\n') {
+                out.push_str("  ");
+                out.push_str(line);
+                out.push('\n');
+            }
+            out
+        }
         PropValue::Text(s) => format!("{key}: {}\n", yaml_quote_if_needed(s)),
         PropValue::Bool(b) => format!("{key}: {}\n", b),
         PropValue::Number(n) => format!("{key}: {}\n", format_number(*n)),

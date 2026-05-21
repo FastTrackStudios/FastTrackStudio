@@ -283,6 +283,56 @@ section h2 {
 .editor-root .md-property-row:hover {
     background: rgba(255, 255, 255, 0.03);
 }
+.editor-root .md-property-row:hover .md-property-row-remove,
+.editor-root .md-property-row.is-active .md-property-row-remove,
+.editor-root .md-property-row.is-vim-active .md-property-row-remove {
+    opacity: 0.6;
+}
+.editor-root .md-property-row-remove {
+    display: inline-block;
+    float: right;
+    margin-left: 8px;
+    padding: 0 6px;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 80ms ease;
+    user-select: none;
+}
+.editor-root .md-property-row-remove:hover {
+    background: rgba(255, 80, 80, 0.2);
+    color: #fff;
+    opacity: 1 !important;
+}
+.editor-root .md-property-add-row {
+    margin-top: 4px;
+    padding: 4px 8px;
+}
+.editor-root .md-property-add {
+    display: inline-block;
+    min-width: 12ch;
+    padding: 2px 8px;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: text;
+    outline: none;
+    border: 1px dashed transparent;
+}
+.editor-root .md-property-add:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.7);
+}
+.editor-root .md-property-add:focus {
+    border-color: rgba(127, 167, 217, 0.6);
+    border-style: solid;
+    color: inherit;
+    background: rgba(96, 128, 192, 0.1);
+}
+.editor-root .md-property-add:empty::before {
+    content: attr(data-placeholder);
+    color: rgba(255, 255, 255, 0.3);
+}
 .editor-root .md-property-key {
     color: rgba(255, 255, 255, 0.55);
     text-transform: lowercase;

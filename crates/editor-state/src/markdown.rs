@@ -1635,6 +1635,28 @@ mod tests {
     }
 
     #[test]
+    fn multiline_scalar_round_trips() {
+        // `|` block scalars carry newlines verbatim.
+        let src = "---\ndescription: |\n  first line\n  second line\n  third\nactive: true\n---\n";
+        let fm = super::parse_frontmatter(src).unwrap();
+        let desc = &fm.props[0];
+        assert_eq!(desc.key, "description");
+        if let super::PropValue::Text(t) = &desc.value {
+            assert_eq!(t, "first line\nsecond line\nthird");
+        } else {
+            panic!("expected multiline text, got {:?}", desc.value);
+        }
+        // Serialize back out — must produce a `|` block, not a
+        // collapsed single-line.
+        let s = super::serialize_property("description", &desc.value);
+        assert!(s.starts_with("description: |\n"));
+        assert!(s.contains("  first line\n"));
+        // Range covers the block + the closing indent line.
+        assert_eq!(&src[desc.range.clone()],
+            "description: |\n  first line\n  second line\n  third\n");
+    }
+
+    #[test]
     fn frontmatter_only_at_doc_start() {
         // `---` mid-doc is a horizontal rule, not frontmatter.
         let src = "# heading\n\n---\nfoo: bar\n---\n";
