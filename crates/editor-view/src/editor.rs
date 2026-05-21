@@ -1210,6 +1210,7 @@ pub fn Editor(
     // ── onkeydown: vim → keymap dispatch ─────────────────────────
     let keymap_for_keys = keymap.clone();
     let vim_for_keys = vim;
+    let editor_id_for_keys = editor_id.clone();
     let on_keydown = move |evt: Event<KeyboardData>| {
         let mods = evt.modifiers();
         let key_str = match evt.key() {
@@ -1225,15 +1226,57 @@ pub fn Editor(
             r#mod: mods.ctrl() || mods.meta(),
         };
         let cur = state.read().clone();
-        // Vim takes the first shot. If it returns a spec, apply
-        // it and preventDefault (also stop the browser from
-        // sending the bare key into the contenteditable).
         if let Some(mut vim_sig) = vim_for_keys {
+            // ── Visual-row h/j/k/l shortcut ──
+            //
+            // Vim's logical j/k jump whole doc lines, which is
+            // jarring when soft-wrap is on (a paragraph that
+            // takes 5 visual rows jumps the cursor 5 rows in one
+            // press). For bare h/j/k/l without a pending count
+            // we lean on the browser's `Selection.modify` so
+            // movement follows the rendered rows the user sees,
+            // matching Obsidian / VSCode wrap behavior. Count-
+            // prefixed motions (`3j`, `5k`) still go through
+            // vim for logical-line semantics.
+            let vim_snap = vim_sig.peek().clone();
+            let is_visual_arrow_key = !vim_snap.is_inserting()
+                && vim_snap.pending_count.is_none()
+                && vim_snap.pending_operator.is_none()
+                && vim_snap.pending_motion_input.is_none()
+                && matches!(press.key.as_str(), "h" | "j" | "k" | "l")
+                && !press.ctrl
+                && !press.alt
+                && !press.meta;
+            if is_visual_arrow_key {
+                let direction = match press.key.as_str() {
+                    "h" => ("backward", "character"),
+                    "l" => ("forward", "character"),
+                    "k" => ("backward", "line"),
+                    "j" => ("forward", "line"),
+                    _ => unreachable!(),
+                };
+                let action = if vim_snap.is_visual() { "extend" } else { "move" };
+                let script = format!(
+                    r#"
+                    (function() {{
+                        const el = document.querySelector('[data-editor-id="{id}"]');
+                        if (!el) return;
+                        const sel = window.getSelection();
+                        if (!sel) return;
+                        sel.modify('{action}', '{dir}', '{gran}');
+                    }})();
+                    "#,
+                    id = editor_id_for_keys,
+                    action = action,
+                    dir = direction.0,
+                    gran = direction.1,
+                );
+                let _ = document::eval(&script);
+                evt.prevent_default();
+                return;
+            }
             let mut vim_state = vim_sig.peek().clone();
             let spec = editor_vim::handle_key(&cur, &mut vim_state, &press);
-            // VimState always gets persisted — pending counts /
-            // operators / mode transitions accumulate across keys
-            // even when no Change is produced.
             vim_sig.set(vim_state);
             if let Some(spec) = spec {
                 evt.prevent_default();
@@ -1241,9 +1284,6 @@ pub fn Editor(
                 state.set(cur.update(spec));
                 return;
             }
-            // In Normal/Visual mode, suppress raw character
-            // input — vim consumes them. Only Insert mode lets
-            // characters fall through to the contenteditable.
             if !vim_sig.peek().is_inserting() {
                 evt.prevent_default();
                 return;

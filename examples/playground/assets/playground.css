@@ -83,7 +83,7 @@ section h2 {
        paints its number into this column via the CSS counter
        below; the counter increments in document order. */
     counter-reset: cm-line;
-    padding-left: 48px;
+    padding-left: 60px;
     position: relative;
 }
 
@@ -133,11 +133,17 @@ section h2 {
 .editor-root .cm-line::before {
     content: counter(cm-line);
     position: absolute;
-    left: -42px;
-    width: 32px;
+    left: -52px;
+    /* Pin a baseline at the start of the line content even when
+       the line itself uses a heading-sized font. Without these
+       explicit absolute sizes, line numbers ballooned on h1/h2
+       and shrank on h6. */
+    top: 0.35em;
+    width: 36px;
     text-align: right;
     color: #4a526a;
-    font-size: 0.9em;
+    font-size: 12px;
+    line-height: 1;
     user-select: none;
     -webkit-user-select: none;
     pointer-events: none;
