@@ -578,29 +578,32 @@ pub fn all_commands() -> Vec<CommandEntry> {
         ("example", "Example", "🧪"),
         ("quote", "Quote", "❞"),
     ] {
-        // Trailing space after `]` + caret_back = 3 → caret
-        // lands right after `> [!type] ` on the title line.
+        // Just the header line with a trailing space — caret
+        // ends right after `> [!type] ` ready for the title.
+        // User hits Enter to drop into the body; the existing
+        // `enter_continue_list` command picks up the
+        // blockquote prefix and inserts `> ` on the next line.
         let snippet: &'static str = match kind {
-            "note" => "> [!note] \n> ",
-            "abstract" => "> [!abstract] \n> ",
-            "info" => "> [!info] \n> ",
-            "todo" => "> [!todo] \n> ",
-            "tip" => "> [!tip] \n> ",
-            "success" => "> [!success] \n> ",
-            "question" => "> [!question] \n> ",
-            "warning" => "> [!warning] \n> ",
-            "failure" => "> [!failure] \n> ",
-            "danger" => "> [!danger] \n> ",
-            "bug" => "> [!bug] \n> ",
-            "example" => "> [!example] \n> ",
-            "quote" => "> [!quote] \n> ",
+            "note" => "> [!note] ",
+            "abstract" => "> [!abstract] ",
+            "info" => "> [!info] ",
+            "todo" => "> [!todo] ",
+            "tip" => "> [!tip] ",
+            "success" => "> [!success] ",
+            "question" => "> [!question] ",
+            "warning" => "> [!warning] ",
+            "failure" => "> [!failure] ",
+            "danger" => "> [!danger] ",
+            "bug" => "> [!bug] ",
+            "example" => "> [!example] ",
+            "quote" => "> [!quote] ",
             _ => unreachable!(),
         };
         out.push(CommandEntry {
             label,
             group: "Callout",
             desc: "",
-            kind: CommandKind::InsertBlockSnippet(snippet, 3),
+            kind: CommandKind::InsertBlockSnippet(snippet, 0),
             icon,
         });
     }
