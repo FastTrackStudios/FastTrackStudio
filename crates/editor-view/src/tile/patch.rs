@@ -81,6 +81,28 @@ pub fn build_patch(arena: &Arena, root: TileId) -> Vec<Patch> {
     out
 }
 
+/// Does this patch sub-tree contain any non-widget text node?
+/// Widgets are rendered `contenteditable="false"` so the browser
+/// doesn't treat them as cursor targets — without an actual
+/// text descendant a line stays unreachable via line motions.
+fn patch_has_text(p: &Patch) -> bool {
+    match p {
+        Patch::Text { text } => !text.is_empty(),
+        Patch::Element { tag, attrs, kids } => {
+            if tag == "br" {
+                return true;
+            }
+            let is_widget = attrs
+                .iter()
+                .any(|(k, v)| k == "class" && v.contains("editor-widget"));
+            if is_widget {
+                return false;
+            }
+            kids.iter().any(patch_has_text)
+        }
+    }
+}
+
 fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
     let t = arena.get(tile);
     let pos = pos_at_start(arena, tile);
@@ -97,7 +119,16 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
                     kids.push(p);
                 }
             }
-            if kids.is_empty() {
+            // The browser's native arrow / line-by-line caret
+            // motion (also what `Selection.modify('move', dir,
+            // 'line')` uses for vim j/k) refuses to land on a
+            // line that has no text descendant — a line whose
+            // sole child is an absolute-positioned widget reads
+            // as "no cursor target here" and gets skipped. Add
+            // a `<br>` so there's always a place for the caret
+            // to anchor.
+            let has_text_anchor = kids.iter().any(patch_has_text);
+            if !has_text_anchor {
                 kids.push(Patch::element("br", Vec::new(), Vec::new()));
             }
             let extras = line_extra_classes(t);
