@@ -147,6 +147,15 @@ impl<'a> TileBuilder<'a> {
 
         let mut event_idx = 0;
         while self.pos < text.len() || event_idx < events.len() {
+            // Drop events that fall *behind* the current pos —
+            // typically Mark{Start,End} pairs whose range was
+            // entirely consumed by a Replace that we already
+            // walked past. Without this, the next iteration's
+            // `next_event_pos < self.pos` traps the loop in an
+            // infinite no-op spin.
+            while event_idx < events.len() && events[event_idx].at < self.pos {
+                event_idx += 1;
+            }
             // Apply all events whose position == self.pos. A
             // Replace event opens a hidden range until its
             // `to`; a Mark event opens a mark wrapper for its

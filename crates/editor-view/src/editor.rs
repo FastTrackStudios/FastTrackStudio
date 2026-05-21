@@ -1160,13 +1160,6 @@ pub fn Editor(
                                         && n.dataset.taskPos != null) {{
                                         evt.preventDefault();
                                         evt.stopPropagation();
-                                        // Clicking a contenteditable=false
-                                        // widget would otherwise create a
-                                        // selection wrapping it; collapse it
-                                        // so the user doesn't see a wide
-                                        // highlight.
-                                        const sel = window.getSelection();
-                                        if (sel) sel.removeAllRanges();
                                         const p = parseInt(n.dataset.taskPos, 10);
                                         if (!isNaN(p)) {{
                                             dioxus.send({{ kind: 'task-toggle', pos: p }});

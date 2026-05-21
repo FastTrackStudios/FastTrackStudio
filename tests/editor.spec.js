@@ -323,6 +323,24 @@ test.describe("editor", () => {
     await expect.poll(async () => (await readState(page)).text).toBe("");
   });
 
+  test("Clicking a task checkbox toggles its source byte", async ({ page }) => {
+    await page.goto("/?seed=&novim=1");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 0);
+    await page.keyboard.insertText("- [ ] todo");
+    await expect.poll(async () => (await readState(page)).text).toBe("- [ ] todo");
+    // dispatchEvent rather than .click() — the widget lives
+    // inside a contenteditable=false span which confuses
+    // Playwright's stability check.
+    await page.evaluate(() => {
+      document
+        .querySelector(".md-task-checkbox")
+        .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    await expect.poll(async () => (await readState(page)).text).toBe("- [x] todo");
+  });
+
   test("Enter on a list item continues the list and cursor lands after marker", async ({
     page,
   }) => {
