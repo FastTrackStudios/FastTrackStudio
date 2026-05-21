@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 editor-state = { workspace = true }
+editor-vim = { workspace = true }
 dioxus = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

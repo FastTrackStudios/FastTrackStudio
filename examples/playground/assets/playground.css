@@ -250,6 +250,34 @@ section h2 {
 .editor-root .cm-line.md-callout-header.md-callout-example  { color: #c792ea; }
 .editor-root .cm-line.md-callout-header.md-callout-quote    { color: #c5cad8; }
 
+/* Vim status badge — shows the current mode at the top of the
+   debug pane. Color-coded so you can glance at it without
+   reading. */
+.vim-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+}
+.vim-mode {
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    color: #0e0f12;
+}
+.vim-mode.mode-normal  { background: #5a7fd6; }
+.vim-mode.mode-insert  { background: #88d4a3; }
+.vim-mode.mode-visual  { background: #c792ea; }
+.vim-mode.mode-replace { background: #ff7b72; }
+.vim-mode.mode-command { background: #ffcb6b; }
+.vim-pending {
+    color: var(--text-dim);
+    min-width: 4ch;
+}
+
 .editor-root .md-bracket-match {
     background: #2f3a55;
     color: #79b8ff;

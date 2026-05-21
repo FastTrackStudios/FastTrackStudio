@@ -262,6 +262,11 @@ fn App() -> Element {
         .with("Backspace", commands::delete_backward as _)
         .with("Delete", commands::delete_forward as _);
 
+    // Vim modal state. Default-on per user preference — toggle
+    // with `?novim=1` in the URL to fall back to plain editing.
+    let vim = use_signal(editor::editor_vim::VimState::new);
+    let vim_enabled = !read_query_flag("novim");
+
     rsx! {
         document::Link { rel: "stylesheet", href: STYLE }
         div { class: "page",
@@ -274,22 +279,61 @@ fn App() -> Element {
                     h2 { "Editor" }
                     div { class: "editor-frame",
                         if read_query_flag("nodeco") {
-                            Editor { state, keymap: keymap.clone() }
+                            Editor {
+                                state,
+                                keymap: keymap.clone(),
+                                vim: if vim_enabled { Some(vim) } else { None },
+                            }
                         } else {
                             Editor {
                                 state,
                                 keymap: keymap.clone(),
                                 decorations: combined_decorations
                                     as editor_view::DecorationSource,
+                                vim: if vim_enabled { Some(vim) } else { None },
                             }
                         }
                     }
                 }
                 section { class: "debug-pane",
                     h2 { "State" }
+                    if vim_enabled {
+                        VimStatus { vim }
+                    }
                     DebugPanel { state }
                 }
             }
+        }
+    }
+}
+
+/// Vim mode badge + pending-command preview. Mirrors the
+/// vim-status strip an Obsidian / Neovim user would see in the
+/// status bar.
+#[component]
+fn VimStatus(vim: Signal<editor::editor_vim::VimState>) -> Element {
+    let v = vim.read();
+    let (mode_label, mode_class) = match v.mode {
+        editor::editor_vim::Mode::Normal => ("NORMAL", "mode-normal"),
+        editor::editor_vim::Mode::Insert => ("INSERT", "mode-insert"),
+        editor::editor_vim::Mode::VisualChar => ("VISUAL", "mode-visual"),
+        editor::editor_vim::Mode::VisualLine => ("V-LINE", "mode-visual"),
+        editor::editor_vim::Mode::VisualBlock => ("V-BLOCK", "mode-visual"),
+        editor::editor_vim::Mode::Replace => ("REPLACE", "mode-replace"),
+        editor::editor_vim::Mode::Command => ("COMMAND", "mode-command"),
+    };
+    let pending = format!(
+        "{}{}{}",
+        v.pending_count.map(|n| n.to_string()).unwrap_or_default(),
+        v.pending_register.map(|r| format!("\"{r:?}")).unwrap_or_default(),
+        v.pending_operator
+            .map(|op| format!("{op:?}").chars().next().unwrap().to_string())
+            .unwrap_or_default(),
+    );
+    rsx! {
+        div { class: "vim-status",
+            span { class: "vim-mode {mode_class}", "{mode_label}" }
+            span { class: "vim-pending", "{pending}" }
         }
     }
 }

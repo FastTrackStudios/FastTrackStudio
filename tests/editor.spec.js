@@ -114,7 +114,7 @@ test.describe("editor", () => {
     page.on("pageerror", (err) => {
       throw err;
     });
-    await page.goto("/");
+    await page.goto("/?novim=1");
     // Wait for the editor to mount and the initial state to
     // populate the debug panel.
     await editor(page).waitFor();
@@ -209,7 +209,7 @@ test.describe("editor", () => {
     // visible text, but typing should not drop the underlying
     // bytes from state.doc. Use a clean seed so we control the
     // exact bytes we're checking for.
-    await page.goto("/?seed=hello%20**world**%20after");
+    await page.goto("/?seed=hello%20**world**%20after&novim=1");
     await editor(page).waitFor();
     await expect.poll(async () => (await readState(page)).len).toBe("21");
     await editor(page).focus();
@@ -248,7 +248,7 @@ test.describe("editor", () => {
     // normalize start<=end. The browser would then think the
     // focus was on the right and shift+arrow-left would just
     // shrink the right edge instead of extending the left.
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -277,7 +277,7 @@ test.describe("editor", () => {
     // line. Root cause: doc positions are UTF-8 byte offsets
     // but JS string offsets are UTF-16 code units; the cursor
     // walked 2 bytes short per em-dash.
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -291,7 +291,7 @@ test.describe("editor", () => {
   });
 
   test("Bracket auto-closes and caret lands between", async ({ page }) => {
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -301,7 +301,7 @@ test.describe("editor", () => {
   });
 
   test("Typing close bracket adjacent skips over", async ({ page }) => {
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -314,7 +314,7 @@ test.describe("editor", () => {
   });
 
   test("Backspace between empty pair deletes both", async ({ page }) => {
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -326,7 +326,7 @@ test.describe("editor", () => {
   test("Enter on a list item continues the list and cursor lands after marker", async ({
     page,
   }) => {
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -344,7 +344,7 @@ test.describe("editor", () => {
   });
 
   test("Enter on a numbered list continues and increments", async ({ page }) => {
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -361,7 +361,7 @@ test.describe("editor", () => {
   });
 
   test("Enter on a task item continues with unchecked box", async ({ page }) => {
-    await page.goto("/?seed=");
+    await page.goto("/?seed=&novim=1&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
@@ -388,7 +388,7 @@ test.describe("editor", () => {
     // past the last text node — selOffsets was reading that
     // offset as a character offset, which pointed to a position
     // inside the doc instead of at its visible end.
-    await page.goto("/?seed=Hello%20**bold**%20world.");
+    await page.goto("/?seed=Hello%20**bold**%20world.&novim=1");
     await editor(page).waitFor();
     await editor(page).focus();
     // Click at the visible end-of-line: place cursor at element
@@ -440,7 +440,7 @@ test.describe("editor", () => {
           console.error("CONSOLE ERROR:", msg.text());
         }
       });
-      await page.goto("/?seed=");
+      await page.goto("/?seed=&novim=1&novim=1");
       await editor(page).waitFor();
     });
 
@@ -567,7 +567,7 @@ test.describe("editor", () => {
       // tests target the *base* DOM↔doc translation, not the
       // decoration churn.
       await page.goto(
-        "/?seed=Line%20one%0ALine%20two%0ALine%20three&nodeco=1"
+        "/?seed=Line%20one%0ALine%20two%0ALine%20three&nodeco=1&novim=1"
       );
       await editor(page).waitFor();
       await expect.poll(async () => (await readState(page)).len).toBe("28");
@@ -624,7 +624,7 @@ test.describe("editor", () => {
       // independent of decorations. Decoration-specific
       // variants live in the separate block below.
       await page.goto(
-        "/?seed=Line%20one%0ALine%20two%0ALine%20three&nodeco=1"
+        "/?seed=Line%20one%0ALine%20two%0ALine%20three&nodeco=1&novim=1"
       );
       await editor(page).waitFor();
       await expect.poll(async () => (await readState(page)).len).toBe("28");
@@ -773,7 +773,7 @@ test.describe("editor", () => {
       // caret sits outside the **world** span, live_preview
       // hides the markers (Hidden tiles), so the rendered
       // visible text is "hello world after" (17 chars).
-      await page.goto("/?seed=hello%20**world**%20after");
+      await page.goto("/?seed=hello%20**world**%20after&novim=1");
       await editor(page).waitFor();
       await expect.poll(async () => (await readState(page)).len).toBe("21");
     });
@@ -816,7 +816,7 @@ test.describe("editor", () => {
       // (markers visible, one big text node) to outside (markers
       // hidden, multiple tiles). The DOM restructured, the cursor
       // was orphaned, and the next chars landed at offset 0.
-      await page.goto("/?seed=");
+      await page.goto("/?seed=&novim=1&novim=1");
       await editor(page).waitFor();
       await editor(page).focus();
       await setCaret(page, 0);

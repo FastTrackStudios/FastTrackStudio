@@ -50,6 +50,17 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             // span, the inner Mark + visible source bytes win so
             // the user can edit. Matches Obsidian / Quartz
             // `ofm.ts:233-265`.
+            // Comments — `%%…%%` source is hidden entirely
+            // (body + markers) when the caret is away. Only the
+            // body stays visible while editing.
+            if span.class == "md-comment" {
+                if cursor_touches(primary, span.outer.clone()) {
+                    out.push(Decoration::mark(span.body.clone(), "md-comment"));
+                } else {
+                    out.push(Decoration::replace(span.outer.clone()));
+                }
+                continue;
+            }
             if span.class == "md-embed" {
                 let raw = &text[span.body.clone()];
                 if !cursor_touches(primary, span.outer.clone()) {
@@ -1385,11 +1396,25 @@ mod tests {
 
     #[test]
     fn comment_recognized() {
-        let s = state("a %% hidden %% b", 100);
+        // Caret away from the `%%…%%` span: whole range hidden.
+        let s = state("a %% hidden %% b", 0);
         let decs = live_preview(&s);
-        let has_comment = decs.iter().any(|d| matches!(&d.kind,
+        let has_replace = decs.iter().any(|d| {
+            d.from == 2
+                && d.to == 14
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(has_replace);
+    }
+
+    #[test]
+    fn comment_revealed_when_caret_inside() {
+        // Caret inside the comment: body styled as `md-comment`.
+        let s = state("a %% hidden %% b", 6);
+        let decs = live_preview(&s);
+        let has_mark = decs.iter().any(|d| matches!(&d.kind,
             crate::decoration::DecorationKind::Mark { class, .. } if class == "md-comment"));
-        assert!(has_comment);
+        assert!(has_mark);
     }
 
     #[test]

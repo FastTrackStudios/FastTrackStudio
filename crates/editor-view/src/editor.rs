@@ -89,6 +89,12 @@ pub fn Editor(
     state: Signal<EditorState>,
     #[props(default)] keymap: Option<Keymap>,
     #[props(default)] decorations: Option<DecorationSource>,
+    /// Optional vim modal state. When `Some`, every keydown is
+    /// dispatched to `editor_vim::handle_key` first; the result
+    /// (if any) is applied and preventDefault'd. Returning
+    /// `None` from vim falls through to the keymap and normal
+    /// browser-side text input.
+    #[props(default)] vim: Option<Signal<editor_vim::VimState>>,
 ) -> Element {
     // Tile-tree build moved into the imperative-patch
     // `use_effect` below. The component body itself no longer
@@ -1201,12 +1207,10 @@ pub fn Editor(
     }
 
 
-    // ── onkeydown: keymap dispatch ───────────────────────────────
+    // ── onkeydown: vim → keymap dispatch ─────────────────────────
     let keymap_for_keys = keymap.clone();
+    let vim_for_keys = vim;
     let on_keydown = move |evt: Event<KeyboardData>| {
-        let Some(ref km) = keymap_for_keys else {
-            return;
-        };
         let mods = evt.modifiers();
         let key_str = match evt.key() {
             Key::Character(c) => c,
@@ -1221,10 +1225,36 @@ pub fn Editor(
             r#mod: mods.ctrl() || mods.meta(),
         };
         let cur = state.read().clone();
-        if let Some(spec) = km.dispatch(&press, &cur) {
-            evt.prevent_default();
-            tracing::debug!(?press, "editor.keymap.fire");
-            state.set(cur.update(spec));
+        // Vim takes the first shot. If it returns a spec, apply
+        // it and preventDefault (also stop the browser from
+        // sending the bare key into the contenteditable).
+        if let Some(mut vim_sig) = vim_for_keys {
+            let mut vim_state = vim_sig.peek().clone();
+            let spec = editor_vim::handle_key(&cur, &mut vim_state, &press);
+            // VimState always gets persisted — pending counts /
+            // operators / mode transitions accumulate across keys
+            // even when no Change is produced.
+            vim_sig.set(vim_state);
+            if let Some(spec) = spec {
+                evt.prevent_default();
+                tracing::debug!(?press, "editor.vim.fire");
+                state.set(cur.update(spec));
+                return;
+            }
+            // In Normal/Visual mode, suppress raw character
+            // input — vim consumes them. Only Insert mode lets
+            // characters fall through to the contenteditable.
+            if !vim_sig.peek().is_inserting() {
+                evt.prevent_default();
+                return;
+            }
+        }
+        if let Some(ref km) = keymap_for_keys {
+            if let Some(spec) = km.dispatch(&press, &cur) {
+                evt.prevent_default();
+                tracing::debug!(?press, "editor.keymap.fire");
+                state.set(cur.update(spec));
+            }
         }
     };
 

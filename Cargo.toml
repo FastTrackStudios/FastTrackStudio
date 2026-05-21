@@ -4,6 +4,7 @@ members = [
     "crates/editor-state",
     "crates/editor-syntax",
     "crates/editor-view",
+    "crates/editor-vim",
     "crates/editor",
     "examples/playground",
 ]
@@ -21,6 +22,7 @@ rust-version = "1.80"
 editor-state = { path = "crates/editor-state" }
 editor-syntax = { path = "crates/editor-syntax" }
 editor-view = { path = "crates/editor-view" }
+editor-vim = { path = "crates/editor-vim" }
 editor = { path = "crates/editor" }
 
 # UI

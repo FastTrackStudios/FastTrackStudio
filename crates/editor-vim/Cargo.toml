@@ -1,6 +1,6 @@
 [package]
-name = "editor"
-description = "Umbrella crate that re-exports editor-state + editor-view."
+name = "editor-vim"
+description = "Pure-Rust vim modal state machine for the Editor. No DOM, no Dioxus, no async."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,5 +9,4 @@ rust-version.workspace = true
 
 [dependencies]
 editor-state = { workspace = true }
-editor-view = { workspace = true }
-editor-vim = { workspace = true }
+tracing = { workspace = true }
