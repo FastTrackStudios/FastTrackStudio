@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 editor-syntax = { workspace = true, features = ["default-langs"] }
+editor-typst = { workspace = true }
 ropey = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }

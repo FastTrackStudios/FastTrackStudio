@@ -254,6 +254,258 @@ section h2 {
     opacity: 0.7;
 }
 
+/* Obsidian-style frontmatter properties panel. Read-only for
+   now; clicking anywhere on the panel drops the caret back
+   inside the raw YAML for editing (wired via the shared
+   `data-focus-pos` widget-click path). */
+.editor-root .md-properties {
+    display: block;
+    margin: 4px 0 14px 0;
+    padding: 8px 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: text;
+    color: inherit;
+    font-size: 13px;
+}
+.editor-root .md-properties-empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+    padding: 4px 8px;
+}
+.editor-root .md-property-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) 1fr;
+    gap: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    align-items: start;
+}
+.editor-root .md-property-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+.editor-root .md-property-key {
+    color: rgba(255, 255, 255, 0.55);
+    text-transform: lowercase;
+    font-variant: small-caps;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.editor-root .md-property-value {
+    color: inherit;
+    min-width: 0;
+}
+.editor-root .md-property-text {
+    word-break: break-word;
+}
+.editor-root .md-property-empty {
+    color: rgba(255, 255, 255, 0.3);
+}
+.editor-root .md-property-bool {
+    display: inline-block;
+    cursor: pointer;
+    min-width: 1.2em;
+    text-align: center;
+    border-radius: 3px;
+    padding: 1px 4px;
+    user-select: none;
+}
+.editor-root .md-property-bool[data-checked="true"] {
+    color: #7fd99c;
+}
+.editor-root .md-property-bool[data-checked="false"] {
+    color: rgba(255, 255, 255, 0.35);
+}
+.editor-root .md-property-bool:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+.editor-root .md-property-bool:focus {
+    outline: 1px solid rgba(127, 217, 156, 0.5);
+    outline-offset: 1px;
+}
+/* Inline-editable scalar cells. `contenteditable` cells need
+   explicit focus styling because their default outline disappears
+   the moment we override `user-select`. */
+.editor-root .md-property-text,
+.editor-root .md-property-number {
+    display: inline-block;
+    min-width: 8ch;
+    padding: 1px 4px;
+    border-radius: 3px;
+    cursor: text;
+    outline: none;
+    white-space: pre-wrap;
+}
+.editor-root .md-property-text:hover,
+.editor-root .md-property-number:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.editor-root .md-property-text:focus,
+.editor-root .md-property-number:focus {
+    background: rgba(96, 128, 192, 0.12);
+    box-shadow: inset 0 -1px 0 rgba(127, 167, 217, 0.5);
+}
+.editor-root .md-property-text:empty::before {
+    content: "—";
+    color: rgba(255, 255, 255, 0.25);
+}
+.editor-root .md-property-date {
+    background: transparent;
+    border: 1px solid transparent;
+    color: inherit;
+    font: inherit;
+    padding: 1px 4px;
+    border-radius: 3px;
+    color-scheme: dark;
+}
+.editor-root .md-property-date:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+.editor-root .md-property-date:focus {
+    outline: none;
+    background: rgba(96, 128, 192, 0.12);
+    border-color: rgba(127, 167, 217, 0.5);
+}
+.editor-root .md-property-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.editor-root .md-property-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 4px 1px 8px;
+    background: rgba(96, 128, 192, 0.18);
+    border: 1px solid rgba(96, 128, 192, 0.3);
+    border-radius: 10px;
+    font-size: 0.9em;
+}
+.editor-root .md-chip-remove {
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 0.85em;
+    line-height: 1;
+    padding: 0 3px;
+    border-radius: 6px;
+}
+.editor-root .md-chip-remove:hover {
+    background: rgba(255, 80, 80, 0.25);
+    color: #fff;
+}
+.editor-root .md-property-chip-add {
+    display: inline-block;
+    min-width: 4ch;
+    padding: 1px 6px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.9em;
+    cursor: text;
+    outline: none;
+}
+.editor-root .md-property-chip-add:focus {
+    border-color: rgba(127, 167, 217, 0.6);
+    border-style: solid;
+    background: rgba(96, 128, 192, 0.1);
+}
+.editor-root .md-property-chip-add:empty::before {
+    content: attr(data-placeholder);
+    color: rgba(255, 255, 255, 0.3);
+}
+/* Active row: any cell inside has focus. CSS-side state means
+   we don't have to round-trip selection back to Rust just to
+   highlight the row. */
+.editor-root .md-property-row.is-active {
+    background: rgba(127, 167, 217, 0.08);
+    box-shadow: inset 2px 0 0 rgba(127, 167, 217, 0.5);
+}
+/* Vim row-nav cursor: in normal mode with the caret on a row.
+   Visually distinct from `.is-active` (cell has focus) so the
+   user can tell whether `i` will enter the value or whether
+   they're already inside it. */
+.editor-root .md-property-row.is-vim-active {
+    background: rgba(255, 203, 107, 0.06);
+    box-shadow: inset 2px 0 0 rgba(255, 203, 107, 0.7);
+}
+.editor-root .md-property-row.is-vim-active.is-active {
+    /* Cell focused inside a vim-active row: cell focus wins
+       visually so it's clear input goes to the value. */
+    background: rgba(127, 167, 217, 0.12);
+    box-shadow: inset 2px 0 0 rgba(127, 167, 217, 0.8);
+}
+/* Raw YAML markers (shown when caret is inside the frontmatter
+   range so the user can edit). `---` delimiters get a muted
+   monospace look to hint they're a block boundary. */
+.editor-root .md-frontmatter-line {
+    background: rgba(255, 255, 255, 0.02);
+}
+.editor-root .md-frontmatter-delim {
+    color: rgba(255, 255, 255, 0.35);
+    font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+/* Typst SVGs use `currentColor` for glyph fill (we post-
+   process the compile output to swap the sentinel hex). The
+   widgets inherit `color` from the editor pane and respond
+   to theme switches automatically. Page background is
+   transparent (`#set page(fill: none)` in the prelude). */
+.editor-root .md-math-widget {
+    user-select: none;
+    color: inherit;
+}
+/* Inline math sits in the run of text. Scale to ~1.1em so it
+   reads at body weight without dwarfing surrounding glyphs,
+   and align via the baseline so fractions don't appear to
+   "float". Lines with tall equations (sums/integrals) grow
+   naturally — `inline-block` lets the SVG push the line
+   height because the wrapper has no enforced line-height. */
+.editor-root .md-math-widget-inline {
+    display: inline-block;
+    vertical-align: -0.15em;
+    line-height: normal;
+    cursor: text;
+}
+.editor-root .md-math-widget-inline svg {
+    /* Match the surrounding text size — Typst renders the
+       inline math at the prelude's `#set text(size: 14pt)`,
+       which would dominate the run otherwise. `0.95em` keeps
+       it visually balanced against body copy. */
+    height: 0.95em;
+    width: auto;
+    max-width: 100%;
+    display: inline-block;
+}
+.editor-root .md-math-widget-block {
+    display: block;
+    text-align: center;
+    margin: 6px 0;
+    line-height: 1.4;
+}
+.editor-root .md-math-widget-block svg {
+    max-width: 100%;
+    height: auto;
+}
+.editor-root .md-typst-widget {
+    display: block;
+    margin: 8px 0;
+    padding: 8px;
+    border-radius: 6px;
+    overflow-x: auto;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: text;
+}
+.editor-root .md-typst-widget svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
 /* Embed widgets — sized via inline style coming from
    embed_widget_html, max-width clamps to the editor pane. */
 .editor-root .md-embed-image,

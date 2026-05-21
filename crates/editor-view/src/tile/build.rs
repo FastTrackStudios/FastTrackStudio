@@ -48,7 +48,7 @@ use crate::tile::flag::{TileFlag, TileFlagSet};
 use crate::tile::line::{new_line_tile, push_line_class};
 use crate::tile::mark::{MarkSpec, new_mark_tile};
 use crate::tile::text::new_text_tile;
-use crate::tile::widget::{new_widget_buffer_tile, new_widget_tile};
+use crate::tile::widget::new_widget_tile;
 use crate::tile::{Tile, TileBody, TileKind};
 
 /// Build the tile tree for `text` + `decorations`. Returns the
@@ -304,6 +304,7 @@ impl<'a> TileBuilder<'a> {
     /// `<span><br></span>` for them so the DOM has a cursor
     /// anchor and the shape stays stable when the user later
     /// types content into the mark.
+    #[allow(dead_code)]
     fn ensure_mark_chain(&mut self, marks: &[MarkSpec]) {
         let mut parent = self.ensure_line();
         for spec in marks {

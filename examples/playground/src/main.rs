@@ -178,7 +178,18 @@ fn App() -> Element {
     let state = use_signal(|| {
         let seed = read_seed_query().unwrap_or_else(|| {
             String::from(
-                "# Welcome to the Editor playground\n\
+                "---\n\
+                 title: Editor playground\n\
+                 tags: [editor, demo, live-preview]\n\
+                 published: true\n\
+                 draft: false\n\
+                 author: cody\n\
+                 created: 2026-05-20\n\
+                 aliases:\n\
+                   - playground\n\
+                   - demo doc\n\
+                 ---\n\
+                 # Welcome to the Editor playground\n\
                  \n\
                  ## Inline styles\n\
                  \n\
@@ -217,7 +228,19 @@ fn App() -> Element {
                  |---------|--------|\n\
                  | Headings | ✅ |\n\
                  | Tables  | ✅ (this one!) |\n\
-                 | Math    | not yet |\n\
+                 | Math    | ✅ Typst |\n\
+                 \n\
+                 Inline math compiles via Typst: $E = m c^2$ and \
+                 $sum_(i=1)^n i = n(n+1)/2$.\n\
+                 \n\
+                 $$ integral_0^1 x^2 d x = 1/3 $$\n\
+                 \n\
+                 ```typst\n\
+                 = Typst block\n\
+                 \n\
+                 Full Typst documents render in-place:\n\
+                 $ A = mat(1, 2; 3, 4) $\n\
+                 ```\n\
                  \n\
                  Comments like %% this %% hide on focus-away.\n\
                  \n\

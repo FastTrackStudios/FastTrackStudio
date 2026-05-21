@@ -1143,6 +1143,176 @@ pub fn Editor(
                             // the keyboard (arrow into it from an
                             // adjacent position). Mirrors
                             // Obsidian's preview-side behavior.
+                            // ── Frontmatter properties ─────────
+                            //
+                            // Editable cells live inside the
+                            // `.md-properties` widget. We attach
+                            // delegated handlers on the root so
+                            // we don't have to re-wire per
+                            // render. `data-edit-role` picks the
+                            // dispatch path.
+                            const propValueText = (cell) => {{
+                                return (cell.textContent || '').trim();
+                            }};
+                            const sendPropEdit = (row, kind, extra) => {{
+                                const key = row.dataset.propKey;
+                                const msg = {{ kind, key }};
+                                Object.assign(msg, extra || {{}});
+                                dioxus.send(msg);
+                            }};
+                            el.addEventListener('focusin', evt => {{
+                                const row = evt.target.closest('.md-property-row');
+                                if (row) row.classList.add('is-active');
+                            }});
+                            el.addEventListener('focusout', evt => {{
+                                const row = evt.target.closest('.md-property-row');
+                                if (!row) return;
+                                row.classList.remove('is-active');
+                                const role = evt.target.dataset.editRole;
+                                if (role === 'text' || role === 'number') {{
+                                    sendPropEdit(row, 'prop-set', {{
+                                        value: propValueText(evt.target),
+                                        ty: role,
+                                    }});
+                                }}
+                            }});
+                            el.addEventListener('change', evt => {{
+                                const role = evt.target.dataset.editRole;
+                                if (role !== 'date') return;
+                                const row = evt.target.closest('.md-property-row');
+                                if (!row) return;
+                                sendPropEdit(row, 'prop-set', {{
+                                    value: evt.target.value,
+                                    ty: 'date',
+                                }});
+                            }});
+                            // Capture-phase keydown inside a
+                            // property cell: stop the editor's
+                            // normal vim/keymap dispatch from
+                            // also firing. Without this, typing
+                            // `j` in a cell would also send a
+                            // vim "next line" to the editor.
+                            el.addEventListener('keydown', evt => {{
+                                if (evt.target.dataset.editRole) {{
+                                    evt.stopPropagation();
+                                }}
+                            }}, true);
+                            el.addEventListener('keydown', evt => {{
+                                const role = evt.target.dataset.editRole;
+                                if (!role) return;
+                                if (evt.key === 'Escape' || (evt.key === 'Enter' && role !== 'chip-add')) {{
+                                    evt.preventDefault();
+                                    evt.target.blur();
+                                    // Tell Rust the cell lost
+                                    // focus due to Esc/Enter so
+                                    // vim can flip back to
+                                    // Normal mode.
+                                    dioxus.send({{ kind: 'prop-leave' }});
+                                    return;
+                                }}
+                                if (role === 'bool' && (evt.key === ' ' || evt.key === 'Enter')) {{
+                                    evt.preventDefault();
+                                    const row = evt.target.closest('.md-property-row');
+                                    const next = evt.target.dataset.checked !== 'true';
+                                    sendPropEdit(row, 'prop-set', {{
+                                        value: next ? 'true' : 'false',
+                                        ty: 'bool',
+                                    }});
+                                    return;
+                                }}
+                                if (role === 'chip-add' && evt.key === 'Enter') {{
+                                    evt.preventDefault();
+                                    const row = evt.target.closest('.md-property-row');
+                                    const val = propValueText(evt.target);
+                                    if (!val) return;
+                                    sendPropEdit(row, 'prop-list-add', {{ value: val }});
+                                    evt.target.textContent = '';
+                                    return;
+                                }}
+                            }});
+                            el.addEventListener('click', evt => {{
+                                const role = evt.target.dataset.editRole;
+                                if (role === 'bool') {{
+                                    evt.preventDefault();
+                                    evt.stopPropagation();
+                                    const row = evt.target.closest('.md-property-row');
+                                    const next = evt.target.dataset.checked !== 'true';
+                                    sendPropEdit(row, 'prop-set', {{
+                                        value: next ? 'true' : 'false',
+                                        ty: 'bool',
+                                    }});
+                                    return;
+                                }}
+                                if (role === 'chip-remove') {{
+                                    evt.preventDefault();
+                                    evt.stopPropagation();
+                                    const chip = evt.target.closest('.md-property-chip');
+                                    const row = evt.target.closest('.md-property-row');
+                                    if (chip && row) {{
+                                        sendPropEdit(row, 'prop-list-remove', {{
+                                            value: chip.dataset.chipValue || '',
+                                        }});
+                                    }}
+                                    return;
+                                }}
+                            }});
+                            // Mousedown anywhere inside the
+                            // properties widget shouldn't steal
+                            // the caret: the contenteditable
+                            // cells handle their own focus.
+                            el.addEventListener('mousedown', evt => {{
+                                if (evt.target.closest('.md-properties')) {{
+                                    evt.stopPropagation();
+                                }}
+                            }});
+                            // Click anywhere in the row (key
+                            // column, gutters, even an empty
+                            // list cell) routes focus into the
+                            // value's editable control. Lets the
+                            // user tap a label and immediately
+                            // type, the way Obsidian does.
+                            el.addEventListener('click', evt => {{
+                                if (evt.target.dataset.editRole) return;
+                                if (evt.target.closest('.md-chip-remove')) return;
+                                const row = evt.target.closest('.md-property-row');
+                                if (!row) return;
+                                const cell = row.querySelector('[data-edit-role]');
+                                if (!cell) return;
+                                if (cell.matches('input')) {{
+                                    cell.focus();
+                                }} else {{
+                                    cell.focus();
+                                    // Move caret to end of
+                                    // existing text.
+                                    const r = document.createRange();
+                                    r.selectNodeContents(cell);
+                                    r.collapse(false);
+                                    const s = window.getSelection();
+                                    s.removeAllRanges();
+                                    s.addRange(r);
+                                }}
+                            }});
+
+                            // Mousedown on a task checkbox: the
+                            // browser would otherwise park the
+                            // caret at the widget position
+                            // before our click handler runs,
+                            // overwriting wherever the user was
+                            // editing. Pre-empt by preventing
+                            // default selection here — the
+                            // click handler below still fires
+                            // and dispatches the toggle.
+                            el.addEventListener('mousedown', evt => {{
+                                let n = evt.target;
+                                while (n && n !== el) {{
+                                    if (n.nodeType === 1 && n.dataset
+                                        && n.dataset.taskPos != null) {{
+                                        evt.preventDefault();
+                                        return;
+                                    }}
+                                    n = n.parentNode;
+                                }}
+                            }});
                             el.addEventListener('click', evt => {{
                                 let n = evt.target;
                                 while (n && n !== el) {{
@@ -1163,6 +1333,21 @@ pub fn Editor(
                                         const p = parseInt(n.dataset.taskPos, 10);
                                         if (!isNaN(p)) {{
                                             dioxus.send({{ kind: 'task-toggle', pos: p }});
+                                        }}
+                                        return;
+                                    }}
+                                    if (n.nodeType === 1 && n.dataset
+                                        && n.dataset.focusPos != null) {{
+                                        // Click on a rendered
+                                        // math/typst widget:
+                                        // hop the caret inside
+                                        // the source span so
+                                        // the user can edit.
+                                        evt.preventDefault();
+                                        evt.stopPropagation();
+                                        const p = parseInt(n.dataset.focusPos, 10);
+                                        if (!isNaN(p)) {{
+                                            dioxus.send({{ kind: 'focus-pos', pos: p }});
                                         }}
                                         return;
                                     }}
@@ -1193,7 +1378,7 @@ pub fn Editor(
                 );
                 let mut handle = document::eval(&script);
                 while let Ok(v) = handle.recv::<serde_json::Value>().await {
-                    handle_bridge_msg(state, deco_source, &v);
+                    handle_bridge_msg(state, deco_source, vim, &v);
                 }
             });
         });
@@ -1268,6 +1453,75 @@ pub fn Editor(
                 evt.prevent_default();
                 return;
             }
+            // ── Frontmatter row-nav override ──────────────
+            //
+            // When the caret sits inside the YAML frontmatter
+            // and the user is in vim Normal mode, `j`/`k`
+            // shouldn't crawl through hidden YAML bytes — they
+            // should hop to the next/prev property row (the
+            // Obsidian-properties feel). `i`/`a` focuses the
+            // current row's value cell. Only activates when the
+            // widget is showing (caret outside vim insert mode
+            // *and* the parsed FM exists).
+            let vim_peek = vim_sig.peek().clone();
+            if matches!(vim_peek.mode, editor_vim::Mode::Normal)
+                && !press.ctrl && !press.alt && !press.meta
+            {
+                let pre = cur.selection.primary().head;
+                let doc_str = cur.doc.to_string();
+                if let Some(fm) = editor_state::markdown::parse_frontmatter(&doc_str) {
+                    if pre >= fm.outer.start && pre < fm.outer.end && !fm.props.is_empty() {
+                        let key = press.key.as_str();
+                        if key == "j" || key == "k" {
+                            let cur_idx = fm.props.iter()
+                                .position(|p| pre >= p.range.start && pre < p.range.end)
+                                .unwrap_or(if key == "j" { 0 } else { fm.props.len() - 1 });
+                            let next_idx = if key == "j" {
+                                (cur_idx + 1).min(fm.props.len() - 1)
+                            } else {
+                                cur_idx.saturating_sub(1)
+                            };
+                            let target = fm.props[next_idx].range.start;
+                            state.set(cur.update(
+                                editor_state::TransactionSpec::new()
+                                    .selection(editor_state::Selection::caret(target))
+                                    .annotate("origin", "fm-row-nav"),
+                            ));
+                            evt.prevent_default();
+                            return;
+                        }
+                        if key == "i" || key == "a" || key == "Enter" {
+                            // Flip vim to Insert so further keys
+                            // (typed into the cell) aren't read
+                            // as motions. The JS capture-phase
+                            // listener above also stops them
+                            // from reaching this handler, but
+                            // mode-state needs to be coherent
+                            // so a follow-up `<Esc>` from the
+                            // cell drops the user back into
+                            // Normal cleanly.
+                            let mut next_vim = vim_peek.clone();
+                            next_vim.mode = editor_vim::Mode::Insert;
+                            vim_sig.set(next_vim);
+                            // Dispatch a JS focus to the row's
+                            // value cell. The contenteditable
+                            // handles the rest.
+                            let row_key = fm.props.iter()
+                                .find(|p| pre >= p.range.start && pre < p.range.end)
+                                .map(|p| p.key.as_str())
+                                .unwrap_or("");
+                            let safe_key = row_key.replace('"', "\\\"");
+                            let script = format!(
+                                r#"(()=>{{const r=document.querySelector('.md-property-row[data-prop-key="{safe_key}"]');if(!r)return;const c=r.querySelector('[data-edit-role]');if(c){{c.focus();if(c.matches('input'))return;const rng=document.createRange();rng.selectNodeContents(c);rng.collapse(false);const s=window.getSelection();s.removeAllRanges();s.addRange(rng);}}}})();"#
+                            );
+                            let _ = document::eval(&script);
+                            evt.prevent_default();
+                            return;
+                        }
+                    }
+                }
+            }
+
             let mut vim_state = vim_sig.peek().clone();
             let spec = editor_vim::handle_key(&cur, &mut vim_state, &press);
             vim_sig.set(vim_state);
@@ -1413,6 +1667,7 @@ pub fn Editor(
 fn handle_bridge_msg(
     mut state: Signal<EditorState>,
     deco_source: Option<DecorationSource>,
+    vim: Option<Signal<editor_vim::VimState>>,
     v: &serde_json::Value,
 ) {
     let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("");
@@ -1746,15 +2001,92 @@ fn handle_bridge_msg(
                 _ => return,
             };
             let changes = Changes::replace(bracket_idx..bracket_idx + 1, new_char);
-            // Explicit caret so a queued `sel` message from the
-            // browser's widget-click selection can't leave the
-            // user staring at a wide highlight after the toggle.
-            let new_sel = Selection::caret(bracket_idx + 1);
+            // Keep the user's caret where it was. The mousedown
+            // handler in JS prevents the widget click from
+            // re-parking the browser selection, and the toggle
+            // is a same-length replacement so the existing
+            // selection passes through map_through unchanged.
+            let prev_sel = cur.selection.clone();
             state.set(cur.update(
                 TransactionSpec::new()
                     .changes(changes)
-                    .selection(new_sel)
+                    .selection(prev_sel)
                     .annotate("origin", "task-toggle"),
+            ));
+        }
+        "prop-leave" => {
+            // Cell blurred via Esc/Enter. Flip vim back to
+            // Normal so the user can keep row-navigating, and
+            // refocus the editor root so further keys land
+            // there.
+            if let Some(mut vs) = vim {
+                let mut next = vs.peek().clone();
+                next.mode = editor_vim::Mode::Normal;
+                next.clear_pending();
+                vs.set(next);
+            }
+            let script = r#"(()=>{const el=document.querySelector('.editor-root');if(el)el.focus();})();"#;
+            let _ = document::eval(script);
+        }
+        "prop-set" => {
+            // Set a scalar property (text / number / date /
+            // bool) to a new value. Re-parses the frontmatter,
+            // finds the row by key, re-serializes the line, and
+            // replaces the range in the doc.
+            apply_property_change(state, &v, |old, ty, value| {
+                use editor_state::markdown::PropValue;
+                match ty {
+                    "text" => PropValue::Text(value.to_string()),
+                    "number" => value
+                        .parse::<f64>()
+                        .map(PropValue::Number)
+                        .unwrap_or_else(|_| PropValue::Text(value.to_string())),
+                    "date" => PropValue::Date(value.to_string()),
+                    "bool" => PropValue::Bool(value == "true"),
+                    _ => {
+                        let _ = old;
+                        PropValue::Text(value.to_string())
+                    }
+                }
+            });
+        }
+        "prop-list-add" => {
+            apply_property_change(state, &v, |old, _ty, value| {
+                use editor_state::markdown::PropValue;
+                let mut items = match old {
+                    PropValue::List(v) => v.clone(),
+                    _ => Vec::new(),
+                };
+                let value = value.trim();
+                if !value.is_empty() && !items.iter().any(|x| x == value) {
+                    items.push(value.to_string());
+                }
+                PropValue::List(items)
+            });
+        }
+        "prop-list-remove" => {
+            apply_property_change(state, &v, |old, _ty, value| {
+                use editor_state::markdown::PropValue;
+                let items = match old {
+                    PropValue::List(v) => {
+                        v.iter().filter(|x| x.as_str() != value).cloned().collect()
+                    }
+                    _ => Vec::new(),
+                };
+                PropValue::List(items)
+            });
+        }
+        "focus-pos" => {
+            // Place the caret inside a math/typst span so its
+            // Replace decoration drops and the source becomes
+            // editable.
+            let pos = v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let cur = state.read().clone();
+            let pos = pos.min(cur.doc.len());
+            state.set(cur.update(
+                TransactionSpec::new()
+                    .selection(Selection::caret(pos))
+                    .annotate("origin", "focus-pos"),
             ));
         }
         "link-clicked" => {
@@ -1777,6 +2109,52 @@ fn handle_bridge_msg(
 /// Push a selection-only transaction if the new range differs
 /// from the current state.
 ///
+/// Resolve a `prop-*` bridge message into a `Changes` against
+/// the frontmatter and dispatch the transaction. `mutate` is
+/// given the existing `PropValue` and the raw payload, and
+/// returns the new `PropValue` — list adds/removes pass the
+/// existing list in, scalar sets ignore the previous value.
+fn apply_property_change(
+    mut state: Signal<EditorState>,
+    v: &serde_json::Value,
+    mutate: impl FnOnce(&editor_state::markdown::PropValue, &str, &str) -> editor_state::markdown::PropValue,
+) {
+    let Some(key) = v.get("key").and_then(|k| k.as_str()) else { return };
+    let value = v.get("value").and_then(|x| x.as_str()).unwrap_or("");
+    let ty = v.get("ty").and_then(|x| x.as_str()).unwrap_or("text");
+    let cur = state.read().clone();
+    let doc = cur.doc.to_string();
+    let Some(fm) = editor_state::markdown::parse_frontmatter(&doc) else { return };
+    let Some(prop) = fm.props.iter().find(|p| p.key == key) else { return };
+    let new_value = mutate(&prop.value, ty, value);
+    // Skip the round-trip when nothing actually changed —
+    // keeps undo history clean.
+    if values_equal(&prop.value, &new_value) {
+        return;
+    }
+    let new_text = editor_state::markdown::serialize_property(key, &new_value);
+    let changes = Changes::replace(prop.range.clone(), new_text);
+    let prev_sel = cur.selection.clone();
+    state.set(cur.update(
+        TransactionSpec::new()
+            .changes(changes)
+            .selection(prev_sel)
+            .annotate("origin", "prop-edit"),
+    ));
+}
+
+fn values_equal(a: &editor_state::markdown::PropValue, b: &editor_state::markdown::PropValue) -> bool {
+    use editor_state::markdown::PropValue::*;
+    match (a, b) {
+        (Text(x), Text(y)) | (Date(x), Date(y)) => x == y,
+        (Bool(x), Bool(y)) => x == y,
+        (Number(x), Number(y)) => x == y,
+        (List(x), List(y)) => x == y,
+        (Empty, Empty) => true,
+        _ => false,
+    }
+}
+
 /// Clamp-detection guard: when state has a selection that
 /// covers more doc than the DOM can currently represent (e.g.,
 /// after `select_all` on a doc with Hidden markdown markers,

@@ -58,6 +58,42 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             // span, the inner Mark + visible source bytes win so
             // the user can edit. Matches Obsidian / Quartz
             // `ofm.ts:233-265`.
+            // Math — `$x$` inline or `$$x$$` display. Source
+            // stays visible when the caret's on the span (so
+            // the user can edit), otherwise replaced with a
+            // rendered Typst SVG widget.
+            if span.class == "md-math-inline" || span.class == "md-math-block" {
+                if !cursor_touches(primary, span.outer.clone()) {
+                    let body = &text[span.body.clone()];
+                    let kind = if span.class == "md-math-inline" {
+                        TypstKind::MathInline
+                    } else {
+                        TypstKind::MathBlock
+                    };
+                    if let Some(svg) = render_typst(kind, body) {
+                        out.push(Decoration::replace(span.outer.clone()));
+                        // `data-focus-pos` lets the JS click
+                        // handler route a click on the widget
+                        // back to a caret inside the source
+                        // span, so the user can edit math by
+                        // tapping the rendered output.
+                        let html = format!(
+                            r#"<span class="{cls}" data-focus-pos="{pos}">{svg}</span>"#,
+                            cls = if kind == TypstKind::MathInline {
+                                "md-math-widget md-math-widget-inline"
+                            } else {
+                                "md-math-widget md-math-widget-block"
+                            },
+                            pos = span.body.start,
+                        );
+                        out.push(Decoration::widget(span.outer.start, html));
+                        continue;
+                    }
+                }
+                // Source visible (caret on, or compile failed).
+                out.push(Decoration::mark(span.body.clone(), span.class));
+                continue;
+            }
             // Comments — `%%…%%` source is hidden entirely
             // (body + markers) when the caret is away. Only the
             // body stays visible while editing.
@@ -156,8 +192,513 @@ fn now_ms_native() -> f64 {
     }
 }
 
+// ── YAML frontmatter (read-only renderer) ─────────────────
+//
+// Hand-rolled parser. Supports the shapes Obsidian itself
+// recognizes for the Properties panel:
+//   - `key: value`
+//   - `key:` followed by `  - item` lines (inline list)
+//   - `key: [a, b]` (flow list)
+//   - `key: true|false` (checkbox)
+//   - `tags: [...]` and other arrays
+// Anything we don't understand falls back to a plain text row.
+// A real YAML lib (`saphyr` / `yaml-rust2`) can replace this
+// once we move to editable cells.
+
+#[derive(Debug, Clone)]
+pub struct FrontMatter {
+    /// Whole `---\n…\n---\n` span including delimiters.
+    pub outer: std::ops::Range<usize>,
+    pub opener: std::ops::Range<usize>,
+    pub closer: std::ops::Range<usize>,
+    pub props: Vec<Property>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Property {
+    pub key: String,
+    pub value: PropValue,
+    /// Byte range of the whole property within the doc — from
+    /// the start of the key line to the end of the last
+    /// continuation line (inclusive of trailing newline). The
+    /// editor uses this to replace the property on edit
+    /// without touching the surrounding YAML.
+    pub range: std::ops::Range<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub enum PropValue {
+    Text(String),
+    Bool(bool),
+    Number(f64),
+    Date(String), // YYYY-MM-DD; stored raw so we round-trip.
+    List(Vec<String>),
+    Empty,
+}
+
+impl PropValue {
+    pub(crate) fn type_name(&self) -> &'static str {
+        match self {
+            PropValue::Text(_) => "text",
+            PropValue::Bool(_) => "bool",
+            PropValue::Number(_) => "number",
+            PropValue::Date(_) => "date",
+            PropValue::List(_) => "list",
+            PropValue::Empty => "text",
+        }
+    }
+}
+
+pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
+    let bytes = text.as_bytes();
+    // Opening fence must be at position 0: literal `---` then
+    // newline. Trailing whitespace on the line is tolerated.
+    if !text.starts_with("---") {
+        return None;
+    }
+    let opener_end = match bytes.iter().position(|&b| b == b'\n') {
+        Some(n) => n,
+        None => return None,
+    };
+    let first_line = &text[..opener_end];
+    if first_line.trim_end() != "---" {
+        return None;
+    }
+    let body_start = opener_end + 1;
+    // Find the closing `---` line.
+    let mut i = body_start;
+    let mut closer_line_start = None;
+    while i < bytes.len() {
+        let line_from = i;
+        while i < bytes.len() && bytes[i] != b'\n' {
+            i += 1;
+        }
+        let line = &text[line_from..i];
+        if line.trim_end() == "---" || line.trim_end() == "..." {
+            closer_line_start = Some(line_from);
+            break;
+        }
+        if i < bytes.len() {
+            i += 1;
+        }
+    }
+    let closer_start = closer_line_start?;
+    let closer_end = bytes[closer_start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|n| closer_start + n + 1)
+        .unwrap_or(bytes.len());
+    let props = parse_frontmatter_body(text, body_start, closer_start);
+    Some(FrontMatter {
+        outer: 0..closer_end,
+        opener: 0..opener_end,
+        closer: closer_start..(closer_end.saturating_sub(1)),
+        props,
+    })
+}
+
+/// Walk lines of the body between `[body_start, body_end)`,
+/// emitting one `Property` per top-level `key:` line. Block
+/// lists get merged into a single property whose `range` covers
+/// all their `  - item` continuation lines, so an edit replaces
+/// the whole multi-line entry atomically.
+fn parse_frontmatter_body(
+    text: &str,
+    body_start: usize,
+    body_end: usize,
+) -> Vec<Property> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = body_start;
+    while i < body_end {
+        let line_from = i;
+        while i < body_end && bytes[i] != b'\n' {
+            i += 1;
+        }
+        let line_to = i;
+        let line_with_nl = if i < body_end { i + 1 } else { i };
+        let line = &text[line_from..line_to];
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            i = line_with_nl;
+            continue;
+        }
+        if line.starts_with([' ', '\t']) {
+            // Orphan continuation line — skip.
+            i = line_with_nl;
+            continue;
+        }
+        let Some(colon) = line.find(':') else {
+            i = line_with_nl;
+            continue;
+        };
+        let key = line[..colon].trim().to_string();
+        if key.is_empty() {
+            i = line_with_nl;
+            continue;
+        }
+        let rest = line[colon + 1..].trim();
+        let mut prop_end = line_with_nl;
+        let value = if rest.is_empty() {
+            // Block list: peek indented `- item` lines and pull
+            // them into this property.
+            let mut items: Vec<String> = Vec::new();
+            let mut j = line_with_nl;
+            while j < body_end {
+                let sub_from = j;
+                while j < body_end && bytes[j] != b'\n' {
+                    j += 1;
+                }
+                let sub_line = &text[sub_from..j];
+                let sub_nl = if j < body_end { j + 1 } else { j };
+                if sub_line.starts_with([' ', '\t'])
+                    && sub_line.trim_start().starts_with("- ")
+                {
+                    let item = sub_line.trim_start()[2..]
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_string();
+                    items.push(item);
+                    prop_end = sub_nl;
+                    j = sub_nl;
+                } else if sub_line.trim().is_empty() {
+                    j = sub_nl;
+                } else {
+                    break;
+                }
+            }
+            i = prop_end;
+            if items.is_empty() {
+                PropValue::Empty
+            } else {
+                PropValue::List(items)
+            }
+        } else {
+            i = line_with_nl;
+            classify_scalar(rest)
+        };
+        out.push(Property {
+            key,
+            value,
+            range: line_from..prop_end,
+        });
+    }
+    out
+}
+
+/// Classify a scalar YAML right-hand side into our enum.
+/// Order matters: bools and flow lists win over the date /
+/// number heuristics so `true` doesn't become a string.
+fn classify_scalar(rest: &str) -> PropValue {
+    if rest.starts_with('[') && rest.ends_with(']') {
+        let inner = &rest[1..rest.len() - 1];
+        let items: Vec<String> = inner
+            .split(',')
+            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        return PropValue::List(items);
+    }
+    match rest {
+        "true" | "True" | "TRUE" => return PropValue::Bool(true),
+        "false" | "False" | "FALSE" => return PropValue::Bool(false),
+        _ => {}
+    }
+    let cleaned = rest.trim_matches('"').trim_matches('\'').to_string();
+    // YYYY-MM-DD heuristic — 10 chars, two dashes at fixed
+    // positions, digits elsewhere.
+    if cleaned.len() == 10
+        && cleaned.as_bytes()[4] == b'-'
+        && cleaned.as_bytes()[7] == b'-'
+        && cleaned.bytes().enumerate().all(|(idx, b)| {
+            if idx == 4 || idx == 7 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        })
+    {
+        return PropValue::Date(cleaned);
+    }
+    // Number — parses as f64 and the original text contains no
+    // letters. Rejects strings like "1.0.0".
+    if !cleaned.is_empty() && cleaned.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
+    {
+        if let Ok(n) = cleaned.parse::<f64>() {
+            return PropValue::Number(n);
+        }
+    }
+    PropValue::Text(cleaned)
+}
+
+/// Render the parsed properties as an editable HTML widget.
+/// Each value cell carries `data-prop-key` + `data-prop-from`/
+/// `data-prop-to` so the JS-side handlers can dispatch typed
+/// edit messages without re-parsing the YAML on every keystroke.
+pub(crate) fn render_properties_html(props: &[Property], active_idx: Option<usize>) -> String {
+    let mut html = String::from(r#"<div class="md-properties">"#);
+    if props.is_empty() {
+        html.push_str(
+            r#"<div class="md-properties-empty">No properties</div>"#,
+        );
+    }
+    for (idx, p) in props.iter().enumerate() {
+        let key_attr = escape_html(&p.key);
+        let active_class = if Some(idx) == active_idx {
+            " is-vim-active"
+        } else {
+            ""
+        };
+        html.push_str(&format!(
+            r#"<div class="md-property-row{active_class}" data-prop-key="{key}" data-prop-from="{from}" data-prop-to="{to}" data-prop-type="{ty}">"#,
+            key = key_attr,
+            from = p.range.start,
+            to = p.range.end,
+            ty = p.value.type_name(),
+        ));
+        html.push_str(r#"<div class="md-property-key">"#);
+        html.push_str(&key_attr);
+        html.push_str("</div>");
+        html.push_str(r#"<div class="md-property-value">"#);
+        match &p.value {
+            PropValue::Empty => {
+                // Editable empty value — CSS draws a hint.
+                html.push_str(
+                    r#"<span class="md-property-text" contenteditable="plaintext-only" spellcheck="false" data-edit-role="text"></span>"#,
+                );
+            }
+            PropValue::Text(s) => {
+                html.push_str(&format!(
+                    r#"<span class="md-property-text" contenteditable="plaintext-only" spellcheck="false" data-edit-role="text">{}</span>"#,
+                    escape_html(s),
+                ));
+            }
+            PropValue::Number(n) => {
+                // Render with a clean string form — `f64`'s
+                // default `Display` keeps integer-looking
+                // numbers free of trailing zeros.
+                let txt = format_number(*n);
+                html.push_str(&format!(
+                    r#"<span class="md-property-number" contenteditable="plaintext-only" spellcheck="false" data-edit-role="number" inputmode="decimal">{}</span>"#,
+                    escape_html(&txt),
+                ));
+            }
+            PropValue::Date(s) => {
+                html.push_str(&format!(
+                    r#"<input type="date" class="md-property-date" data-edit-role="date" value="{}"/>"#,
+                    escape_html(s),
+                ));
+            }
+            PropValue::Bool(b) => {
+                html.push_str(&format!(
+                    r#"<span class="md-property-bool" role="checkbox" tabindex="0" data-edit-role="bool" data-checked="{}" aria-checked="{}">{}</span>"#,
+                    b,
+                    b,
+                    if *b { "✓" } else { "✗" },
+                ));
+            }
+            PropValue::List(items) => {
+                html.push_str(r#"<span class="md-property-list" data-edit-role="list">"#);
+                for item in items {
+                    html.push_str(&format!(
+                        r#"<span class="md-property-chip" data-chip-value="{val}"><span class="md-chip-text">{val}</span><span class="md-chip-remove" data-edit-role="chip-remove" tabindex="0">×</span></span>"#,
+                        val = escape_html(item),
+                    ));
+                }
+                html.push_str(
+                    r#"<span class="md-property-chip-add" contenteditable="plaintext-only" spellcheck="false" data-edit-role="chip-add" data-placeholder="add…"></span>"#,
+                );
+                html.push_str("</span>");
+            }
+        }
+        html.push_str("</div></div>");
+    }
+    html.push_str("</div>");
+    html
+}
+
+/// Format an `f64` so integers print without a decimal point
+/// and floats keep enough precision to round-trip the YAML
+/// source we parsed.
+fn format_number(n: f64) -> String {
+    if n.fract() == 0.0 && n.abs() < 1e16 {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", n)
+    }
+}
+
+/// Re-serialize a property's YAML form. Returns a string that
+/// includes its trailing newline so it can be dropped in for
+/// `text[range]` as-is. The output mirrors common Obsidian
+/// conventions: block lists for `tags`-like keys, inline forms
+/// for scalars.
+pub fn serialize_property(key: &str, value: &PropValue) -> String {
+    match value {
+        PropValue::Text(s) => format!("{key}: {}\n", yaml_quote_if_needed(s)),
+        PropValue::Bool(b) => format!("{key}: {}\n", b),
+        PropValue::Number(n) => format!("{key}: {}\n", format_number(*n)),
+        PropValue::Date(s) => format!("{key}: {s}\n"),
+        PropValue::Empty => format!("{key}:\n"),
+        PropValue::List(items) => {
+            if items.is_empty() {
+                format!("{key}: []\n")
+            } else {
+                let mut out = format!("{key}:\n");
+                for item in items {
+                    out.push_str("  - ");
+                    out.push_str(&yaml_quote_if_needed(item));
+                    out.push('\n');
+                }
+                out
+            }
+        }
+    }
+}
+
+/// YAML scalar quoting. Wraps the string in double quotes only
+/// when needed — values containing colons, leading dashes, or
+/// reserved keywords would otherwise re-parse as something
+/// else. Newlines aren't allowed at all in single-line scalars
+/// so they're replaced with spaces.
+fn yaml_quote_if_needed(s: &str) -> String {
+    let needs_quote = s.is_empty()
+        || s.starts_with(' ')
+        || s.ends_with(' ')
+        || s.contains(':')
+        || s.contains('#')
+        || s.contains('[')
+        || s.contains(']')
+        || s.contains('{')
+        || s.contains('}')
+        || s.contains(',')
+        || matches!(s, "true" | "false" | "True" | "False" | "TRUE" | "FALSE" | "null" | "~")
+        || s.starts_with('-')
+        || s.starts_with('?')
+        || s.starts_with('|')
+        || s.starts_with('>')
+        || s.starts_with('&')
+        || s.starts_with('*')
+        || s.starts_with('!')
+        || s.starts_with('%')
+        || s.starts_with('@')
+        || s.starts_with('`');
+    let cleaned = s.replace('\n', " ").replace('\r', "");
+    if needs_quote {
+        format!("\"{}\"", cleaned.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        cleaned
+    }
+}
+
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
     ranges.iter().any(|r| pos >= r.start && pos < r.end)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum TypstKind {
+    MathInline,
+    MathBlock,
+    /// ```` ```typst …``` ```` fence body, compiled as a full
+    /// Typst document.
+    Block,
+}
+
+/// Render a Typst source fragment to inline SVG, with an LRU-
+/// bounded cache. Returns `None` if compile fails — the caller
+/// then falls back to showing the source so the user can fix it.
+pub(crate) fn render_typst(kind: TypstKind, body: &str) -> Option<String> {
+    if let Some(cached) = with_typst_cache(|c| c.get(kind, body)) {
+        return Some(cached);
+    }
+    // Wrap body in the right Typst preamble so each fragment
+    // compiles as a tiny standalone doc:
+    //   - inline math:  `$<body>$` with auto-sized page
+    //   - block math:   `$ <body> $` (display)
+    //   - typst block:  raw body (already a full doc)
+    // Sentinel color: a deliberately unusual hex we set as the
+    // default text fill and then string-replace with
+    // `currentColor` post-compile, so the rendered glyphs
+    // inherit the CSS theme (`color:` on the surrounding pane).
+    // `#set page(fill: none)` keeps the SVG background
+    // transparent — without it Typst bakes in a white page.
+    // User-set colors inside the body (e.g. `text(red, …)`) are
+    // untouched because they emit a different hex.
+    const SENTINEL: &str = "#ff00fe";
+    let prelude = format!(
+        "#set page(width: auto, height: auto, margin: 0pt, fill: none)\n\
+         #set text(size: 14pt, fill: rgb(\"{SENTINEL}\"))\n"
+    );
+    let wrapped = match kind {
+        TypstKind::MathInline => format!("{prelude}${body}$"),
+        TypstKind::MathBlock => format!("{prelude}$ {body} $"),
+        TypstKind::Block => format!("{prelude}{body}"),
+    };
+    let mut compiler = editor_typst::Compiler::new();
+    compiler.set_source(wrapped);
+    match compiler.compile_svg() {
+        Ok(svg) => {
+            // Typst-svg emits colors lowercase, but be defensive
+            // against uppercase too. Run both replacements over
+            // the SVG before caching.
+            let themed = svg
+                .replace("#ff00fe", "currentColor")
+                .replace("#FF00FE", "currentColor");
+            with_typst_cache(|c| c.put(kind, body.to_string(), themed.clone()));
+            Some(themed)
+        }
+        Err(e) => {
+            tracing::debug!(?e, body_len = body.len(), "typst compile failed");
+            None
+        }
+    }
+}
+
+struct TypstCache {
+    entries: Vec<(TypstKind, String, String)>,
+    cap: usize,
+}
+impl TypstCache {
+    fn new(cap: usize) -> Self {
+        Self { entries: Vec::with_capacity(cap), cap }
+    }
+    fn get(&mut self, kind: TypstKind, body: &str) -> Option<String> {
+        let i = self.entries.iter().position(|(k, b, _)| *k == kind && b == body)?;
+        let hit = self.entries.remove(i);
+        let svg = hit.2.clone();
+        self.entries.push(hit);
+        Some(svg)
+    }
+    fn put(&mut self, kind: TypstKind, body: String, svg: String) {
+        if self.entries.len() >= self.cap {
+            self.entries.remove(0);
+        }
+        self.entries.push((kind, body, svg));
+    }
+}
+
+fn with_typst_cache<R>(f: impl FnOnce(&mut TypstCache) -> R) -> R {
+    thread_local! {
+        static CACHE: std::cell::RefCell<TypstCache> =
+            std::cell::RefCell::new(TypstCache::new(32));
+    }
+    CACHE.with(|c| f(&mut c.borrow_mut()))
 }
 
 /// Render the HTML for an `![[file|opts]]` embed when the
@@ -260,6 +801,34 @@ fn scan_blocks(
     out: &mut Vec<DecoratedRange>,
 ) -> Vec<std::ops::Range<usize>> {
     let mut fenced_ranges = Vec::new();
+    // ── YAML frontmatter ───────────────────────────────────
+    //
+    // Obsidian renders `---\n…\n---` at the top of a note as a
+    // "Properties" panel. Only the very start of the doc
+    // counts — `---` mid-doc is a horizontal rule.
+    //
+    // When caret is outside the block, replace the source with
+    // the rendered properties widget. When caret is inside,
+    // leave the raw YAML visible (so the user can edit), and
+    // still register the range so the inline scanner doesn't
+    // interpret `key: value` colons as anything markdown.
+    // Frontmatter widget is always shown once the block parses
+    // — including when the caret is inside the YAML — so vim
+    // row-navigation has something to look at. The active row
+    // (the one containing the caret) is flagged in the HTML so
+    // CSS can highlight it. Only the `---` delimiter lines stay
+    // raw when caret is on them, in case the user wants to
+    // collapse the block by deleting them.
+    let frontmatter_range = parse_frontmatter(text).map(|fm| fm.outer.clone());
+    if let Some(fm) = parse_frontmatter(text) {
+        fenced_ranges.push(fm.outer.clone());
+        let caret = primary.head;
+        let active_idx = fm.props.iter().position(|p| caret >= p.range.start && caret < p.range.end);
+        let html = render_properties_html(&fm.props, active_idx);
+        out.push(Decoration::replace(fm.outer.clone()));
+        out.push(Decoration::widget(fm.outer.start, html));
+    }
+
     // Fence-tracking state:
     //   - `Some((open_line_end, marker_char, marker_len))` while
     //     we're inside a fence; `open_line_end` is the byte AFTER
@@ -273,6 +842,17 @@ fn scan_blocks(
 
     for (line_from, line_to) in line_ranges(text) {
         let line = &text[line_from..line_to];
+
+        // Lines inside the frontmatter range are handled above
+        // (Replace + widget or delimiter marks) — skip block
+        // parsing so the `---` opener isn't misread as a HR
+        // and `key: value` lines aren't matched against block
+        // patterns.
+        if let Some(r) = &frontmatter_range {
+            if line_from < r.end {
+                continue;
+            }
+        }
 
         // ── Table (GFM pipe table) ─────────────────────────
         //
@@ -361,6 +941,41 @@ fn scan_blocks(
             }
             if let Some(lang) = editor_syntax::Lang::from_fence_tag(info) {
                 emit_fence_tokens(text, content_start, mc, mlen, lang, out);
+            }
+            // ```typst — render the body as a Typst document
+            // and emit a single SVG widget on the closing fence
+            // line so the rendered output sits below the source
+            // code. Skip when the caret is anywhere inside the
+            // fence range (so the user sees the raw source while
+            // editing).
+            if info.eq_ignore_ascii_case("typst") {
+                let body_end = find_fence_close(text, content_start, mc, mlen);
+                let body = &text[content_start..body_end];
+                // Extend the replace range to cover the closing
+                // ``` line so the rendered output stands alone
+                // when caret is away.
+                let bytes = text.as_bytes();
+                let mut close_end = body_end;
+                while close_end < bytes.len() && bytes[close_end] != b'\n' {
+                    close_end += 1;
+                }
+                let fence_range = line_from..close_end;
+                if !cursor_touches(primary, fence_range.clone())
+                    && !body.trim().is_empty()
+                {
+                    if let Some(svg) = render_typst(TypstKind::Block, body) {
+                        // Click anywhere on the rendered widget
+                        // drops the caret at the start of the
+                        // body so the source comes back for
+                        // editing.
+                        let html = format!(
+                            r#"<div class="md-typst-widget" data-focus-pos="{pos}">{svg}</div>"#,
+                            pos = content_start,
+                        );
+                        out.push(Decoration::replace(fence_range.clone()));
+                        out.push(Decoration::widget(fence_range.start, html));
+                    }
+                }
             }
             continue;
         }
@@ -1042,6 +1657,37 @@ fn find_spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
+        // $$display math$$ — must precede the `$inline$` arm so
+        // the doubled marker doesn't get consumed as two empty
+        // inline maths. Body is the Typst math source.
+        if i + 4 <= b.len() && &b[i..i + 2] == b"$$" {
+            if let Some(end) = find_close(b, i + 2, b"$$") {
+                out.push(Span {
+                    outer: i..end + 2,
+                    body: i + 2..end,
+                    class: "md-math-block",
+                });
+                i = end + 2;
+                continue;
+            }
+        }
+        // $inline math$ — single-dollar pair. Skip if the body
+        // would be empty (`$$` already handled above) or starts
+        // with whitespace (avoids matching prose like
+        // "Cost is $5 not $10").
+        if b[i] == b'$' && i + 2 < b.len() && b[i + 1] != b' ' && b[i + 1] != b'$' {
+            if let Some(end) = find_close(b, i + 1, b"$") {
+                if end > i + 1 && b[end - 1] != b' ' {
+                    out.push(Span {
+                        outer: i..end + 1,
+                        body: i + 1..end,
+                        class: "md-math-inline",
+                    });
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
         // `inline code`
         if b[i] == b'`' {
             if let Some(end) = find_close(b, i + 1, b"`") {
@@ -1419,6 +2065,114 @@ mod tests {
             crate::decoration::DecorationKind::Widget { html }
                 if html.contains("md-table")));
         assert!(!widget);
+    }
+
+    #[test]
+    fn frontmatter_parsed() {
+        let src = "---\ntitle: Hello\ntags: [a, b]\npublished: true\naliases:\n  - x\n  - y\n---\n# body";
+        let fm = super::parse_frontmatter(src).expect("fm found");
+        assert_eq!(fm.props.len(), 4);
+        assert_eq!(fm.props[0].key, "title");
+        assert!(matches!(&fm.props[0].value, super::PropValue::Text(s) if s == "Hello"));
+        assert!(matches!(&fm.props[1].value, super::PropValue::List(v) if v == &vec!["a".to_string(), "b".to_string()]));
+        assert!(matches!(&fm.props[2].value, super::PropValue::Bool(true)));
+        assert!(matches!(&fm.props[3].value, super::PropValue::List(v) if v.len() == 2));
+    }
+
+    #[test]
+    fn frontmatter_property_ranges_are_atomic() {
+        let src = "---\ntitle: x\ntags:\n  - a\n  - b\nactive: true\n---\n";
+        let fm = super::parse_frontmatter(src).unwrap();
+        // `title` should span only its one line.
+        let title = &fm.props[0];
+        assert_eq!(&src[title.range.clone()], "title: x\n");
+        // `tags` should span the key line + both list items.
+        let tags = &fm.props[1];
+        assert_eq!(&src[tags.range.clone()], "tags:\n  - a\n  - b\n");
+        // `active` is a scalar bool.
+        let active = &fm.props[2];
+        assert_eq!(&src[active.range.clone()], "active: true\n");
+        assert!(matches!(active.value, super::PropValue::Bool(true)));
+    }
+
+    #[test]
+    fn serialize_property_round_trips() {
+        let s = super::serialize_property(
+            "tags",
+            &super::PropValue::List(vec!["a".into(), "b: c".into()]),
+        );
+        // The second item must be quoted because it contains a
+        // colon; otherwise the parser would split it as a map.
+        assert!(s.contains("\"b: c\""));
+        assert!(s.starts_with("tags:\n"));
+    }
+
+    #[test]
+    fn frontmatter_only_at_doc_start() {
+        // `---` mid-doc is a horizontal rule, not frontmatter.
+        let src = "# heading\n\n---\nfoo: bar\n---\n";
+        assert!(super::parse_frontmatter(src).is_none());
+    }
+
+    #[test]
+    fn frontmatter_emits_widget_when_caret_away() {
+        let s = state("---\ntitle: x\n---\n# body", 20);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-properties")));
+        assert!(has_widget);
+    }
+
+    #[test]
+    fn inline_math_recognized() {
+        // Caret away: source replaced + math widget emitted.
+        let s = state("Cost is $x^2$ today", 0);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-math-widget")));
+        assert!(has_widget);
+    }
+
+    #[test]
+    fn block_math_recognized() {
+        // `mc^2` would fail to compile in Typst (`mc` reads as
+        // an unknown identifier); use `m c^2` so the smoke test
+        // exercises a real render.
+        let s = state("Before\n$$E = m c^2$$\nAfter", 0);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-math-widget-block")));
+        assert!(has_widget);
+    }
+
+    #[test]
+    fn math_with_caret_inside_shows_source() {
+        // Caret inside the body: no Replace, source visible
+        // as `md-math-inline` mark so the user can edit.
+        let s = state("Cost $x^2$ here", 7);
+        let decs = live_preview(&s);
+        let has_replace = decs.iter().any(|d| {
+            d.from == 5
+                && d.to == 10
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(!has_replace);
+    }
+
+    #[test]
+    fn typst_fence_recognized() {
+        // Caret past the closing fence so cursor_touches is
+        // false and the widget actually fires.
+        let src = "```typst\n= Section\n```\nx";
+        let s = state(src, src.len() - 1);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-typst-widget")));
+        assert!(has_widget);
     }
 
     #[test]
