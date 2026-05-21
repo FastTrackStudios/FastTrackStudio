@@ -65,3 +65,4 @@ walkdir = { workspace = true }
 # drive the axum router without spinning up a TCP listener.
 tower = { version = "0.5", features = ["util"] }
 knowledge-crdt = { workspace = true }
+vault-sync = { workspace = true }
