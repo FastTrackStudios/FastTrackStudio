@@ -487,6 +487,13 @@ section h2 {
     color: #c5d4ff;
     padding: 0 8px;
     position: relative;
+    /* The opener / closer lines hold only a position:absolute
+       header widget when the caret's away — they'd otherwise
+       collapse to 0 visible height, the line number on top
+       would stack on the next one's, and the row would be
+       unclickable. Force at least one row's worth so the
+       cursor can actually land there. */
+    min-height: 1.6em;
 }
 .editor-root .md-code-header {
     position: absolute;
