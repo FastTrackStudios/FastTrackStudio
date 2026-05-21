@@ -105,14 +105,14 @@ Still pending below.
   docks at the bottom of the editor frame. A sliver of JS
   reading `window.getSelection().getRangeAt(0).getBoundingClientRect()`
   would let it float just under the caret like Logseq.
-- **Combination edge cases**: code fence inside a callout
-  with `>`-prefix stripping; nested callouts (`> > [!note]`).
-  Both need scan_blocks to track an "indent stack" rather
-  than a single `callout_kind` slot. **Verdict**: defer
-  nested-callouts past v1 — not in the audit's "✅ on by
-  default" set per Obsidian docs (works in vanilla but rare
-  in practice). Code-fence-in-callout is more common; tackle
-  that one alone.
+- ~~**Combination edge cases**: code fence inside a callout
+  with `>`-prefix stripping; nested callouts (`> > [!note]`).~~
+  Nested callouts are done. Code-fence-in-callout is
+  **dropped on purpose** — code fences are raw-code
+  territory, no markdown processing inside them.  If the
+  user wants a fence with explanatory prose, the fence lives
+  outside the callout. Document it as "by design" so a future
+  pass doesn't re-litigate.
 - **Vault-aware wikilink resolution**. Today every wikilink
   marks `md-wikilink-unresolved`. When a vault index lands,
   swap to `md-wikilink-resolved` (purple) when the target
