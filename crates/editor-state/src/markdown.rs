@@ -319,10 +319,13 @@ fn scan_blocks(
         if let Some((_, mc, mlen)) = fence {
             if is_closing_fence(line, mc, mlen) {
                 out.push(Decoration::line(line_from, "md-code-block"));
-                out.push(Decoration::replace(line_from..line_to));
-                // The closing fence line itself counts as part of
-                // the protected range so the inline scanner skips
-                // its backticks.
+                // Caret on the closing fence: source stays
+                // visible so the user can edit the `\`\`\``.
+                // Off: hidden via Replace so the line just shows
+                // the code-block background.
+                if !cursor_touches(primary, line_from..line_to) {
+                    out.push(Decoration::replace(line_from..line_to));
+                }
                 if let Some((open_end, _, _)) = fence.take() {
                     fenced_ranges.push(open_end..line_to);
                 }
@@ -336,31 +339,26 @@ fn scan_blocks(
         let trimmed = line.trim_start();
         if let Some((mc, mlen, info_start)) = opens_fence(trimmed) {
             out.push(Decoration::line(line_from, "md-code-block"));
-            out.push(Decoration::replace(line_from..line_to));
-            // The opener line is part of the protected fence range
-            // — without this the inline scanner finds the `\`\``
-            // pair inside the triple-backtick opener and emits a
-            // stray inline-code mark.
+            let caret_on_opener = cursor_touches(primary, line_from..line_to);
+            // Caret on opener: leave the `\`\`\`lang` source
+            // visible so it's editable. Off: hide source +
+            // overlay the lang/copy widget.
+            if !caret_on_opener {
+                out.push(Decoration::replace(line_from..line_to));
+            }
             let info = trimmed[info_start..].trim();
             let content_start = if line_to < text.len() { line_to + 1 } else { line_to };
-            // The current fence's protected range starts at the
-            // opener line. If we close cleanly we'll rewrite it
-            // above; if we hit EOF without a close, the EOF
-            // fallback at the bottom of this function uses
-            // `open_line_from` instead of `content_start`.
             fence = Some((line_from, mc, mlen));
-            // Header widget at the line's start position — shows
-            // the language label + a copy button. The button
-            // carries `data-copy-from`/`data-copy-to` so the JS
-            // bridge can grab the body text out of the doc.
-            let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
-            let header_html = format!(
-                r#"<span class="md-code-header"><span class="md-code-lang">{lang}</span><button class="md-code-copy" data-copy-from="{from}" data-copy-to="{to}" title="Copy">⧉</button></span>"#,
-                lang = if info.is_empty() { "plain" } else { info },
-                from = content_start,
-                to = body_end_estimate,
-            );
-            out.push(Decoration::widget(line_from, header_html));
+            if !caret_on_opener {
+                let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
+                let header_html = format!(
+                    r#"<span class="md-code-header"><span class="md-code-lang">{lang}</span><button class="md-code-copy" data-copy-from="{from}" data-copy-to="{to}" title="Copy">⧉</button></span>"#,
+                    lang = if info.is_empty() { "plain" } else { info },
+                    from = content_start,
+                    to = body_end_estimate,
+                );
+                out.push(Decoration::widget(line_from, header_html));
+            }
             if let Some(lang) = editor_syntax::Lang::from_fence_tag(info) {
                 emit_fence_tokens(text, content_start, mc, mlen, lang, out);
             }
