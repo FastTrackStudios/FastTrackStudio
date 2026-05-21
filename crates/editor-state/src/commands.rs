@@ -643,6 +643,236 @@ fn toggle_marker(state: &EditorState, marker: &str) -> Option<TransactionSpec> {
     )
 }
 
+/// `Mod-k` — wrap the selection in `[…](url)`. Empty selection
+/// inserts `[]()` with the caret between the brackets so the
+/// user types the link text first. With a selection that looks
+/// like an existing link (`[text](url)`) the markers are
+/// stripped (toggle behavior).
+pub fn toggle_link(state: &EditorState) -> Option<TransactionSpec> {
+    let sel = state.selection.primary();
+    let (from, to) = (sel.from(), sel.to());
+    let doc = state.doc.to_string();
+    if from == to {
+        let insert = "[]()";
+        return Some(
+            TransactionSpec::new()
+                .changes(Changes::insert(from, insert))
+                .selection(Selection::caret(from + 1)),
+        );
+    }
+    let body = doc.get(from..to).unwrap_or("");
+    // Toggle: if the body is already `[…](…)`, strip back to the
+    // inner text. Else wrap.
+    if body.starts_with('[') && body.ends_with(')') {
+        if let Some(rb) = body.find("](") {
+            let inner = &body[1..rb];
+            let inner_owned = inner.to_string();
+            let new_to = from + inner_owned.len();
+            return Some(
+                TransactionSpec::new()
+                    .changes(Changes::replace(from..to, inner_owned))
+                    .selection(Selection::single(Range::new(from, new_to))),
+            );
+        }
+    }
+    let wrapped = format!("[{body}]()");
+    let url_caret = from + wrapped.len() - 1; // inside the `()`
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::replace(from..to, wrapped))
+            .selection(Selection::caret(url_caret)),
+    )
+}
+
+/// `Mod-1` … `Mod-6` — set the current line's heading level.
+/// Strips any existing `#…#` prefix first, then prepends the
+/// new one. Level `0` removes the heading entirely. Operates on
+/// every line covered by the selection.
+pub fn set_heading(state: &EditorState, level: u8) -> Option<TransactionSpec> {
+    let doc = state.doc.to_string();
+    let starts = selected_line_starts(state, &doc);
+    if starts.is_empty() {
+        return None;
+    }
+    let mut changes: Vec<crate::Change> = Vec::new();
+    for line_start in starts {
+        let line_end = doc[line_start..]
+            .find('\n')
+            .map(|n| line_start + n)
+            .unwrap_or(doc.len());
+        let line = &doc[line_start..line_end];
+        // Strip existing prefix.
+        let hashes = line.chars().take_while(|c| *c == '#').count();
+        let strip_to = if (1..=6).contains(&hashes)
+            && line.as_bytes().get(hashes).copied() == Some(b' ')
+        {
+            hashes + 1
+        } else {
+            0
+        };
+        let body = &line[strip_to..];
+        let new_line = if level == 0 {
+            body.to_string()
+        } else {
+            let prefix = "#".repeat(level as usize);
+            format!("{prefix} {body}")
+        };
+        changes.push(crate::Change {
+            from: line_start,
+            to: line_end,
+            inserted: new_line,
+        });
+    }
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::from_sorted(changes))
+            .selection(state.selection.clone()),
+    )
+}
+
+/// `Mod-l` — cycle the current line's list marker through
+/// `none → -  → 1. → - [ ] → none`. Operates on every line in
+/// the selection, snapping all of them to the same target so a
+/// multi-line cycle stays predictable.
+pub fn cycle_list(state: &EditorState) -> Option<TransactionSpec> {
+    let doc = state.doc.to_string();
+    let starts = selected_line_starts(state, &doc);
+    if starts.is_empty() {
+        return None;
+    }
+    // Determine the first line's current state to compute the
+    // target for the whole batch.
+    let first_state = list_marker_state(&doc, starts[0]);
+    let target = first_state.next();
+    let mut changes: Vec<crate::Change> = Vec::new();
+    for line_start in starts {
+        let line_end = doc[line_start..]
+            .find('\n')
+            .map(|n| line_start + n)
+            .unwrap_or(doc.len());
+        let current = list_marker_state(&doc, line_start);
+        let body_start = line_start + current.prefix_bytes();
+        let body = doc.get(body_start..line_end).unwrap_or("");
+        let new_line = target.apply_to(body);
+        changes.push(crate::Change {
+            from: line_start,
+            to: line_end,
+            inserted: new_line,
+        });
+    }
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::from_sorted(changes))
+            .selection(state.selection.clone()),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ListMarkerState {
+    None,
+    Unordered,    // `- `
+    Ordered,      // `1. `
+    UnorderedTask, // `- [ ] `
+}
+
+impl ListMarkerState {
+    fn next(self) -> Self {
+        match self {
+            Self::None => Self::Unordered,
+            Self::Unordered => Self::Ordered,
+            Self::Ordered => Self::UnorderedTask,
+            Self::UnorderedTask => Self::None,
+        }
+    }
+    fn prefix_bytes(self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::Unordered => 2,
+            Self::Ordered => 3,
+            Self::UnorderedTask => 6,
+        }
+    }
+    fn apply_to(self, body: &str) -> String {
+        match self {
+            Self::None => body.to_string(),
+            Self::Unordered => format!("- {body}"),
+            Self::Ordered => format!("1. {body}"),
+            Self::UnorderedTask => format!("- [ ] {body}"),
+        }
+    }
+}
+
+fn list_marker_state(doc: &str, line_start: usize) -> ListMarkerState {
+    let line = doc.get(line_start..).unwrap_or("");
+    let line = line.split('\n').next().unwrap_or("");
+    let b = line.as_bytes();
+    if b.len() >= 6
+        && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+')
+        && b[1] == b' '
+        && b[2] == b'['
+        && b[4] == b']'
+        && b[5] == b' '
+    {
+        return ListMarkerState::UnorderedTask;
+    }
+    if b.len() >= 3 && b[0].is_ascii_digit() && b[1] == b'.' && b[2] == b' ' {
+        return ListMarkerState::Ordered;
+    }
+    if b.len() >= 2
+        && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+')
+        && b[1] == b' '
+    {
+        return ListMarkerState::Unordered;
+    }
+    ListMarkerState::None
+}
+
+/// `Mod-t` — toggle the task checkbox on the current line.
+/// `[ ]` ↔ `[x]`. Non-task lines first promote to `- [ ]` (cycle
+/// → task) so the user can `Mod-t` an empty line and start
+/// checking off immediately.
+pub fn toggle_task(state: &EditorState) -> Option<TransactionSpec> {
+    let doc = state.doc.to_string();
+    let starts = selected_line_starts(state, &doc);
+    if starts.is_empty() {
+        return None;
+    }
+    let mut changes: Vec<crate::Change> = Vec::new();
+    for line_start in starts {
+        let line_end = doc[line_start..]
+            .find('\n')
+            .map(|n| line_start + n)
+            .unwrap_or(doc.len());
+        let line = &doc[line_start..line_end];
+        let b = line.as_bytes();
+        let is_task = b.len() >= 5
+            && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+')
+            && b[1] == b' '
+            && b[2] == b'['
+            && b[4] == b']';
+        let new_line = if is_task {
+            let inner = b[3];
+            let new_inner = if inner == b' ' { 'x' } else { ' ' };
+            let mut bytes = b.to_vec();
+            bytes[3] = new_inner as u8;
+            String::from_utf8(bytes).unwrap_or_else(|_| line.to_string())
+        } else {
+            // Promote to a task line.
+            format!("- [ ] {line}")
+        };
+        changes.push(crate::Change {
+            from: line_start,
+            to: line_end,
+            inserted: new_line,
+        });
+    }
+    Some(
+        TransactionSpec::new()
+            .changes(Changes::from_sorted(changes))
+            .selection(state.selection.clone()),
+    )
+}
+
 /// Delete the character after the caret. With a non-empty
 /// selection, deletes the selection. Bound by convention to
 /// `Delete`.
@@ -917,5 +1147,73 @@ mod tests {
         let next = s.update(toggle_italic(&s).unwrap());
         assert_eq!(next.doc.to_string(), "foo**");
         assert_eq!(next.selection.primary().head, 4);
+    }
+
+    #[test]
+    fn toggle_link_inserts_empty_link_with_caret_in_text() {
+        let s = at("", 0);
+        let next = s.update(toggle_link(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "[]()");
+        assert_eq!(next.selection.primary().head, 1);
+    }
+
+    #[test]
+    fn toggle_link_wraps_selection() {
+        let mut s = at("hello world", 0);
+        s.selection = Selection::single(Range::new(0, 5));
+        let next = s.update(toggle_link(&s).unwrap());
+        assert_eq!(next.doc.to_string(), "[hello]() world");
+        // Caret ends inside the (url) parens.
+        assert_eq!(next.selection.primary().head, 8);
+    }
+
+    #[test]
+    fn set_heading_prepends_hashes() {
+        let s = at("hello", 3);
+        let next = s.update(set_heading(&s, 2).unwrap());
+        assert_eq!(next.doc.to_string(), "## hello");
+    }
+
+    #[test]
+    fn set_heading_replaces_existing_level() {
+        let s = at("# hello", 3);
+        let next = s.update(set_heading(&s, 3).unwrap());
+        assert_eq!(next.doc.to_string(), "### hello");
+    }
+
+    #[test]
+    fn set_heading_zero_strips() {
+        let s = at("### hello", 3);
+        let next = s.update(set_heading(&s, 0).unwrap());
+        assert_eq!(next.doc.to_string(), "hello");
+    }
+
+    #[test]
+    fn cycle_list_walks_through_marker_states() {
+        let s = at("foo", 0);
+        let s = s.update(cycle_list(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "- foo");
+        let s = s.update(cycle_list(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "1. foo");
+        let s = s.update(cycle_list(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "- [ ] foo");
+        let s = s.update(cycle_list(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "foo");
+    }
+
+    #[test]
+    fn toggle_task_flips_existing_checkbox() {
+        let s = at("- [ ] thing", 0);
+        let s = s.update(toggle_task(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "- [x] thing");
+        let s = s.update(toggle_task(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "- [ ] thing");
+    }
+
+    #[test]
+    fn toggle_task_promotes_non_task_line() {
+        let s = at("just a paragraph", 0);
+        let s = s.update(toggle_task(&s).unwrap());
+        assert_eq!(s.doc.to_string(), "- [ ] just a paragraph");
     }
 }
