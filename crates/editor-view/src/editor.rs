@@ -1141,19 +1141,6 @@ pub fn Editor(
                                 let n = evt.target;
                                 while (n && n !== el) {{
                                     if (n.nodeType === 1 && n.dataset
-                                        && n.dataset.foldFrom != null) {{
-                                        evt.preventDefault();
-                                        evt.stopPropagation();
-                                        const sel = window.getSelection();
-                                        if (sel) sel.removeAllRanges();
-                                        const from = parseInt(n.dataset.foldFrom, 10);
-                                        const to   = parseInt(n.dataset.foldTo, 10);
-                                        if (!isNaN(from) && !isNaN(to) && to > from) {{
-                                            dioxus.send({{ kind: 'toggle-fold', from, to }});
-                                        }}
-                                        return;
-                                    }}
-                                    if (n.nodeType === 1 && n.dataset
                                         && n.dataset.copyFrom != null) {{
                                         evt.preventDefault();
                                         const from = parseInt(n.dataset.copyFrom, 10);
@@ -1646,17 +1633,6 @@ fn handle_bridge_msg(
             };
             if let Some(spec) = editor_state::commands::enter_continue_list(&cur_clone) {
                 state.set(cur_clone.update(spec.annotate("origin", "enter")));
-            }
-        }
-        "toggle-fold" => {
-            let from = v.get("from").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
-            let to = v.get("to").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
-            if to <= from {
-                return;
-            }
-            let cur = state.read().clone();
-            if let Some(spec) = editor_state::commands::toggle_fold(&cur, from..to) {
-                state.set(cur.update(spec.annotate("origin", "toggle-fold")));
             }
         }
         "copy-range" => {

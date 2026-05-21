@@ -10,18 +10,12 @@ use crate::doc::Doc;
 use crate::selection::Selection;
 use crate::transaction::{Transaction, TransactionSpec};
 
-/// A snapshot of everything the editor knows: text + caret(s) +
-/// folded ranges. Cheap to clone (`Doc` is a rope; `Selection`
-/// is a small Vec; folds are a small Vec).
+/// A snapshot of everything the editor knows: text + caret(s).
+/// Cheap to clone (`Doc` is a rope; `Selection` is a small Vec).
 #[derive(Clone, Debug)]
 pub struct EditorState {
     pub doc: Doc,
     pub selection: Selection,
-    /// Currently folded byte ranges (sorted, non-overlapping).
-    /// The decoration source emits Replace + a "…" widget on
-    /// each range; transactions map them through the change set
-    /// so they stay anchored as the doc edits around them.
-    pub folds: Vec<std::ops::Range<usize>>,
 }
 
 impl EditorState {
@@ -31,7 +25,6 @@ impl EditorState {
         Self {
             doc: Doc::from_str(&text.into()),
             selection: Selection::caret(0),
-            folds: Vec::new(),
         }
     }
 
