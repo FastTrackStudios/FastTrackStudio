@@ -119,6 +119,31 @@ test.describe("editor", () => {
     // populate the debug panel.
     await editor(page).waitFor();
     await expect(page.locator("#dbg-len")).not.toHaveText("");
+    // `dx serve` injects a "Your app is being rebuilt." overlay
+    // when it detects a non-hot-reloadable change. That overlay
+    // sits above the editor and steals focus/clicks, looking
+    // like a focus / state bug when it's really a hot-reload
+    // race. Forcefully remove it (we don't need the dev affordance
+    // during tests).
+    await page.evaluate(() => {
+      const heads = Array.from(document.querySelectorAll("h3"));
+      for (const h of heads) {
+        if (/being rebuilt/i.test(h.textContent || "")) {
+          // Walk up to the overlay container (cursor=pointer
+          // wrapper several levels up) and remove it.
+          let n = h;
+          while (n && n.parentElement && n.tagName !== "BODY") {
+            const style = window.getComputedStyle(n);
+            if (style.position === "fixed" || style.position === "absolute") {
+              n.remove();
+              return;
+            }
+            n = n.parentElement;
+          }
+          h.remove();
+        }
+      }
+    });
   });
 
   test("renders the seeded document", async ({ page }) => {
@@ -1085,6 +1110,62 @@ test.describe("editor", () => {
       .not.toContain("author: cody");
   });
 
+  test("arrow up from a property cell focuses the previous cell", async ({
+    page,
+  }) => {
+    // Drive the focus + keydown entirely via `page.evaluate` so
+    // we sidestep Playwright's keyboard layer (which doesn't
+    // consistently dispatch keydowns past Dioxus's document-
+    // level delegation in this test rig).
+    const after = await page.evaluate(() => {
+      const add = document.querySelector('[data-edit-role="row-add"]');
+      add.focus();
+      add.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      const a = document.activeElement;
+      return {
+        role: a && a.dataset && a.dataset.editRole,
+        rowKey:
+          a && a.closest && a.closest(".md-property-row")
+            ? a.closest(".md-property-row").dataset.propKey
+            : null,
+      };
+    });
+    expect(after.role).toBeTruthy();
+    expect(after.rowKey).toBe("description");
+  });
+
+  test("arrow down from the title cell focuses the tags row", async ({
+    page,
+  }) => {
+    const after = await page.evaluate(() => {
+      const cell = document.querySelector(
+        '.md-property-row[data-prop-key="title"] [data-edit-role="text"]'
+      );
+      cell.focus();
+      cell.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+      const a = document.activeElement;
+      return {
+        rowKey:
+          a && a.closest && a.closest(".md-property-row")
+            ? a.closest(".md-property-row").dataset.propKey
+            : null,
+      };
+    });
+    expect(after.rowKey).toBe("tags");
+  });
+
   test("adding a new property inserts an empty entry", async ({ page }) => {
     // Type into the "+ Add property" cell, press Enter, expect
     // the doc to contain a new `keyname:` line at the bottom
@@ -1188,6 +1269,64 @@ test.describe("editor", () => {
     // restrictive in a markdown editor where users type
     // continuously).
     await page.keyboard.insertText("\nhello/");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+  });
+
+  test("slash after typing letters opens the menu (vim default-on)", async ({
+    page,
+  }) => {
+    // Type some letters first, then `/` — the exact flow the
+    // user reported broken. Letters end up as ordinary text on
+    // the line; `/` after them should still trigger the menu
+    // (Notion rule).
+    await page.goto("/");
+    await editor(page).waitFor();
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len);
+    await page.keyboard.press("i"); // → Insert
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("h");
+    await page.keyboard.press("e");
+    await page.keyboard.press("l");
+    await page.keyboard.press("l");
+    await page.keyboard.press("o");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("Slash");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+  });
+
+  test("slash via real keystrokes (vim default-on) opens the menu", async ({
+    page,
+  }) => {
+    // Reload without ?novim=1 so the default vim mode is on.
+    await page.goto("/");
+    await editor(page).waitFor();
+    const len = Number((await readState(page)).len);
+    // Vim defaults to Normal. Move to end, enter insert, then
+    // start a new line and press slash — same flow a real user
+    // would do.
+    await editor(page).focus();
+    await setCaret(page, len);
+    await page.keyboard.press("i");  // vim → Insert
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Slash");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+  });
+
+  test("slash via real keystrokes opens the menu", async ({ page }) => {
+    // The other slash tests use `keyboard.insertText` which
+    // synthesizes a single composite input event. The real
+    // failure mode showed up only when typing character-by-
+    // character via `keyboard.press`: each keystroke goes
+    // through keydown → contenteditable → MutationObserver →
+    // state.set → use_effect. If any link in that chain breaks,
+    // the menu silently doesn't open.
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len);
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Slash");
     await expect(page.locator(".slash-menu")).toBeVisible();
   });
 

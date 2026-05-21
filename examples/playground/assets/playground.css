@@ -615,9 +615,7 @@ section h2 {
     position: relative;
 }
 .editor-frame .slash-menu {
-    position: absolute;
-    left: 16px;
-    bottom: 12px;
+    position: fixed;
     z-index: 20;
     min-width: 280px;
     max-width: 420px;
@@ -628,6 +626,10 @@ section h2 {
     border-radius: 6px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     padding: 4px;
+    /* Position is set inline via JS to track the caret —
+       fallback is top-left if JS hasn't kicked in yet. */
+    top: 100px;
+    left: 100px;
 }
 .editor-frame .slash-group {
     padding: 4px 10px 2px;

@@ -1340,6 +1340,68 @@ pub fn Editor(
                                     evt.target.textContent = '';
                                     return;
                                 }}
+                                // Up/down arrows: navigate to the
+                                // adjacent property ROW (or the
+                                // row-add cell at the bottom).
+                                // The default contenteditable
+                                // up-arrow bubbles to the
+                                // browser, which moves the caret
+                                // out of the properties widget
+                                // entirely.
+                                if (evt.key === 'ArrowUp' || evt.key === 'ArrowDown') {{
+                                    // Each navigation target is the
+                                    // first edit-cell of a property
+                                    // row, plus the bottom
+                                    // `row-add`. Skip `chip-remove`
+                                    // × buttons — they're not
+                                    // useful nav targets.
+                                    const targets = [];
+                                    el.querySelectorAll('.md-properties .md-property-row')
+                                        .forEach(row => {{
+                                            const cell = row.querySelector(
+                                                '[data-edit-role="text"],'
+                                                + '[data-edit-role="number"],'
+                                                + '[data-edit-role="date"],'
+                                                + '[data-edit-role="bool"],'
+                                                + '[data-edit-role="chip-add"]'
+                                            );
+                                            if (cell) targets.push(cell);
+                                        }});
+                                    const rowAdd = el.querySelector(
+                                        '[data-edit-role="row-add"]'
+                                    );
+                                    if (rowAdd) targets.push(rowAdd);
+                                    // Find which row the current
+                                    // cell belongs to (the cell
+                                    // itself may not be in
+                                    // `targets` — e.g. a chip-
+                                    // remove button — so map via
+                                    // row).
+                                    const currentRow = evt.target.closest('.md-property-row');
+                                    let idx = targets.findIndex(t => {{
+                                        if (t === evt.target) return true;
+                                        if (currentRow && t.closest('.md-property-row') === currentRow) return true;
+                                        return false;
+                                    }});
+                                    if (idx === -1) {{
+                                        if (evt.target === rowAdd) idx = targets.length - 1;
+                                    }}
+                                    if (idx === -1) return;
+                                    const delta = evt.key === 'ArrowUp' ? -1 : 1;
+                                    const next = targets[idx + delta];
+                                    if (!next) return;
+                                    evt.preventDefault();
+                                    next.focus();
+                                    if (next.isContentEditable) {{
+                                        const r = document.createRange();
+                                        r.selectNodeContents(next);
+                                        r.collapse(false);
+                                        const s = window.getSelection();
+                                        s.removeAllRanges();
+                                        s.addRange(r);
+                                    }}
+                                    return;
+                                }}
                             }}, true);
                             el.addEventListener('click', evt => {{
                                 const role = evt.target.dataset.editRole;

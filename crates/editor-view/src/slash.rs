@@ -32,6 +32,35 @@ pub fn SlashMenu(
     let Some(current) = snapshot else {
         return rsx! { Fragment {} };
     };
+    // Anchor the menu just under the current caret on every
+    // render. Lets the menu track the user's typing position
+    // instead of docking at the bottom of the editor frame.
+    use_effect(|| {
+        let script = r#"(()=>{
+            const menu = document.querySelector('.slash-menu');
+            if (!menu) return;
+            const sel = window.getSelection && window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+            const r = sel.getRangeAt(0);
+            const rects = r.getClientRects();
+            const rect = rects.length
+                ? rects[rects.length - 1]
+                : r.getBoundingClientRect();
+            if (!rect) return;
+            const w = menu.offsetWidth;
+            const h = menu.offsetHeight;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            let top = rect.bottom + 6;
+            if (top + h > vh - 8) top = rect.top - h - 6;
+            let left = rect.left;
+            if (left + w > vw - 8) left = vw - w - 8;
+            if (left < 8) left = 8;
+            menu.style.top = top + 'px';
+            menu.style.left = left + 'px';
+        })();"#;
+        let _ = document::eval(script);
+    });
     let hits = filter_commands(&current.query);
     if hits.is_empty() {
         return rsx! {
