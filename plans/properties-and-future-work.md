@@ -58,8 +58,57 @@ deferred. Listed in rough do-this-first order.
   caret (whole-word match, wraps at doc bounds); `n` / `N`
   repeat / reverse. Last search lives in `VimState.last_search`.
   5 new tests.
+- ✅ **OFM feature audit + gap fills**: inline footnotes
+  `^[…]`, block IDs `^block-id`, autolinks `<url>`,
+  setext-style headings (`===`/`---` underline → H1/H2 with
+  HR disambiguation), and Tasks-plugin-style custom
+  checkboxes (`- [/]`, `- [>]`, etc.). 7 new markdown tests.
+- ✅ **Edit commands**: `Mod-k` (toggle link), `Mod-l`
+  (list cycle: none → `-  → 1. → - [ ]  → none`), `Mod-t`
+  (task toggle, promotes paragraphs), `Mod-1..6` (set
+  heading), `Mod-0` (strip heading). All operate on every
+  line in the selection. 8 new tests.
+- ✅ **Slash-command palette**:
+  - `slash` module in editor-view: `SlashState`,
+    `detect_slash`, `CommandEntry`, `CommandKind`,
+    `filter_commands`, `run_command`. Ported from
+    `~/Development/Task/.../handler/commands.rs`. 6 unit tests.
+  - Catalog: headings 1-6, lists (unordered / ordered /
+    task / quote / hr / table), code fences (generic / rust
+    / ts / typst / mermaid), math (inline / block), all 13
+    Obsidian callouts, links (link / wikilink / embed /
+    footnote / inline footnote).
+  - `SlashMenu` Dioxus component renders the popup; reads
+    open state from a `Signal<Option<SlashState>>` threaded
+    through Editor's new `slash` prop.
+  - Editor's `use_effect` re-runs `detect_slash` on every
+    doc/selection update; `onkeydown` intercepts
+    Arrow/Enter/Escape when the menu is open.
+  - Architecture parallels CodeMirror's
+    `@codemirror/autocomplete`: `detect_slash` is the
+    `matchBefore` analogue, `SlashState` is `ActiveSource`,
+    `CommandKind` is `Completion.apply`.
 
 Still pending below.
+
+### Next concrete chunks
+
+- **Mermaid fence rendering**. Add `editor-mermaid` crate
+  wrapping `mermaid-rs-renderer = "0.2.2"` with
+  `default-features = false`. Cargo dep is wasm-compatible per
+  scout (pure Rust, no rayon/stacker; bundle a WOFF/TTF via
+  `include_bytes!` since `fontdb` system-load won't work in
+  the browser). Mirror `editor-typst`'s `Compiler::compile_svg`
+  shape. Hook into the existing ` ```typst ``` `-fence handler
+  pattern in `markdown.rs::scan_blocks`.
+- **Caret-anchored slash-menu position**. Today the popup
+  docks at the bottom of the editor frame. A sliver of JS
+  reading `window.getSelection().getRangeAt(0).getBoundingClientRect()`
+  would let it float just under the caret like Logseq.
+- **Combination edge cases**: code fence inside a callout
+  with `>`-prefix stripping; nested callouts (`> > [!note]`).
+  Both need scan_blocks to track an "indent stack" rather
+  than a single `callout_kind` slot.
 
 The two files most of this work touches:
 - `crates/editor-state/src/markdown.rs` — 2.4k lines, doing
