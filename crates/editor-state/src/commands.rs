@@ -29,6 +29,27 @@ pub fn insert_newline(state: &EditorState) -> Option<TransactionSpec> {
 /// plain const for now and can be promoted to config later.
 pub const INDENT_UNIT: &str = "  ";
 
+/// Toggle a fold range. If a fold with the same `start` exists
+/// it's removed; otherwise the given range is inserted sorted
+/// by start. Called by the gutter / heading fold-arrow widgets.
+pub fn toggle_fold(state: &EditorState, range: std::ops::Range<usize>) -> Option<TransactionSpec> {
+    let mut folds = state.folds.clone();
+    let existing = folds.iter().position(|f| f.start == range.start);
+    if let Some(i) = existing {
+        folds.remove(i);
+    } else {
+        let pos = folds.iter().position(|f| f.start > range.start).unwrap_or(folds.len());
+        folds.insert(pos, range);
+    }
+    Some(TransactionSpec::new().folds(folds))
+}
+
+/// Flip the reading-mode flag. Bound to `Mod-e` to match
+/// Obsidian's "toggle preview" shortcut.
+pub fn toggle_reading_mode(state: &EditorState) -> Option<TransactionSpec> {
+    Some(TransactionSpec::new().reading_mode(!state.reading_mode))
+}
+
 /// Try CM6-style "insertBracket" behavior for the given inserted
 /// character. Returns a [`TransactionSpec`] when the character
 /// should be handled specially (auto-close, skip-over, wrap-

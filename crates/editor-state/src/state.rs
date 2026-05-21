@@ -1,6 +1,6 @@
-//! The immutable editor state. Holds the current document and
-//! selection. Transactions consume a state and produce a new
-//! one.
+//! The immutable editor state. Holds the current document,
+//! selection, fold set, and reading-mode flag. Transactions
+//! consume a state and produce a new one.
 //!
 //! Mirrors `@codemirror/state`'s `EditorState`. We deliberately
 //! keep it small in v1; facets / extensions / history land in
@@ -10,26 +10,31 @@ use crate::doc::Doc;
 use crate::selection::Selection;
 use crate::transaction::{Transaction, TransactionSpec};
 
-/// A snapshot of everything the editor knows: text + caret(s).
-/// Cheap to clone (`Doc` is a rope; `Selection` is a small Vec).
 #[derive(Clone, Debug)]
 pub struct EditorState {
     pub doc: Doc,
     pub selection: Selection,
+    /// Currently folded byte ranges (sorted, non-overlapping).
+    /// Transactions map them through the change set so they
+    /// stay anchored as the doc edits around them.
+    pub folds: Vec<std::ops::Range<usize>>,
+    /// When `true`, the editor renders in Obsidian-style
+    /// reading mode: contenteditable disabled, all markers
+    /// stay hidden, source bytes never appear. Toggled via
+    /// `commands::toggle_reading_mode` (Mod-E).
+    pub reading_mode: bool,
 }
 
 impl EditorState {
-    /// Create a fresh state with the given initial text and
-    /// caret at offset 0.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             doc: Doc::from_str(&text.into()),
             selection: Selection::caret(0),
+            folds: Vec::new(),
+            reading_mode: false,
         }
     }
 
-    /// Convenience: wrap a [`TransactionSpec`] and apply it.
-    /// Returns the resulting state.
     pub fn update(&self, spec: TransactionSpec) -> EditorState {
         Transaction::new(self.clone(), spec).apply()
     }
@@ -59,7 +64,6 @@ mod tests {
         let s = EditorState::new("hello");
         let next = s.update(TransactionSpec::new().changes(Changes::insert(5, "!")));
         assert_eq!(next.doc.to_string(), "hello!");
-        // Original unchanged.
         assert_eq!(s.doc.to_string(), "hello");
     }
 }

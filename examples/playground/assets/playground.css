@@ -79,6 +79,42 @@ section h2 {
     line-height: 1.6;
     min-height: 200px;
     caret-color: var(--accent);
+    /* Reserve room for the gutter on the left. Each .cm-line
+       paints its number into this column via the CSS counter
+       below; the counter increments in document order. */
+    counter-reset: cm-line;
+    padding-left: 48px;
+    position: relative;
+}
+
+/* Vim-mode caret shape. `caret-shape` is a 2026-era CSS
+   property; falls back gracefully to a normal bar in older
+   browsers. */
+.editor-root.vim-mode-normal,
+.editor-root.vim-mode-visual {
+    caret-shape: block;
+    caret-color: var(--accent);
+}
+.editor-root.vim-mode-replace {
+    caret-shape: underscore;
+    caret-color: #ff5370;
+}
+.editor-root.vim-mode-insert {
+    caret-shape: bar;
+}
+.editor-root.vim-mode-command {
+    caret-shape: bar;
+    caret-color: #ffcb6b;
+}
+
+/* Reading mode: dim the editor frame so it's clearly distinct
+   from edit mode, and hide the gutter (nothing to navigate to
+   when input is disabled). */
+.editor-root.reading-mode {
+    padding-left: 0;
+}
+.editor-root.reading-mode .cm-line::before {
+    display: none;
 }
 
 .editor-root:focus { outline: none; }
@@ -89,6 +125,23 @@ section h2 {
 .editor-root .cm-line {
     display: block;
     min-height: 1lh;
+    counter-increment: cm-line;
+    position: relative;
+}
+/* Line number rendered into the gutter column. Reserved width
+   matches the editor-root's left padding. */
+.editor-root .cm-line::before {
+    content: counter(cm-line);
+    position: absolute;
+    left: -42px;
+    width: 32px;
+    text-align: right;
+    color: #4a526a;
+    font-size: 0.9em;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Live-preview decoration classes — emitted by editor-state's

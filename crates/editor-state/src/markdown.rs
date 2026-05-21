@@ -27,7 +27,15 @@ use crate::state::EditorState;
 /// as `editor_view::DecorationSource`.
 pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     let text = state.doc.to_string();
-    let primary = state.selection.primary();
+    // In reading mode, swap the primary selection for one that
+    // can't touch any byte range — `cursor_touches` then always
+    // returns false, so every marker stays hidden. Same effect
+    // as Obsidian's preview-only mode.
+    let primary = if state.reading_mode {
+        Range::caret(usize::MAX)
+    } else {
+        state.selection.primary()
+    };
     let mut out = Vec::new();
 
     // Per-step timing for the perf trace. The cost in this fn is
@@ -1171,6 +1179,8 @@ mod tests {
         EditorState {
             doc: Doc::from_str(text),
             selection: Selection::caret(caret),
+            folds: Vec::new(),
+            reading_mode: false,
         }
     }
 

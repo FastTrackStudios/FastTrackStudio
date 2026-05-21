@@ -1340,19 +1340,35 @@ pub fn Editor(
         });
     }
 
+    // CSS hook so caret-shape / theming can branch on vim mode.
+    // Falls back to `vim-mode-insert` (bar caret) when vim is
+    // disabled — same as plain editing.
+    let vim_class = vim
+        .map(|sig| match sig.peek().mode {
+            editor_vim::Mode::Normal => "vim-mode-normal",
+            editor_vim::Mode::Insert => "vim-mode-insert",
+            editor_vim::Mode::VisualChar
+            | editor_vim::Mode::VisualLine
+            | editor_vim::Mode::VisualBlock => "vim-mode-visual",
+            editor_vim::Mode::Replace => "vim-mode-replace",
+            editor_vim::Mode::Command => "vim-mode-command",
+        })
+        .unwrap_or("vim-mode-insert");
+    let read_only = state.read().reading_mode;
+    let root_class = if read_only {
+        format!("editor-root reading-mode {vim_class}")
+    } else {
+        format!("editor-root {vim_class}")
+    };
+    let contenteditable = if read_only { "false" } else { "plaintext-only" };
+
     rsx! {
         div {
-            class: "editor-root",
+            class: "{root_class}",
             "data-editor-id": "{editor_id}",
-            // `plaintext-only` strips formatting from paste +
-            // disables rich-text execCommands.
-            contenteditable: "plaintext-only",
+            contenteditable: "{contenteditable}",
             spellcheck: "false",
             onkeydown: on_keydown,
-            // No children in rsx — Dioxus only sees / manages
-            // the outer div's attributes. The interior is owned
-            // by the imperative patcher above. Dioxus's
-            // reconciler never touches our editor content.
         }
     }
 }

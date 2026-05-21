@@ -257,6 +257,7 @@ fn App() -> Element {
         .with("Mod-a", commands::select_all as _)
         .with("Mod-b", commands::toggle_bold as _)
         .with("Mod-i", commands::toggle_italic as _)
+        .with("Mod-e", commands::toggle_reading_mode as _)
         .with("Tab", commands::indent_more as _)
         .with("Shift-Tab", commands::indent_less as _)
         .with("Backspace", commands::delete_backward as _)
