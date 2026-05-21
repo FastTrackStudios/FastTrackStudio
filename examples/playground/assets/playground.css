@@ -202,6 +202,18 @@ section h2 {
     padding: 0 4px;
     border-radius: 3px;
     font-size: 0.92em;
+    /* Without an explicit color the block-cursor renders in
+       `accent` (blue) and gets nearly invisible against the
+       tag's saturated bg. Force a contrasting color. */
+    caret-color: #f5f5fa;
+}
+/* Same idea for every styled inline span with its own
+   background — keep the cursor visible against the surface. */
+.editor-root .md-code,
+.editor-root .md-highlight,
+.editor-root .md-bracket-match,
+.editor-root .md-bracket-mismatch {
+    caret-color: #f5f5fa;
 }
 .editor-root .md-footnote {
     color: #d4a957;
