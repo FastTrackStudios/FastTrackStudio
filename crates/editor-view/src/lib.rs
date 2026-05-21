@@ -6,6 +6,7 @@
 
 pub use editor_state;
 
+mod bridge;
 mod editor;
 pub mod tile;
 
