@@ -367,7 +367,69 @@ fn scan_blocks(
     // callout's class so CSS can group them visually.
     let mut callout_kind: Option<&'static str> = None;
 
+    // Setext-style heading detection. For each window of two
+    // consecutive lines, if the first is content and the second
+    // is `===` or `---` (any length), the pair becomes an H1 or
+    // H2. Stash the underline-line offsets so the main loop can
+    // skip them, and stash the content-line offsets so we know
+    // which level to emit.
+    //
+    // `---` is also a HR — disambiguation: setext wins when the
+    // line above is non-blank AND not a block-opening marker
+    // (heading, list, blockquote, fence, frontmatter). HR wins
+    // otherwise.
+    let all_lines = line_ranges(text);
+    let mut setext_content_level: std::collections::HashMap<usize, u8> =
+        std::collections::HashMap::new();
+    let mut setext_underline: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
+    for win in all_lines.windows(2) {
+        let (lf, lt) = win[0];
+        let (ulf, ult) = win[1];
+        let above = &text[lf..lt];
+        let under = text[ulf..ult].trim_end();
+        if above.trim().is_empty() || under.is_empty() {
+            continue;
+        }
+        let setext_ok_above = !above.starts_with('#')
+            && !above.starts_with('>')
+            && !above.starts_with('-')
+            && !above.starts_with('*')
+            && !above.starts_with('+')
+            && !above.starts_with("```")
+            && !above.starts_with("~~~")
+            && !above.starts_with("---")
+            && !above.starts_with("===");
+        if !setext_ok_above {
+            continue;
+        }
+        if under.chars().all(|c| c == '=') {
+            setext_content_level.insert(lf, 1);
+            setext_underline.insert(ulf);
+        } else if under.chars().all(|c| c == '-') {
+            setext_content_level.insert(lf, 2);
+            setext_underline.insert(ulf);
+        }
+    }
+
     for (line_from, line_to) in line_ranges(text) {
+        // Setext underline — emit a styling class on the line so
+        // it's visually paired with the heading above, then move
+        // on. Without this skip, the `---` underline would be
+        // matched as an HR by the block below.
+        if setext_underline.contains(&line_from) {
+            out.push(Decoration::line(line_from, "md-setext-underline"));
+            continue;
+        }
+        // Setext content line — render with the heading class.
+        // The underline isn't part of the heading text so we
+        // don't bring it into the Replace; the active-state
+        // tooling still treats the body as plain inline.
+        if let Some(&level) = setext_content_level.get(&line_from) {
+            let class = HEADING_CLASS[(level as usize) - 1];
+            out.push(Decoration::line(line_from, class));
+            continue;
+        }
         let line = &text[line_from..line_to];
 
         // Lines inside the frontmatter range are handled above
@@ -920,8 +982,8 @@ fn is_hr(line: &str) -> bool {
 
 fn parse_task_marker(line: &str) -> Option<(usize, bool)> {
     let b = line.as_bytes();
-    // `- [ ]` / `- [x]` / `* [ ]` ... — minimum 6 bytes including
-    // the trailing space.
+    // `- [ ]` / `- [x]` / `- [/]` / `- [>]` / `* [ ]` ... — must
+    // be at least 5 bytes for the `- [X]` form.
     if b.len() < 5 {
         return None;
     }
@@ -933,11 +995,19 @@ fn parse_task_marker(line: &str) -> Option<(usize, bool)> {
     if b[4] != b']' {
         return None;
     }
-    let checked = matches!(inner, b'x' | b'X');
-    if !checked && inner != b' ' {
+    // Accept any single printable ASCII as a status — Obsidian's
+    // Tasks plugin convention uses `x`, ` `, `/` (in-progress),
+    // `>` (forwarded), `<` (scheduled), `-` (cancelled), `?`
+    // (question), `!` (important). Anything else still parses
+    // (treated as unchecked) so we don't break funky user
+    // schemes; styling can specialize via data attrs later.
+    let is_valid_status = inner == b' '
+        || inner.is_ascii_alphanumeric()
+        || matches!(inner, b'/' | b'>' | b'<' | b'-' | b'?' | b'!' | b'.' | b'*');
+    if !is_valid_status {
         return None;
     }
-    // Consume trailing space after the bracket if present.
+    let checked = matches!(inner, b'x' | b'X');
     let end = if b.get(5) == Some(&b' ') { 6 } else { 5 };
     Some((end, checked))
 }
@@ -1281,6 +1351,71 @@ fn find_spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
+        // ^[inline footnote body] — Obsidian extension. Body is
+        // styled like a footnote reference but inline (the text
+        // is the footnote content, not a refnum). Must match
+        // BEFORE the `^block-id` arm, which would otherwise eat
+        // the leading `^`.
+        if b[i] == b'^' && b.get(i + 1) == Some(&b'[') {
+            if let Some(end) = find_close(b, i + 2, b"]") {
+                out.push(Span {
+                    outer: i..end + 1,
+                    body: i + 2..end,
+                    class: "md-inline-footnote",
+                });
+                i = end + 1;
+                continue;
+            }
+        }
+        // ^block-id — an Obsidian block reference target,
+        // emitted at the end of a paragraph / list-item. We
+        // recognize it only when followed by EOL (or end of
+        // doc), so a stray `^` inside a sentence isn't styled.
+        // Boundary check on the left mirrors `tag_boundary_before`.
+        if b[i] == b'^'
+            && i + 1 < b.len()
+            && (b[i + 1].is_ascii_alphanumeric() || b[i + 1] == b'-' || b[i + 1] == b'_')
+            && (i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n'))
+        {
+            let mut j = i + 1;
+            while j < b.len()
+                && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_')
+            {
+                j += 1;
+            }
+            if j == b.len() || b[j] == b'\n' {
+                out.push(Span {
+                    outer: i..j,
+                    body: i..j,
+                    class: "md-block-id",
+                });
+                i = j;
+                continue;
+            }
+        }
+        // <https://…> autolink (also matches mailto-shaped
+        // `<foo@bar.baz>`). The body becomes the URL itself; the
+        // angle brackets are styling-only.
+        if b[i] == b'<' {
+            if let Some(end) = find_close(b, i + 1, b">") {
+                let body = &text[i + 1..end];
+                let is_url = body.starts_with("http://")
+                    || body.starts_with("https://")
+                    || body.starts_with("mailto:")
+                    || (body.contains('@')
+                        && !body.contains(' ')
+                        && body.contains('.'));
+                if is_url {
+                    out.push(Span {
+                        outer: i..end + 1,
+                        body: i + 1..end,
+                        class: "md-autolink",
+                    });
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
         // [text](url) — find `]` then verify `(...)` follows.
         if b[i] == b'[' {
             if let Some(close_text) = find_close(b, i + 1, b"]") {
@@ -1592,6 +1727,71 @@ mod tests {
             crate::decoration::DecorationKind::Widget { html }
                 if html.contains("md-table")));
         assert!(!widget);
+    }
+
+    #[test]
+    fn inline_footnote_recognized() {
+        let s = state("see ^[a side note] here", 0);
+        let decs = live_preview(&s);
+        assert!(mark_classes(&decs).contains(&"md-inline-footnote"));
+    }
+
+    #[test]
+    fn block_id_recognized_at_eol_only() {
+        // `^id` at end of line is a block ref.
+        let s = state("paragraph ^block-1\nnext line", 0);
+        let decs = live_preview(&s);
+        assert!(mark_classes(&decs).contains(&"md-block-id"));
+        // Mid-line `^` shouldn't trigger.
+        let s = state("x^y not a block id", 0);
+        let decs = live_preview(&s);
+        assert!(!mark_classes(&decs).contains(&"md-block-id"));
+    }
+
+    #[test]
+    fn autolink_recognized() {
+        let s = state("see <https://anthropic.com> for more", 0);
+        let decs = live_preview(&s);
+        assert!(mark_classes(&decs).contains(&"md-autolink"));
+    }
+
+    #[test]
+    fn autolink_email_recognized() {
+        let s = state("mail <a@b.co>", 0);
+        let decs = live_preview(&s);
+        assert!(mark_classes(&decs).contains(&"md-autolink"));
+    }
+
+    #[test]
+    fn setext_h1_recognized() {
+        let s = state("Big Title\n=========\nbody", 0);
+        let decs = live_preview(&s);
+        let has_h1 = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class == &"md-h1"));
+        assert!(has_h1);
+    }
+
+    #[test]
+    fn setext_h2_recognized() {
+        let s = state("Subtitle\n--------\nbody", 0);
+        let decs = live_preview(&s);
+        let has_h2 = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class == &"md-h2"));
+        assert!(has_h2);
+    }
+
+    #[test]
+    fn custom_task_status_recognized() {
+        // `- [/]` in-progress, `- [>]` forwarded — still parses
+        // as a task line, just with a non-canonical status char.
+        let s = state("- [/] working on it\n- [>] later", 0);
+        let decs = live_preview(&s);
+        let has_task_line = decs.iter().filter(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class == &"md-task")).count();
+        assert!(has_task_line >= 2);
     }
 
     #[test]

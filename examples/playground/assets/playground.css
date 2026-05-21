@@ -220,6 +220,34 @@ section h2 {
     font-size: 0.8em;
     vertical-align: super;
 }
+.editor-root .md-inline-footnote {
+    color: #d4a957;
+    font-style: italic;
+    border-bottom: 1px dotted #d4a957;
+}
+.editor-root .md-block-id {
+    color: #6a7392;
+    font-size: 0.85em;
+    background: rgba(212, 169, 87, 0.08);
+    padding: 0 4px;
+    border-radius: 3px;
+    user-select: none;
+}
+.editor-root .md-autolink {
+    color: #79b8ff;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+/* Setext-style heading underline (`====` / `----`). Render as a
+   muted rule under the heading text. The line above already
+   carries `md-h1`/`md-h2`, so this just colors the underline
+   line itself. */
+.editor-root .md-setext-underline {
+    color: #4a526a;
+    font-family: var(--mono);
+    font-size: 0.85em;
+    letter-spacing: 0.02em;
+}
 
 /* GFM pipe tables — rendered as a single widget when the caret
    is off, source bytes shown verbatim when the caret is on. */
