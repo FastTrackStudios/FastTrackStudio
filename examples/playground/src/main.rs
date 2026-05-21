@@ -205,14 +205,16 @@ fn App() -> Element {
                  ## Inline styles\n\
                  \n\
                  **bold**, *italic*, ***bold italic***, ~~strikethrough~~, \
-                 ==highlight==, `inline code`, and an inline footnote^[here's the body of an inline footnote].\n\
+                 ==highlight==, `inline code`, and an inline footnote^[click the marker to edit me].\n\
                  \n\
                  Links: standard [Anthropic](https://anthropic.com), \
                  an autolink <https://obsidian.md>, \
-                 wikilinks `[[Page]]`, `[[Page#Header]]`, `[[Page#^block]]`, `[[Page|alias]]`, \
-                 tags like #editor #live-preview #notes/howto, \
-                 and footnote refs like this[^1]. \
-                 A block id at end of paragraph ^demo-block-id\n\
+                 wikilinks: [[Editor Roadmap]], [[Project README|the readme]], \
+                 and to a header [[Editor Roadmap#Goals]]. Unresolved targets render red \
+                 (no vault yet, so every wikilink is unresolved). \
+                 Tags like #editor #live-preview #notes/howto, \
+                 and a footnote ref [^1]. \
+                 Block id at end of paragraph ^demo-block-id\n\
                  \n\
                  ## Block styles\n\
                  \n\
@@ -245,7 +247,9 @@ fn App() -> Element {
                  > [!danger] Danger\n\
                  > High-stakes call-out style.\n\
                  \n\
-                 > [!info] Info • > [!todo] Todo • > [!success] Success • > [!question] Question • > [!failure] Failure • > [!bug] Bug • > [!example] Example • > [!quote] Quote — each on its own line in real use.\n\
+                 > [!info] Info\n\
+                 > Use the slash menu `/callout` to insert any of the others — \
+                 abstract, info, todo, success, question, failure, bug, example, quote.\n\
                  \n\
                  ### Table\n\
                  \n\

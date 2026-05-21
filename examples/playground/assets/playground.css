@@ -196,6 +196,12 @@ section h2 {
 .editor-root .md-wikilink {
     color: #b388ff;
 }
+/* Unresolved wikilink — no vault has confirmed the target
+   exists. Same red Obsidian uses for the same state. */
+.editor-root .md-wikilink-unresolved {
+    color: #ff7373;
+    text-decoration-color: rgba(255, 115, 115, 0.5);
+}
 .editor-root .md-tag {
     color: #88d4a3;
     background: #1e2a22;
@@ -220,10 +226,25 @@ section h2 {
     font-size: 0.8em;
     vertical-align: super;
 }
+/* Inline footnote `^[body]`. When caret is on the span the
+   source is shown (the user is editing), so style it subtly so
+   it doesn't dominate the paragraph. When the caret is away,
+   the body is replaced with a tiny `[*]` superscript marker
+   (`.md-inline-footnote-marker`). */
 .editor-root .md-inline-footnote {
-    color: #d4a957;
+    color: var(--text-dim, #7a7e8a);
     font-style: italic;
-    border-bottom: 1px dotted #d4a957;
+    font-size: 0.9em;
+}
+.editor-root .md-inline-footnote-marker {
+    color: var(--accent, #6b9eff);
+    font-size: 0.75em;
+    cursor: pointer;
+    margin-left: 1px;
+    user-select: none;
+}
+.editor-root .md-inline-footnote-marker:hover {
+    text-decoration: underline;
 }
 .editor-root .md-block-id {
     color: #6a7392;

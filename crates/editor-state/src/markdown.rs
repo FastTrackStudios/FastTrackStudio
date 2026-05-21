@@ -112,6 +112,27 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
                 }
                 continue;
             }
+            // Inline footnotes `^[body]` — Obsidian renders them
+            // as an auto-numbered superscript reference; the body
+            // is hidden until the user mouses over or clicks. We
+            // don't auto-number yet (no footnote registry), so
+            // collapse to a generic `[*]` marker when caret is
+            // away. Source stays visible while editing.
+            if span.class == "md-inline-footnote" {
+                if cursor_touches(primary, span.outer.clone()) {
+                    out.push(Decoration::mark(span.body.clone(), "md-inline-footnote"));
+                } else {
+                    out.push(Decoration::replace(span.outer.clone()));
+                    out.push(Decoration::widget(
+                        span.outer.start,
+                        format!(
+                            r#"<sup class="md-inline-footnote-marker" data-focus-pos="{}">[*]</sup>"#,
+                            span.body.start,
+                        ),
+                    ));
+                }
+                continue;
+            }
             if span.class == "md-embed" {
                 let raw = &text[span.body.clone()];
                 if !cursor_touches(primary, span.outer.clone()) {
@@ -140,9 +161,20 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
                 _ => None,
             };
             if let Some(h) = href {
+                // Wikilinks get an extra class once we know if
+                // the target resolves. v1 has no vault, so
+                // every link is `unresolved` — CSS colors it
+                // red. When a vault layer lands, swap this for
+                // a real lookup (resolved → purple,
+                // unresolved → red, matches Obsidian).
+                let cls = if span.class == "md-wikilink" {
+                    "md-wikilink md-wikilink-unresolved"
+                } else {
+                    span.class
+                };
                 out.push(Decoration::mark_with_attrs(
                     span.body.clone(),
-                    span.class,
+                    cls,
                     vec![("data-href".into(), h)],
                 ));
                 if !cursor_touches(primary, span.outer.clone()) {
@@ -1630,7 +1662,10 @@ mod tests {
     fn wikilink_recognized() {
         let s = state("[[Page Name]]", 0);
         let decs = live_preview(&s);
-        assert!(mark_classes(&decs).contains(&"md-wikilink"));
+        // Class is space-separated `md-wikilink
+        // md-wikilink-unresolved` until a vault layer resolves
+        // the target, so check the prefix rather than equality.
+        assert!(mark_classes(&decs).iter().any(|c| c.starts_with("md-wikilink")));
         assert!(decs.iter().any(|d| d.from == 2 && d.to == 11));
     }
 
@@ -1742,9 +1777,27 @@ mod tests {
 
     #[test]
     fn inline_footnote_recognized() {
+        // Caret away from the span: source replaced + marker
+        // widget shown.
         let s = state("see ^[a side note] here", 0);
         let decs = live_preview(&s);
+        let has_marker = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-inline-footnote-marker")));
+        assert!(has_marker);
+    }
+
+    #[test]
+    fn inline_footnote_source_visible_when_caret_on() {
+        // Caret inside the body: Mark, no Replace.
+        let s = state("see ^[a side note] here", 8);
+        let decs = live_preview(&s);
         assert!(mark_classes(&decs).contains(&"md-inline-footnote"));
+        let has_replace = decs.iter().any(|d| {
+            d.from == 4 && d.to == 18
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(!has_replace);
     }
 
     #[test]

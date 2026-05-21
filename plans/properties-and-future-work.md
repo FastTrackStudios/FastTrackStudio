@@ -108,7 +108,16 @@ Still pending below.
 - **Combination edge cases**: code fence inside a callout
   with `>`-prefix stripping; nested callouts (`> > [!note]`).
   Both need scan_blocks to track an "indent stack" rather
-  than a single `callout_kind` slot.
+  than a single `callout_kind` slot. **Verdict**: defer
+  nested-callouts past v1 — not in the audit's "✅ on by
+  default" set per Obsidian docs (works in vanilla but rare
+  in practice). Code-fence-in-callout is more common; tackle
+  that one alone.
+- **Vault-aware wikilink resolution**. Today every wikilink
+  marks `md-wikilink-unresolved`. When a vault index lands,
+  swap to `md-wikilink-resolved` (purple) when the target
+  exists. Hook: thread a `vault: Option<&dyn VaultLookup>`
+  into `live_preview`.
 
 The two files most of this work touches:
 - `crates/editor-state/src/markdown.rs` — 2.4k lines, doing
