@@ -89,6 +89,12 @@ impl<'a> Projects for StandaloneProject<'a> {
     fn set_project_info(&self, project: ProjectContext, key: &str, value: f64) {
         self.daw.set_project_info(project, key, value)
     }
+    fn get_project_config(&self, project: ProjectContext, key: &str) -> Option<f64> {
+        self.daw.get_project_config(project, key)
+    }
+    fn set_project_config(&self, project: ProjectContext, key: &str, value: f64) -> bool {
+        self.daw.set_project_config(project, key, value)
+    }
     fn set_ruler_lane_name(&self, project: ProjectContext, lane_index: u32, name: &str) {
         self.daw.set_ruler_lane_name(project, lane_index, name)
     }
@@ -341,6 +347,32 @@ impl Projects for Standalone {
             }
             _ => {}
         });
+    }
+
+    fn get_project_config(&self, project: ProjectContext, key: &str) -> Option<f64> {
+        let guid = resolve_ctx_guid(self, &project)?;
+        let s = self.state.lock().ok()?;
+        let value = s
+            .projects
+            .get(&guid)?
+            .project_ext_state
+            .get(&("daw-standalone:project_config".into(), key.to_string()))?
+            .parse()
+            .ok()?;
+        Some(value)
+    }
+
+    fn set_project_config(&self, project: ProjectContext, key: &str, value: f64) -> bool {
+        let Some(guid) = resolve_ctx_guid(self, &project) else {
+            return false;
+        };
+        self.with_project_mut(&guid, |p| {
+            p.project_ext_state.insert(
+                ("daw-standalone:project_config".into(), key.to_string()),
+                value.to_string(),
+            );
+        })
+        .is_ok()
     }
 
     fn set_ruler_lane_name(&self, project: ProjectContext, lane_index: u32, name: &str) {

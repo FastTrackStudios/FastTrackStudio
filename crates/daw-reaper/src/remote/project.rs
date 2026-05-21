@@ -85,6 +85,12 @@ impl<'a> ProjectTrait for RemoteProject<'a> {
         0.0
     }
     fn set_project_info(&self, _project: ProjectContext, _key: &str, _value: f64) {}
+    fn get_project_config(&self, _project: ProjectContext, _key: &str) -> Option<f64> {
+        None
+    }
+    fn set_project_config(&self, _project: ProjectContext, _key: &str, _value: f64) -> bool {
+        false
+    }
     fn set_ruler_lane_name(&self, _project: ProjectContext, _lane_index: u32, _name: &str) {}
     fn get_ruler_lane_name(&self, _project: ProjectContext, _lane_index: u32) -> String {
         String::new()

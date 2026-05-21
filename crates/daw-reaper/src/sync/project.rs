@@ -91,6 +91,12 @@ impl<'a> ProjectTrait for ReaperProject<'a> {
     fn set_project_info(&self, project: ProjectContext, key: &str, value: f64) {
         crate::Reaper.set_project_info(project, key, value)
     }
+    fn get_project_config(&self, project: ProjectContext, key: &str) -> Option<f64> {
+        crate::Reaper.get_project_config(project, key)
+    }
+    fn set_project_config(&self, project: ProjectContext, key: &str, value: f64) -> bool {
+        crate::Reaper.set_project_config(project, key, value)
+    }
     fn set_ruler_lane_name(&self, project: ProjectContext, lane_index: u32, name: &str) {
         crate::Reaper.set_ruler_lane_name(project, lane_index, name)
     }

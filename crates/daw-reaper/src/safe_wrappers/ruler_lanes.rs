@@ -143,5 +143,6 @@ pub fn set_marker_lane(low: &ReaperLow, project: ProjectContext, idx: u32, lane:
             lane as f64,
         )
     };
+    low.UpdateTimeline();
     true
 }

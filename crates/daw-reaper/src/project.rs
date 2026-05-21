@@ -72,6 +72,52 @@ pub(crate) fn convert_undo_scope(scope: &daw_proto::UndoScope) -> UndoScope {
     }
 }
 
+fn config_value_for_profile(key: &str, size: u32, value: f64) -> String {
+    if matches!(key, "preroll" | "projmetroen" | "projmetrobeatlen") {
+        return value.round().to_string();
+    }
+
+    if size == std::mem::size_of::<f64>() as u32 || size == std::mem::size_of::<f32>() as u32 {
+        format!("{value:.14}")
+    } else {
+        value.round().to_string()
+    }
+}
+
+#[cfg(target_family = "unix")]
+fn persist_global_config_value(key: &str, value: &str) -> bool {
+    let Ok(section) = std::ffi::CString::new("REAPER") else {
+        return false;
+    };
+    let Ok(key) = std::ffi::CString::new(key) else {
+        return false;
+    };
+    let Ok(value) = std::ffi::CString::new(value) else {
+        return false;
+    };
+
+    let ini_path = Reaper::get()
+        .medium_reaper()
+        .get_ini_file(|path| path.to_path_buf());
+    let Ok(ini_path) = std::ffi::CString::new(ini_path.as_str()) else {
+        return false;
+    };
+
+    unsafe {
+        reaper_low::Swell::get().WritePrivateProfileString(
+            section.as_ptr(),
+            key.as_ptr(),
+            value.as_ptr(),
+            ini_path.as_ptr(),
+        ) != 0
+    }
+}
+
+#[cfg(not(target_family = "unix"))]
+fn persist_global_config_value(_key: &str, _value: &str) -> bool {
+    true
+}
+
 impl Projects for crate::Reaper {
     fn info(&self, project: daw_proto::ProjectContext) -> DawResult<ProjectInfo> {
         let proj = resolve_project(&project)
@@ -575,6 +621,155 @@ impl Projects for crate::Reaper {
         }
     }
 
+    fn get_project_config(&self, project: daw_proto::ProjectContext, key: &str) -> Option<f64> {
+        let reaper = Reaper::get();
+        let medium = reaper.medium_reaper();
+        let proj_ctx = match resolve_project(&project) {
+            Some(p) => ProjectContext::Proj(p.raw()),
+            None => ProjectContext::CurrentProject,
+        };
+        let (ptr, size) = if let Some(descriptor) = medium.project_config_var_get_offs(key)
+            && descriptor.offset != 0
+        {
+            match medium.project_config_var_addr(proj_ctx, descriptor.offset) {
+                Some(ptr) => (ptr, descriptor.size),
+                None => {
+                    tracing::debug!(
+                        key,
+                        offset = descriptor.offset,
+                        "get_project_config: project config address is null, trying global config var"
+                    );
+                    let global = medium.get_config_var(key)?;
+                    (global.value, global.size)
+                }
+            }
+        } else {
+            let global = medium.get_config_var(key)?;
+            (global.value, global.size)
+        };
+
+        let value = unsafe {
+            match size {
+                size if size == std::mem::size_of::<f64>() as u32 => *(ptr.as_ptr() as *const f64),
+                size if size == std::mem::size_of::<f32>() as u32 => {
+                    *(ptr.as_ptr() as *const f32) as f64
+                }
+                size if size == std::mem::size_of::<i32>() as u32 => {
+                    *(ptr.as_ptr() as *const i32) as f64
+                }
+                size if size == std::mem::size_of::<i16>() as u32 => {
+                    *(ptr.as_ptr() as *const i16) as f64
+                }
+                size => {
+                    tracing::warn!(
+                        key,
+                        size,
+                        "get_project_config: unsupported project config var size"
+                    );
+                    return None;
+                }
+            }
+        };
+        Some(value)
+    }
+
+    fn set_project_config(
+        &self,
+        project: daw_proto::ProjectContext,
+        key: &str,
+        value: f64,
+    ) -> bool {
+        let reaper = Reaper::get();
+        let medium = reaper.medium_reaper();
+        let proj_ctx = match resolve_project(&project) {
+            Some(p) => ProjectContext::Proj(p.raw()),
+            None => ProjectContext::CurrentProject,
+        };
+        let (ptr, size, is_project_config) = if let Some(descriptor) =
+            medium.project_config_var_get_offs(key)
+            && descriptor.offset != 0
+        {
+            match medium.project_config_var_addr(proj_ctx, descriptor.offset) {
+                Some(ptr) => (ptr, descriptor.size, true),
+                None => {
+                    tracing::debug!(
+                        key,
+                        offset = descriptor.offset,
+                        "set_project_config: project config address is null, trying global config var"
+                    );
+                    let Some(global) = medium.get_config_var(key) else {
+                        tracing::warn!(key, "set_project_config: config var not found");
+                        return false;
+                    };
+                    (global.value, global.size, false)
+                }
+            }
+        } else {
+            let Some(global) = medium.get_config_var(key) else {
+                tracing::warn!(key, "set_project_config: config var not found");
+                return false;
+            };
+            (global.value, global.size, false)
+        };
+
+        let written = unsafe {
+            match size {
+                size if size == std::mem::size_of::<f64>() as u32 => {
+                    *(ptr.as_ptr() as *mut f64) = value;
+                    true
+                }
+                size if size == std::mem::size_of::<f32>() as u32 => {
+                    *(ptr.as_ptr() as *mut f32) = value as f32;
+                    true
+                }
+                size if size == std::mem::size_of::<i32>() as u32 => {
+                    *(ptr.as_ptr() as *mut i32) = value.round() as i32;
+                    true
+                }
+                size if size == std::mem::size_of::<i16>() as u32 => {
+                    *(ptr.as_ptr() as *mut i16) = value.round() as i16;
+                    true
+                }
+                size => {
+                    tracing::warn!(
+                        key,
+                        size,
+                        "set_project_config: unsupported project config var size"
+                    );
+                    false
+                }
+            }
+        };
+
+        if written {
+            if is_project_config {
+                medium.mark_project_dirty(proj_ctx);
+            } else {
+                let profile_value = config_value_for_profile(key, size, value);
+                if !persist_global_config_value(key, &profile_value) {
+                    tracing::warn!(
+                        key,
+                        value = profile_value,
+                        "set_project_config: failed to persist global config var"
+                    );
+                }
+            }
+            medium.update_timeline();
+            if key == "preroll" || key == "prerollmeas" {
+                let read_back = self.get_project_config(project, key);
+                tracing::info!(
+                    key,
+                    value,
+                    ?read_back,
+                    is_project_config,
+                    size,
+                    "set_project_config: wrote config var"
+                );
+            }
+        }
+        written
+    }
+
     // =========================================================================
     // Ruler Lane Management (v7.62+)
     // =========================================================================
@@ -586,6 +781,7 @@ impl Projects for crate::Reaper {
             Some(p) => ProjectContext::Proj(p.raw()),
             None => ProjectContext::CurrentProject,
         };
+        ensure_ruler_lane_exists(low, proj_ctx, lane_index);
         let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
         let value = std::ffi::CString::new(name).unwrap_or_default();
         unsafe {
@@ -596,6 +792,7 @@ impl Projects for crate::Reaper {
                 true,
             );
         }
+        low.UpdateTimeline();
     }
 
     fn get_ruler_lane_name(&self, project: daw_proto::ProjectContext, lane_index: u32) -> String {
@@ -623,21 +820,39 @@ impl Projects for crate::Reaper {
             Some(p) => ProjectContext::Proj(p.raw()),
             None => ProjectContext::CurrentProject,
         };
-        // Count by probing lane names until we find an empty one
-        let mut count = 0u32;
-        for i in 1..=128 {
-            let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", i)).unwrap();
-            let mut buf = [0u8; 256];
-            let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
-            unsafe {
-                low.GetSetProjectInfo_String(proj_ctx.to_raw(), key.as_ptr(), buf_ptr, false);
-                let name = std::ffi::CStr::from_ptr(buf_ptr).to_string_lossy();
-                if name.is_empty() {
-                    break;
-                }
-                count = i;
-            }
-        }
-        count
+        ruler_lane_count(low, proj_ctx)
     }
+}
+
+fn ensure_ruler_lane_exists(
+    low: &crate::safe_wrappers::ReaperLow,
+    project: ProjectContext,
+    lane_index: u32,
+) {
+    let mut count = ruler_lane_count(low, project).max(1);
+    while count < lane_index {
+        let key = std::ffi::CString::new(format!("RULER_LANE_ORDER:{}", count + 1)).unwrap();
+        unsafe {
+            low.GetSetProjectInfo(project.to_raw(), key.as_ptr(), -1.0, true);
+        }
+        count += 1;
+    }
+}
+
+fn ruler_lane_count(low: &crate::safe_wrappers::ReaperLow, project: ProjectContext) -> u32 {
+    let mut count = 0u32;
+    for i in 1..=128 {
+        let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", i)).unwrap();
+        let mut buf = [0u8; 256];
+        let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
+        unsafe {
+            low.GetSetProjectInfo_String(project.to_raw(), key.as_ptr(), buf_ptr, false);
+            let name = std::ffi::CStr::from_ptr(buf_ptr).to_string_lossy();
+            if name.is_empty() {
+                break;
+            }
+            count = i;
+        }
+    }
+    count.max(1)
 }

@@ -65,6 +65,8 @@ pub trait Projects {
     fn set_project_info_string(&self, project: ProjectContext, key: &str, value: &str);
     fn get_project_info(&self, project: ProjectContext, key: &str) -> f64;
     fn set_project_info(&self, project: ProjectContext, key: &str, value: f64);
+    fn get_project_config(&self, project: ProjectContext, key: &str) -> Option<f64>;
+    fn set_project_config(&self, project: ProjectContext, key: &str, value: f64) -> bool;
 
     // ── Ruler lanes (v7.62+) ──────────────────────────────────────
 

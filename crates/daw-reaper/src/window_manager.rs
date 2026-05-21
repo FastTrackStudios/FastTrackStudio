@@ -99,9 +99,13 @@ where
     }
 }
 
-/// Walk both top-level windows *and* the descendants of REAPER's main
-/// HWND. Toolbars surface in one or the other depending on whether
-/// they're floating or docked.
+/// Walk top-level windows, direct children of REAPER's main HWND, and
+/// children of any `REAPER_dock` container we find. Toolbars docked
+/// in REAPER's standard docks surface as direct children of main;
+/// toolbars attached to "top of main window" / "above arrange view"
+/// instead live inside a `REAPER_dock` container two levels deep, so
+/// we need a manual second hop. We don't fully recurse to keep the
+/// log volume sane.
 fn for_each_reaper_window<F>(mut visit: F)
 where
     F: FnMut(raw::HWND, String) -> bool,
@@ -118,13 +122,35 @@ where
         return;
     }
     let main = unsafe { reaper_low::Reaper::get().GetMainHwnd() };
+    // Collect candidate dock containers first; we'll walk into them
+    // after the top-level visit (need to avoid mutating `keep_going`
+    // from inside one enumeration while issuing another).
+    let mut docker_containers: Vec<raw::HWND> = Vec::new();
     for_each_child_window(main, |hwnd, title| {
         if !keep_going {
             return false;
         }
+        if title == "REAPER_dock" {
+            docker_containers.push(hwnd);
+        }
         keep_going = visit(hwnd, title);
         keep_going
     });
+    if !keep_going {
+        return;
+    }
+    for container in docker_containers {
+        for_each_child_window(container, |hwnd, title| {
+            if !keep_going {
+                return false;
+            }
+            keep_going = visit(hwnd, title);
+            keep_going
+        });
+        if !keep_going {
+            return;
+        }
+    }
 }
 
 /// Build a map of window title → HWND for every visible REAPER window.
@@ -215,7 +241,7 @@ fn is_mode_toolbar_title(title: &str) -> bool {
     }
     matches!(
         mode_word,
-        "Organize" | "Write" | "Produce" | "Record" | "Edit" | "Mix" | "Master" | "Live"
+        "Organize" | "Write" | "Produce" | "Record" | "Edit" | "Mix" | "Master" | "Live" | "Video"
     )
 }
 
@@ -265,13 +291,15 @@ fn slot_for_mode_toolbar_title(title: &str) -> Option<u32> {
         "Mix" => 5,
         "Master" => 6,
         "Live" => 7,
+        "Video" => 8,
+        // No "Minimal" — that mode has no toolbars.
         _ => return None,
     };
     Some((mode_idx as u32) * 3 + n)
 }
 
 /// Resolve a layout name to its 0-based mode index (`Organize` → 0,
-/// ..., `Live` → 7). Case-sensitive — matches the names we register
+/// ..., `Video` → 8). Case-sensitive — matches the names we register
 /// via `mode_defs` exactly.
 fn mode_index_for_layout_name(name: &str) -> Option<u32> {
     match name {
@@ -283,16 +311,42 @@ fn mode_index_for_layout_name(name: &str) -> Option<u32> {
         "Mix" => Some(5),
         "Master" => Some(6),
         "Live" => Some(7),
+        "Video" => Some(8),
+        "Minimal" => Some(9),
         _ => None,
     }
 }
 
-/// Build the full list of mode-toolbar titles in slot order (`Organize 1`
-/// at slot 1, ..., `Live 3` at slot 24). Used to know which toolbars are
-/// "mode managed" for hide-others-on-apply logic.
+/// REAPER's native screenset window-set action IDs, verified from the
+/// action list on REAPER 7.66:
+/// - `40454 + N` = "Screenset: Load window set #(N+1)" for N in 0..=9
+/// - `40474 + N` = "Screenset: Save window set #(N+1)" for N in 0..=9
+const LOAD_WINDOW_SET_BASE_CMD: u32 = 40454;
+const SAVE_WINDOW_SET_BASE_CMD: u32 = 40474;
+const MAX_NATIVE_WINDOW_SETS: u32 = 10;
+
+fn fire_main_command(cmd_id: u32) {
+    // Use the high-level wrapper that resolves to `Main_OnCommandEx`
+    // with an explicit `ProjectContext::CurrentProject`. The bare
+    // `Main_OnCommand` we used before silently dropped screenset
+    // load actions (saves worked, loads didn't) — REAPER's load path
+    // appears to require a valid project context, which the
+    // bare-call version doesn't pass.
+    let reaper = HighReaper::get();
+    reaper.medium_reaper().main_on_command_ex(
+        reaper_medium::CommandId::new(cmd_id),
+        0,
+        reaper_medium::ProjectContext::CurrentProject,
+    );
+}
+
+/// Build the full list of mode-toolbar titles in slot order
+/// (`Organize 1` at slot 1, ..., `Video 3` at slot 27). Used to know
+/// which toolbars are "mode managed" for hide-others-on-apply logic.
+/// `Minimal` is intentionally excluded — it has no toolbars.
 fn all_mode_toolbar_titles() -> Vec<(u32, String)> {
     let modes = [
-        "Organize", "Write", "Produce", "Record", "Edit", "Mix", "Master", "Live",
+        "Organize", "Write", "Produce", "Record", "Edit", "Mix", "Master", "Live", "Video",
     ];
     let mut out = Vec::with_capacity(modes.len() * 3);
     for (mode_idx, mode) in modes.iter().enumerate() {
@@ -344,24 +398,176 @@ const MODE_DOCKER_LAYOUT_PATH: &str = "fasttrackstudio/mode_docker_layout.json";
 fn load_mode_docker_layout() -> daw_proto::window_manager::ModeDockerLayout {
     use daw_proto::window_manager::ModeDockerLayout;
 
-    let Some(resource) = Some(HighReaper::get().resource_path()) else {
-        return ModeDockerLayout::default();
-    };
+    // 1) Try the user's explicit override JSON.
+    let resource = HighReaper::get().resource_path();
     let path = PathBuf::from(resource.as_str()).join(MODE_DOCKER_LAYOUT_PATH);
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => match facet_json::from_str::<ModeDockerLayout>(&contents) {
-            Ok(layout) => layout,
-            Err(err) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %err,
-                    "mode_docker_layout.json failed to parse — using defaults"
-                );
-                ModeDockerLayout::default()
-            }
-        },
-        Err(_) => ModeDockerLayout::default(),
+    if let Ok(contents) = std::fs::read_to_string(&path) {
+        match facet_json::from_str::<ModeDockerLayout>(&contents) {
+            Ok(layout) => return layout,
+            Err(err) => tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "mode_docker_layout.json failed to parse — falling back to auto-detect"
+            ),
+        }
     }
+
+    // 2) Auto-detect: ask REAPER which docker is at each main-window
+    // edge and use those IDs. Falls back to compile-time defaults when
+    // no docker is attached to a position.
+    auto_detect_mode_docker_layout()
+}
+
+/// REAPER's [`reaper_low::Reaper::DockGetPosition`] returns these
+/// constants for a docker's main-window edge attachment.
+///
+/// Validated by probing on REAPER 7.66 — the values match REAPER's
+/// public documentation: bottom=0, left=1, top=2, right=3.
+mod docker_position {
+    pub const BOTTOM: i32 = 0;
+    pub const LEFT: i32 = 1;
+    pub const TOP: i32 = 2;
+    pub const RIGHT: i32 = 3;
+}
+
+/// Read each docker (0..=15) and resolve which one is currently
+/// attached to the top, left, and right of the main window. Returns
+/// defaults when a position is empty (no docker attached there).
+fn auto_detect_mode_docker_layout() -> daw_proto::window_manager::ModeDockerLayout {
+    use daw_proto::window_manager::ModeDockerLayout;
+
+    let defaults = ModeDockerLayout::default();
+    let reaper = reaper_low::Reaper::get();
+
+    let mut top: Option<i32> = None;
+    let mut left: Option<i32> = None;
+    let mut right: Option<i32> = None;
+    for docker_id in 0..16 {
+        let pos = unsafe { reaper.DockGetPosition(docker_id) };
+        match pos {
+            docker_position::TOP if top.is_none() => top = Some(docker_id),
+            docker_position::LEFT if left.is_none() => left = Some(docker_id),
+            docker_position::RIGHT if right.is_none() => right = Some(docker_id),
+            _ => {}
+        }
+    }
+
+    let layout = ModeDockerLayout {
+        top: top.unwrap_or(defaults.top),
+        left: left.unwrap_or(defaults.left),
+        right: right.unwrap_or(defaults.right),
+    };
+    tracing::info!(
+        top_docker = layout.top,
+        left_docker = layout.left,
+        right_docker = layout.right,
+        top_auto_detected = top.is_some(),
+        left_auto_detected = left.is_some(),
+        right_auto_detected = right.is_some(),
+        "WindowManager: mode docker layout resolved"
+    );
+    layout
+}
+
+/// Render a `DockGetPosition` code as a short label for logs.
+fn docker_position_label(pos: i32) -> &'static str {
+    match pos {
+        docker_position::BOTTOM => "bottom",
+        docker_position::LEFT => "left",
+        docker_position::TOP => "top",
+        docker_position::RIGHT => "right",
+        _ => "floating/unattached",
+    }
+}
+
+/// Walk every REAPER window and group them by which docker they're
+/// currently in (`DockIsChildOfDock`). Windows that aren't docked
+/// anywhere are dropped. Used by [`log_docker_landscape`] to emit a
+/// snapshot per mode switch.
+fn windows_by_docker() -> HashMap<i32, Vec<(String, bool)>> {
+    let mut map: HashMap<i32, Vec<(String, bool)>> = HashMap::new();
+    for_each_reaper_window(|hwnd, title| {
+        if title.is_empty() {
+            return true;
+        }
+        let reaper = reaper_low::Reaper::get();
+        let mut is_floating: bool = false;
+        let dock_id = unsafe { reaper.DockIsChildOfDock(hwnd, &mut is_floating) };
+        if dock_id >= 0 {
+            map.entry(dock_id).or_default().push((title, is_floating));
+        }
+        true
+    });
+    map
+}
+
+/// Emit a per-docker info line summarising the current docker
+/// landscape: each docker's position attachment, occupant count, and
+/// occupant titles. Called at the start of every `apply_layout` so the
+/// log carries a snapshot of REAPER's state immediately before the
+/// mode switch reshuffles it.
+fn log_docker_landscape(context: &str) {
+    let reaper = reaper_low::Reaper::get();
+    let windows = windows_by_docker();
+    for docker_id in 0..16 {
+        let pos = unsafe { reaper.DockGetPosition(docker_id) };
+        let occupants = windows.get(&docker_id).cloned().unwrap_or_default();
+        let titles: Vec<String> = occupants
+            .iter()
+            .map(|(t, floating)| {
+                if *floating {
+                    format!("{t} (floating)")
+                } else {
+                    t.clone()
+                }
+            })
+            .collect();
+        if pos < 0 && occupants.is_empty() {
+            continue;
+        }
+        // Log raw codes (both decimal and hex) plus low-bit decoding so
+        // the user can spot non-standard codes like "top of main view"
+        // that may bit-pack additional state.
+        tracing::info!(
+            context = %context,
+            docker_id,
+            position_code = pos,
+            position_hex = format!("{:#06x}", pos as u32),
+            low_bits = pos & 0x3,
+            high_bits = pos >> 2,
+            position = %docker_position_label(pos),
+            occupants = occupants.len(),
+            titles = %titles.join(" | "),
+            "Docker"
+        );
+    }
+}
+
+/// Diagnostic: log the position + occupants of every docker (0..=15)
+/// for ad-hoc inspection. Same data as the per-mode-switch snapshot
+/// but triggered on demand from the action list.
+pub fn debug_dump_docker_positions() {
+    log_docker_landscape("debug-action");
+    // Also emit every window the recursive walker finds with its raw
+    // `DockIsChildOfDock` result — including windows where the API
+    // returns -1 (not a known dock child). Catches the case where a
+    // toolbar lives somewhere our docker-filtered view drops it.
+    let reaper = reaper_low::Reaper::get();
+    for_each_reaper_window(|hwnd, title| {
+        if title.is_empty() {
+            return true;
+        }
+        let mut is_floating: bool = false;
+        let dock_id = unsafe { reaper.DockIsChildOfDock(hwnd, &mut is_floating) };
+        tracing::info!(
+            title = %title,
+            hwnd = ?(hwnd as *const c_void),
+            dock_id,
+            is_floating,
+            "EnumWindow"
+        );
+        true
+    });
 }
 
 /// Resolve the target docker ID for a mode-toolbar slot (1..=3) using
@@ -378,23 +584,75 @@ fn docker_id_for_slot_position(
     }
 }
 
+/// SWP_NOZORDER flag — keep current Z-order, only move/resize.
+const SWP_NOZORDER: i32 = 0x0004;
+/// SWP_NOACTIVATE — don't steal focus while repositioning.
+const SWP_NOACTIVATE: i32 = 0x0010;
+
+/// Position a window to a monitor-relative rectangle. `rect` is
+/// interpreted as fractions of the primary monitor. Used to place
+/// floating windows (and floating docker frames) at predictable spots
+/// regardless of the user's monitor size.
+fn position_window_to_monitor_rect(hwnd: raw::HWND, rect: &daw_proto::window_manager::MonitorRect) {
+    if hwnd.is_null() {
+        return;
+    }
+    let (w, h) = primary_screen_size();
+    let wf = w as f32;
+    let hf = h as f32;
+    let x = (rect.x_frac * wf).round() as i32;
+    let y = (rect.y_frac * hf).round() as i32;
+    let cx = (rect.w_frac * wf).round().max(1.0) as i32;
+    let cy = (rect.h_frac * hf).round().max(1.0) as i32;
+    unsafe {
+        Swell::get().SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            x,
+            y,
+            cx,
+            cy,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
+
+/// Detach a window from any docker it's in. The window remains valid
+/// (REAPER turns it into a floating window) but stops occupying a tab
+/// slot in whatever docker it was living in. Used on hidden mode
+/// toolbars so they don't leave a stale tab header next to the active
+/// mode's toolbar.
+fn undock_window(hwnd: raw::HWND) {
+    if hwnd.is_null() {
+        return;
+    }
+    unsafe {
+        reaper_low::Reaper::get().DockWindowRemove(hwnd);
+    }
+}
+
 /// Force-dock a toolbar HWND into the given docker via REAPER's
 /// `DockWindowAdd` (which accepts a numeric docker ID directly, unlike
-/// `DockWindowAddEx` which keys off an ident string). No-op when
-/// `hwnd` is null.
+/// `DockWindowAddEx` which keys off an ident string), then call
+/// `DockWindowActivate` to bring the docker visible if it was hidden
+/// and switch its active tab to this toolbar (so users see the
+/// requested toolbar, not whichever sibling was previously active when
+/// the docker hosts multiple windows). No-op on null HWND.
 fn dock_window_to(hwnd: raw::HWND, title: &str, docker_id: i32) {
     if hwnd.is_null() {
         return;
     }
+    let reaper = reaper_low::Reaper::get();
     let mut name_buf: Vec<u8> = title.as_bytes().to_vec();
     name_buf.push(0);
     unsafe {
-        reaper_low::Reaper::get().DockWindowAdd(
-            hwnd,
-            name_buf.as_ptr() as *const _,
-            docker_id,
-            true,
-        );
+        reaper.DockWindowAdd(hwnd, name_buf.as_ptr() as *const _, docker_id, true);
+        // Ensures the docker is shown and this window's tab is active.
+        // Without this a `DockWindowAdd` into a hidden docker leaves
+        // the toolbar invisible until the user manually opens the
+        // docker; calling Activate after Add is REAPER's documented
+        // pattern for "I want this window in front, now".
+        reaper.DockWindowActivate(hwnd);
     }
 }
 
@@ -559,6 +817,76 @@ pub fn debug_log_toolbar_command_names() {
     tracing::info!(hits, "Toolbar command-id probe complete");
 }
 
+/// Force every mode toolbar slot (1..=24) to visible. Bypasses the
+/// usual mode-based show/hide and just toggles each toolbar on if
+/// it's currently off. Useful for one-shot "give me HWNDs for every
+/// toolbar at once" workflows like a full attachment-state capture.
+pub fn open_all_mode_toolbars() {
+    let mut opened = 0usize;
+    let mut already_open = 0usize;
+    let mut errored = 0usize;
+    for (slot, _title) in all_mode_toolbar_titles() {
+        match is_toolbar_slot_visible(slot) {
+            Some(true) => already_open += 1,
+            _ => match set_toolbar_slot_visible(slot, true) {
+                Ok(()) => opened += 1,
+                Err(err) => {
+                    tracing::warn!(slot, error = %err, "open-all toolbar toggle failed");
+                    errored += 1;
+                }
+            },
+        }
+    }
+    tracing::info!(
+        opened,
+        already_open,
+        errored,
+        "Open-all mode toolbars complete"
+    );
+}
+
+/// Diagnostic: emit a deep state dump for every mode toolbar — visible
+/// flag, dock_id, is_floating, and absolute screen rect. Lets us see
+/// the *live* per-toolbar attachment REAPER tracks in memory (which
+/// the saved `reaper.ini` only mirrors on shutdown). Use to capture
+/// what a manually-positioned toolbar looks like so we can replicate
+/// its state for siblings.
+pub fn debug_dump_mode_toolbar_attachments() {
+    let hwnds = toolbar_hwnds();
+    let reaper = reaper_low::Reaper::get();
+    for (slot, title) in all_mode_toolbar_titles() {
+        let Some(&hwnd) = hwnds.get(&title) else {
+            tracing::info!(
+                slot,
+                title = %title,
+                "Mode toolbar attachment: HWND not found (likely hidden/never opened)"
+            );
+            continue;
+        };
+        let mut is_floating: bool = false;
+        let dock_id = unsafe { reaper.DockIsChildOfDock(hwnd, &mut is_floating) };
+        let visible = is_window_visible(hwnd);
+        let rect = window_rect(hwnd).unwrap_or(raw::RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        });
+        tracing::info!(
+            slot,
+            title = %title,
+            visible,
+            dock_id,
+            is_floating,
+            left = rect.left,
+            top = rect.top,
+            width = rect.right - rect.left,
+            height = rect.bottom - rect.top,
+            "Mode toolbar attachment"
+        );
+    }
+}
+
 pub fn debug_dump_toolbar_states() {
     let hwnds = toolbar_hwnds();
     let mut shown = 0usize;
@@ -598,169 +926,116 @@ fn record_current_layout(name: &str) {
 
 impl WindowManager for crate::Reaper {
     fn apply_layout(&self, name: String, _options: WindowLayoutOptions) -> WindowLayoutResult {
-        // Layouts are derived from the renaming convention: mode at
-        // index N owns toolbar slots `(N*3 + 1)..=(N*3 + 3)`. No disk
-        // lookup, no save flow — the mode name fully determines the
-        // toolbar set.
+        // Apply = fire REAPER's native "Screenset: Load window set
+        // #(mode_idx + 1)" action. REAPER itself restores the full
+        // window state (toolbar positions including "top of main",
+        // docker layouts, mixer flags, etc.) that the user set up
+        // by hand and captured via `save_layout`.
         let Some(mode_idx) = mode_index_for_layout_name(&name) else {
             return WindowLayoutResult::error(format!(
-                "no mode named '{name}' (expected Organize/Write/Produce/Record/Edit/Mix/Master/Live)"
+                "no mode named '{name}' (expected Organize/Write/Produce/Record/Edit/Mix/Master/Live/Video/Minimal)"
             ));
         };
-        let docker_layout = load_mode_docker_layout();
-        let mode_first_slot = mode_idx * 3 + 1;
-        let want_slots: [u32; 3] = [mode_first_slot, mode_first_slot + 1, mode_first_slot + 2];
-
-        let mut shown = 0usize;
-        let mut hidden = 0usize;
-        let mut errored = 0usize;
-        for (slot, title) in all_mode_toolbar_titles() {
-            let want_visible = want_slots.contains(&slot);
-            match set_toolbar_slot_visible(slot, want_visible) {
-                Ok(()) => {
-                    if want_visible {
-                        shown += 1;
-                    } else {
-                        hidden += 1;
-                        continue;
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(slot, error = %err, "toolbar visibility toggle failed");
-                    errored += 1;
-                    continue;
-                }
-            }
-
-            // Slot-in-mode is 1..=3 (top/left/right). Find the toolbar's
-            // HWND (which only exists after the toggle action above
-            // showed it) and force-dock it to the configured docker.
-            let slot_in_mode = slot - mode_first_slot + 1;
-            let Some(docker_id) = docker_id_for_slot_position(slot_in_mode, &docker_layout) else {
-                continue;
-            };
-            let hwnds = toolbar_hwnds();
-            let Some(&hwnd) = hwnds.get(&title) else {
-                tracing::warn!(
-                    title = %title,
-                    "shown toolbar's HWND not found after toggle — skipping dock"
-                );
-                continue;
-            };
-            dock_window_to(hwnd, &title, docker_id);
+        if mode_idx >= MAX_NATIVE_WINDOW_SETS {
+            return WindowLayoutResult::error(format!(
+                "mode index {mode_idx} exceeds REAPER's {MAX_NATIVE_WINDOW_SETS} native window-set slots"
+            ));
         }
+        let cmd = LOAD_WINDOW_SET_BASE_CMD + mode_idx;
+        log_docker_landscape(&format!("before-apply:{name}"));
+        fire_main_command(cmd);
+        record_current_layout(&name);
         tracing::info!(
             layout = %name,
-            top_docker = docker_layout.top,
-            left_docker = docker_layout.left,
-            right_docker = docker_layout.right,
-            shown,
-            hidden,
-            errored,
-            "WindowManager: layout applied"
+            mode_idx,
+            command_id = cmd,
+            "WindowManager: native window-set load fired"
         );
-
-        record_current_layout(&name);
+        log_docker_landscape(&format!("after-apply:{name}"));
         WindowLayoutResult::ok(name)
     }
 
     fn list_layouts(&self) -> Vec<WindowLayoutSummary> {
-        list_layouts_from_disk()
+        // We don't read REAPER's persisted screenset names here — the
+        // 9 mode slots are derived from the renaming convention, not
+        // an arbitrary list. Return a synthetic summary for each mode.
+        let mut out = Vec::new();
+        for (name, toolbar_count) in [
+            ("Organize", 3),
+            ("Write", 3),
+            ("Produce", 3),
+            ("Record", 3),
+            ("Edit", 3),
+            ("Mix", 3),
+            ("Master", 3),
+            ("Live", 3),
+            ("Video", 3),
+            ("Minimal", 0),
+        ] {
+            out.push(WindowLayoutSummary {
+                name: name.to_string(),
+                description: format!("Mode {name} — native REAPER window set"),
+                toolbar_count,
+                action_count: 0,
+            });
+        }
+        out
     }
 
     fn current_layout(&self) -> Option<WindowLayoutSummary> {
         let name = CURRENT_LAYOUT_NAME.lock().ok()?.clone()?;
-        let layout = load_layout_from_disk(&name)?;
-        Some(summary_for(&layout))
+        Some(WindowLayoutSummary {
+            name: name.clone(),
+            description: format!("Mode {name} — native REAPER window set"),
+            toolbar_count: 3,
+            action_count: 0,
+        })
     }
 
     fn get_layout(&self, name: String) -> Option<WindowLayout> {
-        load_layout_from_disk(&name)
+        mode_index_for_layout_name(&name)?;
+        Some(WindowLayout {
+            name: name.clone(),
+            description: format!("Mode {name} — native REAPER window set"),
+            toolbars: Vec::new(),
+            actions_on_apply: Vec::new(),
+        })
     }
 
-    fn save_layout(&self, mut layout: WindowLayout) -> WindowLayoutResult {
-        use daw_proto::window_manager::{LayoutPlacement, LayoutToolbar, MonitorRect};
-
-        if layout.name.is_empty() {
-            return WindowLayoutResult::error("layout name cannot be empty");
+    fn save_layout(&self, layout: WindowLayout) -> WindowLayoutResult {
+        // Save = fire REAPER's native "Screenset: Save window set
+        // #(mode_idx + 1)" action. REAPER captures the current window
+        // state — toolbar positions, dockers, mixer flags — directly
+        // into `reaper-screensets.ini` slot N. Our `apply_layout` then
+        // restores from that slot on next mode switch.
+        let Some(mode_idx) = mode_index_for_layout_name(&layout.name) else {
+            return WindowLayoutResult::error(format!(
+                "no mode named '{}' (expected Organize/Write/Produce/Record/Edit/Mix/Master/Live/Video/Minimal)",
+                layout.name
+            ));
+        };
+        if mode_idx >= MAX_NATIVE_WINDOW_SETS {
+            return WindowLayoutResult::error(format!(
+                "mode index {mode_idx} exceeds REAPER's {MAX_NATIVE_WINDOW_SETS} native window-set slots"
+            ));
         }
-
-        // Snapshot the current state of every mode toolbar we can find.
-        // Toolbars not present in the enumeration (e.g. closed) are
-        // omitted — `apply` treats absent entries as "leave untouched"
-        // so we don't accidentally hide things that weren't part of the
-        // capture.
-        let hwnds = toolbar_hwnds();
-        let (screen_w, screen_h) = primary_screen_size();
-        let screen_w_f = screen_w as f32;
-        let screen_h_f = screen_h as f32;
-        let mut toolbars: Vec<LayoutToolbar> = Vec::new();
-        for (title, hwnd) in &hwnds {
-            if !is_mode_toolbar_title(title) {
-                continue;
-            }
-            let visible = is_window_visible(*hwnd);
-            let placement = if !visible {
-                LayoutPlacement::Hidden
-            } else {
-                match current_dock_state(*hwnd) {
-                    Some(DockState::Docked { docker_id }) => LayoutPlacement::Docked { docker_id },
-                    Some(DockState::FloatingDocker { docker_id }) => {
-                        LayoutPlacement::FloatingDocker { docker_id }
-                    }
-                    Some(DockState::Floating) | None => {
-                        let rect = window_rect(*hwnd).unwrap_or(raw::RECT {
-                            left: 0,
-                            top: 0,
-                            right: 0,
-                            bottom: 0,
-                        });
-                        let w = (rect.right - rect.left).max(0) as f32;
-                        let h = (rect.bottom - rect.top).max(0) as f32;
-                        LayoutPlacement::Floating {
-                            rect: MonitorRect {
-                                x_frac: rect.left as f32 / screen_w_f,
-                                y_frac: rect.top as f32 / screen_h_f,
-                                w_frac: w / screen_w_f,
-                                h_frac: h / screen_h_f,
-                            },
-                        }
-                    }
-                }
-            };
-            toolbars.push(LayoutToolbar {
-                toolbar_name: title.clone(),
-                placement,
-            });
-        }
-        toolbars.sort_by(|a, b| a.toolbar_name.cmp(&b.toolbar_name));
-        layout.toolbars = toolbars;
-
-        match write_layout_to_disk(&layout) {
-            Ok(()) => {
-                tracing::info!(
-                    name = %layout.name,
-                    toolbars = layout.toolbars.len(),
-                    "WindowManager: layout saved"
-                );
-                WindowLayoutResult::ok(layout.name)
-            }
-            Err(err) => WindowLayoutResult::error(format!("write layout: {err}")),
-        }
+        let cmd = SAVE_WINDOW_SET_BASE_CMD + mode_idx;
+        fire_main_command(cmd);
+        tracing::info!(
+            name = %layout.name,
+            mode_idx,
+            command_id = cmd,
+            "WindowManager: native window-set save fired"
+        );
+        WindowLayoutResult::ok(layout.name)
     }
 
     fn delete_layout(&self, name: String) -> WindowLayoutResult {
-        let Some(path) = layout_path(&name) else {
-            return WindowLayoutResult::error(format!(
-                "layout name '{name}' invalid (alnum/space/-/_ only)"
-            ));
-        };
-        match std::fs::remove_file(&path) {
-            Ok(()) => WindowLayoutResult::ok(name),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                WindowLayoutResult::error(format!("layout '{name}' does not exist"))
-            }
-            Err(e) => WindowLayoutResult::error(format!("delete failed: {e}")),
-        }
+        // REAPER's native window sets don't have a "clear slot"
+        // action — slot contents are overwritten by the next save.
+        // We expose this as an explicit error rather than pretending.
+        WindowLayoutResult::error(format!(
+            "delete not supported for native window sets — re-save layout '{name}' to overwrite"
+        ))
     }
 }

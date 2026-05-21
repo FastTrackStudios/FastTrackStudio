@@ -120,6 +120,12 @@ impl Markers for Standalone {
         })?
     }
 
+    fn set_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) -> DawResult<()> {
+        // Standalone has no lane concept yet; accept the call so
+        // consumers writing portable code don't have to branch.
+        Ok(())
+    }
+
     async fn subscribe(
         &self,
         _project: ProjectContext,

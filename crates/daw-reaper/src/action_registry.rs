@@ -998,10 +998,23 @@ impl ActionRegistration for crate::Reaper {
         }
     }
 
-    fn set_toggle_state(&self, _command_name: &str, _is_on: bool) {}
+    fn set_toggle_state(&self, command_name: &str, is_on: bool) {
+        toggle_states()
+            .lock_recoverable("action_registry")
+            .insert(normalize_command_name(command_name).to_string(), is_on);
+        write_shared_toggle_state(command_name, is_on);
 
-    fn get_toggle_state(&self, _command_name: &str) -> Option<bool> {
-        None
+        if let Some(command_id) = self.lookup_command_id(command_name) {
+            write_reaper_toggle_state(0, CommandId::new(command_id), is_on);
+        }
+    }
+
+    fn get_toggle_state(&self, command_name: &str) -> Option<bool> {
+        toggle_states()
+            .lock_recoverable("action_registry")
+            .get(normalize_command_name(command_name))
+            .copied()
+            .or_else(|| read_shared_toggle_state(command_name))
     }
 }
 
