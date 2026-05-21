@@ -929,4 +929,68 @@ test.describe("editor", () => {
     const after = await readState(page);
     expect(after.text.endsWith(burst)).toBeTruthy();
   });
+
+  // ── Frontmatter properties ───────────────────────────────
+  //
+  // The seeded doc starts with a `---\n…\n---\n` block. The
+  // editor renders it as a `.md-properties` widget; the YAML
+  // bytes are still in the doc, just hidden behind a Replace
+  // decoration.
+
+  test("frontmatter renders as a properties widget", async ({ page }) => {
+    await expect(page.locator(".md-properties")).toBeVisible();
+    // Each prop produces one row.
+    const rows = page.locator(".md-property-row");
+    await expect(rows).not.toHaveCount(0);
+    // The `tags` key from the seed should be present.
+    await expect(
+      page.locator('.md-property-row[data-prop-key="tags"]')
+    ).toBeVisible();
+  });
+
+  test("toggling a bool property flips the source", async ({ page }) => {
+    const beforeText = (await readState(page)).text;
+    // `published: true` is in the seed — the cell carries
+    // `data-edit-role="bool"` with `data-checked="true"`.
+    const cell = page
+      .locator('.md-property-row[data-prop-key="published"] [data-edit-role="bool"]')
+      .first();
+    await cell.click();
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .not.toBe(beforeText);
+    const after = (await readState(page)).text;
+    expect(after).toContain("published: false");
+  });
+
+  test("editing a text property writes back through YAML", async ({
+    page,
+  }) => {
+    const cell = page
+      .locator('.md-property-row[data-prop-key="title"] [data-edit-role="text"]')
+      .first();
+    await cell.click();
+    // Caret is at end of content; replace by selecting all + typing.
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.insertText("Renamed Title");
+    // Blur to commit (Escape blurs + sends prop-leave).
+    await page.keyboard.press("Escape");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toContain("title: Renamed Title");
+  });
+
+  test("adding a list chip appends to the YAML block list", async ({
+    page,
+  }) => {
+    const adder = page
+      .locator('.md-property-row[data-prop-key="tags"] [data-edit-role="chip-add"]')
+      .first();
+    await adder.click();
+    await page.keyboard.insertText("new-tag");
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toContain("- new-tag");
+  });
 });
