@@ -12361,6 +12361,7 @@ dependencies = [
 name = "vault-sync-proto"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "facet",
  "thiserror 2.0.18",
  "vox 0.3.1",

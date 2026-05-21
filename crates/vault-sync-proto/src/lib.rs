@@ -1,35 +1,29 @@
 //! `vault-sync-proto` — wire contract for the vault-sync feature.
 //!
-//! Replaces the standalone HTTP + WS surface that lived in
-//! `apps/server/src/vault_sync.rs` with a `#[vox::service]` trait
-//! mounted on the same `/vox` route every other architect /
-//! vox-shaped feature uses. Native + wasm clients consume the
-//! generated `VaultSyncClient` directly; no per-transport client
-//! crates required.
+//! One canonical sync trait — [`VaultSync`] — decorated with
+//! `#[architect::rpc]`. The macro derives:
+//! - `VaultSyncRpc` — the hidden async mirror trait used by vox.
+//! - `VaultSyncClient` — async caller proxy for remote consumers
+//!   (native + wasm).
+//! - `VaultSyncRpcDispatcher` (re-exported as
+//!   [`Dispatcher`]) — server-side wrapper that mounts on a vox
+//!   router.
+//! - `serve(backend)` / `layer(backend)` / [`Service`] — mount
+//!   verbs for `architect::Services` + `architect::layers!`
+//!   bundles.
 //!
-//! Surface:
-//! - [`VaultSync::manifest`] — list every file in a vault (path,
-//!   sha256, mtime, size).
-//! - [`VaultSync::get_file`] — read one file's bytes by relative
-//!   path.
-//! - [`VaultSync::put_file`] — write one file with an
-//!   [`IfMatch`] guard. On conflict the server returns the
-//!   current sha + bytes inside [`VaultSyncError::Conflict`] so
-//!   callers can run a 3-way merge without a follow-up GET.
-//! - [`VaultSync::delete_file`] — remove a file, same `IfMatch`
-//!   semantics.
-//! - [`VaultSync::subscribe`] — stream every subsequent
-//!   [`VaultEvent`] for a vault. First send replays nothing; the
-//!   caller is expected to pull a fresh manifest before
-//!   subscribing.
+//! Backends impl `VaultSync` directly (sync methods, zero-cost
+//! in-process call sites). For server use the backend also
+//! implements [`architect::HasDispatcher`] returning a real
+//! marshaling dispatcher — typically
+//! [`architect::dispatch::TokioBlockingDispatcher`] for blocking
+//! `std::fs` IO on a tokio server.
 //!
 //! Conflict policy: **last-writer-wins with `IfMatch`**.
-//! - `IfMatch::CreateOnly` — fail if the path already exists.
-//! - `IfMatch::Sha(_)`     — fail if the server's current sha
-//!                            differs.
-//! - `IfMatch::Force`      — unconditional. Only safe for the
-//!                            very first push of a brand-new
-//!                            vault.
+//! - `CreateOnly` — fail if the path already exists.
+//! - `Sha(hex)`   — fail unless the server's current sha matches.
+//! - `Force`      — unconditional. Only safe for the first push
+//!                  of a brand-new vault.
 
 use facet::Facet;
 use thiserror::Error;
@@ -51,22 +45,9 @@ unsafe impl vox_types::Reborrow for ManifestEntry {
     type Ref<'a> = ManifestEntry;
 }
 
-/// Single-arg wrapper for [`VaultSync::manifest`] and
-/// [`VaultSync::subscribe`]. Vox method args are one typed value;
-/// the wrapper gives that value a stable wire name.
-#[derive(Debug, Clone, Facet)]
-pub struct VaultIdArg {
-    pub vault_id: String,
-}
-
-#[cfg(feature = "vox")]
-unsafe impl vox_types::Reborrow for VaultIdArg {
-    type Ref<'a> = VaultIdArg;
-}
-
-/// Server → client. Full file listing for one vault. `vault_id`
-/// echoes the request so a client juggling several vaults can
-/// double-check what came back.
+/// Full file listing for one vault. `vault_id` echoes the
+/// request so a client juggling several vaults can double-check
+/// what came back.
 #[derive(Debug, Clone, Facet)]
 pub struct Manifest {
     pub vault_id: String,
@@ -78,49 +59,8 @@ unsafe impl vox_types::Reborrow for Manifest {
     type Ref<'a> = Manifest;
 }
 
-/// Path-addressed read.
-#[derive(Debug, Clone, Facet)]
-pub struct GetFileArg {
-    pub vault_id: String,
-    pub path: String,
-}
-
-#[cfg(feature = "vox")]
-unsafe impl vox_types::Reborrow for GetFileArg {
-    type Ref<'a> = GetFileArg;
-}
-
-/// Path-addressed write. `bytes` is the file body. `if_match`
-/// guards against blind overwrites.
-#[derive(Debug, Clone, Facet)]
-pub struct PutFileArg {
-    pub vault_id: String,
-    pub path: String,
-    pub bytes: Vec<u8>,
-    pub if_match: IfMatch,
-}
-
-#[cfg(feature = "vox")]
-unsafe impl vox_types::Reborrow for PutFileArg {
-    type Ref<'a> = PutFileArg;
-}
-
-/// Path-addressed delete. Same conflict-guard rules as
-/// [`PutFileArg`].
-#[derive(Debug, Clone, Facet)]
-pub struct DeleteFileArg {
-    pub vault_id: String,
-    pub path: String,
-    pub if_match: IfMatch,
-}
-
-#[cfg(feature = "vox")]
-unsafe impl vox_types::Reborrow for DeleteFileArg {
-    type Ref<'a> = DeleteFileArg;
-}
-
-/// Server → client. Bytes payload for [`VaultSync::get_file`].
-/// Newtype so vox has a named wire type to bind to.
+/// Bytes payload returned by [`VaultSync::get_file`]. Newtype so
+/// vox has a named wire type to bind to.
 #[derive(Debug, Clone, Facet)]
 pub struct FileBytes(pub Vec<u8>);
 
@@ -129,9 +69,9 @@ unsafe impl vox_types::Reborrow for FileBytes {
     type Ref<'a> = FileBytes;
 }
 
-/// Server → client. The freshly-committed file's sha + mtime
-/// after a successful PUT. The sha lets the caller record the
-/// new "last-known-server" value without a follow-up GET.
+/// The freshly-committed file's sha + mtime after a successful
+/// PUT. The sha lets the caller record the new "last-known-server"
+/// value without a follow-up GET.
 #[derive(Debug, Clone, Facet)]
 pub struct PutAck {
     pub sha256: String,
@@ -143,11 +83,8 @@ unsafe impl vox_types::Reborrow for PutAck {
     type Ref<'a> = PutAck;
 }
 
-/// Conditional-write modes. Wire-level mirror of the old HTTP
-/// `If-Match` header semantics:
-/// - `CreateOnly` ↔ `If-Match: *`
-/// - `Sha(hex)`   ↔ `If-Match: <hex>`
-/// - `Force`      ↔ no `If-Match` header (unconditional).
+/// Conditional-write mode for [`VaultSync::put_file`] /
+/// [`VaultSync::delete_file`].
 #[derive(Debug, Clone, Facet)]
 #[repr(u8)]
 pub enum IfMatch {
@@ -187,9 +124,9 @@ unsafe impl vox_types::Reborrow for VaultEvent {
     type Ref<'a> = VaultEvent;
 }
 
-/// Errors at the trait boundary. `Conflict` carries the
-/// server's current sha + bytes inline so callers can resolve
-/// without a second round-trip.
+/// Errors at the trait boundary. `Conflict` carries the server's
+/// current sha + bytes inline so callers can resolve without a
+/// second round-trip.
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Error)]
 #[repr(u8)]
 pub enum VaultSyncError {
@@ -208,28 +145,44 @@ pub enum VaultSyncError {
     Internal(String),
 }
 
-#[cfg_attr(feature = "vox", vox::service)]
+/// Vault file-replication operations. Sync methods (cheap when
+/// called in-process; marshaled through the backend's
+/// `HasDispatcher` for remote callers). `subscribe` is async
+/// because the broadcast stream can't be expressed in a sync
+/// signature.
+#[architect::rpc]
 pub trait VaultSync {
     /// List every file in `vault_id`. Empty vault = empty list,
     /// not an error.
-    async fn manifest(&self, req: VaultIdArg) -> Result<Manifest, VaultSyncError>;
+    fn manifest(&self, vault_id: &str) -> Result<Manifest, VaultSyncError>;
 
     /// Read one file's bytes. Returns
     /// `VaultSyncError::NotFound` for missing paths.
-    async fn get_file(&self, req: GetFileArg) -> Result<FileBytes, VaultSyncError>;
+    fn get_file(&self, vault_id: &str, path: &str) -> Result<FileBytes, VaultSyncError>;
 
     /// Write one file. Honors `if_match`; on conflict the
     /// returned error carries the server's current sha + bytes.
-    async fn put_file(&self, req: PutFileArg) -> Result<PutAck, VaultSyncError>;
+    fn put_file(
+        &self,
+        vault_id: &str,
+        path: &str,
+        bytes: Vec<u8>,
+        if_match: IfMatch,
+    ) -> Result<PutAck, VaultSyncError>;
 
     /// Remove one file. Idempotent: deleting a missing path
     /// succeeds.
-    async fn delete_file(&self, req: DeleteFileArg) -> Result<(), VaultSyncError>;
+    fn delete_file(
+        &self,
+        vault_id: &str,
+        path: &str,
+        if_match: IfMatch,
+    ) -> Result<(), VaultSyncError>;
 
     /// Subscribe to live change events for `vault_id`. The
-    /// server keeps sending until the caller drops `output`.
-    /// On broadcast-lag the server sends [`VaultEvent::Resync`]
+    /// server keeps sending until the caller drops `tx`. On
+    /// broadcast-lag the server sends [`VaultEvent::Resync`]
     /// and continues — clients should re-pull the manifest in
     /// response.
-    async fn subscribe(&self, req: VaultIdArg, output: Tx<VaultEvent>);
+    async fn subscribe(&self, vault_id: String, tx: Tx<VaultEvent>);
 }

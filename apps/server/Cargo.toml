@@ -45,7 +45,7 @@ attachments-proto = { workspace = true }
 vault-sync-proto = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
-architect = { workspace = true, features = ["server-axum"] }
+architect = { workspace = true, features = ["server-axum", "dispatch-tokio"] }
 architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
