@@ -55,7 +55,14 @@ impl World {
             FileId::new(None, typst::syntax::VirtualPath::new(MAIN_VIRTUAL_PATH));
         let mut sources = HashMap::new();
         sources.insert(main_id, Source::new(main_id, String::new()));
-        let today = chrono::Local::now();
+        // `chrono` with `clock` + `wasmbind` routes through
+        // `Date.now()` on `wasm32-unknown-unknown`; without
+        // `wasmbind` `Local::now()` panics with "time not
+        // implemented on this platform".
+        use chrono::Datelike;
+        let now = chrono::Local::now();
+        let today = Datetime::from_ymd(now.year(), now.month() as u8, now.day() as u8)
+            .unwrap_or_else(|| Datetime::from_ymd(2026, 1, 1).unwrap());
         Self {
             library: LazyHash::new(Library::builder().build()),
             book: LazyHash::new(book),
@@ -63,15 +70,7 @@ impl World {
             main_id,
             sources: Mutex::new(sources),
             files: Mutex::new(HashMap::new()),
-            today: Datetime::from_ymd_hms(
-                today.format("%Y").to_string().parse().unwrap_or(2026),
-                today.format("%m").to_string().parse().unwrap_or(1),
-                today.format("%d").to_string().parse().unwrap_or(1),
-                today.format("%H").to_string().parse().unwrap_or(0),
-                today.format("%M").to_string().parse().unwrap_or(0),
-                today.format("%S").to_string().parse().unwrap_or(0),
-            )
-            .unwrap_or(Datetime::from_ymd(2026, 1, 1).unwrap()),
+            today,
         }
     }
 

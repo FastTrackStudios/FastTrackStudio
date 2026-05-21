@@ -23,7 +23,11 @@ ecow = "0.2"
 # we hold the World inside one. Same as obsidian-typst does it.
 send_wrapper = "0.6"
 parking_lot = "0.12"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# `wasmbind` routes `chrono::Local::now()` through `Date.now()`
+# on `wasm32-unknown-unknown` — without it the call panics with
+# "time not implemented on this platform". Brings in `js-sys` +
+# `wasm-bindgen` transitively.
+chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
