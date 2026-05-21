@@ -1057,16 +1057,16 @@ async fn vox_ws_handler(
                     connection.handle_with(BaseRepoDispatcher::new(base_repo.clone()));
                     Ok(())
                 }
-                "VaultSyncRpc" => {
-                    // `vault_sync_proto::serve(...)` is the
-                    // architect-emitted mount verb — wraps the
-                    // backend in a `VaultSyncRpcDispatcher` and
-                    // pulls its `TokioBlockingDispatcher` via
-                    // `HasDispatcher`. The wire-level service
-                    // name is `VaultSyncRpc` because the
-                    // `#[architect::rpc]` macro emits the vox
-                    // mirror trait as `VaultSyncRpc` from the
-                    // sync `VaultSync` declaration.
+                // architect-emitted mount: `serve` wraps the
+                // backend in `VaultSyncRpcDispatcher` and pulls
+                // its `TokioBlockingDispatcher` via
+                // `HasDispatcher`. The wire-level service name
+                // comes from `descriptor()` (currently
+                // `VaultSyncRpc` — the `#[architect::rpc]`
+                // macro suffixes the hidden vox mirror trait,
+                // and pulling it from the descriptor keeps the
+                // proto crate as the single source of truth).
+                name if name == vault_sync_proto::descriptor().service_name => {
                     connection.handle_with(vault_sync_proto::serve(vault_sync_state.clone()));
                     Ok(())
                 }
