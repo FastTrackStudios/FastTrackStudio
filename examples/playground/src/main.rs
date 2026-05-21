@@ -326,6 +326,20 @@ fn App() -> Element {
                  \n\
                  {{embed ((5f9c1234-abcd-4ef0-8123-fedcba012345))}}\n\
                  \n\
+                 ### Page + section embeds (Obsidian-style)\n\
+                 \n\
+                 Embed a whole page (placeholder until multi-file lookup):\n\
+                 \n\
+                 ![[Project README]]\n\
+                 \n\
+                 Embed a section by heading — resolves intra-doc if the heading lives in this file:\n\
+                 \n\
+                 ![[#Math]]\n\
+                 \n\
+                 Embed a block by Obsidian short-id (the `^demo-block-id` anchor near the top):\n\
+                 \n\
+                 ![[#^demo-block-id]]\n\
+                 \n\
                  ### Code fences (syntax highlighting)\n\
                  \n\
                  ```rust\n\

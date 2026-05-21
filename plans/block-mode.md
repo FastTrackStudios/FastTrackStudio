@@ -72,6 +72,21 @@ rebuildable from the files.
   block's title/first line is the important thing; the id is
   a footnote.
 
+## Done
+
+- ✅ UUID v7 generation (time-prefixed, sortable). Switched
+  from v4 — Logseq's squuid model. Version-tracking friendly.
+- ✅ `((uuid))` block-ref chip + `{{embed ((uuid))}}` block-
+  embed card.
+- ✅ `id:: <uuid>` hidden + atomic in live-preview.
+- ✅ `Mod-Shift-K` / `/block-id` command.
+- ✅ Page embed `![[Page]]`, section embed `![[Page#Heading]]`
+  / `![[#Heading]]`, block embed via Obsidian short-id
+  `![[Page#^id]]` / `![[#^id]]`. Intra-doc resolution lands
+  for the `![[#…]]` forms (page-empty); cross-doc renders a
+  "multi-file lookup pending" placeholder until the vault
+  index slice.
+
 ## Implementation slices
 
 ### 1. Parser (this PR)

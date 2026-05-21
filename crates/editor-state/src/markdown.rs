@@ -188,7 +188,7 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             if span.class == "md-embed" {
                 let raw = &text[span.body.clone()];
                 if !cursor_touches(primary, span.outer.clone()) {
-                    if let Some(html) = embed_widget_html(raw) {
+                    if let Some(html) = embed_widget_html(raw, &text) {
                         out.push(Decoration::replace(span.outer.clone()));
                         out.push(Decoration::widget(span.outer.start, html));
                         continue;
@@ -322,7 +322,7 @@ fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
 /// formats) — the caller then falls back to a wikilink-style
 /// mark so the source stays visible. Quartz reference: same
 /// dispatch in `ofm.ts:233-265`.
-fn embed_widget_html(raw: &str) -> Option<String> {
+fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
     let (target, opts) = match raw.split_once('|') {
         Some((t, o)) => (t.trim(), Some(o.trim())),
         None => (raw.trim(), None),
@@ -333,30 +333,176 @@ fn embed_widget_html(raw: &str) -> Option<String> {
     let style = opts
         .and_then(|o| parse_size_opts(o))
         .unwrap_or_default();
-    let html = match ext {
+    // 1. Media extensions first (image / video / audio / pdf).
+    match ext {
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "avif" | "bmp" => {
-            format!(
+            return Some(format!(
                 r#"<img class="md-embed-image" src="{safe_target}" alt="{safe_target}"{style}>"#
-            )
+            ));
         }
         "mp4" | "webm" | "mov" | "ogv" => {
-            format!(
+            return Some(format!(
                 r#"<video class="md-embed-video" src="{safe_target}" controls{style}></video>"#
-            )
+            ));
         }
         "mp3" | "wav" | "ogg" | "flac" | "m4a" => {
-            format!(
+            return Some(format!(
                 r#"<audio class="md-embed-audio" src="{safe_target}" controls></audio>"#
-            )
+            ));
         }
         "pdf" => {
-            format!(
+            return Some(format!(
                 r#"<iframe class="md-embed-pdf" src="{safe_target}"{style}></iframe>"#
-            )
+            ));
         }
-        _ => return None,
+        _ => {}
+    }
+    // 2. Note-style embeds. Split into page + fragment parts.
+    //    Shapes:
+    //      `![[Page]]`            — whole-page embed
+    //      `![[Page#Heading]]`    — section embed
+    //      `![[Page#^short-id]]`  — block embed (Obsidian short id)
+    //      `![[#Heading]]`        — section in current doc
+    //      `![[#^short-id]]`      — block in current doc
+    let (page_part, frag_part) = match target.split_once('#') {
+        Some((p, f)) => (p.trim(), Some(f.trim())),
+        None => (target.trim(), None),
     };
-    Some(html)
+    let is_intra_doc = page_part.is_empty();
+    let safe_page = if page_part.is_empty() {
+        "this page".to_string()
+    } else {
+        html_escape(page_part)
+    };
+    // Section: `#Heading` (no leading `^`).
+    if let Some(frag) = frag_part {
+        if let Some(short_id) = frag.strip_prefix('^') {
+            // Block embed via short id. Resolve intra-doc.
+            let resolved = if is_intra_doc {
+                resolve_block_short_id(doc, short_id)
+            } else {
+                None
+            };
+            return Some(render_embed_card_short(
+                "🔗",
+                &safe_page,
+                &html_escape(frag),
+                resolved.as_deref(),
+            ));
+        }
+        // Section embed.
+        let resolved = if is_intra_doc {
+            resolve_heading_section(doc, frag)
+        } else {
+            None
+        };
+        return Some(render_embed_card_section(
+            "📄",
+            &safe_page,
+            &html_escape(frag),
+            resolved.as_deref(),
+        ));
+    }
+    // 3. Whole-page embed — no intra-doc concept for "embed this
+    //    whole page from itself", so always a placeholder until
+    //    multi-file resolution lands.
+    let _ = is_intra_doc;
+    Some(render_embed_card_page("📄", &safe_page, None))
+}
+
+/// Walk the doc for a heading whose text matches `name` (case-
+/// insensitive trim). Returns the heading body content (up to
+/// the next same-or-higher heading) when found.
+fn resolve_heading_section(doc: &str, name: &str) -> Option<String> {
+    let needle = name.trim().to_lowercase();
+    let lines: Vec<(usize, usize)> = line_ranges(doc);
+    let mut start_idx: Option<(usize, usize)> = None; // (line_index, level)
+    for (i, (lf, lt)) in lines.iter().enumerate() {
+        let line = &doc[*lf..*lt];
+        if let Some((level, marker_end)) = parse_heading(line) {
+            let title = line[marker_end..].trim();
+            if title.to_lowercase() == needle {
+                start_idx = Some((i, level));
+                break;
+            }
+        }
+    }
+    let (start_i, start_level) = start_idx?;
+    // Collect content lines until the next heading of level
+    // <= start_level.
+    let mut body = String::new();
+    for (lf, lt) in lines.iter().skip(start_i + 1) {
+        let line = &doc[*lf..*lt];
+        if let Some((level, _)) = parse_heading(line) {
+            if level <= start_level {
+                break;
+            }
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    Some(body.trim().to_string())
+}
+
+/// Find an Obsidian short block-id `^id` in the doc and return
+/// the containing paragraph's text.
+fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
+    let needle = format!("^{short_id}");
+    let pos = doc.find(&needle)?;
+    let line_start = doc[..pos].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_end = doc[pos..]
+        .find('\n')
+        .map(|n| pos + n)
+        .unwrap_or(doc.len());
+    let line = &doc[line_start..line_end];
+    // Strip the trailing `^id` so the embed shows the body text.
+    Some(line[..line.len() - needle.len()].trim_end().to_string())
+}
+
+fn render_embed_card_page(icon: &str, page: &str, resolved: Option<&str>) -> String {
+    let body = match resolved {
+        Some(s) => html_escape(s),
+        None => format!(
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
+        ),
+    };
+    format!(
+        r#"<div class="md-embed-card md-embed-page"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span></div><div class="md-embed-body">{body}</div></div>"#
+    )
+}
+
+fn render_embed_card_section(
+    icon: &str,
+    page: &str,
+    heading: &str,
+    resolved: Option<&str>,
+) -> String {
+    let body = match resolved {
+        Some(s) => html_escape(s),
+        None => format!(
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
+        ),
+    };
+    format!(
+        r#"<div class="md-embed-card md-embed-section"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{heading}</span></div><div class="md-embed-body">{body}</div></div>"#
+    )
+}
+
+fn render_embed_card_short(
+    icon: &str,
+    page: &str,
+    short: &str,
+    resolved: Option<&str>,
+) -> String {
+    let body = match resolved {
+        Some(s) => html_escape(s),
+        None => format!(
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
+        ),
+    };
+    format!(
+        r#"<div class="md-embed-card md-embed-block"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{short}</span></div><div class="md-embed-body">{body}</div></div>"#
+    )
 }
 
 fn html_escape(s: &str) -> String {
@@ -2091,6 +2237,59 @@ mod tests {
                 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
+    }
+
+    #[test]
+    fn embed_page_renders_card() {
+        let s = state("![[OtherPage]]", 100);
+        let decs = live_preview(&s);
+        let has_card = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-embed-page")));
+        assert!(has_card);
+    }
+
+    #[test]
+    fn embed_section_with_intra_doc_resolves() {
+        // `![[#Section]]` looks up the heading in the current
+        // doc.
+        let src = "Before\n\n## Section\nbody line\nmore body\n\n## Next\n\n![[#Section]]";
+        let s = state(src, 100);
+        let decs = live_preview(&s);
+        let card_html = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-embed-section") => Some(html.clone()),
+            _ => None,
+        }).expect("section card");
+        assert!(card_html.contains("body line"));
+        assert!(!card_html.contains("md-embed-placeholder"));
+    }
+
+    #[test]
+    fn embed_section_unresolved_shows_placeholder() {
+        // Cross-doc section reference — no multi-file lookup
+        // yet, so renders the placeholder.
+        let s = state("![[OtherPage#Section]]", 100);
+        let decs = live_preview(&s);
+        let card_html = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-embed-section") => Some(html.clone()),
+            _ => None,
+        }).expect("section card");
+        assert!(card_html.contains("md-embed-placeholder"));
+    }
+
+    #[test]
+    fn embed_block_via_short_id_resolves_intra_doc() {
+        let src = "Paragraph body ^anchor-here\n\n![[#^anchor-here]]";
+        let s = state(src, 100);
+        let decs = live_preview(&s);
+        let card_html = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-embed-block") => Some(html.clone()),
+            _ => None,
+        }).expect("block card");
+        assert!(card_html.contains("Paragraph body"));
     }
 
     #[test]

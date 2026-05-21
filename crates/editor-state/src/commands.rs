@@ -863,7 +863,7 @@ pub fn add_block_id(state: &EditorState) -> Option<(TransactionSpec, String)> {
             }
         }
     }
-    let uuid = uuid::Uuid::new_v4().to_string();
+    let uuid = uuid::Uuid::now_v7().to_string();
     let insert = format!("\nid:: {uuid}");
     let prev_sel = state.selection.clone();
     Some((

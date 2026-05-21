@@ -393,7 +393,7 @@ pub fn run_command(
 
 fn uuid_v4_string() -> String {
     // Re-export point — keep `uuid` as an editor-state dep only.
-    uuid::Uuid::new_v4().to_string()
+    uuid::Uuid::now_v7().to_string()
 }
 
 /// Byte-range of the (single) line containing the slash. The

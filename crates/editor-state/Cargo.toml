@@ -15,9 +15,12 @@ ropey = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# Block-id generator. `v4` for random IDs; `js` so it routes
-# through `crypto.getRandomValues` on `wasm32-unknown-unknown`.
-uuid = { version = "1", features = ["v4", "js"] }
+# Block-id generator. `v7` gives time-prefixed IDs (Logseq's
+# `squuid` model — refs naturally sort by creation order,
+# stays friendly to any future b-tree index for version
+# tracking). `js` routes through `crypto.getRandomValues` on
+# `wasm32-unknown-unknown` for the random tail.
+uuid = { version = "1", features = ["v7", "js"] }
 
 # wasm-only: `performance.now()` for the live-preview perf
 # trace (native uses `Instant`, which traps on wasm32-unknown-
