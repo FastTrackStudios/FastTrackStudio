@@ -401,7 +401,11 @@ fn scan_blocks(
     // Callout-tracking state: while we're inside a `> [!type]…`
     // block, every subsequent `>`-prefixed line inherits the
     // callout's class so CSS can group them visually.
-    let mut callout_kind: Option<&'static str> = None;
+    // Callout stack: one entry per nesting depth. `> [!note]\n>
+    // > [!warning]` pushes "note" then "warning"; a line with
+    // fewer `>` markers pops back. Non-blockquote lines drain
+    // the whole stack. Indexed by depth - 1 (depth 1 → [0]).
+    let mut callout_stack: Vec<&'static str> = Vec::new();
 
     // Setext-style heading detection. For each window of two
     // consecutive lines, if the first is content and the second
@@ -489,7 +493,7 @@ fn scan_blocks(
         // range. Quartz: `ofm.ts:123-126` via `remark-gfm`.
         let table_match = if !line.trim().is_empty()
             && fence.is_none()
-            && callout_kind.is_none()
+            && callout_stack.is_empty()
             && is_table_header(line)
         {
             try_parse_table(text, line_from, line_to)
@@ -554,7 +558,15 @@ fn scan_blocks(
             let info = trimmed[info_start..].trim();
             let content_start = if line_to < text.len() { line_to + 1 } else { line_to };
             fence = Some((line_from, mc, mlen));
-            if !caret_on_opener {
+            // The lang+copy header overlays the opener line for
+            // ordinary code fences. Skip it for fences we
+            // render as a widget (typst, mermaid) — the
+            // rendered SVG already speaks for itself, and the
+            // floating header would be a leftover when the user
+            // moves the caret onto the fence to edit source.
+            let is_rendered_fence = info.eq_ignore_ascii_case("typst")
+                || info.eq_ignore_ascii_case("mermaid");
+            if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
                     r#"<span class="md-code-header"><span class="md-code-lang">{lang}</span><button class="md-code-copy" data-copy-from="{from}" data-copy-to="{to}" title="Copy">⧉</button></span>"#,
@@ -686,22 +698,41 @@ fn scan_blocks(
             continue;
         }
 
-        // ── Blockquote / Callout ───────────────────────────
-        if let Some(marker_end) = parse_blockquote(line) {
+        // ── Blockquote / Callout (with nesting) ────────────
+        if let Some((depth, marker_end)) = parse_blockquote_depth(line) {
             let abs_marker_end = line_from + marker_end;
+            // Lines with fewer `>` markers close any deeper
+            // callouts. e.g. on `> > body` after `> [!a]\n> >
+            // [!b]\n> >body` we'd be at depth 2 still — only a
+            // depth-1 or 0 line pops back.
+            while callout_stack.len() > depth {
+                callout_stack.pop();
+            }
             let after_marker = &line[marker_end..];
-            // Callout header: `> [!type] Title` (with optional
-            // `+`/`-` collapsibility suffix on the marker, which
-            // we currently ignore). On match, switch line class
-            // to a callout-specific class and remember the kind
-            // for the body lines. Quartz: `ofm.ts:63-91`.
+            // Callout header at the deepest open level.
             if let Some((kind, header_end_off)) = parse_callout_header(after_marker) {
-                callout_kind = Some(kind);
+                // Extend the stack with synthetic ancestors if
+                // the user opens a depth-3 callout without
+                // having opened a depth-2 first. Real docs
+                // almost never hit this; the fallback keeps
+                // indexing safe.
+                while callout_stack.len() < depth - 1 {
+                    callout_stack.push("note");
+                }
+                if callout_stack.len() == depth - 1 {
+                    callout_stack.push(kind);
+                } else if depth >= 1 {
+                    callout_stack[depth - 1] = kind;
+                }
                 let line_class = callout_class(kind, true);
                 out.push(Decoration::line(line_from, line_class));
-                // Hide the `[!type]` syntax when caret is off
-                // the line — the line class draws the icon /
-                // title styling instead.
+                if depth > 1 {
+                    out.push(Decoration::line(line_from, callout_depth_class(depth)));
+                }
+                // Hide the `> > [!type] Title` markers when
+                // caret is off the line — the line class draws
+                // the icon / title styling instead. The marker
+                // span covers all `>` chars + their spaces.
                 let abs_header_end = abs_marker_end + header_end_off;
                 if !cursor_touches(primary, line_from..line_to) {
                     out.push(Decoration::mark(
@@ -712,13 +743,16 @@ fn scan_blocks(
                 }
                 continue;
             }
-            // Plain blockquote line (or callout body if we're
-            // inside one).
-            let line_class = match callout_kind {
+            // Plain blockquote or callout body — pick the kind
+            // of the deepest currently-open callout (if any).
+            let line_class = match callout_stack.last().copied() {
                 Some(kind) => callout_class(kind, false),
                 None => "md-blockquote",
             };
             out.push(Decoration::line(line_from, line_class));
+            if depth > 1 {
+                out.push(Decoration::line(line_from, callout_depth_class(depth)));
+            }
             if !cursor_touches(primary, line_from..line_to) {
                 out.push(Decoration::mark(
                     line_from..abs_marker_end,
@@ -727,10 +761,8 @@ fn scan_blocks(
             }
             continue;
         }
-        // A line without `>` closes the current callout (and any
-        // open blockquote). Reset state so the next callout
-        // starts fresh.
-        callout_kind = None;
+        // A line without `>` drains the whole nesting stack.
+        callout_stack.clear();
 
         // ── List (unordered or ordered) ────────────────────
         if let Some(marker_end) = parse_list_marker(line) {
@@ -932,6 +964,19 @@ fn render_table_html(cells: &[Vec<String>]) -> String {
     s
 }
 
+/// Composite class for nested callouts so CSS can indent the
+/// deeper levels. Depth `1` is the unnested base (no class
+/// emitted by the caller); `2`+ each get a level-specific
+/// class. Caps at 4 — anything deeper falls back to level 4
+/// styling, which is fine for the rare deep-nesting edge case.
+fn callout_depth_class(depth: usize) -> &'static str {
+    match depth {
+        2 => "md-callout-nested-2",
+        3 => "md-callout-nested-3",
+        _ => "md-callout-nested-4",
+    }
+}
+
 fn callout_class(kind: &str, is_header: bool) -> &'static str {
     // The decoration::Line variant takes a `String` so we have
     // to return a `&'static str` selected from a fixed table.
@@ -1002,13 +1047,28 @@ fn parse_heading(line: &str) -> Option<(usize, usize)> {
     Some((level, level + 1))
 }
 
-fn parse_blockquote(line: &str) -> Option<usize> {
+/// Count the depth of a nested blockquote (number of `>`
+/// markers at the start of the line) and the byte offset where
+/// the content body begins. Spaces between successive `>` are
+/// tolerated — `> > [!note]` is the canonical Obsidian form.
+/// Returns `None` when the line doesn't start with `>`.
+fn parse_blockquote_depth(line: &str) -> Option<(usize, usize)> {
     let b = line.as_bytes();
     if b.first() != Some(&b'>') {
         return None;
     }
-    // `> ` is the standard form; bare `>` is also legal.
-    if b.get(1) == Some(&b' ') { Some(2) } else { Some(1) }
+    let mut i = 0;
+    let mut depth = 0;
+    while i < b.len() && b[i] == b'>' {
+        depth += 1;
+        i += 1;
+        // Eat the optional separator space — either between
+        // successive `>` markers or before the body.
+        if i < b.len() && b[i] == b' ' {
+            i += 1;
+        }
+    }
+    Some((depth, i))
 }
 
 fn is_hr(line: &str) -> bool {
@@ -2076,6 +2136,51 @@ mod tests {
             crate::decoration::DecorationKind::Line { class }
                 if class.contains("md-callout-note")));
         assert!(has_callout);
+    }
+
+    #[test]
+    fn nested_callout_emits_depth_class() {
+        let src = "> [!note] outer\n> > [!warning] inner\n> > inner body\n";
+        let s = state(src, 100);
+        let decs = live_preview(&s);
+        // Inner header line gets both `md-callout-warning` and
+        // a depth-2 class.
+        let inner_line_from = src.find("> > [!warning]").unwrap();
+        let has_warning = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class.contains("md-callout-warning")) && d.from == inner_line_from);
+        let has_depth = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class == &"md-callout-nested-2") && d.from == inner_line_from);
+        assert!(has_warning, "expected inner line to be warning-classed");
+        assert!(has_depth, "expected inner line to carry depth-2 class");
+    }
+
+    #[test]
+    fn nested_callout_body_inherits_inner_kind() {
+        let src = "> [!note] outer\n> > [!warning] inner header\n> > body\n";
+        let s = state(src, 100);
+        let decs = live_preview(&s);
+        let body_from = src.find("> > body").unwrap();
+        let body_is_warning = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class.contains("md-callout-warning")) && d.from == body_from);
+        assert!(body_is_warning);
+    }
+
+    #[test]
+    fn dedent_closes_inner_callout() {
+        // After `> > [!warning] inner`, a `> ` line at depth 1
+        // should fall back to the OUTER callout kind, not the
+        // inner one.
+        let src = "> [!note] outer\n> > [!warning] inner\n> back to outer\n";
+        let s = state(src, 100);
+        let decs = live_preview(&s);
+        let back_from = src.find("> back to outer").unwrap();
+        let back_is_note = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class.contains("md-callout-note")) && d.from == back_from);
+        assert!(back_is_note);
     }
 
     #[test]

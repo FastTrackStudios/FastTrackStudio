@@ -251,6 +251,14 @@ fn App() -> Element {
                  > Use the slash menu `/callout` to insert any of the others — \
                  abstract, info, todo, success, question, failure, bug, example, quote.\n\
                  \n\
+                 > [!example] Nested callouts\n\
+                 > The outer is an example callout.\n\
+                 > > [!warning] Two levels deep\n\
+                 > > The body inherits the inner kind.\n\
+                 > > > [!danger] Three levels\n\
+                 > > > Rare in practice but supported.\n\
+                 > Back to the outer level.\n\
+                 \n\
                  ### Table\n\
                  \n\
                  | Feature             | Status        | Notes                          |\n\

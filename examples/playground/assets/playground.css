@@ -751,6 +751,43 @@ section h2 {
 .editor-root .cm-line.md-callout-header.md-callout-example  { color: #c792ea; }
 .editor-root .cm-line.md-callout-header.md-callout-quote    { color: #c5cad8; }
 
+/* Nested callouts. Each additional `>` deepens the visual
+   indent and stacks a second / third vertical bar so the user
+   can see how deep they are. Lines get both the kind class and
+   the depth class. */
+.editor-root .cm-line.md-callout-nested-2 {
+    padding-left: 32px;
+    background: rgba(60, 70, 100, 0.28);
+}
+.editor-root .cm-line.md-callout-nested-2::after {
+    content: "";
+    position: absolute;
+    left: 18px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: rgba(255, 255, 255, 0.18);
+}
+.editor-root .cm-line.md-callout-nested-3 {
+    padding-left: 50px;
+    background: rgba(60, 70, 100, 0.36);
+}
+.editor-root .cm-line.md-callout-nested-3::after {
+    content: "";
+    position: absolute;
+    left: 18px;
+    top: 0;
+    bottom: 0;
+    width: 21px;
+    border-left: 3px solid rgba(255, 255, 255, 0.18);
+    border-right: 3px solid rgba(255, 255, 255, 0.28);
+    box-sizing: border-box;
+}
+.editor-root .cm-line.md-callout-nested-4 {
+    padding-left: 68px;
+    background: rgba(60, 70, 100, 0.42);
+}
+
 /* Vim status badge — shows the current mode at the top of the
    debug pane. Color-coded so you can glance at it without
    reading. */
