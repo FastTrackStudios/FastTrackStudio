@@ -412,6 +412,26 @@ pub fn line_end_n(state: &EditorState, pos: usize, count: usize) -> usize {
     next_newline(state, p).unwrap_or(state.doc.len())
 }
 
+/// Position at the first non-blank character of the `n`-th
+/// line (0-indexed). Used by `gg` / `<N>G`. Clamps `n` to the
+/// last line of the doc.
+pub fn nth_line_first_nonblank(state: &EditorState, n: usize) -> usize {
+    let s = state.doc.to_string();
+    let bytes = s.as_bytes();
+    let mut p = 0usize;
+    let mut line = 0usize;
+    while line < n && p < bytes.len() {
+        if let Some(off) = bytes[p..].iter().position(|&b| b == b'\n') {
+            p += off + 1;
+            line += 1;
+        } else {
+            p = bytes.len();
+            break;
+        }
+    }
+    line_first_nonblank(state, p)
+}
+
 pub fn line_first_nonblank(state: &EditorState, pos: usize) -> usize {
     let start = line_start(state, pos);
     let end = line_end(state, pos);

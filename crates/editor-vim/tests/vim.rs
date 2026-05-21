@@ -173,3 +173,63 @@ fn zero_moves_to_line_start() {
     let s = drive(s, &mut vim, &["0"]);
     assert_eq!(s.selection.primary().head, 0);
 }
+
+#[test]
+fn capital_d_deletes_to_eol() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("hello world\nnext", 6);
+    let s = drive(s, &mut vim, &["D"]);
+    assert_eq!(s.doc.to_string(), "hello \nnext");
+    assert_eq!(s.selection.primary().head, 6);
+}
+
+#[test]
+fn capital_c_changes_to_eol_and_enters_insert() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("hello world", 6);
+    let s = drive(s, &mut vim, &["C"]);
+    assert_eq!(s.doc.to_string(), "hello ");
+    assert_eq!(vim.mode, editor_vim::Mode::Insert);
+}
+
+#[test]
+fn capital_y_yanks_line() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("first\nsecond", 0);
+    let s = drive(s, &mut vim, &["Y", "j", "p"]);
+    // After Y (line yank) → j → p (paste after) on line "second",
+    // doc becomes "first\nsecond\nfirst".
+    assert_eq!(s.doc.to_string(), "first\nsecond\nfirst");
+}
+
+#[test]
+fn gg_jumps_to_first_line() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("first\nsecond\nthird", 14);
+    let s = drive(s, &mut vim, &["g", "g"]);
+    assert_eq!(s.selection.primary().head, 0);
+}
+
+#[test]
+fn gu_motion_lowercases_word() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("HELLO world", 0);
+    let s = drive(s, &mut vim, &["g", "u", "w"]);
+    assert_eq!(s.doc.to_string(), "hello world");
+}
+
+#[test]
+fn gcap_u_motion_uppercases_word() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("hello world", 0);
+    let s = drive(s, &mut vim, &["g", "U", "w"]);
+    assert_eq!(s.doc.to_string(), "HELLO world");
+}
+
+#[test]
+fn g_tilde_doubled_toggles_case_of_line() {
+    let mut vim = VimState::new();
+    let s = state_with_caret("Hello World", 0);
+    let s = drive(s, &mut vim, &["g", "~", "~"]);
+    assert_eq!(s.doc.to_string(), "hELLO wORLD");
+}

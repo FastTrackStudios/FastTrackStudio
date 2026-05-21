@@ -38,6 +38,13 @@ pub struct VimState {
     /// Set when the previous key was one of `f F t T r` and the
     /// next key is a literal char, not a command.
     pub pending_motion_input: Option<MotionInput>,
+    /// Set after `g` is pressed in normal mode — the next key
+    /// finishes a `g`-prefixed command (`gg`, `gu`, `gU`, `g~`).
+    pub pending_g: bool,
+    /// Set after `gu`/`gU`/`g~` — the next key is a motion and
+    /// the resolved range gets case-changed. Holds the case op
+    /// (`'u'`/`'U'`/`'~'`).
+    pub pending_g_case: Option<char>,
     /// Anchor offset for visual mode. `None` outside visual.
     pub visual_anchor: Option<usize>,
     pub registers: Registers,
@@ -91,6 +98,8 @@ impl VimState {
         self.pending_operator = None;
         self.pending_register = None;
         self.pending_motion_input = None;
+        self.pending_g = false;
+        self.pending_g_case = None;
     }
 
     pub fn is_visual(&self) -> bool {
@@ -191,6 +200,38 @@ fn dispatch_normal(
     // Register prefix.
     if ch == '"' {
         vim.pending_motion_input = Some(MotionInput::Register);
+        return None;
+    }
+
+    // Pending case op (`gu`/`gU`/`g~`): the next key is a
+    // motion, and we re-case the resolved range. Doubled (`guu`/
+    // `gUU`/`g~~`) acts on the current line — vim convention.
+    if let Some(case_op) = vim.pending_g_case {
+        let from = caret(state);
+        if (case_op == 'u' && ch == 'u')
+            || (case_op == 'U' && ch == 'U')
+            || (case_op == '~' && ch == '~')
+        {
+            let lo = motions::line_start(state, from);
+            let hi = motions::line_end(state, from);
+            return Some(apply_case_change(state, vim, case_op, lo, hi));
+        }
+        if let Some(motion) = Motion::from_char(ch) {
+            let count = vim.pending_count.take().unwrap_or(1);
+            let to = motions::apply(state, motion, count);
+            return Some(apply_case_change(state, vim, case_op, from, to));
+        }
+        vim.clear_pending();
+        return None;
+    }
+
+    // `g`-prefix: the next key finishes a `g`-prefixed command.
+    if vim.pending_g {
+        vim.pending_g = false;
+        return finish_g_command(state, vim, ch);
+    }
+    if ch == 'g' {
+        vim.pending_g = true;
         return None;
     }
 
@@ -372,10 +413,96 @@ fn single_char_normal_command(
             )
         }
         'J' => Some(join_lines(state, vim)),
+        'C' => {
+            // Change to end of line. `c$` shorthand.
+            let from = caret(state);
+            let to = motions::line_end(state, from);
+            Some(operators::apply_range(state, vim, operators::Operator::Change, from, to))
+        }
+        'D' => {
+            // Delete to end of line. `d$` shorthand.
+            let from = caret(state);
+            let to = motions::line_end(state, from);
+            Some(operators::apply_range(state, vim, operators::Operator::Delete, from, to))
+        }
+        'Y' => {
+            // Yank the line (`yy`). Neovim default; classic vim
+            // ships `Y` = `y$` but Neovim flipped it years ago.
+            let from = motions::line_start(state, caret(state));
+            let line_end = motions::line_end(state, caret(state));
+            let to = (line_end + 1).min(state.doc.len());
+            Some(operators::apply_linewise(state, vim, operators::Operator::Yank, from, to))
+        }
         '~' => Some(toggle_case_char(state, vim)),
         '.' => crate::macros::replay_last(state, vim),
         _ => None,
     }
+}
+
+/// Resolve a `g`-prefixed normal-mode command. The first `g`
+/// has already been consumed (we entered with `pending_g`
+/// cleared), and `ch` is whatever the user pressed next.
+fn finish_g_command(
+    state: &EditorState,
+    vim: &mut VimState,
+    ch: char,
+) -> Option<TransactionSpec> {
+    match ch {
+        'g' => {
+            // `gg` — go to first non-blank of (count-th) line. No
+            // count: first line.
+            let n = vim.pending_count.take().unwrap_or(1).saturating_sub(1);
+            let pos = motions::nth_line_first_nonblank(state, n);
+            vim.clear_pending();
+            Some(TransactionSpec::new().selection(Selection::caret(pos)))
+        }
+        'u' | 'U' | '~' => {
+            // `gu<motion>` / `gU<motion>` / `g~<motion>` —
+            // change case over a motion. Park the case-op tag in
+            // `pending_g_case`; the next key is read as a motion
+            // and the resolved range gets re-cased here.
+            vim.pending_g_case = Some(ch);
+            None
+        }
+        _ => {
+            vim.clear_pending();
+            None
+        }
+    }
+}
+
+/// Apply a pending case change (`gu`/`gU`/`g~`) over a resolved
+/// `[from, to)` range. Returns the transaction spec.
+fn apply_case_change(
+    state: &EditorState,
+    vim: &mut VimState,
+    op: char,
+    from: usize,
+    to: usize,
+) -> TransactionSpec {
+    let (lo, hi) = (from.min(to), from.max(to));
+    let text = state.doc.slice(lo..hi);
+    let new_text: String = text
+        .chars()
+        .map(|c| match op {
+            'u' => c.to_lowercase().next().unwrap_or(c),
+            'U' => c.to_uppercase().next().unwrap_or(c),
+            '~' => {
+                if c.is_uppercase() {
+                    c.to_lowercase().next().unwrap_or(c)
+                } else if c.is_lowercase() {
+                    c.to_uppercase().next().unwrap_or(c)
+                } else {
+                    c
+                }
+            }
+            _ => c,
+        })
+        .collect();
+    vim.clear_pending();
+    TransactionSpec::new()
+        .changes(Changes::replace(lo..hi, new_text))
+        .selection(Selection::caret(lo))
 }
 
 fn finish_operator(
