@@ -18,7 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::refs::{BlockRef, EmbedRef, EntityRef, LinkRef, Ref, TagRef};
+use crate::refs::{BlockRef, EmbedRef, EntityRef, LinkRef, MarkdownLinkRef, Ref, TagRef};
 use crate::{Block, Page, Vault};
 
 // ── Regex sources ───────────────────────────────────────────────────
@@ -58,6 +58,19 @@ pub const LOGSEQ_BLOCK_REF_REGEX: &str =
 /// re-exported under the v1.5 editor's preferred name.
 pub const BLOCK_REF_REGEX: &str = LOGSEQ_BLOCK_REF_REGEX;
 
+/// `[text](url)` standard markdown link. Captures: 1=alt/text,
+/// 2=url. Leading `!` (image embed) is matched separately so the
+/// link form doesn't double-match. Inline title (`"…"` after the
+/// URL) is allowed but discarded.
+pub const MD_LINK_REGEX: &str = r"\[([^\]\n]*)\]\(([^)\s]+)(?:\s+\x22[^\x22]*\x22)?\)";
+pub const MD_IMAGE_REGEX: &str = r"!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+\x22[^\x22]*\x22)?\)";
+
+/// Inline code span: backtick-delimited run that does NOT cross a
+/// newline. We mark these so `extract_refs` can skip any wikilink /
+/// markdown-link / tag matches that fall inside them — Obsidian
+/// doesn't index references inside inline code.
+pub const INLINE_CODE_REGEX: &str = r"`[^`\n]+`";
+
 // ── Compiled regex accessors (lazy, leaked-once) ────────────────────
 
 fn link_re() -> &'static Regex {
@@ -93,6 +106,21 @@ fn logseq_prop_re() -> &'static Regex {
 fn logseq_block_ref_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(LOGSEQ_BLOCK_REF_REGEX).expect("LOGSEQ_BLOCK_REF_REGEX is valid"))
+}
+
+fn md_link_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(MD_LINK_REGEX).expect("MD_LINK_REGEX is valid"))
+}
+
+fn md_image_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(MD_IMAGE_REGEX).expect("MD_IMAGE_REGEX is valid"))
+}
+
+fn inline_code_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(INLINE_CODE_REGEX).expect("INLINE_CODE_REGEX is valid"))
 }
 
 // ── Intermediate value types ───────────────────────────────────────
@@ -328,12 +356,26 @@ pub fn parse_block_id(line: &str) -> (String, Option<String>) {
 pub fn extract_refs(content: &str) -> Vec<Ref> {
     let mut out: Vec<(usize, Ref)> = Vec::new();
 
+    // Pre-compute inline-code spans (`` `...` ``). Any ref whose
+    // match falls entirely inside one of these gets filtered —
+    // Obsidian doesn't treat `[[link]]`, `#tag`, or `[md](link)`
+    // inside inline code as references.
+    let code_spans: Vec<(usize, usize)> = inline_code_re()
+        .find_iter(content)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    let in_code =
+        |start: usize, end: usize| code_spans.iter().any(|(s, e)| start >= *s && end <= *e);
+
     // Entity links go first since they're a strict subset of the
     // wikilink shape; we record their byte ranges to avoid emitting
     // both an EntityRef and a LinkRef for the same span.
     let mut entity_spans: Vec<(usize, usize)> = Vec::new();
     for caps in entity_link_re().captures_iter(content) {
         let m = caps.get(0).unwrap();
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
         let kind = caps.get(1).unwrap().as_str().to_string();
         let id_str = caps.get(2).unwrap().as_str();
         let display = caps.get(3).map(|m| m.as_str().to_string());
@@ -351,6 +393,9 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
     let mut embed_spans: Vec<(usize, usize)> = Vec::new();
     for caps in embed_re().captures_iter(content) {
         let m = caps.get(0).unwrap();
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
         embed_spans.push((m.start(), m.end()));
         let target = caps.get(1).unwrap().as_str().to_string();
         let block_id = caps.get(2).map(|m| m.as_str().to_string());
@@ -370,8 +415,14 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
 
     for caps in link_re().captures_iter(content) {
         let m = caps.get(0).unwrap();
-        // Skip if this is the tail of a `!`-prefixed embed.
-        let preceded_by_bang = m.start() > 0 && &content[m.start() - 1..m.start()] == "!";
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
+        // Skip if this is the tail of a `!`-prefixed embed. Bytes-
+        // level lookback avoids slicing through a multibyte char
+        // when the link follows non-ASCII text.
+        let preceded_by_bang =
+            m.start() > 0 && content.as_bytes().get(m.start() - 1).copied() == Some(b'!');
         if preceded_by_bang {
             continue;
         }
@@ -409,6 +460,9 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
     // `((uuid))` direct block references.
     for caps in logseq_block_ref_re().captures_iter(content) {
         let m = caps.get(0).unwrap();
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
         let uuid_str = caps.get(1).unwrap().as_str();
         if let Ok(target_block_id) = Uuid::parse_str(uuid_str) {
             out.push((
@@ -422,8 +476,89 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
         }
     }
 
+    // Markdown image embeds (`![alt](src)`) — recorded before plain
+    // links so the link scanner can skip overlapping spans.
+    let mut md_image_spans: Vec<(usize, usize)> = Vec::new();
+    for caps in md_image_re().captures_iter(content) {
+        let m = caps.get(0).unwrap();
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
+        md_image_spans.push((m.start(), m.end()));
+        let alias_raw = caps.get(1).unwrap().as_str().to_string();
+        let url = caps.get(2).unwrap().as_str().to_string();
+        out.push((
+            m.start(),
+            Ref::MarkdownLink(MarkdownLinkRef {
+                url,
+                alias: if alias_raw.is_empty() {
+                    None
+                } else {
+                    Some(alias_raw)
+                },
+                is_embed: true,
+                original: m.as_str().to_string(),
+            }),
+        ));
+    }
+
+    // Plain markdown links (`[text](url)`). Skip image embeds (the
+    // `!`-prefix variant matched above), wikilink / embed regions
+    // (`[[Foo|Bar]]` contains an inner `[Bar](...)` shape we don't
+    // want to double-count), and code-block spans.
+    for caps in md_link_re().captures_iter(content) {
+        let m = caps.get(0).unwrap();
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
+        // Drop the image-embed form — already handled above.
+        // Use bytes-level lookback so we don't slice through a
+        // multibyte UTF-8 codepoint when the link follows a
+        // smart-quote / em-dash / etc.
+        let preceded_by_bang =
+            m.start() > 0 && content.as_bytes().get(m.start() - 1).copied() == Some(b'!');
+        if preceded_by_bang {
+            continue;
+        }
+        // Drop links inside any wikilink/embed/entity span.
+        if embed_spans
+            .iter()
+            .chain(entity_spans.iter())
+            .any(|(s, e)| m.start() >= *s && m.end() <= *e)
+        {
+            continue;
+        }
+        if md_image_spans
+            .iter()
+            .any(|(s, e)| m.start() >= *s && m.end() <= *e)
+        {
+            continue;
+        }
+        let alias_raw = caps.get(1).unwrap().as_str().to_string();
+        let url = caps.get(2).unwrap().as_str().to_string();
+        // External links (http://, https://, mailto:, etc.) aren't
+        // useful for vault backlinks but Obsidian does emit them.
+        // Keep them — caller can filter by scheme.
+        out.push((
+            m.start(),
+            Ref::MarkdownLink(MarkdownLinkRef {
+                url,
+                alias: if alias_raw.is_empty() {
+                    None
+                } else {
+                    Some(alias_raw)
+                },
+                is_embed: false,
+                original: m.as_str().to_string(),
+            }),
+        ));
+    }
+
     for caps in tag_re().captures_iter(content) {
         let m = caps.get(0).unwrap();
+        if in_code(m.start(), m.end()) {
+            continue;
+        }
         // Skip tags inside link / embed spans (Obsidian doesn't
         // index `#tag` inside `[[Page#tag]]`).
         if embed_spans
@@ -431,6 +566,16 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
             .chain(entity_spans.iter())
             .any(|(s, e)| m.start() >= *s && m.end() <= *e)
         {
+            continue;
+        }
+        // Skip markdown link / reference-definition fragments. The
+        // tag regex anchors on `^` or `\s`, so the patterns we need
+        // to filter are `[label]: #anchor` (preceded by `]:`) and
+        // `[text](#anchor)` (technically preceded by `(`, but some
+        // sources put a space — `[text]: \n  #anchor`). Obsidian
+        // doesn't treat either as a tag.
+        let before = content[..m.start()].trim_end();
+        if before.ends_with("]:") || before.ends_with("](") {
             continue;
         }
         let raw = caps.get(1).unwrap().as_str();
@@ -561,7 +706,12 @@ pub fn parse_page(src: &str) -> ParsedPage {
             let (content_without_props, props) = extract_logseq_props(&blk.content);
             blk.content = content_without_props;
             blk.properties = props;
-            blk.refs = extract_refs(&blk.content);
+            // Skip ref/tag extraction inside code fences — Obsidian
+            // ignores `#tag` and `[[link]]` patterns when they're
+            // inside ```code``` blocks, and so do we.
+            if blk.kind != "code" {
+                blk.refs = extract_refs(&blk.content);
+            }
             blocks.push(blk);
         }
     };

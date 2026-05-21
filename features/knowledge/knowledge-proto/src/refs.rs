@@ -60,6 +60,22 @@ pub struct BlockRef {
     pub original: String,
 }
 
+/// `[text](url)` / `![alt](src)` — standard Markdown link or image.
+/// Obsidian indexes these the same as `[[wikilinks]]` for the
+/// backlink / orphan / unresolved-link graph, so we extract them
+/// alongside the wikilink variants. `is_embed` distinguishes
+/// `![…](…)` (image / file embed) from `[…](…)` (plain link).
+#[derive(::facet::Facet, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MarkdownLinkRef {
+    /// Raw URL / path as written. Vault-relative or absolute or
+    /// external (`http://…`). Resolution against the vault is the
+    /// caller's job.
+    pub url: String,
+    pub alias: Option<String>,
+    pub is_embed: bool,
+    pub original: String,
+}
+
 #[derive(::facet::Facet, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Ref {
@@ -68,4 +84,5 @@ pub enum Ref {
     Tag(TagRef),
     Entity(EntityRef),
     BlockRef(BlockRef),
+    MarkdownLink(MarkdownLinkRef),
 }

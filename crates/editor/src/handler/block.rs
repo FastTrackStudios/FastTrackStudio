@@ -5,7 +5,7 @@
 use dioxus::prelude::*;
 use uuid::Uuid;
 
-use crate::db::{Block, new_block};
+use crate::db::{Block, Vault, new_block};
 use crate::handler::persist::{page_for_block, save_page};
 use crate::state::AppState;
 
@@ -226,6 +226,36 @@ mod tests {
     }
 
     #[test]
+    fn prev_block_at_top_is_none() {
+        let (vault, ids) = setup();
+        assert_eq!(prev_block_in_outline(&vault, ids[0]), None);
+    }
+
+    #[test]
+    fn prev_block_previous_sibling() {
+        let (vault, ids) = setup();
+        // B's prev is A (no children).
+        assert_eq!(prev_block_in_outline(&vault, ids[1]), Some(ids[0]));
+    }
+
+    #[test]
+    fn prev_block_descends_into_prior_subtree() {
+        let (mut vault, ids) = setup();
+        // Make B a child of A. Now C's prev should be B
+        // (A's last descendant), not A.
+        indent_block_pure(&mut vault, ids[1]);
+        assert_eq!(prev_block_in_outline(&vault, ids[2]), Some(ids[1]));
+    }
+
+    #[test]
+    fn prev_block_first_child_is_parent() {
+        let (mut vault, ids) = setup();
+        // B is A's child; B's prev should be A itself.
+        indent_block_pure(&mut vault, ids[1]);
+        assert_eq!(prev_block_in_outline(&vault, ids[1]), Some(ids[0]));
+    }
+
+    #[test]
     fn delete_reparents_children() {
         let (mut vault, ids) = setup();
         // Make B and C children of A so the test can show
@@ -242,6 +272,165 @@ mod tests {
         assert_eq!(b.parent_id, None);
         assert_eq!(c.parent_id, None);
     }
+}
+
+/// The block that visually appears immediately above `block_id`
+/// in the outline. Mirrors Logseq's
+/// `util/get-prev-block-non-collapsed`:
+///
+/// - If there's a previous sibling, follow it down to its
+///   deepest last descendant (visually that's the block right
+///   above us).
+/// - Otherwise the parent (or `None` if the block is at the top
+///   of the page).
+pub fn prev_block_in_outline(vault: &Vault, block_id: Uuid) -> Option<Uuid> {
+    let target = vault.blocks.iter().find(|b| b.id == block_id)?;
+    let mut siblings: Vec<&Block> = vault
+        .blocks
+        .iter()
+        .filter(|b| b.parent_id == target.parent_id && b.page_id == target.page_id)
+        .collect();
+    siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let pos = siblings.iter().position(|b| b.id == target.id)?;
+    if pos > 0 {
+        Some(last_descendant(vault, siblings[pos - 1].id))
+    } else {
+        target.parent_id
+    }
+}
+
+/// The block that visually appears immediately *below* `block_id`.
+/// Mirrors Logseq's `get-next-block-non-collapsed`:
+///
+/// - If the block has children, the first child.
+/// - Else the next sibling.
+/// - Else walk up: the first ancestor that has a following
+///   sibling — that sibling is the answer.
+/// - Else `None` (block is the last in the page).
+pub fn next_block_in_outline(vault: &Vault, block_id: Uuid) -> Option<Uuid> {
+    // First child?
+    let mut children: Vec<&Block> = vault
+        .blocks
+        .iter()
+        .filter(|b| b.parent_id == Some(block_id))
+        .collect();
+    if !children.is_empty() {
+        children.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        return Some(children[0].id);
+    }
+    // Walk up looking for a next sibling.
+    let mut cursor = block_id;
+    loop {
+        let cur = vault.blocks.iter().find(|b| b.id == cursor)?;
+        let mut siblings: Vec<&Block> = vault
+            .blocks
+            .iter()
+            .filter(|b| b.parent_id == cur.parent_id && b.page_id == cur.page_id)
+            .collect();
+        siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        let pos = siblings.iter().position(|b| b.id == cur.id)?;
+        if let Some(next) = siblings.get(pos + 1) {
+            return Some(next.id);
+        }
+        cursor = cur.parent_id?;
+    }
+}
+
+/// Swap this block with its previous sibling (Cmd-Up). No-op when
+/// at the top of its sibling group.
+pub fn move_block_up(state: AppState, block_id: Uuid) {
+    let mut v = state.vault;
+    let page_id = {
+        let mut guard = v.write();
+        match move_block_up_pure(&mut guard, block_id) {
+            Some(pid) => pid,
+            None => return,
+        }
+    };
+    save_page(state, page_id);
+}
+
+/// Swap this block with its next sibling (Cmd-Down). No-op when
+/// at the bottom of its sibling group.
+pub fn move_block_down(state: AppState, block_id: Uuid) {
+    let mut v = state.vault;
+    let page_id = {
+        let mut guard = v.write();
+        match move_block_down_pure(&mut guard, block_id) {
+            Some(pid) => pid,
+            None => return,
+        }
+    };
+    save_page(state, page_id);
+}
+
+pub fn move_block_up_pure(vault: &mut Vault, block_id: Uuid) -> Option<Uuid> {
+    let target = vault.blocks.iter().find(|b| b.id == block_id).cloned()?;
+    let mut siblings: Vec<Block> = vault
+        .blocks
+        .iter()
+        .filter(|b| b.parent_id == target.parent_id && b.page_id == target.page_id)
+        .cloned()
+        .collect();
+    siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let pos = siblings.iter().position(|b| b.id == target.id)?;
+    if pos == 0 {
+        return None;
+    }
+    let prev_key = siblings[pos - 1].sort_key.clone();
+    let cur_key = siblings[pos].sort_key.clone();
+    let now = chrono::Utc::now();
+    for b in vault.blocks.iter_mut() {
+        if b.id == target.id {
+            b.sort_key = prev_key.clone();
+            b.updated_at = now;
+        } else if b.id == siblings[pos - 1].id {
+            b.sort_key = cur_key.clone();
+            b.updated_at = now;
+        }
+    }
+    Some(target.page_id)
+}
+
+pub fn move_block_down_pure(vault: &mut Vault, block_id: Uuid) -> Option<Uuid> {
+    let target = vault.blocks.iter().find(|b| b.id == block_id).cloned()?;
+    let mut siblings: Vec<Block> = vault
+        .blocks
+        .iter()
+        .filter(|b| b.parent_id == target.parent_id && b.page_id == target.page_id)
+        .cloned()
+        .collect();
+    siblings.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    let pos = siblings.iter().position(|b| b.id == target.id)?;
+    if pos + 1 >= siblings.len() {
+        return None;
+    }
+    let next_key = siblings[pos + 1].sort_key.clone();
+    let cur_key = siblings[pos].sort_key.clone();
+    let now = chrono::Utc::now();
+    for b in vault.blocks.iter_mut() {
+        if b.id == target.id {
+            b.sort_key = next_key.clone();
+            b.updated_at = now;
+        } else if b.id == siblings[pos + 1].id {
+            b.sort_key = cur_key.clone();
+            b.updated_at = now;
+        }
+    }
+    Some(target.page_id)
+}
+
+fn last_descendant(vault: &Vault, block_id: Uuid) -> Uuid {
+    let mut children: Vec<&Block> = vault
+        .blocks
+        .iter()
+        .filter(|b| b.parent_id == Some(block_id))
+        .collect();
+    if children.is_empty() {
+        return block_id;
+    }
+    children.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+    last_descendant(vault, children.last().unwrap().id)
 }
 
 /// Pick a sort_key strictly between `after_key` and the next

@@ -42,6 +42,8 @@ project-ui = { path = "features/project/project-ui" }
 knowledge-proto = { path = "features/knowledge/knowledge-proto" }
 knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
 knowledge-ui = { path = "features/knowledge/knowledge-ui" }
+
+obsidian-compat = { path = "crates/obsidian-compat" }
 publish-core = { path = "crates/publish-core" }
 editor = { path = "crates/editor" }
 attachments-proto = { path = "features/attachments/attachments-proto" }

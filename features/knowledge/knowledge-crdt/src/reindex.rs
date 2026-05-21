@@ -488,6 +488,26 @@ async fn project_refs(block: &Block, refs: &[Ref], doc: &CrdtDoc) -> Vec<BlockRe
                 target_uuid: Some(br.target_block_id),
                 alias: br.alias.clone(),
             },
+            // Standard markdown link / image. We treat both forms
+            // identically in the CRDT edge index — resolution is
+            // url-string based; the UI cares about embed-vs-link.
+            Ref::MarkdownLink(link) => {
+                let target = link.url.clone();
+                let resolved = basename_index.get(&target.to_lowercase()).copied();
+                BlockRefEdgeCreate {
+                    vault_id: block.vault_id,
+                    source_block_id: block.id,
+                    source_page_id: block.page_id,
+                    target_kind: if link.is_embed {
+                        "md_embed".into()
+                    } else {
+                        "md_link".into()
+                    },
+                    target_str: target,
+                    target_uuid: resolved,
+                    alias: link.alias.clone(),
+                }
+            }
         };
         out.push(create);
     }

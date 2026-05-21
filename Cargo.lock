@@ -6831,6 +6831,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "obsidian-compat"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "knowledge-proto",
+ "notify",
+ "notify-debouncer-mini",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9626,6 +9646,7 @@ dependencies = [
  "futures",
  "knowledge-crdt",
  "knowledge-proto",
+ "obsidian-compat",
  "project-crdt",
  "project-proto",
  "serde",

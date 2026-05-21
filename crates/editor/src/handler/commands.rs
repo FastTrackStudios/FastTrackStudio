@@ -292,6 +292,13 @@ pub fn filter(query: &str) -> Vec<CommandEntry> {
 /// the slash-prefix range to be removed (start..end byte offset
 /// of `/query` inside the block content); the runner replaces
 /// that range with the command's effect.
+///
+/// `SetTask` and `SetHeading` are special: they're block-level
+/// transforms (strip existing prefix, prepend the new one) — not
+/// inline splices. The slash trigger is removed first, then the
+/// transform runs on the cleaned content. Mirrors Logseq's
+/// `set-marker`/`set-heading!` which always operate on the whole
+/// block title regardless of caret position.
 pub fn run_command(
     state: AppState,
     block_id: Uuid,
@@ -307,12 +314,159 @@ pub fn run_command(
         .map(|b| b.content.clone())?;
     let before = current.get(..slash_range.start)?;
     let after = current.get(slash_range.end..).unwrap_or("");
-    let (replacement, caret_back) = render_kind(cmd);
-    let new_content = format!("{before}{replacement}{after}");
-    let caret = before.len() + replacement.len() - caret_back;
-    update_block_content(state, block_id, new_content);
+    let cleaned = format!("{before}{after}");
     let _ = split_block; // keep import live for future Enter-style commands
-    Some(CommandResult { caret })
+
+    match cmd {
+        CommandKind::SetTask(m) => {
+            let new_content = set_task_marker(&cleaned, Some(m));
+            let caret = new_content.len();
+            update_block_content(state, block_id, new_content);
+            Some(CommandResult { caret })
+        }
+        CommandKind::SetHeading(level) => {
+            let new_content = set_heading_level(&cleaned, level);
+            let caret = new_content.len();
+            update_block_content(state, block_id, new_content);
+            Some(CommandResult { caret })
+        }
+        _ => {
+            let (replacement, caret_back) = render_kind(cmd);
+            let new_content = format!("{before}{replacement}{after}");
+            let caret = before.len() + replacement.len() - caret_back;
+            update_block_content(state, block_id, new_content);
+            Some(CommandResult { caret })
+        }
+    }
+}
+
+/// Strip any leading task marker (TODO / DOING / …) and a
+/// trailing space from `content`. If none is present, returns
+/// the input unchanged.
+pub fn strip_task_marker(content: &str) -> &str {
+    for m in TaskMarker::all() {
+        let label = m.label();
+        if let Some(rest) = content.strip_prefix(label) {
+            // Marker must be followed by a space (or end of content)
+            // — otherwise "TODOIST" would get its prefix stripped.
+            if rest.is_empty() {
+                return rest;
+            }
+            if let Some(rest_after_space) = rest.strip_prefix(' ') {
+                return rest_after_space;
+            }
+        }
+    }
+    content
+}
+
+/// Strip a leading `#…#` heading prefix (1-6 hashes followed by
+/// a space) from `content`. Returns the input unchanged when no
+/// heading marker is present.
+pub fn strip_heading_marker(content: &str) -> &str {
+    let hashes = content.chars().take_while(|c| *c == '#').count();
+    if (1..=6).contains(&hashes) {
+        let after = &content[hashes..];
+        if after.is_empty() {
+            return after;
+        }
+        if let Some(rest_after_space) = after.strip_prefix(' ') {
+            return rest_after_space;
+        }
+    }
+    content
+}
+
+/// Set (or clear) the leading task marker on the block content.
+/// Preserves any existing heading prefix — `## DOING foo` with
+/// `SetTask(Done)` becomes `## DONE foo`, matching Logseq's
+/// `set-marker` behavior of treating heading + marker as a
+/// composite prefix.
+pub fn set_task_marker(content: &str, marker: Option<TaskMarker>) -> String {
+    // Split out the heading prefix (if any), keep the rest as the
+    // body where the task marker lives.
+    let (heading_prefix, body) = match split_heading_prefix(content) {
+        Some((h, b)) => (h, b),
+        None => ("", content),
+    };
+    let body_no_marker = strip_task_marker(body);
+    match marker {
+        Some(m) => format!("{heading_prefix}{} {body_no_marker}", m.label()),
+        None => format!("{heading_prefix}{body_no_marker}"),
+    }
+}
+
+/// Set (or clear) the heading level on the block. Preserves any
+/// existing task marker.
+pub fn set_heading_level(content: &str, level: Option<u8>) -> String {
+    // Drop existing heading prefix to find the body.
+    let body = strip_heading_marker(content);
+    match level {
+        Some(n) => format!("{} {body}", "#".repeat(n as usize)),
+        None => body.to_string(),
+    }
+}
+
+/// Cycle the block's task marker. Mirrors Logseq's
+/// `db-based-cycle-todo!`:
+/// none → TODO → DOING → DONE → none.
+pub fn cycle_task_marker(state: AppState, block_id: Uuid) {
+    let current = match state
+        .vault
+        .read()
+        .blocks
+        .iter()
+        .find(|b| b.id == block_id)
+        .map(|b| b.content.clone())
+    {
+        Some(c) => c,
+        None => return,
+    };
+    let body = match split_heading_prefix(&current) {
+        Some((_, b)) => b,
+        None => current.as_str(),
+    };
+    let next = match leading_task_marker(body) {
+        None => Some(TaskMarker::Todo),
+        Some(TaskMarker::Todo) => Some(TaskMarker::Doing),
+        Some(TaskMarker::Doing) => Some(TaskMarker::Done),
+        Some(TaskMarker::Done) => None,
+        // Other markers (LATER/NOW/WAITING/CANCELLED) reset to
+        // unmarked then re-enter the cycle on the next press.
+        Some(_) => None,
+    };
+    let new_content = set_task_marker(&current, next);
+    update_block_content(state, block_id, new_content);
+}
+
+/// Return the leading task marker if the body starts with one,
+/// followed by a space or end-of-input. Used by `cycle_task_marker`
+/// to know what's currently set without re-parsing.
+pub fn leading_task_marker(body: &str) -> Option<TaskMarker> {
+    for m in TaskMarker::all() {
+        let label = m.label();
+        if let Some(rest) = body.strip_prefix(label) {
+            if rest.is_empty() || rest.starts_with(' ') {
+                return Some(*m);
+            }
+        }
+    }
+    None
+}
+
+/// Split `content` at the heading prefix boundary. Returns
+/// `Some((prefix_with_trailing_space, body))` when content
+/// begins with `#…# `; `None` otherwise. The prefix keeps its
+/// trailing space so callers can reattach it verbatim.
+fn split_heading_prefix(content: &str) -> Option<(&str, &str)> {
+    let hashes = content.chars().take_while(|c| *c == '#').count();
+    if !(1..=6).contains(&hashes) {
+        return None;
+    }
+    let after = &content[hashes..];
+    let rest = after.strip_prefix(' ')?;
+    let prefix_len = hashes + 1; // hashes + the space
+    Some((&content[..prefix_len], rest))
 }
 
 /// What `run_command` reports back: the caret offset the caller
@@ -371,6 +525,68 @@ mod tests {
         let (txt, back) = render_kind(CommandKind::InsertSnippet("[[]]", 2));
         assert_eq!(txt, "[[]]");
         assert_eq!(back, 2);
+    }
+
+    #[test]
+    fn strip_task_marker_removes_todo() {
+        assert_eq!(strip_task_marker("TODO buy milk"), "buy milk");
+        assert_eq!(strip_task_marker("DONE buy milk"), "buy milk");
+    }
+
+    #[test]
+    fn strip_task_marker_no_prefix_unchanged() {
+        assert_eq!(strip_task_marker("TODOIST app"), "TODOIST app");
+        assert_eq!(strip_task_marker("plain text"), "plain text");
+    }
+
+    #[test]
+    fn strip_heading_marker_removes_prefix() {
+        assert_eq!(strip_heading_marker("## Title"), "Title");
+        assert_eq!(strip_heading_marker("###### Six"), "Six");
+    }
+
+    #[test]
+    fn strip_heading_marker_seven_hashes_left_alone() {
+        // Beyond H6 the marker is no longer a heading prefix.
+        assert_eq!(strip_heading_marker("####### Title"), "####### Title");
+    }
+
+    #[test]
+    fn set_task_replaces_existing() {
+        assert_eq!(
+            set_task_marker("TODO foo", Some(TaskMarker::Done)),
+            "DONE foo"
+        );
+    }
+
+    #[test]
+    fn set_task_preserves_heading_prefix() {
+        assert_eq!(
+            set_task_marker("## DOING fix bug", Some(TaskMarker::Done)),
+            "## DONE fix bug"
+        );
+    }
+
+    #[test]
+    fn set_task_none_strips_marker() {
+        assert_eq!(set_task_marker("DOING foo", None), "foo");
+    }
+
+    #[test]
+    fn set_heading_replaces_existing() {
+        assert_eq!(set_heading_level("## Title", Some(3)), "### Title");
+        assert_eq!(set_heading_level("plain", Some(1)), "# plain");
+    }
+
+    #[test]
+    fn set_heading_none_strips() {
+        assert_eq!(set_heading_level("## Title", None), "Title");
+    }
+
+    #[test]
+    fn leading_task_marker_detects() {
+        assert_eq!(leading_task_marker("TODO foo"), Some(TaskMarker::Todo));
+        assert_eq!(leading_task_marker("plain"), None);
     }
 
     #[test]

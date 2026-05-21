@@ -82,6 +82,59 @@ pub enum Expr {
     FormulaRef { name: String },
     /// Literal JSON value (string, number, bool, null, list, map).
     Literal { value: serde_json::Value },
+    /// `this` — current page in templated bases (Project Hierarchy,
+    /// relationships).
+    This,
+    /// Free function call (`list(x)`, `today()`, `date(due)`) when
+    /// `receiver` is `None`, or method call (`x.contains(y)`,
+    /// `date(due).format("YYYY-MM")`) when `receiver` is `Some`.
+    /// The evaluator treats unknown calls as `null` for now —
+    /// keeping this in the AST lets us round-trip the source.
+    Call {
+        receiver: Option<Box<Expr>>,
+        name: String,
+        args: Vec<Expr>,
+    },
+    /// `a + b` / `a - b` / `a * b` / `a / b` / `a % b`. Also covers
+    /// string concatenation via `+`.
+    Binary {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    /// `-x` — only unary minus right now. (`!` is a FilterNode op,
+    /// not an Expr op.)
+    Unary { op: UnaryOp, arg: Box<Expr> },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    /// Logical AND inside expressions (`a && b`, `a and b`). Distinct
+    /// from `FilterNode::And` which lives at the filter level.
+    And,
+    /// Logical OR inside expressions.
+    Or,
+    /// Comparison ops inside expressions — for cases like
+    /// `if(a == b, …)` where the comparison sits in expression
+    /// position rather than at a filter root.
+    Eq,
+    Neq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum UnaryOp {
+    Neg,
+    /// Logical negation inside expressions (`!x`, `not x`).
+    Not,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -115,13 +168,19 @@ pub struct ViewSpec {
     pub extras: serde_json::Value,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ViewKind {
     Table,
     Board,
     Gallery,
     Calendar,
     List,
+    /// Plugin-supplied view type the core engine doesn't know how
+    /// to render. We still parse the surrounding metadata and the
+    /// UI can fall back to a placeholder card. Matches Obsidian's
+    /// behavior — it lists `.base` files with unknown view types
+    /// rather than rejecting them.
+    Other(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -327,7 +386,7 @@ fn parse_view(v: &serde_yaml::Value) -> Result<ViewSpec, BaseParseError> {
         "gallery" => ViewKind::Gallery,
         "calendar" => ViewKind::Calendar,
         "list" => ViewKind::List,
-        other => return Err(BaseParseError::View(format!("unknown view type {other}"))),
+        other => ViewKind::Other(other.to_string()),
     };
     let name = m
         .get(serde_yaml::Value::String("name".into()))
@@ -413,12 +472,13 @@ fn parse_view(v: &serde_yaml::Value) -> Result<ViewSpec, BaseParseError> {
 
 fn view_to_yaml(v: &ViewSpec) -> Result<serde_yaml::Value, BaseParseError> {
     let mut m = serde_yaml::Mapping::new();
-    let kind_str = match v.kind {
+    let kind_str: &str = match &v.kind {
         ViewKind::Table => "table",
         ViewKind::Board => "board",
         ViewKind::Gallery => "gallery",
         ViewKind::Calendar => "calendar",
         ViewKind::List => "list",
+        ViewKind::Other(s) => s.as_str(),
     };
     m.insert(
         serde_yaml::Value::String("type".into()),
@@ -652,6 +712,47 @@ fn expr_to_source(e: &Expr) -> String {
             serde_json::Value::Null => "null".into(),
             other => other.to_string(),
         },
+        Expr::This => "this".into(),
+        Expr::Call {
+            receiver,
+            name,
+            args,
+        } => {
+            let arg_src = args
+                .iter()
+                .map(expr_to_source)
+                .collect::<Vec<_>>()
+                .join(", ");
+            match receiver {
+                Some(r) => format!("{}.{name}({arg_src})", expr_to_source(r)),
+                None => format!("{name}({arg_src})"),
+            }
+        }
+        Expr::Binary { op, left, right } => {
+            let op = match op {
+                BinOp::Add => "+",
+                BinOp::Sub => "-",
+                BinOp::Mul => "*",
+                BinOp::Div => "/",
+                BinOp::Rem => "%",
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+                BinOp::Eq => "==",
+                BinOp::Neq => "!=",
+                BinOp::Lt => "<",
+                BinOp::Le => "<=",
+                BinOp::Gt => ">",
+                BinOp::Ge => ">=",
+            };
+            format!("{} {op} {}", expr_to_source(left), expr_to_source(right))
+        }
+        Expr::Unary { op, arg } => {
+            let op = match op {
+                UnaryOp::Neg => "-",
+                UnaryOp::Not => "!",
+            };
+            format!("{op}{}", expr_to_source(arg))
+        }
     }
 }
 
@@ -741,7 +842,7 @@ pub mod expr_parser {
     //!   literal  := STRING | NUMBER | "true" | "false" | "null"
     //!   args     := or ("," or)*
 
-    use super::{BaseParseError, CmpOp, Expr, FilterNode};
+    use super::{BaseParseError, BinOp, CmpOp, Expr, FilterNode, UnaryOp};
 
     pub fn parse_filter(src: &str) -> Result<FilterNode, BaseParseError> {
         let mut p = Parser::new(src);
@@ -793,21 +894,19 @@ pub mod expr_parser {
         fn parse_or(&mut self) -> Result<FilterNode, BaseParseError> {
             let mut left = self.parse_and()?;
             loop {
-                self.skip_ws();
-                if self.eat(b"||") {
-                    let right = self.parse_and()?;
-                    left = match left {
-                        FilterNode::Or { mut args } => {
-                            args.push(right);
-                            FilterNode::Or { args }
-                        }
-                        other => FilterNode::Or {
-                            args: vec![other, right],
-                        },
-                    };
-                } else {
+                if !self.eat_logical_or() {
                     break;
                 }
+                let right = self.parse_and()?;
+                left = match left {
+                    FilterNode::Or { mut args } => {
+                        args.push(right);
+                        FilterNode::Or { args }
+                    }
+                    other => FilterNode::Or {
+                        args: vec![other, right],
+                    },
+                };
             }
             Ok(left)
         }
@@ -815,21 +914,19 @@ pub mod expr_parser {
         fn parse_and(&mut self) -> Result<FilterNode, BaseParseError> {
             let mut left = self.parse_not()?;
             loop {
-                self.skip_ws();
-                if self.eat(b"&&") {
-                    let right = self.parse_not()?;
-                    left = match left {
-                        FilterNode::And { mut args } => {
-                            args.push(right);
-                            FilterNode::And { args }
-                        }
-                        other => FilterNode::And {
-                            args: vec![other, right],
-                        },
-                    };
-                } else {
+                if !self.eat_logical_and() {
                     break;
                 }
+                let right = self.parse_not()?;
+                left = match left {
+                    FilterNode::And { mut args } => {
+                        args.push(right);
+                        FilterNode::And { args }
+                    }
+                    other => FilterNode::And {
+                        args: vec![other, right],
+                    },
+                };
             }
             Ok(left)
         }
@@ -843,27 +940,21 @@ pub mod expr_parser {
                     arg: Box::new(inner),
                 });
             }
+            if self.eat_keyword(b"not") {
+                let inner = self.parse_not()?;
+                return Ok(FilterNode::Not {
+                    arg: Box::new(inner),
+                });
+            }
             self.parse_cmp()
         }
 
         fn parse_cmp(&mut self) -> Result<FilterNode, BaseParseError> {
-            let left_out = self.parse_postfix()?;
-            // If the left side is a Call, that already IS a FilterNode
-            // (predicate). It cannot be the lhs of a comparison.
-            let left = match left_out {
-                PostfixOut::Expr(e) => e,
-                PostfixOut::Call {
-                    receiver,
-                    name,
-                    args,
-                } => {
-                    return Ok(FilterNode::Call {
-                        receiver,
-                        name,
-                        args,
-                    });
-                }
-            };
+            // At filter level, the LHS / RHS of a comparison are
+            // arithmetic exprs — logical + cmp ops at this level are
+            // handled by the surrounding `parse_or` / `parse_and` /
+            // `parse_cmp` themselves, not nested inside the operand.
+            let left = self.parse_add()?;
             self.skip_ws();
             let op = if self.eat(b"==") {
                 Some(CmpOp::Eq)
@@ -882,16 +973,211 @@ pub mod expr_parser {
             };
             match op {
                 Some(op) => {
-                    let right = self.parse_postfix_expr()?;
+                    let right = self.parse_add()?;
                     Ok(FilterNode::Cmp { left, op, right })
                 }
-                None => Ok(FilterNode::Truthy { expr: left }),
+                None => Ok(match left {
+                    Expr::Call {
+                        receiver: Some(r),
+                        name,
+                        args,
+                    } => FilterNode::Call {
+                        receiver: *r,
+                        name,
+                        args,
+                    },
+                    // Free function call at filter root (`hasTag("x")`).
+                    // Surface as a Call against `note` so the evaluator
+                    // can dispatch on `name`.
+                    Expr::Call {
+                        receiver: None,
+                        name,
+                        args,
+                    } => FilterNode::Call {
+                        receiver: Expr::NoteProp {
+                            name: String::new(),
+                        },
+                        name,
+                        args,
+                    },
+                    other => FilterNode::Truthy { expr: other },
+                }),
             }
         }
 
-        /// Parse a postfix expression that may also produce a Call as
-        /// a FilterNode (when followed by `()`).
-        fn parse_postfix(&mut self) -> Result<PostfixOut, BaseParseError> {
+        /// Top-level expression. Full precedence ladder mirroring
+        /// JavaScript (which Obsidian's bases-language follows):
+        ///   `or → and → unary-not → cmp → add → mul → unary-neg → postfix → primary`.
+        ///
+        /// The same operators also appear at the *filter* level via
+        /// `parse_or`/`parse_and`/`parse_not`/`parse_cmp` — those
+        /// produce `FilterNode`s; this ladder produces `Expr`s for
+        /// use inside calls / args / arithmetic.
+        fn parse_expr(&mut self) -> Result<Expr, BaseParseError> {
+            self.parse_expr_or()
+        }
+
+        fn parse_expr_or(&mut self) -> Result<Expr, BaseParseError> {
+            let mut left = self.parse_expr_and()?;
+            while self.eat_logical_or() {
+                let right = self.parse_expr_and()?;
+                left = Expr::Binary {
+                    op: BinOp::Or,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+            Ok(left)
+        }
+
+        fn parse_expr_and(&mut self) -> Result<Expr, BaseParseError> {
+            let mut left = self.parse_expr_not()?;
+            while self.eat_logical_and() {
+                let right = self.parse_expr_not()?;
+                left = Expr::Binary {
+                    op: BinOp::And,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+            Ok(left)
+        }
+
+        fn parse_expr_not(&mut self) -> Result<Expr, BaseParseError> {
+            self.skip_ws();
+            if self.peek() == Some(b'!') && self.src.get(self.pos + 1) != Some(&b'=') {
+                self.pos += 1;
+                let arg = self.parse_expr_not()?;
+                return Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    arg: Box::new(arg),
+                });
+            }
+            if self.eat_keyword(b"not") {
+                let arg = self.parse_expr_not()?;
+                return Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    arg: Box::new(arg),
+                });
+            }
+            self.parse_expr_cmp()
+        }
+
+        fn parse_expr_cmp(&mut self) -> Result<Expr, BaseParseError> {
+            let left = self.parse_add()?;
+            self.skip_ws();
+            let op = if self.src[self.pos..].starts_with(b"==") {
+                self.pos += 2;
+                Some(BinOp::Eq)
+            } else if self.src[self.pos..].starts_with(b"!=") {
+                self.pos += 2;
+                Some(BinOp::Neq)
+            } else if self.src[self.pos..].starts_with(b"<=") {
+                self.pos += 2;
+                Some(BinOp::Le)
+            } else if self.src[self.pos..].starts_with(b">=") {
+                self.pos += 2;
+                Some(BinOp::Ge)
+            } else if self.peek() == Some(b'<') {
+                self.pos += 1;
+                Some(BinOp::Lt)
+            } else if self.peek() == Some(b'>') {
+                self.pos += 1;
+                Some(BinOp::Gt)
+            } else {
+                None
+            };
+            match op {
+                Some(op) => {
+                    let right = self.parse_add()?;
+                    Ok(Expr::Binary {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    })
+                }
+                None => Ok(left),
+            }
+        }
+
+        fn parse_add(&mut self) -> Result<Expr, BaseParseError> {
+            let mut left = self.parse_mul()?;
+            loop {
+                self.skip_ws();
+                let op = if self.peek() == Some(b'+') {
+                    self.pos += 1;
+                    BinOp::Add
+                } else if self.peek() == Some(b'-') {
+                    // Distinguish `a - b` from `-b`. We're past the
+                    // unary site, so a bare `-` here is subtraction.
+                    self.pos += 1;
+                    BinOp::Sub
+                } else {
+                    break;
+                };
+                let right = self.parse_mul()?;
+                left = Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+            Ok(left)
+        }
+
+        fn parse_mul(&mut self) -> Result<Expr, BaseParseError> {
+            let mut left = self.parse_unary()?;
+            loop {
+                self.skip_ws();
+                let op = match self.peek() {
+                    Some(b'*') => {
+                        self.pos += 1;
+                        BinOp::Mul
+                    }
+                    Some(b'/') => {
+                        self.pos += 1;
+                        BinOp::Div
+                    }
+                    Some(b'%') => {
+                        self.pos += 1;
+                        BinOp::Rem
+                    }
+                    _ => break,
+                };
+                let right = self.parse_unary()?;
+                left = Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+            Ok(left)
+        }
+
+        fn parse_unary(&mut self) -> Result<Expr, BaseParseError> {
+            self.skip_ws();
+            if self.peek() == Some(b'-')
+                && self
+                    .src
+                    .get(self.pos + 1)
+                    .map(|c| !c.is_ascii_digit())
+                    .unwrap_or(false)
+            {
+                self.pos += 1;
+                let arg = self.parse_unary()?;
+                return Ok(Expr::Unary {
+                    op: UnaryOp::Neg,
+                    arg: Box::new(arg),
+                });
+            }
+            self.parse_postfix()
+        }
+
+        /// Parse a postfix expression — a primary followed by any
+        /// chain of `.prop` accesses and `.method(args)` calls. Calls
+        /// return `Expr::Call`, so they're usable in any expression
+        /// context (args, RHS, arithmetic).
+        fn parse_postfix(&mut self) -> Result<Expr, BaseParseError> {
             let mut expr = self.parse_primary()?;
             loop {
                 self.skip_ws();
@@ -902,16 +1188,17 @@ pub mod expr_parser {
                     if self.peek() == Some(b'(') {
                         self.pos += 1;
                         let args = self.parse_args()?;
-                        // Function call. Return as a FilterNode::Call
-                        // wrapped in PostfixOut::Call.
-                        return Ok(PostfixOut::Call {
-                            receiver: expr,
+                        expr = Expr::Call {
+                            receiver: Some(Box::new(expr)),
                             name: ident,
                             args,
-                        });
+                        };
                     } else {
                         // Property access — fold into the existing
-                        // identifier path.
+                        // identifier path when the receiver carries
+                        // one. Calls / arbitrary exprs become a Call
+                        // with `name = "<prop>"` and zero args so the
+                        // chain stays representable.
                         expr = match expr {
                             Expr::FileProp { name } => Expr::FileProp {
                                 name: join_path(&name, &ident),
@@ -922,8 +1209,10 @@ pub mod expr_parser {
                             Expr::FormulaRef { name } => Expr::FormulaRef {
                                 name: join_path(&name, &ident),
                             },
-                            other => Expr::NoteProp {
-                                name: join_path(expr_root_name(&other), &ident),
+                            other => Expr::Call {
+                                receiver: Some(Box::new(other)),
+                                name: ident,
+                                args: Vec::new(),
                             },
                         };
                     }
@@ -931,18 +1220,7 @@ pub mod expr_parser {
                     break;
                 }
             }
-            Ok(PostfixOut::Expr(expr))
-        }
-
-        /// Like parse_postfix but always returns an Expr — for use on
-        /// the RHS of a comparison.
-        fn parse_postfix_expr(&mut self) -> Result<Expr, BaseParseError> {
-            match self.parse_postfix()? {
-                PostfixOut::Expr(e) => Ok(e),
-                PostfixOut::Call { .. } => Err(BaseParseError::Expr(
-                    "function call not allowed on rhs of comparison".into(),
-                )),
-            }
+            Ok(expr)
         }
 
         fn parse_args(&mut self) -> Result<Vec<Expr>, BaseParseError> {
@@ -953,7 +1231,7 @@ pub mod expr_parser {
                 return Ok(out);
             }
             loop {
-                let e = self.parse_postfix_expr()?;
+                let e = self.parse_expr()?;
                 out.push(e);
                 self.skip_ws();
                 if self.eat(b",") {
@@ -973,16 +1251,13 @@ pub mod expr_parser {
                 Some(b'"') | Some(b'\'') => self.parse_string(),
                 Some(b'(') => {
                     self.pos += 1;
-                    // Sub-expressions in primary position are
-                    // restricted to plain Exprs (no AND/OR) — Bases
-                    // doesn't actually need grouping here.
-                    let e = self.parse_postfix_expr()?;
+                    let e = self.parse_expr()?;
                     if !self.eat(b")") {
                         return Err(BaseParseError::Expr("expected )".into()));
                     }
                     Ok(e)
                 }
-                Some(c) if c.is_ascii_digit() || c == b'-' => self.parse_number(),
+                Some(c) if c.is_ascii_digit() => self.parse_number(),
                 Some(c) if is_ident_start(c) => {
                     let ident = self.parse_ident()?;
                     match ident.as_str() {
@@ -995,7 +1270,22 @@ pub mod expr_parser {
                         "null" => Ok(Expr::Literal {
                             value: serde_json::Value::Null,
                         }),
-                        _ => Ok(expr_from_ident(ident)),
+                        "this" => Ok(Expr::This),
+                        _ => {
+                            // `ident(` → free function call.
+                            self.skip_ws();
+                            if self.peek() == Some(b'(') {
+                                self.pos += 1;
+                                let args = self.parse_args()?;
+                                Ok(Expr::Call {
+                                    receiver: None,
+                                    name: ident,
+                                    args,
+                                })
+                            } else {
+                                Ok(expr_from_ident(ident))
+                            }
+                        }
                     }
                 }
                 Some(c) => Err(BaseParseError::Expr(format!(
@@ -1003,6 +1293,48 @@ pub mod expr_parser {
                     c as char, self.pos
                 ))),
                 None => Err(BaseParseError::Expr("unexpected end of input".into())),
+            }
+        }
+
+        /// `||` literal or the bare `or` keyword (Obsidian-style).
+        /// Keyword form must be followed by a non-ident-continue byte
+        /// so we don't tear into identifiers like `order:`.
+        fn eat_logical_or(&mut self) -> bool {
+            self.skip_ws();
+            if self.src[self.pos..].starts_with(b"||") {
+                self.pos += 2;
+                return true;
+            }
+            self.eat_keyword(b"or")
+        }
+
+        fn eat_logical_and(&mut self) -> bool {
+            self.skip_ws();
+            if self.src[self.pos..].starts_with(b"&&") {
+                self.pos += 2;
+                return true;
+            }
+            self.eat_keyword(b"and")
+        }
+
+        /// Consume `kw` iff it's at the cursor AND the next byte is
+        /// not an ident-continue. Avoids mis-eating prefixes of real
+        /// identifiers (`order`, `note`, etc).
+        fn eat_keyword(&mut self, kw: &[u8]) -> bool {
+            self.skip_ws();
+            if !self.src[self.pos..].starts_with(kw) {
+                return false;
+            }
+            match self.src.get(self.pos + kw.len()) {
+                None => {
+                    self.pos += kw.len();
+                    true
+                }
+                Some(&c) if !is_ident_continue(c) => {
+                    self.pos += kw.len();
+                    true
+                }
+                _ => false,
             }
         }
 
@@ -1084,15 +1416,6 @@ pub mod expr_parser {
         }
     }
 
-    enum PostfixOut {
-        Expr(Expr),
-        Call {
-            receiver: Expr,
-            name: String,
-            args: Vec<Expr>,
-        },
-    }
-
     fn is_ident_start(c: u8) -> bool {
         c.is_ascii_alphabetic() || c == b'_'
     }
@@ -1124,13 +1447,6 @@ pub mod expr_parser {
             ident.to_string()
         } else {
             format!("{prefix}.{ident}")
-        }
-    }
-
-    fn expr_root_name(e: &Expr) -> &str {
-        match e {
-            Expr::FileProp { name } | Expr::NoteProp { name } | Expr::FormulaRef { name } => name,
-            Expr::Literal { .. } => "",
         }
     }
 }
@@ -1302,7 +1618,7 @@ filters:
     #[test]
     fn all_view_kinds_parse() {
         let p = parse(REP_BASE).unwrap();
-        let kinds: Vec<ViewKind> = p.views.iter().map(|v| v.kind).collect();
+        let kinds: Vec<ViewKind> = p.views.iter().map(|v| v.kind.clone()).collect();
         assert!(kinds.contains(&ViewKind::Table));
         assert!(kinds.contains(&ViewKind::Board));
         assert!(kinds.contains(&ViewKind::Gallery));
@@ -1332,6 +1648,18 @@ filters:
 pub struct BaseRow {
     pub page_id: uuid::Uuid,
     pub basename: String,
+    /// Vault-relative path with extension (e.g. `Music/Charts.md`).
+    /// Empty when unknown.
+    pub path: String,
+    /// Vault-relative parent folder; empty at root or when unknown.
+    pub folder: String,
+    /// File extension without the leading dot (e.g. `md`). Empty
+    /// when unknown.
+    pub ext: String,
+    /// Union of frontmatter `tags` and inline `#tag` markers. Used
+    /// by `file.tags` lookups so `.contains("chart")` works the
+    /// way Obsidian does.
+    pub tags: Vec<String>,
     /// Top-level frontmatter map. Empty if the page has no
     /// frontmatter or it failed to decode.
     pub frontmatter: indexmap::IndexMap<String, serde_json::Value>,
@@ -1339,6 +1667,8 @@ pub struct BaseRow {
 
 impl BaseRow {
     /// Build from a `(page_id, basename, frontmatter_json)` triple.
+    /// Path/folder/ext default to empty; tags are inferred from the
+    /// frontmatter `tags` (or `tag`) key when present.
     pub fn from_parts(
         page_id: uuid::Uuid,
         basename: impl Into<String>,
@@ -1346,30 +1676,82 @@ impl BaseRow {
     ) -> Self {
         let frontmatter: indexmap::IndexMap<String, serde_json::Value> =
             serde_json::from_str(frontmatter_json).unwrap_or_default();
+        let tags = tags_from_frontmatter(&frontmatter);
         Self {
             page_id,
             basename: basename.into(),
+            path: String::new(),
+            folder: String::new(),
+            ext: String::new(),
+            tags,
+            frontmatter,
+        }
+    }
+
+    /// Enriched constructor used by the vault bridge to populate
+    /// `file.path` / `file.folder` / `file.ext` / `file.tags`
+    /// lookups. `extra_tags` is merged into whatever's derived from
+    /// the frontmatter (dedup, order-preserving) so inline `#tag`
+    /// markers participate in `file.tags.contains(...)` filters.
+    pub fn from_parts_full(
+        page_id: uuid::Uuid,
+        basename: impl Into<String>,
+        rel_path: impl Into<String>,
+        folder: impl Into<String>,
+        ext: impl Into<String>,
+        frontmatter_json: &str,
+        extra_tags: &[String],
+    ) -> Self {
+        let frontmatter: indexmap::IndexMap<String, serde_json::Value> =
+            serde_json::from_str(frontmatter_json).unwrap_or_default();
+        let mut tags = tags_from_frontmatter(&frontmatter);
+        for t in extra_tags {
+            if !tags.iter().any(|x| x == t) {
+                tags.push(t.clone());
+            }
+        }
+        Self {
+            page_id,
+            basename: basename.into(),
+            path: rel_path.into(),
+            folder: folder.into(),
+            ext: ext.into(),
+            tags,
             frontmatter,
         }
     }
 
     fn lookup(&self, expr: &Expr) -> serde_json::Value {
-        match expr {
-            Expr::FileProp { name } if name == "name" => {
-                serde_json::Value::String(self.basename.clone())
+        eval_expr(expr, self)
+    }
+}
+
+fn tags_from_frontmatter(fm: &indexmap::IndexMap<String, serde_json::Value>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        let t = s.trim().trim_start_matches('#').to_string();
+        if !t.is_empty() && !out.iter().any(|x| x == &t) {
+            out.push(t);
+        }
+    };
+    for key in ["tags", "tag"] {
+        match fm.get(key) {
+            Some(serde_json::Value::Array(arr)) => {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        push(s);
+                    }
+                }
             }
-            Expr::NoteProp { name } => self
-                .frontmatter
-                .get(name)
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
-            Expr::Literal { value } => value.clone(),
-            // Unsupported in Phase 6: FileProp other than name,
-            // FormulaRef. Return null so comparisons fail
-            // predictably rather than panicking.
-            _ => serde_json::Value::Null,
+            Some(serde_json::Value::String(s)) => {
+                for piece in s.split([',', ' ']) {
+                    push(piece);
+                }
+            }
+            _ => {}
         }
     }
+    out
 }
 
 /// Result of running a view: rows grouped (or one bucket when no
@@ -1455,23 +1837,28 @@ fn filter_matches(node: &FilterNode, row: &BaseRow) -> bool {
         FilterNode::And { args } => args.iter().all(|n| filter_matches(n, row)),
         FilterNode::Or { args } => args.iter().any(|n| filter_matches(n, row)),
         FilterNode::Not { arg } => !filter_matches(arg, row),
-        FilterNode::Truthy { expr } => is_truthy(&row.lookup(expr)),
+        FilterNode::Truthy { expr } => is_truthy(&eval_expr(expr, row)),
         FilterNode::Cmp { left, op, right } => {
-            let l = row.lookup(left);
-            let r = row.lookup(right);
+            let l = eval_expr(left, row);
+            let r = eval_expr(right, row);
             cmp_values(&l, *op, &r)
         }
-        // Call (hasTag, hasLink, contains, …) — Phase 6 stub. The
-        // `contains` case maps to the Cmp::Contains op already;
-        // other Calls return false so they don't accidentally let
-        // everything through.
-        FilterNode::Call { name, args, .. } if name == "contains" && args.len() == 1 => {
-            let l = row.lookup(&Expr::NoteProp {
-                name: String::new(),
-            });
-            cmp_values(&l, CmpOp::Contains, &row.lookup(&args[0]))
+        // Unified dispatch — wrap into `Expr::Call` and reuse the
+        // expression evaluator so `contains` / `hasTag` /
+        // `startsWith` / … behave identically whether they appear
+        // as a filter root or inside a nested expression.
+        FilterNode::Call {
+            receiver,
+            name,
+            args,
+        } => {
+            let call = Expr::Call {
+                receiver: Some(Box::new(receiver.clone())),
+                name: name.clone(),
+                args: args.clone(),
+            };
+            is_truthy(&eval_expr(&call, row))
         }
-        FilterNode::Call { .. } => false,
     }
 }
 
@@ -1488,6 +1875,22 @@ fn is_truthy(v: &serde_json::Value) -> bool {
 
 fn cmp_values(l: &serde_json::Value, op: CmpOp, r: &serde_json::Value) -> bool {
     use serde_json::Value as V;
+    match op {
+        CmpOp::Contains => return value_contains(l, r),
+        CmpOp::StartsWith => {
+            if let (Some(a), Some(b)) = (l.as_str(), r.as_str()) {
+                return a.starts_with(b);
+            }
+            return false;
+        }
+        CmpOp::EndsWith => {
+            if let (Some(a), Some(b)) = (l.as_str(), r.as_str()) {
+                return a.ends_with(b);
+            }
+            return false;
+        }
+        _ => {}
+    }
     match (l, r) {
         (V::String(a), V::String(b)) => match op {
             CmpOp::Eq => a == b,
@@ -1496,9 +1899,7 @@ fn cmp_values(l: &serde_json::Value, op: CmpOp, r: &serde_json::Value) -> bool {
             CmpOp::Le => a <= b,
             CmpOp::Gt => a > b,
             CmpOp::Ge => a >= b,
-            CmpOp::Contains => a.contains(b.as_str()),
-            CmpOp::StartsWith => a.starts_with(b.as_str()),
-            CmpOp::EndsWith => a.ends_with(b.as_str()),
+            _ => false,
         },
         (V::Number(a), V::Number(b)) => {
             let af = a.as_f64().unwrap_or(0.0);
@@ -1513,10 +1914,362 @@ fn cmp_values(l: &serde_json::Value, op: CmpOp, r: &serde_json::Value) -> bool {
                 _ => false,
             }
         }
-        (V::Bool(a), V::Bool(b)) => matches!(op, CmpOp::Eq) && a == b,
-        // Mixed types: only equality on null vs null is meaningful.
+        (V::Bool(a), V::Bool(b)) => match op {
+            CmpOp::Eq => a == b,
+            CmpOp::Neq => a != b,
+            _ => false,
+        },
         (V::Null, V::Null) => matches!(op, CmpOp::Eq),
+        // Any other comparison involving Null is false except !=.
+        (V::Null, _) | (_, V::Null) => matches!(op, CmpOp::Neq),
         _ => false,
+    }
+}
+
+fn value_contains(haystack: &serde_json::Value, needle: &serde_json::Value) -> bool {
+    use serde_json::Value as V;
+    match haystack {
+        V::String(s) => match needle {
+            V::String(n) => s.contains(n.as_str()),
+            _ => false,
+        },
+        V::Array(arr) => arr.iter().any(|v| v == needle),
+        _ => false,
+    }
+}
+
+// ── Expression evaluator ─────────────────────────────────────────────
+//
+// Walks the AST and produces a `serde_json::Value`. Unknown call
+// names / unsupported constructs return `Value::Null` (never panic)
+// — the bases language is open-ended via plugin extensions and we
+// don't want one stray identifier to drop a whole view to zero rows.
+
+fn eval_expr(expr: &Expr, row: &BaseRow) -> serde_json::Value {
+    use serde_json::Value as V;
+    match expr {
+        Expr::Literal { value } => value.clone(),
+        // `this` — full templated bases (Project Hierarchy, etc.)
+        // aren't wired up yet. Returning Null lets `this.up == foo`
+        // style predicates parse-and-degrade-to-empty cleanly.
+        // FUTURE: thread "current page" into BaseRow and resolve.
+        Expr::This => V::Null,
+        Expr::FileProp { name } => eval_file_prop(name, row),
+        Expr::NoteProp { name } => eval_note_prop(name, row),
+        // FUTURE: formula support — needs a second pass that parses
+        // `formula.expression` strings into Exprs and evaluates them
+        // with the surrounding row. Returning Null keeps comparisons
+        // false rather than panicking.
+        Expr::FormulaRef { .. } => V::Null,
+        Expr::Unary { op, arg } => {
+            let v = eval_expr(arg, row);
+            match op {
+                UnaryOp::Neg => match v.as_f64() {
+                    Some(f) => json_num(-f),
+                    None => V::Null,
+                },
+                UnaryOp::Not => V::Bool(!is_truthy(&v)),
+            }
+        }
+        Expr::Binary { op, left, right } => match op {
+            BinOp::And => {
+                let l = eval_expr(left, row);
+                if !is_truthy(&l) {
+                    return V::Bool(false);
+                }
+                V::Bool(is_truthy(&eval_expr(right, row)))
+            }
+            BinOp::Or => {
+                let l = eval_expr(left, row);
+                if is_truthy(&l) {
+                    return V::Bool(true);
+                }
+                V::Bool(is_truthy(&eval_expr(right, row)))
+            }
+            BinOp::Eq => V::Bool(cmp_values(
+                &eval_expr(left, row),
+                CmpOp::Eq,
+                &eval_expr(right, row),
+            )),
+            BinOp::Neq => V::Bool(cmp_values(
+                &eval_expr(left, row),
+                CmpOp::Neq,
+                &eval_expr(right, row),
+            )),
+            BinOp::Lt => V::Bool(cmp_values(
+                &eval_expr(left, row),
+                CmpOp::Lt,
+                &eval_expr(right, row),
+            )),
+            BinOp::Le => V::Bool(cmp_values(
+                &eval_expr(left, row),
+                CmpOp::Le,
+                &eval_expr(right, row),
+            )),
+            BinOp::Gt => V::Bool(cmp_values(
+                &eval_expr(left, row),
+                CmpOp::Gt,
+                &eval_expr(right, row),
+            )),
+            BinOp::Ge => V::Bool(cmp_values(
+                &eval_expr(left, row),
+                CmpOp::Ge,
+                &eval_expr(right, row),
+            )),
+            BinOp::Add => {
+                let l = eval_expr(left, row);
+                let r = eval_expr(right, row);
+                // String concat if either side is a string (matches
+                // JS/Obsidian); otherwise numeric addition.
+                if matches!(l, V::String(_)) || matches!(r, V::String(_)) {
+                    V::String(format!("{}{}", value_to_string(&l), value_to_string(&r)))
+                } else {
+                    arith(&l, &r, |a, b| a + b)
+                }
+            }
+            BinOp::Sub => arith_eval(left, right, row, |a, b| a - b),
+            BinOp::Mul => arith_eval(left, right, row, |a, b| a * b),
+            BinOp::Div => arith_eval(left, right, row, |a, b| a / b),
+            BinOp::Rem => arith_eval(left, right, row, |a, b| a % b),
+        },
+        Expr::Call {
+            receiver,
+            name,
+            args,
+        } => eval_call(receiver.as_deref(), name, args, row),
+    }
+}
+
+fn arith_eval(
+    left: &Expr,
+    right: &Expr,
+    row: &BaseRow,
+    op: impl FnOnce(f64, f64) -> f64,
+) -> serde_json::Value {
+    arith(&eval_expr(left, row), &eval_expr(right, row), op)
+}
+
+fn arith(
+    l: &serde_json::Value,
+    r: &serde_json::Value,
+    op: impl FnOnce(f64, f64) -> f64,
+) -> serde_json::Value {
+    match (l.as_f64(), r.as_f64()) {
+        (Some(a), Some(b)) => json_num(op(a, b)),
+        _ => serde_json::Value::Null,
+    }
+}
+
+fn json_num(f: f64) -> serde_json::Value {
+    serde_json::Number::from_f64(f)
+        .map(serde_json::Value::Number)
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn value_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn eval_file_prop(name: &str, row: &BaseRow) -> serde_json::Value {
+    use serde_json::Value as V;
+    match name {
+        // `file` itself with no member access — used only as a
+        // receiver for method calls; return Null so a bare `file`
+        // doesn't accidentally pass a Truthy filter.
+        "" => V::Null,
+        "name" | "basename" => V::String(row.basename.clone()),
+        "path" => {
+            if row.path.is_empty() {
+                V::Null
+            } else {
+                V::String(row.path.clone())
+            }
+        }
+        "folder" => V::String(row.folder.clone()),
+        "ext" => {
+            if row.ext.is_empty() {
+                V::Null
+            } else {
+                V::String(row.ext.clone())
+            }
+        }
+        "tags" => V::Array(row.tags.iter().map(|t| V::String(t.clone())).collect()),
+        // FUTURE: file.size / file.mtime / file.ctime / file.links /
+        // file.embeds — we don't carry that data on `BaseRow` yet.
+        _ => V::Null,
+    }
+}
+
+fn eval_note_prop(name: &str, row: &BaseRow) -> serde_json::Value {
+    if name.is_empty() {
+        // bare `note` — used as a method receiver; not a value on
+        // its own.
+        return serde_json::Value::Null;
+    }
+    // Support dotted paths (`note.foo.bar` → walk Object).
+    let mut parts = name.split('.');
+    let head = match parts.next() {
+        Some(h) => h,
+        None => return serde_json::Value::Null,
+    };
+    let mut cur = row
+        .frontmatter
+        .get(head)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    for seg in parts {
+        cur = match cur {
+            serde_json::Value::Object(map) => {
+                map.get(seg).cloned().unwrap_or(serde_json::Value::Null)
+            }
+            _ => return serde_json::Value::Null,
+        };
+    }
+    cur
+}
+
+fn eval_call(
+    receiver: Option<&Expr>,
+    name: &str,
+    args: &[Expr],
+    row: &BaseRow,
+) -> serde_json::Value {
+    use serde_json::Value as V;
+    match receiver {
+        Some(recv) => {
+            let recv_v = eval_expr(recv, row);
+            let arg_vals: Vec<V> = args.iter().map(|a| eval_expr(a, row)).collect();
+            match name {
+                "contains" if arg_vals.len() == 1 => V::Bool(value_contains(&recv_v, &arg_vals[0])),
+                "startsWith" if arg_vals.len() == 1 => {
+                    match (recv_v.as_str(), arg_vals[0].as_str()) {
+                        (Some(a), Some(b)) => V::Bool(a.starts_with(b)),
+                        _ => V::Bool(false),
+                    }
+                }
+                "endsWith" if arg_vals.len() == 1 => {
+                    match (recv_v.as_str(), arg_vals[0].as_str()) {
+                        (Some(a), Some(b)) => V::Bool(a.ends_with(b)),
+                        _ => V::Bool(false),
+                    }
+                }
+                "isEmpty" => V::Bool(match &recv_v {
+                    V::Null => true,
+                    V::String(s) => s.is_empty(),
+                    V::Array(a) => a.is_empty(),
+                    V::Object(m) => m.is_empty(),
+                    _ => false,
+                }),
+                "length" => match &recv_v {
+                    V::String(s) => json_num(s.chars().count() as f64),
+                    V::Array(a) => json_num(a.len() as f64),
+                    _ => V::Null,
+                },
+                "hasTag" if arg_vals.len() == 1 => {
+                    // Receiver is typically `file` / `note` /
+                    // `file.tags`. Normalize to an array of strings
+                    // and contains-check the needle, stripping any
+                    // leading `#` on either side.
+                    let tags = receiver_tags(&recv_v, row);
+                    let needle = match arg_vals[0].as_str() {
+                        Some(s) => s.trim_start_matches('#').to_string(),
+                        None => return V::Bool(false),
+                    };
+                    V::Bool(tags.iter().any(|t| t == &needle))
+                }
+                "floor" => recv_v
+                    .as_f64()
+                    .map(|f| json_num(f.floor()))
+                    .unwrap_or(V::Null),
+                "round" => recv_v
+                    .as_f64()
+                    .map(|f| json_num(f.round()))
+                    .unwrap_or(V::Null),
+                "ceil" => recv_v
+                    .as_f64()
+                    .map(|f| json_num(f.ceil()))
+                    .unwrap_or(V::Null),
+                // FUTURE: real date/number formatting via chrono +
+                // a locale-aware number formatter. v1 = pass-through
+                // stringification.
+                "format" => V::String(value_to_string(&recv_v)),
+                // FUTURE: proper date truncation / coercion.
+                "date" => recv_v,
+                // FUTURE: lambda-style higher-order calls. Args are
+                // mini-expressions referencing an implicit element;
+                // we'd need a scoped row binding to evaluate them.
+                "filter" | "map" | "reduce" => V::Null,
+                _ => V::Null,
+            }
+        }
+        None => {
+            let arg_vals: Vec<V> = args.iter().map(|a| eval_expr(a, row)).collect();
+            match name {
+                "today" | "now" => {
+                    // ISO-8601 UTC. Tests that need determinism can
+                    // avoid these by sticking to scalar filters.
+                    // FUTURE: inject a `Clock` trait for deterministic
+                    // tests if/when formula support lands.
+                    V::String(chrono::Utc::now().to_rfc3339())
+                }
+                "date" if arg_vals.len() == 1 => arg_vals.into_iter().next().unwrap(),
+                "number" if arg_vals.len() == 1 => match &arg_vals[0] {
+                    V::Number(_) => arg_vals.into_iter().next().unwrap(),
+                    V::String(s) => s.parse::<f64>().map(json_num).unwrap_or(V::Null),
+                    V::Bool(b) => json_num(if *b { 1.0 } else { 0.0 }),
+                    _ => V::Null,
+                },
+                "list" => match arg_vals.as_slice() {
+                    [V::Array(_)] => arg_vals.into_iter().next().unwrap(),
+                    _ => V::Array(arg_vals),
+                },
+                "min" if arg_vals.len() == 2 => num_pair(&arg_vals[0], &arg_vals[1])
+                    .map(|(a, b)| json_num(a.min(b)))
+                    .unwrap_or(V::Null),
+                "max" if arg_vals.len() == 2 => num_pair(&arg_vals[0], &arg_vals[1])
+                    .map(|(a, b)| json_num(a.max(b)))
+                    .unwrap_or(V::Null),
+                "if" if args.len() == 3 => {
+                    // Lazy: only evaluate the chosen branch.
+                    if is_truthy(&eval_expr(&args[0], row)) {
+                        eval_expr(&args[1], row)
+                    } else {
+                        eval_expr(&args[2], row)
+                    }
+                }
+                "hasTag" if arg_vals.len() == 1 => {
+                    let needle = match arg_vals[0].as_str() {
+                        Some(s) => s.trim_start_matches('#').to_string(),
+                        None => return V::Bool(false),
+                    };
+                    V::Bool(row.tags.iter().any(|t| t == &needle))
+                }
+                _ => V::Null,
+            }
+        }
+    }
+}
+
+fn num_pair(a: &serde_json::Value, b: &serde_json::Value) -> Option<(f64, f64)> {
+    Some((a.as_f64()?, b.as_f64()?))
+}
+
+fn receiver_tags(recv: &serde_json::Value, row: &BaseRow) -> Vec<String> {
+    use serde_json::Value as V;
+    match recv {
+        V::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.trim_start_matches('#').to_string()))
+            .collect(),
+        // Bare `file` / `note` evaluate to Null in our model; fall
+        // back to the row's union tag set.
+        V::Null => row.tags.clone(),
+        V::String(s) => vec![s.trim_start_matches('#').to_string()],
+        _ => Vec::new(),
     }
 }
 
@@ -1699,5 +2452,100 @@ mod executor_tests {
             .map(|r| r.basename.as_str())
             .collect();
         assert_eq!(names, vec!["c", "b", "a"]);
+    }
+
+    #[test]
+    fn contains_filters_by_tag() {
+        // Mirrors a real Charts.base: filter pages whose
+        // `file.tags` array contains the literal `"chart"`.
+        let base = ParsedBase {
+            global_filter: FilterNode::None,
+            formulas: vec![],
+            properties: vec![],
+            views: vec![ViewSpec {
+                kind: ViewKind::List,
+                name: "All Charts".into(),
+                filter: Some(FilterNode::And {
+                    args: vec![FilterNode::Call {
+                        receiver: Expr::FileProp {
+                            name: "tags".into(),
+                        },
+                        name: "contains".into(),
+                        args: vec![Expr::Literal {
+                            value: serde_json::json!("chart"),
+                        }],
+                    }],
+                }),
+                order: vec![],
+                sort: vec![],
+                limit: None,
+                group_by: None,
+                extras: serde_json::Value::Null,
+            }],
+        };
+        let rows = vec![
+            row("Alpha", serde_json::json!({ "tags": ["chart"] })),
+            row("Beta", serde_json::json!({ "tags": ["demo"] })),
+            row("Gamma", serde_json::json!({ "tags": [] })),
+        ];
+        let out = execute_view(&base, &base.views[0], rows);
+        assert_eq!(out.groups.len(), 1);
+        assert_eq!(out.groups[0].1.len(), 1);
+        assert_eq!(out.groups[0].1[0].basename, "Alpha");
+    }
+
+    #[test]
+    fn string_concat_via_add() {
+        let r = row("x", serde_json::json!({}));
+        let expr = Expr::Binary {
+            op: BinOp::Add,
+            left: Box::new(Expr::Literal {
+                value: serde_json::json!("a"),
+            }),
+            right: Box::new(Expr::Literal {
+                value: serde_json::json!("b"),
+            }),
+        };
+        assert_eq!(eval_expr(&expr, &r), serde_json::json!("ab"));
+    }
+
+    #[test]
+    fn boolean_short_circuit() {
+        let r = row("x", serde_json::json!({}));
+        // `false && undefined_thing()` — RHS would eval to Null,
+        // but short-circuit returns Bool(false) before touching it.
+        let expr = Expr::Binary {
+            op: BinOp::And,
+            left: Box::new(Expr::Literal {
+                value: serde_json::json!(false),
+            }),
+            right: Box::new(Expr::Call {
+                receiver: None,
+                name: "undefined_thing".into(),
+                args: vec![],
+            }),
+        };
+        assert_eq!(eval_expr(&expr, &r), serde_json::json!(false));
+    }
+
+    #[test]
+    fn if_returns_branch() {
+        let r = row("x", serde_json::json!({}));
+        let expr = Expr::Call {
+            receiver: None,
+            name: "if".into(),
+            args: vec![
+                Expr::Literal {
+                    value: serde_json::json!(true),
+                },
+                Expr::Literal {
+                    value: serde_json::json!("yes"),
+                },
+                Expr::Literal {
+                    value: serde_json::json!("no"),
+                },
+            ],
+        };
+        assert_eq!(eval_expr(&expr, &r), serde_json::json!("yes"));
     }
 }
