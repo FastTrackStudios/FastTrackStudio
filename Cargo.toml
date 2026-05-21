@@ -52,6 +52,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 
+# Locally vendored fork of `mermaid-rs-renderer` 0.2.2 with
+# `std::time::Instant` swapped for `web_time::Instant` so the
+# layouter doesn't panic on `wasm32-unknown-unknown`. See
+# `vendor/mermaid-rs-renderer/` for the patch.
+[patch.crates-io]
+mermaid-rs-renderer = { path = "vendor/mermaid-rs-renderer" }
+
 [profile.dev]
 opt-level = 1
 debug = true
