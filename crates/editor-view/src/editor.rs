@@ -1614,6 +1614,30 @@ pub fn Editor(
                 return;
             }
             if !vim_sig.peek().is_inserting() {
+                // `/` in Normal mode should still open the
+                // slash palette — vim doesn't claim it (we
+                // don't ship `/` search), and otherwise the
+                // unconditional preventDefault below would
+                // swallow the key before the contenteditable
+                // sees it. Insert `/` as a Rust transaction
+                // and let the slash-state `use_effect` pick up
+                // the trigger.
+                if !press.ctrl && !press.alt && !press.meta
+                    && press.key == "/" && slash_for_keys.is_some()
+                {
+                    let head = cur.selection.primary().head;
+                    let mut next_vim = vim_sig.peek().clone();
+                    next_vim.mode = editor_vim::Mode::Insert;
+                    vim_sig.set(next_vim);
+                    state.set(cur.update(
+                        TransactionSpec::new()
+                            .changes(Changes::insert(head, "/"))
+                            .selection(Selection::caret(head + 1))
+                            .annotate("origin", "slash-trigger"),
+                    ));
+                    evt.prevent_default();
+                    return;
+                }
                 evt.prevent_default();
                 return;
             }

@@ -587,38 +587,19 @@ section h2 {
     max-width: 100%;
     height: auto;
 }
-.editor-root .md-typst-widget {
-    display: block;
-    margin: 8px 0;
-    padding: 8px;
-    border-radius: 6px;
-    overflow-x: auto;
-    color: inherit;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    cursor: text;
-}
-.editor-root .md-typst-widget svg {
-    max-width: 100%;
-    height: auto;
-    display: block;
-    margin: 0 auto;
-}
-/* Mermaid widget — same surface treatment as Typst (so a doc
-   that mixes both reads consistently), but the rendered SVG
-   carries its own theme colors, so we don't force currentColor
-   on the contents. */
+/* Typst + Mermaid widgets sit inside `.cm-line.md-code-block`
+   which already provides the rounded inset container around
+   the fence — adding our own here would double up the frame.
+   Just position the SVG and clamp its size. */
+.editor-root .md-typst-widget,
 .editor-root .md-mermaid-widget {
     display: block;
-    margin: 8px 0;
-    padding: 12px;
-    border-radius: 6px;
+    padding: 6px 0;
     overflow-x: auto;
     color: inherit;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
     cursor: text;
 }
+.editor-root .md-typst-widget svg,
 .editor-root .md-mermaid-widget svg {
     max-width: 100%;
     height: auto;
