@@ -185,25 +185,38 @@ fn App() -> Element {
                  draft: false\n\
                  author: cody\n\
                  created: 2026-05-20\n\
+                 priority: 3\n\
+                 description: |\n\
+                   Multi-line YAML scalar — used to demo block-\n\
+                   scalar parsing and editing in the Properties\n\
+                   panel above.\n\
                  aliases:\n\
                    - playground\n\
                    - demo doc\n\
                  ---\n\
                  # Welcome to the Editor playground\n\
                  \n\
+                 Setext-style heading too\n\
+                 ========================\n\
+                 \n\
+                 Subtitle via dashes\n\
+                 -------------------\n\
+                 \n\
                  ## Inline styles\n\
                  \n\
                  **bold**, *italic*, ***bold italic***, ~~strikethrough~~, \
-                 ==highlight==, and `inline code`.\n\
+                 ==highlight==, `inline code`, and an inline footnote^[here's the body of an inline footnote].\n\
                  \n\
-                 Links: [Anthropic](https://anthropic.com), \
-                 wikilinks like [[Page Name]], \
-                 tags like #editor #live-preview, \
-                 and footnote refs like this[^1].\n\
+                 Links: standard [Anthropic](https://anthropic.com), \
+                 an autolink <https://obsidian.md>, \
+                 wikilinks `[[Page]]`, `[[Page#Header]]`, `[[Page#^block]]`, `[[Page|alias]]`, \
+                 tags like #editor #live-preview #notes/howto, \
+                 and footnote refs like this[^1]. \
+                 A block id at end of paragraph ^demo-block-id\n\
                  \n\
                  ## Block styles\n\
                  \n\
-                 > Blockquotes look like this.\n\
+                 > Blockquotes are just blockquotes.\n\
                  > Multi-line works too.\n\
                  \n\
                  - Unordered list item\n\
@@ -214,39 +227,83 @@ fn App() -> Element {
                  \n\
                  - [ ] Click the checkbox to toggle\n\
                  - [x] Done\n\
+                 - [/] In progress (custom Tasks-plugin status)\n\
+                 - [>] Forwarded\n\
+                 - [-] Cancelled\n\
                  \n\
-                 > [!note] Callouts\n\
-                 > Callouts share the blockquote syntax — just\n\
-                 > prepend `[!type]` (note, tip, warning, danger,\n\
-                 > quote, success, info, todo, question, …).\n\
+                 ### Callouts (all 13 types)\n\
                  \n\
-                 > [!warning]+ Collapsible\n\
-                 > The `+`/`-` on the type marker is parsed but\n\
-                 > not yet wired to toggling.\n\
+                 > [!note] Note\n\
+                 > Callouts share the blockquote syntax.\n\
                  \n\
-                 | Feature | Status |\n\
-                 |---------|--------|\n\
-                 | Headings | ✅ |\n\
-                 | Tables  | ✅ (this one!) |\n\
-                 | Math    | ✅ Typst |\n\
+                 > [!tip] Tip\n\
+                 > Press `/` anywhere to open the slash-command menu.\n\
                  \n\
-                 Inline math compiles via Typst: $E = m c^2$ and \
+                 > [!warning]+ Collapsible warning\n\
+                 > The `+`/`-` on the type marker controls folded default.\n\
+                 \n\
+                 > [!danger] Danger\n\
+                 > High-stakes call-out style.\n\
+                 \n\
+                 > [!info] Info • > [!todo] Todo • > [!success] Success • > [!question] Question • > [!failure] Failure • > [!bug] Bug • > [!example] Example • > [!quote] Quote — each on its own line in real use.\n\
+                 \n\
+                 ### Table\n\
+                 \n\
+                 | Feature             | Status        | Notes                          |\n\
+                 |---------------------|---------------|--------------------------------|\n\
+                 | Headings (1-6)      | ✅ Mod-1..6   | Mod-0 strips                   |\n\
+                 | Tables              | ✅            | GFM pipe form                  |\n\
+                 | Math (inline+block) | ✅ Typst      | Compiled per-pass via cache    |\n\
+                 | Mermaid             | ✅ pure Rust  | mermaid-rs-renderer            |\n\
+                 | Frontmatter         | ✅ editable   | bool/number/date/list/text     |\n\
+                 | Vim                 | ✅ default-on | C/D/Y / gg / gu/gU/g~ / */#/n  |\n\
+                 | Slash menu          | ✅ `/` opens  | `/callout`, `/typst`, …        |\n\
+                 \n\
+                 ### Math\n\
+                 \n\
+                 Inline math compiles via Typst: $E = m c^2$, and a longer one — \
                  $sum_(i=1)^n i = n(n+1)/2$.\n\
                  \n\
                  $$ integral_0^1 x^2 d x = 1/3 $$\n\
                  \n\
-                 ```typst\n\
-                 = Typst block\n\
+                 ### Typst block\n\
                  \n\
-                 Full Typst documents render in-place:\n\
+                 ```typst\n\
+                 = Typst block heading\n\
+                 \n\
+                 Full Typst documents render in-place.\n\
+                 \n\
                  $ A = mat(1, 2; 3, 4) $\n\
                  ```\n\
                  \n\
-                 Comments like %% this %% hide on focus-away.\n\
+                 ### Mermaid diagram\n\
                  \n\
-                 ---\n\
+                 ```mermaid\n\
+                 flowchart LR\n\
+                   A[Keystroke] --> B{Live preview}\n\
+                   B -->|markdown| C[Decorations]\n\
+                   B -->|math| D[Typst SVG]\n\
+                   B -->|diagram| E[Mermaid SVG]\n\
+                   C --> F[DOM patch]\n\
+                   D --> F\n\
+                   E --> F\n\
+                 ```\n\
                  \n\
-                 ## Code fences with syntax highlighting\n\
+                 ### Editor commands\n\
+                 \n\
+                 - **Mod-B** / **Mod-I** — bold / italic\n\
+                 - **Mod-K** — wrap as `[…](url)`\n\
+                 - **Mod-L** — cycle list marker (none → `-` → `1.` → `- [ ]`)\n\
+                 - **Mod-T** — toggle task on current line\n\
+                 - **Mod-1**..**Mod-6** — heading levels; **Mod-0** strips\n\
+                 - **Mod-E** — toggle reading mode\n\
+                 - **`/`** — open the slash-command palette\n\
+                 \n\
+                 ### Embeds\n\
+                 \n\
+                 Wikilink embed: `![[diagram.png|320]]` (renders an `<img>` when the file resolves).\n\
+                 \n\
+                 ### Code fences (syntax highlighting)\n\
                  \n\
                  ```rust\n\
                  fn greet(name: &str) -> String {\n\
@@ -259,8 +316,17 @@ fn App() -> Element {
                      return f\"Hello, {name}!\"\n\
                  ```\n\
                  \n\
-                 Markers stay visible while your caret is on the span — \
-                 move away and they fade out.",
+                 ```ts\n\
+                 const greet = (name: string) => `Hello, ${name}!`;\n\
+                 ```\n\
+                 \n\
+                 Comments like %% this %% hide on focus-away.\n\
+                 \n\
+                 ---\n\
+                 \n\
+                 [^1]: Footnote definitions live at the bottom of the file.\n\
+                 \n\
+                 Markers stay visible while your caret is on the span — move away and they fade out.",
             )
         });
         EditorState::new(seed)

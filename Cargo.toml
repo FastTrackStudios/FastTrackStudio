@@ -6,6 +6,7 @@ members = [
     "crates/editor-view",
     "crates/editor-vim",
     "crates/editor-typst",
+    "crates/editor-mermaid",
     "crates/editor",
     "examples/playground",
 ]
@@ -25,6 +26,7 @@ editor-syntax = { path = "crates/editor-syntax" }
 editor-view = { path = "crates/editor-view" }
 editor-vim = { path = "crates/editor-vim" }
 editor-typst = { path = "crates/editor-typst" }
+editor-mermaid = { path = "crates/editor-mermaid" }
 editor = { path = "crates/editor" }
 
 # UI

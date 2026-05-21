@@ -31,6 +31,7 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     // full of fresh math doesn't block typing. See `typst`
     // submodule for the budget value and rationale.
     reset_compile_budget();
+    reset_mermaid_budget();
 
     let text = state.doc.to_string();
     // In reading mode, swap the primary selection for one that
@@ -208,6 +209,9 @@ use frontmatter::render_properties_html;
 
 mod typst;
 use typst::{render_typst, reset_compile_budget, TypstKind};
+
+mod mermaid;
+use mermaid::{render_mermaid, reset_compile_budget as reset_mermaid_budget};
 
 pub(crate) fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -537,7 +541,7 @@ fn scan_blocks(
             // code. Skip when the caret is anywhere inside the
             // fence range (so the user sees the raw source while
             // editing).
-            if info.eq_ignore_ascii_case("typst") {
+            if info.eq_ignore_ascii_case("typst") || info.eq_ignore_ascii_case("mermaid") {
                 let body_end = find_fence_close(text, content_start, mc, mlen);
                 let body = &text[content_start..body_end];
                 // Extend the replace range to cover the closing
@@ -552,13 +556,20 @@ fn scan_blocks(
                 if !cursor_touches(primary, fence_range.clone())
                     && !body.trim().is_empty()
                 {
-                    if let Some(svg) = render_typst(TypstKind::Block, body) {
-                        // Click anywhere on the rendered widget
-                        // drops the caret at the start of the
-                        // body so the source comes back for
-                        // editing.
+                    let is_mermaid = info.eq_ignore_ascii_case("mermaid");
+                    let svg = if is_mermaid {
+                        render_mermaid(body)
+                    } else {
+                        render_typst(TypstKind::Block, body)
+                    };
+                    if let Some(svg) = svg {
+                        let class = if is_mermaid {
+                            "md-mermaid-widget"
+                        } else {
+                            "md-typst-widget"
+                        };
                         let html = format!(
-                            r#"<div class="md-typst-widget" data-focus-pos="{pos}">{svg}</div>"#,
+                            r#"<div class="{class}" data-focus-pos="{pos}">{svg}</div>"#,
                             pos = content_start,
                         );
                         out.push(Decoration::replace(fence_range.clone()));
@@ -1909,6 +1920,19 @@ mod tests {
                 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
+    }
+
+    #[test]
+    fn mermaid_fence_recognized() {
+        // Caret past the closing fence so cursor_touches is
+        // false and the widget actually fires.
+        let src = "```mermaid\nflowchart TD\n  A --> B\n```\nx";
+        let s = state(src, src.len() - 1);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-mermaid-widget")));
+        assert!(has_widget);
     }
 
     #[test]
