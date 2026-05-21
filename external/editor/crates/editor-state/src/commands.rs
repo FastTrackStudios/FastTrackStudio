@@ -38,7 +38,10 @@ pub fn toggle_fold(state: &EditorState, range: std::ops::Range<usize>) -> Option
     if let Some(i) = existing {
         folds.remove(i);
     } else {
-        let pos = folds.iter().position(|f| f.start > range.start).unwrap_or(folds.len());
+        let pos = folds
+            .iter()
+            .position(|f| f.start > range.start)
+            .unwrap_or(folds.len());
         folds.insert(pos, range);
     }
     Some(TransactionSpec::new().folds(folds))
@@ -105,10 +108,7 @@ pub fn insert_bracket(state: &EditorState, input: &str) -> Option<TransactionSpe
     if same {
         let next_byte = doc.as_bytes().get(from).copied();
         if next_byte == Some(ch as u8) {
-            return Some(
-                TransactionSpec::new()
-                    .selection(Selection::caret(from + 1)),
-            );
+            return Some(TransactionSpec::new().selection(Selection::caret(from + 1)));
         }
     }
 
@@ -119,8 +119,12 @@ pub fn insert_bracket(state: &EditorState, input: &str) -> Option<TransactionSpe
     let next_byte = doc.as_bytes().get(from).copied();
     let can_close = match next_byte {
         None => true,
-        Some(b) => b == b' ' || b == b'\n' || b == b'\t'
-            || matches!(b, b')' | b']' | b'}' | b',' | b';' | b':' | b'>'),
+        Some(b) => {
+            b == b' '
+                || b == b'\n'
+                || b == b'\t'
+                || matches!(b, b')' | b']' | b'}' | b',' | b';' | b':' | b'>')
+        }
     };
     if !can_close {
         return None;
@@ -149,9 +153,7 @@ fn handle_close(state: &EditorState, close_char: char) -> Option<TransactionSpec
     let from = p.head;
     let next = state.doc.to_string().as_bytes().get(from).copied();
     if next == Some(close_char as u8) {
-        return Some(
-            TransactionSpec::new().selection(Selection::caret(from + 1)),
-        );
+        return Some(TransactionSpec::new().selection(Selection::caret(from + 1)));
     }
     None
 }
@@ -357,9 +359,7 @@ pub fn indent_less(state: &EditorState) -> Option<TransactionSpec> {
     for &line_from in &lines {
         let bytes = doc.as_bytes();
         let mut leading = 0;
-        while leading < unit
-            && bytes.get(line_from + leading) == Some(&b' ')
-        {
+        while leading < unit && bytes.get(line_from + leading) == Some(&b' ') {
             leading += 1;
         }
         if leading > 0 {
@@ -545,7 +545,9 @@ fn parse_list_continuation(line: &str) -> Option<ListContinuation> {
     // Optional task box `[ ]` / `[x]`.
     let task = bytes
         .get(marker_end..marker_end + 3)
-        .map(|sl| sl.len() == 3 && sl[0] == b'[' && sl[2] == b']' && matches!(sl[1], b' ' | b'x' | b'X'))
+        .map(|sl| {
+            sl.len() == 3 && sl[0] == b'[' && sl[2] == b']' && matches!(sl[1], b' ' | b'x' | b'X')
+        })
         .unwrap_or(false);
     if task {
         marker_end += 3;
@@ -703,13 +705,12 @@ pub fn set_heading(state: &EditorState, level: u8) -> Option<TransactionSpec> {
         let line = &doc[line_start..line_end];
         // Strip existing prefix.
         let hashes = line.chars().take_while(|c| *c == '#').count();
-        let strip_to = if (1..=6).contains(&hashes)
-            && line.as_bytes().get(hashes).copied() == Some(b' ')
-        {
-            hashes + 1
-        } else {
-            0
-        };
+        let strip_to =
+            if (1..=6).contains(&hashes) && line.as_bytes().get(hashes).copied() == Some(b' ') {
+                hashes + 1
+            } else {
+                0
+            };
         let body = &line[strip_to..];
         let new_line = if level == 0 {
             body.to_string()
@@ -770,8 +771,8 @@ pub fn cycle_list(state: &EditorState) -> Option<TransactionSpec> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ListMarkerState {
     None,
-    Unordered,    // `- `
-    Ordered,      // `1. `
+    Unordered,     // `- `
+    Ordered,       // `1. `
     UnorderedTask, // `- [ ] `
 }
 
@@ -818,10 +819,7 @@ fn list_marker_state(doc: &str, line_start: usize) -> ListMarkerState {
     if b.len() >= 3 && b[0].is_ascii_digit() && b[1] == b'.' && b[2] == b' ' {
         return ListMarkerState::Ordered;
     }
-    if b.len() >= 2
-        && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+')
-        && b[1] == b' '
-    {
+    if b.len() >= 2 && (b[0] == b'-' || b[0] == b'*' || b[0] == b'+') && b[1] == b' ' {
         return ListMarkerState::Unordered;
     }
     ListMarkerState::None

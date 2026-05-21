@@ -24,10 +24,7 @@ use editor_state::{Changes, EditorState, Selection, TransactionSpec};
 /// nav lives in `Editor`'s `onkeydown` rather than here so it
 /// works without the menu element being focused.
 #[component]
-pub fn SlashMenu(
-    state: Signal<EditorState>,
-    slash: Signal<Option<SlashState>>,
-) -> Element {
+pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) -> Element {
     let snapshot = slash.read().clone();
     let Some(current) = snapshot else {
         return rsx! { Fragment {} };
@@ -400,7 +397,10 @@ fn uuid_v4_string() -> String {
 /// slash range is guaranteed to live on one line because the
 /// parser closes on newlines.
 fn line_bounds(doc: &str, slash_range: &std::ops::Range<usize>) -> (usize, usize) {
-    let line_start = doc[..slash_range.start].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_start = doc[..slash_range.start]
+        .rfind('\n')
+        .map(|n| n + 1)
+        .unwrap_or(0);
     let line_end = doc[slash_range.end..]
         .find('\n')
         .map(|n| slash_range.end + n)

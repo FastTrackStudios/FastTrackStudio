@@ -106,8 +106,8 @@ impl std::ops::IndexMut<TileId> for Arena {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tile::{TileBody, TileKind};
     use crate::tile::flag::TileFlagSet;
+    use crate::tile::{TileBody, TileKind};
 
     fn tile(kind: TileKind, length: usize) -> Tile {
         Tile {

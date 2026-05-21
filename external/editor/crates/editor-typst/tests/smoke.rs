@@ -5,7 +5,11 @@ fn compiles_hello_world_to_svg() {
     let mut c = Compiler::new();
     c.set_source("Hello, *world*!");
     let svg = c.compile_svg().expect("compile failed");
-    assert!(svg.starts_with("<svg"), "expected SVG output, got: {}", &svg[..svg.len().min(80)]);
+    assert!(
+        svg.starts_with("<svg"),
+        "expected SVG output, got: {}",
+        &svg[..svg.len().min(80)]
+    );
     assert!(svg.contains("world") || svg.contains("svg"));
 }
 

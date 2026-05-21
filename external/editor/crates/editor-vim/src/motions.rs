@@ -10,33 +10,33 @@ use crate::state::MotionInput;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Motion {
-    Left,         // h
-    Down,         // j
-    Up,           // k
-    Right,        // l
-    WordForward,  // w
-    WordBackward, // b
-    WordEnd,      // e
-    WORDForward,  // W — whitespace-only delimited
-    WORDBackward, // B
-    WORDEnd,      // E
-    LineStart,    // 0
-    LineEnd,      // $
+    Left,          // h
+    Down,          // j
+    Up,            // k
+    Right,         // l
+    WordForward,   // w
+    WordBackward,  // b
+    WordEnd,       // e
+    WORDForward,   // W — whitespace-only delimited
+    WORDBackward,  // B
+    WORDEnd,       // E
+    LineStart,     // 0
+    LineEnd,       // $
     FirstNonblank, // ^
-    DocStart,     // gg  (count = explicit line)
-    DocEnd,       // G
-    FindForward,  // f<c>
-    FindBackward, // F<c>
-    TillForward,  // t<c>
-    TillBackward, // T<c>
-    ParaForward,  // }
-    ParaBackward, // {
-    SentForward,  // )
-    SentBackward, // (
-    MatchBracket, // %
-    SearchNext,   // n
-    SearchPrev,   // N
-    EndPrevWord,  // ge
+    DocStart,      // gg  (count = explicit line)
+    DocEnd,        // G
+    FindForward,   // f<c>
+    FindBackward,  // F<c>
+    TillForward,   // t<c>
+    TillBackward,  // T<c>
+    ParaForward,   // }
+    ParaBackward,  // {
+    SentForward,   // )
+    SentBackward,  // (
+    MatchBracket,  // %
+    SearchNext,    // n
+    SearchPrev,    // N
+    EndPrevWord,   // ge
 }
 
 impl Motion {
@@ -103,7 +103,9 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
         Motion::SearchNext | Motion::SearchPrev => pos, // v1: no search
         Motion::EndPrevWord => word_backward(state, pos, count), // approximation
         // f/F/t/T are handled via pending-input — never reached here.
-        Motion::FindForward | Motion::FindBackward | Motion::TillForward | Motion::TillBackward => pos,
+        Motion::FindForward | Motion::FindBackward | Motion::TillForward | Motion::TillBackward => {
+            pos
+        }
     }
 }
 
@@ -447,7 +449,11 @@ pub fn line_first_nonblank(state: &EditorState, pos: usize) -> usize {
 fn next_newline(state: &EditorState, pos: usize) -> Option<usize> {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
-    bytes.iter().skip(pos).position(|&b| b == b'\n').map(|i| pos + i)
+    bytes
+        .iter()
+        .skip(pos)
+        .position(|&b| b == b'\n')
+        .map(|i| pos + i)
 }
 
 // --- paragraph/bracket -----------------------------------------
@@ -465,7 +471,10 @@ fn para_forward(state: &EditorState, pos: usize, n: usize) -> usize {
             };
             p = nl + 1;
             let line_end_pos = next_newline(state, p).unwrap_or(bytes.len());
-            if p == line_end_pos || bytes[p..line_end_pos].iter().all(|b| b.is_ascii_whitespace())
+            if p == line_end_pos
+                || bytes[p..line_end_pos]
+                    .iter()
+                    .all(|b| b.is_ascii_whitespace())
             {
                 break;
             }
@@ -486,7 +495,10 @@ fn para_backward(state: &EditorState, pos: usize, n: usize) -> usize {
             let line_lo = line_start(state, p.saturating_sub(1));
             let line_hi = next_newline(state, line_lo).unwrap_or(bytes.len());
             p = line_lo;
-            if line_lo == line_hi || bytes[line_lo..line_hi].iter().all(|b| b.is_ascii_whitespace())
+            if line_lo == line_hi
+                || bytes[line_lo..line_hi]
+                    .iter()
+                    .all(|b| b.is_ascii_whitespace())
             {
                 break;
             }

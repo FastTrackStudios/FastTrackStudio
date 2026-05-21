@@ -6,7 +6,7 @@
 //! one and emit `Mark` decorations on both. The view paints them
 //! via `.md-bracket-match` / `.md-bracket-mismatch`.
 
-use crate::decoration::{Decoration, DecoratedRange};
+use crate::decoration::{DecoratedRange, Decoration};
 use crate::state::EditorState;
 
 const PAIRS: &[(u8, u8)] = &[(b'(', b')'), (b'[', b']'), (b'{', b'}')];
@@ -43,7 +43,11 @@ pub fn bracket_match(state: &EditorState) -> Vec<DecoratedRange> {
 }
 
 fn push_pair(out: &mut Vec<DecoratedRange>, from: usize, to: usize, matched: bool) {
-    let class = if matched { "md-bracket-match" } else { "md-bracket-mismatch" };
+    let class = if matched {
+        "md-bracket-match"
+    } else {
+        "md-bracket-mismatch"
+    };
     out.push(Decoration::mark(from..from + 1, class));
     if to != from {
         out.push(Decoration::mark(to..to + 1, class));

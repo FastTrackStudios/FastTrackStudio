@@ -47,7 +47,11 @@ mod tests {
     #[test]
     fn renders_a_simple_flowchart() {
         let svg = render_svg("flowchart TD\n  A --> B").expect("render ok");
-        assert!(svg.starts_with("<svg"), "got: {}", &svg[..svg.len().min(80)]);
+        assert!(
+            svg.starts_with("<svg"),
+            "got: {}",
+            &svg[..svg.len().min(80)]
+        );
     }
 
     #[test]

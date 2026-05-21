@@ -7,15 +7,15 @@ use editor_state::EditorState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextObject {
-    Word,       // w
+    Word,        // w
     DoubleQuote, // "
     SingleQuote, // '
-    Backtick,   // `
-    Paren,      // ( or )
-    Bracket,    // [ or ]
-    Brace,      // { or }
-    AngleTag,   // t — XML/HTML tag (v1: stub, returns caret-only)
-    Paragraph,  // p
+    Backtick,    // `
+    Paren,       // ( or )
+    Bracket,     // [ or ]
+    Brace,       // { or }
+    AngleTag,    // t — XML/HTML tag (v1: stub, returns caret-only)
+    Paragraph,   // p
 }
 
 impl TextObject {
@@ -38,7 +38,12 @@ impl TextObject {
 /// Resolve a text object to a half-open byte range `[lo, hi)`
 /// around `pos`. `around=true` for `a<obj>` (includes delimiters
 /// / trailing space); `around=false` for `i<obj>` (inner).
-pub fn apply(state: &EditorState, obj: TextObject, around: bool, pos: usize) -> std::ops::Range<usize> {
+pub fn apply(
+    state: &EditorState,
+    obj: TextObject,
+    around: bool,
+    pos: usize,
+) -> std::ops::Range<usize> {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
     match obj {
@@ -183,7 +188,9 @@ fn pair_object(
 
 fn paragraph_object(bytes: &[u8], pos: usize, around: bool) -> std::ops::Range<usize> {
     let is_blank = |line_start: usize, line_end: usize| {
-        bytes[line_start..line_end].iter().all(|b| b.is_ascii_whitespace())
+        bytes[line_start..line_end]
+            .iter()
+            .all(|b| b.is_ascii_whitespace())
     };
     // find current line start
     let p = pos.min(bytes.len());

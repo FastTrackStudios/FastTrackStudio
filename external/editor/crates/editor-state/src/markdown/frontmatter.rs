@@ -115,11 +115,7 @@ pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
 /// lists get merged into a single property whose `range` covers
 /// all their `  - item` continuation lines, so an edit replaces
 /// the whole multi-line entry atomically.
-fn parse_frontmatter_body(
-    text: &str,
-    body_start: usize,
-    body_end: usize,
-) -> Vec<Property> {
+fn parse_frontmatter_body(text: &str, body_start: usize, body_end: usize) -> Vec<Property> {
     let mut out = Vec::new();
     let bytes = text.as_bytes();
     let mut i = body_start;
@@ -167,8 +163,10 @@ fn parse_frontmatter_body(
                 }
                 let sub_line = &text[sub_from..j];
                 let sub_nl = if j < body_end { j + 1 } else { j };
-                let sub_indent =
-                    sub_line.bytes().take_while(|&b| b == b' ' || b == b'\t').count();
+                let sub_indent = sub_line
+                    .bytes()
+                    .take_while(|&b| b == b' ' || b == b'\t')
+                    .count();
                 if sub_line.trim().is_empty() {
                     // Blank line: part of the block if any
                     // content follows at the right indent.
@@ -207,9 +205,7 @@ fn parse_frontmatter_body(
                 }
                 let sub_line = &text[sub_from..j];
                 let sub_nl = if j < body_end { j + 1 } else { j };
-                if sub_line.starts_with([' ', '\t'])
-                    && sub_line.trim_start().starts_with("- ")
-                {
+                if sub_line.starts_with([' ', '\t']) && sub_line.trim_start().starts_with("- ") {
                     let item = sub_line.trim_start()[2..]
                         .trim()
                         .trim_matches('"')
@@ -279,7 +275,10 @@ fn classify_scalar(rest: &str) -> PropValue {
     }
     // Number — parses as f64 and the original text contains no
     // letters. Rejects strings like "1.0.0".
-    if !cleaned.is_empty() && cleaned.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
+    if !cleaned.is_empty()
+        && cleaned
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
     {
         if let Ok(n) = cleaned.parse::<f64>() {
             return PropValue::Number(n);
@@ -295,9 +294,7 @@ fn classify_scalar(rest: &str) -> PropValue {
 pub(crate) fn render_properties_html(props: &[Property], active_idx: Option<usize>) -> String {
     let mut html = String::from(r#"<div class="md-properties">"#);
     if props.is_empty() {
-        html.push_str(
-            r#"<div class="md-properties-empty">No properties</div>"#,
-        );
+        html.push_str(r#"<div class="md-properties-empty">No properties</div>"#);
     }
     for (idx, p) in props.iter().enumerate() {
         let key_attr = escape_html(&p.key);
@@ -447,7 +444,10 @@ fn yaml_quote_if_needed(s: &str) -> String {
         || s.contains('{')
         || s.contains('}')
         || s.contains(',')
-        || matches!(s, "true" | "false" | "True" | "False" | "TRUE" | "FALSE" | "null" | "~")
+        || matches!(
+            s,
+            "true" | "false" | "True" | "False" | "TRUE" | "FALSE" | "null" | "~"
+        )
         || s.starts_with('-')
         || s.starts_with('?')
         || s.starts_with('|')

@@ -82,10 +82,19 @@ fn themify_svg(svg: &str) -> String {
         // Node fill (slate-50). Subtle overlay.
         .replace("fill=\"#F8FAFC\"", "fill=\"rgba(127, 167, 217, 0.08)\"")
         // Node + edge-label strokes (slate-400).
-        .replace("stroke=\"#94A3B8\"", "stroke=\"currentColor\" stroke-opacity=\"0.35\"")
+        .replace(
+            "stroke=\"#94A3B8\"",
+            "stroke=\"currentColor\" stroke-opacity=\"0.35\"",
+        )
         // Arrow heads, edges (slate-500).
-        .replace("fill=\"#64748B\"", "fill=\"currentColor\" fill-opacity=\"0.55\"")
-        .replace("stroke=\"#64748B\"", "stroke=\"currentColor\" stroke-opacity=\"0.55\"")
+        .replace(
+            "fill=\"#64748B\"",
+            "fill=\"currentColor\" fill-opacity=\"0.55\"",
+        )
+        .replace(
+            "stroke=\"#64748B\"",
+            "stroke=\"currentColor\" stroke-opacity=\"0.55\"",
+        )
 }
 
 struct MermaidCache {
@@ -95,7 +104,10 @@ struct MermaidCache {
 
 impl MermaidCache {
     fn new(cap: usize) -> Self {
-        Self { entries: Vec::with_capacity(cap), cap }
+        Self {
+            entries: Vec::with_capacity(cap),
+            cap,
+        }
     }
     fn get(&mut self, body: &str) -> Option<String> {
         let i = self.entries.iter().position(|(b, _)| b == body)?;

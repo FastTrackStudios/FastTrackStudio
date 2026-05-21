@@ -66,8 +66,8 @@ pub fn pos_after(arena: &Arena, parent: TileId, child: TileId) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tile::{Tile, TileBody, TileKind};
     use crate::tile::flag::{TileFlag, TileFlagSet};
+    use crate::tile::{Tile, TileBody, TileKind};
 
     /// Build a small tree:
     ///   Doc (root, length=11)

@@ -92,10 +92,7 @@ impl Default for Compiler {
 /// Pretty-print typst's `SourceDiagnostic` list into something
 /// the UI can show in a toast or hover popover. Carries the
 /// span text where available.
-fn format_diagnostics(
-    errs: &ecow::EcoVec<typst::diag::SourceDiagnostic>,
-    world: &World,
-) -> String {
+fn format_diagnostics(errs: &ecow::EcoVec<typst::diag::SourceDiagnostic>, world: &World) -> String {
     use std::fmt::Write;
     let mut out = String::new();
     for diag in errs {

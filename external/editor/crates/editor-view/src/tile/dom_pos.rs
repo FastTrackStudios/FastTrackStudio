@@ -68,12 +68,8 @@ pub fn leaf_at_pos(arena: &Arena, root: TileId, pos: usize, side: Side) -> (Tile
         let mut acc = 0usize;
         let mut chosen: Option<TileId> = None;
         for (idx, &child) in children.iter().enumerate() {
-            let child_len = arena.get(child).length
-                + (if arena.get(child).break_after() {
-                    1
-                } else {
-                    0
-                });
+            let child_len =
+                arena.get(child).length + (if arena.get(child).break_after() { 1 } else { 0 });
             let next_acc = acc + child_len;
             let inside = if side == Side::Before {
                 local > acc && local <= next_acc

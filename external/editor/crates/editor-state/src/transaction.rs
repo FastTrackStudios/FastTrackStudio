@@ -101,10 +101,7 @@ impl Transaction {
                 })
                 .collect()
         };
-        let new_reading_mode = self
-            .spec
-            .reading_mode
-            .unwrap_or(self.before.reading_mode);
+        let new_reading_mode = self.spec.reading_mode.unwrap_or(self.before.reading_mode);
         EditorState {
             doc: new_doc,
             selection: new_selection,

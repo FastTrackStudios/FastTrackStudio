@@ -7,10 +7,10 @@ use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RegisterKey {
-    Named(char),    // 'a'..'z'
-    Unnamed,        // "
-    SystemPlus,     // +
-    SystemStar,     // *
+    Named(char), // 'a'..'z'
+    Unnamed,     // "
+    SystemPlus,  // +
+    SystemStar,  // *
 }
 
 impl RegisterKey {

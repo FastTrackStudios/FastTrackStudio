@@ -3,9 +3,7 @@
 //! vim ref: zed/crates/vim/src/state.rs:45 (`Mode`, `Operator`)
 //! vim ref: codemirror-vim/src/vim.js (vim_api / commandDispatcher)
 
-use editor_state::{
-    Changes, EditorState, KeySpec, Range, Selection, TransactionSpec,
-};
+use editor_state::{Changes, EditorState, KeySpec, Range, Selection, TransactionSpec};
 
 use crate::motions::{self, Motion};
 use crate::operators::{self, Operator};
@@ -57,12 +55,12 @@ pub struct VimState {
 /// Which pending command is waiting on a character.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MotionInput {
-    FindForward,        // `f`
-    FindBackward,       // `F`
-    TillForward,        // `t`
-    TillBackward,       // `T`
-    Replace,            // `r`
-    Register,           // `"` — the next char names a register
+    FindForward,  // `f`
+    FindBackward, // `F`
+    TillForward,  // `t`
+    TillBackward, // `T`
+    Replace,      // `r`
+    Register,     // `"` — the next char names a register
 }
 
 /// Recorded last change for `.` repeat. We store *intent* rather
@@ -157,9 +155,7 @@ pub(crate) fn dispatch(
     match vim.mode {
         Mode::Normal => dispatch_normal(state, vim, key),
         Mode::Insert => dispatch_insert(state, vim, key),
-        Mode::VisualChar | Mode::VisualLine | Mode::VisualBlock => {
-            dispatch_visual(state, vim, key)
-        }
+        Mode::VisualChar | Mode::VisualLine | Mode::VisualBlock => dispatch_visual(state, vim, key),
         Mode::Replace => dispatch_replace(state, vim, key),
         Mode::Command => crate::command_line::dispatch(state, vim, key),
     }
@@ -424,13 +420,25 @@ fn single_char_normal_command(
             // Change to end of line. `c$` shorthand.
             let from = caret(state);
             let to = motions::line_end(state, from);
-            Some(operators::apply_range(state, vim, operators::Operator::Change, from, to))
+            Some(operators::apply_range(
+                state,
+                vim,
+                operators::Operator::Change,
+                from,
+                to,
+            ))
         }
         'D' => {
             // Delete to end of line. `d$` shorthand.
             let from = caret(state);
             let to = motions::line_end(state, from);
-            Some(operators::apply_range(state, vim, operators::Operator::Delete, from, to))
+            Some(operators::apply_range(
+                state,
+                vim,
+                operators::Operator::Delete,
+                from,
+                to,
+            ))
         }
         'Y' => {
             // Yank the line (`yy`). Neovim default; classic vim
@@ -438,7 +446,13 @@ fn single_char_normal_command(
             let from = motions::line_start(state, caret(state));
             let line_end = motions::line_end(state, caret(state));
             let to = (line_end + 1).min(state.doc.len());
-            Some(operators::apply_linewise(state, vim, operators::Operator::Yank, from, to))
+            Some(operators::apply_linewise(
+                state,
+                vim,
+                operators::Operator::Yank,
+                from,
+                to,
+            ))
         }
         '~' => Some(toggle_case_char(state, vim)),
         '.' => crate::macros::replay_last(state, vim),
@@ -449,11 +463,7 @@ fn single_char_normal_command(
 /// Resolve a `g`-prefixed normal-mode command. The first `g`
 /// has already been consumed (we entered with `pending_g`
 /// cleared), and `ch` is whatever the user pressed next.
-fn finish_g_command(
-    state: &EditorState,
-    vim: &mut VimState,
-    ch: char,
-) -> Option<TransactionSpec> {
+fn finish_g_command(state: &EditorState, vim: &mut VimState, ch: char) -> Option<TransactionSpec> {
     match ch {
         'g' => {
             // `gg` — go to first non-blank of (count-th) line. No
@@ -528,7 +538,11 @@ fn finish_operator(
         // semantics: `dd` is linewise).
         let to_inclusive = (to + 1).min(state.doc.len());
         return Some(operators::apply_linewise(
-            state, vim, op, from, to_inclusive,
+            state,
+            vim,
+            op,
+            from,
+            to_inclusive,
         ));
     }
 
@@ -718,7 +732,9 @@ fn dispatch_visual(
         let count = vim.pending_count.take().unwrap_or(1);
         let new_head = motions::apply(state, motion, count);
         let anchor = vim.visual_anchor.unwrap_or(caret(state));
-        return Some(TransactionSpec::new().selection(Selection::single(Range::new(anchor, new_head))));
+        return Some(
+            TransactionSpec::new().selection(Selection::single(Range::new(anchor, new_head))),
+        );
     }
     None
 }

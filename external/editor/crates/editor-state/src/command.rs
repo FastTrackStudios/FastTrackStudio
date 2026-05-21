@@ -275,10 +275,7 @@ mod tests {
 
     /// Demo command: select the whole document.
     fn select_all(state: &EditorState) -> Option<TransactionSpec> {
-        Some(
-            TransactionSpec::new()
-                .selection(Selection::single(Range::new(0, state.doc.len()))),
-        )
+        Some(TransactionSpec::new().selection(Selection::single(Range::new(0, state.doc.len()))))
     }
 
     #[test]

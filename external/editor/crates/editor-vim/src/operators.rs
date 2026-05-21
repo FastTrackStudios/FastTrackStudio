@@ -12,10 +12,10 @@ use crate::state::VimState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operator {
-    Delete, // d
-    Change, // c
-    Yank,   // y
-    Indent, // >
+    Delete,  // d
+    Change,  // c
+    Yank,    // y
+    Indent,  // >
     Outdent, // <
 }
 
@@ -42,7 +42,11 @@ pub fn apply_range(
     to: usize,
 ) -> TransactionSpec {
     let (lo, hi) = (from.min(to), from.max(to));
-    let text = if hi > lo { state.doc.slice(lo..hi) } else { String::new() };
+    let text = if hi > lo {
+        state.doc.slice(lo..hi)
+    } else {
+        String::new()
+    };
     let reg = vim.pending_register.take();
     vim.registers.write(reg, &text);
     vim.clear_pending();
@@ -77,7 +81,11 @@ pub fn apply_linewise(
     to: usize,
 ) -> TransactionSpec {
     let (lo, hi) = (from.min(to), from.max(to));
-    let mut text = if hi > lo { state.doc.slice(lo..hi) } else { String::new() };
+    let mut text = if hi > lo {
+        state.doc.slice(lo..hi)
+    } else {
+        String::new()
+    };
     if !text.ends_with('\n') {
         text.push('\n');
     }

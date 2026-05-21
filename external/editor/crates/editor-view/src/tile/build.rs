@@ -121,7 +121,10 @@ impl<'a> TileBuilder<'a> {
     /// fold in once those land.
     fn end_line(&mut self) {
         let line_id = self.ensure_line();
-        self.arena.get_mut(line_id).flags.insert(TileFlag::BreakAfter);
+        self.arena
+            .get_mut(line_id)
+            .flags
+            .insert(TileFlag::BreakAfter);
         self.cur_line = None;
     }
 
@@ -189,10 +192,7 @@ impl<'a> TileBuilder<'a> {
             // What's the next event position? Cap any emitted
             // segment so it ends at the next event (and we
             // re-enter the inner loop above).
-            let next_event_pos = events
-                .get(event_idx)
-                .map(|e| e.at)
-                .unwrap_or(text.len());
+            let next_event_pos = events.get(event_idx).map(|e| e.at).unwrap_or(text.len());
 
             if let Some(replace_until) = active_replace_until {
                 // We're inside a Replace decoration: emit one
@@ -264,9 +264,7 @@ impl<'a> TileBuilder<'a> {
     /// CSS class layering you'd expect (`<span class="bold">
     /// <span class="italic">…</span></span>`).
     fn emit_text(&mut self, text: &str, marks: &[MarkSpec]) {
-        let text_tile = self.insert_under_marks(marks, |arena| {
-            arena.insert(new_text_tile(text))
-        });
+        let text_tile = self.insert_under_marks(marks, |arena| arena.insert(new_text_tile(text)));
         let len = text.len();
         // Bubble length up the parent chain.
         self.bump_lengths_up(text_tile, len);
@@ -573,10 +571,7 @@ mod tests {
     #[test]
     fn multiple_line_decorations_concatenate() {
         // Second line gets two classes; first line stays bare.
-        let decs = vec![
-            Decoration::line(3, "md-h1"),
-            Decoration::line(3, "active"),
-        ];
+        let decs = vec![Decoration::line(3, "md-h1"), Decoration::line(3, "active")];
         let (arena, doc) = build_tiles("ab\ncd", &decs);
         let l1 = arena.get(doc).children[0];
         let l2 = arena.get(doc).children[1];

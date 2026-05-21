@@ -19,7 +19,7 @@
 //! markdown parser (pulldown-cmark or a port of CM6's
 //! lang-markdown) without touching the decoration shape.
 
-use crate::decoration::{Decoration, DecoratedRange};
+use crate::decoration::{DecoratedRange, Decoration};
 use crate::selection::Range;
 use crate::state::EditorState;
 
@@ -286,13 +286,11 @@ fn now_ms_native() -> f64 {
 // YAML frontmatter lives in its own submodule — parser,
 // serializer, and Properties widget renderer.
 pub mod frontmatter;
-pub use frontmatter::{
-    parse_frontmatter, serialize_property, FrontMatter, Property, PropValue,
-};
 use frontmatter::render_properties_html;
+pub use frontmatter::{FrontMatter, PropValue, Property, parse_frontmatter, serialize_property};
 
 mod typst;
-use typst::{render_typst, reset_compile_budget, TypstKind};
+use typst::{TypstKind, render_typst, reset_compile_budget};
 
 mod mermaid;
 use mermaid::{render_mermaid, reset_compile_budget as reset_mermaid_budget};
@@ -330,9 +328,7 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
     let ext = target.rsplit_once('.').map(|x| x.1.to_ascii_lowercase());
     let ext = ext.as_deref().unwrap_or("");
     let safe_target = html_escape(target);
-    let style = opts
-        .and_then(|o| parse_size_opts(o))
-        .unwrap_or_default();
+    let style = opts.and_then(|o| parse_size_opts(o)).unwrap_or_default();
     // 1. Media extensions first (image / video / audio / pdf).
     match ext {
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "avif" | "bmp" => {
@@ -450,10 +446,7 @@ fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
     let needle = format!("^{short_id}");
     let pos = doc.find(&needle)?;
     let line_start = doc[..pos].rfind('\n').map(|n| n + 1).unwrap_or(0);
-    let line_end = doc[pos..]
-        .find('\n')
-        .map(|n| pos + n)
-        .unwrap_or(doc.len());
+    let line_end = doc[pos..].find('\n').map(|n| pos + n).unwrap_or(doc.len());
     let line = &doc[line_start..line_end];
     // Strip the trailing `^id` so the embed shows the body text.
     Some(line[..line.len() - needle.len()].trim_end().to_string())
@@ -462,9 +455,7 @@ fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
 fn render_embed_card_page(icon: &str, page: &str, resolved: Option<&str>) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(
-            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
-        ),
+        None => format!(r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#),
     };
     format!(
         r#"<div class="md-embed-card md-embed-page"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -479,26 +470,17 @@ fn render_embed_card_section(
 ) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(
-            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
-        ),
+        None => format!(r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#),
     };
     format!(
         r#"<div class="md-embed-card md-embed-section"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{heading}</span></div><div class="md-embed-body">{body}</div></div>"#
     )
 }
 
-fn render_embed_card_short(
-    icon: &str,
-    page: &str,
-    short: &str,
-    resolved: Option<&str>,
-) -> String {
+fn render_embed_card_short(icon: &str, page: &str, short: &str, resolved: Option<&str>) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(
-            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#
-        ),
+        None => format!(r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#),
     };
     format!(
         r#"<div class="md-embed-card md-embed-block"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{short}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -584,7 +566,10 @@ fn scan_blocks(
     if let Some(fm) = parse_frontmatter(text) {
         fenced_ranges.push(fm.outer.clone());
         let caret = primary.head;
-        let active_idx = fm.props.iter().position(|p| caret >= p.range.start && caret < p.range.end);
+        let active_idx = fm
+            .props
+            .iter()
+            .position(|p| caret >= p.range.start && caret < p.range.end);
         let html = render_properties_html(&fm.props, active_idx);
         out.push(Decoration::replace(fm.outer.clone()));
         out.push(Decoration::widget(fm.outer.start, html));
@@ -619,8 +604,7 @@ fn scan_blocks(
     let all_lines = line_ranges(text);
     let mut setext_content_level: std::collections::HashMap<usize, u8> =
         std::collections::HashMap::new();
-    let mut setext_underline: std::collections::HashSet<usize> =
-        std::collections::HashSet::new();
+    let mut setext_underline: std::collections::HashSet<usize> = std::collections::HashSet::new();
     for win in all_lines.windows(2) {
         let (lf, lt) = win[0];
         let (ulf, ult) = win[1];
@@ -678,13 +662,20 @@ fn scan_blocks(
         if let Some(uuid_range) = parse_block_id_line(line, line_from) {
             // Replace the whole line content + its trailing
             // newline so neighbouring lines collapse together.
-            let end = if line_to < text.len() { line_to + 1 } else { line_to };
+            let end = if line_to < text.len() {
+                line_to + 1
+            } else {
+                line_to
+            };
             out.push(Decoration::replace(line_from..end));
             out.push(Decoration::atomic(line_from..end));
             // Index this block id against the byte offset of the
             // line above (its block content). Stashed for
             // cross-line resolution + the `🔗` widget.
-            register_block_id(&text[uuid_range.clone()], find_block_anchor(text, line_from));
+            register_block_id(
+                &text[uuid_range.clone()],
+                find_block_anchor(text, line_from),
+            );
             continue;
         }
 
@@ -772,7 +763,11 @@ fn scan_blocks(
                 out.push(Decoration::replace(line_from..line_to));
             }
             let info = trimmed[info_start..].trim();
-            let content_start = if line_to < text.len() { line_to + 1 } else { line_to };
+            let content_start = if line_to < text.len() {
+                line_to + 1
+            } else {
+                line_to
+            };
             fence = Some((line_from, mc, mlen));
             // The lang+copy header overlays the opener line for
             // ordinary code fences. Skip it for fences we
@@ -780,8 +775,8 @@ fn scan_blocks(
             // rendered SVG already speaks for itself, and the
             // floating header would be a leftover when the user
             // moves the caret onto the fence to edit source.
-            let is_rendered_fence = info.eq_ignore_ascii_case("typst")
-                || info.eq_ignore_ascii_case("mermaid");
+            let is_rendered_fence =
+                info.eq_ignore_ascii_case("typst") || info.eq_ignore_ascii_case("mermaid");
             if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
@@ -813,9 +808,7 @@ fn scan_blocks(
                     close_end += 1;
                 }
                 let fence_range = line_from..close_end;
-                if !cursor_touches(primary, fence_range.clone())
-                    && !body.trim().is_empty()
-                {
+                if !cursor_touches(primary, fence_range.clone()) && !body.trim().is_empty() {
                     let is_mermaid = info.eq_ignore_ascii_case("mermaid");
                     let svg = if is_mermaid {
                         render_mermaid(body)
@@ -1110,7 +1103,11 @@ fn try_parse_table(
         }
     }
     let mut rows = vec![(header_from, header_to), (sep_from, sep_end)];
-    let mut i = if sep_end < bytes.len() { sep_end + 1 } else { sep_end };
+    let mut i = if sep_end < bytes.len() {
+        sep_end + 1
+    } else {
+        sep_end
+    };
     while i < bytes.len() {
         let row_from = i;
         let mut row_end = row_from;
@@ -1122,7 +1119,11 @@ fn try_parse_table(
             break;
         }
         rows.push((row_from, row_end));
-        i = if row_end < bytes.len() { row_end + 1 } else { row_end };
+        i = if row_end < bytes.len() {
+            row_end + 1
+        } else {
+            row_end
+        };
     }
     Some(rows)
 }
@@ -1373,12 +1374,7 @@ fn opens_fence(trimmed: &str) -> Option<(u8, usize, usize)> {
 /// Find the byte offset of the closing fence's `\n` (or doc end)
 /// when walking forward from `content_start`. Used by both the
 /// syntax-highlighter and the lang/copy header widget.
-fn find_fence_close(
-    text: &str,
-    content_start: usize,
-    marker_char: u8,
-    marker_len: usize,
-) -> usize {
+fn find_fence_close(text: &str, content_start: usize, marker_char: u8, marker_len: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = content_start;
     while i < bytes.len() {
@@ -1464,7 +1460,10 @@ impl FenceCache {
         }
     }
     fn get(&mut self, lang: editor_syntax::Lang, body: &str) -> Option<Vec<editor_syntax::Token>> {
-        let idx = self.entries.iter().position(|(l, b, _)| *l == lang && b == body)?;
+        let idx = self
+            .entries
+            .iter()
+            .position(|(l, b, _)| *l == lang && b == body)?;
         // Move to back so this entry is "freshest".
         let hit = self.entries.remove(idx);
         let toks = hit.2.clone();
@@ -1697,9 +1696,7 @@ fn find_spans(text: &str) -> Vec<Span> {
             && (i == 0 || matches!(b[i - 1], b' ' | b'\t' | b'\n'))
         {
             let mut j = i + 1;
-            while j < b.len()
-                && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_')
-            {
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'-' || b[j] == b'_') {
                 j += 1;
             }
             if j == b.len() || b[j] == b'\n' {
@@ -1760,9 +1757,7 @@ fn find_spans(text: &str) -> Vec<Span> {
                 let is_url = body.starts_with("http://")
                     || body.starts_with("https://")
                     || body.starts_with("mailto:")
-                    || (body.contains('@')
-                        && !body.contains(' ')
-                        && body.contains('.'));
+                    || (body.contains('@') && !body.contains(' ') && body.contains('.'));
                 if is_url {
                     out.push(Span {
                         outer: i..end + 1,
@@ -1911,8 +1906,14 @@ pub(crate) fn block_preview(text: &str, anchor: usize) -> String {
         .unwrap_or(text.len());
     let line = &text[anchor..line_end];
     let cleaned = line.trim_start_matches(|c: char| {
-        c == '#' || c == '>' || c == '-' || c == '*' || c == '+'
-            || c == ' ' || c == '\t' || c == '['
+        c == '#'
+            || c == '>'
+            || c == '-'
+            || c == '*'
+            || c == '+'
+            || c == ' '
+            || c == '\t'
+            || c == '['
     });
     let cleaned = cleaned.trim_end();
     let max = 40;
@@ -2104,7 +2105,11 @@ mod tests {
         // Class is space-separated `md-wikilink
         // md-wikilink-unresolved` until a vault layer resolves
         // the target, so check the prefix rather than equality.
-        assert!(mark_classes(&decs).iter().any(|c| c.starts_with("md-wikilink")));
+        assert!(
+            mark_classes(&decs)
+                .iter()
+                .any(|c| c.starts_with("md-wikilink"))
+        );
         assert!(decs.iter().any(|d| d.from == 2 && d.to == 11));
     }
 
@@ -2144,9 +2149,7 @@ mod tests {
         assert!(has_line_class(&decs, 0, "md-h1"));
         // Marker `# ` (2 bytes) replaced when caret elsewhere.
         assert!(decs.iter().any(|d| {
-            d.from == 0
-                && d.to == 2
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 2 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         }));
     }
 
@@ -2168,9 +2171,7 @@ mod tests {
         assert!(has_line_class(&decs, 0, "md-h1"));
         // … but no Replace on the `# `.
         let replace_on_marker = decs.iter().any(|d| {
-            d.from == 0
-                && d.to == 2
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 2 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!replace_on_marker);
     }
@@ -2186,9 +2187,11 @@ mod tests {
     fn table_recognized() {
         let s = state("| A | B |\n|---|---|\n| 1 | 2 |", 100);
         let decs = live_preview(&s);
-        let widget = decs.iter().any(|d| matches!(&d.kind,
+        let widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-table")));
+                if html.contains("md-table"))
+        });
         assert!(widget);
     }
 
@@ -2198,8 +2201,9 @@ mod tests {
         // recognized but no Replace, source stays editable.
         let s = state("| A | B |\n|---|---|\n| 1 | 2 |", 5);
         let decs = live_preview(&s);
-        let has_replace = decs.iter().any(|d| matches!(d.kind,
-            crate::decoration::DecorationKind::Replace));
+        let has_replace = decs
+            .iter()
+            .any(|d| matches!(d.kind, crate::decoration::DecorationKind::Replace));
         assert!(!has_replace);
     }
 
@@ -2208,9 +2212,11 @@ mod tests {
         // No separator → not a table.
         let s = state("| A | B |\n| 1 | 2 |", 100);
         let decs = live_preview(&s);
-        let widget = decs.iter().any(|d| matches!(&d.kind,
+        let widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-table")));
+                if html.contains("md-table"))
+        });
         assert!(!widget);
     }
 
@@ -2220,9 +2226,11 @@ mod tests {
         // widget shown.
         let s = state("see ^[a side note] here", 0);
         let decs = live_preview(&s);
-        let has_marker = decs.iter().any(|d| matches!(&d.kind,
+        let has_marker = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-inline-footnote-marker")));
+                if html.contains("md-inline-footnote-marker"))
+        });
         assert!(has_marker);
     }
 
@@ -2233,7 +2241,8 @@ mod tests {
         let decs = live_preview(&s);
         assert!(mark_classes(&decs).contains(&"md-inline-footnote"));
         let has_replace = decs.iter().any(|d| {
-            d.from == 4 && d.to == 18
+            d.from == 4
+                && d.to == 18
                 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
@@ -2243,9 +2252,11 @@ mod tests {
     fn embed_page_renders_card() {
         let s = state("![[OtherPage]]", 100);
         let decs = live_preview(&s);
-        let has_card = decs.iter().any(|d| matches!(&d.kind,
+        let has_card = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-page")));
+                if html.contains("md-embed-page"))
+        });
         assert!(has_card);
     }
 
@@ -2256,11 +2267,17 @@ mod tests {
         let src = "Before\n\n## Section\nbody line\nmore body\n\n## Next\n\n![[#Section]]";
         let s = state(src, 100);
         let decs = live_preview(&s);
-        let card_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-section") => Some(html.clone()),
-            _ => None,
-        }).expect("section card");
+        let card_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-section") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("section card");
         assert!(card_html.contains("body line"));
         assert!(!card_html.contains("md-embed-placeholder"));
     }
@@ -2271,11 +2288,17 @@ mod tests {
         // yet, so renders the placeholder.
         let s = state("![[OtherPage#Section]]", 100);
         let decs = live_preview(&s);
-        let card_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-section") => Some(html.clone()),
-            _ => None,
-        }).expect("section card");
+        let card_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-section") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("section card");
         assert!(card_html.contains("md-embed-placeholder"));
     }
 
@@ -2284,11 +2307,17 @@ mod tests {
         let src = "Paragraph body ^anchor-here\n\n![[#^anchor-here]]";
         let s = state(src, 100);
         let decs = live_preview(&s);
-        let card_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-block") => Some(html.clone()),
-            _ => None,
-        }).expect("block card");
+        let card_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-block") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("block card");
         assert!(card_html.contains("Paragraph body"));
     }
 
@@ -2319,9 +2348,11 @@ mod tests {
         let src = format!("see (({uuid})) for details");
         let s = state(&src, 0);
         let decs = live_preview(&s);
-        let has_chip = decs.iter().any(|d| matches!(&d.kind,
+        let has_chip = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-block-ref-chip")));
+                if html.contains("md-block-ref-chip"))
+        });
         assert!(has_chip);
     }
 
@@ -2331,9 +2362,11 @@ mod tests {
         let src = format!("{{{{embed (({uuid}))}}}}\n");
         let s = state(&src, 0);
         let decs = live_preview(&s);
-        let has_card = decs.iter().any(|d| matches!(&d.kind,
+        let has_card = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-block-embed-card")));
+                if html.contains("md-block-embed-card"))
+        });
         assert!(has_card);
     }
 
@@ -2343,18 +2376,26 @@ mod tests {
         // the `((uuid))` chip should render the target's
         // first-line content (not "unresolved").
         let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
-        let src = format!(
-            "First block content here\nid:: {uuid}\n\nA later paragraph with (({uuid}))."
-        );
+        let src =
+            format!("First block content here\nid:: {uuid}\n\nA later paragraph with (({uuid})).");
         let s = state(&src, 0);
         let decs = live_preview(&s);
-        let chip_html = decs.iter().find_map(|d| match &d.kind {
-            crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-block-ref-chip") => Some(html.clone()),
-            _ => None,
-        }).expect("chip widget");
-        assert!(chip_html.contains("First block content here"),
-            "expected chip to preview target, got: {}", chip_html);
+        let chip_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-block-ref-chip") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("chip widget");
+        assert!(
+            chip_html.contains("First block content here"),
+            "expected chip to preview target, got: {}",
+            chip_html
+        );
         assert!(!chip_html.contains("md-block-ref-unresolved"));
     }
 
@@ -2388,9 +2429,11 @@ mod tests {
     fn setext_h1_recognized() {
         let s = state("Big Title\n=========\nbody", 0);
         let decs = live_preview(&s);
-        let has_h1 = decs.iter().any(|d| matches!(&d.kind,
+        let has_h1 = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-h1"));
+                if class == &"md-h1")
+        });
         assert!(has_h1);
     }
 
@@ -2398,9 +2441,11 @@ mod tests {
     fn setext_h2_recognized() {
         let s = state("Subtitle\n--------\nbody", 0);
         let decs = live_preview(&s);
-        let has_h2 = decs.iter().any(|d| matches!(&d.kind,
+        let has_h2 = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-h2"));
+                if class == &"md-h2")
+        });
         assert!(has_h2);
     }
 
@@ -2410,20 +2455,28 @@ mod tests {
         // as a task line, just with a non-canonical status char.
         let s = state("- [/] working on it\n- [>] later", 0);
         let decs = live_preview(&s);
-        let has_task_line = decs.iter().filter(|d| matches!(&d.kind,
+        let has_task_line = decs
+            .iter()
+            .filter(|d| {
+                matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-task")).count();
+                if class == &"md-task")
+            })
+            .count();
         assert!(has_task_line >= 2);
     }
 
     #[test]
     fn frontmatter_parsed() {
-        let src = "---\ntitle: Hello\ntags: [a, b]\npublished: true\naliases:\n  - x\n  - y\n---\n# body";
+        let src =
+            "---\ntitle: Hello\ntags: [a, b]\npublished: true\naliases:\n  - x\n  - y\n---\n# body";
         let fm = super::parse_frontmatter(src).expect("fm found");
         assert_eq!(fm.props.len(), 4);
         assert_eq!(fm.props[0].key, "title");
         assert!(matches!(&fm.props[0].value, super::PropValue::Text(s) if s == "Hello"));
-        assert!(matches!(&fm.props[1].value, super::PropValue::List(v) if v == &vec!["a".to_string(), "b".to_string()]));
+        assert!(
+            matches!(&fm.props[1].value, super::PropValue::List(v) if v == &vec!["a".to_string(), "b".to_string()])
+        );
         assert!(matches!(&fm.props[2].value, super::PropValue::Bool(true)));
         assert!(matches!(&fm.props[3].value, super::PropValue::List(v) if v.len() == 2));
     }
@@ -2474,8 +2527,10 @@ mod tests {
         assert!(s.starts_with("description: |\n"));
         assert!(s.contains("  first line\n"));
         // Range covers the block + the closing indent line.
-        assert_eq!(&src[desc.range.clone()],
-            "description: |\n  first line\n  second line\n  third\n");
+        assert_eq!(
+            &src[desc.range.clone()],
+            "description: |\n  first line\n  second line\n  third\n"
+        );
     }
 
     #[test]
@@ -2489,9 +2544,11 @@ mod tests {
     fn frontmatter_emits_widget_when_caret_away() {
         let s = state("---\ntitle: x\n---\n# body", 20);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-properties")));
+                if html.contains("md-properties"))
+        });
         assert!(has_widget);
     }
 
@@ -2500,9 +2557,11 @@ mod tests {
         // Caret away: source replaced + math widget emitted.
         let s = state("Cost is $x^2$ today", 0);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-math-widget")));
+                if html.contains("md-math-widget"))
+        });
         assert!(has_widget);
     }
 
@@ -2513,9 +2572,11 @@ mod tests {
         // exercises a real render.
         let s = state("Before\n$$E = m c^2$$\nAfter", 0);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-math-widget-block")));
+                if html.contains("md-math-widget-block"))
+        });
         assert!(has_widget);
     }
 
@@ -2540,9 +2601,11 @@ mod tests {
         let src = "```mermaid\nflowchart TD\n  A --> B\n```\nx";
         let s = state(src, src.len() - 1);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-mermaid-widget")));
+                if html.contains("md-mermaid-widget"))
+        });
         assert!(has_widget);
     }
 
@@ -2553,9 +2616,11 @@ mod tests {
         let src = "```typst\n= Section\n```\nx";
         let s = state(src, src.len() - 1);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-typst-widget")));
+                if html.contains("md-typst-widget"))
+        });
         assert!(has_widget);
     }
 
@@ -2577,8 +2642,10 @@ mod tests {
         // Caret inside the comment: body styled as `md-comment`.
         let s = state("a %% hidden %% b", 6);
         let decs = live_preview(&s);
-        let has_mark = decs.iter().any(|d| matches!(&d.kind,
-            crate::decoration::DecorationKind::Mark { class, .. } if class == "md-comment"));
+        let has_mark = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Mark { class, .. } if class == "md-comment")
+        });
         assert!(has_mark);
     }
 
@@ -2586,9 +2653,11 @@ mod tests {
     fn image_embed_recognized() {
         let s = state("![[pic.png]]", 100);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-image")));
+                if html.contains("md-embed-image"))
+        });
         assert!(has_widget);
     }
 
@@ -2609,9 +2678,11 @@ mod tests {
     fn video_embed_recognized() {
         let s = state("![[clip.mp4]]", 100);
         let decs = live_preview(&s);
-        let has_video = decs.iter().any(|d| matches!(&d.kind,
+        let has_video = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.contains("md-embed-video")));
+                if html.contains("md-embed-video"))
+        });
         assert!(has_video);
     }
 
@@ -2620,9 +2691,11 @@ mod tests {
         // .md isn't a media kind — should NOT emit an embed widget.
         let s = state("![[other.md]]", 100);
         let decs = live_preview(&s);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html }
-                if html.starts_with("<img") || html.starts_with("<video")));
+                if html.starts_with("<img") || html.starts_with("<video"))
+        });
         assert!(!has_widget);
     }
 
@@ -2630,9 +2703,11 @@ mod tests {
     fn callout_note_emits_md_callout_class() {
         let s = state("> [!note] Title", 100);
         let decs = live_preview(&s);
-        let has_callout = decs.iter().any(|d| matches!(&d.kind,
+        let has_callout = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-note")));
+                if class.contains("md-callout-note"))
+        });
         assert!(has_callout);
     }
 
@@ -2644,12 +2719,18 @@ mod tests {
         // Inner header line gets both `md-callout-warning` and
         // a depth-2 class.
         let inner_line_from = src.find("> > [!warning]").unwrap();
-        let has_warning = decs.iter().any(|d| matches!(&d.kind,
+        let has_warning = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-warning")) && d.from == inner_line_from);
-        let has_depth = decs.iter().any(|d| matches!(&d.kind,
+                if class.contains("md-callout-warning"))
+                && d.from == inner_line_from
+        });
+        let has_depth = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-callout-nested-2") && d.from == inner_line_from);
+                if class == &"md-callout-nested-2")
+                && d.from == inner_line_from
+        });
         assert!(has_warning, "expected inner line to be warning-classed");
         assert!(has_depth, "expected inner line to carry depth-2 class");
     }
@@ -2660,9 +2741,12 @@ mod tests {
         let s = state(src, 100);
         let decs = live_preview(&s);
         let body_from = src.find("> > body").unwrap();
-        let body_is_warning = decs.iter().any(|d| matches!(&d.kind,
+        let body_is_warning = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-warning")) && d.from == body_from);
+                if class.contains("md-callout-warning"))
+                && d.from == body_from
+        });
         assert!(body_is_warning);
     }
 
@@ -2675,9 +2759,12 @@ mod tests {
         let s = state(src, 100);
         let decs = live_preview(&s);
         let back_from = src.find("> back to outer").unwrap();
-        let back_is_note = decs.iter().any(|d| matches!(&d.kind,
+        let back_is_note = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-note")) && d.from == back_from);
+                if class.contains("md-callout-note"))
+                && d.from == back_from
+        });
         assert!(back_is_note);
     }
 
@@ -2685,9 +2772,11 @@ mod tests {
     fn callout_warning_alias_resolves() {
         let s = state("> [!caution] Hey", 100);
         let decs = live_preview(&s);
-        let has_warning = decs.iter().any(|d| matches!(&d.kind,
+        let has_warning = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-warning")));
+                if class.contains("md-callout-warning"))
+        });
         assert!(has_warning);
     }
 
@@ -2696,9 +2785,14 @@ mod tests {
         let s = state("> [!note] T\n> body line", 100);
         let decs = live_preview(&s);
         // Both lines should have a `md-callout-note` class.
-        let count = decs.iter().filter(|d| matches!(&d.kind,
+        let count = decs
+            .iter()
+            .filter(|d| {
+                matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class.contains("md-callout-note"))).count();
+                if class.contains("md-callout-note"))
+            })
+            .count();
         assert_eq!(count, 2);
     }
 
@@ -2730,8 +2824,7 @@ mod tests {
         assert!(has_line_class(&decs, 0, "md-hr-active"));
         // And the `---` source isn't replaced — user can edit.
         let has_replace = decs.iter().any(|d| {
-            d.from == 0 && d.to == 3
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 3 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
     }
@@ -2757,10 +2850,12 @@ mod tests {
         let s = state("- item", 3);
         let decs = live_preview(&s);
         let has_replace = decs.iter().any(|d| {
-            d.from == 0 && d.to == 2
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 2 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
-        assert!(!has_replace, "marker source must stay visible while caret is on the line");
+        assert!(
+            !has_replace,
+            "marker source must stay visible while caret is on the line"
+        );
         let has_widget = decs
             .iter()
             .any(|d| matches!(&d.kind, crate::decoration::DecorationKind::Widget { .. }));
@@ -2772,8 +2867,7 @@ mod tests {
         let s = state("1. foo", 3);
         let decs = live_preview(&s);
         let has_replace = decs.iter().any(|d| {
-            d.from == 0 && d.to == 3
-                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+            d.from == 0 && d.to == 3 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
     }
@@ -2788,8 +2882,10 @@ mod tests {
             .iter()
             .any(|d| matches!(d.kind, crate::decoration::DecorationKind::Replace));
         assert!(!has_replace);
-        let has_widget = decs.iter().any(|d| matches!(&d.kind,
-            crate::decoration::DecorationKind::Widget { html } if html.contains("md-task-checkbox")));
+        let has_widget = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html } if html.contains("md-task-checkbox"))
+        });
         assert!(!has_widget);
     }
 
@@ -2821,9 +2917,11 @@ mod tests {
     fn code_fence_with_lang_emits_syntax_tokens() {
         let s = state("```rust\nfn main() {}\n```", 999);
         let decs = live_preview(&s);
-        let has_token = decs.iter().any(|d| matches!(&d.kind,
+        let has_token = decs.iter().any(|d| {
+            matches!(&d.kind,
             crate::decoration::DecorationKind::Mark { class, .. }
-                if class.starts_with("md-tok-")));
+                if class.starts_with("md-tok-"))
+        });
         assert!(has_token, "expected at least one md-tok-* mark");
     }
 

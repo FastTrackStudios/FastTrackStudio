@@ -6,9 +6,28 @@ members = [
     "features/*/*",
     "features/*/tests/native",
     "xtask",
+    # CodeMirror-style editor — subtree-imported from
+    # github.com/.../Editor. Lives under `external/editor/` so its
+    # internal Cargo.toml + git history stay intact. We re-expose
+    # its crates here so the rest of Task can depend on them.
+    "external/editor/crates/editor-state",
+    "external/editor/crates/editor-syntax",
+    "external/editor/crates/editor-view",
+    "external/editor/crates/editor-vim",
+    "external/editor/crates/editor-typst",
+    "external/editor/crates/editor-mermaid",
+    "external/editor/crates/editor-cm",
+    # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
+    # patched in for wasm32 compat. Lives next to the editor it
+    # supports.
+    "external/editor/vendor/mermaid-rs-renderer",
 ]
 exclude = [
     "features/project/spec",    "features/project/tests",
+    # Editor playground stays in its own subtree workspace —
+    # pulls in `dx serve` and a different Dioxus version, not
+    # part of Task's main build.
+    "external/editor/examples/playground",
 ]
 resolver = "2"
 
@@ -46,6 +65,26 @@ knowledge-ui = { path = "features/knowledge/knowledge-ui" }
 obsidian-compat = { path = "crates/obsidian-compat" }
 publish-core = { path = "crates/publish-core" }
 editor = { path = "crates/editor" }
+# CodeMirror-style editor crates (subtree). Aliased here so
+# task crates can reference them by short workspace name.
+editor-state = { path = "external/editor/crates/editor-state" }
+editor-syntax = { path = "external/editor/crates/editor-syntax" }
+editor-view = { path = "external/editor/crates/editor-view" }
+editor-vim = { path = "external/editor/crates/editor-vim" }
+editor-typst = { path = "external/editor/crates/editor-typst" }
+editor-mermaid = { path = "external/editor/crates/editor-mermaid" }
+editor-cm = { path = "external/editor/crates/editor-cm" }
+
+# Deps the editor's inner crates inherit via `workspace = true`.
+# `serde`, `serde_json` are already declared elsewhere in the
+# workspace deps block — only the editor-specific ones go here.
+ropey = "1.6"
+# Tree-sitter syntax highlighting — same versions as the editor
+# subtree's original workspace, kept default-features-off so we
+# don't drag in everything by default.
+arborium = { version = "2.16.0", default-features = false }
+arborium-theme = "2.16.0"
+arborium-tree-sitter = "2.16.0"
 attachments-proto = { path = "features/attachments/attachments-proto" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
@@ -469,3 +508,12 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 [patch.crates-io.sea-orm-migration]
 git = "https://github.com/FastTrackStudios/sea-orm"
 rev = "d01afa40d79227a4a2de85b50e76849300890766"
+
+# Vendored fork of `mermaid-rs-renderer` 0.2.2 — the upstream
+# crate calls `std::time::Instant::now()` unconditionally from
+# its layout pipeline, which panics on `wasm32-unknown-unknown`.
+# Our fork swaps that for `web_time::Instant` so editor-mermaid
+# can render diagrams in the browser. Subtree-imported with the
+# editor, lives at `external/editor/vendor/mermaid-rs-renderer`.
+[patch.crates-io.mermaid-rs-renderer]
+path = "external/editor/vendor/mermaid-rs-renderer"

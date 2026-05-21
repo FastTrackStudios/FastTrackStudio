@@ -1,5 +1,5 @@
 [package]
-name = "editor"
+name = "editor-cm"
 description = "Umbrella crate that re-exports editor-state + editor-view."
 version.workspace = true
 edition.workspace = true

@@ -7,7 +7,7 @@ members = [
     "crates/editor-vim",
     "crates/editor-typst",
     "crates/editor-mermaid",
-    "crates/editor",
+    "crates/editor-cm",
     "examples/playground",
 ]
 
@@ -27,7 +27,7 @@ editor-view = { path = "crates/editor-view" }
 editor-vim = { path = "crates/editor-vim" }
 editor-typst = { path = "crates/editor-typst" }
 editor-mermaid = { path = "crates/editor-mermaid" }
-editor = { path = "crates/editor" }
+editor-cm = { path = "crates/editor-cm" }
 
 # UI
 dioxus = "0.7"

@@ -110,10 +110,16 @@ struct TypstCache {
 
 impl TypstCache {
     fn new(cap: usize) -> Self {
-        Self { entries: Vec::with_capacity(cap), cap }
+        Self {
+            entries: Vec::with_capacity(cap),
+            cap,
+        }
     }
     fn get(&mut self, kind: TypstKind, body: &str) -> Option<String> {
-        let i = self.entries.iter().position(|(k, b, _)| *k == kind && b == body)?;
+        let i = self
+            .entries
+            .iter()
+            .position(|(k, b, _)| *k == kind && b == body)?;
         let hit = self.entries.remove(i);
         let svg = hit.2.clone();
         self.entries.push(hit);

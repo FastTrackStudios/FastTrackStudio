@@ -3,7 +3,7 @@
 //! `TransactionSpec`, and asserts on the resulting doc + caret.
 
 use editor_state::{EditorState, KeySpec, Range, Selection};
-use editor_vim::{handle_key, VimState};
+use editor_vim::{VimState, handle_key};
 
 fn k(ch: &str) -> KeySpec {
     KeySpec {

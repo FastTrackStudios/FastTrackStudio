@@ -13,12 +13,12 @@
 use std::collections::HashMap;
 
 use parking_lot::Mutex;
+use typst::Library;
 use typst::diag::{FileError, FileResult};
 use typst::foundations::{Bytes, Datetime};
 use typst::syntax::{FileId, Source, Span};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
-use typst::Library;
 
 const MAIN_VIRTUAL_PATH: &str = "/main.typ";
 
@@ -51,8 +51,7 @@ impl World {
             }
         }
         let book = FontBook::from_fonts(&fonts);
-        let main_id =
-            FileId::new(None, typst::syntax::VirtualPath::new(MAIN_VIRTUAL_PATH));
+        let main_id = FileId::new(None, typst::syntax::VirtualPath::new(MAIN_VIRTUAL_PATH));
         let mut sources = HashMap::new();
         sources.insert(main_id, Source::new(main_id, String::new()));
         // `chrono` with `clock` + `wasmbind` routes through
@@ -95,7 +94,12 @@ impl World {
         let range = src.range(span)?;
         let line = src.byte_to_line(range.start)? + 1;
         let col = src.byte_to_column(range.start)? + 1;
-        Some(format!("{}:{}:{}", id.vpath().as_rooted_path().display(), line, col))
+        Some(format!(
+            "{}:{}:{}",
+            id.vpath().as_rooted_path().display(),
+            line,
+            col
+        ))
     }
 }
 
