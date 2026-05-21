@@ -29,17 +29,19 @@
 //! - `DELETE /vault/:id/file/*path`   → remove; `If-Match`
 //!   guards.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, put};
+use axum::routing::{any, delete, get, put};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock, broadcast};
 
 /// Shared state for the vault-sync routes. One process can
 /// serve many vaults — `root` is the parent directory under
@@ -54,6 +56,11 @@ pub struct VaultSyncState {
     /// inside the lock. Refine to per-vault when latency
     /// matters.
     write_lock: Arc<Mutex<()>>,
+    /// Per-vault broadcast channels. PUT / DELETE handlers
+    /// publish a [`VaultEvent`] here; the WS endpoint
+    /// subscribes per connection. Capacity 256 — bursts of
+    /// rapid edits get coalesced client-side.
+    channels: Arc<RwLock<HashMap<String, broadcast::Sender<VaultEvent>>>>,
 }
 
 impl VaultSyncState {
@@ -62,7 +69,22 @@ impl VaultSyncState {
         Ok(Self {
             root,
             write_lock: Arc::new(Mutex::new(())),
+            channels: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Get (or lazily create) the broadcast sender for a vault.
+    async fn channel(&self, vault_id: &str) -> broadcast::Sender<VaultEvent> {
+        if let Some(tx) = self.channels.read().await.get(vault_id) {
+            return tx.clone();
+        }
+        let mut chans = self.channels.write().await;
+        if let Some(tx) = chans.get(vault_id) {
+            return tx.clone();
+        }
+        let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
+        chans.insert(vault_id.to_string(), tx.clone());
+        tx
     }
 
     fn vault_dir(&self, vault_id: &str) -> PathBuf {
@@ -94,9 +116,78 @@ impl VaultSyncState {
 pub fn router() -> Router<VaultSyncState> {
     Router::new()
         .route("/vault/{vault_id}/manifest", get(manifest))
+        .route("/vault/{vault_id}/subscribe", any(subscribe_ws))
         .route("/vault/{vault_id}/file/{*path}", get(get_file))
         .route("/vault/{vault_id}/file/{*path}", put(put_file))
         .route("/vault/{vault_id}/file/{*path}", delete(delete_file))
+}
+
+/// One change event on a vault. Sent to every WS subscriber
+/// whenever a PUT or DELETE handler completes successfully.
+/// JSON-serialized over the wire — same shape clients see in
+/// manifest entries, plus an `op` discriminator.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum VaultEvent {
+    /// File was created or modified. `sha256` is the new
+    /// content's digest; clients can skip the pull when their
+    /// local sha already matches (echo from their own push).
+    Put {
+        path: String,
+        sha256: String,
+        mtime_ms: i64,
+        size: u64,
+    },
+    /// File was removed.
+    Delete { path: String },
+}
+
+async fn subscribe_ws(
+    State(state): State<VaultSyncState>,
+    AxumPath(vault_id): AxumPath<String>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let tx = state.channel(&vault_id).await;
+    let mut rx = tx.subscribe();
+    ws.on_upgrade(move |socket| async move {
+        run_subscriber(socket, &mut rx).await;
+    })
+}
+
+async fn run_subscriber(mut socket: WebSocket, rx: &mut broadcast::Receiver<VaultEvent>) {
+    loop {
+        tokio::select! {
+            // Forward broadcast events as JSON text frames.
+            msg = rx.recv() => match msg {
+                Ok(evt) => {
+                    let json = match serde_json::to_string(&evt) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    if socket.send(Message::Text(json.into())).await.is_err() {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // Subscriber missed events because we hit
+                    // the channel cap. Send a hint so the
+                    // client knows to re-pull the manifest.
+                    let _ = socket
+                        .send(Message::Text(r#"{"op":"resync"}"#.into()))
+                        .await;
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            // Drain inbound (we don't expect client → server
+            // messages on this socket; pong frames pass
+            // through). Closing the WS ends the loop.
+            inbound = socket.recv() => match inbound {
+                Some(Ok(Message::Close(_))) | None => return,
+                Some(Ok(_)) => continue,
+                Some(Err(_)) => return,
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -236,6 +327,22 @@ async fn put_file(
     std::fs::write(&tmp, &body).map_err(SyncError::io)?;
     std::fs::rename(&tmp, &abs).map_err(SyncError::io)?;
     let new_sha = sha256_hex(&body);
+    let mtime_ms = std::fs::metadata(&abs)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    // Drop the write lock before publishing — broadcast::send
+    // is non-blocking, but keeps the critical section minimal.
+    drop(_g);
+    let tx = state.channel(&vault_id).await;
+    let _ = tx.send(VaultEvent::Put {
+        path: rel.clone(),
+        sha256: new_sha.clone(),
+        mtime_ms,
+        size: body.len() as u64,
+    });
     let mut resp_headers = HeaderMap::new();
     resp_headers.insert("X-Vault-Sha256", HeaderValue::from_str(&new_sha).unwrap());
     Ok((StatusCode::OK, resp_headers, new_sha).into_response())
@@ -266,6 +373,9 @@ async fn delete_file(
         }
     }
     std::fs::remove_file(&abs).map_err(SyncError::io)?;
+    drop(_g);
+    let tx = state.channel(&vault_id).await;
+    let _ = tx.send(VaultEvent::Delete { path: rel.clone() });
     Ok(StatusCode::OK)
 }
 
@@ -479,5 +589,73 @@ mod tests {
             resp.status(),
             StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND
         ));
+    }
+
+    #[tokio::test]
+    async fn put_broadcasts_event() {
+        let (_tmp, state) = make_state();
+        let tx = state.channel("v1").await;
+        let mut rx = tx.subscribe();
+        let app = make_app(state);
+        let _ = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/vault/v1/file/hello.md")
+                    .header("If-Match", "*")
+                    .body(Body::from("hi"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("recv ok");
+        match evt {
+            VaultEvent::Put { path, size, .. } => {
+                assert_eq!(path, "hello.md");
+                assert_eq!(size, 2);
+            }
+            other => panic!("expected Put, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_broadcasts_event() {
+        let (_tmp, state) = make_state();
+        let app = make_app(state.clone());
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/vault/v1/file/gone.md")
+                    .header("If-Match", "*")
+                    .body(Body::from("x"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let tx = state.channel("v1").await;
+        let mut rx = tx.subscribe();
+        let _ = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/vault/v1/file/gone.md")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .expect("event timeout")
+            .expect("recv ok");
+        match evt {
+            VaultEvent::Delete { path } => assert_eq!(path, "gone.md"),
+            other => panic!("expected Delete, got {other:?}"),
+        }
     }
 }
