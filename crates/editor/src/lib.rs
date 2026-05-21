@@ -2,6 +2,7 @@
 //! the state + view surface from one place.
 
 pub use editor_state::*;
+pub use editor_typst;
 pub use editor_view::{self, Editor};
 pub use editor_vim;
 
