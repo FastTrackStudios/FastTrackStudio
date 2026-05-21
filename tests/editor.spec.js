@@ -993,4 +993,109 @@ test.describe("editor", () => {
       .poll(async () => (await readState(page)).text)
       .toContain("- new-tag");
   });
+
+  // ── Slash command palette ──────────────────────────────────
+  //
+  // `?novim=1` is on the page so we're plain-insert-mode by
+  // default. Each test sets caret to a known position then
+  // types — the menu should open whenever `/` is at start of
+  // line / after whitespace, and stay closed elsewhere.
+
+  test("slash opens the menu at start of line", async ({ page }) => {
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len); // end of doc
+    // Insert a newline first so we know `/` is at line start.
+    await page.keyboard.insertText("\n/");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+    // Catalog renders at least the headings group.
+    await expect(page.locator(".slash-group", { hasText: "Heading" })).toBeVisible();
+  });
+
+  test("typing after slash filters the catalog", async ({ page }) => {
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len);
+    await page.keyboard.insertText("\n/cal");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+    // `cal` matches "Callout: …"; non-callout groups shouldn't
+    // be in the visible list.
+    await expect(page.locator(".slash-row-label", { hasText: /Callout/ }).first()).toBeVisible();
+    await expect(page.locator(".slash-row-label", { hasText: "Code block" })).toHaveCount(0);
+  });
+
+  test("escape closes the slash menu", async ({ page }) => {
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len);
+    await page.keyboard.insertText("\n/");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".slash-menu")).toHaveCount(0);
+  });
+
+  test("enter picks the highlighted command", async ({ page }) => {
+    const beforeLen = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, beforeLen);
+    // `/h1` filters to "Heading 1" which is the first row in
+    // the Heading group.
+    await page.keyboard.insertText("\n/heading 1");
+    await expect(page.locator(".slash-menu")).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".slash-menu")).toHaveCount(0);
+    // After picking Heading 1, the line should be a `# ` prefix
+    // (slash + query removed, heading set on the now-empty
+    // line). Body of the doc should end with `# ` or contain it
+    // somewhere near the tail.
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toMatch(/# $/);
+  });
+
+  test("slash mid-word does NOT open the menu", async ({ page }) => {
+    const len = Number((await readState(page)).len);
+    await editor(page).focus();
+    await setCaret(page, len);
+    // Type `wo` then `/` then `rd` — the `/` is mid-word, so
+    // detect_slash should refuse it (matches Logseq behavior:
+    // protects URLs like `https://`).
+    await page.keyboard.insertText("\nwo/rd");
+    await expect(page.locator(".slash-menu")).toHaveCount(0);
+  });
+
+  // ── Wikilink rendering ─────────────────────────────────────
+
+  test("wikilinks render with the unresolved class by default", async ({
+    page,
+  }) => {
+    // The seed contains `[[Editor Roadmap]]` (real wikilink,
+    // not in backticks). With no vault, every wikilink is
+    // unresolved → `.md-wikilink-unresolved`.
+    await expect(
+      page.locator(".md-wikilink-unresolved").first()
+    ).toBeVisible();
+  });
+
+  // ── Inline footnote ────────────────────────────────────────
+
+  test("inline footnote renders as a marker when caret away", async ({
+    page,
+  }) => {
+    // Marker should be visible since the seed's footnote sits
+    // far from doc start (default caret is at offset 0).
+    await expect(
+      page.locator(".md-inline-footnote-marker").first()
+    ).toBeVisible();
+  });
+
+  // ── Nested callouts ────────────────────────────────────────
+
+  test("nested callouts emit a depth class", async ({ page }) => {
+    // Seed has `> > [!warning]` and `> > > [!danger]` blocks;
+    // the depth-2 and depth-3 line classes should be on
+    // rendered lines.
+    await expect(page.locator(".md-callout-nested-2").first()).toBeVisible();
+    await expect(page.locator(".md-callout-nested-3").first()).toBeVisible();
+  });
 });
