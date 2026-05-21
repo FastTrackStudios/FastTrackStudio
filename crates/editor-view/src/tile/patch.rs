@@ -158,11 +158,8 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
                 _ => String::new(),
             };
             if html.is_empty() {
-                // Hidden replacement — no DOM.
                 None
             } else {
-                // Widget content is opaque HTML; the patcher
-                // sets innerHTML on first mount.
                 Some(Patch::element(
                     "span",
                     vec![
@@ -170,6 +167,12 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
                         ("contenteditable".into(), "false".into()),
                         ("data-tile-id".into(), tid.to_string()),
                         ("data-tile-pos".into(), pos.to_string()),
+                        // `priorSiblingBytes` in the JS bridge
+                        // reads this to know how many doc bytes
+                        // this widget consumes (markers etc.)
+                        // when summing offsets for a downstream
+                        // text node.
+                        ("data-tile-len".into(), t.length.to_string()),
                         ("data-widget-html".into(), html),
                     ],
                     Vec::new(),

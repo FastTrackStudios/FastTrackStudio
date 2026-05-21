@@ -76,9 +76,18 @@ fn init_tracing() {
 
 #[cfg(target_arch = "wasm32")]
 fn init_tracing() {
-    // No-op on wasm for now. A follow-up commit will wire
-    // `tracing-wasm` so the browser DevTools console gets the
-    // same stream.
+    // Browser DevTools console gets the structured log stream.
+    // Filter via `?log=trace` query for verbose; otherwise default
+    // to `debug` for the editor crates and `info` everywhere else.
+    let level = if read_query_flag("log") {
+        tracing::Level::TRACE
+    } else {
+        tracing::Level::DEBUG
+    };
+    let cfg = tracing_wasm::WASMLayerConfigBuilder::new()
+        .set_max_level(level)
+        .build();
+    tracing_wasm::set_as_global_default_with_config(cfg);
 }
 
 /// Look for a `?seed=...` query param in the page URL and

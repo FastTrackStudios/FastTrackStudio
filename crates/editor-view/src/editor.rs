@@ -61,6 +61,25 @@ pub type DecorationSource = fn(&EditorState) -> Vec<DecoratedRange>;
 /// unique `data-editor-id` for the JS bridge to find it.
 static EDITOR_INSTANCE: AtomicU64 = AtomicU64::new(0);
 
+/// Wall-clock milliseconds. wasm-safe: `Instant::now()` traps on
+/// `wasm32-unknown-unknown`, so we hop through `performance.now()`
+/// there. Used by perf-trace spans.
+#[cfg(not(target_arch = "wasm32"))]
+fn now_ms() -> f64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let s = START.get_or_init(std::time::Instant::now);
+    s.elapsed().as_secs_f64() * 1000.0
+}
+#[cfg(target_arch = "wasm32")]
+fn now_ms() -> f64 {
+    // Cheap call — browsers cache it. Falls back to 0 if for
+    // some reason there's no `performance` (Workers etc.).
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .unwrap_or(0.0)
+}
+
 /// `keymap` is optional. When `None` the browser handles every
 /// key. When `Some`, each `onkeydown` looks for a matching
 /// binding whose command returns `Some(spec)` and we
@@ -197,10 +216,38 @@ pub fn Editor(
                             //   Browsers place the cursor at element
                             //   level when the click hits non-text
                             //   space inside a line div.
+                            // Sum the doc-length each prior sibling
+                            // of `node` contributes to its parent tile.
+                            // Used to anchor positions when the
+                            // browser has split text nodes within a
+                            // line (typing inside an auto-paired
+                            // bracket, IME composition, paste).
+                            function priorSiblingBytes(node) {{
+                                let bytes = 0;
+                                let n = node.previousSibling;
+                                while (n) {{
+                                    if (n.nodeType === 3) {{
+                                        bytes += utf8Len(n.nodeValue);
+                                    }} else if (n.nodeType === 1) {{
+                                        // Widget tile carries its doc
+                                        // length explicitly; everything
+                                        // else (mark spans, line
+                                        // children) sums via recursion.
+                                        if (n.dataset && n.dataset.tileLen != null) {{
+                                            bytes += parseInt(n.dataset.tileLen, 10);
+                                        }} else {{
+                                            bytes += utf8Len(visText(n));
+                                        }}
+                                    }}
+                                    n = n.previousSibling;
+                                }}
+                                return bytes;
+                            }}
                             function posFromDOM(container, offset) {{
                                 if (!container) return 0;
                                 if (container.nodeType === 3) {{
                                     return tilePosOf(container)
+                                        + priorSiblingBytes(container)
                                         + utf16ToBytes(container.nodeValue, offset);
                                 }}
                                 const kids = container.childNodes;
@@ -307,10 +354,21 @@ pub fn Editor(
                                 return Array.from(lines).map(visText).join('\n');
                             }}
                             function sendInput() {{
+                                const t0 = window.__cm_perf ? performance.now() : 0;
                                 const [a, b] = selOffsets();
+                                const text = readText();
+                                if (window.__cm_perf) {{
+                                    window.__cm_perf_summary.inputs += 1;
+                                    const dt = performance.now() - t0;
+                                    window.__cm_perf_summary.totalInputMs += dt;
+                                    console.log(
+                                        `[cm/perf] sendInput ${{dt.toFixed(2)}}ms`,
+                                        'textLen=' + text.length + ' sel=' + a + ',' + b
+                                    );
+                                }}
                                 dioxus.send({{
                                     kind: 'input',
-                                    text: readText(),
+                                    text: text,
                                     sel: [a, b]
                                 }});
                             }}
@@ -324,6 +382,158 @@ pub fn Editor(
                                 if (el.dataset.muting === '1') return;
                                 const [a, b] = selOffsets();
                                 dioxus.send({{ kind: 'sel', sel: [a, b] }});
+                            }}
+
+                            // ── (dead) sync bracket helper ──
+                            // Kept around for the perf-trace refactor
+                            // — the sync path raced the patcher
+                            // (re-render replaces text nodes, cursor
+                            // reference lost), so brackets route
+                            // through Rust today. The helpers below
+                            // are still referenced by other code
+                            // paths (peekNextChar etc.).
+                            const OPENERS = {{ '(': ')', '[': ']', '{{': '}}' }};
+                            const SAME = new Set(["'", '"', '`']);
+                            const CLOSE_BEFORE = ')]}}>;,:';
+                            function handleBracketSync(ch) {{
+                                const sel = window.getSelection();
+                                if (!sel || sel.rangeCount === 0) return false;
+                                const r = sel.getRangeAt(0);
+                                if (!el.contains(r.startContainer)) return false;
+                                const isOpener = ch in OPENERS;
+                                const isSame = SAME.has(ch);
+                                const isCloser = !isOpener && !isSame
+                                    && (ch === ')' || ch === ']' || ch === '}}');
+                                if (!isOpener && !isSame && !isCloser) return false;
+
+                                const collapsed = r.collapsed;
+                                // For closer: skip-over if next char is the same.
+                                if (isCloser && collapsed) {{
+                                    const next = peekNextChar(r);
+                                    if (next === ch) {{
+                                        moveCursor(r, +1);
+                                        return true;
+                                    }}
+                                    return false;
+                                }}
+                                // For same-char (quote): skip if next is the same.
+                                if (isSame && collapsed) {{
+                                    const next = peekNextChar(r);
+                                    if (next === ch) {{
+                                        moveCursor(r, +1);
+                                        return true;
+                                    }}
+                                    // Only auto-pair when surrounded by
+                                    // non-word chars / EOL.
+                                    const prev = peekPrevChar(r);
+                                    const wordRe = /[\w]/;
+                                    if ((prev && wordRe.test(prev))
+                                        || (next && wordRe.test(next))) {{
+                                        return false;
+                                    }}
+                                }}
+                                // For opener: check the "before" rule.
+                                if (isOpener && collapsed) {{
+                                    const next = peekNextChar(r);
+                                    if (next && !/^\s$/.test(next)
+                                        && !CLOSE_BEFORE.includes(next)) {{
+                                        return false;
+                                    }}
+                                    // Suppress `[` auto-pair when
+                                    // the user looks like they're
+                                    // typing a task marker `- [`
+                                    // / `* [` / `+ [` — the
+                                    // closing `]` they type next
+                                    // would otherwise be dropped
+                                    // by skip-past, leaving a
+                                    // stray `]` later.
+                                    if (ch === '[') {{
+                                        const lineText = enclosingLineText(r);
+                                        if (lineText && /^[ ]*[-*+] $/.test(lineText)) {{
+                                            return false;
+                                        }}
+                                    }}
+                                }}
+                                // Build the pair text. For same-char,
+                                // the closer IS the opener.
+                                const close = isOpener ? OPENERS[ch] : ch;
+                                if (!collapsed) {{
+                                    // Wrap selection.
+                                    const text = r.toString();
+                                    r.deleteContents();
+                                    r.insertNode(document.createTextNode(ch + text + close));
+                                    // Place caret at the end of the inserted (post-close).
+                                    return true;
+                                }}
+                                // Empty caret — insert pair, leave caret between.
+                                const pair = document.createTextNode(ch + close);
+                                r.insertNode(pair);
+                                const newRange = document.createRange();
+                                newRange.setStart(pair, 1);
+                                newRange.collapse(true);
+                                sel.removeAllRanges();
+                                sel.addRange(newRange);
+                                // sendInput's diff will compute
+                                // an intended-caret at the END of
+                                // the inserted pair. We want the
+                                // caret BETWEEN. Send a follow-up
+                                // `sel` so once the input
+                                // transaction commits, the
+                                // selection lands where we want.
+                                // Queued FIFO after the input msg,
+                                // so the final state matches.
+                                queueMicrotask(() => {{
+                                    const [a, b] = selOffsets();
+                                    dioxus.send({{ kind: 'sel', sel: [a, b] }});
+                                }});
+                                return true;
+                            }}
+                            // Return the visible source bytes of
+                            // the line containing `r.startContainer`
+                            // up to (but not including) the caret.
+                            // Used by the bracket auto-pair to
+                            // decide whether `[` should be a task-
+                            // marker opener instead of a pair.
+                            function enclosingLineText(r) {{
+                                let n = r.startContainer;
+                                while (n && n !== el && !(n.classList
+                                    && n.classList.contains('cm-line'))) {{
+                                    n = n.parentNode;
+                                }}
+                                if (!n || n === el) return '';
+                                return visText(n);
+                            }}
+                            function peekNextChar(r) {{
+                                const n = r.startContainer;
+                                if (n.nodeType === 3) {{
+                                    return n.nodeValue[r.startOffset] || '';
+                                }}
+                                const kid = n.childNodes[r.startOffset];
+                                if (kid && kid.nodeType === 3) return kid.nodeValue[0] || '';
+                                return '';
+                            }}
+                            function peekPrevChar(r) {{
+                                const n = r.startContainer;
+                                if (n.nodeType === 3) {{
+                                    return r.startOffset > 0 ? n.nodeValue[r.startOffset - 1] : '';
+                                }}
+                                if (r.startOffset > 0) {{
+                                    const prev = n.childNodes[r.startOffset - 1];
+                                    if (prev && prev.nodeType === 3) {{
+                                        return prev.nodeValue[prev.nodeValue.length - 1] || '';
+                                    }}
+                                }}
+                                return '';
+                            }}
+                            function moveCursor(r, delta) {{
+                                const n = r.startContainer;
+                                if (n.nodeType !== 3) return;
+                                const newRange = document.createRange();
+                                newRange.setStart(n, r.startOffset + delta);
+                                newRange.collapse(true);
+                                const s = window.getSelection();
+                                s.removeAllRanges();
+                                s.addRange(newRange);
                             }}
 
                             // Composition guard. Mirrors CM6's
@@ -443,11 +653,13 @@ pub fn Editor(
                                 // factor, not typing in general.
                                 if (t === 'insertText' && typeof evt.data === 'string') {{
                                     // Bracket / quote auto-pair —
-                                    // CM6's `closebrackets` extension.
-                                    // Route through Rust so the
-                                    // resulting Changes go through
-                                    // the same Transaction pipeline as
-                                    // everything else (history etc.).
+                                    // routed through Rust. Sync-
+                                    // in-JS would race the
+                                    // re-render that follows; the
+                                    // patcher replaces the
+                                    // browser-inserted text node
+                                    // with a fresh span and the
+                                    // cursor reference is lost.
                                     if (/^[\(\[\{{\)\]\}}\'\"`]$/.test(evt.data)) {{
                                         evt.preventDefault();
                                         dioxus.send({{
@@ -759,16 +971,35 @@ pub fn Editor(
                                 }}
                             }}
 
+                            // ── perf logging ──
+                            // Toggle in DevTools console with:
+                            //   window.__cm_perf = true
+                            // Then watch `[cm/perf]` lines.
+                            function perfStart(label) {{
+                                if (!window.__cm_perf) return 0;
+                                return performance.now();
+                            }}
+                            function perfEnd(label, t0, extra) {{
+                                if (!window.__cm_perf || t0 === 0) return;
+                                const dt = performance.now() - t0;
+                                console.log(
+                                    `[cm/perf] {{label}} ${{dt.toFixed(2)}}ms`,
+                                    extra || ''
+                                );
+                            }}
+                            window.__cm_perf_summary = {{
+                                patches: 0, totalPatchMs: 0,
+                                inputs: 0, totalInputMs: 0,
+                            }};
+
                             function applyPatch(payloadJson) {{
                                 if (composing) return;
+                                const t0 = perfStart('patch');
                                 let payload;
                                 try {{ payload = JSON.parse(payloadJson); }}
                                 catch (_) {{ return; }}
                                 const descs = payload.patches || payload;
                                 const sel = payload.selection || null;
-                                // Cache the source doc so the copy
-                                // handler can emit markdown source
-                                // instead of the rendered DOM.
                                 if (typeof payload.doc === 'string') {{
                                     window['__cm_doc_{id}'] = payload.doc;
                                 }}
@@ -785,6 +1016,16 @@ pub fn Editor(
                                         delete el.dataset.writing;
                                         delete el.dataset.muting;
                                     }});
+                                }}
+                                const dt = window.__cm_perf
+                                    ? performance.now() - t0 : 0;
+                                if (window.__cm_perf) {{
+                                    window.__cm_perf_summary.patches += 1;
+                                    window.__cm_perf_summary.totalPatchMs += dt;
+                                    console.log(
+                                        `[cm/perf] patch ${{dt.toFixed(2)}}ms`,
+                                        `descs=${{descs.length}} docLen=${{(payload.doc||'').length}}`
+                                    );
                                 }}
                             }}
                             window['__cm_patch_{id}'] = function(descsJson) {{
@@ -1001,7 +1242,10 @@ pub fn Editor(
         let id = editor_id.clone();
         let deco_source_patch = decorations;
         use_effect(move || {
+            let _span = tracing::debug_span!("editor.patch_effect").entered();
             let s = state.read();
+            let doc_len = s.doc.len();
+            let t_decos = now_ms();
             let decorations: Vec<DecoratedRange> = match deco_source_patch {
                 Some(src) => {
                     let mut v = src(&s);
@@ -1010,8 +1254,22 @@ pub fn Editor(
                 }
                 None => Vec::new(),
             };
+            let deco_count = decorations.len();
+            let decos_ms = now_ms() - t_decos;
+            let t_build = now_ms();
             let (arena, root) = build_tiles(&s.doc.to_string(), &decorations);
+            let build_ms = now_ms() - t_build;
+            let t_patch = now_ms();
             let patch = build_patch(&arena, root);
+            let patch_ms = now_ms() - t_patch;
+            tracing::debug!(
+                doc_len,
+                deco_count,
+                decos_ms = %format!("{:.2}", decos_ms),
+                build_ms = %format!("{:.2}", build_ms),
+                patch_ms = %format!("{:.2}", patch_ms),
+                "editor.patch.build"
+            );
             let primary = s.selection.primary();
             // Send anchor/head separately (not sorted) so JS uses
             // `setBaseAndExtent` and preserves direction. Otherwise
@@ -1194,9 +1452,6 @@ fn handle_bridge_msg(
                 .iter()
                 .last()
                 .map(|c| {
-                    // Pre-change `c.from` plus the inserted
-                    // length plus accumulated delta from prior
-                    // changes.
                     let prior_delta: isize = changes
                         .iter()
                         .take_while(|x| (*x).from < c.from)
@@ -1332,11 +1587,6 @@ fn handle_bridge_msg(
             tracing::debug!("editor.composition.end");
         }
         "insert-bracket" => {
-            // CM6-style auto-pair / skip-over / wrap-selection
-            // for `()`/`[]`/`{}`/`""`/`''`/` `` `. The bracket
-            // char comes through the beforeinput intercept so
-            // the browser never inserts the raw char; the Rust
-            // command authors the Change.
             let text = v.get("text").and_then(|t| t.as_str()).unwrap_or("");
             let cur_clone = {
                 let cur = state.read().clone();
@@ -1351,8 +1601,6 @@ fn handle_bridge_msg(
             if let Some(spec) = editor_state::commands::insert_bracket(&cur_clone, text) {
                 state.set(cur_clone.update(spec.annotate("origin", "insert-bracket")));
             } else {
-                // No bracket logic applied — fall back to plain
-                // insert at the captured selection.
                 let p = cur_clone.selection.primary();
                 let changes = editor_state::Changes::replace(p.from()..p.to(), text);
                 let caret = p.from() + text.len();
