@@ -31,6 +31,14 @@ editor-state = { workspace = true }
 # Bases (`.base` YAML files) — parser + executor live in
 # knowledge-proto so the vault crate stays focused on storage.
 knowledge-proto = { workspace = true }
+# `VaultSync` wire trait + payload types. The `sync` module impls
+# `vault_proto::VaultSync` on the backend, making this crate the
+# canonical filesystem backend mounted on a `task-server` vox route.
+vault-proto = { workspace = true }
+architect = { workspace = true, features = ["dispatch-tokio"] }
+tokio = { workspace = true, features = ["sync", "rt", "macros"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "time"] }

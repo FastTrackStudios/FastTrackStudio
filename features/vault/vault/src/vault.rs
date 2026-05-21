@@ -31,7 +31,7 @@ pub struct VaultPage {
 
 /// One `.base` file (Obsidian Bases). The vault loads + holds
 /// the raw + parsed form; query execution lives in
-/// `obsidian-compat::base_query` so we don't duplicate it
+/// `vault-obsidian::base_query` so we don't duplicate it
 /// here.
 #[derive(Clone, Debug)]
 pub struct VaultBase {

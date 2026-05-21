@@ -1,18 +1,20 @@
 [package]
-name = "obsidian-compat"
+name = "vault-obsidian"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
-# Obsidian-compatibility layer. Native-only. Disk is the runtime
-# source of truth — pages, bases, attachments, frontmatter all
-# read/written directly to `.md` / `.base` files. No CRDT.
+# Obsidian translation layer — a `vault-proto::VaultSync` backend
+# rooted at an Obsidian-shaped directory. Native-only. Disk is the
+# runtime source of truth — pages, bases, attachments, frontmatter
+# all read/written directly to `.md` / `.base` files. No CRDT.
 #
 # Mirrors Obsidian's built-in CLI surface (`obsidian help`) so a
-# scripted workflow can use either interchangeably. Eventually
-# this crate becomes the seam where Task forks Obsidian's
-# semantics into its own — for now, it's a faithful subset.
+# scripted workflow can use either interchangeably. This is the
+# import / interop seam: open an existing Obsidian vault on disk
+# and serve it through the same wire trait as the primary `vault`
+# backend.
 #
 # Layout:
 #   vault.rs          — in-memory snapshot (Vault::open)

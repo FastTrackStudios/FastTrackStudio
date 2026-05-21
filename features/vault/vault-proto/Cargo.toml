@@ -1,6 +1,6 @@
 [package]
-name = "vault-sync-proto"
-description = "Wire contract for the vault-sync vox service: types, IfMatch enum, VaultEvent stream, and the `#[vox::service] trait VaultSync` consumed by server + native + wasm clients."
+name = "vault-proto"
+description = "Wire contract for the vault feature: `#[architect::rpc] trait VaultSync` (byte-level file replication) plus payload + event types. Implementations live in sibling `vault` (primary block-aware impl), `vault-obsidian` (Obsidian translation layer), and the server's per-vault disk store."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

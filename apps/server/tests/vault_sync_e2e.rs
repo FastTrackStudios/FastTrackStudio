@@ -5,6 +5,9 @@
 //! PUT → manifest → GET, the subscribe stream observing PUT +
 //! DELETE, and a conflict round-trip.
 //!
+//! The server uses `vault::Backend::under_parent` for its
+//! multi-tenant layout — any `vault_id` resolves to a fresh
+//! subdir under the configured root, created on first write.
 //! The architect macro rewrites the sync trait's `&str` args
 //! into owned `String` on the async client side, so call sites
 //! here pass owned strings.
@@ -14,7 +17,7 @@ use std::time::Duration;
 use crdt_seaorm::SeaOrmPersistence;
 use task_db::{default_database_url, open_and_migrate};
 use task_server::{AppState, router};
-use vault_sync_proto::{IfMatch, VaultEvent, VaultSyncClient, VaultSyncError};
+use vault_proto::{IfMatch, VaultEvent, VaultSyncClient, VaultSyncError};
 use vox::VoxError;
 
 /// Serializes env-var twiddling. `cargo test` runs tests on a

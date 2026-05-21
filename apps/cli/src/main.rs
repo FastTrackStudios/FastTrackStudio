@@ -636,7 +636,7 @@ async fn run_import(
 // ── FS-native Obsidian vault subcommands ─────────────────────────────
 
 fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
-    use obsidian_compat::Vault;
+    use vault_obsidian::Vault;
     match cmd {
         VaultCmd::Open { path } => {
             let t0 = std::time::Instant::now();
@@ -737,14 +737,14 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
         }
         VaultCmd::Backlinks { path, rel_path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let idx = obsidian_compat::LinkIndex::build(&v);
+            let idx = vault_obsidian::LinkIndex::build(&v);
             for p in idx.backlinks(&rel_path) {
                 println!("{p}");
             }
         }
         VaultCmd::Links { path, rel_path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let idx = obsidian_compat::LinkIndex::build(&v);
+            let idx = vault_obsidian::LinkIndex::build(&v);
             for link in idx.outgoing(&rel_path) {
                 match link.resolved {
                     Some(target) => println!("{}\t→ {target}", link.linkpath),
@@ -754,21 +754,21 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
         }
         VaultCmd::Orphans { path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let idx = obsidian_compat::LinkIndex::build(&v);
+            let idx = vault_obsidian::LinkIndex::build(&v);
             for p in idx.orphans() {
                 println!("{p}");
             }
         }
         VaultCmd::Deadends { path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let idx = obsidian_compat::LinkIndex::build(&v);
+            let idx = vault_obsidian::LinkIndex::build(&v);
             for p in idx.deadends() {
                 println!("{p}");
             }
         }
         VaultCmd::Unresolved { path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let idx = obsidian_compat::LinkIndex::build(&v);
+            let idx = vault_obsidian::LinkIndex::build(&v);
             for u in idx.unresolved() {
                 println!("{}\t{}", u.source, u.linkpath);
             }
@@ -778,14 +778,14 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             let page = v
                 .page(&rel_path)
                 .ok_or_else(|| eyre::eyre!("page not found: {rel_path}"))?;
-            for h in obsidian_compat::outline(page).headings {
+            for h in vault_obsidian::outline(page).headings {
                 let bar = "#".repeat(h.level as usize);
                 println!("{:>5}  {bar} {}", h.line, h.text);
             }
         }
         VaultCmd::Properties { path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            for k in obsidian_compat::list_property_keys(&v) {
+            for k in vault_obsidian::list_property_keys(&v) {
                 println!("{k}");
             }
         }
@@ -798,7 +798,7 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             let page = v
                 .page(&rel_path)
                 .ok_or_else(|| eyre::eyre!("page not found: {rel_path}"))?;
-            match obsidian_compat::read_property(page, &key) {
+            match vault_obsidian::read_property(page, &key) {
                 Some(v) => println!("{v}"),
                 None => {}
             }
@@ -812,8 +812,8 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
             let parsed: serde_json::Value = serde_json::from_str(&value)
                 .unwrap_or_else(|_| serde_json::Value::String(value.clone()));
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::set_property(&mut v, &rel_path, &key, parsed, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::set_property(&mut v, &rel_path, &key, parsed, &guard)
                 .map_err(|e| eyre::eyre!("set: {e}"))?;
         }
         VaultCmd::PropertyRemove {
@@ -822,19 +822,19 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             key,
         } => {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::remove_property(&mut v, &rel_path, &key, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::remove_property(&mut v, &rel_path, &key, &guard)
                 .map_err(|e| eyre::eyre!("remove: {e}"))?;
         }
         VaultCmd::Aliases { path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            for a in obsidian_compat::list_aliases(&v) {
+            for a in vault_obsidian::list_aliases(&v) {
                 println!("{}\t{}", a.alias, a.page);
             }
         }
         VaultCmd::Tasks { path } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            for t in obsidian_compat::list_tasks(&v) {
+            for t in vault_obsidian::list_tasks(&v) {
                 println!("{}:{}\t[{}] {}", t.page, t.line, t.marker, t.text);
             }
         }
@@ -845,9 +845,9 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
                     let p = v
                         .page(&rel)
                         .ok_or_else(|| eyre::eyre!("page not found: {rel}"))?;
-                    obsidian_compat::page_wordcount(p)
+                    vault_obsidian::page_wordcount(p)
                 }
-                None => obsidian_compat::vault_wordcount(&v),
+                None => vault_obsidian::vault_wordcount(&v),
             };
             println!(
                 "pages: {}\nwords: {}\ncharacters: {}",
@@ -858,12 +858,12 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
             match view {
                 Some(view_name) => {
-                    let ev = obsidian_compat::query_view(&v, &base, &view_name)
+                    let ev = vault_obsidian::query_view(&v, &base, &view_name)
                         .map_err(|e| eyre::eyre!("query: {e}"))?;
                     print_executed_view(&view_name, &ev);
                 }
                 None => {
-                    let results = obsidian_compat::query_all_views(&v, &base)
+                    let results = vault_obsidian::query_all_views(&v, &base)
                         .map_err(|e| eyre::eyre!("query: {e}"))?;
                     for (name, ev) in results {
                         print_executed_view(&name, &ev);
@@ -886,8 +886,8 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
                     buf
                 }
             };
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::create_page(&mut v, &rel_path, &[], &body, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::create_page(&mut v, &rel_path, &[], &body, &guard)
                 .map_err(|e| eyre::eyre!("create: {e}"))?;
         }
         VaultCmd::Append {
@@ -897,8 +897,8 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             inline,
         } => {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::append_to_page(&mut v, &rel_path, &text, inline, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::append_to_page(&mut v, &rel_path, &text, inline, &guard)
                 .map_err(|e| eyre::eyre!("append: {e}"))?;
         }
         VaultCmd::Prepend {
@@ -908,20 +908,20 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             inline,
         } => {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::prepend_to_page(&mut v, &rel_path, &text, inline, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::prepend_to_page(&mut v, &rel_path, &text, inline, &guard)
                 .map_err(|e| eyre::eyre!("prepend: {e}"))?;
         }
         VaultCmd::Delete { path, rel_path } => {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::delete_page(&mut v, &rel_path, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::delete_page(&mut v, &rel_path, &guard)
                 .map_err(|e| eyre::eyre!("delete: {e}"))?;
         }
         VaultCmd::Move { path, from, to } => {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let guard = obsidian_compat::SelfWriteGuard::new();
-            obsidian_compat::move_page(&mut v, &from, &to, &guard)
+            let guard = vault_obsidian::SelfWriteGuard::new();
+            vault_obsidian::move_page(&mut v, &from, &to, &guard)
                 .map_err(|e| eyre::eyre!("move: {e}"))?;
         }
     }
@@ -954,18 +954,14 @@ fn parse_fm_pairs(raw: &[String]) -> eyre::Result<Vec<(String, serde_json::Value
         .collect()
 }
 
-fn page_matches_fm(
-    page: &obsidian_compat::VaultPage,
-    key: &str,
-    value: &serde_json::Value,
-) -> bool {
+fn page_matches_fm(page: &vault_obsidian::VaultPage, key: &str, value: &serde_json::Value) -> bool {
     page.parsed
         .frontmatter
         .iter()
         .any(|e| e.key == key && &e.value == value)
 }
 
-fn page_matches_tag(page: &obsidian_compat::VaultPage, tag: &str) -> bool {
+fn page_matches_tag(page: &vault_obsidian::VaultPage, tag: &str) -> bool {
     // Match Obsidian: a query for `#parent` also includes any
     // `#parent/child` nested tags.
     let prefix = format!("{tag}/");
@@ -974,7 +970,7 @@ fn page_matches_tag(page: &obsidian_compat::VaultPage, tag: &str) -> bool {
         .any(|t| t == tag || t.starts_with(&prefix))
 }
 
-fn collect_page_tags(page: &obsidian_compat::VaultPage) -> Vec<String> {
+fn collect_page_tags(page: &vault_obsidian::VaultPage) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for e in &page.parsed.frontmatter {
         if e.key == "tags" || e.key == "tag" {

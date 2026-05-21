@@ -1,4 +1,4 @@
-//! `vault-sync-proto` — wire contract for the vault-sync
+//! `vault-proto` — wire contract for the vault-sync
 //! feature.
 //!
 //! - [`Manifest`] / [`ManifestEntry`] — the file listing
@@ -33,8 +33,8 @@ pub use service::{VaultSync, VaultSyncRpc};
 // architect-emitted vox bits from the auto-generated mirror
 // trait. Re-exported with shorter aliases (`Dispatcher`,
 // `descriptor`) so consumer mounting code reads
-// `vault_sync_proto::descriptor()` and
-// `vault_sync_proto::serve(state)` rather than juggling the
+// `vault_proto::descriptor()` and
+// `vault_proto::serve(state)` rather than juggling the
 // underscored mirror names directly. Mirrors the daw
 // `marker::serve(Reaper)` shape.
 #[cfg(feature = "vox")]

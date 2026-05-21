@@ -20,7 +20,7 @@ project-proto = { workspace = true }
 project-crdt = { workspace = true }
 knowledge-proto = { workspace = true }
 knowledge-crdt = { workspace = true }
-obsidian-compat = { workspace = true }
+vault-obsidian = { workspace = true }
 crdt = { workspace = true }
 walkdir = { workspace = true }
 futures = { workspace = true }

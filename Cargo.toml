@@ -61,18 +61,18 @@ knowledge-proto = { path = "features/knowledge/knowledge-proto" }
 knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
 knowledge-ui = { path = "features/knowledge/knowledge-ui" }
 
-obsidian-compat = { path = "crates/obsidian-compat" }
+vault-obsidian = { path = "features/vault/vault-obsidian" }
 publish-core = { path = "crates/publish-core" }
 # Legacy Logseq-style outliner — kept until the new editor
 # grows a vault/page layer that supersedes it.
 editor-outliner = { path = "crates/editor-outliner" }
-# File-backed vault layer. Modeled on `obsidian-compat` (clean
+# File-backed vault layer. Modeled on `vault-obsidian` (clean
 # small modules, native-only `cfg`, walker / watcher / mutate)
 # but adds block-id awareness: a `BlockIndex` maps every
 # `id:: <uuid>` line in the vault to its containing page +
 # anchor offset.
-vault = { path = "crates/vault" }
-vault-sync-proto = { path = "crates/vault-sync-proto" }
+vault = { path = "features/vault/vault" }
+vault-proto = { path = "features/vault/vault-proto" }
 # CodeMirror-style editor (subtree). `editor` is the umbrella
 # crate that re-exports the others — apps consume that.
 editor-state = { path = "external/editor/crates/editor-state" }

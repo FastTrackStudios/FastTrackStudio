@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use obsidian_compat::Vault;
+use vault_obsidian::Vault;
 
 #[test]
 fn open_observatory_vault() {

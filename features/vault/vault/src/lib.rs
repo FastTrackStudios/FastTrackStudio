@@ -11,7 +11,7 @@
 //! - [`watch`]: a debounced filesystem watcher that emits change
 //!   events the editor can use to refresh state.
 //!
-//! Architectural shape mirrors [`obsidian-compat`]: small focused
+//! Architectural shape mirrors [`vault-obsidian`]: small focused
 //! modules, native-only `cfg`, vault snapshot + walker + watcher
 //! + a thin mutate layer for create / append / save. The
 //! difference is block-awareness: every vault page is parsed for
@@ -41,6 +41,11 @@
 pub mod blocks;
 pub mod lookup;
 pub mod mutate;
+/// `VaultSync` backend — canonical filesystem impl of the
+/// [`vault_proto::VaultSync`] wire trait. Consumers use
+/// `vault::sync::Backend` (also re-exported as
+/// [`Backend`]).
+pub mod sync;
 pub mod vault;
 pub mod walker;
 pub mod watcher;
@@ -48,6 +53,7 @@ pub mod watcher;
 pub use blocks::{BlockIndex, BlockLocation};
 pub use lookup::VaultLookupView;
 pub use mutate::{MutateError, append_to_page, create_page, delete_page, save_page};
+pub use sync::Backend;
 pub use vault::{LoadError, SaveError, Vault, VaultPage};
 pub use vault::{PropertyTypes, VaultBase};
 pub use walker::{VaultEntry, VaultEntryKind, walk_vault};

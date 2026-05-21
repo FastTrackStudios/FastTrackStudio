@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 # Wire contract for the `knowledge` feature — an Obsidian-compatible
-# PKM/outliner. Wasm-clean by default; the obsidian-compat helpers
+# PKM/outliner. Wasm-clean by default; the vault-obsidian helpers
 # (parse/serialize markdown) are pure functions with no Loro/Repo
 # dependency so they can be reused from sync + UI crates.
 

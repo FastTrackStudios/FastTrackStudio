@@ -7739,26 +7739,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "obsidian-compat"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "futures",
- "knowledge-proto",
- "notify",
- "notify-debouncer-mini 0.6.0",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
- "walkdir",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10918,7 +10898,6 @@ dependencies = [
  "futures",
  "knowledge-crdt",
  "knowledge-proto",
- "obsidian-compat",
  "project-crdt",
  "project-proto",
  "serde",
@@ -10926,6 +10905,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "vault-obsidian",
  "vox 0.3.1",
  "walkdir",
 ]
@@ -11011,7 +10991,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "vault-sync-proto",
+ "vault",
+ "vault-proto",
  "vox 0.3.1",
  "walkdir",
 ]
@@ -12342,6 +12323,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 name = "vault"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "editor-state",
  "knowledge-proto",
@@ -12350,15 +12332,38 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vault-proto",
+ "walkdir",
+]
+
+[[package]]
+name = "vault-obsidian"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "knowledge-proto",
+ "notify",
+ "notify-debouncer-mini 0.6.0",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
  "walkdir",
 ]
 
 [[package]]
-name = "vault-sync-proto"
+name = "vault-proto"
 version = "0.1.0"
 dependencies = [
  "architect",

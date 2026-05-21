@@ -1,34 +1,33 @@
-//! File-replication sync for the vault layer — architect::rpc-shaped.
+//! `VaultSync` backend — the canonical filesystem implementation
+//! of [`vault_proto::VaultSync`].
 //!
-//! Phase 2 of the sync architecture (see
-//! `plans/sync-architecture.md`): per-file get / put / delete with
-//! sha256-based conflict detection. No structural awareness of
-//! markdown content — that lives in `vault` + the editor. The
-//! server is a thin store keyed by `(vault_id, rel_path)` → blob
-//! + sha256 + mtime.
+//! One [`Backend`] instance serves one-or-more vault roots, each
+//! addressed by an opaque `vault_id`. A desktop app typically has
+//! one backend with one vault registered; a server can register
+//! many. Both shapes go through the same wire trait + the same
+//! `architect::serve` mount point, so a remote client doesn't
+//! know which backend it's talking to.
 //!
-//! Conflict policy: **last-writer-wins with `IfMatch`**.
-//! [`IfMatch::CreateOnly`] = "create only, fail on existing";
-//! [`IfMatch::Sha`] = "update only if server's current sha
-//! matches"; [`IfMatch::Force`] = "overwrite unconditionally"
-//! (only safe for the first push of a brand-new vault).
+//! Conflict policy: **last-writer-wins with `IfMatch`**, mirroring
+//! the proto:
+//! - [`IfMatch::CreateOnly`] — fail if the file exists.
+//! - [`IfMatch::Sha`]        — fail unless the server's current
+//!   sha matches.
+//! - [`IfMatch::Force`]      — unconditional. Only safe on the
+//!   first push of a brand-new vault.
 //!
-//! Modeled on
-//! [`vrtmrz/obsidian-livesync`](https://github.com/vrtmrz/obsidian-livesync)'s
-//! HTTP shape but storage is the filesystem (one folder per
-//! vault under `root`) rather than CouchDB.
+//! Live events: every successful PUT / DELETE publishes a
+//! [`VaultEvent`] on the per-vault `broadcast::Sender`. A
+//! subscribing client receives every committed change; if the
+//! channel laps (capacity 256), the server sends
+//! [`VaultEvent::Resync`] so the client knows to re-pull the
+//! manifest.
 //!
-//! This module is the *server-side* implementation of
-//! [`vault_sync_proto::VaultSync`] — the canonical sync trait
-//! decorated with `#[architect::rpc]`. Native + wasm clients
-//! consume the architect-emitted `VaultSyncClient` against the
-//! same `/vox` route every other architect service uses; there
-//! is no separate REST surface.
-//!
-//! `VaultSyncState` implements `HasDispatcher` returning
-//! [`TokioBlockingDispatcher`] so each sync method runs inside
-//! `tokio::task::spawn_blocking` when invoked over RPC — the
-//! `std::fs` calls won't stall the async executor.
+//! Disk-side externalities (file changes from outside the
+//! backend) are *not* forwarded here — for that, a higher-level
+//! integration plumbs [`crate::watcher`] events into the same
+//! channel. The pure-RPC subscriber only sees changes the
+//! backend itself applied.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,81 +35,101 @@ use std::sync::Arc;
 
 use architect::HasDispatcher;
 use architect::dispatch::TokioBlockingDispatcher;
+use architect::vox;
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
-use vault_sync_proto::{
+use vault_proto::{
     FileBytes, IfMatch, Manifest, ManifestEntry, PutAck, VaultEvent, VaultSync, VaultSyncError,
 };
 
-/// Server-side filesystem state. One process can serve many
-/// vaults — `root` is the parent directory under which each
-/// vault lives at `{root}/{vault_id}/`. Cheap to `Clone` —
-/// `Arc`s inside. Broadcasts hand off through a tokio mpsc so
-/// the sync impl can stay sync while the async `subscribe`
-/// stays async.
+/// How the backend resolves `vault_id` → on-disk path.
+#[derive(Debug, Clone)]
+enum Layout {
+    /// Each `vault_id` maps to an explicit absolute path.
+    /// Unknown ids return [`VaultSyncError::NotFound`]. Right
+    /// for a desktop app that opens a finite, user-chosen set
+    /// of vaults.
+    Explicit(HashMap<String, PathBuf>),
+    /// All vaults live as subdirectories under one parent
+    /// directory. Any `vault_id` is accepted; the directory is
+    /// created on the first write. Right for a multi-tenant
+    /// server hosting many client vaults.
+    UnderParent(PathBuf),
+}
+
+/// Filesystem-backed `VaultSync` implementation. Cheap to
+/// `Clone` — internals are `Arc`d.
+///
+/// Two layouts (pick one per backend instance):
+/// - [`Backend::single`] / [`Backend::with_roots`]: explicit
+///   `vault_id → path` registry. Unknown ids fail.
+/// - [`Backend::under_parent`]: open-ended, one subdir per
+///   vault under a shared parent. Unknown ids auto-create.
 #[derive(Clone)]
-pub struct VaultSyncState {
-    pub root: PathBuf,
-    /// Single coarse lock — serializes writes across vaults.
-    /// Read paths don't take it; conflicts use sha-then-write
-    /// inside the lock. The mutex is `std::sync` (not tokio's)
-    /// so it can be held inside the sync trait methods.
+pub struct Backend {
+    layout: Layout,
+    /// Coarse global write lock. Reads bypass it; writes
+    /// `lock` → `read-sha` → `write` → `unlock`. Refine to a
+    /// per-vault `RwLock` if write contention shows up.
     write_lock: Arc<std::sync::Mutex<()>>,
-    /// Per-vault broadcast channels. PUT / DELETE handlers
-    /// publish a [`VaultEvent`] here; `subscribe` subscribes
-    /// per connection. Capacity 256 — bursts of rapid edits
-    /// get coalesced client-side.
+    /// Per-vault broadcast sender, lazily created on first
+    /// `subscribe`. Capacity 256: rapid bursts coalesce
+    /// client-side via [`VaultEvent::Resync`].
     channels: Arc<RwLock<HashMap<String, broadcast::Sender<VaultEvent>>>>,
 }
 
-impl VaultSyncState {
-    pub fn new(root: PathBuf) -> std::io::Result<Self> {
+impl Backend {
+    /// Build a backend serving a single vault under `root` as
+    /// `vault_id`. The directory is created if missing.
+    pub fn single(vault_id: impl Into<String>, root: PathBuf) -> std::io::Result<Self> {
         std::fs::create_dir_all(&root)?;
-        Ok(Self {
-            root,
+        let mut roots = HashMap::with_capacity(1);
+        roots.insert(vault_id.into(), root);
+        Ok(Self::with_roots(roots))
+    }
+
+    /// Build a backend from a pre-built `vault_id → root` map.
+    /// Caller is responsible for creating the directories.
+    pub fn with_roots(roots: HashMap<String, PathBuf>) -> Self {
+        Self::from_layout(Layout::Explicit(roots))
+    }
+
+    /// Build a multi-tenant backend where every `vault_id`
+    /// resolves to `{parent}/{vault_id}/`. Subdirs are created
+    /// on demand on the first write. `parent` itself is
+    /// created up front.
+    pub fn under_parent(parent: PathBuf) -> std::io::Result<Self> {
+        std::fs::create_dir_all(&parent)?;
+        Ok(Self::from_layout(Layout::UnderParent(parent)))
+    }
+
+    fn from_layout(layout: Layout) -> Self {
+        Self {
+            layout,
             write_lock: Arc::new(std::sync::Mutex::new(())),
             channels: Arc::new(RwLock::new(HashMap::new())),
-        })
+        }
     }
 
-    /// Lazily creates the per-vault broadcast sender. Sync path —
-    /// uses `std::sync::Mutex` under the hood by way of
-    /// `tokio::sync::RwLock::blocking_*` so it works in either
-    /// trait method shape.
-    pub async fn channel(&self, vault_id: &str) -> broadcast::Sender<VaultEvent> {
-        if let Some(tx) = self.channels.read().await.get(vault_id) {
-            return tx.clone();
+    /// Resolve `vault_id` to an absolute root path. Returns
+    /// [`VaultSyncError::NotFound`] only in `Explicit` mode
+    /// when the id is unregistered; `UnderParent` always
+    /// succeeds.
+    fn root(&self, vault_id: &str) -> Result<PathBuf, VaultSyncError> {
+        match &self.layout {
+            Layout::Explicit(map) => map.get(vault_id).cloned().ok_or(VaultSyncError::NotFound),
+            Layout::UnderParent(parent) => Ok(parent.join(vault_id)),
         }
-        let mut chans = self.channels.write().await;
-        if let Some(tx) = chans.get(vault_id) {
-            return tx.clone();
-        }
-        let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
-        chans.insert(vault_id.to_string(), tx.clone());
-        tx
     }
 
-    /// Sync sibling of [`Self::channel`] — used by the sync
-    /// trait methods so they don't need an executor. We can't
-    /// hold an async RwLock guard across a sync boundary, so
-    /// use the blocking_* variants that block the current
-    /// thread; `TokioBlockingDispatcher` already runs us on a
-    /// blocking-pool thread.
-    fn channel_blocking(&self, vault_id: &str) -> broadcast::Sender<VaultEvent> {
-        if let Some(tx) = self.channels.blocking_read().get(vault_id) {
-            return tx.clone();
+    /// Whether `vault_id` would resolve to a path this backend
+    /// serves. `Explicit`: present in the registry.
+    /// `UnderParent`: always true.
+    fn knows(&self, vault_id: &str) -> bool {
+        match &self.layout {
+            Layout::Explicit(map) => map.contains_key(vault_id),
+            Layout::UnderParent(_) => true,
         }
-        let mut chans = self.channels.blocking_write();
-        if let Some(tx) = chans.get(vault_id) {
-            return tx.clone();
-        }
-        let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
-        chans.insert(vault_id.to_string(), tx.clone());
-        tx
-    }
-
-    fn vault_dir(&self, vault_id: &str) -> PathBuf {
-        self.root.join(vault_id)
     }
 
     fn file_path(&self, vault_id: &str, rel: &str) -> Result<PathBuf, VaultSyncError> {
@@ -125,20 +144,54 @@ impl VaultSyncState {
         {
             return Err(VaultSyncError::BadPath);
         }
-        Ok(self.vault_dir(vault_id).join(rel))
+        let root = self.root(vault_id)?;
+        Ok(root.join(rel))
+    }
+
+    /// Get-or-create the per-vault broadcast sender. Async —
+    /// uses tokio's `RwLock` so it interoperates with the async
+    /// `subscribe` impl.
+    pub async fn channel(&self, vault_id: &str) -> broadcast::Sender<VaultEvent> {
+        if let Some(tx) = self.channels.read().await.get(vault_id) {
+            return tx.clone();
+        }
+        let mut chans = self.channels.write().await;
+        if let Some(tx) = chans.get(vault_id) {
+            return tx.clone();
+        }
+        let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
+        chans.insert(vault_id.to_string(), tx.clone());
+        tx
+    }
+
+    /// Sync sibling of [`Self::channel`] for use inside the
+    /// sync trait methods. `TokioBlockingDispatcher` already
+    /// runs us on a blocking-pool thread, so the
+    /// `blocking_read`/`blocking_write` variants are safe.
+    fn channel_blocking(&self, vault_id: &str) -> broadcast::Sender<VaultEvent> {
+        if let Some(tx) = self.channels.blocking_read().get(vault_id) {
+            return tx.clone();
+        }
+        let mut chans = self.channels.blocking_write();
+        if let Some(tx) = chans.get(vault_id) {
+            return tx.clone();
+        }
+        let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
+        chans.insert(vault_id.to_string(), tx.clone());
+        tx
     }
 }
 
-impl HasDispatcher for VaultSyncState {
+impl HasDispatcher for Backend {
     type Dispatcher = TokioBlockingDispatcher;
     fn dispatcher(&self) -> Self::Dispatcher {
         TokioBlockingDispatcher
     }
 }
 
-impl VaultSync for VaultSyncState {
+impl VaultSync for Backend {
     fn manifest(&self, vault_id: &str) -> Result<Manifest, VaultSyncError> {
-        let dir = self.vault_dir(vault_id);
+        let dir = self.root(vault_id)?;
         if !dir.exists() {
             return Ok(Manifest {
                 vault_id: vault_id.to_string(),
@@ -173,18 +226,13 @@ impl VaultSync for VaultSyncState {
         let _g = self
             .write_lock
             .lock()
-            .expect("vault_sync write_lock poisoned");
+            .expect("vault::sync write_lock poisoned");
         let existing_sha = if abs.exists() {
             let bytes = std::fs::read(&abs).map_err(io_err)?;
             Some(sha256_hex(&bytes))
         } else {
             None
         };
-        // IfMatch semantics:
-        //   CreateOnly → fail if file exists.
-        //   Sha(hex)   → fail unless the server's current sha matches.
-        //   Force      → unconditional write (client overwriting blindly;
-        //                only safe on first push of a brand-new vault).
         match (&if_match, existing_sha.as_deref()) {
             (IfMatch::CreateOnly, Some(_)) => return Err(conflict(&abs, existing_sha.as_deref())),
             (IfMatch::Sha(want), Some(have)) if want != have => {
@@ -235,7 +283,7 @@ impl VaultSync for VaultSyncState {
         let _g = self
             .write_lock
             .lock()
-            .expect("vault_sync write_lock poisoned");
+            .expect("vault::sync write_lock poisoned");
         if !abs.exists() {
             // Idempotent: missing path = success, no broadcast.
             return Ok(());
@@ -260,6 +308,11 @@ impl VaultSync for VaultSyncState {
     }
 
     async fn subscribe(&self, vault_id: String, tx: vox::Tx<VaultEvent>) {
+        // Validate up front so misconfigured callers fail fast.
+        if !self.knows(&vault_id) {
+            let _ = tx.close(Default::default()).await;
+            return;
+        }
         let sender = self.channel(&vault_id).await;
         let mut rx = sender.subscribe();
         loop {
@@ -271,9 +324,6 @@ impl VaultSync for VaultSyncState {
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
                 Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // Subscriber missed events because we hit the
-                    // channel cap. Send a hint so the client knows
-                    // to re-pull the manifest.
                     if tx.send(VaultEvent::Resync).await.is_err() {
                         return;
                     }
@@ -343,41 +393,41 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    /// `channel_blocking` uses `RwLock::blocking_*`, which panics if
-    /// called from a thread that's driving a tokio runtime. Tests use
-    /// the multi-thread flavor so the blocking calls land on a worker
-    /// thread that isn't currently running an executor.
-    fn make_state() -> (tempfile::TempDir, VaultSyncState) {
+    fn make_backend() -> (tempfile::TempDir, Backend) {
         let tmp = tempfile::tempdir().unwrap();
-        let state = VaultSyncState::new(tmp.path().to_path_buf()).unwrap();
-        (tmp, state)
+        let backend = Backend::single("v1", tmp.path().to_path_buf()).unwrap();
+        (tmp, backend)
     }
 
     #[test]
     fn manifest_empty_vault() {
-        let (_tmp, state) = make_state();
-        let m = state.manifest("v1").unwrap();
+        let (_tmp, b) = make_backend();
+        let m = b.manifest("v1").unwrap();
         assert_eq!(m.vault_id, "v1");
         assert!(m.files.is_empty());
     }
 
     #[test]
+    fn unknown_vault_id_returns_not_found() {
+        let (_tmp, b) = make_backend();
+        assert!(matches!(b.manifest("nope"), Err(VaultSyncError::NotFound)));
+    }
+
+    #[test]
     fn put_then_get_round_trips() {
-        let (_tmp, state) = make_state();
-        state
-            .put_file("v1", "hello.md", b"body".to_vec(), IfMatch::CreateOnly)
+        let (_tmp, b) = make_backend();
+        b.put_file("v1", "hello.md", b"body".to_vec(), IfMatch::CreateOnly)
             .unwrap();
-        let got = state.get_file("v1", "hello.md").unwrap();
+        let got = b.get_file("v1", "hello.md").unwrap();
         assert_eq!(got.0, b"body");
     }
 
     #[test]
     fn if_match_create_only_refuses_existing_file() {
-        let (_tmp, state) = make_state();
-        state
-            .put_file("v1", "x.md", b"first".to_vec(), IfMatch::CreateOnly)
+        let (_tmp, b) = make_backend();
+        b.put_file("v1", "x.md", b"first".to_vec(), IfMatch::CreateOnly)
             .unwrap();
-        let err = state
+        let err = b
             .put_file("v1", "x.md", b"second".to_vec(), IfMatch::CreateOnly)
             .unwrap_err();
         assert!(matches!(err, VaultSyncError::Conflict { .. }));
@@ -385,11 +435,10 @@ mod tests {
 
     #[test]
     fn if_match_sha_mismatch_returns_conflict() {
-        let (_tmp, state) = make_state();
-        state
-            .put_file("v1", "x.md", b"v1".to_vec(), IfMatch::CreateOnly)
+        let (_tmp, b) = make_backend();
+        b.put_file("v1", "x.md", b"v1".to_vec(), IfMatch::CreateOnly)
             .unwrap();
-        let err = state
+        let err = b
             .put_file(
                 "v1",
                 "x.md",
@@ -398,17 +447,15 @@ mod tests {
             )
             .unwrap_err();
         match err {
-            VaultSyncError::Conflict { server_bytes, .. } => {
-                assert_eq!(server_bytes, b"v1");
-            }
+            VaultSyncError::Conflict { server_bytes, .. } => assert_eq!(server_bytes, b"v1"),
             other => panic!("expected Conflict, got {other:?}"),
         }
     }
 
     #[test]
     fn rejects_traversal_attempts() {
-        let (_tmp, state) = make_state();
-        let err = state
+        let (_tmp, b) = make_backend();
+        let err = b
             .put_file("v1", "../escape.md", b"x".to_vec(), IfMatch::Force)
             .unwrap_err();
         assert!(matches!(err, VaultSyncError::BadPath));
@@ -416,12 +463,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn put_broadcasts_event() {
-        let (_tmp, state) = make_state();
-        let tx = state.channel("v1").await;
+        let (_tmp, b) = make_backend();
+        let tx = b.channel("v1").await;
         let mut rx = tx.subscribe();
-        let st = state.clone();
+        let backend = b.clone();
         tokio::task::spawn_blocking(move || {
-            st.put_file("v1", "hello.md", b"hi".to_vec(), IfMatch::CreateOnly)
+            backend
+                .put_file("v1", "hi.md", b"x".to_vec(), IfMatch::CreateOnly)
                 .unwrap();
         })
         .await
@@ -432,38 +480,42 @@ mod tests {
             .expect("recv ok");
         match evt {
             VaultEvent::Put { path, size, .. } => {
-                assert_eq!(path, "hello.md");
-                assert_eq!(size, 2);
+                assert_eq!(path, "hi.md");
+                assert_eq!(size, 1);
             }
             other => panic!("expected Put, got {other:?}"),
         }
     }
 
+    #[test]
+    fn under_parent_auto_creates_vault_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = Backend::under_parent(tmp.path().to_path_buf()).unwrap();
+        // Any vault_id works; the subdir materializes on first
+        // write.
+        b.put_file("fresh-vault", "n.md", b"x".to_vec(), IfMatch::CreateOnly)
+            .unwrap();
+        assert!(tmp.path().join("fresh-vault").join("n.md").exists());
+        // Manifest of an unwritten id is empty, not an error.
+        assert!(b.manifest("never-touched").unwrap().files.is_empty());
+    }
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn delete_broadcasts_event() {
-        let (_tmp, state) = make_state();
-        let st1 = state.clone();
+    async fn multi_vault_isolation() {
+        let tmp_a = tempfile::tempdir().unwrap();
+        let tmp_b = tempfile::tempdir().unwrap();
+        let mut roots = HashMap::new();
+        roots.insert("a".into(), tmp_a.path().to_path_buf());
+        roots.insert("b".into(), tmp_b.path().to_path_buf());
+        let backend = Backend::with_roots(roots);
+        let b1 = backend.clone();
         tokio::task::spawn_blocking(move || {
-            st1.put_file("v1", "gone.md", b"x".to_vec(), IfMatch::CreateOnly)
+            b1.put_file("a", "note.md", b"hello-a".to_vec(), IfMatch::CreateOnly)
                 .unwrap();
         })
         .await
         .unwrap();
-        let tx = state.channel("v1").await;
-        let mut rx = tx.subscribe();
-        let st2 = state.clone();
-        tokio::task::spawn_blocking(move || {
-            st2.delete_file("v1", "gone.md", IfMatch::Force).unwrap();
-        })
-        .await
-        .unwrap();
-        let evt = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
-            .await
-            .expect("event timeout")
-            .expect("recv ok");
-        match evt {
-            VaultEvent::Delete { path } => assert_eq!(path, "gone.md"),
-            other => panic!("expected Delete, got {other:?}"),
-        }
+        assert_eq!(backend.manifest("b").unwrap().files.len(), 0);
+        assert_eq!(backend.manifest("a").unwrap().files.len(), 1);
     }
 }

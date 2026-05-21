@@ -4,9 +4,37 @@ Status: **done.** Kept as the design record for why the
 file-replication layer rides on architect::rpc (and thus vox)
 like every other feature.
 
+## Crate layout
+
+```
+features/vault/
+  vault-proto/      wire contract (#[architect::rpc] trait VaultSync,
+                     Manifest, FileBytes, PutAck, IfMatch, VaultEvent,
+                     VaultSyncError). Wasm-clean. Single source of
+                     truth for the wire service name (consumers use
+                     `vault_proto::descriptor().service_name`).
+  vault/            primary backend impl. `vault::Backend` impls
+                     VaultSync + HasDispatcher (TokioBlockingDispatcher).
+                     Two layout modes:
+                       Backend::single(id, root)
+                       Backend::with_roots(HashMap<id, root>)
+                       Backend::under_parent(parent)   ← multi-tenant,
+                                                          auto-create
+                     Also home of the in-memory Vault snapshot +
+                     BlockIndex + watcher (unchanged).
+  vault-obsidian/   Obsidian translation / import layer (renamed
+                     from `obsidian-compat`). Not a VaultSync
+                     backend on its own — exists so `vault` (or
+                     CLI consumers) can understand Obsidian-shaped
+                     directories: skip `.obsidian` / `.trash`,
+                     parse `.base` files, frontmatter conventions,
+                     wikilink index, tasks, properties, outline,
+                     wordcount, base queries.
+```
+
 ## What shipped
 
-- `crates/vault-sync-proto` — one canonical sync trait
+- `features/vault/vault-proto` — one canonical sync trait
   `VaultSync` decorated with `#[architect::rpc]`. Sync CRUD
   methods (`manifest`, `get_file`, `put_file`, `delete_file`)
   + async `subscribe(Tx<VaultEvent>)` (mixed-mode trait).
@@ -14,25 +42,29 @@ like every other feature.
   rewrites to owned `String` for the async client mirror.
   Payload types (`Manifest`, `ManifestEntry`, `FileBytes`,
   `PutAck`, `IfMatch`, `VaultEvent`, `VaultSyncError`) are
-  `#[derive(Facet)]` + `vox_types::Reborrow`. Wasm-clean.
-- Server: `apps/server/src/vault_sync.rs` exposes
-  `VaultSyncState` (filesystem root + per-vault broadcast
-  channels) and implements `VaultSync` directly with sync
-  methods. The state also `impl HasDispatcher` returning
-  `TokioBlockingDispatcher` so each remote sync call runs
-  inside `spawn_blocking` (the `std::fs` calls don't stall the
-  async executor). Mounted via the architect-emitted
-  `vault_sync_proto::serve(state)` mount verb as one more arm
-  in `vox_ws_handler` alongside `ProjectRepo` / `WorkspaceSync`
-  / `AttachmentService` / etc. On the wire the service is
-  named `"VaultSyncRpc"` (architect's `#[rpc]` macro suffixes
+  `#[derive(Facet)]` + `vox_types::Reborrow`, split per-domain
+  (`manifest.rs` / `file.rs` / `event.rs` / `error.rs` /
+  `service.rs`). Wasm-clean.
+- `vault::Backend` is the **only** `VaultSync` implementation.
+  It impls `HasDispatcher` returning
+  `TokioBlockingDispatcher` so remote sync calls run inside
+  `spawn_blocking`. The server constructs it with
+  `vault::Backend::under_parent(vault_root)` and mounts it
+  via the architect-emitted
+  `vault_proto::serve(backend)` verb as one more arm in
+  `vox_ws_handler` alongside `ProjectRepo` / `WorkspaceSync`
+  / `AttachmentService` / etc. The match arm matches against
+  `vault_proto::descriptor().service_name` (currently
+  `"VaultSyncRpc"`, suffixed by architect's `#[rpc]` macro on
   the hidden vox mirror trait). No separate REST routes; no
-  second WS upgrade.
+  second WS upgrade. The previous server-local
+  `vault_sync::VaultSyncState` was deleted — same logic now
+  lives in `vault::Backend`.
 - The old `crates/vault-sync` native HTTP client crate has been
   deleted. Consumers use the architect-emitted
-  `vault_sync_proto::VaultSyncClient` directly — same client
-  builds for native (tests, desktop) and wasm (`apps/web`)
-  because `vox` itself is target-agnostic. This obsoletes the
+  `vault_proto::VaultSyncClient` directly — same client builds
+  for native (tests, desktop) and wasm (`apps/web`) because
+  `vox` itself is target-agnostic. This obsoletes the
   separate `vault-sync-web-transport` plan.
 - `apps/server/tests/vault_sync_e2e.rs` drives the real
   `VaultSyncClient` against a booted `task-server`. Three

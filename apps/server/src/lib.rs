@@ -18,7 +18,9 @@ pub mod basename_index;
 pub mod capability;
 pub mod knowledge_index;
 pub mod share_link;
-pub mod vault_sync;
+// Vault file-replication backend lives in the `vault` crate as
+// `vault::Backend`; the server just constructs an instance and
+// mounts it on the vox router below.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -354,12 +356,15 @@ pub struct AppState {
     pub indexer: KnowledgeIndexer,
     pub attachments: Arc<attachments::AttachmentServiceImpl>,
     pub anonymous_claim: AnonymousClaimServiceImpl<AuthSeaOrmStorage>,
-    /// Phase 2 vault file-replication. Carries the per-vault
-    /// filesystem root + the broadcast channels behind
-    /// [`vault_sync_proto::VaultSync`]. Mounted as one more arm on
-    /// the `/vox` route alongside every other architect/vox
-    /// service.
-    pub vault_sync: vault_sync::VaultSyncState,
+    /// Phase 2 vault file-replication. The canonical
+    /// [`vault_proto::VaultSync`] backend lives in the `vault`
+    /// crate; the server uses
+    /// [`vault::Backend::under_parent`] so any `vault_id`
+    /// resolves to a subdir of the configured parent
+    /// (multi-tenant on-demand creation). Mounted as one more
+    /// arm on the `/vox` route alongside every other
+    /// architect/vox service.
+    pub vault_sync: vault::Backend,
 }
 
 impl AppState {
@@ -496,8 +501,8 @@ impl AppState {
                     .join("task-server")
                     .join("vaults")
             });
-        let vault_sync_state = vault_sync::VaultSyncState::new(vault_root)
-            .map_err(|e| eyre::eyre!("vault_sync state: {e}"))?;
+        let vault_sync_state = vault::Backend::under_parent(vault_root)
+            .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
 
         // Phase 8 — anonymous claim service. Holds the in-memory
         // (peer_id -> user_id) table; the dispatcher's
@@ -1066,8 +1071,8 @@ async fn vox_ws_handler(
                 // macro suffixes the hidden vox mirror trait,
                 // and pulling it from the descriptor keeps the
                 // proto crate as the single source of truth).
-                name if name == vault_sync_proto::descriptor().service_name => {
-                    connection.handle_with(vault_sync_proto::serve(vault_sync_state.clone()));
+                name if name == vault_proto::descriptor().service_name => {
+                    connection.handle_with(vault_proto::serve(vault_sync_state.clone()));
                     Ok(())
                 }
                 other => {

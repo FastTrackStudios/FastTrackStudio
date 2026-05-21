@@ -42,7 +42,8 @@ project-crdt = { workspace = true }
 knowledge-proto = { workspace = true }
 knowledge-crdt = { workspace = true }
 attachments-proto = { workspace = true }
-vault-sync-proto = { workspace = true }
+vault-proto = { workspace = true }
+vault = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server-axum", "dispatch-tokio"] }
@@ -65,4 +66,4 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 walkdir = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 knowledge-crdt = { workspace = true }
-vault-sync-proto = { workspace = true }
+vault-proto = { workspace = true }

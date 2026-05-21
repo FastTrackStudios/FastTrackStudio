@@ -2,9 +2,9 @@
 //! directories (`.git`, `.obsidian`, `.trash`, etc.) and any
 //! filename starting with `.`.
 //!
-//! Lighter than `obsidian-compat::walker` — we only care about
+//! Lighter than `vault-obsidian::walker` — we only care about
 //! pages here; Bases / canvas / attachments are someone else's
-//! problem (consume `obsidian-compat` for that). The intent is
+//! problem (consume `vault-obsidian` for that). The intent is
 //! that this crate stays small and editor-focused.
 
 use std::path::{Path, PathBuf};
