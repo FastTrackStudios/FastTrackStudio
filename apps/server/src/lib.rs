@@ -18,6 +18,7 @@ pub mod basename_index;
 pub mod capability;
 pub mod knowledge_index;
 pub mod share_link;
+pub mod vault_sync;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -877,12 +878,40 @@ pub fn router(state: AppState) -> Router {
     };
     let blob_router = attachments::attachment_router().with_state(blob_state);
 
+    // Vault file-replication sync (phase 2). Mounted alongside
+    // the vox CRDT routes; the two sync layers are orthogonal —
+    // vox handles structured Loro entities, vault_sync handles
+    // raw markdown files. Storage root defaults to
+    // `~/.local/share/task-server/vaults` but can be overridden
+    // by `TASK_SERVER_VAULT_ROOT`.
+    let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs_local_share()
+                .unwrap_or_else(|| std::path::PathBuf::from("./vaults"))
+                .join("task-server")
+                .join("vaults")
+        });
+    let vault_state = vault_sync::VaultSyncState::new(vault_root).expect("vault_sync state");
+    let vault_router = vault_sync::router().with_state(vault_state);
+
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/vox", get(vox_ws_handler))
         .merge(blob_router)
+        .merge(vault_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
+}
+
+/// Best-effort `$XDG_DATA_HOME` (falls back to `$HOME/.local/share`).
+/// Skips a `dirs` crate dep — we only use this one path.
+fn dirs_local_share() -> Option<std::path::PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
+        return Some(std::path::PathBuf::from(xdg));
+    }
+    let home = std::env::var_os("HOME")?;
+    Some(std::path::PathBuf::from(home).join(".local/share"))
 }
 
 async fn vox_ws_handler(

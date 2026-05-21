@@ -61,4 +61,7 @@ chrono = { workspace = true }
 tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 walkdir = { workspace = true }
+# vault_sync tests use `tower::util::ServiceExt::oneshot` to
+# drive the axum router without spinning up a TCP listener.
+tower = { version = "0.5", features = ["util"] }
 knowledge-crdt = { workspace = true }
