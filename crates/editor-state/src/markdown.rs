@@ -44,6 +44,34 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             continue;
         }
         if !span.body.is_empty() {
+            // Embed: `![[file.png|opts]]` etc. Render an `<img>` /
+            // `<video>` / `<audio>` / `<iframe>` widget when the
+            // caret is off the span. While the caret is on the
+            // span, the inner Mark + visible source bytes win so
+            // the user can edit. Matches Obsidian / Quartz
+            // `ofm.ts:233-265`.
+            if span.class == "md-embed" {
+                let raw = &text[span.body.clone()];
+                if !cursor_touches(primary, span.outer.clone()) {
+                    if let Some(html) = embed_widget_html(raw) {
+                        out.push(Decoration::replace(span.outer.clone()));
+                        out.push(Decoration::widget(span.outer.start, html));
+                        continue;
+                    }
+                }
+                // Fallback (or caret on): style the body like a
+                // wikilink so it's still recognizable as a link.
+                out.push(Decoration::mark(span.body.clone(), "md-wikilink"));
+                if !cursor_touches(primary, span.outer.clone()) {
+                    if span.body.start > span.outer.start {
+                        out.push(Decoration::replace(span.outer.start..span.body.start));
+                    }
+                    if span.outer.end > span.body.end {
+                        out.push(Decoration::replace(span.body.end..span.outer.end));
+                    }
+                }
+                continue;
+            }
             let href = match span.class {
                 "md-link" => Some(text[span.body.end + 2..span.outer.end - 1].to_string()),
                 "md-wikilink" => Some(text[span.body.clone()].to_string()),
@@ -113,6 +141,77 @@ fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
     ranges.iter().any(|r| pos >= r.start && pos < r.end)
 }
 
+/// Render the HTML for an `![[file|opts]]` embed when the
+/// target's extension maps to a media kind we know. Returns
+/// `None` for embeds we don't yet support (notes, unknown
+/// formats) — the caller then falls back to a wikilink-style
+/// mark so the source stays visible. Quartz reference: same
+/// dispatch in `ofm.ts:233-265`.
+fn embed_widget_html(raw: &str) -> Option<String> {
+    let (target, opts) = match raw.split_once('|') {
+        Some((t, o)) => (t.trim(), Some(o.trim())),
+        None => (raw.trim(), None),
+    };
+    let ext = target.rsplit_once('.').map(|x| x.1.to_ascii_lowercase());
+    let ext = ext.as_deref().unwrap_or("");
+    let safe_target = html_escape(target);
+    let style = opts
+        .and_then(|o| parse_size_opts(o))
+        .unwrap_or_default();
+    let html = match ext {
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "avif" | "bmp" => {
+            format!(
+                r#"<img class="md-embed-image" src="{safe_target}" alt="{safe_target}"{style}>"#
+            )
+        }
+        "mp4" | "webm" | "mov" | "ogv" => {
+            format!(
+                r#"<video class="md-embed-video" src="{safe_target}" controls{style}></video>"#
+            )
+        }
+        "mp3" | "wav" | "ogg" | "flac" | "m4a" => {
+            format!(
+                r#"<audio class="md-embed-audio" src="{safe_target}" controls></audio>"#
+            )
+        }
+        "pdf" => {
+            format!(
+                r#"<iframe class="md-embed-pdf" src="{safe_target}"{style}></iframe>"#
+            )
+        }
+        _ => return None,
+    };
+    Some(html)
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Parse Obsidian's `|WxH`, `|W`, or `|HxW` opts on an embed.
+/// Returns an inline `style` snippet to drop into the widget.
+fn parse_size_opts(opts: &str) -> Option<String> {
+    let (w, h) = match opts.split_once('x') {
+        Some((w, h)) => (w.parse::<u32>().ok(), h.parse::<u32>().ok()),
+        None => (opts.parse::<u32>().ok(), None),
+    };
+    let mut style = String::new();
+    if let Some(w) = w {
+        style.push_str(&format!(" style=\"width:{w}px"));
+        if let Some(h) = h {
+            style.push_str(&format!(";height:{h}px"));
+        }
+        style.push('"');
+    }
+    if style.is_empty() {
+        return None;
+    }
+    Some(style)
+}
+
 struct Span {
     /// Includes the opening + closing markers.
     outer: std::ops::Range<usize>,
@@ -148,9 +247,54 @@ fn scan_blocks(
     //     the opening fence's `\n` (or end of doc if the fence is
     //     the last thing).
     let mut fence: Option<(usize, u8, usize)> = None;
+    // Callout-tracking state: while we're inside a `> [!type]…`
+    // block, every subsequent `>`-prefixed line inherits the
+    // callout's class so CSS can group them visually.
+    let mut callout_kind: Option<&'static str> = None;
 
     for (line_from, line_to) in line_ranges(text) {
         let line = &text[line_from..line_to];
+
+        // ── Table (GFM pipe table) ─────────────────────────
+        //
+        // First-line check: `| header | … |` followed by a
+        // separator row `|---|---|`. The separator's column
+        // count must match the header. When we recognize a
+        // table, jump the outer scan past its last row and emit
+        // a single rendered `<table>` widget covering the whole
+        // range. Quartz: `ofm.ts:123-126` via `remark-gfm`.
+        let table_match = if !line.trim().is_empty()
+            && fence.is_none()
+            && callout_kind.is_none()
+            && is_table_header(line)
+        {
+            try_parse_table(text, line_from, line_to)
+        } else {
+            None
+        };
+        if let Some(rows) = table_match {
+            let table_end = rows.last().map(|r| r.1).unwrap_or(line_to);
+            // Header / separator + body cells.
+            let cells = collect_table_cells(text, &rows);
+            let html = render_table_html(&cells);
+            // When caret is anywhere in the table, leave the
+            // source visible (Obsidian behavior — typing in
+            // tables works against the source). Otherwise
+            // replace + widget.
+            if !cursor_touches(primary, line_from..table_end) {
+                out.push(Decoration::replace(line_from..table_end));
+                out.push(Decoration::widget(line_from, html));
+            }
+            // Skip the outer loop forward to the last table
+            // line so we don't re-process its rows.
+            // The outer iterator drives off `line_ranges`, so
+            // we can't actually skip lines from in here. Mark
+            // the table range as a "fenced-like" zone so the
+            // inline scanner doesn't reparse cell contents as
+            // bold/italic at odd positions — and have the next
+            // iterations see them as inside-fence.
+            fenced_ranges.push(line_from..table_end);
+        }
 
         // ── Inside a fence ─────────────────────────────────
         if let Some((_, mc, mlen)) = fence {
@@ -266,16 +410,39 @@ fn scan_blocks(
             continue;
         }
 
-        // ── Blockquote ─────────────────────────────────────
+        // ── Blockquote / Callout ───────────────────────────
         if let Some(marker_end) = parse_blockquote(line) {
             let abs_marker_end = line_from + marker_end;
-            out.push(Decoration::line(line_from, "md-blockquote"));
-            // Marker is "off" when the caret is anywhere on
-            // this line; "on" otherwise. "Off" = transparent
-            // (md-quote-marker) so the vertical bar overlays
-            // the glyph and the content column doesn't shift.
-            // "On" = leave bytes visible at normal styling so
-            // the user can edit the `>` directly.
+            let after_marker = &line[marker_end..];
+            // Callout header: `> [!type] Title` (with optional
+            // `+`/`-` collapsibility suffix on the marker, which
+            // we currently ignore). On match, switch line class
+            // to a callout-specific class and remember the kind
+            // for the body lines. Quartz: `ofm.ts:63-91`.
+            if let Some((kind, header_end_off)) = parse_callout_header(after_marker) {
+                callout_kind = Some(kind);
+                let line_class = callout_class(kind, true);
+                out.push(Decoration::line(line_from, line_class));
+                // Hide the `[!type]` syntax when caret is off
+                // the line — the line class draws the icon /
+                // title styling instead.
+                let abs_header_end = abs_marker_end + header_end_off;
+                if !cursor_touches(primary, line_from..line_to) {
+                    out.push(Decoration::mark(
+                        line_from..abs_marker_end,
+                        "md-quote-marker",
+                    ));
+                    out.push(Decoration::replace(abs_marker_end..abs_header_end));
+                }
+                continue;
+            }
+            // Plain blockquote line (or callout body if we're
+            // inside one).
+            let line_class = match callout_kind {
+                Some(kind) => callout_class(kind, false),
+                None => "md-blockquote",
+            };
+            out.push(Decoration::line(line_from, line_class));
             if !cursor_touches(primary, line_from..line_to) {
                 out.push(Decoration::mark(
                     line_from..abs_marker_end,
@@ -284,6 +451,10 @@ fn scan_blocks(
             }
             continue;
         }
+        // A line without `>` closes the current callout (and any
+        // open blockquote). Reset state so the next callout
+        // starts fresh.
+        callout_kind = None;
 
         // ── List (unordered or ordered) ────────────────────
         if let Some(marker_end) = parse_list_marker(line) {
@@ -319,6 +490,199 @@ fn scan_blocks(
 }
 
 const HEADING_CLASS: [&str; 6] = ["md-h1", "md-h2", "md-h3", "md-h4", "md-h5", "md-h6"];
+
+/// Match a callout header `[!type] [title]` after the `> ` of a
+/// blockquote line. Returns the canonical callout kind (lower-
+/// cased + alias-resolved) and the byte offset within `after`
+/// where the `[!type]` syntax ends (excluding any title). The
+/// type list mirrors Obsidian / Quartz: `ofm.ts:63-91`.
+fn parse_callout_header(after: &str) -> Option<(&'static str, usize)> {
+    let b = after.as_bytes();
+    if !b.starts_with(b"[!") {
+        return None;
+    }
+    let close = b.iter().skip(2).position(|&c| c == b']')?;
+    let raw = &after[2..2 + close];
+    // Strip the optional collapse suffix the user can add via
+    // `+`/`-` on the closing bracket — `[!note]+` / `[!note]-`.
+    let kind = canonical_callout_kind(raw)?;
+    let mut end = 2 + close + 1;
+    if matches!(b.get(end), Some(b'+') | Some(b'-')) {
+        end += 1;
+    }
+    // Consume the space that typically follows.
+    if b.get(end) == Some(&b' ') {
+        end += 1;
+    }
+    Some((kind, end))
+}
+
+fn canonical_callout_kind(raw: &str) -> Option<&'static str> {
+    Some(match raw.trim().to_ascii_lowercase().as_str() {
+        "note" => "note",
+        "abstract" | "summary" | "tldr" => "abstract",
+        "info" => "info",
+        "todo" => "todo",
+        "tip" | "hint" | "important" => "tip",
+        "success" | "check" | "done" => "success",
+        "question" | "help" | "faq" => "question",
+        "warning" | "attention" | "caution" => "warning",
+        "failure" | "missing" | "fail" => "failure",
+        "danger" | "error" => "danger",
+        "bug" => "bug",
+        "example" => "example",
+        "quote" | "cite" => "quote",
+        _ => return None,
+    })
+}
+
+/// Cheap "is this even a candidate?" check: a non-trivial pipe
+/// table header must start (after optional spaces) with `|` and
+/// contain at least one other `|`.
+fn is_table_header(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with('|') && t[1..].contains('|')
+}
+
+/// Walk forward from the line that looks like a table header.
+/// Returns the byte ranges of all table rows (header + sep +
+/// body) when valid, or `None` if the structure doesn't hold.
+fn try_parse_table(
+    text: &str,
+    header_from: usize,
+    header_to: usize,
+) -> Option<Vec<(usize, usize)>> {
+    let bytes = text.as_bytes();
+    // Find the separator line directly after the header.
+    let sep_from = if header_to < bytes.len() && bytes[header_to] == b'\n' {
+        header_to + 1
+    } else {
+        return None;
+    };
+    let mut sep_end = sep_from;
+    while sep_end < bytes.len() && bytes[sep_end] != b'\n' {
+        sep_end += 1;
+    }
+    let sep_line = &text[sep_from..sep_end];
+    let header_cells = split_pipe_cells(&text[header_from..header_to]);
+    let sep_cells = split_pipe_cells(sep_line);
+    if header_cells.len() != sep_cells.len() || header_cells.is_empty() {
+        return None;
+    }
+    for cell in &sep_cells {
+        let c = cell.trim();
+        if c.is_empty() {
+            return None;
+        }
+        if !c.chars().all(|ch| matches!(ch, '-' | ':' | ' ')) {
+            return None;
+        }
+    }
+    let mut rows = vec![(header_from, header_to), (sep_from, sep_end)];
+    let mut i = if sep_end < bytes.len() { sep_end + 1 } else { sep_end };
+    while i < bytes.len() {
+        let row_from = i;
+        let mut row_end = row_from;
+        while row_end < bytes.len() && bytes[row_end] != b'\n' {
+            row_end += 1;
+        }
+        let row_line = &text[row_from..row_end];
+        if row_line.trim().is_empty() || !row_line.trim_start().starts_with('|') {
+            break;
+        }
+        rows.push((row_from, row_end));
+        i = if row_end < bytes.len() { row_end + 1 } else { row_end };
+    }
+    Some(rows)
+}
+
+fn split_pipe_cells(line: &str) -> Vec<&str> {
+    let mut t = line.trim();
+    if let Some(stripped) = t.strip_prefix('|') {
+        t = stripped;
+    }
+    if let Some(stripped) = t.strip_suffix('|') {
+        t = stripped;
+    }
+    t.split('|').map(|s| s.trim()).collect()
+}
+
+fn collect_table_cells(text: &str, rows: &[(usize, usize)]) -> Vec<Vec<String>> {
+    rows.iter()
+        .enumerate()
+        .filter(|(idx, _)| *idx != 1) // drop the separator row
+        .map(|(_, (f, t))| {
+            split_pipe_cells(&text[*f..*t])
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .collect()
+}
+
+fn render_table_html(cells: &[Vec<String>]) -> String {
+    if cells.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(r#"<table class="md-table">"#);
+    let mut iter = cells.iter();
+    if let Some(header) = iter.next() {
+        s.push_str("<thead><tr>");
+        for c in header {
+            s.push_str(r#"<th>"#);
+            s.push_str(&html_escape(c));
+            s.push_str("</th>");
+        }
+        s.push_str("</tr></thead>");
+    }
+    s.push_str("<tbody>");
+    for row in iter {
+        s.push_str("<tr>");
+        for c in row {
+            s.push_str(r#"<td>"#);
+            s.push_str(&html_escape(c));
+            s.push_str("</td>");
+        }
+        s.push_str("</tr>");
+    }
+    s.push_str("</tbody></table>");
+    s
+}
+
+fn callout_class(kind: &str, is_header: bool) -> &'static str {
+    // The decoration::Line variant takes a `String` so we have
+    // to return a `&'static str` selected from a fixed table.
+    // 13 kinds × 2 (header/body) — 26 entries; one match.
+    match (kind, is_header) {
+        ("note", true) => "md-callout md-callout-note md-callout-header",
+        ("note", false) => "md-callout md-callout-note",
+        ("abstract", true) => "md-callout md-callout-abstract md-callout-header",
+        ("abstract", false) => "md-callout md-callout-abstract",
+        ("info", true) => "md-callout md-callout-info md-callout-header",
+        ("info", false) => "md-callout md-callout-info",
+        ("todo", true) => "md-callout md-callout-todo md-callout-header",
+        ("todo", false) => "md-callout md-callout-todo",
+        ("tip", true) => "md-callout md-callout-tip md-callout-header",
+        ("tip", false) => "md-callout md-callout-tip",
+        ("success", true) => "md-callout md-callout-success md-callout-header",
+        ("success", false) => "md-callout md-callout-success",
+        ("question", true) => "md-callout md-callout-question md-callout-header",
+        ("question", false) => "md-callout md-callout-question",
+        ("warning", true) => "md-callout md-callout-warning md-callout-header",
+        ("warning", false) => "md-callout md-callout-warning",
+        ("failure", true) => "md-callout md-callout-failure md-callout-header",
+        ("failure", false) => "md-callout md-callout-failure",
+        ("danger", true) => "md-callout md-callout-danger md-callout-header",
+        ("danger", false) => "md-callout md-callout-danger",
+        ("bug", true) => "md-callout md-callout-bug md-callout-header",
+        ("bug", false) => "md-callout md-callout-bug",
+        ("example", true) => "md-callout md-callout-example md-callout-header",
+        ("example", false) => "md-callout md-callout-example",
+        ("quote", true) => "md-callout md-callout-quote md-callout-header",
+        ("quote", false) => "md-callout md-callout-quote",
+        _ => "md-blockquote",
+    }
+}
 
 /// Iterate `(line_from, line_to)` byte ranges, exclusive of the
 /// trailing `\n`. The last line (no trailing `\n`) is included.
@@ -629,6 +993,19 @@ fn find_spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
+        // %% obsidian comment %% — body hidden when caret away,
+        // styled subtly when revealed. Quartz: `ofm.ts:132`.
+        if i + 4 <= b.len() && &b[i..i + 2] == b"%%" {
+            if let Some(end) = find_close(b, i + 2, b"%%") {
+                out.push(Span {
+                    outer: i..end + 2,
+                    body: i + 2..end,
+                    class: "md-comment",
+                });
+                i = end + 2;
+                continue;
+            }
+        }
         // `inline code`
         if b[i] == b'`' {
             if let Some(end) = find_close(b, i + 1, b"`") {
@@ -654,6 +1031,20 @@ fn find_spans(text: &str) -> Vec<Span> {
                     i = end + 1;
                     continue;
                 }
+            }
+        }
+        // ![[embed]]  — image/audio/video/pdf embed by file
+        // extension on the target. Recognized before the plain
+        // `[[wikilink]]` arm. Quartz: `ofm.ts:233-265`.
+        if i + 5 <= b.len() && &b[i..i + 3] == b"![[" {
+            if let Some(end) = find_close(b, i + 3, b"]]") {
+                out.push(Span {
+                    outer: i..end + 2,
+                    body: i + 3..end,
+                    class: "md-embed",
+                });
+                i = end + 2;
+                continue;
             }
         }
         // [[wikilink]]  — keep before `[link]` so the `[[`
@@ -958,6 +1349,136 @@ mod tests {
         let s = state("> quoted", 100);
         let decs = live_preview(&s);
         assert!(has_line_class(&decs, 0, "md-blockquote"));
+    }
+
+    #[test]
+    fn table_recognized() {
+        let s = state("| A | B |\n|---|---|\n| 1 | 2 |", 100);
+        let decs = live_preview(&s);
+        let widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-table")));
+        assert!(widget);
+    }
+
+    #[test]
+    fn table_with_caret_inside_keeps_source_visible() {
+        // Caret at byte 5 ("| A | B" inside header) — table
+        // recognized but no Replace, source stays editable.
+        let s = state("| A | B |\n|---|---|\n| 1 | 2 |", 5);
+        let decs = live_preview(&s);
+        let has_replace = decs.iter().any(|d| matches!(d.kind,
+            crate::decoration::DecorationKind::Replace));
+        assert!(!has_replace);
+    }
+
+    #[test]
+    fn table_requires_separator_row() {
+        // No separator → not a table.
+        let s = state("| A | B |\n| 1 | 2 |", 100);
+        let decs = live_preview(&s);
+        let widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-table")));
+        assert!(!widget);
+    }
+
+    #[test]
+    fn comment_recognized() {
+        let s = state("a %% hidden %% b", 100);
+        let decs = live_preview(&s);
+        let has_comment = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Mark { class, .. } if class == "md-comment"));
+        assert!(has_comment);
+    }
+
+    #[test]
+    fn image_embed_recognized() {
+        let s = state("![[pic.png]]", 100);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-embed-image")));
+        assert!(has_widget);
+    }
+
+    #[test]
+    fn image_embed_with_size_opts() {
+        let s = state("![[pic.png|320x200]]", 100);
+        let decs = live_preview(&s);
+        let widget = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html } => Some(html),
+            _ => None,
+        });
+        let html = widget.expect("widget");
+        assert!(html.contains("width:320px"));
+        assert!(html.contains("height:200px"));
+    }
+
+    #[test]
+    fn video_embed_recognized() {
+        let s = state("![[clip.mp4]]", 100);
+        let decs = live_preview(&s);
+        let has_video = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-embed-video")));
+        assert!(has_video);
+    }
+
+    #[test]
+    fn unknown_extension_falls_back_to_wikilink() {
+        // .md isn't a media kind — should NOT emit an embed widget.
+        let s = state("![[other.md]]", 100);
+        let decs = live_preview(&s);
+        let has_widget = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.starts_with("<img") || html.starts_with("<video")));
+        assert!(!has_widget);
+    }
+
+    #[test]
+    fn callout_note_emits_md_callout_class() {
+        let s = state("> [!note] Title", 100);
+        let decs = live_preview(&s);
+        let has_callout = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class.contains("md-callout-note")));
+        assert!(has_callout);
+    }
+
+    #[test]
+    fn callout_warning_alias_resolves() {
+        let s = state("> [!caution] Hey", 100);
+        let decs = live_preview(&s);
+        let has_warning = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class.contains("md-callout-warning")));
+        assert!(has_warning);
+    }
+
+    #[test]
+    fn callout_body_lines_inherit_kind() {
+        let s = state("> [!note] T\n> body line", 100);
+        let decs = live_preview(&s);
+        // Both lines should have a `md-callout-note` class.
+        let count = decs.iter().filter(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Line { class }
+                if class.contains("md-callout-note"))).count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn non_blockquote_line_closes_callout() {
+        let s = state("> [!note] T\n> body\nafter", 100);
+        let decs = live_preview(&s);
+        // Line at pos 21 ("after") should NOT have callout class.
+        let after_class = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Line { class } if d.from == 21 => Some(class),
+            _ => None,
+        });
+        // Either no Line at "after" (it's a plain line) or one
+        // without the callout class.
+        assert!(after_class.map_or(true, |c| !c.contains("md-callout")));
     }
 
     #[test]

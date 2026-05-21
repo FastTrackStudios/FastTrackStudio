@@ -150,6 +150,106 @@ section h2 {
     vertical-align: super;
 }
 
+/* GFM pipe tables — rendered as a single widget when the caret
+   is off, source bytes shown verbatim when the caret is on. */
+.editor-root .md-table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 0.95em;
+    width: 100%;
+    max-width: 100%;
+}
+.editor-root .md-table th,
+.editor-root .md-table td {
+    border: 1px solid #3a4060;
+    padding: 4px 10px;
+    text-align: left;
+}
+.editor-root .md-table th {
+    background: #20253a;
+    color: #f5f5fa;
+    font-weight: 600;
+}
+.editor-root .md-table tr:nth-child(even) td {
+    background: rgba(60, 70, 100, 0.12);
+}
+
+/* %% comment %% — subtle when caret is on it (revealed source);
+   collapsed to nothing when caret is off (the Replace covers
+   the outer span). */
+.editor-root .md-comment {
+    color: #6a7392;
+    font-style: italic;
+    opacity: 0.7;
+}
+
+/* Embed widgets — sized via inline style coming from
+   embed_widget_html, max-width clamps to the editor pane. */
+.editor-root .md-embed-image,
+.editor-root .md-embed-video,
+.editor-root .md-embed-pdf {
+    display: block;
+    max-width: 100%;
+    border-radius: 6px;
+    margin: 6px 0;
+}
+.editor-root .md-embed-audio {
+    display: inline-block;
+    margin: 6px 0;
+}
+
+/* Callouts — 13 colored variants, header line carries the
+   colored title bar, body lines reuse the same vertical bar
+   in muted form. Visually mimics Obsidian's live-preview
+   admonition style. */
+.editor-root .cm-line.md-callout {
+    position: relative;
+    padding-left: 14px;
+    padding-right: 8px;
+    background: rgba(60, 70, 100, 0.18);
+}
+.editor-root .cm-line.md-callout::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+}
+.editor-root .cm-line.md-callout-header {
+    font-weight: 600;
+    padding-top: 4px;
+}
+.editor-root .cm-line.md-callout-header + .cm-line.md-callout {
+    padding-bottom: 4px;
+}
+.editor-root .cm-line.md-callout-note::before     { background: #5a7fd6; }
+.editor-root .cm-line.md-callout-abstract::before { background: #79b8ff; }
+.editor-root .cm-line.md-callout-info::before     { background: #79b8ff; }
+.editor-root .cm-line.md-callout-todo::before     { background: #b388ff; }
+.editor-root .cm-line.md-callout-tip::before      { background: #5be2d2; }
+.editor-root .cm-line.md-callout-success::before  { background: #88d4a3; }
+.editor-root .cm-line.md-callout-question::before { background: #ffcb6b; }
+.editor-root .cm-line.md-callout-warning::before  { background: #ffa657; }
+.editor-root .cm-line.md-callout-failure::before  { background: #ff7b72; }
+.editor-root .cm-line.md-callout-danger::before   { background: #ff5370; }
+.editor-root .cm-line.md-callout-bug::before      { background: #ff5370; }
+.editor-root .cm-line.md-callout-example::before  { background: #c792ea; }
+.editor-root .cm-line.md-callout-quote::before    { background: #c5cad8; }
+.editor-root .cm-line.md-callout-header.md-callout-note     { color: #79b8ff; }
+.editor-root .cm-line.md-callout-header.md-callout-abstract { color: #79b8ff; }
+.editor-root .cm-line.md-callout-header.md-callout-info     { color: #79b8ff; }
+.editor-root .cm-line.md-callout-header.md-callout-todo     { color: #b388ff; }
+.editor-root .cm-line.md-callout-header.md-callout-tip      { color: #5be2d2; }
+.editor-root .cm-line.md-callout-header.md-callout-success  { color: #88d4a3; }
+.editor-root .cm-line.md-callout-header.md-callout-question { color: #ffcb6b; }
+.editor-root .cm-line.md-callout-header.md-callout-warning  { color: #ffa657; }
+.editor-root .cm-line.md-callout-header.md-callout-failure  { color: #ff7b72; }
+.editor-root .cm-line.md-callout-header.md-callout-danger   { color: #ff5370; }
+.editor-root .cm-line.md-callout-header.md-callout-bug      { color: #ff5370; }
+.editor-root .cm-line.md-callout-header.md-callout-example  { color: #c792ea; }
+.editor-root .cm-line.md-callout-header.md-callout-quote    { color: #c5cad8; }
+
 .editor-root .md-bracket-match {
     background: #2f3a55;
     color: #79b8ff;

@@ -204,6 +204,23 @@ fn App() -> Element {
                  - [ ] Click the checkbox to toggle\n\
                  - [x] Done\n\
                  \n\
+                 > [!note] Callouts\n\
+                 > Callouts share the blockquote syntax — just\n\
+                 > prepend `[!type]` (note, tip, warning, danger,\n\
+                 > quote, success, info, todo, question, …).\n\
+                 \n\
+                 > [!warning]+ Collapsible\n\
+                 > The `+`/`-` on the type marker is parsed but\n\
+                 > not yet wired to toggling.\n\
+                 \n\
+                 | Feature | Status |\n\
+                 |---------|--------|\n\
+                 | Headings | ✅ |\n\
+                 | Tables  | ✅ (this one!) |\n\
+                 | Math    | not yet |\n\
+                 \n\
+                 Comments like %% this %% hide on focus-away.\n\
+                 \n\
                  ---\n\
                  \n\
                  ## Code fences with syntax highlighting\n\
