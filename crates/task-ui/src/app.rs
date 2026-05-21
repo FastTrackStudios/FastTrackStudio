@@ -7,7 +7,7 @@
 //! Restoring them is a `git checkout` of this file.
 
 use dioxus::prelude::*;
-use editor::EditorApp;
+use editor_outliner::EditorApp;
 use fts_ui::prelude::*;
 
 /// Top-level component that the platform launchers mount.

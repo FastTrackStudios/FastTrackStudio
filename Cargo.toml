@@ -16,18 +16,17 @@ members = [
     "external/editor/crates/editor-vim",
     "external/editor/crates/editor-typst",
     "external/editor/crates/editor-mermaid",
-    "external/editor/crates/editor-cm",
+    "external/editor/crates/editor",
     # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
     # patched in for wasm32 compat. Lives next to the editor it
     # supports.
     "external/editor/vendor/mermaid-rs-renderer",
+    # Editor playground — Dioxus app that dogfoods the editor.
+    # Built with `dx serve --package playground`.
+    "external/editor/examples/playground",
 ]
 exclude = [
     "features/project/spec",    "features/project/tests",
-    # Editor playground stays in its own subtree workspace —
-    # pulls in `dx serve` and a different Dioxus version, not
-    # part of Task's main build.
-    "external/editor/examples/playground",
 ]
 resolver = "2"
 
@@ -64,16 +63,18 @@ knowledge-ui = { path = "features/knowledge/knowledge-ui" }
 
 obsidian-compat = { path = "crates/obsidian-compat" }
 publish-core = { path = "crates/publish-core" }
-editor = { path = "crates/editor" }
-# CodeMirror-style editor crates (subtree). Aliased here so
-# task crates can reference them by short workspace name.
+# Legacy Logseq-style outliner — kept until the new editor
+# grows a vault/page layer that supersedes it.
+editor-outliner = { path = "crates/editor-outliner" }
+# CodeMirror-style editor (subtree). `editor` is the umbrella
+# crate that re-exports the others — apps consume that.
 editor-state = { path = "external/editor/crates/editor-state" }
 editor-syntax = { path = "external/editor/crates/editor-syntax" }
 editor-view = { path = "external/editor/crates/editor-view" }
 editor-vim = { path = "external/editor/crates/editor-vim" }
 editor-typst = { path = "external/editor/crates/editor-typst" }
 editor-mermaid = { path = "external/editor/crates/editor-mermaid" }
-editor-cm = { path = "external/editor/crates/editor-cm" }
+editor = { path = "external/editor/crates/editor" }
 
 # Deps the editor's inner crates inherit via `workspace = true`.
 # `serde`, `serde_json` are already declared elsewhere in the
@@ -261,6 +262,11 @@ features = ["full"]
 [workspace.dependencies.tracing-subscriber]
 version = "0.3"
 features = ["env-filter"]
+
+# Used by the editor playground (and any future binary that
+# wants a structured log file alongside stdout).
+[workspace.dependencies.tracing-appender]
+version = "0.2"
 
 [workspace.dependencies.uuid]
 version = "1"

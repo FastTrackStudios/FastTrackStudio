@@ -3454,25 +3454,6 @@ dependencies = [
 name = "editor"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "dioxus",
- "indexmap",
- "notify",
- "notify-debouncer-mini",
- "publish-core",
- "rfd 0.15.4",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "editor-cm"
-version = "0.1.0"
-dependencies = [
  "editor-state",
  "editor-typst",
  "editor-view",
@@ -3486,6 +3467,25 @@ dependencies = [
  "mermaid-rs-renderer",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "editor-outliner"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "indexmap",
+ "notify",
+ "notify-debouncer-mini",
+ "publish-core",
+ "rfd 0.15.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -8298,6 +8298,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "playground"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "editor",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tracing-wasm",
+ "web-sys",
+]
+
+[[package]]
 name = "plist"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10706,6 +10719,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "symlink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10990,7 +11009,7 @@ dependencies = [
  "crdt",
  "dioxus",
  "dioxus-router",
- "editor",
+ "editor-outliner",
  "fake",
  "fts-ui",
  "futures-channel",
@@ -11458,6 +11477,19 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-appender"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050686193eb999b4bb3bc2acfa891a13da00f79734704c4b8b4ef1a10b368a3c"
+dependencies = [
+ "crossbeam-channel",
+ "symlink",
+ "thiserror 2.0.18",
+ "time",
+ "tracing-subscriber",
 ]
 
 [[package]]
