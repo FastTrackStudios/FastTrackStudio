@@ -465,7 +465,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             icon: "1.",
         },
         CommandEntry {
-            label: "Task list",
+            label: "Task",
             group: "Structure",
             desc: "- [ ] task",
             kind: CommandKind::SetList(ListKind::Task),
@@ -563,11 +563,13 @@ pub fn all_commands() -> Vec<CommandEntry> {
     // the caret on the title line (right after `> [!type] `),
     // ready for the user to type the title. Next Enter takes
     // them to the body.
+    // No `Todo` callout — that's what the `- [ ]` task list
+    // is for. Picking `/task` is the right path for actionable
+    // items; the callout was redundant with it.
     for (kind, label, icon) in [
         ("note", "Note", "📝"),
         ("abstract", "Abstract", "📄"),
         ("info", "Info", "ⓘ"),
-        ("todo", "Todo", "☑"),
         ("tip", "Tip", "💡"),
         ("success", "Success", "✅"),
         ("question", "Question", "❓"),
@@ -587,7 +589,6 @@ pub fn all_commands() -> Vec<CommandEntry> {
             "note" => "> [!note] ",
             "abstract" => "> [!abstract] ",
             "info" => "> [!info] ",
-            "todo" => "> [!todo] ",
             "tip" => "> [!tip] ",
             "success" => "> [!success] ",
             "question" => "> [!question] ",

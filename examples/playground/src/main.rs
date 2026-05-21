@@ -249,7 +249,7 @@ fn App() -> Element {
                  \n\
                  > [!info] Info\n\
                  > Use the slash menu `/callout` to insert any of the others — \
-                 abstract, info, todo, success, question, failure, bug, example, quote.\n\
+                 abstract, info, success, question, failure, bug, example, quote.\n\
                  \n\
                  > [!example] Nested callouts\n\
                  > The outer is an example callout.\n\
