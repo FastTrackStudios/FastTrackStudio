@@ -33,6 +33,18 @@ deferred. Listed in rough do-this-first order.
   frontmatter widget renders; bool toggle writes back; text
   edit + Esc commits; list-chip add via Enter appends to YAML
   block list.
+- ✅ **File splits**:
+  - `markdown.rs` → `markdown/frontmatter.rs` (parser,
+    serializer, render) + `markdown/typst.rs` (kinds,
+    `render_typst`, LRU cache).
+  - `editor.rs` → sibling `bridge.rs` for `handle_bridge_msg`
+    + property edit helpers. `push_selection` / `diff_text`
+    promoted to `pub(crate)`.
+  - markdown.rs: 2452 → 1967 LOC. editor.rs: 2207 → 1839 LOC.
+- ✅ **Typst compile debounce**: per-pass budget caps cold
+  compiles at 2 per `live_preview`. LRU cap raised 32 → 128.
+  Pasting a doc full of fresh equations no longer freezes —
+  math fills in over a few render cycles.
 
 Still pending below.
 
