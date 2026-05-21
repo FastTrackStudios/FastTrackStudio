@@ -41,14 +41,51 @@ pub(crate) fn render_mermaid(body: &str) -> Option<String> {
 
     match editor_mermaid::render_svg(body) {
         Ok(svg) => {
-            with_mermaid_cache(|c| c.put(body.to_string(), svg.clone()));
-            Some(svg)
+            let themed = themify_svg(&svg);
+            with_mermaid_cache(|c| c.put(body.to_string(), themed.clone()));
+            Some(themed)
         }
         Err(e) => {
             tracing::debug!(?e, body_len = body.len(), "mermaid render failed");
             None
         }
     }
+}
+
+/// Swap the renderer's "modern" theme palette for values that
+/// live on the editor's CSS token system. Mermaid bakes colors
+/// in as inline `fill=`/`stroke=` attributes, which beat any
+/// stylesheet rule unless we use `!important` — string replace
+/// is the simplest robust answer. Mapping below targets the
+/// six hex values the default theme actually emits (sampled
+/// from a real render; see crate test).
+///
+/// - text → `currentColor` so it tracks the editor's `color`.
+/// - background → `transparent` so the surrounding widget's
+///   own background shows through.
+/// - node fills → a translucent overlay that reads on either
+///   light or dark themes.
+/// - strokes (nodes + edges + arrows) → `currentColor` at
+///   reduced opacity for hierarchy.
+///
+/// Users with custom themes can swap to `editor_mermaid::render_svg`
+/// directly and skip this step.
+fn themify_svg(svg: &str) -> String {
+    svg
+        // Text fills (`#0F172A` slate-900). Must go first so
+        // the `#FFFFFF` background rule below doesn't catch
+        // any text accidentally.
+        .replace("fill=\"#0F172A\"", "fill=\"currentColor\"")
+        // Page background rect. Drop it so the widget div's
+        // background is what the user sees.
+        .replace("fill=\"#FFFFFF\"", "fill=\"transparent\"")
+        // Node fill (slate-50). Subtle overlay.
+        .replace("fill=\"#F8FAFC\"", "fill=\"rgba(127, 167, 217, 0.08)\"")
+        // Node + edge-label strokes (slate-400).
+        .replace("stroke=\"#94A3B8\"", "stroke=\"currentColor\" stroke-opacity=\"0.35\"")
+        // Arrow heads, edges (slate-500).
+        .replace("fill=\"#64748B\"", "fill=\"currentColor\" fill-opacity=\"0.55\"")
+        .replace("stroke=\"#64748B\"", "stroke=\"currentColor\" stroke-opacity=\"0.55\"")
 }
 
 struct MermaidCache {
@@ -72,6 +109,34 @@ impl MermaidCache {
             self.entries.remove(0);
         }
         self.entries.push((body, svg));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::themify_svg;
+
+    #[test]
+    fn themify_swaps_text_for_currentcolor() {
+        let svg = r##"<svg><text fill="#0F172A">x</text></svg>"##;
+        let out = themify_svg(svg);
+        assert!(out.contains("fill=\"currentColor\""));
+        assert!(!out.contains("#0F172A"));
+    }
+
+    #[test]
+    fn themify_drops_white_background() {
+        let svg = r##"<svg><rect fill="#FFFFFF"/></svg>"##;
+        let out = themify_svg(svg);
+        assert!(out.contains("fill=\"transparent\""));
+    }
+
+    #[test]
+    fn themify_preserves_other_colors() {
+        // A user-set custom color shouldn't be touched.
+        let svg = r##"<svg><rect fill="#abc123"/></svg>"##;
+        let out = themify_svg(svg);
+        assert!(out.contains("#abc123"));
     }
 }
 
