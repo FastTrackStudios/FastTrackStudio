@@ -44,6 +44,7 @@ pub(crate) fn handle_bridge_msg(
     mut state: Signal<EditorState>,
     deco_source: Option<DecorationSource>,
     vim: Option<Signal<editor_vim::VimState>>,
+    mut widget_focus: Signal<bool>,
     v: &serde_json::Value,
 ) {
     let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("");
@@ -300,6 +301,10 @@ pub(crate) fn handle_bridge_msg(
                     .selection(prev_sel)
                     .annotate("origin", "task-toggle"),
             ));
+        }
+        "widget-focus" => {
+            let focused = v.get("focused").and_then(|b| b.as_bool()).unwrap_or(false);
+            widget_focus.set(focused);
         }
         "prop-leave" => {
             if let Some(mut vs) = vim {

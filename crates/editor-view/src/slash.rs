@@ -15,7 +15,7 @@
 //! `run_command` and clears the state.
 
 use dioxus::prelude::*;
-use editor_state::{Changes, EditorState, Range, Selection, TransactionSpec};
+use editor_state::{Changes, EditorState, Selection, TransactionSpec};
 
 /// Slash-command popup. Reads the open state from the
 /// `slash` signal threaded down from the host (typically the
@@ -257,67 +257,112 @@ pub fn run_command(
             )
         }
         CommandKind::SetHeading(level) => {
-            // First strip the slash, then run set_heading on the
-            // cleaned state.
-            let stripped = remove_range(&doc, &slash_range);
-            let new_state = state_with_doc(state, stripped, slash_range.start);
-            editor_state::commands::set_heading(&new_state, level)
+            // Replace the whole line containing the slash range
+            // with a heading-prefixed version of its non-slash
+            // content. Doing this as one atomic replace avoids
+            // the bug where stripping the slash separately and
+            // then calling `set_heading` on a synthetic doc
+            // produces offsets that don't map back to the real
+            // doc.
+            let (line_start, line_end) = line_bounds(&doc, &slash_range);
+            let body = line_without_slash(&doc, line_start, line_end, &slash_range);
+            let body = strip_heading(&body);
+            let new_line = if level == 0 {
+                body.to_string()
+            } else {
+                let prefix = "#".repeat(level as usize);
+                format!("{prefix} {body}")
+            };
+            let caret = line_start + new_line.len();
+            Some(
+                TransactionSpec::new()
+                    .changes(Changes::replace(line_start..line_end, new_line))
+                    .selection(Selection::caret(caret))
+                    .annotate("origin", "slash"),
+            )
         }
         CommandKind::SetList(kind) => {
-            let stripped = remove_range(&doc, &slash_range);
-            let new_state = state_with_doc(state, stripped, slash_range.start);
             let target = match kind {
                 ListKind::Unordered => "- ",
                 ListKind::Ordered => "1. ",
                 ListKind::Task => "- [ ] ",
             };
-            // Replace any existing list marker on the line, or
-            // prepend.
-            let doc2 = new_state.doc.to_string();
-            let line_start = doc2[..slash_range.start]
-                .rfind('\n')
-                .map(|n| n + 1)
-                .unwrap_or(0);
-            let line_end = doc2[line_start..]
-                .find('\n')
-                .map(|n| line_start + n)
-                .unwrap_or(doc2.len());
-            let line = &doc2[line_start..line_end];
-            let stripped_line = strip_list_marker(line);
-            let new_line = format!("{target}{stripped_line}");
+            let (line_start, line_end) = line_bounds(&doc, &slash_range);
+            let body = line_without_slash(&doc, line_start, line_end, &slash_range);
+            let body = strip_list_marker(&body);
+            let new_line = format!("{target}{body}");
             let caret = line_start + new_line.len();
             Some(
                 TransactionSpec::new()
-                    .changes(Changes::replace(0..doc.len(), {
-                        let mut s = doc2.clone();
-                        s.replace_range(line_start..line_end, &new_line);
-                        s
-                    }))
+                    .changes(Changes::replace(line_start..line_end, new_line))
                     .selection(Selection::caret(caret))
                     .annotate("origin", "slash"),
             )
         }
         CommandKind::ToggleTask => {
-            let stripped = remove_range(&doc, &slash_range);
-            let new_state = state_with_doc(state, stripped, slash_range.start);
-            editor_state::commands::toggle_task(&new_state)
+            let (line_start, line_end) = line_bounds(&doc, &slash_range);
+            let body = line_without_slash(&doc, line_start, line_end, &slash_range);
+            // If the line already starts with `- [ ]`/`- [x]`,
+            // flip it; otherwise promote to task.
+            let b = body.as_bytes();
+            let is_task = b.len() >= 5
+                && matches!(b[0], b'-' | b'*' | b'+')
+                && b[1] == b' '
+                && b[2] == b'['
+                && b[4] == b']';
+            let new_line = if is_task {
+                let inner = b[3];
+                let new_inner = if inner == b' ' { 'x' } else { ' ' };
+                let mut bs = b.to_vec();
+                bs[3] = new_inner as u8;
+                String::from_utf8(bs).unwrap_or(body.clone())
+            } else {
+                format!("- [ ] {body}")
+            };
+            let caret = line_start + new_line.len();
+            Some(
+                TransactionSpec::new()
+                    .changes(Changes::replace(line_start..line_end, new_line))
+                    .selection(Selection::caret(caret))
+                    .annotate("origin", "slash"),
+            )
         }
     }
 }
 
-fn remove_range(doc: &str, range: &std::ops::Range<usize>) -> String {
-    let mut s = String::with_capacity(doc.len() - (range.end - range.start));
-    s.push_str(&doc[..range.start]);
-    s.push_str(&doc[range.end..]);
-    s
+/// Byte-range of the (single) line containing the slash. The
+/// slash range is guaranteed to live on one line because the
+/// parser closes on newlines.
+fn line_bounds(doc: &str, slash_range: &std::ops::Range<usize>) -> (usize, usize) {
+    let line_start = doc[..slash_range.start].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_end = doc[slash_range.end..]
+        .find('\n')
+        .map(|n| slash_range.end + n)
+        .unwrap_or(doc.len());
+    (line_start, line_end)
 }
 
-fn state_with_doc(state: &EditorState, doc: String, caret: usize) -> EditorState {
-    let mut s = state.clone();
-    s.doc = doc.into();
-    let caret = caret.min(s.doc.len());
-    s.selection = Selection::single(Range::caret(caret));
-    s
+/// Reconstruct the line text with the `/query` removed.
+fn line_without_slash(
+    doc: &str,
+    line_start: usize,
+    line_end: usize,
+    slash_range: &std::ops::Range<usize>,
+) -> String {
+    let mut out = String::with_capacity(line_end - line_start);
+    out.push_str(&doc[line_start..slash_range.start]);
+    out.push_str(&doc[slash_range.end..line_end]);
+    out
+}
+
+/// Strip a leading `#…# ` heading marker (1-6 hashes + space).
+fn strip_heading(line: &str) -> &str {
+    let hashes = line.chars().take_while(|c| *c == '#').count();
+    if (1..=6).contains(&hashes) && line.as_bytes().get(hashes).copied() == Some(b' ') {
+        &line[hashes + 1..]
+    } else {
+        line
+    }
 }
 
 fn strip_list_marker(line: &str) -> &str {

@@ -69,6 +69,37 @@ fn now_ms() -> f64 {
     let s = START.get_or_init(std::time::Instant::now);
     s.elapsed().as_secs_f64() * 1000.0
 }
+/// Synchronously query the DOM for "is a decoration widget
+/// cell currently focused?". Used by the editor's keydown
+/// dispatch to bail out before any vim/keymap/slash handler
+/// fires, so cell-owned keystrokes (Mod-A inside a property
+/// text cell, Enter in a chip-add input, etc.) aren't double-
+/// handled by the doc.
+///
+/// The JS-side `focusin`/`focusout` listeners flip
+/// `dataset.widgetFocused` on the editor root the moment focus
+/// crosses into / out of an `[data-edit-role]` element. We
+/// read that attribute here from Rust via `web_sys` — same
+/// thread, same tick, no bridge latency.
+#[cfg(target_arch = "wasm32")]
+fn widget_focused_dom() -> bool {
+    use web_sys::wasm_bindgen::JsCast;
+    let Some(win) = web_sys::window() else { return false };
+    let Some(doc) = win.document() else { return false };
+    let Some(el) = doc.query_selector("[data-editor-id]").ok().flatten() else {
+        return false;
+    };
+    let html: web_sys::HtmlElement = match el.dyn_into() {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    html.dataset().get("widgetFocused").is_some()
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn widget_focused_dom() -> bool {
+    false
+}
+
 #[cfg(target_arch = "wasm32")]
 fn now_ms() -> f64 {
     // Cheap call — browsers cache it. Falls back to 0 if for
@@ -102,6 +133,15 @@ pub fn Editor(
     /// keeps the state in sync with the doc.
     #[props(default)] slash: Option<Signal<Option<crate::slash::SlashState>>>,
 ) -> Element {
+    // True when a decoration widget cell currently has focus
+    // (frontmatter property contenteditable, chip-add box, etc.).
+    // Flipped via JS focusin/focusout bridge messages so the
+    // Rust-side `on_keydown` can bail entirely while the cell
+    // owns the keyboard — otherwise Dioxus's document-level
+    // delegation would still fire commands like `Mod-A` against
+    // the whole doc even when we `stopPropagation` in capture
+    // phase on the editor root.
+    let widget_focus = use_signal(|| false);
     // Tile-tree build moved into the imperative-patch
     // `use_effect` below. The component body itself no longer
     // computes a render — it just allocates the editor id and
@@ -1194,9 +1234,15 @@ pub fn Editor(
                             el.addEventListener('focusin', evt => {{
                                 const row = evt.target.closest('.md-property-row');
                                 if (row) row.classList.add('is-active');
+                                if (evt.target.dataset.editRole) {{
+                                    dioxus.send({{ kind: 'widget-focus', focused: true }});
+                                }}
                             }});
                             el.addEventListener('focusout', evt => {{
                                 const row = evt.target.closest('.md-property-row');
+                                if (evt.target.dataset.editRole) {{
+                                    dioxus.send({{ kind: 'widget-focus', focused: false }});
+                                }}
                                 if (!row) return;
                                 row.classList.remove('is-active');
                                 const role = evt.target.dataset.editRole;
@@ -1217,21 +1263,47 @@ pub fn Editor(
                                     ty: 'date',
                                 }});
                             }});
-                            // Capture-phase keydown inside a
-                            // property cell: stop the editor's
-                            // normal vim/keymap dispatch from
-                            // also firing. Without this, typing
-                            // `j` in a cell would also send a
-                            // vim "next line" to the editor.
-                            el.addEventListener('keydown', evt => {{
+                            // Synchronous focus flag — written
+                            // before any keydown that follows the
+                            // click that focused the cell. The
+                            // editor's `onkeydown` Rust closure
+                            // checks `el.dataset.widgetFocused`
+                            // synchronously via an inline JS
+                            // helper at the top of dispatch.
+                            el.addEventListener('focusin', evt => {{
                                 if (evt.target.dataset.editRole) {{
-                                    evt.stopPropagation();
+                                    el.dataset.widgetFocused = '1';
                                 }}
                             }}, true);
+                            el.addEventListener('focusout', evt => {{
+                                if (evt.target.dataset.editRole) {{
+                                    delete el.dataset.widgetFocused;
+                                }}
+                            }}, true);
+                            // Capture-phase keydown inside a
+                            // property cell: handle cell-owned
+                            // keys (Esc/Enter/Space) and stop
+                            // propagation so the editor's
+                            // normal vim/keymap dispatch
+                            // (Dioxus document delegation)
+                            // never sees them. Single handler
+                            // because if we split it across
+                            // capture + bubble, the
+                            // stopPropagation in capture kills
+                            // the bubble pass on the same
+                            // element.
                             el.addEventListener('keydown', evt => {{
                                 const role = evt.target.dataset.editRole;
                                 if (!role) return;
-                                if (evt.key === 'Escape' || (evt.key === 'Enter' && role !== 'chip-add')) {{
+                                evt.stopPropagation();
+                                // Esc always blurs. Enter blurs for
+                                // single-value cells (text /
+                                // number / date / bool) but is
+                                // handled below for the cells
+                                // that commit on Enter
+                                // (chip-add, row-add).
+                                const enterCommits = role === 'chip-add' || role === 'row-add';
+                                if (evt.key === 'Escape' || (evt.key === 'Enter' && !enterCommits)) {{
                                     evt.preventDefault();
                                     evt.target.blur();
                                     // Tell Rust the cell lost
@@ -1268,7 +1340,7 @@ pub fn Editor(
                                     evt.target.textContent = '';
                                     return;
                                 }}
-                            }});
+                            }}, true);
                             el.addEventListener('click', evt => {{
                                 const role = evt.target.dataset.editRole;
                                 if (role === 'bool') {{
@@ -1429,7 +1501,7 @@ pub fn Editor(
                 );
                 let mut handle = document::eval(&script);
                 while let Ok(v) = handle.recv::<serde_json::Value>().await {
-                    crate::bridge::handle_bridge_msg(state, deco_source, vim, &v);
+                    crate::bridge::handle_bridge_msg(state, deco_source, vim, widget_focus, &v);
                 }
             });
         });
@@ -1440,8 +1512,19 @@ pub fn Editor(
     let keymap_for_keys = keymap.clone();
     let vim_for_keys = vim;
     let slash_for_keys = slash;
+    let widget_focus_for_keys = widget_focus;
     let editor_id_for_keys = editor_id.clone();
     let on_keydown = move |evt: Event<KeyboardData>| {
+        // Widget cell has focus (e.g. a frontmatter property
+        // contenteditable). The widget owns its keyboard, so
+        // every editor-side handler — vim, slash, keymap —
+        // must bail. We check the DOM directly (synchronous)
+        // because the `widget_focus_for_keys` signal is
+        // bridge-driven and arrives a tick late, racing the
+        // first keypress after a click.
+        if widget_focused_dom() || *widget_focus_for_keys.peek() {
+            return;
+        }
         let mods = evt.modifiers();
         let key_str = match evt.key() {
             Key::Character(c) => c,

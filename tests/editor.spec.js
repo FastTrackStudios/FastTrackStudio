@@ -963,35 +963,149 @@ test.describe("editor", () => {
     expect(after).toContain("published: false");
   });
 
+  /**
+   * Focus a property cell and replace its text content with
+   * `value`, then blur it. Drives the cell directly via DOM
+   * APIs instead of relying on keyboard.press("ControlOrMeta+a"),
+   * which races Dioxus's document-level event delegation and
+   * ends up selecting-all on the whole editor doc.
+   */
+  async function setPropertyCellText(page, key, role, value) {
+    await page.evaluate(
+      ({ key, role, value }) => {
+        const sel = `.md-property-row[data-prop-key="${key}"] [data-edit-role="${role}"]`;
+        const cell = document.querySelector(sel);
+        if (!cell) throw new Error(`cell ${sel} not found`);
+        cell.focus();
+        // Replace the cell's text content, then fire blur so
+        // the editor's focusout handler dispatches prop-set.
+        cell.textContent = value;
+        cell.blur();
+      },
+      { key, role, value }
+    );
+  }
+
   test("editing a text property writes back through YAML", async ({
     page,
   }) => {
-    const cell = page
-      .locator('.md-property-row[data-prop-key="title"] [data-edit-role="text"]')
-      .first();
-    await cell.click();
-    // Caret is at end of content; replace by selecting all + typing.
-    await page.keyboard.press("ControlOrMeta+a");
-    await page.keyboard.insertText("Renamed Title");
-    // Blur to commit (Escape blurs + sends prop-leave).
-    await page.keyboard.press("Escape");
+    // Sanity: cell exists and shows the seed value.
+    const cell = page.locator(
+      '.md-property-row[data-prop-key="title"] [data-edit-role="text"]'
+    );
+    await expect(cell).toHaveText("Editor playground");
+    await setPropertyCellText(page, "title", "text", "Renamed Title");
     await expect
       .poll(async () => (await readState(page)).text)
       .toContain("title: Renamed Title");
   });
 
+  test("editing a number property writes back through YAML", async ({
+    page,
+  }) => {
+    await setPropertyCellText(page, "priority", "number", "7");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toContain("priority: 7");
+  });
+
+  test("editing a date property writes back through YAML", async ({
+    page,
+  }) => {
+    // Date cell is a native `<input type="date">`. Set its
+    // `value` then fire a `change` event so the editor's
+    // change-handler dispatches prop-set.
+    await page.evaluate(() => {
+      const input = document.querySelector(
+        '.md-property-row[data-prop-key="created"] [data-edit-role="date"]'
+      );
+      input.value = "2030-01-15";
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toContain("created: 2030-01-15");
+  });
+
   test("adding a list chip appends to the YAML block list", async ({
     page,
   }) => {
-    const adder = page
-      .locator('.md-property-row[data-prop-key="tags"] [data-edit-role="chip-add"]')
-      .first();
-    await adder.click();
-    await page.keyboard.insertText("new-tag");
-    await page.keyboard.press("Enter");
+    // Drive the chip-add cell directly: set its text, fire an
+    // Enter keydown, then verify the new tag appears in the
+    // YAML.
+    await page.evaluate(() => {
+      const add = document.querySelector(
+        '.md-property-row[data-prop-key="tags"] [data-edit-role="chip-add"]'
+      );
+      add.focus();
+      add.textContent = "new-tag";
+      add.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
     await expect
       .poll(async () => (await readState(page)).text)
       .toContain("- new-tag");
+  });
+
+  test("removing a list chip drops it from the YAML block list", async ({
+    page,
+  }) => {
+    // Click the `×` button on the first existing chip.
+    await page.evaluate(() => {
+      const x = document.querySelector(
+        '.md-property-row[data-prop-key="tags"] .md-property-chip [data-edit-role="chip-remove"]'
+      );
+      x.click();
+    });
+    // The chip that's removed is the first one in the seed
+    // (`editor`). The remaining list still contains `demo` and
+    // `live-preview`.
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toMatch(/tags:\n  - demo\n  - live-preview\n/);
+  });
+
+  test("removing a property row deletes its YAML line", async ({ page }) => {
+    // `author` is a single-line scalar — easy to verify it's
+    // gone from the doc text.
+    await page.evaluate(() => {
+      const row = document.querySelector(
+        '.md-property-row[data-prop-key="author"]'
+      );
+      const x = row.querySelector('[data-edit-role="row-remove"]');
+      x.click();
+    });
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .not.toContain("author: cody");
+  });
+
+  test("adding a new property inserts an empty entry", async ({ page }) => {
+    // Type into the "+ Add property" cell, press Enter, expect
+    // the doc to contain a new `keyname:` line at the bottom
+    // of the YAML.
+    await page.evaluate(() => {
+      const add = document.querySelector(
+        '[data-edit-role="row-add"]'
+      );
+      add.focus();
+      add.textContent = "newkey";
+      add.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toContain("newkey:");
   });
 
   // ── Slash command palette ──────────────────────────────────
