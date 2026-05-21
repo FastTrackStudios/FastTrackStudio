@@ -315,6 +315,17 @@ fn App() -> Element {
                  \n\
                  Wikilink embed: `![[diagram.png|320]]` (renders an `<img>` when the file resolves).\n\
                  \n\
+                 ### Block IDs (Logseq-style references)\n\
+                 \n\
+                 This is a referenceable block — press Mod-Shift-K on any block to give it an id.\n\
+                 id:: 5f9c1234-abcd-4ef0-8123-fedcba012345\n\
+                 \n\
+                 You can reference it inline like this: ((5f9c1234-abcd-4ef0-8123-fedcba012345)).\n\
+                 \n\
+                 Or embed the whole block as a card:\n\
+                 \n\
+                 {{embed ((5f9c1234-abcd-4ef0-8123-fedcba012345))}}\n\
+                 \n\
                  ### Code fences (syntax highlighting)\n\
                  \n\
                  ```rust\n\
@@ -359,6 +370,7 @@ fn App() -> Element {
         .with("Mod-b", commands::toggle_bold as _)
         .with("Mod-i", commands::toggle_italic as _)
         .with("Mod-k", commands::toggle_link as _)
+        .with("Mod-Shift-k", |s: &_| commands::add_block_id(s).map(|(t, _)| t))
         .with("Mod-l", commands::cycle_list as _)
         .with("Mod-t", commands::toggle_task as _)
         .with("Mod-1", |s: &_| commands::set_heading(s, 1))

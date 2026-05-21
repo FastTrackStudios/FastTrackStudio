@@ -32,6 +32,7 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     // submodule for the budget value and rationale.
     reset_compile_budget();
     reset_mermaid_budget();
+    reset_block_index();
 
     let text = state.doc.to_string();
     // In reading mode, swap the primary selection for one that
@@ -110,6 +111,57 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
                 } else {
                     out.push(Decoration::replace(span.outer.clone()));
                 }
+                continue;
+            }
+            // `((uuid))` block reference — render as an atomic
+            // chip showing the target block's first-line
+            // content. UUID source is never visible (would
+            // invite editing → broken refs). Always render the
+            // widget; the chip itself is the only visible form.
+            if span.class == "md-block-ref" {
+                let uuid = &text[span.body.clone()];
+                let (preview, resolved) = match block_anchor_for_uuid(uuid) {
+                    Some(anchor) => (block_preview(&text, anchor), true),
+                    None => (format!("unresolved {}", &uuid[..8]), false),
+                };
+                let cls = if resolved {
+                    "md-block-ref-chip"
+                } else {
+                    "md-block-ref-chip md-block-ref-unresolved"
+                };
+                let html = format!(
+                    r#"<span class="{cls}" data-uuid="{uuid}" title="{full}">{glyph} {preview}</span>"#,
+                    glyph = "🔗",
+                    full = escape_html(uuid),
+                    preview = escape_html(&preview),
+                );
+                out.push(Decoration::replace(span.outer.clone()));
+                out.push(Decoration::widget(span.outer.start, html));
+                out.push(Decoration::atomic(span.outer.clone()));
+                continue;
+            }
+            // `{{embed ((uuid))}}` — render the target block's
+            // content inline in a bordered card. Same atomic +
+            // hidden-source treatment as block refs.
+            if span.class == "md-block-embed" {
+                let uuid = &text[span.body.clone()];
+                let (content, resolved) = match block_anchor_for_uuid(uuid) {
+                    Some(anchor) => (block_preview(&text, anchor), true),
+                    None => (format!("unresolved {}", &uuid[..8]), false),
+                };
+                let cls = if resolved {
+                    "md-block-embed-card"
+                } else {
+                    "md-block-embed-card md-block-ref-unresolved"
+                };
+                let html = format!(
+                    r#"<div class="{cls}" data-uuid="{uuid}">{content}</div>"#,
+                    uuid = escape_html(uuid),
+                    content = escape_html(&content),
+                );
+                out.push(Decoration::replace(span.outer.clone()));
+                out.push(Decoration::widget(span.outer.start, html));
+                out.push(Decoration::atomic(span.outer.clone()));
                 continue;
             }
             // Inline footnotes `^[body]` — Obsidian renders them
@@ -471,6 +523,24 @@ fn scan_blocks(
             continue;
         }
         let line = &text[line_from..line_to];
+
+        // `id:: <uuid>` block-id property line (Logseq form).
+        // Whole line is hidden from the rendered view; we never
+        // want the user to accidentally edit a UUID (it'd break
+        // every ref). Atomic so arrow-keys / Backspace treat
+        // the hidden range as a single unit.
+        if let Some(uuid_range) = parse_block_id_line(line, line_from) {
+            // Replace the whole line content + its trailing
+            // newline so neighbouring lines collapse together.
+            let end = if line_to < text.len() { line_to + 1 } else { line_to };
+            out.push(Decoration::replace(line_from..end));
+            out.push(Decoration::atomic(line_from..end));
+            // Index this block id against the byte offset of the
+            // line above (its block content). Stashed for
+            // cross-line resolution + the `🔗` widget.
+            register_block_id(&text[uuid_range.clone()], find_block_anchor(text, line_from));
+            continue;
+        }
 
         // Lines inside the frontmatter range are handled above
         // (Replace + widget or delimiter marks) — skip block
@@ -1496,6 +1566,45 @@ fn find_spans(text: &str) -> Vec<Span> {
                 continue;
             }
         }
+        // `{{embed ((uuid))}}` — block embed (Logseq form).
+        // Must match before `((uuid))` so the outer `(` of the
+        // embed's payload isn't consumed by the bare-ref arm.
+        if i + 13 <= b.len() && &b[i..i + 9] == b"{{embed (" {
+            // Look for `))}}` closing.
+            let payload_start = i + 9; // after `{{embed (`
+            if b.get(payload_start) == Some(&b'(') {
+                let uuid_start = payload_start + 1;
+                if let Some(uuid_len) = peek_uuid(&b[uuid_start..]) {
+                    let uuid_end = uuid_start + uuid_len;
+                    if b.get(uuid_end..uuid_end + 4) == Some(b"))}}") {
+                        out.push(Span {
+                            outer: i..uuid_end + 4,
+                            body: uuid_start..uuid_end,
+                            class: "md-block-embed",
+                        });
+                        i = uuid_end + 4;
+                        continue;
+                    }
+                }
+            }
+        }
+        // `((uuid))` — Logseq block reference. The body is the
+        // 36-char UUID itself; outer adds the `(( ))` markers.
+        if i + 40 <= b.len() && &b[i..i + 2] == b"((" {
+            let uuid_start = i + 2;
+            if let Some(uuid_len) = peek_uuid(&b[uuid_start..]) {
+                let uuid_end = uuid_start + uuid_len;
+                if b.get(uuid_end..uuid_end + 2) == Some(b"))") {
+                    out.push(Span {
+                        outer: i..uuid_end + 2,
+                        body: uuid_start..uuid_end,
+                        class: "md-block-ref",
+                    });
+                    i = uuid_end + 2;
+                    continue;
+                }
+            }
+        }
         // <https://…> autolink (also matches mailto-shaped
         // `<foo@bar.baz>`). The body becomes the URL itself; the
         // angle brackets are styling-only.
@@ -1583,6 +1692,130 @@ fn is_tag_char(c: u8) -> bool {
 /// Find the next occurrence of `needle` in `b` starting at
 /// `from`, returning the start byte offset. Stops at newlines
 /// (a span can't cross a line boundary).
+/// Parse a `id:: <uuid>` block-id property line. Returns the
+/// byte range of the UUID within the doc (absolute) when the
+/// line matches, else `None`. Leading whitespace is tolerated
+/// so an indented bullet's block-id is recognized too.
+fn parse_block_id_line(line: &str, line_from: usize) -> Option<std::ops::Range<usize>> {
+    let trimmed_start = line.len() - line.trim_start().len();
+    let rest = &line[trimmed_start..];
+    let prefix = "id:: ";
+    let rest = rest.strip_prefix(prefix)?;
+    let rest_off = trimmed_start + prefix.len();
+    let bytes = rest.as_bytes();
+    let uuid_len = peek_uuid(bytes)?;
+    // Allow trailing whitespace but nothing else after the UUID.
+    if rest.len() > uuid_len && !rest[uuid_len..].trim().is_empty() {
+        return None;
+    }
+    Some(line_from + rest_off..line_from + rest_off + uuid_len)
+}
+
+/// Walk back from a line offset to the start of the block the
+/// `id::` line belongs to. For a paragraph or list item, that's
+/// the line directly above (or the start of the nearest non-
+/// empty block above). For v1 we just return the previous
+/// non-empty line's start.
+fn find_block_anchor(text: &str, id_line_from: usize) -> usize {
+    if id_line_from == 0 {
+        return 0;
+    }
+    let prefix = &text[..id_line_from];
+    // Walk back over any blank lines (shouldn't be common — the
+    // `id::` line should be flush against the block).
+    let mut end = id_line_from;
+    while end > 0 {
+        let prev_nl = prefix[..end - 1].rfind('\n').map(|n| n + 1).unwrap_or(0);
+        let line = &text[prev_nl..end - 1];
+        if !line.trim().is_empty() {
+            return prev_nl;
+        }
+        end = prev_nl;
+    }
+    0
+}
+
+/// Per-`live_preview`-pass registry of UUIDs in the current
+/// doc. Refreshed on each pass via `reset_block_index`. Used by
+/// the `((uuid))` chip renderer to look up the target block's
+/// first-line content and by the `🔗` indicator to know which
+/// blocks have ids.
+thread_local! {
+    static BLOCK_INDEX: std::cell::RefCell<std::collections::HashMap<String, usize>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+pub(crate) fn reset_block_index() {
+    BLOCK_INDEX.with(|m| m.borrow_mut().clear());
+}
+
+pub(crate) fn register_block_id(uuid: &str, block_anchor: usize) {
+    BLOCK_INDEX.with(|m| {
+        m.borrow_mut().insert(uuid.to_string(), block_anchor);
+    });
+}
+
+/// First ~40 chars of the block at `anchor`, stripped of
+/// markdown markers for chip display. Stops at the first
+/// newline.
+pub(crate) fn block_preview(text: &str, anchor: usize) -> String {
+    let line_end = text[anchor..]
+        .find('\n')
+        .map(|n| anchor + n)
+        .unwrap_or(text.len());
+    let line = &text[anchor..line_end];
+    let cleaned = line.trim_start_matches(|c: char| {
+        c == '#' || c == '>' || c == '-' || c == '*' || c == '+'
+            || c == ' ' || c == '\t' || c == '['
+    });
+    let cleaned = cleaned.trim_end();
+    let max = 40;
+    if cleaned.chars().count() > max {
+        let truncated: String = cleaned.chars().take(max).collect();
+        format!("{truncated}…")
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// Look up a block's anchor offset by UUID. Returns `None` when
+/// the UUID isn't in the current doc — multi-file resolution
+/// is a later slice.
+pub(crate) fn block_anchor_for_uuid(uuid: &str) -> Option<usize> {
+    BLOCK_INDEX.with(|m| m.borrow().get(uuid).copied())
+}
+
+/// Peek a UUID v4 string at the start of `bytes` and return its
+/// length (always 36) if matched, else `None`. Accepted form is
+/// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` — hex digits in the
+/// 8-4-4-4-12 layout, hyphens at positions 8/13/18/23.
+pub(crate) fn peek_uuid(bytes: &[u8]) -> Option<usize> {
+    const POSITIONS: [(usize, bool); 36] = {
+        // (index, is_hyphen)
+        let mut arr = [(0usize, false); 36];
+        let mut i = 0;
+        while i < 36 {
+            arr[i] = (i, matches!(i, 8 | 13 | 18 | 23));
+            i += 1;
+        }
+        arr
+    };
+    if bytes.len() < 36 {
+        return None;
+    }
+    for (idx, is_hyphen) in POSITIONS {
+        let c = bytes[idx];
+        if is_hyphen {
+            if c != b'-' {
+                return None;
+            }
+        } else if !c.is_ascii_hexdigit() {
+            return None;
+        }
+    }
+    Some(36)
+}
+
 fn find_close(b: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
     let mut i = from;
     while i + needle.len() <= b.len() {
@@ -1858,6 +2091,72 @@ mod tests {
                 && matches!(d.kind, crate::decoration::DecorationKind::Replace)
         });
         assert!(!has_replace);
+    }
+
+    #[test]
+    fn block_id_property_line_replaced() {
+        // A line that's just `id:: <uuid>` is hidden via a
+        // Replace covering the whole line.
+        let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+        let src = format!("paragraph content\nid:: {uuid}\nnext line");
+        let s = state(&src, 0);
+        let decs = live_preview(&s);
+        let id_line_start = src.find("id::").unwrap();
+        let id_line_end = src[id_line_start..]
+            .find('\n')
+            .map(|n| id_line_start + n + 1)
+            .unwrap_or(src.len());
+        let has_replace = decs.iter().any(|d| {
+            d.from == id_line_start
+                && d.to == id_line_end
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)
+        });
+        assert!(has_replace);
+    }
+
+    #[test]
+    fn block_ref_rendered_as_chip_widget() {
+        let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+        let src = format!("see (({uuid})) for details");
+        let s = state(&src, 0);
+        let decs = live_preview(&s);
+        let has_chip = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-block-ref-chip")));
+        assert!(has_chip);
+    }
+
+    #[test]
+    fn block_embed_rendered_as_card() {
+        let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+        let src = format!("{{{{embed (({uuid}))}}}}\n");
+        let s = state(&src, 0);
+        let decs = live_preview(&s);
+        let has_card = decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-block-embed-card")));
+        assert!(has_card);
+    }
+
+    #[test]
+    fn block_ref_resolves_when_target_block_has_id_above() {
+        // When the doc contains a block with an `id::` line,
+        // the `((uuid))` chip should render the target's
+        // first-line content (not "unresolved").
+        let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+        let src = format!(
+            "First block content here\nid:: {uuid}\n\nA later paragraph with (({uuid}))."
+        );
+        let s = state(&src, 0);
+        let decs = live_preview(&s);
+        let chip_html = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-block-ref-chip") => Some(html.clone()),
+            _ => None,
+        }).expect("chip widget");
+        assert!(chip_html.contains("First block content here"),
+            "expected chip to preview target, got: {}", chip_html);
+        assert!(!chip_html.contains("md-block-ref-unresolved"));
     }
 
     #[test]

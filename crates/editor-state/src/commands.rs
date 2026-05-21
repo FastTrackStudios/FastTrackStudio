@@ -827,6 +827,54 @@ fn list_marker_state(doc: &str, line_start: usize) -> ListMarkerState {
     ListMarkerState::None
 }
 
+/// `Mod-Shift-K` — give the block at the caret a UUID and
+/// write `id:: <uuid>` on the line below. If the block already
+/// has an id line, the existing UUID is reused.
+///
+/// Returns `(TransactionSpec, ref_string)` so callers can
+/// also copy `((uuid))` to the clipboard.
+pub fn add_block_id(state: &EditorState) -> Option<(TransactionSpec, String)> {
+    let doc = state.doc.to_string();
+    let caret = state.selection.primary().head.min(doc.len());
+    let line_start = doc[..caret].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_end = doc[line_start..]
+        .find('\n')
+        .map(|n| line_start + n)
+        .unwrap_or(doc.len());
+    let line = &doc[line_start..line_end];
+    if line.trim().is_empty() {
+        return None;
+    }
+    // If the next line is already `id:: <uuid>`, reuse it.
+    if line_end < doc.len() {
+        let next_start = line_end + 1;
+        let next_end = doc[next_start..]
+            .find('\n')
+            .map(|n| next_start + n)
+            .unwrap_or(doc.len());
+        let next_line = &doc[next_start..next_end];
+        if let Some(uuid) = next_line.strip_prefix("id:: ") {
+            let uuid = uuid.trim();
+            if uuid.len() == 36 {
+                return Some((
+                    TransactionSpec::new().selection(state.selection.clone()),
+                    format!("(({uuid}))"),
+                ));
+            }
+        }
+    }
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let insert = format!("\nid:: {uuid}");
+    let prev_sel = state.selection.clone();
+    Some((
+        TransactionSpec::new()
+            .changes(Changes::insert(line_end, insert))
+            .selection(prev_sel)
+            .annotate("origin", "block-id"),
+        format!("(({uuid}))"),
+    ))
+}
+
 /// `Mod-t` — toggle the task checkbox on the current line.
 /// `[ ]` ↔ `[x]`. Non-task lines first promote to `- [ ]` (cycle
 /// → task) so the user can `Mod-t` an empty line and start
@@ -1215,5 +1263,36 @@ mod tests {
         let s = at("just a paragraph", 0);
         let s = s.update(toggle_task(&s).unwrap());
         assert_eq!(s.doc.to_string(), "- [ ] just a paragraph");
+    }
+
+    #[test]
+    fn add_block_id_inserts_id_line_below_block() {
+        let s = at("block content", 3);
+        let (spec, ref_str) = add_block_id(&s).unwrap();
+        let s = s.update(spec);
+        let doc = s.doc.to_string();
+        assert!(doc.starts_with("block content\nid:: "));
+        // Ref string surrounds the same UUID that was inserted.
+        let line2 = doc.lines().nth(1).unwrap();
+        let uuid = line2.strip_prefix("id:: ").unwrap();
+        assert_eq!(ref_str, format!("(({uuid}))"));
+    }
+
+    #[test]
+    fn add_block_id_reuses_existing_id() {
+        let uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+        let src = format!("block content\nid:: {uuid}");
+        let s = at(&src, 3);
+        let (spec, ref_str) = add_block_id(&s).unwrap();
+        let s2 = s.update(spec);
+        // Doc unchanged.
+        assert_eq!(s2.doc.to_string(), src);
+        assert_eq!(ref_str, format!("(({uuid}))"));
+    }
+
+    #[test]
+    fn add_block_id_refuses_blank_line() {
+        let s = at("", 0);
+        assert!(add_block_id(&s).is_none());
     }
 }

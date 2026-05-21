@@ -1358,6 +1358,62 @@ test.describe("editor", () => {
 
   // ── Nested callouts ────────────────────────────────────────
 
+  // ── Block IDs + refs ─────────────────────────────────────
+
+  test("block id property line is hidden from the rendered view", async ({
+    page,
+  }) => {
+    await page.goto(
+      "/?seed=" +
+        encodeURIComponent(
+          "Block content here\nid:: 5f9c1234-abcd-4ef0-8123-fedcba012345"
+        ) +
+        "&novim=1"
+    );
+    await editor(page).waitFor();
+    // The id:: line shouldn't appear in the rendered text.
+    const visible = await page.evaluate(
+      () => document.querySelector("[data-editor-id]").innerText
+    );
+    expect(visible).not.toContain("id::");
+    expect(visible).not.toContain("5f9c1234");
+    expect(visible).toContain("Block content here");
+  });
+
+  test("block reference renders as a chip showing target preview", async ({
+    page,
+  }) => {
+    const uuid = "5f9c1234-abcd-4ef0-8123-fedcba012345";
+    await page.goto(
+      "/?seed=" +
+        encodeURIComponent(
+          `First block content\nid:: ${uuid}\n\nSecond block: ((${uuid})).`
+        ) +
+        "&novim=1"
+    );
+    await editor(page).waitFor();
+    await expect(page.locator(".md-block-ref-chip").first()).toBeVisible();
+    // Chip text should preview the target block's content.
+    const chipText = await page
+      .locator(".md-block-ref-chip")
+      .first()
+      .textContent();
+    expect(chipText).toContain("First block content");
+  });
+
+  test("Mod-Shift-K appends an id:: line below the current block", async ({
+    page,
+  }) => {
+    await page.goto("/?seed=" + encodeURIComponent("Hello world.") + "&novim=1");
+    await editor(page).waitFor();
+    await editor(page).focus();
+    await setCaret(page, 3);
+    await page.keyboard.press("Control+Shift+k");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toMatch(/Hello world\.\nid:: [0-9a-f-]{36}/);
+  });
+
   test("nested callouts emit a depth class", async ({ page }) => {
     // Seed has `> > [!warning]` and `> > > [!danger]` blocks;
     // the depth-2 and depth-3 line classes should be on

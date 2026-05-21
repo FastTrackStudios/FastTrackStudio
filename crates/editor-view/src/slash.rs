@@ -162,6 +162,9 @@ pub enum CommandKind {
     SetList(ListKind),
     /// Toggle the current line's task checkbox (`[ ]` ↔ `[x]`).
     ToggleTask,
+    /// Add a UUID block id to the block at the caret (Logseq
+    /// style) so it can be referenced via `((uuid))`.
+    AddBlockId,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -363,7 +366,34 @@ pub fn run_command(
                     .annotate("origin", "slash"),
             )
         }
+        CommandKind::AddBlockId => {
+            // Strip the slash first by reconstructing the line,
+            // then run `add_block_id` on the result.
+            let (line_start, line_end) = line_bounds(&doc, &slash_range);
+            let body = line_without_slash(&doc, line_start, line_end, &slash_range);
+            // Build a synthetic state with the slash removed
+            // and run the helper. Inline transcription avoids a
+            // direct dep on the helper's `(spec, ref_str)`
+            // shape — we just compute the final line.
+            if body.trim().is_empty() {
+                return None;
+            }
+            let uuid = uuid_v4_string();
+            let new_text = format!("{body}\nid:: {uuid}");
+            let caret = line_start + body.len();
+            Some(
+                TransactionSpec::new()
+                    .changes(Changes::replace(line_start..line_end, new_text))
+                    .selection(Selection::caret(caret))
+                    .annotate("origin", "slash-block-id"),
+            )
+        }
     }
+}
+
+fn uuid_v4_string() -> String {
+    // Re-export point — keep `uuid` as an editor-state dep only.
+    uuid::Uuid::new_v4().to_string()
 }
 
 /// Byte-range of the (single) line containing the slash. The
@@ -608,6 +638,17 @@ pub fn all_commands() -> Vec<CommandEntry> {
             icon,
         });
     }
+
+    // ── Block IDs / refs (Logseq-style) ─────────────────────
+    // `Mod-Shift-K` is the keymap binding; the slash entry is
+    // a discoverability path.
+    out.push(CommandEntry {
+        label: "Block id",
+        group: "Block",
+        desc: "Give this block an id so it can be referenced",
+        kind: CommandKind::AddBlockId,
+        icon: "🔗",
+    });
 
     // ── Embeds & links ─────────────────────────────────────
     out.extend([

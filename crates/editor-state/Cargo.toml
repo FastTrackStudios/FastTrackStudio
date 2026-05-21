@@ -15,6 +15,9 @@ ropey = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+# Block-id generator. `v4` for random IDs; `js` so it routes
+# through `crypto.getRandomValues` on `wasm32-unknown-unknown`.
+uuid = { version = "1", features = ["v4", "js"] }
 
 # wasm-only: `performance.now()` for the live-preview perf
 # trace (native uses `Instant`, which traps on wasm32-unknown-

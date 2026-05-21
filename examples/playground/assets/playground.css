@@ -196,6 +196,45 @@ section h2 {
 .editor-root .md-wikilink {
     color: #b388ff;
 }
+
+/* Block reference chip — `((uuid))` rendered as an inline
+   atomic widget showing the target block's preview. Click
+   navigates to the source. Source UUID is never visible in
+   live-preview; the chip IS the only visible form. */
+.editor-root .md-block-ref-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    background: rgba(127, 167, 217, 0.12);
+    border: 1px solid rgba(127, 167, 217, 0.3);
+    border-radius: 10px;
+    font-size: 0.92em;
+    color: #b8d4ff;
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-block-ref-chip:hover {
+    background: rgba(127, 167, 217, 0.2);
+    border-color: rgba(127, 167, 217, 0.55);
+}
+.editor-root .md-block-ref-unresolved {
+    background: rgba(255, 115, 115, 0.12);
+    border-color: rgba(255, 115, 115, 0.35);
+    color: #ff9999;
+}
+
+/* Block embed — `{{embed ((uuid))}}` rendered as a bordered
+   card with the target block's content inline. */
+.editor-root .md-block-embed-card {
+    display: block;
+    margin: 6px 0;
+    padding: 8px 12px;
+    background: rgba(127, 167, 217, 0.06);
+    border-left: 3px solid rgba(127, 167, 217, 0.55);
+    border-radius: 4px;
+    color: var(--text);
+}
 /* Unresolved wikilink — no vault has confirmed the target
    exists. Same red Obsidian uses for the same state. */
 .editor-root .md-wikilink-unresolved {
