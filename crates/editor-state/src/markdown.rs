@@ -425,6 +425,10 @@ fn scan_blocks(
                     p = line_from
                 )
             };
+            // Two states: source-visible when the caret is on
+            // the line (so `- [ ]` is editable), checkbox-widget
+            // otherwise. Rendering both at once gave you the
+            // checkbox + the literal source overlapping.
             if cursor_touches(primary, line_from..line_to) {
                 out.push(Decoration::mark(
                     line_from..abs_prefix_end,
@@ -432,8 +436,8 @@ fn scan_blocks(
                 ));
             } else {
                 out.push(Decoration::replace(line_from..abs_prefix_end));
+                out.push(Decoration::widget(line_from, html));
             }
-            out.push(Decoration::widget(line_from, html));
             continue;
         }
 
@@ -1596,8 +1600,7 @@ mod tests {
     #[test]
     fn task_with_caret_on_line_keeps_source_visible() {
         // Caret on the line: source bytes stay editable (no
-        // Replace) but the checkbox widget is still emitted so
-        // it remains clickable.
+        // Replace AND no widget — both at once would overlap).
         let s = state("- [ ] todo", 4);
         let decs = live_preview(&s);
         let has_replace = decs
@@ -1606,7 +1609,7 @@ mod tests {
         assert!(!has_replace);
         let has_widget = decs.iter().any(|d| matches!(&d.kind,
             crate::decoration::DecorationKind::Widget { html } if html.contains("md-task-checkbox")));
-        assert!(has_widget);
+        assert!(!has_widget);
     }
 
     #[test]

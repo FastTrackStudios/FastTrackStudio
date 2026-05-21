@@ -328,17 +328,21 @@ test.describe("editor", () => {
     await editor(page).waitFor();
     await editor(page).focus();
     await setCaret(page, 0);
-    await page.keyboard.insertText("- [ ] todo");
-    await expect.poll(async () => (await readState(page)).text).toBe("- [ ] todo");
-    // dispatchEvent rather than .click() — the widget lives
-    // inside a contenteditable=false span which confuses
-    // Playwright's stability check.
+    // Two lines so we can move the caret away from the task —
+    // the checkbox widget only renders when the caret is OFF
+    // the task line.
+    await page.keyboard.insertText("- [ ] todo\nelsewhere");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("- [ ] todo\nelsewhere");
     await page.evaluate(() => {
       document
         .querySelector(".md-task-checkbox")
         .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
-    await expect.poll(async () => (await readState(page)).text).toBe("- [x] todo");
+    await expect
+      .poll(async () => (await readState(page)).text)
+      .toBe("- [x] todo\nelsewhere");
   });
 
   test("Enter on a list item continues the list and cursor lands after marker", async ({
