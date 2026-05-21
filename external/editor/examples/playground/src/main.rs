@@ -21,7 +21,8 @@ use editor::{
 fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     #[cfg(not(target_arch = "wasm32"))]
     let mut out = {
-        match VAULT.get() {
+        let guard = VAULT.read().expect("vault rwlock poisoned");
+        match guard.as_ref() {
             Some((v, idx)) => {
                 let view = vault::VaultLookupView::new(v, idx);
                 markdown::live_preview_with(state, Some(&view))
@@ -35,37 +36,88 @@ fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     out
 }
 
-/// Lazily-initialized native vault. Populated by `init_vault()`
-/// at app startup when `~/Documents/Task/` exists. Stays empty
-/// in the wasm build (no filesystem).
+/// Native vault snapshot. The watcher thread swaps fresh
+/// `(Vault, BlockIndex)` pairs in on debounced FS events;
+/// reads from `combined_decorations` take the read lock for
+/// the duration of one render pass. `None` while the vault
+/// is still loading (or absent).
 #[cfg(not(target_arch = "wasm32"))]
-static VAULT: std::sync::OnceLock<(vault::Vault, vault::BlockIndex)> = std::sync::OnceLock::new();
+static VAULT: std::sync::RwLock<Option<(vault::Vault, vault::BlockIndex)>> =
+    std::sync::RwLock::new(None);
 
 #[cfg(not(target_arch = "wasm32"))]
 fn init_vault() {
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return;
     };
-    let root = home.join("Documents/Task");
-    if !root.exists() {
-        tracing::info!("no vault at {} — skipping", root.display());
+    // Prefer the Observatory if it exists (8k-page real
+    // vault, useful for actually using the playground);
+    // fall back to the demo vault at `~/Documents/Task/`
+    // (created by `make_example_vault` when the user runs
+    // the playground for the first time).
+    let candidates = [
+        home.join("Documents/Task"),
+        home.join("Documents/The Observatory"),
+    ];
+    let root = candidates.into_iter().find(|p| p.exists());
+    let Some(root) = root else {
+        tracing::info!("no vault under ~/Documents — skipping");
+        return;
+    };
+    if let Err(e) = reload_vault(&root) {
+        tracing::warn!(?e, "vault open failed — running without cross-doc refs");
         return;
     }
-    let vault = match vault::Vault::open(&root) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(?e, "vault open failed — running without cross-doc refs");
-            return;
-        }
-    };
-    let idx = vault::BlockIndex::build(&vault);
+    // Spawn a background watcher so changes on disk reload
+    // the in-memory snapshot. Debounce keeps this cheap on a
+    // bulk save / `rsync`.
+    spawn_watcher(root);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn reload_vault(root: &std::path::Path) -> Result<(), vault::LoadError> {
+    let t0 = std::time::Instant::now();
+    let v = vault::Vault::open(root)?;
+    let idx = vault::BlockIndex::build(&v);
     tracing::info!(
-        pages = vault.pages.len(),
+        pages = v.pages.len(),
+        bases = v.bases.len(),
         ids = idx.len(),
+        property_hints = v.property_types.map.len(),
+        elapsed = ?t0.elapsed(),
         root = %root.display(),
         "vault loaded"
     );
-    let _ = VAULT.set((vault, idx));
+    let mut guard = VAULT.write().expect("vault rwlock poisoned");
+    *guard = Some((v, idx));
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_watcher(root: std::path::PathBuf) {
+    use std::time::Duration;
+    std::thread::spawn(move || {
+        let (rx, _guard) = match vault::watch(root.clone(), Duration::from_millis(250)) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(?e, "watcher failed to start");
+                return;
+            }
+        };
+        tracing::info!(root = %root.display(), "vault watcher running");
+        // Process events on a coarse "burst" — wait for the
+        // first one, then drain any others that arrived
+        // within 100ms before doing the actual reload. A
+        // single save in another editor often triggers 2-3
+        // mutation events; collapsing them keeps the rebuild
+        // cost down.
+        while let Ok(_evt) = rx.recv() {
+            while let Ok(_more) = rx.recv_timeout(Duration::from_millis(100)) {}
+            if let Err(e) = reload_vault(&root) {
+                tracing::warn!(?e, "watcher reload failed");
+            }
+        }
+    });
 }
 
 const STYLE: Asset = asset!("/assets/playground.css");
@@ -235,9 +287,9 @@ fn App() -> Element {
         let seed_from_vault = read_seed_query()
             .is_none()
             .then(|| {
-                VAULT
-                    .get()
-                    .and_then(|(v, _)| v.page_by_basename("Welcome").map(|p| p.raw.clone()))
+                let guard = VAULT.read().ok()?;
+                let (v, _) = guard.as_ref()?;
+                v.page_by_basename("Welcome").map(|p| p.raw.clone())
             })
             .flatten();
         #[cfg(not(target_arch = "wasm32"))]

@@ -49,5 +49,6 @@ pub use blocks::{BlockIndex, BlockLocation};
 pub use lookup::VaultLookupView;
 pub use mutate::{MutateError, append_to_page, create_page, delete_page, save_page};
 pub use vault::{LoadError, SaveError, Vault, VaultPage};
-pub use walker::{VaultEntry, walk_vault};
+pub use vault::{PropertyTypes, VaultBase};
+pub use walker::{VaultEntry, VaultEntryKind, walk_vault};
 pub use watcher::{VaultEvent, WatchError, watch};

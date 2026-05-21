@@ -12342,8 +12342,12 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "editor-state",
+ "knowledge-proto",
  "notify",
  "notify-debouncer-mini 0.7.0",
+ "rayon",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",

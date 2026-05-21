@@ -146,6 +146,8 @@ mod tests {
     fn fresh_vault() -> (tempfile::TempDir, Vault) {
         let tmp = tempfile::tempdir().unwrap();
         let v = Vault {
+            bases: Vec::new(),
+            property_types: Default::default(),
             root: tmp.path().to_path_buf(),
             pages: Vec::new(),
         };

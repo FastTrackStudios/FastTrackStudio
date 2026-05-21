@@ -18,10 +18,19 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+# Parallel file reads. ~4x speedup on the cold-open scan for
+# the 8k-page Observatory vault (350ms → ~80ms on M-class
+# hardware with 8 cores).
+rayon = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 # `editor-state::markdown::parse_frontmatter` + the block-id
 # parser. We depend on the editor for the *parsing*; the vault
 # owns the file storage + index layer above it.
 editor-state = { workspace = true }
+# Bases (`.base` YAML files) — parser + executor live in
+# knowledge-proto so the vault crate stays focused on storage.
+knowledge-proto = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

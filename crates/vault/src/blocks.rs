@@ -190,6 +190,8 @@ mod tests {
 
     fn vault_with(pages: Vec<VaultPage>) -> Vault {
         Vault {
+            bases: Vec::new(),
+            property_types: Default::default(),
             root: ".".into(),
             pages,
         }

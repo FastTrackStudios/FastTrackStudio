@@ -11,7 +11,15 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-/// One `.md` page found by the walker.
+/// What an entry is. Drives whether the loader treats it as
+/// markdown content or an Obsidian `.base` view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VaultEntryKind {
+    Markdown,
+    Base,
+}
+
+/// One file the walker has decided is part of the vault.
 #[derive(Clone, Debug)]
 pub struct VaultEntry {
     /// Full disk path.
@@ -19,6 +27,7 @@ pub struct VaultEntry {
     /// Vault-relative path with extension. Forward-slash
     /// separated (`Notes/2026/howdy.md`).
     pub rel_path: String,
+    pub kind: VaultEntryKind,
 }
 
 /// Synchronous walk. Returns entries in walkdir's default order
@@ -45,15 +54,18 @@ pub fn walk_vault(root: &Path) -> Vec<VaultEntry> {
             .extension()
             .and_then(|s| s.to_str())
             .map(str::to_ascii_lowercase);
-        if !matches!(ext.as_deref(), Some("md") | Some("markdown")) {
-            continue;
-        }
+        let kind = match ext.as_deref() {
+            Some("md") | Some("markdown") => VaultEntryKind::Markdown,
+            Some("base") => VaultEntryKind::Base,
+            _ => continue,
+        };
         let Ok(rel) = abs.strip_prefix(root) else {
             continue;
         };
         out.push(VaultEntry {
             abs_path: abs.clone(),
             rel_path: rel.to_string_lossy().replace('\\', "/"),
+            kind,
         });
     }
     out

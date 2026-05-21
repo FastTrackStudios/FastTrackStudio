@@ -98,6 +98,8 @@ architect-auth = { path = "../architect-auth/crates/architect-auth" }
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault
 # directories. Server-only dep; never reaches wasm.
 walkdir = "2"
+# Parallel file IO for the vault scanner.
+rayon = "1"
 
 # Fuzzy matcher used by the knowledge live-preview editor pickers
 # (wikilink/blockref/tag/slash-command). Same crate used internally by

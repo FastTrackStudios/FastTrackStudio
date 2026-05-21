@@ -179,6 +179,8 @@ mod tests {
 
     fn build(pages: Vec<VaultPage>) -> (Vault, BlockIndex) {
         let v = Vault {
+            bases: Vec::new(),
+            property_types: Default::default(),
             root: ".".into(),
             pages,
         };
