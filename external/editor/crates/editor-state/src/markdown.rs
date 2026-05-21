@@ -25,7 +25,46 @@ use crate::state::EditorState;
 
 /// The full live-preview decoration source. Suitable to register
 /// as `editor_view::DecorationSource`.
+/// Trait the editor uses to resolve cross-file references —
+/// `((uuid))`, `[[Page]]`, `![[Page#Heading]]`, etc. — without
+/// pulling a vault implementation into `editor-state`. The
+/// `vault` crate provides the canonical impl; tests / single-
+/// file uses pass `None`.
+pub trait VaultLookup {
+    /// Find a block by full UUID across the vault. Returns the
+    /// containing page's basename and a short preview.
+    fn lookup_block(&self, uuid: &str) -> Option<VaultBlockHit>;
+    /// Find a page by basename (case-insensitive). Returns a
+    /// content preview suitable for an embed card.
+    fn lookup_page(&self, name: &str) -> Option<VaultPageHit>;
+    /// Find a section `Page#Heading`. Returns the body of the
+    /// section (heading line + content until next same-or-
+    /// higher heading), or None when the page or heading is
+    /// missing.
+    fn lookup_section(&self, page: &str, heading: &str) -> Option<String>;
+    /// Find a block by Obsidian short-id `Page#^id`.
+    fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String>;
+}
+
+#[derive(Clone, Debug)]
+pub struct VaultBlockHit {
+    pub page: String,
+    pub preview: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct VaultPageHit {
+    pub preview: String,
+}
+
 pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
+    live_preview_with(state, None)
+}
+
+pub fn live_preview_with(
+    state: &EditorState,
+    vault: Option<&dyn VaultLookup>,
+) -> Vec<DecoratedRange> {
     // Per-pass compile budget for Typst — bounds the worst
     // case at a couple of cold compiles per render so a doc
     // full of fresh math doesn't block typing. See `typst`
@@ -120,20 +159,35 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             // widget; the chip itself is the only visible form.
             if span.class == "md-block-ref" {
                 let uuid = &text[span.body.clone()];
-                let (preview, resolved) = match block_anchor_for_uuid(uuid) {
-                    Some(anchor) => (block_preview(&text, anchor), true),
-                    None => (format!("unresolved {}", &uuid[..8]), false),
-                };
-                let cls = if resolved {
+                // Resolve in this order: intra-doc block index →
+                // vault lookup → unresolved. The vault hit
+                // brings its own preview (target page may live
+                // anywhere); intra-doc hits read from this
+                // doc's text directly.
+                let (preview, source_page, is_resolved) =
+                    if let Some(anchor) = block_anchor_for_uuid(uuid) {
+                        (block_preview(&text, anchor), None, true)
+                    } else if let Some(hit) = vault.and_then(|v| v.lookup_block(uuid)) {
+                        (hit.preview, Some(hit.page), true)
+                    } else {
+                        (
+                            format!("unresolved {}", &uuid[..8.min(uuid.len())]),
+                            None,
+                            false,
+                        )
+                    };
+                let cls = if is_resolved {
                     "md-block-ref-chip"
                 } else {
                     "md-block-ref-chip md-block-ref-unresolved"
                 };
+                let page_hint = source_page.map(|p| format!(" › {p}")).unwrap_or_default();
                 let html = format!(
-                    r#"<span class="{cls}" data-uuid="{uuid}" title="{full}">{glyph} {preview}</span>"#,
+                    r#"<span class="{cls}" data-uuid="{uuid}" title="{full}">{glyph} {preview}{page}</span>"#,
                     glyph = "🔗",
                     full = escape_html(uuid),
                     preview = escape_html(&preview),
+                    page = escape_html(&page_hint),
                 );
                 out.push(Decoration::replace(span.outer.clone()));
                 out.push(Decoration::widget(span.outer.start, html));
@@ -145,17 +199,31 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             // hidden-source treatment as block refs.
             if span.class == "md-block-embed" {
                 let uuid = &text[span.body.clone()];
-                let (content, resolved) = match block_anchor_for_uuid(uuid) {
-                    Some(anchor) => (block_preview(&text, anchor), true),
-                    None => (format!("unresolved {}", &uuid[..8]), false),
-                };
-                let cls = if resolved {
+                let (content, source_page, is_resolved) =
+                    if let Some(anchor) = block_anchor_for_uuid(uuid) {
+                        (block_preview(&text, anchor), None, true)
+                    } else if let Some(hit) = vault.and_then(|v| v.lookup_block(uuid)) {
+                        (hit.preview, Some(hit.page), true)
+                    } else {
+                        (
+                            format!("unresolved {}", &uuid[..8.min(uuid.len())]),
+                            None,
+                            false,
+                        )
+                    };
+                let cls = if is_resolved {
                     "md-block-embed-card"
                 } else {
                     "md-block-embed-card md-block-ref-unresolved"
                 };
+                let page_chip = source_page
+                    .map(|p| format!(
+                        r#"<div class="md-embed-head">📄 <span class="md-embed-title">{title}</span></div>"#,
+                        title = escape_html(&p),
+                    ))
+                    .unwrap_or_default();
                 let html = format!(
-                    r#"<div class="{cls}" data-uuid="{uuid}">{content}</div>"#,
+                    r#"<div class="{cls}" data-uuid="{uuid}">{page_chip}{content}</div>"#,
                     uuid = escape_html(uuid),
                     content = escape_html(&content),
                 );
@@ -188,7 +256,7 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
             if span.class == "md-embed" {
                 let raw = &text[span.body.clone()];
                 if !cursor_touches(primary, span.outer.clone()) {
-                    if let Some(html) = embed_widget_html(raw, &text) {
+                    if let Some(html) = embed_widget_html(raw, &text, vault) {
                         out.push(Decoration::replace(span.outer.clone()));
                         out.push(Decoration::widget(span.outer.start, html));
                         continue;
@@ -213,14 +281,22 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
                 _ => None,
             };
             if let Some(h) = href {
-                // Wikilinks get an extra class once we know if
-                // the target resolves. v1 has no vault, so
-                // every link is `unresolved` — CSS colors it
-                // red. When a vault layer lands, swap this for
-                // a real lookup (resolved → purple,
-                // unresolved → red, matches Obsidian).
+                // Wikilinks: consult the vault to decide
+                // resolved (purple, default) vs unresolved
+                // (red). Without a vault the link stays
+                // unresolved — `#Heading` / `#^id` suffixes are
+                // stripped before the page-name lookup so
+                // `[[Page#Section]]` resolves when Page exists.
                 let cls = if span.class == "md-wikilink" {
-                    "md-wikilink md-wikilink-unresolved"
+                    let page_part = h.split(['#', '|']).next().unwrap_or(&h).trim();
+                    let resolved = vault
+                        .map(|v| v.lookup_page(page_part).is_some())
+                        .unwrap_or(false);
+                    if resolved {
+                        "md-wikilink"
+                    } else {
+                        "md-wikilink md-wikilink-unresolved"
+                    }
                 } else {
                     span.class
                 };
@@ -320,7 +396,7 @@ fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
 /// formats) — the caller then falls back to a wikilink-style
 /// mark so the source stays visible. Quartz reference: same
 /// dispatch in `ofm.ts:233-265`.
-fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
+fn embed_widget_html(raw: &str, doc: &str, vault: Option<&dyn VaultLookup>) -> Option<String> {
     let (target, opts) = match raw.split_once('|') {
         Some((t, o)) => (t.trim(), Some(o.trim())),
         None => (raw.trim(), None),
@@ -370,14 +446,15 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
     } else {
         html_escape(page_part)
     };
-    // Section: `#Heading` (no leading `^`).
+    // Section / short-id fragment.
     if let Some(frag) = frag_part {
         if let Some(short_id) = frag.strip_prefix('^') {
-            // Block embed via short id. Resolve intra-doc.
+            // Block embed via short id. Intra-doc resolution
+            // first; cross-doc through the vault.
             let resolved = if is_intra_doc {
                 resolve_block_short_id(doc, short_id)
             } else {
-                None
+                vault.and_then(|v| v.lookup_block_short(page_part, short_id))
             };
             return Some(render_embed_card_short(
                 "🔗",
@@ -386,11 +463,12 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
                 resolved.as_deref(),
             ));
         }
-        // Section embed.
+        // Section embed. Intra-doc walks this file's headings;
+        // cross-doc asks the vault.
         let resolved = if is_intra_doc {
             resolve_heading_section(doc, frag)
         } else {
-            None
+            vault.and_then(|v| v.lookup_section(page_part, frag))
         };
         return Some(render_embed_card_section(
             "📄",
@@ -399,11 +477,21 @@ fn embed_widget_html(raw: &str, doc: &str) -> Option<String> {
             resolved.as_deref(),
         ));
     }
-    // 3. Whole-page embed — no intra-doc concept for "embed this
-    //    whole page from itself", so always a placeholder until
-    //    multi-file resolution lands.
-    let _ = is_intra_doc;
-    Some(render_embed_card_page("📄", &safe_page, None))
+    // 3. Whole-page embed. Cross-doc resolution via vault;
+    //    intra-doc has no meaningful behavior (a page embedding
+    //    itself), so falls back to placeholder.
+    let resolved = if is_intra_doc {
+        None
+    } else {
+        vault
+            .and_then(|v| v.lookup_page(page_part))
+            .map(|h| h.preview)
+    };
+    Some(render_embed_card_page(
+        "📄",
+        &safe_page,
+        resolved.as_deref(),
+    ))
 }
 
 /// Walk the doc for a heading whose text matches `name` (case-
@@ -2368,6 +2456,118 @@ mod tests {
                 if html.contains("md-block-embed-card"))
         });
         assert!(has_card);
+    }
+
+    /// Stub vault for cross-doc resolution tests.
+    struct FakeVault {
+        block_hits: std::collections::HashMap<String, super::VaultBlockHit>,
+        page_hits: std::collections::HashMap<String, super::VaultPageHit>,
+        section_hits: std::collections::HashMap<(String, String), String>,
+    }
+    impl super::VaultLookup for FakeVault {
+        fn lookup_block(&self, u: &str) -> Option<super::VaultBlockHit> {
+            self.block_hits.get(u).cloned()
+        }
+        fn lookup_page(&self, n: &str) -> Option<super::VaultPageHit> {
+            self.page_hits.get(n).cloned()
+        }
+        fn lookup_section(&self, p: &str, h: &str) -> Option<String> {
+            self.section_hits.get(&(p.into(), h.into())).cloned()
+        }
+        fn lookup_block_short(&self, _p: &str, _id: &str) -> Option<String> {
+            None
+        }
+    }
+
+    #[test]
+    fn block_ref_resolves_across_pages_via_vault() {
+        let uuid = "11111111-1111-4111-8111-111111111111";
+        let s = state(&format!("see (({uuid})) for context"), 0);
+        let mut block_hits = std::collections::HashMap::new();
+        block_hits.insert(
+            uuid.to_string(),
+            super::VaultBlockHit {
+                page: "OtherPage".into(),
+                preview: "Target block content".into(),
+            },
+        );
+        let vault = FakeVault {
+            block_hits,
+            page_hits: Default::default(),
+            section_hits: Default::default(),
+        };
+        let decs = super::live_preview_with(&s, Some(&vault));
+        let chip_html = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-block-ref-chip") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("chip widget");
+        assert!(chip_html.contains("Target block content"));
+        assert!(chip_html.contains("OtherPage"));
+        assert!(!chip_html.contains("md-block-ref-unresolved"));
+    }
+
+    #[test]
+    fn wikilink_resolved_class_when_vault_finds_page() {
+        let s = state("see [[OtherPage]]", 0);
+        let mut page_hits = std::collections::HashMap::new();
+        page_hits.insert(
+            "OtherPage".into(),
+            super::VaultPageHit {
+                preview: "Body".into(),
+            },
+        );
+        let vault = FakeVault {
+            block_hits: Default::default(),
+            page_hits,
+            section_hits: Default::default(),
+        };
+        let decs = super::live_preview_with(&s, Some(&vault));
+        // The wikilink's mark class should NOT carry the
+        // unresolved suffix when the vault confirms existence.
+        let has_resolved = decs.iter().any(|d| {
+            matches!(&d.kind,
+            crate::decoration::DecorationKind::Mark { class, .. }
+                if class == "md-wikilink")
+        });
+        assert!(has_resolved, "decs = {decs:?}");
+    }
+
+    #[test]
+    fn cross_page_section_embed_resolves_via_vault() {
+        // Caret well past the embed so the widget actually
+        // fires (caret on the span keeps the source visible).
+        let s = state("![[Project README#Goals]]\n\nbody", 50);
+        let mut section_hits = std::collections::HashMap::new();
+        section_hits.insert(
+            ("Project README".into(), "Goals".into()),
+            "Make notes good.\nShip quickly.".into(),
+        );
+        let vault = FakeVault {
+            block_hits: Default::default(),
+            page_hits: Default::default(),
+            section_hits,
+        };
+        let decs = super::live_preview_with(&s, Some(&vault));
+        let card = decs
+            .iter()
+            .find_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-embed-section") =>
+                {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .expect("section card");
+        assert!(card.contains("Make notes good."));
+        assert!(!card.contains("md-embed-placeholder"));
     }
 
     #[test]

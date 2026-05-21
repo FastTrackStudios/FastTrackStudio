@@ -39,12 +39,14 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod blocks;
+pub mod lookup;
 pub mod mutate;
 pub mod vault;
 pub mod walker;
 pub mod watcher;
 
 pub use blocks::{BlockIndex, BlockLocation};
+pub use lookup::VaultLookupView;
 pub use mutate::{MutateError, append_to_page, create_page, delete_page, save_page};
 pub use vault::{LoadError, SaveError, Vault, VaultPage};
 pub use walker::{VaultEntry, walk_vault};
