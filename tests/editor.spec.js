@@ -1211,11 +1211,12 @@ test.describe("editor", () => {
     const len = Number((await readState(page)).len);
     await editor(page).focus();
     await setCaret(page, len);
-    await page.keyboard.insertText("\n/cal");
+    await page.keyboard.insertText("\n/callout");
     await expect(page.locator(".slash-menu")).toBeVisible();
-    // `cal` matches "Callout: …"; non-callout groups shouldn't
-    // be in the visible list.
-    await expect(page.locator(".slash-row-label", { hasText: /Callout/ }).first()).toBeVisible();
+    // After the label rename, callouts are matched by their
+    // group header ("Callout"); the labels themselves are just
+    // the type name (Note / Todo / ...).
+    await expect(page.locator(".slash-group", { hasText: "Callout" })).toBeVisible();
     await expect(page.locator(".slash-row-label", { hasText: "Code block" })).toHaveCount(0);
   });
 

@@ -111,9 +111,12 @@ pub fn SlashMenu(
                                 slash_for_click.set(None);
                             },
                             key: "{idx_for_click}",
-                            div { class: "slash-row-label", "{entry.label}" }
-                            if !entry.desc.is_empty() {
-                                div { class: "slash-row-desc", "{entry.desc}" }
+                            div { class: "slash-row-icon", "{entry.icon}" }
+                            div { class: "slash-row-body",
+                                div { class: "slash-row-label", "{entry.label}" }
+                                if !entry.desc.is_empty() {
+                                    div { class: "slash-row-desc", "{entry.desc}" }
+                                }
                             }
                         }
                     }
@@ -131,6 +134,10 @@ pub struct CommandEntry {
     pub group: &'static str,
     pub desc: &'static str,
     pub kind: CommandKind,
+    /// Single-glyph icon shown left of the label — `LSP-completion`
+    /// vibe so the user can scan-by-kind. Falls back to a
+    /// blank space when empty so all rows align.
+    pub icon: &'static str,
 }
 
 /// What the command does. Each variant carries the data the
@@ -437,6 +444,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
             group: "Heading",
             desc: "",
             kind: CommandKind::SetHeading(level),
+            icon: "H",
         });
     }
 
@@ -447,36 +455,42 @@ pub fn all_commands() -> Vec<CommandEntry> {
             group: "Structure",
             desc: "- item",
             kind: CommandKind::SetList(ListKind::Unordered),
+            icon: "•",
         },
         CommandEntry {
             label: "Numbered list",
             group: "Structure",
             desc: "1. item",
             kind: CommandKind::SetList(ListKind::Ordered),
+            icon: "1.",
         },
         CommandEntry {
             label: "Task list",
             group: "Structure",
             desc: "- [ ] task",
             kind: CommandKind::SetList(ListKind::Task),
+            icon: "☐",
         },
         CommandEntry {
             label: "Toggle task",
             group: "Structure",
             desc: "Mark current line as / un-task",
             kind: CommandKind::ToggleTask,
+            icon: "☑",
         },
         CommandEntry {
             label: "Quote",
             group: "Structure",
             desc: "> blockquote",
             kind: CommandKind::InsertSnippet("> ", 0),
+            icon: "❝",
         },
         CommandEntry {
             label: "Horizontal rule",
             group: "Structure",
             desc: "---",
             kind: CommandKind::InsertBlockSnippet("---\n", 0),
+            icon: "—",
         },
         CommandEntry {
             label: "Table",
@@ -486,6 +500,7 @@ pub fn all_commands() -> Vec<CommandEntry> {
                 "| col1 | col2 |\n| ---- | ---- |\n|      |      |\n",
                 21,
             ),
+            icon: "▦",
         },
     ]);
 
@@ -496,84 +511,97 @@ pub fn all_commands() -> Vec<CommandEntry> {
             group: "Code",
             desc: "```lang \\n … \\n```",
             kind: CommandKind::InsertBlockSnippet("```\n\n```\n", 5),
+            icon: "{}",
         },
         CommandEntry {
             label: "Rust code block",
             group: "Code",
             desc: "```rust",
             kind: CommandKind::InsertBlockSnippet("```rust\n\n```\n", 5),
+            icon: "🦀",
         },
         CommandEntry {
             label: "TypeScript code block",
             group: "Code",
             desc: "```ts",
             kind: CommandKind::InsertBlockSnippet("```ts\n\n```\n", 5),
+            icon: "TS",
         },
         CommandEntry {
             label: "Typst block",
             group: "Code",
             desc: "Compiled Typst — math, diagrams, layout",
             kind: CommandKind::InsertBlockSnippet("```typst\n\n```\n", 5),
+            icon: "𝒯",
         },
         CommandEntry {
             label: "Mermaid diagram",
             group: "Code",
             desc: "```mermaid",
             kind: CommandKind::InsertBlockSnippet("```mermaid\n\n```\n", 5),
+            icon: "⤳",
         },
         CommandEntry {
             label: "Inline math",
             group: "Math",
             desc: "$x$",
             kind: CommandKind::InsertSnippet("$$", 1),
+            icon: "∑",
         },
         CommandEntry {
             label: "Math block",
             group: "Math",
             desc: "$$\\n…\\n$$",
             kind: CommandKind::InsertBlockSnippet("$$\n\n$$\n", 4),
+            icon: "∫",
         },
     ]);
 
     // ── Callouts ────────────────────────────────────────────
-    // All 13 canonical Obsidian types — the renderer maps the
-    // type name to a color in CSS.
-    for (kind, label, desc) in [
-        ("note", "Callout: Note", "> [!note]"),
-        ("abstract", "Callout: Abstract", "> [!abstract]"),
-        ("info", "Callout: Info", "> [!info]"),
-        ("todo", "Callout: Todo", "> [!todo]"),
-        ("tip", "Callout: Tip", "> [!tip]"),
-        ("success", "Callout: Success", "> [!success]"),
-        ("question", "Callout: Question", "> [!question]"),
-        ("warning", "Callout: Warning", "> [!warning]"),
-        ("failure", "Callout: Failure", "> [!failure]"),
-        ("danger", "Callout: Danger", "> [!danger]"),
-        ("bug", "Callout: Bug", "> [!bug]"),
-        ("example", "Callout: Example", "> [!example]"),
-        ("quote", "Callout: Quote", "> [!quote]"),
+    // All 13 canonical Obsidian types. Snippet always has a
+    // trailing space + newline + body so `caret_back = 3` lands
+    // the caret on the title line (right after `> [!type] `),
+    // ready for the user to type the title. Next Enter takes
+    // them to the body.
+    for (kind, label, icon) in [
+        ("note", "Note", "📝"),
+        ("abstract", "Abstract", "📄"),
+        ("info", "Info", "ⓘ"),
+        ("todo", "Todo", "☑"),
+        ("tip", "Tip", "💡"),
+        ("success", "Success", "✅"),
+        ("question", "Question", "❓"),
+        ("warning", "Warning", "⚠"),
+        ("failure", "Failure", "❌"),
+        ("danger", "Danger", "⚡"),
+        ("bug", "Bug", "🐞"),
+        ("example", "Example", "🧪"),
+        ("quote", "Quote", "❞"),
     ] {
+        // Trailing space after `]` + caret_back = 3 → caret
+        // lands right after `> [!type] ` on the title line.
         let snippet: &'static str = match kind {
-            "note" => "> [!note]\n> ",
-            "abstract" => "> [!abstract]\n> ",
-            "info" => "> [!info]\n> ",
-            "todo" => "> [!todo]\n> ",
-            "tip" => "> [!tip]\n> ",
-            "success" => "> [!success]\n> ",
-            "question" => "> [!question]\n> ",
-            "warning" => "> [!warning]\n> ",
-            "failure" => "> [!failure]\n> ",
-            "danger" => "> [!danger]\n> ",
-            "bug" => "> [!bug]\n> ",
-            "example" => "> [!example]\n> ",
-            "quote" => "> [!quote]\n> ",
+            "note" => "> [!note] \n> ",
+            "abstract" => "> [!abstract] \n> ",
+            "info" => "> [!info] \n> ",
+            "todo" => "> [!todo] \n> ",
+            "tip" => "> [!tip] \n> ",
+            "success" => "> [!success] \n> ",
+            "question" => "> [!question] \n> ",
+            "warning" => "> [!warning] \n> ",
+            "failure" => "> [!failure] \n> ",
+            "danger" => "> [!danger] \n> ",
+            "bug" => "> [!bug] \n> ",
+            "example" => "> [!example] \n> ",
+            "quote" => "> [!quote] \n> ",
             _ => unreachable!(),
         };
         out.push(CommandEntry {
             label,
             group: "Callout",
-            desc,
-            kind: CommandKind::InsertBlockSnippet(snippet, 0),
+            desc: "",
+            kind: CommandKind::InsertBlockSnippet(snippet, 3),
+            icon,
         });
     }
 
@@ -584,30 +612,35 @@ pub fn all_commands() -> Vec<CommandEntry> {
             group: "Link",
             desc: "[text](url)",
             kind: CommandKind::InsertSnippet("[]()", 3),
+            icon: "🔗",
         },
         CommandEntry {
             label: "Wikilink",
             group: "Link",
             desc: "[[Page]]",
             kind: CommandKind::InsertSnippet("[[]]", 2),
+            icon: "[[",
         },
         CommandEntry {
             label: "Embed",
             group: "Link",
             desc: "![[file]] — image / audio / video / pdf",
             kind: CommandKind::InsertSnippet("![[]]", 2),
+            icon: "🖼",
         },
         CommandEntry {
             label: "Footnote ref",
             group: "Link",
             desc: "[^id]",
             kind: CommandKind::InsertSnippet("[^]", 1),
+            icon: "ⁿ",
         },
         CommandEntry {
             label: "Inline footnote",
             group: "Link",
             desc: "^[note]",
             kind: CommandKind::InsertSnippet("^[]", 1),
+            icon: "ⁿ",
         },
     ]);
 
@@ -662,8 +695,10 @@ mod tests {
     }
 
     #[test]
-    fn filter_matches_label() {
+    fn filter_matches_group() {
         let hits = filter_commands("call");
-        assert!(hits.iter().any(|c| c.label.contains("Callout")));
+        // After the label rename, callouts are matched by group
+        // (`"Callout"`) rather than by the label itself.
+        assert!(hits.iter().any(|c| c.group == "Callout"));
     }
 }

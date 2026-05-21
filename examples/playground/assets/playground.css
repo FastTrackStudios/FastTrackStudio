@@ -639,8 +639,10 @@ section h2 {
     color: var(--text-dim, #7a7e8a);
 }
 .editor-frame .slash-row {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    align-items: center;
+    gap: 8px;
     padding: 4px 10px;
     border-radius: 4px;
     cursor: pointer;
@@ -652,6 +654,31 @@ section h2 {
 .editor-frame .slash-row.selected {
     background: rgba(127, 167, 217, 0.18);
     box-shadow: inset 2px 0 0 rgba(127, 167, 217, 0.7);
+}
+/* Icon column. LSP-completion vibe — small, monospace,
+   centered, muted unless the row is selected. */
+.editor-frame .slash-row-icon {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-dim, #7a7e8a);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.editor-frame .slash-row.selected .slash-row-icon {
+    color: var(--text, #d6d8df);
+    background: rgba(127, 167, 217, 0.18);
+    border-color: rgba(127, 167, 217, 0.4);
+}
+.editor-frame .slash-row-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
 }
 .editor-frame .slash-row-label {
     color: var(--text, #d6d8df);
