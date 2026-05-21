@@ -1,0 +1,22 @@
+[package]
+name = "editor-view"
+description = "Dioxus view layer for the Editor — <Editor> component, contenteditable bridge."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+editor-state = { workspace = true }
+editor-vim = { workspace = true }
+dioxus = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1", features = ["v7", "js"] }
+
+# wasm-only: `performance.now()` for our perf spans (the std
+# `Instant::now` traps on wasm32-unknown-unknown).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Performance", "Document", "Element", "HtmlElement", "DomStringMap"] }
