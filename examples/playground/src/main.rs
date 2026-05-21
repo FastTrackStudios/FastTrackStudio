@@ -301,6 +301,11 @@ fn App() -> Element {
     let vim = use_signal(editor::editor_vim::VimState::new);
     let vim_enabled = !read_query_flag("novim");
 
+    // Slash-command palette. The Editor refreshes this on every
+    // doc change via `detect_slash`; the `SlashMenu` component
+    // renders the popup directly inside the editor frame.
+    let slash = use_signal(|| None::<editor::editor_view::slash::SlashState>);
+
     rsx! {
         document::Link { rel: "stylesheet", href: STYLE }
         div { class: "page",
@@ -317,6 +322,7 @@ fn App() -> Element {
                                 state,
                                 keymap: keymap.clone(),
                                 vim: if vim_enabled { Some(vim) } else { None },
+                                slash: Some(slash),
                             }
                         } else {
                             Editor {
@@ -325,8 +331,10 @@ fn App() -> Element {
                                 decorations: combined_decorations
                                     as editor_view::DecorationSource,
                                 vim: if vim_enabled { Some(vim) } else { None },
+                                slash: Some(slash),
                             }
                         }
+                        editor::editor_view::slash::SlashMenu { state, slash }
                     }
                 }
                 section { class: "debug-pane",

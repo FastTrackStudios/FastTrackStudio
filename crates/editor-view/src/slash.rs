@@ -14,7 +14,85 @@
 //! line; selection nav fires `move_selection`; pick fires
 //! `run_command` and clears the state.
 
+use dioxus::prelude::*;
 use editor_state::{Changes, EditorState, Range, Selection, TransactionSpec};
+
+/// Slash-command popup. Reads the open state from the
+/// `slash` signal threaded down from the host (typically the
+/// playground or whichever shell embeds the editor). Renders
+/// rows grouped by `group`; clicks pick a command. Keyboard
+/// nav lives in `Editor`'s `onkeydown` rather than here so it
+/// works without the menu element being focused.
+#[component]
+pub fn SlashMenu(
+    state: Signal<EditorState>,
+    slash: Signal<Option<SlashState>>,
+) -> Element {
+    let snapshot = slash.read().clone();
+    let Some(current) = snapshot else {
+        return rsx! { Fragment {} };
+    };
+    let hits = filter_commands(&current.query);
+    if hits.is_empty() {
+        return rsx! {
+            div { class: "slash-menu",
+                div { class: "slash-empty", "No commands match." }
+            }
+        };
+    }
+    let selected = current.selected.min(hits.len().saturating_sub(1));
+    let mut last_group: Option<&str> = None;
+    let mut row_idx: usize = 0;
+    rsx! {
+        div { class: "slash-menu",
+            for entry in hits.iter().cloned() {
+                {
+                    let show_header = last_group.map(|g| g != entry.group).unwrap_or(true);
+                    last_group = Some(entry.group);
+                    let is_selected = row_idx == selected;
+                    let idx_for_click = row_idx;
+                    let entry_for_click = entry.clone();
+                    let mut state_for_click = state;
+                    let mut slash_for_click = slash;
+                    let current_for_click = current.clone();
+                    row_idx += 1;
+                    rsx! {
+                        {
+                            if show_header {
+                                rsx! { div { class: "slash-group", "{entry.group}" } }
+                            } else { rsx! {} }
+                        }
+                        div {
+                            class: if is_selected { "slash-row selected" } else { "slash-row" },
+                            // Mousedown.preventDefault keeps the
+                            // editor's caret from blurring as the
+                            // click lands, so the next render keeps
+                            // selection state coherent.
+                            onmousedown: move |e: Event<MouseData>| e.prevent_default(),
+                            onclick: move |_| {
+                                let cur = state_for_click.read().clone();
+                                let end = current_for_click.slash_start + 1 + current_for_click.query.len();
+                                if let Some(spec) = run_command(
+                                    &cur,
+                                    current_for_click.slash_start..end,
+                                    entry_for_click.kind,
+                                ) {
+                                    state_for_click.set(cur.update(spec));
+                                }
+                                slash_for_click.set(None);
+                            },
+                            key: "{idx_for_click}",
+                            div { class: "slash-row-label", "{entry.label}" }
+                            if !entry.desc.is_empty() {
+                                div { class: "slash-row-desc", "{entry.desc}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// One menu entry. Title shows in the row, group is the header
 /// above it ("Heading", "Format", "Callout", …).

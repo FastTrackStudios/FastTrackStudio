@@ -94,6 +94,13 @@ pub fn Editor(
     /// `None` from vim falls through to the keymap and normal
     /// browser-side text input.
     #[props(default)] vim: Option<Signal<editor_vim::VimState>>,
+    /// Optional slash-command menu state. When `Some`, the
+    /// editor watches doc changes and refreshes the open state
+    /// via `slash::detect_slash`. Arrow keys, Enter, and Escape
+    /// route into the menu when it's open. Owner is responsible
+    /// for rendering the menu component itself — the editor just
+    /// keeps the state in sync with the doc.
+    #[props(default)] slash: Option<Signal<Option<crate::slash::SlashState>>>,
 ) -> Element {
     // Tile-tree build moved into the imperative-patch
     // `use_effect` below. The component body itself no longer
@@ -1407,6 +1414,7 @@ pub fn Editor(
     // ── onkeydown: vim → keymap dispatch ─────────────────────────
     let keymap_for_keys = keymap.clone();
     let vim_for_keys = vim;
+    let slash_for_keys = slash;
     let editor_id_for_keys = editor_id.clone();
     let on_keydown = move |evt: Event<KeyboardData>| {
         let mods = evt.modifiers();
@@ -1423,6 +1431,61 @@ pub fn Editor(
             r#mod: mods.ctrl() || mods.meta(),
         };
         let cur = state.read().clone();
+        // ── Slash menu key routing ──
+        //
+        // When the menu is open, Arrow keys cycle selection,
+        // Enter picks the highlighted command, Escape closes
+        // without firing. Everything else falls through to vim
+        // and the keymap below — including character keys, so
+        // typing more after `/` keeps the trigger active and the
+        // doc change re-runs `detect_slash`.
+        if let Some(mut slash_sig) = slash_for_keys {
+            let snapshot = slash_sig.peek().clone();
+            if let Some(current) = snapshot {
+                let hits = crate::slash::filter_commands(&current.query);
+                match press.key.as_str() {
+                    "Escape" => {
+                        slash_sig.set(None);
+                        evt.prevent_default();
+                        return;
+                    }
+                    "ArrowDown" if !hits.is_empty() => {
+                        let len = hits.len();
+                        let next = (current.selected + 1) % len;
+                        let mut new = current.clone();
+                        new.selected = next;
+                        slash_sig.set(Some(new));
+                        evt.prevent_default();
+                        return;
+                    }
+                    "ArrowUp" if !hits.is_empty() => {
+                        let len = hits.len();
+                        let next = (current.selected + len - 1) % len;
+                        let mut new = current.clone();
+                        new.selected = next;
+                        slash_sig.set(Some(new));
+                        evt.prevent_default();
+                        return;
+                    }
+                    "Enter" => {
+                        if let Some(entry) = hits.get(current.selected) {
+                            let end = current.slash_start + 1 + current.query.len();
+                            if let Some(spec) = crate::slash::run_command(
+                                &cur,
+                                current.slash_start..end,
+                                entry.kind,
+                            ) {
+                                state.clone().set(cur.update(spec));
+                            }
+                        }
+                        slash_sig.set(None);
+                        evt.prevent_default();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if let Some(mut vim_sig) = vim_for_keys {
             // ── Visual-row h/j/k/l shortcut ──
             //
@@ -1574,6 +1637,44 @@ pub fn Editor(
     // entirely — we render only an empty `<div data-editor-id>`
     // and the patcher fills + maintains everything inside.
     // CM6 model.
+    // Slash-state refresh: every time the doc or selection
+    // changes, re-run `detect_slash` against the caret. Open the
+    // menu when a fresh `/` trigger appears; close it when the
+    // trigger goes away (user typed a space, deleted the `/`,
+    // or moved the caret off the line).
+    if let Some(mut slash_sig) = slash {
+        use_effect(move || {
+            let s = state.read();
+            let caret = s.selection.primary().head;
+            let detected = crate::slash::detect_slash(&s.doc.to_string(), caret);
+            let cur = slash_sig.peek().clone();
+            match (detected, cur) {
+                (Some((start, q)), Some(prev)) if prev.slash_start == start => {
+                    // Same trigger, query updated. Clamp the
+                    // selected row to the new hit count.
+                    let hits_len = crate::slash::filter_commands(&q).len();
+                    let selected = prev.selected.min(hits_len.saturating_sub(1));
+                    if prev.query != q || prev.selected != selected {
+                        slash_sig.set(Some(crate::slash::SlashState {
+                            slash_start: start,
+                            query: q,
+                            selected,
+                        }));
+                    }
+                }
+                (Some((start, q)), _) => {
+                    slash_sig.set(Some(crate::slash::SlashState {
+                        slash_start: start,
+                        query: q,
+                        selected: 0,
+                    }));
+                }
+                (None, Some(_)) => slash_sig.set(None),
+                _ => {}
+            }
+        });
+    }
+
     {
         let id = editor_id.clone();
         let deco_source_patch = decorations;

@@ -584,6 +584,64 @@ section h2 {
     margin: 0 auto;
 }
 
+/* Slash-command popup. Floats below the editor frame; positions
+   could later be caret-anchored via a sliver of JS that reads
+   the DOM Selection rect. For v1 we just dock below the frame
+   so it never overlaps the live-preview content. */
+.editor-frame {
+    position: relative;
+}
+.editor-frame .slash-menu {
+    position: absolute;
+    left: 16px;
+    bottom: 12px;
+    z-index: 20;
+    min-width: 280px;
+    max-width: 420px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--bg-elev, #161821);
+    border: 1px solid var(--border, #2a2d38);
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    padding: 4px;
+}
+.editor-frame .slash-group {
+    padding: 4px 10px 2px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim, #7a7e8a);
+}
+.editor-frame .slash-row {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+.editor-frame .slash-row:hover {
+    background: rgba(127, 167, 217, 0.08);
+}
+.editor-frame .slash-row.selected {
+    background: rgba(127, 167, 217, 0.18);
+    box-shadow: inset 2px 0 0 rgba(127, 167, 217, 0.7);
+}
+.editor-frame .slash-row-label {
+    color: var(--text, #d6d8df);
+}
+.editor-frame .slash-row-desc {
+    font-size: 0.85em;
+    color: var(--text-dim, #7a7e8a);
+    margin-top: 2px;
+}
+.editor-frame .slash-empty {
+    padding: 12px;
+    color: var(--text-dim, #7a7e8a);
+    font-style: italic;
+}
+
 /* Embed widgets — sized via inline style coming from
    embed_widget_html, max-width clamps to the editor pane. */
 .editor-root .md-embed-image,
