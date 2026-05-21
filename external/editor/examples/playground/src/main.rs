@@ -13,16 +13,67 @@ use editor::{
 /// is just concatenation; the inner builders dedupe nothing, but
 /// our overlapping mark spans on brackets sit next to each other
 /// without conflict.
+///
+/// When the playground is running on desktop AND a vault has
+/// been loaded into `VAULT`, we route the markdown pass through
+/// `live_preview_with` so cross-doc `((uuid))`, `[[Page]]`, and
+/// `![[Page#Heading]]` resolve against the on-disk vault.
 fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut out = {
+        match VAULT.get() {
+            Some((v, idx)) => {
+                let view = vault::VaultLookupView::new(v, idx);
+                markdown::live_preview_with(state, Some(&view))
+            }
+            None => markdown::live_preview(state),
+        }
+    };
+    #[cfg(target_arch = "wasm32")]
     let mut out = markdown::live_preview(state);
     out.extend(bracket_match::bracket_match(state));
     out
+}
+
+/// Lazily-initialized native vault. Populated by `init_vault()`
+/// at app startup when `~/Documents/Task/` exists. Stays empty
+/// in the wasm build (no filesystem).
+#[cfg(not(target_arch = "wasm32"))]
+static VAULT: std::sync::OnceLock<(vault::Vault, vault::BlockIndex)> = std::sync::OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn init_vault() {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let root = home.join("Documents/Task");
+    if !root.exists() {
+        tracing::info!("no vault at {} — skipping", root.display());
+        return;
+    }
+    let vault = match vault::Vault::open(&root) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(?e, "vault open failed — running without cross-doc refs");
+            return;
+        }
+    };
+    let idx = vault::BlockIndex::build(&vault);
+    tracing::info!(
+        pages = vault.pages.len(),
+        ids = idx.len(),
+        root = %root.display(),
+        "vault loaded"
+    );
+    let _ = VAULT.set((vault, idx));
 }
 
 const STYLE: Asset = asset!("/assets/playground.css");
 
 fn main() {
     init_tracing();
+    #[cfg(not(target_arch = "wasm32"))]
+    init_vault();
     tracing::info!("playground starting");
     dioxus::launch(App);
 }
@@ -176,6 +227,23 @@ fn App() -> Element {
     // welcome message — useful for isolating decoration-aware
     // typing tests from the markdown in the default seed.
     let state = use_signal(|| {
+        // Desktop with a vault loaded: open `Welcome.md` so the
+        // cross-doc resolution paths are visible immediately.
+        // No vault / wasm / explicit `?seed=` override: use the
+        // built-in showcase seed below.
+        #[cfg(not(target_arch = "wasm32"))]
+        let seed_from_vault = read_seed_query()
+            .is_none()
+            .then(|| {
+                VAULT
+                    .get()
+                    .and_then(|(v, _)| v.page_by_basename("Welcome").map(|p| p.raw.clone()))
+            })
+            .flatten();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(text) = seed_from_vault {
+            return EditorState::new(text);
+        }
         let seed = read_seed_query().unwrap_or_else(|| {
             String::from(
                 "---\n\

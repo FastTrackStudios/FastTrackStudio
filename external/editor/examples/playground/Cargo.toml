@@ -10,7 +10,11 @@ publish = false
 
 [dependencies]
 editor = { workspace = true }
-dioxus = { workspace = true }
+# `launch` brings in the `dioxus::launch` entry point the
+# playground's `main` calls. Task's workspace declares dioxus
+# with `features = ["lib"]` (lib-only) so we add `launch`
+# locally.
+dioxus = { workspace = true, features = ["launch"] }
 tracing = { workspace = true }
 
 # File / stdout logging is desktop-only — wasm can't open files.
@@ -18,6 +22,11 @@ tracing = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
+# Vault — native-only. Loaded from `~/Documents/Task/` on
+# desktop launch so the playground can resolve cross-doc refs
+# / embeds against a real filesystem-backed corpus.
+vault = { workspace = true }
+editor-state = { workspace = true }
 
 # Switch platforms with --no-default-features --features web|desktop.
 [features]

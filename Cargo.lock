@@ -8315,10 +8315,12 @@ version = "0.1.0"
 dependencies = [
  "dioxus",
  "editor",
+ "editor-state",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "tracing-wasm",
+ "vault",
  "web-sys",
 ]
 
