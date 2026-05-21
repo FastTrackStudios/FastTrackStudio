@@ -26,6 +26,9 @@ pub struct TransactionSpec {
     /// distinguish their own transactions. Stored as JSON-ish
     /// strings for now; an `Annotation<T>` type can come later.
     pub annotations: Vec<(String, String)>,
+    /// Replace `state.folds` wholesale. `None` falls through to
+    /// the default of "map existing folds through the change set".
+    pub folds: Option<Vec<std::ops::Range<usize>>>,
 }
 
 impl TransactionSpec {
@@ -50,6 +53,11 @@ impl TransactionSpec {
 
     pub fn annotate(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.annotations.push((key.into(), value.into()));
+        self
+    }
+
+    pub fn folds(mut self, folds: Vec<std::ops::Range<usize>>) -> Self {
+        self.folds = Some(folds);
         self
     }
 }
@@ -77,9 +85,43 @@ impl Transaction {
             .selection
             .clone()
             .unwrap_or_else(|| self.before.selection.map(&self.spec.changes));
+        // Fold ranges: map both endpoints through the change set
+        // so they follow doc edits. A fold whose start/end fall
+        // INSIDE a deletion collapses to a zero-length range and
+        // is dropped.
+        let new_doc_len = new_doc.len();
+        let new_folds = if let Some(folds) = self.spec.folds.clone() {
+            folds
+                .into_iter()
+                .filter(|r| r.end <= new_doc_len && r.start < r.end)
+                .collect()
+        } else {
+            self.before
+                .folds
+                .iter()
+                .filter_map(|r| {
+                    let from = self
+                        .spec
+                        .changes
+                        .map_position(r.start, crate::change::Assoc::Before)
+                        .min(new_doc_len);
+                    let to = self
+                        .spec
+                        .changes
+                        .map_position(r.end, crate::change::Assoc::After)
+                        .min(new_doc_len);
+                    if to > from {
+                        Some(from..to)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
         EditorState {
             doc: new_doc,
             selection: new_selection,
+            folds: new_folds,
         }
     }
 }
@@ -93,6 +135,7 @@ mod tests {
     #[test]
     fn insert_advances_caret() {
         let state = EditorState {
+            folds: Vec::new(),
             doc: Doc::from_str("hello"),
             selection: Selection::caret(5),
         };
@@ -109,6 +152,7 @@ mod tests {
     #[test]
     fn explicit_selection_overrides_mapping() {
         let state = EditorState {
+            folds: Vec::new(),
             doc: Doc::from_str("hello"),
             selection: Selection::caret(5),
         };

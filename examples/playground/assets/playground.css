@@ -150,6 +150,43 @@ section h2 {
     vertical-align: super;
 }
 
+/* Heading + callout fold arrow — fades in on line hover, fades
+   to muted color otherwise. Click toggles a fold range stored
+   in `state.folds`. */
+.editor-root .md-fold-arrow {
+    display: inline-block;
+    margin-right: 0.3em;
+    color: #4a526a;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.75em;
+    transition: color 0.12s, opacity 0.12s;
+    opacity: 0;
+    width: 0.8em;
+    text-align: center;
+}
+.editor-root .cm-line:hover .md-fold-arrow,
+.editor-root .md-fold-arrow:hover {
+    opacity: 1;
+    color: #a4b1d8;
+}
+.editor-root .md-fold-callout {
+    opacity: 1; /* always show on callouts — they're prominent */
+    color: #8892b0;
+}
+
+/* The `…` widget marking a collapsed fold's location. */
+.editor-root .md-fold-ellipsis {
+    display: inline-block;
+    margin-left: 0.3em;
+    color: #8892b0;
+    background: #2a2f44;
+    border-radius: 3px;
+    padding: 0 6px;
+    font-size: 0.85em;
+    user-select: none;
+}
+
 /* GFM pipe tables — rendered as a single widget when the caret
    is off, source bytes shown verbatim when the caret is on. */
 .editor-root .md-table {

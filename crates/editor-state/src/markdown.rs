@@ -30,11 +30,24 @@ pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     let primary = state.selection.primary();
     let mut out = Vec::new();
 
+    // Apply currently-active folds first: each range gets a
+    // Replace (hiding bytes) plus a small `…` widget at the
+    // fold's start so the line shows the fold marker.
+    for r in &state.folds {
+        if r.end <= text.len() && r.start < r.end {
+            out.push(Decoration::replace(r.start..r.end));
+            out.push(Decoration::widget(
+                r.start,
+                String::from(r#"<span class="md-fold-ellipsis">…</span>"#),
+            ));
+        }
+    }
+
     // Per-step timing for the perf trace. The cost in this fn is
     // dominated by `emit_fence_tokens` (tree-sitter) on docs
     // with code fences; the rest is O(doc-length) byte walking.
     let t_blocks = now_ms_native();
-    let fenced_ranges = scan_blocks(&text, primary, &mut out);
+    let fenced_ranges = scan_blocks(&text, primary, &state.folds, &mut out);
     let blocks_ms = now_ms_native() - t_blocks;
 
     let t_inline = now_ms_native();
@@ -238,6 +251,7 @@ fn cursor_touches(primary: Range, range: std::ops::Range<usize>) -> bool {
 fn scan_blocks(
     text: &str,
     primary: Range,
+    folds: &[std::ops::Range<usize>],
     out: &mut Vec<DecoratedRange>,
 ) -> Vec<std::ops::Range<usize>> {
     let mut fenced_ranges = Vec::new();
@@ -353,9 +367,6 @@ fn scan_blocks(
             let abs_marker_end = line_from + marker_end;
             let class = HEADING_CLASS[level - 1];
             out.push(Decoration::line(line_from, class));
-            // Marker stays visible (muted) any time the caret
-            // is anywhere on the line — typing inside the
-            // heading body shouldn't make the marker disappear.
             if cursor_touches(primary, line_from..line_to) {
                 out.push(Decoration::mark(
                     line_from..abs_marker_end,
@@ -364,6 +375,18 @@ fn scan_blocks(
             } else {
                 out.push(Decoration::replace(line_from..abs_marker_end));
             }
+            // Fold widget — clickable arrow that toggles a fold
+            // covering everything from the end of this line to
+            // the start of the next heading of equal-or-greater
+            // level (or doc end). Range is what the JS bridge
+            // sends back as `toggle-fold`.
+            let (fold_from, fold_to) = heading_fold_range(text, line_to, level);
+            let folded = folds.iter().any(|r| r.start == fold_from);
+            let arrow = if folded { "▸" } else { "▾" };
+            let html = format!(
+                r#"<span class="md-fold-arrow" data-fold-from="{fold_from}" data-fold-to="{fold_to}" title="Fold">{arrow}</span>"#,
+            );
+            out.push(Decoration::widget(line_from, html));
             continue;
         }
 
@@ -423,9 +446,6 @@ fn scan_blocks(
                 callout_kind = Some(kind);
                 let line_class = callout_class(kind, true);
                 out.push(Decoration::line(line_from, line_class));
-                // Hide the `[!type]` syntax when caret is off
-                // the line — the line class draws the icon /
-                // title styling instead.
                 let abs_header_end = abs_marker_end + header_end_off;
                 if !cursor_touches(primary, line_from..line_to) {
                     out.push(Decoration::mark(
@@ -433,6 +453,18 @@ fn scan_blocks(
                         "md-quote-marker",
                     ));
                     out.push(Decoration::replace(abs_marker_end..abs_header_end));
+                }
+                // Fold arrow — covers body lines (everything
+                // from this line's `\n` to the end of the
+                // callout block, i.e. last `>` line).
+                let (fold_from, fold_to) = callout_fold_range(text, line_to);
+                if fold_to > fold_from {
+                    let folded = folds.iter().any(|r| r.start == fold_from);
+                    let arrow = if folded { "▸" } else { "▾" };
+                    let html = format!(
+                        r#"<span class="md-fold-arrow md-fold-callout" data-fold-from="{fold_from}" data-fold-to="{fold_to}" title="Fold">{arrow}</span>"#,
+                    );
+                    out.push(Decoration::widget(line_from, html));
                 }
                 continue;
             }
@@ -534,6 +566,68 @@ fn canonical_callout_kind(raw: &str) -> Option<&'static str> {
         "quote" | "cite" => "quote",
         _ => return None,
     })
+}
+
+/// Walk forward from a callout header's `\n` to find the byte
+/// range covering its body — every subsequent `>`-prefixed
+/// line, stopping at the first line that doesn't start with `>`
+/// (or doc end).
+fn callout_fold_range(text: &str, header_to: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let mut i = header_to;
+    let start = i;
+    while i < bytes.len() {
+        if bytes[i] == b'\n' {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let line_from = i;
+        let mut line_end = line_from;
+        while line_end < bytes.len() && bytes[line_end] != b'\n' {
+            line_end += 1;
+        }
+        let trimmed = text[line_from..line_end].trim_start();
+        if !trimmed.starts_with('>') {
+            return (start, line_from.saturating_sub(1).max(start));
+        }
+        i = line_end;
+    }
+    (start, text.len())
+}
+
+/// Compute the byte range a heading at `header_to` (end of the
+/// heading line, position of its `\n`) would fold when toggled.
+/// Walks forward through subsequent lines, stopping at the next
+/// heading of equal or higher level (smaller `#` count) or doc
+/// end. The fold covers `\n` + all body lines, but NOT the next
+/// heading line itself.
+fn heading_fold_range(text: &str, header_to: usize, level: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let mut i = header_to;
+    while i < bytes.len() {
+        // Skip the line terminator.
+        if bytes[i] == b'\n' {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let line_from = i;
+        let mut line_end = line_from;
+        while line_end < bytes.len() && bytes[line_end] != b'\n' {
+            line_end += 1;
+        }
+        let line = &text[line_from..line_end];
+        if let Some((next_level, _)) = parse_heading(line) {
+            if next_level <= level {
+                return (header_to, line_from.saturating_sub(1).max(header_to));
+            }
+        }
+        i = line_end;
+    }
+    (header_to, text.len())
 }
 
 /// Cheap "is this even a candidate?" check: a non-trivial pipe
@@ -1160,6 +1254,7 @@ mod tests {
         EditorState {
             doc: Doc::from_str(text),
             selection: Selection::caret(caret),
+            folds: Vec::new(),
         }
     }
 
