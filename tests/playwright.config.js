@@ -20,7 +20,10 @@
 const { defineConfig, devices } = require("@playwright/test");
 const path = require("path");
 
-const PORT = 8090;
+// Distinct from `dx serve`'s default (8080) and from 8090 (which
+// users might have a long-running dev session on). Override via
+// `PW_PORT=…` if 9091 is also taken.
+const PORT = parseInt(process.env.PW_PORT || "9091", 10);
 const repoRoot = path.resolve(__dirname, "..");
 
 module.exports = defineConfig({
