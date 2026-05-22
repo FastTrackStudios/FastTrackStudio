@@ -17,6 +17,7 @@
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
+mod session_store;
 mod shared;
 
 use clap::{Parser, Subcommand};
@@ -83,6 +84,43 @@ enum Commands {
     /// sessions, PDF rendering via fulgur.
     #[command(subcommand)]
     Finance(FinanceCmd),
+    /// Architect-auth flows — local sign-in, session
+    /// management, org selection. Writes the persistent
+    /// session file consumed by `timer` / `finance`.
+    #[command(subcommand)]
+    Auth(AuthCmd),
+}
+
+#[derive(Subcommand)]
+enum AuthCmd {
+    /// Sign in against the local `auth.sqlite`. Persists a
+    /// session token (+ `user_id`, `active_organization_id`)
+    /// to `$XDG_DATA_HOME/task/session.json` so future
+    /// commands no longer need `TASK_USER_ID` / `TASK_ORG_ID`.
+    Login {
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        password: String,
+    },
+    /// Print the active session (email, user id, org id).
+    Whoami,
+    /// Invalidate the active session server-side AND remove
+    /// the local session file.
+    Logout,
+    /// Org membership + selection.
+    #[command(subcommand)]
+    Org(AuthOrgCmd),
+}
+
+#[derive(Subcommand)]
+enum AuthOrgCmd {
+    /// List orgs the signed-in user is a member of.
+    List,
+    /// Set the active org for subsequent commands. Updates
+    /// both the local session file and the server-side
+    /// `auth_session.active_organization_id`.
+    Use { org_id: uuid::Uuid },
 }
 
 #[derive(Subcommand)]
@@ -528,6 +566,12 @@ enum TimerCmd {
         /// session is for.
         #[arg(long, default_value = "")]
         task_note: String,
+        /// Tag names to attach to the session. Tags are
+        /// auto-created in the calling user's org if they
+        /// don't already exist. Pass `--tag focus --tag review`
+        /// to attach two.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
     },
     /// Stop the current session. Snapshots `rate_cents` +
     /// `currency` via the rate cascade and writes the closed
@@ -542,6 +586,8 @@ enum TimerCmd {
         project: Option<uuid::Uuid>,
         #[arg(long, default_value = "")]
         task_note: String,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
     },
     /// Retro-log a past session: `--from` / `--to` ISO 8601
     /// timestamps + description. Skips the active-timer
@@ -560,6 +606,8 @@ enum TimerCmd {
         /// Omit to inherit.
         #[arg(long)]
         billable: Option<bool>,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
     },
     /// List sessions. Defaults to the last 7 days.
     List {
@@ -586,6 +634,41 @@ enum TimerCmd {
         #[arg(long)]
         project: Option<uuid::Uuid>,
     },
+    /// Tag CRUD + attach to existing sessions.
+    #[command(subcommand)]
+    Tag(TimerTagCmd),
+}
+
+#[derive(Subcommand)]
+enum TimerTagCmd {
+    /// List tags in the calling user's org.
+    List,
+    /// Create a tag. Idempotent — no-op if a tag with that
+    /// name already exists.
+    Create {
+        name: String,
+        /// Hex `#RRGGBB` (UI hint). Empty = auto-pick.
+        #[arg(long, default_value = "")]
+        color: String,
+    },
+    /// Delete a tag by name. Removes the join rows on every
+    /// session via FK cascade.
+    Rm { name: String },
+    /// Attach tags to an existing session.
+    Attach {
+        session_id: uuid::Uuid,
+        #[arg(long = "tag", required = true)]
+        tags: Vec<String>,
+    },
+    /// Detach tags from a session. `--tag <name>` removes
+    /// that tag; `--all` removes every tag.
+    Detach {
+        session_id: uuid::Uuid,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -606,7 +689,12 @@ enum FinanceCmd {
         until: Option<chrono::DateTime<chrono::Utc>>,
     },
     /// Build + render an invoice from billable sessions on
-    /// one project. Writes a PDF to `--out`.
+    /// one project. By default writes both a PDF and a
+    /// markdown stub into the vault's `Reports/Invoices/`
+    /// directory (PDF under `Reports/Invoices/pdfs/`, MD at
+    /// `Reports/Invoices/<num>.md` wikilinking the PDF).
+    /// Use `--out` to override the PDF location and skip the
+    /// vault export.
     Invoice {
         /// Project frontmatter uuid.
         #[arg(long)]
@@ -629,9 +717,14 @@ enum FinanceCmd {
         /// `--party-id <uuid>`.
         #[arg(long, default_value = "Bill-to")]
         client_name: String,
-        /// Output PDF path.
+        /// Override PDF path. When set, skips the vault
+        /// export and writes only this file. When omitted,
+        /// the PDF lands at
+        /// `<vault>/Reports/Invoices/pdfs/<num>.pdf` and a
+        /// companion markdown stub goes to
+        /// `<vault>/Reports/Invoices/<num>.md`.
         #[arg(long, short)]
-        out: std::path::PathBuf,
+        out: Option<std::path::PathBuf>,
     },
 }
 
@@ -665,8 +758,214 @@ async fn main() -> eyre::Result<()> {
         Commands::Finance(cmd) => {
             return run_finance(cmd).await;
         }
+        Commands::Auth(cmd) => {
+            return run_auth(cmd).await;
+        }
     }
     Ok(())
+}
+
+/// Open `ArchitectAuth` against the local `auth.sqlite` —
+/// same DB the server uses. CLI ↔ server interop hinges on
+/// matching `default_auth_db_path()` + `DEFAULT_AUTH_SECRET`.
+async fn open_local_auth()
+-> eyre::Result<architect_auth::ArchitectAuth<architect_auth::db::AuthSeaOrmStorage>> {
+    use architect_auth::db::{AuthSeaOrmStorage, Migrator as AuthMigrator};
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+    let path = session_store::default_auth_db_path()?;
+    let db_url = format!("sqlite://{}?mode=rwc", path.display());
+    let db = Database::connect(&db_url)
+        .await
+        .map_err(|e| eyre::eyre!("connect auth db `{db_url}`: {e}"))?;
+    AuthMigrator::up(&db, None)
+        .await
+        .map_err(|e| eyre::eyre!("auth migrations: {e}"))?;
+    let storage = AuthSeaOrmStorage::new(db);
+    architect_auth::ArchitectAuth::builder()
+        .secret(session_store::DEFAULT_AUTH_SECRET)
+        .storage(storage)
+        .build()
+        .map_err(|e| eyre::eyre!("build ArchitectAuth: {e}"))
+}
+
+async fn run_auth(cmd: AuthCmd) -> eyre::Result<()> {
+    use architect_auth::commands::{CurrentSession, SignOut};
+    use architect_auth::proto::SignInEmailPassword;
+    match cmd {
+        AuthCmd::Login { email, password } => {
+            let auth = open_local_auth().await?;
+            let bundle = auth
+                .sign_in_email_password(SignInEmailPassword {
+                    email: email.clone(),
+                    password,
+                    ip_address: None,
+                    user_agent: Some("task-cli".into()),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("sign in: {e}"))?;
+            let sess = session_store::CliSession {
+                token: bundle.token.clone(),
+                user_id: bundle.user.id,
+                email: bundle.user.email.clone().unwrap_or_else(|| email.clone()),
+                org_id: bundle.session.active_organization_id,
+            };
+            session_store::save(&sess)?;
+            println!("Signed in as {} ({})", sess.email, sess.user_id);
+            match sess.org_id {
+                Some(org) => println!("Active org: {org}"),
+                None => println!("No active org — pick one with `task auth org use <id>`."),
+            }
+        }
+        AuthCmd::Whoami => match session_store::load()? {
+            Some(s) => {
+                println!("email:   {}", s.email);
+                println!("user_id: {}", s.user_id);
+                match s.org_id {
+                    Some(org) => println!("org_id:  {org}"),
+                    None => println!("org_id:  (none — `task auth org use <id>`)"),
+                }
+                println!(
+                    "token:   <stored in {}>",
+                    session_store::session_path()?.display()
+                );
+            }
+            None => {
+                println!("Not signed in. Run `task auth login --email … --password …`.");
+            }
+        },
+        AuthCmd::Logout => {
+            if let Some(s) = session_store::load()? {
+                let auth = open_local_auth().await?;
+                if let Err(e) = auth.sign_out(SignOut { token: s.token }).await {
+                    eprintln!("warning: server-side sign out failed: {e}");
+                }
+            }
+            session_store::clear()?;
+            println!("Signed out.");
+        }
+        AuthCmd::Org(AuthOrgCmd::List) => {
+            let Some(sess) = session_store::load()? else {
+                return Err(eyre::eyre!("not signed in — run `task auth login` first"));
+            };
+            let auth = open_local_auth().await?;
+            // Verify session still valid + refresh `user_id`.
+            let bundle = auth
+                .current_session(CurrentSession { token: sess.token })
+                .await
+                .map_err(|e| eyre::eyre!("session: {e}"))?;
+            let memberships = list_user_memberships(bundle.user.id).await?;
+            if memberships.is_empty() {
+                println!("(no org memberships)");
+            }
+            for (member, org) in memberships {
+                let marker = if Some(member.organization_id) == sess.org_id {
+                    " *"
+                } else {
+                    "  "
+                };
+                println!(
+                    "{marker} {}  {}  ({})",
+                    member.organization_id, org.name, member.role
+                );
+            }
+        }
+        AuthCmd::Org(AuthOrgCmd::Use { org_id }) => {
+            let Some(mut sess) = session_store::load()? else {
+                return Err(eyre::eyre!("not signed in — run `task auth login` first"));
+            };
+            // Membership check.
+            let memberships = list_user_memberships(sess.user_id).await?;
+            if !memberships.iter().any(|(m, _)| m.organization_id == org_id) {
+                return Err(eyre::eyre!("user is not a member of org {org_id}"));
+            }
+            update_session_active_org(&sess.token, Some(org_id)).await?;
+            sess.org_id = Some(org_id);
+            session_store::save(&sess)?;
+            println!("Active org set to {org_id}");
+        }
+    }
+    Ok(())
+}
+
+async fn open_auth_db() -> eyre::Result<sea_orm::DatabaseConnection> {
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+    let path = session_store::default_auth_db_path()?;
+    let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
+        .await
+        .map_err(|e| eyre::eyre!("connect auth db: {e}"))?;
+    architect_auth::db::Migrator::up(&db, None)
+        .await
+        .map_err(|e| eyre::eyre!("auth migrations: {e}"))?;
+    Ok(db)
+}
+
+async fn list_user_memberships(
+    user_id: uuid::Uuid,
+) -> eyre::Result<
+    Vec<(
+        architect_auth::db::AuthMemberModel,
+        architect_auth::db::AuthOrganizationModel,
+    )>,
+> {
+    use architect_auth::db::{AuthMemberColumn, AuthMemberEntity, AuthOrganizationEntity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    let db = open_auth_db().await?;
+    let members = AuthMemberEntity::find()
+        .filter(AuthMemberColumn::UserId.eq(user_id))
+        .all(&db)
+        .await
+        .map_err(|e| eyre::eyre!("list members: {e}"))?;
+    let mut out = Vec::with_capacity(members.len());
+    for m in members {
+        let Some(org) = AuthOrganizationEntity::find_by_id(m.organization_id)
+            .one(&db)
+            .await
+            .map_err(|e| eyre::eyre!("find org {}: {e}", m.organization_id))?
+        else {
+            continue;
+        };
+        out.push((m, org));
+    }
+    Ok(out)
+}
+
+async fn update_session_active_org(token: &str, org_id: Option<uuid::Uuid>) -> eyre::Result<()> {
+    use architect_auth::db::{AuthSessionActiveModel, AuthSessionColumn, AuthSessionEntity};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+    let token_hash = hash_session_token(session_store::DEFAULT_AUTH_SECRET, token);
+    let db = open_auth_db().await?;
+    let row = AuthSessionEntity::find()
+        .filter(AuthSessionColumn::TokenHash.eq(token_hash))
+        .one(&db)
+        .await
+        .map_err(|e| eyre::eyre!("find session: {e}"))?
+        .ok_or_else(|| eyre::eyre!("session not found — session file may be stale"))?;
+    let mut am: AuthSessionActiveModel = row.into_active_model();
+    am.active_organization_id = Set(org_id);
+    am.update(&db)
+        .await
+        .map_err(|e| eyre::eyre!("update session: {e}"))?;
+    Ok(())
+}
+
+/// Reproduce `architect-auth::crypto::hash_token`. The auth
+/// crate keeps the helper crate-private; we re-implement the
+/// exact same recipe so the CLI can look up its own session
+/// row by token hash without depending on auth internals.
+///
+/// **Recipe (must match `architect-auth/crypto.rs`):**
+/// `base64url-no-pad(SHA256(secret || ":" || token))`.
+fn hash_session_token(secret: &str, token: &str) -> String {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(secret.as_bytes());
+    h.update(b":");
+    h.update(token.as_bytes());
+    URL_SAFE_NO_PAD.encode(h.finalize())
 }
 
 async fn run_finance(cmd: FinanceCmd) -> eyre::Result<()> {
@@ -797,6 +1096,21 @@ async fn run_finance(cmd: FinanceCmd) -> eyre::Result<()> {
                 tax_id: String::new(),
             };
             let ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
+            // Decide PDF path: explicit --out wins; else vault-export under
+            // `<vault>/Reports/Invoices/pdfs/<num>.pdf`.
+            let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
+                |_| std::path::PathBuf::from("examples/vault"),
+                std::path::PathBuf::from,
+            );
+            let do_vault_export = out.is_none();
+            let pdf_path: std::path::PathBuf = if let Some(p) = out {
+                p
+            } else {
+                let dir = vault_root.join("Reports").join("Invoices").join("pdfs");
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
+                dir.join(format!("{}.pdf", build.invoice.number))
+            };
             // Shell out to the `task-pdf-render` binary (in
             // libs/pdf). Fulgur's compile tree triggers a
             // stylo recursion-limit issue when pulled into
@@ -810,7 +1124,7 @@ async fn run_finance(cmd: FinanceCmd) -> eyre::Result<()> {
                 .unwrap_or_else(|_| "task-pdf-render".to_string());
             let mut child = std::process::Command::new(&render_bin)
                 .arg("--out")
-                .arg(&out)
+                .arg(&pdf_path)
                 .stdin(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::inherit())
                 .spawn()
@@ -831,10 +1145,34 @@ async fn run_finance(cmd: FinanceCmd) -> eyre::Result<()> {
             if !status.success() {
                 return Err(eyre::eyre!("`{render_bin}` exited with {status}"));
             }
-            let bytes_len = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+            let bytes_len = std::fs::metadata(&pdf_path).map(|m| m.len()).unwrap_or(0);
+
+            // Vault export: companion markdown stub at
+            // `Reports/Invoices/<num>.md` wikilinking the
+            // PDF. Skipped when caller passes --out.
+            if do_vault_export {
+                let md_path = vault_root
+                    .join("Reports")
+                    .join("Invoices")
+                    .join(format!("{}.md", build.invoice.number));
+                if let Some(parent) = md_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| eyre::eyre!("create {}: {e}", parent.display()))?;
+                }
+                let rel_pdf = format!("pdfs/{}.pdf", build.invoice.number);
+                let md = render_invoice_markdown(
+                    &build.invoice,
+                    &party,
+                    &rel_pdf,
+                    build.source_session_ids.len(),
+                );
+                std::fs::write(&md_path, md)
+                    .map_err(|e| eyre::eyre!("write {}: {e}", md_path.display()))?;
+                println!("Wrote {}", md_path.display());
+            }
             println!(
                 "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",
-                out.display(),
+                pdf_path.display(),
                 build.source_session_ids.len(),
                 fmt_minor(build.invoice.total_minor),
                 build.invoice.currency,
@@ -865,10 +1203,84 @@ fn fmt_minor(c: i64) -> String {
     )
 }
 
+/// Companion markdown stub for an invoice. Wikilinks the
+/// PDF (Obsidian-style `![[pdfs/INV-...pdf]]` embed) so a
+/// vault viewer can open the file inline. Frontmatter makes
+/// the page queryable in `Reports/Invoices/*.base`.
+fn render_invoice_markdown(
+    invoice: &finance_proto::invoice::Invoice,
+    party: &finance_proto::party::Party,
+    rel_pdf_path: &str,
+    session_count: usize,
+) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("type: invoice\n");
+    out.push_str(&format!("number: {}\n", invoice.number));
+    out.push_str(&format!("status: {:?}\n", invoice.status).to_lowercase());
+    out.push_str(&format!("issueDate: {}\n", invoice.issue_date));
+    out.push_str(&format!("dueDate: {}\n", invoice.due_date));
+    out.push_str(&format!("currency: {}\n", invoice.currency));
+    out.push_str(&format!("totalMinor: {}\n", invoice.total_minor));
+    out.push_str(&format!("balanceMinor: {}\n", invoice.balance_minor));
+    out.push_str(&format!("party: \"{}\"\n", party.display_name));
+    out.push_str(&format!("sessions: {session_count}\n"));
+    out.push_str(&format!("pdf: \"{rel_pdf_path}\"\n"));
+    out.push_str("tags: [invoice]\n");
+    out.push_str("---\n\n");
+    out.push_str(&format!("# Invoice {}\n\n", invoice.number));
+    out.push_str(&format!(
+        "**To:** {}  \n**Issued:** {}  \n**Due:** {}  \n**Total:** {} {}\n\n",
+        party.display_name,
+        invoice.issue_date,
+        invoice.due_date,
+        fmt_minor(invoice.total_minor),
+        invoice.currency,
+    ));
+    out.push_str("## PDF\n\n");
+    out.push_str(&format!("![[{rel_pdf_path}]]\n\n"));
+    out.push_str("## Line items\n\n");
+    out.push_str("| Description | Quantity | Unit price | Amount |\n");
+    out.push_str("|---|---:|---:|---:|\n");
+    for li in &invoice.line_items.0 {
+        let qty_hours = (li.quantity_milli as f64) / 1000.0;
+        out.push_str(&format!(
+            "| {} | {:.2} hr | {} | {} |\n",
+            li.description,
+            qty_hours,
+            fmt_minor(li.unit_price_minor),
+            fmt_minor(li.line_total_minor),
+        ));
+    }
+    out.push_str(&format!(
+        "\n**Subtotal:** {} {}  \n",
+        fmt_minor(invoice.subtotal_minor),
+        invoice.currency,
+    ));
+    if invoice.tax_total_minor != 0 {
+        out.push_str(&format!(
+            "**Tax:** {} {}  \n",
+            fmt_minor(invoice.tax_total_minor),
+            invoice.currency,
+        ));
+    }
+    out.push_str(&format!(
+        "**Total:** {} {}\n",
+        fmt_minor(invoice.total_minor),
+        invoice.currency,
+    ));
+    if !invoice.notes_public.is_empty() {
+        out.push_str(&format!("\n## Notes\n\n{}\n", invoice.notes_public));
+    }
+    out
+}
+
 async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
     use sea_orm::Database;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use sea_orm_migration::MigratorTrait;
     use std::sync::Arc;
+    use timer::entity::{TagColumn, TagEntity, WorkSessionTagColumn, WorkSessionTagEntity};
     use timer::store::{Store, VaultProjectDefaults};
     use timer_proto::service::{LogSessionRequest, StartTimerRequest, TimerService};
 
@@ -901,13 +1313,27 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
         |_| std::path::PathBuf::from("examples/vault"),
         std::path::PathBuf::from,
     );
-    let user_id = std::env::var("TASK_USER_ID")
-        .ok()
-        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+    // ID resolution order (first match wins):
+    //   1. `task auth login`-issued session.json
+    //   2. `TASK_USER_ID` / `TASK_ORG_ID` env vars
+    //   3. fixed dev nil-uuids — only useful for fresh setups
+    //      before architect-auth is wired
+    let stored_session = session_store::load().ok().flatten();
+    let session_user_id = stored_session.as_ref().map(|s| s.user_id);
+    let session_org_id = stored_session.as_ref().and_then(|s| s.org_id);
+    let user_id = session_user_id
+        .or_else(|| {
+            std::env::var("TASK_USER_ID")
+                .ok()
+                .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        })
         .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
-    let org_id = std::env::var("TASK_ORG_ID")
-        .ok()
-        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+    let org_id = session_org_id
+        .or_else(|| {
+            std::env::var("TASK_ORG_ID")
+                .ok()
+                .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        })
         .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap());
 
     let conn = Database::connect(&db_url)
@@ -926,6 +1352,7 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
             description,
             project,
             task_note,
+            tags,
         } => {
             let project_path = project_path_for(&vault_root, project);
             let session = store
@@ -939,12 +1366,16 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
                 })
                 .await
                 .map_err(|e| eyre::eyre!("start: {e}"))?;
+            attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
             println!("Started {} at {}", session.id, session.start_time);
             println!("  description: {}", session.description);
             if !session.project_path.is_empty() {
                 println!("  project:     {}", session.project_path);
             }
             println!("  billable:    {}", session.billable);
+            if !tags.is_empty() {
+                println!("  tags:        {}", tags.join(", "));
+            }
         }
         TimerCmd::Stop => {
             let session = store
@@ -994,6 +1425,7 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
             description,
             project,
             task_note,
+            tags,
         } => {
             let project_path = project_path_for(&vault_root, project);
             let (closed, started) = store
@@ -1007,6 +1439,7 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
                 })
                 .await
                 .map_err(|e| eyre::eyre!("switch: {e}"))?;
+            attach_tags_by_name(store.conn(), org_id, started.id, &tags).await?;
             if let Some(prev) = closed {
                 let elapsed = prev
                     .end_time
@@ -1015,6 +1448,9 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
                 println!("Stopped {} after {}", prev.id, fmt_duration(elapsed));
             }
             println!("Started {} at {}", started.id, started.start_time);
+            if !tags.is_empty() {
+                println!("  tags: {}", tags.join(", "));
+            }
         }
         TimerCmd::Log {
             description,
@@ -1023,6 +1459,7 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
             project,
             task_note,
             billable,
+            tags,
         } => {
             let project_path = project_path_for(&vault_root, project);
             let session = store
@@ -1039,6 +1476,7 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
                 })
                 .await
                 .map_err(|e| eyre::eyre!("log: {e}"))?;
+            attach_tags_by_name(store.conn(), org_id, session.id, &tags).await?;
             println!("Logged {} ({})", session.id, fmt_duration(to - from));
         }
         TimerCmd::List {
@@ -1103,6 +1541,150 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
                 resolved.source,
             );
         }
+        TimerCmd::Tag(sub) => match sub {
+            TimerTagCmd::List => {
+                let rows = TagEntity::find()
+                    .filter(TagColumn::OrgId.eq(org_id))
+                    .all(store.conn())
+                    .await
+                    .map_err(|e| eyre::eyre!("list tags: {e}"))?;
+                if rows.is_empty() {
+                    println!("(no tags)");
+                }
+                for t in rows {
+                    let color = if t.color.is_empty() {
+                        "(auto)"
+                    } else {
+                        t.color.as_str()
+                    };
+                    println!("{}  {}  {}", t.id, t.name, color);
+                }
+            }
+            TimerTagCmd::Create { name, color } => {
+                let tag = ensure_tag(store.conn(), org_id, &name, &color).await?;
+                println!("{}  {}", tag.id, tag.name);
+            }
+            TimerTagCmd::Rm { name } => {
+                let existing = TagEntity::find()
+                    .filter(TagColumn::OrgId.eq(org_id))
+                    .filter(TagColumn::Name.eq(name.clone()))
+                    .one(store.conn())
+                    .await
+                    .map_err(|e| eyre::eyre!("find tag: {e}"))?;
+                let Some(tag) = existing else {
+                    return Err(eyre::eyre!("no such tag: {name}"));
+                };
+                TagEntity::delete_by_id(tag.id)
+                    .exec(store.conn())
+                    .await
+                    .map_err(|e| eyre::eyre!("delete tag: {e}"))?;
+                println!("Deleted tag {} ({})", tag.name, tag.id);
+            }
+            TimerTagCmd::Attach { session_id, tags } => {
+                attach_tags_by_name(store.conn(), org_id, session_id, &tags).await?;
+                println!("Attached {} to {session_id}", tags.join(", "));
+            }
+            TimerTagCmd::Detach {
+                session_id,
+                tags,
+                all,
+            } => {
+                if all {
+                    WorkSessionTagEntity::delete_many()
+                        .filter(WorkSessionTagColumn::WorkSessionId.eq(session_id))
+                        .exec(store.conn())
+                        .await
+                        .map_err(|e| eyre::eyre!("detach all: {e}"))?;
+                    println!("Detached all tags from {session_id}");
+                } else if tags.is_empty() {
+                    return Err(eyre::eyre!("pass --tag <name> or --all"));
+                } else {
+                    let tag_rows = TagEntity::find()
+                        .filter(TagColumn::OrgId.eq(org_id))
+                        .filter(TagColumn::Name.is_in(tags.clone()))
+                        .all(store.conn())
+                        .await
+                        .map_err(|e| eyre::eyre!("lookup tags: {e}"))?;
+                    let ids: Vec<uuid::Uuid> = tag_rows.iter().map(|t| t.id).collect();
+                    if ids.is_empty() {
+                        return Err(eyre::eyre!("no matching tags"));
+                    }
+                    WorkSessionTagEntity::delete_many()
+                        .filter(WorkSessionTagColumn::WorkSessionId.eq(session_id))
+                        .filter(WorkSessionTagColumn::TagId.is_in(ids))
+                        .exec(store.conn())
+                        .await
+                        .map_err(|e| eyre::eyre!("detach: {e}"))?;
+                    println!("Detached {} from {session_id}", tags.join(", "));
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
+/// Idempotent tag upsert by `(org_id, name)`. Returns the
+/// existing or freshly inserted row.
+async fn ensure_tag(
+    conn: &sea_orm::DatabaseConnection,
+    org_id: uuid::Uuid,
+    name: &str,
+    color: &str,
+) -> eyre::Result<timer::entity::TagModel> {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    if let Some(existing) = timer::entity::TagEntity::find()
+        .filter(timer::entity::TagColumn::OrgId.eq(org_id))
+        .filter(timer::entity::TagColumn::Name.eq(name.to_string()))
+        .one(conn)
+        .await
+        .map_err(|e| eyre::eyre!("find tag: {e}"))?
+    {
+        return Ok(existing);
+    }
+    let now = chrono::Utc::now();
+    let am = timer::entity::TagActive {
+        id: Set(uuid::Uuid::new_v4()),
+        org_id: Set(org_id),
+        name: Set(name.to_string()),
+        color: Set(color.to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    am.insert(conn)
+        .await
+        .map_err(|e| eyre::eyre!("insert tag: {e}"))
+}
+
+/// Ensure each tag in `names` exists in `org_id` and attach
+/// it to `session_id`. Already-attached pairs are skipped
+/// (uniqueness index guards the join).
+async fn attach_tags_by_name(
+    conn: &sea_orm::DatabaseConnection,
+    org_id: uuid::Uuid,
+    session_id: uuid::Uuid,
+    names: &[String],
+) -> eyre::Result<()> {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+    for name in names {
+        let tag = ensure_tag(conn, org_id, name, "").await?;
+        let already = timer::entity::WorkSessionTagEntity::find()
+            .filter(timer::entity::WorkSessionTagColumn::WorkSessionId.eq(session_id))
+            .filter(timer::entity::WorkSessionTagColumn::TagId.eq(tag.id))
+            .one(conn)
+            .await
+            .map_err(|e| eyre::eyre!("check join: {e}"))?;
+        if already.is_some() {
+            continue;
+        }
+        let am = timer::entity::WorkSessionTagActive {
+            id: Set(uuid::Uuid::new_v4()),
+            work_session_id: Set(session_id),
+            tag_id: Set(tag.id),
+            created_at: Set(chrono::Utc::now()),
+        };
+        am.insert(conn)
+            .await
+            .map_err(|e| eyre::eyre!("insert join: {e}"))?;
     }
     Ok(())
 }

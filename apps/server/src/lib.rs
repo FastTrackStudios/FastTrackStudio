@@ -95,6 +95,15 @@ pub struct AppState {
     /// defaults are read from the same vault root as
     /// `vault_sync`, so the rate cascade resolves on disk.
     pub timer: timer::Store,
+    /// Finance DB connection — SQLite at
+    /// `$XDG_DATA_HOME/task-server/finance.sqlite`. Migrations
+    /// run on boot. Holds the architect-emitted entity
+    /// tables (books, accounts, transactions, parties,
+    /// invoices, payments, expenses, recurring schedules,
+    /// tax rates). Service traits (Ledger / Invoicing) are
+    /// NOT mounted yet — that needs the SeaORM-backed impls
+    /// which land in a follow-up PR.
+    pub finance_conn: sea_orm::DatabaseConnection,
 }
 
 impl AppState {
@@ -187,6 +196,27 @@ impl AppState {
         });
         let timer = timer::Store::new(timer_conn, timer_defaults);
 
+        // Finance store. SQLite at
+        // `$XDG_DATA_HOME/task-server/finance.sqlite`
+        // (override via `TASK_SERVER_FINANCE_URL`). Services
+        // (Invoicing / Ledger) are not mounted yet — only
+        // the migrated DB connection is exposed; the
+        // task-cli `finance invoice` flow writes against it
+        // when that feature lands.
+        let finance_url = std::env::var("TASK_SERVER_FINANCE_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                default_finance_db_path()
+                    .map_or_else(|_| ":memory:".into(), |p| p.display().to_string())
+            )
+        });
+        let finance_conn = Database::connect(&finance_url)
+            .await
+            .map_err(|e| eyre::eyre!("connect finance db `{finance_url}`: {e}"))?;
+        finance_db::Migrator::up(&finance_conn, None)
+            .await
+            .map_err(|e| eyre::eyre!("finance migrations: {e}"))?;
+
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
@@ -221,8 +251,25 @@ impl AppState {
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
             timer,
+            finance_conn,
         })
     }
+}
+
+/// Resolve `$XDG_DATA_HOME/task-server/finance.sqlite`. Mirror
+/// of [`default_agent_tasks_db_path`] / [`default_timer_db_path`].
+pub fn default_finance_db_path() -> eyre::Result<PathBuf> {
+    let base = match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => PathBuf::from(v),
+        _ => {
+            let home = std::env::var("HOME")
+                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
+            PathBuf::from(home).join(".local").join("share")
+        }
+    };
+    let dir = base.join("task-server");
+    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("finance.sqlite"))
 }
 
 /// Resolve `$XDG_DATA_HOME/task-server/timer.sqlite`. Mirror
