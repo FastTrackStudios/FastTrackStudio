@@ -47,21 +47,39 @@ static VAULT: std::sync::RwLock<Option<(vault::Vault, vault::BlockIndex)>> =
 
 #[cfg(not(target_arch = "wasm32"))]
 fn init_vault() {
-    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
-        return;
-    };
-    // Prefer the Observatory if it exists (8k-page real
-    // vault, useful for actually using the playground);
-    // fall back to the demo vault at `~/Documents/Task/`
-    // (created by `make_example_vault` when the user runs
-    // the playground for the first time).
-    let candidates = [
-        home.join("Documents/Task"),
-        home.join("Documents/The Observatory"),
-    ];
+    // Resolution order:
+    //   1. `TASK_VAULT_ROOT` env var — explicit override (CI,
+    //      switching between vaults for one run).
+    //   2. `examples/vault/` in-repo — the small fixture that
+    //      ships with Task. Always present after a fresh clone
+    //      so the playground has working cross-doc resolution
+    //      even before the user has set anything up.
+    //   3. `~/Documents/Task` — legacy default, kept for
+    //      backwards compat with existing demo setups.
+    //   4. `~/Documents/The Observatory` — the 8k-page real
+    //      vault some of us dogfood against locally.
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(explicit) = std::env::var_os("TASK_VAULT_ROOT") {
+        candidates.push(std::path::PathBuf::from(explicit));
+    }
+    // `CARGO_MANIFEST_DIR` of the playground is
+    // `features/editor/examples/playground/`; the in-repo vault
+    // is four levels up.
+    let crate_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(
+        crate_root
+            .ancestors()
+            .nth(3)
+            .map(|p| p.join("examples/vault"))
+            .unwrap_or_else(|| crate_root.join("../../../../examples/vault")),
+    );
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        candidates.push(home.join("Documents/Task"));
+        candidates.push(home.join("Documents/The Observatory"));
+    }
     let root = candidates.into_iter().find(|p| p.exists());
     let Some(root) = root else {
-        tracing::info!("no vault under ~/Documents — skipping");
+        tracing::info!("no vault candidate exists — skipping");
         return;
     };
     if let Err(e) = reload_vault(&root) {
