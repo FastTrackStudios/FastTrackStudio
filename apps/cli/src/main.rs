@@ -105,6 +105,88 @@ enum WikiCmd {
         #[arg(long)]
         json: bool,
     },
+    /// One-shot wiki health snapshot — queue depth, open
+    /// findings, source count, last ingest/rescan.
+    Health {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+    },
+    /// Recursively import a directory of files into
+    /// `Wiki/raw/sources/`. Doesn't enqueue ingest tasks —
+    /// follow with `task wiki rescan` to do that.
+    Import {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Directory to walk.
+        #[arg(short, long)]
+        dir: std::path::PathBuf,
+        /// Flatten (drop subdirectory structure).
+        #[arg(long)]
+        flatten: bool,
+        /// Extensions to include (comma-separated, no dot).
+        /// Default: `md,txt,pdf`.
+        #[arg(long, default_value = "md,txt,pdf")]
+        ext: String,
+    },
+    /// Walk `Wiki/raw/sources/`, diff against the
+    /// `snapshot.json`, and report new/modified/deleted
+    /// files. Doesn't enqueue (yet) — pass `--enqueue` to
+    /// also push diffs into the ingest queue.
+    Rescan {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        #[arg(long)]
+        enqueue: bool,
+    },
+    /// Run one semantic lint pass via the LLM. Persists
+    /// new findings under `Wiki/_state/lint_findings.json`.
+    Lint {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        #[arg(short, long)]
+        model: Option<String>,
+        #[arg(long, default_value_t = 180)]
+        timeout_secs: u64,
+        #[arg(long, default_value = "English")]
+        language: String,
+    },
+    /// List open lint findings.
+    Findings {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+    },
+    /// Detect duplicate pages via the LLM. Prints groups;
+    /// pass `--merge <slug-csv>` to merge one (writes via
+    /// `record_pages`).
+    Dedup {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        #[arg(short, long)]
+        model: Option<String>,
+        #[arg(long, default_value_t = 180)]
+        timeout_secs: u64,
+    },
+    /// Propose a research plan for a knowledge gap (output
+    /// of `task wiki gaps`).
+    Research {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Gap kind (`Orphan`, `MissingPage`, `SparseCluster`, `Bridge`).
+        #[arg(long, default_value = "MissingPage")]
+        gap_kind: String,
+        /// Short gap title.
+        #[arg(long)]
+        gap_title: String,
+        /// Gap description.
+        #[arg(long, default_value = "")]
+        gap_description: String,
+        #[arg(short, long)]
+        model: Option<String>,
+        #[arg(long, default_value_t = 120)]
+        timeout_secs: u64,
+        #[arg(long, default_value = "English")]
+        language: String,
+    },
     /// Ingest one source file into `<vault>/Wiki/` via the
     /// two-step CoT pipeline (analyze → generate). Drops
     /// the source under `Wiki/raw/sources/`, runs the
@@ -501,6 +583,202 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                 for g in &gaps {
                     println!("  [{:?}] {}", g.kind, g.explanation);
                 }
+            }
+            return Ok(());
+        }
+        WikiCmd::Health { vault } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            let h = wiki.health().map_err(|e| eyre::eyre!("health: {e}"))?;
+            println!("bootstrapped:    {}", h.bootstrap_done);
+            println!("schema_present:  {}", h.schema_present);
+            println!("purpose_present: {}", h.purpose_present);
+            println!("pages:           {}", h.page_count);
+            println!("sources:         {}", h.source_count);
+            println!("queue_depth:     {}", h.queue_depth);
+            println!("queue_failed:    {}", h.queue_failed);
+            if let Some(t) = h.last_ingest_at {
+                println!("last_ingest_at:  {t}");
+            }
+            if let Some(t) = h.last_rescan_at {
+                println!("last_rescan_at:  {t}");
+            }
+            return Ok(());
+        }
+        WikiCmd::Import {
+            vault,
+            dir,
+            flatten,
+            ext,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            wiki.bootstrap()
+                .map_err(|e| eyre::eyre!("bootstrap: {e}"))?;
+            let opts = wiki_live::ImportFolderOpts {
+                preserve_structure: !flatten,
+                include_exts: ext.split(',').map(|s| s.trim().to_lowercase()).collect(),
+                exclude_substrings: vec![".git/".into(), "node_modules/".into(), "target/".into()],
+            };
+            let refs = wiki
+                .import_folder(&dir, opts)
+                .map_err(|e| eyre::eyre!("import_folder: {e}"))?;
+            println!("Imported {} file(s) from {}", refs.len(), dir.display());
+            for r in refs.iter().take(40) {
+                println!("  {} ({} bytes)", r.path, r.size);
+            }
+            if refs.len() > 40 {
+                println!("  … {} more", refs.len() - 40);
+            }
+            return Ok(());
+        }
+        WikiCmd::Rescan { vault, enqueue } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            let diff = wiki
+                .rescan_sources()
+                .map_err(|e| eyre::eyre!("rescan: {e}"))?;
+            println!(
+                "created={} modified={} deleted={}",
+                diff.created.len(),
+                diff.modified.len(),
+                diff.deleted.len()
+            );
+            for c in &diff.created {
+                println!("  + {c}");
+            }
+            for m in &diff.modified {
+                println!("  ~ {m}");
+            }
+            for d in &diff.deleted {
+                println!("  - {d}");
+            }
+            if enqueue {
+                let mut count = 0;
+                for c in diff.created.iter().chain(diff.modified.iter()) {
+                    let abs = wiki.wiki_root().join(c);
+                    let bytes = std::fs::read(&abs)?;
+                    let kind = if diff.created.contains(c) {
+                        wiki_live::queue::SourceChange::Created
+                    } else {
+                        wiki_live::queue::SourceChange::Modified
+                    };
+                    wiki.enqueue_ingest(c, kind, &bytes)
+                        .map_err(|e| eyre::eyre!("enqueue {c}: {e}"))?;
+                    count += 1;
+                }
+                println!("enqueued {count} ingest task(s)");
+            }
+            return Ok(());
+        }
+        WikiCmd::Lint {
+            vault,
+            model,
+            timeout_secs,
+            language,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            wiki.bootstrap()
+                .map_err(|e| eyre::eyre!("bootstrap: {e}"))?;
+            let backend = agent_codex::CodexBackend::new();
+            let req = agent_wiki::bridge::LintRequest {
+                model,
+                timeout: Duration::from_secs(timeout_secs),
+                language,
+            };
+            let raised = agent_wiki::bridge::run_lint(&backend, &wiki, req)
+                .await
+                .map_err(|e| eyre::eyre!("lint: {e}"))?;
+            println!("New findings: {}", raised.len());
+            for f in &raised {
+                println!("  [{:?} {:?}] {}", f.kind, f.severity, f.title);
+            }
+            return Ok(());
+        }
+        WikiCmd::Findings { vault } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            let open = wiki
+                .list_findings(Some(wiki_live::FindingStatus::Open))
+                .map_err(|e| eyre::eyre!("list_findings: {e}"))?;
+            println!("Open findings: {}", open.len());
+            for f in &open {
+                println!("  {}  [{:?} {:?}] {}", f.id, f.kind, f.severity, f.title);
+                if !f.pages.is_empty() {
+                    println!("      pages: {}", f.pages.join(", "));
+                }
+            }
+            return Ok(());
+        }
+        WikiCmd::Dedup {
+            vault,
+            model,
+            timeout_secs,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            let backend = agent_codex::CodexBackend::new();
+            let groups = agent_wiki::bridge::run_dedup_detect(
+                &backend,
+                &wiki,
+                model,
+                Duration::from_secs(timeout_secs),
+            )
+            .await
+            .map_err(|e| eyre::eyre!("dedup_detect: {e}"))?;
+            println!("Dedup groups: {}", groups.len());
+            for g in &groups {
+                println!(
+                    "  [{:?}] {} — {}",
+                    g.confidence,
+                    g.slugs.join(", "),
+                    g.reason
+                );
+            }
+            return Ok(());
+        }
+        WikiCmd::Research {
+            vault,
+            gap_kind,
+            gap_title,
+            gap_description,
+            model,
+            timeout_secs,
+            language,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            let backend = agent_codex::CodexBackend::new();
+            let plan = agent_wiki::bridge::run_propose_research(
+                &backend,
+                &wiki,
+                &gap_kind,
+                &gap_title,
+                &gap_description,
+                model,
+                Duration::from_secs(timeout_secs),
+                &language,
+            )
+            .await
+            .map_err(|e| eyre::eyre!("propose_research: {e}"))?;
+            println!("TOPIC: {}", plan.topic);
+            for q in &plan.queries {
+                println!("QUERY: {q}");
             }
             return Ok(());
         }
