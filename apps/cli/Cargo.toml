@@ -19,8 +19,11 @@ uuid.workspace = true
 # `task-cli vault …` subcommands operate on a filesystem vault
 # via vault-obsidian's parsed helpers (outline / tasks / props /
 # base-query) and vault-live's wire types (refs::Ref, bases::*).
+vault.workspace = true
 vault-live = { workspace = true }
 vault-obsidian = { workspace = true }
+# `task-cli task …` subcommands — first-party task feature.
+task.workspace = true
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }

@@ -88,6 +88,11 @@ publish-core = { path = "crates/legacy/publish-core" }
 editor-outliner = { path = "crates/legacy/editor-outliner" }
 
 vault-obsidian = { path = "features/vault/vault-obsidian" }
+# First-party task feature. Tasks = markdown pages with
+# TaskNotes-shape frontmatter (mirrors callumalpass/tasknotes
+# so existing vaults round-trip without conversion). Lives at
+# `features/task/task/`.
+task = { path = "features/task/task" }
 # File-backed vault layer. Modeled on `vault-obsidian` (clean
 # small modules, native-only `cfg`, walker / watcher / mutate)
 # but adds block-id awareness: a `BlockIndex` maps every

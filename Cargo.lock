@@ -10240,6 +10240,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
+name = "task"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "facet",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "vault",
+]
+
+[[package]]
 name = "task-app-desktop"
 version = "0.1.0"
 dependencies = [
@@ -10274,9 +10290,11 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "task",
  "tokio",
  "tracing",
  "uuid",
+ "vault",
  "vault-live",
  "vault-obsidian",
  "vox 0.3.1",

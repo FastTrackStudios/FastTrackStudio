@@ -54,19 +54,66 @@ enum Commands {
     /// Probe the configured vox endpoint.
     Doctor,
     /// FS-native vault queries — no server, no CRDT.
-    /// Operates directly on `.md` and `.base` files. Mirrors the
-    /// Obsidian-CLI / TaskNotes-CLI surface for shell scripting.
     Vault {
         #[command(subcommand)]
         cmd: VaultCmd,
     },
+    /// First-party task management. Tasks are markdown pages
+    /// with TaskNotes-shape frontmatter (mirrors
+    /// callumalpass/tasknotes). Files live at
+    /// `<vault>/tasks/<slug>.md` by default.
+    #[command(subcommand)]
+    Task(TaskCmd),
 }
 
-// Task / project commands (`list`, `set-done`, `new-task`,
-// `new-project`) were ripped when the CRDT entity layer went
-// away. Rebuild them in a follow-up slice against vault::Vault
-// — tasks become markdown pages with `type: task` frontmatter,
-// projects become folders.
+#[derive(Subcommand)]
+enum TaskCmd {
+    /// Create a new task from a natural-language line. Extracts
+    /// `#tag`s, `@context`s, `[[Project]]`s, `!priority`, and
+    /// date keywords (`today`, `tomorrow`, `next monday`, `mon`,
+    /// `YYYY-MM-DD`). Title = the remaining text.
+    ///
+    /// Examples:
+    ///   task task capture "Buy milk tomorrow #errands @shopping"
+    ///   task task capture "Ship vault-graph !high next friday"
+    Capture {
+        /// The task line. Quote the whole thing.
+        text: String,
+        /// Vault root. Defaults to `examples/vault`.
+        #[arg(long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Override folder. Default: `tasks/`.
+        #[arg(long)]
+        folder: Option<String>,
+    },
+    /// List tasks in the vault. Filters compose (AND).
+    List {
+        #[arg(long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Restrict to one status (e.g. `open`, `done`).
+        #[arg(long)]
+        status: Option<String>,
+        /// Restrict to tasks with this tag (without `#`).
+        #[arg(long)]
+        tag: Option<String>,
+        /// Restrict to tasks with this context (with or without `@`).
+        #[arg(long)]
+        context: Option<String>,
+    },
+    /// Mark a task done. Sets `status: done` and `completedDate`
+    /// to today. `task_id` matches a unique basename prefix.
+    Done {
+        /// Task identifier — basename, prefix, or full
+        /// `tasks/foo.md` path.
+        task_id: String,
+        #[arg(long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Re-open the task (clear `completedDate`, set status
+        /// to `open`).
+        #[arg(long)]
+        undo: bool,
+    },
+}
 
 #[derive(Subcommand)]
 enum VaultCmd {
@@ -223,6 +270,148 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Vault { cmd } => {
             return run_vault(cmd);
+        }
+        Commands::Task(cmd) => {
+            return run_task(cmd);
+        }
+    }
+    Ok(())
+}
+
+fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
+    match cmd {
+        TaskCmd::Capture {
+            text,
+            vault,
+            folder,
+        } => {
+            let mut info = task::capture(&text);
+            info.path = task::write::default_task_path(&info.title, folder.as_deref());
+            let abs = task::write_task(&vault, &mut info, false)
+                .map_err(|e| eyre::eyre!("write task: {e}"))?;
+            println!("Created {}", abs.display());
+            println!("  title:    {}", info.title);
+            println!("  status:   {}", info.status);
+            println!("  priority: {}", info.priority);
+            if let Some(d) = &info.due {
+                println!("  due:      {d}");
+            }
+            if !info.tags.is_empty() {
+                println!("  tags:     {}", info.tags.join(", "));
+            }
+            if !info.contexts.is_empty() {
+                println!("  contexts: {}", info.contexts.join(", "));
+            }
+            if !info.projects.is_empty() {
+                println!("  projects: {}", info.projects.join(", "));
+            }
+        }
+        TaskCmd::List {
+            vault,
+            status,
+            tag,
+            context,
+        } => {
+            let v = vault::Vault::open(&vault).map_err(|e| eyre::eyre!("open: {e}"))?;
+            let ctx_filter = context.map(|c| {
+                if c.starts_with('@') {
+                    c
+                } else {
+                    format!("@{c}")
+                }
+            });
+            let mut tasks: Vec<_> = task::scan_vault(&v)
+                .into_iter()
+                .filter(|t| {
+                    status
+                        .as_deref()
+                        .is_none_or(|s| t.status.eq_ignore_ascii_case(s))
+                })
+                .filter(|t| {
+                    tag.as_deref()
+                        .is_none_or(|tg| t.tags.iter().any(|x| x == tg))
+                })
+                .filter(|t| {
+                    ctx_filter
+                        .as_deref()
+                        .is_none_or(|c| t.contexts.iter().any(|x| x == c))
+                })
+                .collect();
+            tasks.sort_by(|a, b| {
+                // Open before done; then by due date ascending
+                // (None last); then by title.
+                let a_done = task::Status::from_str(&a.status).is_some_and(|s| s.is_done());
+                let b_done = task::Status::from_str(&b.status).is_some_and(|s| s.is_done());
+                a_done
+                    .cmp(&b_done)
+                    .then_with(|| a.due.is_none().cmp(&b.due.is_none()))
+                    .then_with(|| a.due.cmp(&b.due))
+                    .then_with(|| a.title.cmp(&b.title))
+            });
+            if tasks.is_empty() {
+                println!("(no tasks)");
+                return Ok(());
+            }
+            for t in &tasks {
+                let marker = if task::Status::from_str(&t.status).is_some_and(|s| s.is_done()) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                let due = t
+                    .due
+                    .as_deref()
+                    .map(|d| format!(" (due {d})"))
+                    .unwrap_or_default();
+                let prio = match t.priority.as_str() {
+                    "critical" => " !!",
+                    "high" => " !",
+                    _ => "",
+                };
+                println!("{marker} {}{prio}{due}    {}", t.title, t.path);
+            }
+        }
+        TaskCmd::Done {
+            task_id,
+            vault,
+            undo,
+        } => {
+            let v = vault::Vault::open(&vault).map_err(|e| eyre::eyre!("open: {e}"))?;
+            let tasks = task::scan_vault(&v);
+            let needle = task_id.trim_end_matches(".md").to_ascii_lowercase();
+            let matches: Vec<_> = tasks
+                .iter()
+                .filter(|t| {
+                    t.path.eq_ignore_ascii_case(&task_id)
+                        || std::path::Path::new(&t.path)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.to_ascii_lowercase().starts_with(&needle))
+                            .unwrap_or(false)
+                })
+                .collect();
+            let matched = match matches.as_slice() {
+                [] => return Err(eyre::eyre!("no task matched {task_id:?}")),
+                [t] => *t,
+                multi => {
+                    return Err(eyre::eyre!(
+                        "{} tasks matched {task_id:?} (be more specific)",
+                        multi.len()
+                    ));
+                }
+            };
+            let mut info = matched.clone();
+            if undo {
+                info.status = "open".into();
+                info.completed_date = None;
+            } else {
+                info.status = "done".into();
+                info.completed_date = Some(chrono::Local::now().date_naive());
+            }
+            task::write_task(&vault, &mut info, true)
+                .map_err(|e| eyre::eyre!("write task: {e}"))?;
+            let verb = if undo { "Reopened" } else { "Done" };
+            println!("{verb} {}    {}", info.title, info.path);
         }
     }
     Ok(())

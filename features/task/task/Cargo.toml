@@ -1,0 +1,26 @@
+[package]
+name = "task"
+description = "First-party task feature for Task: TaskInfo schema, frontmatter parser/writer, NLP capture. Tasks are markdown pages in a `vault::Vault` with YAML frontmatter; the schema mirrors callumalpass/tasknotes so existing Obsidian TaskNotes vaults round-trip without conversion."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { workspace = true, features = ["clock", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+indexmap = { workspace = true }
+facet = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# `task::open_vault` returns a `vault::Vault`; the scanner walks
+# its pages looking for the task discriminator (`tags: [..., task]`
+# or `type: task`).
+vault.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
