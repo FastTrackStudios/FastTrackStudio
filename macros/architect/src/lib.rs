@@ -240,10 +240,11 @@ pub mod dispatch {
     //!
     //! See [`Dispatcher`] for the contract. Consumers typically pick a
     //! pre-built dispatcher per binary — `tokio` server binaries reach
-    //! for [`TokioBlockingDispatcher`]; tests and pure in-process
-    //! callers reach for [`CurrentThreadDispatcher`]; runtime-specific
-    //! dispatchers (moiré main-thread queue, REAPER defer queue) live
-    //! in their own crates.
+    //! for `TokioBlockingDispatcher` (gated on the `dispatch-tokio`
+    //! feature); tests and pure in-process callers reach for
+    //! [`CurrentThreadDispatcher`];
+    //! runtime-specific dispatchers (moiré main-thread queue, REAPER
+    //! defer queue) live in their own crates.
 
     use core::future::Future;
     use core::pin::Pin;

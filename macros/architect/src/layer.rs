@@ -82,7 +82,7 @@
 //!
 //! 4. **HTTP / WebSocket via axum.** Enable `architect`'s
 //!    `server-axum` feature and wrap the same router with
-//!    [`architect::axum_ws::serve`]. Browser clients use the same
+//!    [`crate::axum_ws::serve`]. Browser clients use the same
 //!    `<T>Client` types compiled for wasm.
 //!
 //! See `examples/layered-services/` for a runnable composition
@@ -373,8 +373,9 @@ pub trait Layer<B>: Bind<B> + Descriptors + Sized {
     /// On duplicate method IDs the **last merged** handler wins —
     /// that's how overrides and mocks compose.
     ///
-    /// To compose two cons-chained sub-bundles, use the [`layers!`]
-    /// macro instead — it concatenates via [`Append`] internally.
+    /// To compose two cons-chained sub-bundles, use the
+    /// [`crate::layers!`] macro instead — it concatenates via
+    /// [`Append`] internally.
     fn merge<M>(self, m: M) -> Cons<Mounted, Self>
     where
         M: Into<Mounted>,
