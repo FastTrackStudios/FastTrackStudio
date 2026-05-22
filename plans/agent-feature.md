@@ -35,14 +35,17 @@ implementation varies. UIs and CLIs depend only on the trait.
 features/agent/
 ├── agent-proto/   ✅ shipped — wire contract
 ├── agent-wiki/    ✅ shipped — wiki bindings (prompts + parsers)
-├── agent-task/    ⏳ future — task/kanban bindings
+├── agent-codex/   ⏳ next — Codex backend (vendor CodexMonitor's app_server.rs)
 ├── agent-hermes/  ⏳ future — in-process Hermes backend
-├── agent-codex/   ⏳ future — Codex CLI monitor backend
-├── agent-claude-cli/ ⏳ future — claude CLI bridge backend
+├── agent-task/    ⏳ future — task/kanban bindings
 ├── agent-cli/     ⏳ future — `task agent ...` CLI subcommands
 ├── agent-ui/      ⏳ future — Dioxus chat + kanban + diff viewer
 └── agent/         ⏳ future — facade re-export
 ```
+
+> Dropped: `agent-claude-cli`. Claude usage on Task happens
+> through the user's editor / CLI, not as an in-app agent
+> backend. If that changes later, add it back.
 
 ## Shipped: `agent-proto`
 
@@ -91,44 +94,91 @@ llm_wiki + parser signatures.
 
 `agent-proto` + `agent-wiki` compile cleanly.
 
-### 2. `agent-codex` (read-only first)
+### 2. `agent-codex` — first concrete backend
 
-Easiest backend — read-only monitor over `~/.codex/`
-session logs. No turn dispatch; `dispatch_turn` returns
-`Unsupported`. Validates the proto by re-rendering existing
-Codex sessions in a Task UI.
+CodexMonitor already ships **1388 lines of working Rust**
+that drive `codex app-server` (the official Codex daemon)
+over JSON-RPC stdio. See
+`~/Development/research/CodexMonitor/src-tauri/src/backend/app_server.rs`.
 
-### 3. `agent-claude-cli` (bridge)
+Plan:
 
-Spawns `claude` CLI per turn, parses stdout into
-`AgentEvent`. Supports `dispatch_turn` end-to-end.
+1. Vendor `app_server.rs` + `events.rs` under
+   `features/agent/agent-codex/vendor/` (subtree-style; keep
+   upstream attribution).
+2. Write `agent-codex/src/lib.rs` that implements
+   `agent_proto::AgentService` by:
+   - mapping `AgentBackend::kind = ExternalMonitor` ↔
+     `CliBridge` (Codex supports both modes — read-only logs
+     + active subprocess dispatch).
+   - translating CodexMonitor's `AppServerEvent` →
+     `agent_proto::AgentEvent`.
+   - translating CodexMonitor's `WorkspaceInfo` →
+     `agent_proto::Project`, `ThreadSummary` → `Session`,
+     `ConversationItem` (8-variant union) → `Message` +
+     `ToolCall` + `ReasoningBlock` + `Approval` +
+     `QuestionRequest`.
+3. `dispatch_turn` works end-to-end (spawn or attach to
+   `codex app-server`, send a `start_thread` RPC, stream the
+   response events).
+4. `import_external_session` reads a Codex log file and
+   materializes a `Session` + messages without spawning the
+   daemon — useful for archived sessions.
+
+Once shipped, this is the first usable agent backend and
+gives us the surface to validate `agent-wiki`'s ingest /
+lint / dedup flows end-to-end. **The wiki feature reaches
+full llm_wiki parity at the end of this slice** — agent
+loops are real, prompts are real, output parsing is real.
+
+### 3. `agent-wiki` parser bodies + bridge wiring
+
+With Codex driving real agent loops, port the strict
+parsers from llm_wiki's TypeScript:
+
+- `parse_ingest_blocks` — `---FILE:` / `---REVIEW:` block
+  parser; the response is dropped if the first character
+  isn't `-`.
+- `parse_lint_blocks` — `---LINT: type | severity | title---`
+  blocks.
+- `parse_dedup_groups`, `parse_sweep_resolved` — strict JSON
+  (no markdown fences).
+- `parse_research_plan` — exactly-4-line `TOPIC:` + `QUERY:`
+  format.
+
+Then wire `bridge::run_ingest` / `run_lint` /
+`run_propose_research` / `run_sweep_reviews` /
+`run_dedup_*` so a single function call drives one full
+pipeline. **At the end of this slice, Task has llm_wiki
+parity** — same prompts, same parsers, same flows, against
+the same `Wiki/raw/sources/` shape.
 
 ### 4. `agent-hermes` (in-process)
 
-The big one. Embeds Hermes Rust SDK (when available) or
-shells out to the Python Hermes runtime. Streams events via
-`subscribe_session`. Owns approvals + questions + kanban.
+The big one. Embeds Hermes runtime (Rust SDK when
+available; shell out to the Python entrypoint as fallback).
+Streams events via `subscribe_session`. Owns approvals +
+questions + kanban end-to-end.
 
-### 5. `agent-wiki` parser bodies
+This is where personalities, MCP servers, multi-profile
+support, composer drafts, and the run-journal SSE replay
+all live. After this slice, Task can act as a full Hermes
+WebUI replacement (single-user).
 
-Fill in `parse_ingest_blocks`, `parse_lint_blocks`,
-`parse_dedup_groups`, `parse_research_plan`,
-`parse_sweep_resolved`. Wire `bridge::run_*` helpers.
-
-### 6. `agent-cli` (`task agent ...`)
+### 5. `agent-cli` (`task agent ...`)
 
 CLI surface — `task agent session list`,
 `task agent dispatch <msg>`, `task agent kanban list`,
 `task agent ingest <source-path>` (delegates to
 `agent_wiki::bridge::run_ingest`).
 
-### 7. `agent-ui` (Dioxus)
+### 6. `agent-ui` (Dioxus)
 
 Chat view, kanban board, diff viewer for tool changes,
 approval dialog, session sidebar. Uses
 `subscribe_session` for live updates.
 
-### 8. `agent-task` (binding)
+### 7. `agent-task` (binding)
 
 Sister to `agent-wiki` — drives the future task feature's
 proto from agent loops. Same shape: prompt templates +
