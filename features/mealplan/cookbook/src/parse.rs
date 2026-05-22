@@ -39,8 +39,7 @@ pub fn parse_cook_at(
     let name = parsed
         .metadata
         .title()
-        .map(str::to_string)
-        .unwrap_or_else(|| basename_of(path));
+        .map_or_else(|| basename_of(path), str::to_string);
     let description = parsed.metadata.description().map(str::to_string);
     let course = take_meta_str(&parsed.metadata, "course");
     let cuisine = take_meta_str(&parsed.metadata, "cuisine");
@@ -133,7 +132,7 @@ fn project_ingredient(i: &cooklang::Ingredient) -> Ingredient {
 fn number_value(v: &Value) -> Option<f64> {
     match v {
         Value::Number(n) => Some(n.value()),
-        Value::Range { start, end } => Some((f64::from(*start) + f64::from(*end)) / 2.0),
+        Value::Range { start, end } => Some(f64::midpoint(f64::from(*start), f64::from(*end))),
         Value::Text(_) => None,
     }
 }

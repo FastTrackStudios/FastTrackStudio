@@ -85,8 +85,7 @@ pub fn image_paths_for(vault_root: &Path, recipe_path: &str) -> Vec<RecipeImage>
     };
     let parent = std::path::Path::new(recipe_path)
         .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(PathBuf::new);
+        .map_or_else(PathBuf::new, std::path::Path::to_path_buf);
     let abs_parent = vault_root.join(&parent);
     if !abs_parent.exists() {
         return Vec::new();

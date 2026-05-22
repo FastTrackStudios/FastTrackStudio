@@ -108,10 +108,10 @@ fn rename_sibling_images(dir: &Path, old_stem: &str, new_stem: &str) -> std::io:
         }
         let new_file = if file_stem == old_stem {
             Some(format!("{new_stem}.{ext}"))
-        } else if let Some(rest) = file_stem.strip_prefix(&format!("{old_stem}.")) {
-            Some(format!("{new_stem}.{rest}.{ext}"))
         } else {
-            None
+            file_stem
+                .strip_prefix(&format!("{old_stem}."))
+                .map(|rest| format!("{new_stem}.{rest}.{ext}"))
         };
         if let Some(new_file) = new_file {
             std::fs::rename(&path, dir.join(new_file))?;
