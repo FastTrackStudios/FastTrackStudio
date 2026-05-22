@@ -113,6 +113,53 @@ impl WikiLive {
         Ok(self.load_state::<QueueFile>()?.tasks)
     }
 
+    /// Auto-retry recovery — call at backend init. Any task
+    /// stuck in `Analyzing` / `Generating` / `Writing`
+    /// (i.e. the agent crashed mid-turn) gets bumped:
+    ///
+    /// - If `retries < max_retries` ⇒ status → `Pending`,
+    ///   `retries += 1`, recorded `last_error` set.
+    /// - Otherwise ⇒ status → `Failed` for the curator to
+    ///   inspect.
+    ///
+    /// Returns `(retried, failed)` task ids so the caller
+    /// can log + report.
+    pub fn auto_retry_stuck_tasks(
+        &self,
+        max_retries: u32,
+    ) -> Result<(Vec<String>, Vec<String>), WikiLiveError> {
+        let mut queue: QueueFile = self.load_state()?;
+        let now = Utc::now();
+        let mut retried = Vec::new();
+        let mut failed = Vec::new();
+        for task in &mut queue.tasks {
+            let stuck = matches!(
+                task.status,
+                IngestStatus::Analyzing | IngestStatus::Generating | IngestStatus::Writing
+            );
+            if !stuck {
+                continue;
+            }
+            if task.retries < max_retries {
+                task.status = IngestStatus::Pending;
+                task.retries += 1;
+                task.last_error = Some("auto-retry after backend restart".to_string());
+                task.updated_at = now;
+                retried.push(task.id.clone());
+            } else {
+                task.status = IngestStatus::Failed;
+                task.last_error =
+                    Some(format!("auto-retry exhausted after {max_retries} attempts"));
+                task.updated_at = now;
+                failed.push(task.id.clone());
+            }
+        }
+        if !retried.is_empty() || !failed.is_empty() {
+            self.save_state(&queue)?;
+        }
+        Ok((retried, failed))
+    }
+
     /// Pop one `Pending` task and flip to `Analyzing`.
     pub fn claim_next_ingest(&self) -> Result<Option<IngestTask>, WikiLiveError> {
         let mut queue: QueueFile = self.load_state()?;

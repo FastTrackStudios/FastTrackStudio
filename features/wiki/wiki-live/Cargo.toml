@@ -9,6 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+architect = { workspace = true, features = ["dispatch-tokio"] }
 chrono = { workspace = true, features = ["clock", "serde"] }
 mime_guess = "2"
 serde = { workspace = true }
@@ -19,4 +20,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 vault-live = { workspace = true }
 walkdir = { workspace = true }
+wiki-extract = { workspace = true }
+wiki-graph = { workspace = true }
 wiki-proto = { workspace = true }
+wiki-search = { workspace = true }

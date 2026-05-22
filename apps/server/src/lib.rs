@@ -76,6 +76,10 @@ pub struct AppState {
     /// resolves to a subdir of the configured parent (created on
     /// demand on first write).
     pub vault_sync: vault::Backend,
+    /// Wiki feature backend. `under_parent` layout — each
+    /// `wiki_id` maps to `<vault_root>/{wiki_id}/`. Mounted
+    /// on `/vox` as the 13 per-capability traits.
+    pub wiki: wiki_live::WikiBackend,
 }
 
 impl AppState {
@@ -118,14 +122,42 @@ impl AppState {
                     .join("task-server")
                     .join("vaults")
             });
-        let vault_sync_state = vault::Backend::under_parent(vault_root)
+        let vault_sync_state = vault::Backend::under_parent(vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
+        let wiki = wiki_live::WikiBackend::under_parent(vault_root.clone())
+            .map_err(|e| eyre::eyre!("wiki backend: {e}"))?;
+
+        // Auto-retry any wiki ingest tasks the previous
+        // backend left stuck mid-flight. Best-effort —
+        // failures here shouldn't block startup.
+        if let Ok(entries) = std::fs::read_dir(&vault_root) {
+            for entry in entries.flatten() {
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let wiki_handle = wiki_live::WikiLive::open(entry.path());
+                if !wiki_handle.is_bootstrapped() {
+                    continue;
+                }
+                if let Ok((retried, failed)) = wiki_handle.auto_retry_stuck_tasks(3) {
+                    if !retried.is_empty() || !failed.is_empty() {
+                        tracing::info!(
+                            vault = %entry.path().display(),
+                            retried = retried.len(),
+                            failed = failed.len(),
+                            "wiki auto-retry: revived stuck tasks"
+                        );
+                    }
+                }
+            }
+        }
 
         Ok(Self {
             auth,
             keypair,
             attachments: attachment_service,
             vault_sync: vault_sync_state,
+            wiki,
         })
     }
 }
@@ -188,6 +220,7 @@ async fn vox_ws_handler(
         let auth = state.auth.auth.clone();
         let attachment_service = state.attachments.clone();
         let vault_sync_state = state.vault_sync.clone();
+        let wiki = state.wiki.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "AuthService" => {
@@ -211,6 +244,69 @@ async fn vox_ws_handler(
                 // `vault_proto::descriptor()`.
                 name if name == vault_proto::descriptor().service_name => {
                     connection.handle_with(vault_proto::serve(vault_sync_state.clone()));
+                    Ok(())
+                }
+                // Wiki feature — 13 per-capability traits, one
+                // descriptor each. `wiki_proto::service::*`.
+                name if name
+                    == wiki_proto::service::schema::schema_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::schema::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::catalog::catalog_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::catalog::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::raw_layer::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::graph::graph_rpc_service_descriptor().service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::graph::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::ingest::ingest_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::ingest::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::lint::lint_rpc_service_descriptor().service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::lint::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::search::search_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::search::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::watcher::watcher_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::watcher::serve(wiki.clone()));
+                    Ok(())
+                }
+                name if name
+                    == wiki_proto::service::multimodal::multimodal_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::multimodal::serve(wiki.clone()));
                     Ok(())
                 }
                 other => {
