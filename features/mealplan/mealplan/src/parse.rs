@@ -53,13 +53,13 @@ pub fn parse_page(page: &VaultPage) -> Result<Meal, ParseError> {
         .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok())
         .unwrap_or(1);
-    let recipe_ids = map
-        .get("recipeIds")
+    let recipe_paths = map
+        .get("recipePaths")
         .and_then(|v| v.as_sequence())
         .map(|seq| {
             seq.iter()
                 .filter_map(|v| v.as_str())
-                .filter_map(|s| Uuid::parse_str(s).ok())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -100,7 +100,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Meal, ParseError> {
         scheduled_for,
         slot,
         servings,
-        recipe_ids,
+        recipe_paths,
         status,
         pantry_deductions,
         tags,

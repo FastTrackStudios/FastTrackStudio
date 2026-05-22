@@ -124,12 +124,12 @@ pub trait ShoppingService {
     fn delete(&self, id: &str) -> Result<(), ShoppingError>;
 
     /// Add every shortage from `recipe`'s fulfillment to
-    /// `list_id`. Computed via the mealplan store's
-    /// `can_cook` flow.
+    /// `list_id`. `recipe_path` is the vault-relative
+    /// `.cook` file path.
     fn add_missing_for_recipe(
         &self,
         list_id: &str,
-        recipe_id: &str,
+        recipe_path: &str,
         servings: u32,
     ) -> Result<ShoppingList, ShoppingError>;
 
@@ -312,9 +312,10 @@ pub struct Store {
 impl Store {
     #[must_use]
     pub fn new(vault: Vault) -> Self {
+        let root = vault.root.clone();
         let pantry = PantryStore::new(vault);
         let inner = pantry.shared();
-        let cookbook = cookbook::Store::from_shared(inner.clone());
+        let cookbook = cookbook::Store::new(root);
         Self {
             inner,
             pantry,
@@ -323,8 +324,9 @@ impl Store {
     }
 
     pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
+        let root = inner.lock().expect("shared vault poisoned").root.clone();
         let pantry = PantryStore::from_shared(inner.clone());
-        let cookbook = cookbook::Store::from_shared(inner.clone());
+        let cookbook = cookbook::Store::new(root);
         Self {
             inner,
             pantry,
@@ -446,13 +448,13 @@ impl ShoppingService for Store {
     fn add_missing_for_recipe(
         &self,
         list_id: &str,
-        recipe_id: &str,
+        recipe_path: &str,
         servings: u32,
     ) -> Result<ShoppingList, ShoppingError> {
         let recipe = self
             .cookbook
-            .get(recipe_id)
-            .map_err(|e| ShoppingError::NotFound(format!("recipe {recipe_id}: {e}")))?;
+            .get(recipe_path)
+            .map_err(|e| ShoppingError::NotFound(format!("recipe {recipe_path}: {e}")))?;
         let pantry_items = self
             .pantry
             .list()

@@ -128,11 +128,12 @@ fn parse_source(v: &serde_yaml::Value) -> Option<IntakeSource> {
     let kind = m.get("kind").and_then(|v| v.as_str())?;
     match kind {
         "recipe" => {
-            let id = m
-                .get("id")
+            let path = m
+                .get("path")
+                .or_else(|| m.get("id")) // legacy alias
                 .and_then(|v| v.as_str())
-                .and_then(|s| Uuid::parse_str(s).ok())?;
-            Some(IntakeSource::Recipe { id })
+                .map(std::string::ToString::to_string)?;
+            Some(IntakeSource::Recipe { path })
         }
         "pantry" => {
             let id = m

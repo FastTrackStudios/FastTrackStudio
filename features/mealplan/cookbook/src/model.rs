@@ -148,6 +148,28 @@ pub struct Ingredient {
     pub is_recipe_ref: bool,
 }
 
+/// Per-unit nutrition. Lives on a `pantry::PantryItem` (the
+/// wiki page for "Flour" carries `nutritionPerUnit` so any
+/// recipe using `@flour{...}` can be aggregated at mealprep
+/// time). Kept in this crate as the shared nutrition shape —
+/// consumers (`pantry`, `intake`, `fitness`) all reference
+/// `cookbook::Nutrition`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct Nutrition {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub calories: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "proteinG")]
+    pub protein_g: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "carbsG")]
+    pub carbs_g: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "fatG")]
+    pub fat_g: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "fiberG")]
+    pub fiber_g: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "sugarG")]
+    pub sugar_g: Option<f64>,
+}
+
 /// Canonical course values. Recipes round-trip arbitrary
 /// strings; this is a hint for UI grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

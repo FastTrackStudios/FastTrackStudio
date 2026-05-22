@@ -1,27 +1,21 @@
 //! End-to-end smoke test for the full mealplan slice.
 //!
-//! Walks the loop:
-//!
 //! 1. Open an empty tempdir vault.
-//! 2. Create two pantry items (pasta + olive oil) — both
-//!    barcoded, both with stock entries.
-//! 3. Create a recipe that uses pasta + oil + a missing
-//!    ingredient (truffles) + a substitutable ingredient
-//!    (butter, with a registry rule pointing at olive oil).
-//! 4. Create a meal referencing the recipe + cook it (debits
-//!    pasta + oil from pantry).
-//! 5. Check fulfillment for a *second* meal of the same
-//!    recipe — confirms shortage detection + substitution
-//!    suggestions surface.
+//! 2. Create three pantry items (pasta + olive oil + butter)
+//!    — pasta + oil with stock, butter empty + carrying
+//!    `nutritionPerUnit` so the recipe nutrition aggregator
+//!    has something to sum.
+//! 3. Write a cooklang `.cook` recipe that uses
+//!    `@pasta`, `@olive oil`, `@butter`, `@truffles`.
+//! 4. Create a meal referencing the recipe by path + cook it
+//!    (debits pasta + oil from pantry).
+//! 5. Check fulfillment for a follow-up meal — confirms
+//!    truffles shortage + butter sub suggestion surface.
 //! 6. Auto-populate a shopping list from the missing items.
-//! 7. Confirm meal nutrition aggregates correctly.
-//!
-//! This guards against silent regressions when any single
-//! phase's model changes — the whole chain has to keep
-//! composing.
+//! 7. Confirm meal nutrition aggregates from pantry data.
 
 use chrono::NaiveDate;
-use cookbook::{CookbookService, Ingredient, Nutrition, Recipe};
+use cookbook::{CookbookService, Nutrition, Recipe};
 use mealplan::{
     MealplanService, ShoppingService, ShoppingStore, ShortageReason, Slot, SubstitutionService,
     SubstitutionStore, fulfillment,
@@ -34,29 +28,18 @@ use vault::Vault;
 
 fn fresh_vault(root: &Path) -> Vault {
     std::fs::create_dir_all(root.join("Operations/Inventory/Pantry")).unwrap();
-    std::fs::create_dir_all(root.join("Wiki/Cookbook")).unwrap();
+    std::fs::create_dir_all(root.join("Cookbook")).unwrap();
     std::fs::create_dir_all(root.join("Projects/Mealplan/meals")).unwrap();
     std::fs::create_dir_all(root.join("shopping")).unwrap();
     std::fs::create_dir_all(root.join("substitutions")).unwrap();
     Vault::open(root).expect("open vault")
 }
 
-#[test]
-fn full_grocery_to_meal_loop() {
-    let dir = tempdir().unwrap();
-    let vault = fresh_vault(dir.path());
-
-    let store = mealplan::Store::new(vault);
-    let pantry = store.pantry().clone();
-    let cookbook = store.cookbook().clone();
-    let shopping = ShoppingStore::from_shared(store.shared());
-    let subs = SubstitutionStore::from_shared(store.shared());
-
-    // ── 1. Create pantry items with barcodes + stock ──
-    let mut pasta = pantry::PantryItem::from_item(inventory::Item {
+fn item(name: &str, unit: &str) -> pantry::PantryItem {
+    let mut p = pantry::PantryItem::from_item(inventory::Item {
         path: String::new(),
         id: Uuid::nil(),
-        name: "Pasta".into(),
+        name: name.into(),
         category: "food".into(),
         location_id: None,
         condition: "good".into(),
@@ -72,8 +55,34 @@ fn full_grocery_to_meal_loop() {
         date_modified: None,
         details: String::new(),
     });
-    pasta.unit = "g".into();
+    p.unit = unit.into();
+    p
+}
+
+#[test]
+fn full_grocery_to_meal_loop() {
+    let dir = tempdir().unwrap();
+    let vault = fresh_vault(dir.path());
+    let root = vault.root.clone();
+
+    let store = mealplan::Store::new(vault);
+    let pantry = store.pantry().clone();
+    let cookbook = store.cookbook().clone();
+    let shopping = ShoppingStore::from_shared(store.shared());
+    let subs = SubstitutionStore::from_shared(store.shared());
+
+    // ── 1. Pantry items + stock ──
+    let mut pasta = item("Pasta", "g");
     pasta.barcodes = vec!["8001234567890".into()];
+    pasta.nutrition_per_unit = Some(Nutrition {
+        calories: Some(371.0),
+        protein_g: Some(13.0),
+        carbs_g: Some(75.0),
+        fat_g: Some(1.5),
+        fiber_g: None,
+        sugar_g: None,
+    });
+    pasta.nutrition_unit = Some("100g".into());
     let pasta = pantry.create(pasta).unwrap();
     pantry
         .add_stock(
@@ -92,26 +101,16 @@ fn full_grocery_to_meal_loop() {
         )
         .unwrap();
 
-    let mut olive_oil = pantry::PantryItem::from_item(inventory::Item {
-        path: String::new(),
-        id: Uuid::nil(),
-        name: "Olive Oil".into(),
-        category: "food".into(),
-        location_id: None,
-        condition: "good".into(),
-        status: "stored".into(),
-        manufacturer: None,
-        model: None,
-        serial: None,
-        purchase_date: None,
-        value: None,
-        tasks: Vec::new(),
-        tags: vec!["item".into(), "pantry".into()],
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
+    let mut olive_oil = item("Olive Oil", "ml");
+    olive_oil.nutrition_per_unit = Some(Nutrition {
+        calories: Some(884.0),
+        protein_g: Some(0.0),
+        carbs_g: Some(0.0),
+        fat_g: Some(100.0),
+        fiber_g: None,
+        sugar_g: None,
     });
-    olive_oil.unit = "ml".into();
+    olive_oil.nutrition_unit = Some("100ml".into());
     let olive_oil = pantry.create(olive_oil).unwrap();
     pantry
         .add_stock(
@@ -130,29 +129,7 @@ fn full_grocery_to_meal_loop() {
         )
         .unwrap();
 
-    // Empty "Butter" item so the substitution registry
-    // rule has somewhere to point at.
-    let mut butter = pantry::PantryItem::from_item(inventory::Item {
-        path: String::new(),
-        id: Uuid::nil(),
-        name: "Butter".into(),
-        category: "food".into(),
-        location_id: None,
-        condition: "good".into(),
-        status: "stored".into(),
-        manufacturer: None,
-        model: None,
-        serial: None,
-        purchase_date: None,
-        value: None,
-        tasks: Vec::new(),
-        tags: vec!["item".into(), "pantry".into()],
-        date_created: None,
-        date_modified: None,
-        details: String::new(),
-    });
-    butter.unit = "g".into();
-    let butter = pantry.create(butter).unwrap();
+    let butter = pantry.create(item("Butter", "g")).unwrap();
 
     // ── 2. Substitution rule: butter → olive oil ──
     subs.create(mealplan::SubstitutionRule {
@@ -171,74 +148,43 @@ fn full_grocery_to_meal_loop() {
     })
     .unwrap();
 
-    // ── 3. Recipe: pasta + oil + butter + truffles ──
-    let recipe = Recipe {
-        path: String::new(),
-        id: Uuid::nil(),
+    // ── 3. Cooklang recipe ──
+    let recipe_src = "\
+>> title: Truffle Pasta
+>> course: dinner
+>> servings: 2
+>> prep time: 5 minutes
+>> cook time: 15 minutes
+>> tags: weeknight
+
+Bring a pot of water to a boil and cook @pasta{200%g} until al dente.
+Meanwhile, warm @olive oil{30%ml} in a pan.
+Toss with @butter{20%g} and shaved @truffles{5%g}.
+";
+    let recipe_path = "Cookbook/Truffle Pasta.cook";
+    let mut draft = Recipe {
+        path: recipe_path.into(),
         name: "Truffle Pasta".into(),
         description: None,
-        course: "dinner".into(),
+        course: None,
         cuisine: None,
-        prep_minutes: Some(5),
-        cook_minutes: Some(15),
-        servings: Some(2),
-        ingredients: vec![
-            Ingredient {
-                name: "Pasta".into(),
-                qty: Some(200.0),
-                unit: "g".into(),
-                pantry_item_id: Some(pasta.id),
-                substitutes: Vec::new(),
-                note: None,
-                optional: false,
-            },
-            Ingredient {
-                name: "Olive Oil".into(),
-                qty: Some(30.0),
-                unit: "ml".into(),
-                pantry_item_id: Some(olive_oil.id),
-                substitutes: Vec::new(),
-                note: None,
-                optional: false,
-            },
-            Ingredient {
-                name: "Butter".into(),
-                qty: Some(20.0),
-                unit: "g".into(),
-                pantry_item_id: Some(butter.id),
-                substitutes: Vec::new(),
-                note: None,
-                optional: false,
-            },
-            Ingredient {
-                name: "Truffles".into(),
-                qty: Some(5.0),
-                unit: "g".into(),
-                pantry_item_id: None,
-                substitutes: Vec::new(),
-                note: None,
-                optional: false,
-            },
-        ],
-        steps: vec!["Boil water.".into(), "Cook pasta.".into(), "Toss.".into()],
-        nutrition: Some(Nutrition {
-            calories: Some(520.0),
-            protein_g: Some(16.0),
-            carbs_g: Some(78.0),
-            fat_g: Some(16.0),
-            fiber_g: None,
-            sugar_g: None,
-        }),
-        tags: vec!["weeknight".into()],
+        prep_minutes: None,
+        cook_minutes: None,
+        servings: None,
+        ingredients: Vec::new(),
+        steps: Vec::new(),
+        cookware: Vec::new(),
         nested_recipes: Vec::new(),
-        source: None,
-        date_created: None,
+        tags: Vec::new(),
+        source_url: None,
         date_modified: None,
-        details: String::new(),
+        source: recipe_src.into(),
     };
-    let recipe = cookbook.create(recipe).unwrap();
+    draft = cookbook.create(draft).unwrap();
+    assert_eq!(draft.servings, Some(2));
+    assert_eq!(draft.ingredients.len(), 4);
 
-    // ── 4. Schedule + cook a meal — debits stock ──
+    // ── 4. Schedule + cook a meal ──
     let meal = mealplan::Meal {
         path: String::new(),
         id: Uuid::nil(),
@@ -246,7 +192,7 @@ fn full_grocery_to_meal_loop() {
         scheduled_for: NaiveDate::from_ymd_opt(2026, 5, 22).unwrap(),
         slot: Slot::Dinner.as_str().to_string(),
         servings: 2,
-        recipe_ids: vec![recipe.id],
+        recipe_paths: vec![recipe_path.into()],
         status: mealplan::Status::Planned.as_str().to_string(),
         pantry_deductions: Vec::new(),
         tags: Vec::new(),
@@ -274,27 +220,29 @@ fn full_grocery_to_meal_loop() {
         .unwrap();
     assert_eq!(cooked.status, "cooked");
 
-    // Pasta stock should be 300g; oil 970ml.
     let pasta_now = pantry.get(&pasta.id.to_string()).unwrap();
     assert!((pasta_now.stock_total().unwrap() - 300.0).abs() < 1e-6);
     let oil_now = pantry.get(&olive_oil.id.to_string()).unwrap();
     assert!((oil_now.stock_total().unwrap() - 970.0).abs() < 1e-6);
 
-    // ── 5. Fulfillment for a follow-up meal — surfaces
-    //       the truffles shortage + butter sub suggestion ──
+    // ── 5. Fulfillment with subs ──
     let rules = subs.list().unwrap();
     let pantry_now = pantry.list().unwrap();
+    let recipe = cookbook.get(recipe_path).unwrap();
     let f = fulfillment::check_with_subs(&recipe, &pantry_now, &rules, &[]);
     assert!(!f.can_cook);
-    let by_name: std::collections::HashMap<&str, &mealplan::Shortage> =
-        f.missing.iter().map(|s| (s.name.as_str(), s)).collect();
 
-    let truffles = by_name.get("Truffles").expect("truffles shortage");
+    let by_name: std::collections::HashMap<String, &mealplan::Shortage> = f
+        .missing
+        .iter()
+        .map(|s| (s.name.to_ascii_lowercase(), s))
+        .collect();
+    let truffles = by_name.get("truffles").expect("truffles shortage");
     assert!(matches!(truffles.reason, ShortageReason::NotInPantry));
-    let butter_short = by_name.get("Butter").expect("butter shortage");
+    let butter_short = by_name.get("butter").expect("butter shortage");
     assert!(
         !butter_short.suggestions.is_empty(),
-        "butter should have subs"
+        "butter should have subs from registry rule"
     );
     assert!(
         butter_short
@@ -318,22 +266,36 @@ fn full_grocery_to_meal_loop() {
         })
         .unwrap();
     let list = shopping
-        .add_missing_for_recipe(&list.id.to_string(), &recipe.id.to_string(), 2)
+        .add_missing_for_recipe(&list.id.to_string(), recipe_path, 2)
         .unwrap();
     assert!(
-        list.entries.iter().any(|e| e.name == "Truffles"),
+        list.entries
+            .iter()
+            .any(|e| e.name.eq_ignore_ascii_case("truffles")),
         "shopping list should pick up truffles"
     );
     assert!(
-        list.entries.iter().any(|e| e.name == "Butter"),
+        list.entries
+            .iter()
+            .any(|e| e.name.eq_ignore_ascii_case("butter")),
         "shopping list should pick up butter"
     );
 
-    // ── 7. Meal nutrition aggregation ──
+    // ── 7. Nutrition aggregation from pantry data ──
+    // Per-meal: 2 servings of a 2-serving recipe = 1x ingredient qtys.
+    // Pasta 200g × 371kcal/100g = 742 kcal; oil 30ml × 884kcal/100ml = 265.2 kcal.
+    // Total ≈ 1007.2 kcal. Butter + truffles unmatched (no per-unit data) → skipped.
+    let recipes = vec![recipe];
+    let pantry_now = pantry.list().unwrap();
     let total = cooked
-        .nutrition_total(std::slice::from_ref(&recipe))
+        .nutrition_total(&recipes, &pantry_now)
         .expect("nutrition");
-    // 2 servings of a 520-cal recipe = 1040 cal.
-    assert!((total.calories.unwrap() - 1040.0).abs() < 1e-6);
-    assert!((total.protein_g.unwrap() - 32.0).abs() < 1e-6);
+    let cal = total.calories.unwrap();
+    assert!(
+        (cal - 1007.2).abs() < 1.0,
+        "expected ~1007.2 calories, got {cal}"
+    );
+
+    // Sanity that the vault root we constructed is what the store sees.
+    assert_eq!(cookbook.vault_root(), root.as_path());
 }

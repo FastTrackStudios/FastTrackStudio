@@ -27,7 +27,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
-pub use model::{Course, Ingredient, Recipe};
+pub use model::{Course, Ingredient, Nutrition, Recipe};
 pub use parse::{ParseError, parse_cook, parse_cook_at};
 pub use scan::{COOKBOOK_DIR, RecipeImage, image_paths_for, scan_cookbook, scan_cookbook_at};
 pub use service::{CookbookError, CookbookService};

@@ -53,5 +53,5 @@ pub trait MealplanService {
     /// and runs [`crate::fulfillment::check`]. Returns the
     /// fulfillment result including per-ingredient
     /// shortages.
-    fn can_cook(&self, recipe_id: &str, servings: u32) -> Result<Fulfillment, MealplanError>;
+    fn can_cook(&self, recipe_path: &str, servings: u32) -> Result<Fulfillment, MealplanError>;
 }
