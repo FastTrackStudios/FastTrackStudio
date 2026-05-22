@@ -8,4 +8,6 @@
 
 pub mod project;
 pub mod servers;
+pub mod view_calendar;
 pub mod view_gantt;
+pub mod view_kanban;
