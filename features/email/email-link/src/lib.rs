@@ -21,12 +21,16 @@
 
 mod entity;
 mod error;
+mod frontmatter;
 mod link;
 mod parse;
 mod store;
+mod walker;
 
 pub use entity::{EntityKind, EntityRef};
 pub use error::{LinkError, Result};
+pub use frontmatter::{ParsedFrontmatter, parse_frontmatter, split};
 pub use link::EmailLink;
 pub use parse::{EmailWikilink, format_wikilink, parse_wikilinks};
 pub use store::LinkStore;
+pub use walker::{EntityResolver, WalkedFile, collect_links, default_resolver, walk_vault};
