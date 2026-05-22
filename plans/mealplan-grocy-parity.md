@@ -28,11 +28,22 @@ read-the-room reference for what each piece does + why.
 - ✅ Phase 8 — substitutions (3-layer: recipe-ingredient,
   pantry-item, registry rules; goal-filtered suggestions
   surfaced on every shortage — never auto-applied)
+- ✅ Phase 9 — `Meal::nutrition_total` aggregation
+  (sums recipe nutrition × servings) + end-to-end
+  integration test covering the full scan → resolve → add
+  stock → cook → fulfillment → shopping-list loop. Fixed
+  a real bug along the way: `MealplanService::cook` was
+  routing through legacy `pantry::consume` and ignoring
+  stock entries — now uses `consume_stock` so FIFO +
+  auto-open + shelf-life-after-open all apply.
 
-Follow-up (smaller scope, separate PRs): wire a Dioxus
-route into `task-ui`; CLI commands in `task-cli`; integration
-tests over `examples/vault/` end-to-end (scan → resolve →
-add stock → cook a meal → fulfillment view).
+The backend is feature-complete for grocy parity. Follow-up
+work happens in fresh PRs: `task-cli` commands first (no UI
+yet); then the `fitness` feature (depends on
+`mealplan::Meal::nutrition_total` for calorie logs); a
+`task-ui` route later. Recipe URL import
+(schema.org/Recipe JSON-LD) and price-history aggregation
+are worth their own PRs when there's demand.
 
 ## Scope
 

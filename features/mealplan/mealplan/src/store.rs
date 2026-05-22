@@ -73,6 +73,20 @@ impl Store {
     pub fn cookbook(&self) -> &CookbookStore {
         &self.cookbook
     }
+
+    /// Convenience: total nutrition for the meal with `id`,
+    /// summed across its referenced recipes scaled by
+    /// `meal.servings`. `None` when no referenced recipe
+    /// has nutrition data. See [`Meal::nutrition_total`]
+    /// for the math.
+    pub fn meal_nutrition(&self, id: &str) -> Result<Option<cookbook::Nutrition>, MealplanError> {
+        let meal = self.get(id)?;
+        let recipes = self
+            .cookbook
+            .list()
+            .map_err(|e| MealplanError::Pantry(format!("cookbook list: {e}")))?;
+        Ok(meal.nutrition_total(&recipes))
+    }
 }
 
 fn map_io(e: impl std::fmt::Display) -> MealplanError {
@@ -172,10 +186,13 @@ impl MealplanService for Store {
         // Deduct first, then stamp the meal. If a deduct
         // fails we surface the pantry error and leave the
         // meal unchanged — caller retries with a corrected
-        // ingredient list.
+        // ingredient list. Uses `consume_stock` so the
+        // FIFO + auto-open + shelf-life-after-open math
+        // applies; falls back to the legacy `qty` path
+        // automatically when an item has no stock entries.
         for row in &deductions {
             self.pantry
-                .consume(&row.item_id.to_string(), row.qty)
+                .consume_stock(&row.item_id.to_string(), row.qty)
                 .map_err(|e| MealplanError::Pantry(e.to_string()))?;
         }
         let mut meal = self.get(id)?;

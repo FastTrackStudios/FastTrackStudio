@@ -103,6 +103,56 @@ fn default_servings() -> u32 {
     1
 }
 
+impl Meal {
+    /// Total nutrition for this meal across all referenced
+    /// recipes, scaled by the meal's [`Self::servings`] vs
+    /// each recipe's base servings. `None` when no
+    /// referenced recipe has nutrition data — partial is
+    /// returned when *some* do (missing fields are summed
+    /// as 0, present fields aggregate normally).
+    ///
+    /// `recipes` is the full list (or any subset that
+    /// contains the ones this meal references); ids that
+    /// aren't found are silently skipped.
+    pub fn nutrition_total(&self, recipes: &[cookbook::Recipe]) -> Option<cookbook::Nutrition> {
+        use std::collections::HashMap;
+        let index: HashMap<uuid::Uuid, &cookbook::Recipe> =
+            recipes.iter().map(|r| (r.id, r)).collect();
+
+        let mut acc = cookbook::Nutrition::default();
+        let mut any = false;
+        for rid in &self.recipe_ids {
+            let Some(recipe) = index.get(rid) else {
+                continue;
+            };
+            let Some(n) = &recipe.nutrition else {
+                continue;
+            };
+            // Nutrition on a `Recipe` is per-serving; the
+            // meal multiplies by its own `servings`. We do
+            // NOT re-scale by recipe.servings because the
+            // recipe's nutrition is *already* per-serving.
+            let scale = self.servings as f64;
+            any = true;
+            acc.calories = sum(acc.calories, n.calories.map(|v| v * scale));
+            acc.protein_g = sum(acc.protein_g, n.protein_g.map(|v| v * scale));
+            acc.carbs_g = sum(acc.carbs_g, n.carbs_g.map(|v| v * scale));
+            acc.fat_g = sum(acc.fat_g, n.fat_g.map(|v| v * scale));
+            acc.fiber_g = sum(acc.fiber_g, n.fiber_g.map(|v| v * scale));
+            acc.sugar_g = sum(acc.sugar_g, n.sugar_g.map(|v| v * scale));
+        }
+        any.then_some(acc)
+    }
+}
+
+fn sum(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x + y),
+        (Some(x), None) | (None, Some(x)) => Some(x),
+        (None, None) => None,
+    }
+}
+
 fn default_slot() -> String {
     Slot::Dinner.as_str().to_string()
 }
