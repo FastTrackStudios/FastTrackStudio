@@ -46,4 +46,6 @@ A block embed via Obsidian short-id form:
 - [[Block Library]] — reusable snippets meant to be embedded.
 - [[Math reference]] — inline + display math.
 - [[Mermaid showcase]] — diagrams.
-- [[Daily 2026-05-21]] — daily note that references everything.
+- [[2026-05-21]] — daily note that references everything.
+
+Maintainers + influences: [[Marijn Haverbeke]], [[Bret Victor]], [[Andrej Karpathy]], [[Linus Torvalds]].
