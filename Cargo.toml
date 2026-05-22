@@ -27,7 +27,6 @@ members = [
     # Parked: legacy Logseq-style shell. Kept buildable so we can
     # mine pieces (virt-folder, properties pane, tasks-kanban) into
     # the new editor + vault stack on demand.
-    "crates/legacy/knowledge-ui",
 ]
 exclude = [
     "features/project/spec",
@@ -76,20 +75,18 @@ project = { path = "features/project/project" }
 project-proto = { path = "features/project/project-proto" }
 project-crdt = { path = "features/project/project-crdt" }
 project-db = { path = "features/project/project-db" }
-project-ui = { path = "features/project/project-ui" }
-knowledge-proto = { path = "features/knowledge/knowledge-proto" }
-knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
-# Parked: the legacy Logseq-style shell. Lives under
-# `crates/legacy/` until we mine pieces (folder shell,
-# virt-folder views, properties pane, tasks-kanban) into the
-# new editor + vault stack.
+project-ui = { path = "crates/legacy/project-ui" }
+# `knowledge` feature deleted. File-backed `vault` is now the
+# only storage path. Pieces of the old stack survive as legacy
+# parks under `crates/legacy/` (knowledge-ui shell,
+# editor-outliner Logseq port, publish-core static-site engine);
+# kept readable so we can mine them later, not in the workspace
+# member glob.
 knowledge-ui = { path = "crates/legacy/knowledge-ui" }
+publish-core = { path = "crates/legacy/publish-core" }
+editor-outliner = { path = "crates/legacy/editor-outliner" }
 
 vault-obsidian = { path = "features/vault/vault-obsidian" }
-publish-core = { path = "crates/publish-core" }
-# Legacy Logseq-style outliner — kept until the new editor
-# grows a vault/page layer that supersedes it.
-editor-outliner = { path = "crates/editor-outliner" }
 # File-backed vault layer. Modeled on `vault-obsidian` (clean
 # small modules, native-only `cfg`, walker / watcher / mutate)
 # but adds block-id awareness: a `BlockIndex` maps every

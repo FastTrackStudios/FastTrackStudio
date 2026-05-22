@@ -8,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use knowledge_proto::bases::{self, ParsedBase};
-use knowledge_proto::obsidian::{ParsedPage, parse_page, serialize_frontmatter};
+use crate::obsidian_parse::{ParsedPage, parse_page, serialize_frontmatter};
+use vault_live::bases::{self, ParsedBase};
 
 use crate::config::{ObsidianConfig, read_obsidian_config};
 use crate::guard::SelfWriteGuard;
@@ -210,7 +210,7 @@ fn page_has_tag(p: &VaultPage, tag: &str) -> bool {
     // Inline `#tag` refs parsed out of each block.
     for b in &p.parsed.blocks {
         for r in &b.refs {
-            if let knowledge_proto::refs::Ref::Tag(t) = r {
+            if let vault_live::refs::Ref::Tag(t) = r {
                 if t.path.join("/") == tag {
                     return true;
                 }
@@ -270,7 +270,7 @@ fn split_rel(rel: &str) -> (String, String) {
 
 /// Helper: rebuild a markdown file from a `ParsedPage`, preserving
 /// frontmatter key order. Block-tree serialization is delegated to
-/// `knowledge_proto::obsidian::serialize_page` once we have full
+/// `crate::obsidian_parse::serialize_page` once we have full
 /// `Block` structs; for the FS-first phase, callers typically edit
 /// raw markdown directly and pass it into `save_page`.
 pub fn serialize_parsed(parsed: &ParsedPage) -> String {
@@ -358,4 +358,4 @@ mod tests {
 
 // Re-export so callers don't need a separate `knowledge_proto` dep
 // for the common refs types used by query helpers.
-pub use knowledge_proto::refs;
+pub use vault_live::refs;

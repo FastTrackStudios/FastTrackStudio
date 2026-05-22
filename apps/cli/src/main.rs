@@ -76,27 +76,6 @@ enum Commands {
     },
     /// Probe the configured vox endpoint.
     Doctor,
-    /// Export the org vault to an Obsidian-shaped directory.
-    /// Phase 9 — single vault for now (multi-vault servers
-    /// follow); writes one `.md` per Page with frontmatter +
-    /// rendered blocks, and folder prefixes per the vault's
-    /// folder hierarchy.
-    Export {
-        /// Output directory. Created if missing; existing files
-        /// are overwritten. Tested via the workspace's
-        /// `markdown_roundtrip` integration test.
-        #[arg(long)]
-        out: std::path::PathBuf,
-    },
-    /// Import an Obsidian vault directory into the server's org
-    /// vault. Walks `.md` files, parses each as a Page, creates
-    /// folders for the path hierarchy. Idempotent at the byte
-    /// level: re-running produces the same export.
-    Import {
-        /// Source directory.
-        #[arg(long)]
-        path: std::path::PathBuf,
-    },
     /// FS-native Obsidian-vault queries — no server, no CRDT.
     /// Operates directly on `.md` and `.base` files. Mirrors the
     /// Obsidian-CLI / TaskNotes-CLI surface for shell scripting.
@@ -422,213 +401,9 @@ async fn main() -> eyre::Result<()> {
                 RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
         }
-        Commands::Export { out } => {
-            let remote =
-                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
-            let session = LiveSession::open_doc(&remote, project_proto::DocId::org_vault()).await?;
-            run_export(&session.doc, &out).await?;
-            println!("Exported to {}", out.display());
-        }
         Commands::Vault { cmd } => {
             return run_vault(cmd);
         }
-        Commands::Import { path } => {
-            let remote =
-                RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
-            let session = LiveSession::open_doc(&remote, project_proto::DocId::org_vault()).await?;
-            run_import(&session.doc, &path).await?;
-            session.flush().await?;
-            println!("Imported {}", path.display());
-        }
-    }
-    Ok(())
-}
-
-/// Walks the org-vault doc, renders to markdown, writes to `out`.
-async fn run_export(
-    doc: &std::sync::Arc<crdt::CrdtDoc>,
-    out: &std::path::Path,
-) -> eyre::Result<()> {
-    use knowledge_crdt::{BlockRepoLoro, FolderRepoLoro, PageRepoLoro, VaultRepoLoro};
-    use knowledge_proto::{BlockRepo, FolderRepo, PageRepo, VaultRepo};
-    let big = Page {
-        index: 0,
-        size: 10_000,
-    };
-    let vault_repo = VaultRepoLoro::new(doc);
-    let folder_repo = FolderRepoLoro::new(doc);
-    let page_repo = PageRepoLoro::new(doc);
-    let block_repo = BlockRepoLoro::new(doc);
-
-    let vaults = vault_repo
-        .list(big.clone(), None, None)
-        .await
-        .map_err(|e| eyre::eyre!("vault list: {e}"))?;
-    let vault = vaults
-        .items
-        .into_iter()
-        .next()
-        .ok_or_else(|| eyre::eyre!("server has no vault to export"))?;
-    let folders = folder_repo
-        .list(big.clone(), None, None)
-        .await
-        .map_err(|e| eyre::eyre!("folder list: {e}"))?;
-    let pages = page_repo
-        .list(big.clone(), None, None)
-        .await
-        .map_err(|e| eyre::eyre!("page list: {e}"))?;
-    let blocks = block_repo
-        .list(big, None, None)
-        .await
-        .map_err(|e| eyre::eyre!("block list: {e}"))?;
-
-    let plan =
-        knowledge_proto::export::export_vault(&vault, &folders.items, &pages.items, &blocks.items);
-    std::fs::create_dir_all(out)?;
-    for file in plan.files {
-        let dest = out.join(&file.relative_path);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&dest, file.contents)?;
-    }
-    Ok(())
-}
-
-/// Walks `path`, parses every `.md`, and inserts the result into
-/// the org-vault doc via the Knowledge repos.
-async fn run_import(
-    doc: &std::sync::Arc<crdt::CrdtDoc>,
-    path: &std::path::Path,
-) -> eyre::Result<()> {
-    use knowledge_crdt::{BlockRepoLoro, FolderRepoLoro, PageRepoLoro, VaultRepoLoro};
-    use knowledge_proto::export::{ImportFile, import_vault};
-    use knowledge_proto::{
-        BlockCreate, BlockRepo, FolderCreate, FolderRepo, PageCreate, PageRepo, VaultRepo,
-    };
-
-    let mut files: Vec<ImportFile> = Vec::new();
-    for entry in walkdir::WalkDir::new(path) {
-        let entry = entry?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let rel = entry
-            .path()
-            .strip_prefix(path)?
-            .to_string_lossy()
-            .replace('\\', "/");
-        let contents = std::fs::read_to_string(entry.path())?;
-        files.push(ImportFile {
-            relative_path: rel,
-            contents,
-        });
-    }
-    let imported = import_vault("Imported", &files)?;
-    // Insert into the org-vault doc. We don't reset the existing
-    // vault — that lets users layer imports on top of running
-    // state.
-    let vault_repo = VaultRepoLoro::new(doc);
-    let folder_repo = FolderRepoLoro::new(doc);
-    let page_repo = PageRepoLoro::new(doc);
-    let block_repo = BlockRepoLoro::new(doc);
-
-    let vaults = vault_repo
-        .list(Page { index: 0, size: 10 }, None, None)
-        .await
-        .map_err(|e| eyre::eyre!("vault list: {e}"))?;
-    let target_vault_id = match vaults.items.into_iter().next() {
-        Some(v) => v.id,
-        None => {
-            // No vault on server yet — create one.
-            vault_repo
-                .create(knowledge_proto::VaultCreate {
-                    name: imported.vault.name.clone(),
-                    root_path: None,
-                    use_markdown_links: false,
-                    new_link_format: "shortest".into(),
-                    attachment_folder_path: "".into(),
-                    default_view_mode: "source".into(),
-                    config_json: imported.vault.config_json.clone(),
-                })
-                .await
-                .map_err(|e| eyre::eyre!("vault create: {e}"))?
-                .id
-        }
-    };
-
-    // Folders parent-first.
-    let mut folders = imported.folders;
-    folders.sort_by_key(|f| f.path.matches('/').count());
-    let mut folder_id_remap: std::collections::HashMap<uuid::Uuid, uuid::Uuid> =
-        std::collections::HashMap::new();
-    for f in folders {
-        let parent_id = f
-            .parent_id
-            .and_then(|pid| folder_id_remap.get(&pid).copied());
-        let new = folder_repo
-            .create(FolderCreate {
-                vault_id: target_vault_id,
-                path: f.path.clone(),
-                parent_id,
-            })
-            .await
-            .map_err(|e| eyre::eyre!("folder: {e}"))?;
-        folder_id_remap.insert(f.id, new.id);
-    }
-    let mut page_id_remap: std::collections::HashMap<uuid::Uuid, uuid::Uuid> =
-        std::collections::HashMap::new();
-    for p in imported.pages {
-        let folder_id = p
-            .folder_id
-            .and_then(|fid| folder_id_remap.get(&fid).copied());
-        let new = page_repo
-            .create(PageCreate {
-                vault_id: target_vault_id,
-                folder_id,
-                path: p.path.clone(),
-                basename: p.basename.clone(),
-                ext: p.ext.clone(),
-                aliases: p.aliases.clone(),
-                frontmatter_json: p.frontmatter_json.clone(),
-                stat_ctime: p.stat_ctime,
-                stat_mtime: p.stat_mtime,
-                stat_size: p.stat_size,
-                is_journal: p.is_journal,
-                journal_day: p.journal_day.clone(),
-                shadow_for_kind: p.shadow_for_kind.clone(),
-                shadow_for_id: p.shadow_for_id,
-            })
-            .await
-            .map_err(|e| eyre::eyre!("page: {e}"))?;
-        page_id_remap.insert(p.id, new.id);
-    }
-    for b in imported.blocks {
-        let Some(&page_id) = page_id_remap.get(&b.page_id) else {
-            continue;
-        };
-        block_repo
-            .create(BlockCreate {
-                vault_id: target_vault_id,
-                page_id,
-                parent_block_id: None,
-                sort_key: b.sort_key.clone(),
-                kind: b.kind.clone(),
-                content: b.content.clone(),
-                heading_level: b.heading_level,
-                list_ordered: b.list_ordered,
-                list_task: b.list_task.clone(),
-                code_lang: b.code_lang.clone(),
-                callout_kind: b.callout_kind.clone(),
-                callout_foldable: b.callout_foldable,
-                properties_json: b.properties_json.clone(),
-                obsidian_block_id: b.obsidian_block_id.clone(),
-                collapsed: b.collapsed,
-                refs_json: b.refs_json.clone(),
-                canvas_node_json: b.canvas_node_json.clone(),
-            })
-            .await
-            .map_err(|e| eyre::eyre!("block: {e}"))?;
     }
     Ok(())
 }
@@ -928,7 +703,7 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
     Ok(())
 }
 
-fn print_executed_view(name: &str, ev: &knowledge_proto::bases::ExecutedView) {
+fn print_executed_view(name: &str, ev: &vault_live::bases::ExecutedView) {
     let total: usize = ev.groups.iter().map(|(_, r)| r.len()).sum();
     println!("## {name}  ({total} rows)");
     for (bucket, rows) in &ev.groups {
@@ -996,7 +771,7 @@ fn collect_page_tags(page: &vault_obsidian::VaultPage) -> Vec<String> {
     }
     for b in &page.parsed.blocks {
         for r in &b.refs {
-            if let knowledge_proto::refs::Ref::Tag(t) = r {
+            if let vault_live::refs::Ref::Tag(t) = r {
                 out.push(t.path.join("/"));
             }
         }

@@ -9,7 +9,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-use knowledge_proto::obsidian::{
+use crate::obsidian_parse::{
     FrontmatterEntry, parse_frontmatter, parse_page, serialize_frontmatter,
 };
 

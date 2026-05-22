@@ -18,8 +18,10 @@ serde_json.workspace = true
 uuid.workspace = true
 project-proto = { workspace = true }
 project-crdt = { workspace = true }
-knowledge-proto = { workspace = true }
-knowledge-crdt = { workspace = true }
+# `task-cli vault …` subcommands operate on a filesystem vault
+# via vault-obsidian's parsed helpers (outline / tasks / props /
+# base-query) and vault-live's wire types (refs::Ref, bases::*).
+vault-live = { workspace = true }
 vault-obsidian = { workspace = true }
 crdt = { workspace = true }
 walkdir = { workspace = true }

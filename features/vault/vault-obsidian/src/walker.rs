@@ -13,9 +13,9 @@ use crate::config::ObsidianConfig;
 /// What an entry maps to in our entity model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VaultEntryKind {
-    /// `.md` / `.markdown`. Parsed via `knowledge_proto::obsidian::parse_page`.
+    /// `.md` / `.markdown`. Parsed via `crate::obsidian_parse::parse_page`.
     Markdown,
-    /// `.base` Obsidian Bases definition. Parsed via `knowledge_proto::bases::parse`.
+    /// `.base` Obsidian Bases definition. Parsed via `vault_live::bases::parse`.
     Base,
     /// `.canvas`. v1 stores raw JSON on a placeholder page; full
     /// rendering is a later arc.

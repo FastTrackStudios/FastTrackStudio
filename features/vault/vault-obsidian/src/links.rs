@@ -15,9 +15,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::OnceLock;
 
-use knowledge_proto::obsidian::FrontmatterEntry;
-use knowledge_proto::refs::Ref;
+use crate::obsidian_parse::FrontmatterEntry;
 use regex::Regex;
+use vault_live::refs::Ref;
 
 use crate::vault::Vault;
 
@@ -520,13 +520,11 @@ fn att_basename(rel: &str) -> &str {
 }
 
 /// Compiled wikilink regex for scanning frontmatter strings. We
-/// reuse `knowledge_proto::obsidian::LINK_REGEX` so the pattern
+/// reuse `crate::obsidian_parse::LINK_REGEX` so the pattern
 /// stays in lockstep with the body parser.
 fn frontmatter_link_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| {
-        Regex::new(knowledge_proto::obsidian::LINK_REGEX).expect("LINK_REGEX is valid")
-    })
+    R.get_or_init(|| Regex::new(crate::obsidian_parse::LINK_REGEX).expect("LINK_REGEX is valid"))
 }
 
 /// Walk every frontmatter Value and yield linkpath targets found

@@ -1,12 +1,12 @@
 //! Bridge from a `Vault` snapshot to the Bases query engine in
-//! `knowledge_proto::bases`. Mirrors Obsidian's `base:query` CLI:
+//! `vault_live::bases`. Mirrors Obsidian's `base:query` CLI:
 //! given a `.base` file in the vault and the in-memory page set,
 //! run each `ViewSpec` and return the executed view (filtered,
 //! sorted, grouped, limited).
 //!
 //! This module only does the wiring. Richer expression evaluation
 //! (formula support, file properties beyond `name`, etc.) is the
-//! responsibility of `knowledge_proto::bases::execute_view`. Filters
+//! responsibility of `vault_live::bases::execute_view`. Filters
 //! it can't yet evaluate currently return `false` per the
 //! `filter_matches` fallback, so unsupported predicates manifest as
 //! empty groups rather than panics.
@@ -14,8 +14,8 @@
 //! No CRDT, no Loro, no Dioxus — native-only, same as the rest of
 //! this crate.
 
-use knowledge_proto::bases::{self, BaseRow, ExecutedView, ParsedBase};
 use uuid::Uuid;
+use vault_live::bases::{self, BaseRow, ExecutedView, ParsedBase};
 
 use crate::vault::{Vault, VaultPage};
 
@@ -112,7 +112,7 @@ fn page_to_row(page: &VaultPage) -> BaseRow {
     let mut inline_tags: Vec<String> = Vec::new();
     for block in &page.parsed.blocks {
         for r in &block.refs {
-            if let knowledge_proto::refs::Ref::Tag(t) = r {
+            if let vault_live::refs::Ref::Tag(t) = r {
                 let joined = t.path.join("/");
                 if !joined.is_empty() && !inline_tags.iter().any(|x| x == &joined) {
                     inline_tags.push(joined);

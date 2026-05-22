@@ -6,7 +6,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use knowledge_proto::obsidian::parse_frontmatter;
+use crate::obsidian_parse::parse_frontmatter;
 
 use crate::vault::{Vault, VaultPage};
 

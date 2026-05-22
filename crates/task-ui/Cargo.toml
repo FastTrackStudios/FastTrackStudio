@@ -25,10 +25,10 @@ crdt = { path = "../../../architect/libs/crdt" }
 # Vertical-slice reset: only project trio remains.
 project-proto = { workspace = true, features = ["fake"] }
 project-crdt.workspace = true
-project-ui.workspace = true
-# `knowledge-ui` parked under `crates/legacy/` — task-ui mounts
-# `editor::EditorApp` now. Re-add the dep when we mine the
-# legacy shell (virt-folder views, properties pane, tasks-kanban).
+# `knowledge-ui` and `project-ui` parked under `crates/legacy/`.
+# task-ui mounts `editor::EditorApp` for /  and stubs the
+# /projects route until project-ui is rebuilt against
+# `project_crdt::TaskRepoLoro` (no knowledge dep).
 editor.workspace = true
 view.workspace = true
 

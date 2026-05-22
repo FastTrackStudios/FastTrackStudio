@@ -38,9 +38,23 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+// Format-agnostic file parsers, migrated out of the old
+// `knowledge-proto` crate so vault-live owns the file-format
+// layer it loads:
+//   bases           — `.base` query DSL parser
+//   refs            — wikilink / blockref / tag value types
+//   property_schema — frontmatter type coercion (Obsidian's
+//                      `.obsidian/types.json` shape)
+//   lexorank        — fractional-index sort keys
+// `knowledge-proto` keeps thin compat re-exports for now;
+// they go away in the slice-3 server rip.
+pub mod bases;
 pub mod blocks;
+pub mod lexorank;
 pub mod lookup;
 pub mod mutate;
+pub mod property_schema;
+pub mod refs;
 /// `VaultSync` backend — canonical filesystem impl of the
 /// [`vault_proto::VaultSync`] wire trait. Consumers use
 /// `vault::sync::Backend` (also re-exported as

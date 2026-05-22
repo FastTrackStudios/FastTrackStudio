@@ -41,7 +41,7 @@ pub struct VaultBase {
     pub raw: String,
     /// `Err` keeps the file visible (so editors can show a
     /// parse-error chip rather than hiding it).
-    pub parsed: Result<knowledge_proto::bases::ParsedBase, String>,
+    pub parsed: Result<crate::bases::ParsedBase, String>,
     pub mtime: SystemTime,
 }
 
@@ -196,7 +196,7 @@ fn load_entry(entry: &VaultEntry) -> Result<LoadedEntry, std::io::Error> {
             mtime,
         }),
         VaultEntryKind::Base => {
-            let parsed = knowledge_proto::bases::parse(&raw).map_err(|e| format!("{e}"));
+            let parsed = crate::bases::parse(&raw).map_err(|e| format!("{e}"));
             LoadedEntry::Base(VaultBase {
                 rel_path: entry.rel_path.clone(),
                 basename,

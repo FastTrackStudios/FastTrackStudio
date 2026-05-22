@@ -39,8 +39,6 @@ task-db = { path = "../db" }
 
 project-proto = { workspace = true }
 project-crdt = { workspace = true }
-knowledge-proto = { workspace = true }
-knowledge-crdt = { workspace = true }
 attachments-proto = { workspace = true }
 vault-proto = { workspace = true }
 vault = { workspace = true }
@@ -57,7 +55,6 @@ futures = { workspace = true }
 crdt = { workspace = true }
 project-crdt = { workspace = true }
 project-proto = { workspace = true, features = ["fake"] }
-knowledge-proto = { workspace = true }
 attachments-proto = { workspace = true }
 architect = { workspace = true }
 chrono = { workspace = true }
@@ -65,5 +62,4 @@ tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 walkdir = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
-knowledge-crdt = { workspace = true }
 vault-proto = { workspace = true }

@@ -18,6 +18,16 @@
 pub mod config;
 pub mod guard;
 pub mod links;
+// Migrated out of the deleted `knowledge-proto` crate. Holds
+// the obsidian-flavored markdown parser (frontmatter,
+// wikilink / blockref / tag extraction, block-id stripping,
+// callout / list-item / heading parsers, code-fence handling).
+// The entity-coupled fns (resolve_linkpath, serialize_page,
+// translate_logseq_block_refs, format_link) were stripped
+// during migration — they depended on the deleted
+// `knowledge_proto::{Page, Block, Vault}` entity types. Add
+// them back against `vault_obsidian::Vault` if needed.
+pub mod obsidian_parse;
 pub mod vault;
 pub mod walker;
 pub mod watcher;
