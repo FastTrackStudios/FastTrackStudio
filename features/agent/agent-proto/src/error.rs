@@ -1,4 +1,4 @@
-//! Trait-boundary error type for `AgentService`.
+//! Trait-boundary error type for `Agents`.
 
 use facet::Facet;
 use thiserror::Error;

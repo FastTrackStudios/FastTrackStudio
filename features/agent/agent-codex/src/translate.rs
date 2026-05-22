@@ -2,7 +2,7 @@
 //! translator. Pulls just enough of the Codex JSON-RPC
 //! notification surface to drive a CLI chat demo — the
 //! full mapping (tool calls, reasoning, approvals, diffs)
-//! arrives alongside the `AgentService` impl in slice 2c.
+//! arrives alongside the `Agents` impl in slice 2c.
 //!
 //! Codex pushes events as JSON-RPC notifications whose
 //! `params.item` carries one of CodexMonitor's

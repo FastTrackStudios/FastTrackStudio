@@ -52,6 +52,7 @@ name = "agent-codex"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
+ "architect",
  "chrono",
  "futures",
  "serde",
@@ -62,6 +63,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "uuid",
+ "vox 0.3.1",
 ]
 
 [[package]]
