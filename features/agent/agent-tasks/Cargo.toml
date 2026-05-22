@@ -1,6 +1,6 @@
 [package]
 name = "agent-tasks"
-description = "SQLite-backed implementation of `agent_proto::service::tasks::AgentTaskQueue`. Owns the queue DBs, the `AgentTaskStatus` lifecycle (including dispatcher-owned `Running` claim), and the `queue_events` tail used for live UI updates. The `agent-dispatch` crate sits on top of this and bridges task notes ↔ agent tasks; this crate is pure data + claim semantics."
+description = "Server-side persistence + lifecycle layer for agent-task queues. Re-exports the SeaORM bits emitted by `architect::Entity` on `agent-proto`'s Queue/AgentTask/Link/Comment, bundles the migrations, and implements the slim `AgentTaskQueue` trait — claim, complete, set-status — that can't be expressed as plain CRUD."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,17 +9,19 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-agent-proto = { workspace = true, default-features = false }
+agent-proto = { workspace = true, features = ["server"] }
+async-trait = "0.1"
 chrono = { workspace = true, features = ["clock", "serde"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+serde = { workspace = true }
+serde_json = "1"
 thiserror = { workspace = true }
 tracing = { workspace = true }
-ulid = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

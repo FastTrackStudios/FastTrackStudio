@@ -6,8 +6,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum TasksDbError {
-    #[error("sqlite: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    #[error("db: {0}")]
+    Db(#[from] sea_orm::DbErr),
 
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
@@ -20,8 +20,9 @@ pub enum TasksDbError {
     #[error("conflict: {0}")]
     Conflict(String),
 
-    /// Caller tried to set `status = Running` outside the
-    /// claim path, or tried to move a Done task to Blocked.
+    /// Caller tried to set `status = "running"` outside the
+    /// claim path, or tried to move a Done task to Blocked,
+    /// or some other forbidden state transition.
     #[error("invalid transition: {0}")]
     InvalidTransition(String),
 

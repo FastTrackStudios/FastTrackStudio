@@ -1,31 +1,41 @@
-//! SQLite-backed agent-task queues.
+#![allow(clippy::large_futures)]
+//! Server-side persistence + lifecycle layer for agent-task queues.
 //!
-//! Implements `agent_proto::service::tasks::AgentTaskQueue`
-//! against per-queue SQLite files. See `plans/agent-dispatch.md`
-//! for the full design.
+//! Sits on top of the SeaORM `Model`/`Entity` items emitted by
+//! `#[derive(architect::Entity)]` on `agent-proto`'s [`Queue`],
+//! [`AgentTask`], [`AgentTaskLink`], [`AgentTaskComment`]. We
+//! re-export the architect-emitted `<Name>RepoStorage<C>` types
+//! for callers that want plain CRUD, and add a [`Store`] that
+//! owns the operations CRUD can't express:
 //!
-//! ## Surface
+//! - **Atomic claim**: `claim_agent_task` flips status to
+//!   `running` only when the row is in `ready` AND unclaimed,
+//!   under a single `UPDATE` so two workers can't double-claim.
+//! - **Dependency-checked completion**: `complete_agent_task`
+//!   rejects when an incoming `blocks` link still points at a
+//!   non-`done` task.
+//! - **Status guard**: `set_agent_task_status` refuses
+//!   `"running"` — the only path in is `claim_agent_task`.
+//! - **Snapshot read**: `read_queue` packages queue metadata +
+//!   filtered tasks + the latest event-log watermark in one
+//!   round-trip so a subscriber can resume the live tail.
 //!
-//! - [`Store`] — opens a queue directory and exposes the trait
-//!   impl. Backed by `rusqlite`.
-//! - [`schema::SCHEMA_SQL`] — single source of truth for the DDL.
-//! - [`error::TasksDbError`] — internal error type that converts
-//!   into `AgentError` for the trait surface.
+//! ## Crate layout
 //!
-//! Concurrency: each `Store` owns one `Connection` behind a
-//! `Mutex`. The dispatcher's atomic-claim path uses a single
-//! `UPDATE … WHERE claim_lock IS NULL` so two workers can't
-//! double-claim; the rest of the API is serialized by the mutex
-//! and is fine for the single-user / single-server case.
+//! - `migrations` — SeaORM `Migrator` for the five tables. Run
+//!   against any `ConnectionTrait`.
+//! - `store` — [`Store`] type implementing
+//!   `agent_proto::service::tasks::AgentTaskQueue`.
+//! - `entity` — re-exports the architect-emitted SeaORM items
+//!   from `agent-proto`.
 //!
-//! Multi-machine deployment (the planned server-side dispatcher)
-//! runs ONE `Store` per queue file on the server; clients reach
-//! it via vox RPCs through `agent-proto`.
+//! See `plans/agent-dispatch.md` for the design.
 
-mod conn;
-mod error;
-mod schema;
+pub mod entity;
+pub mod error;
+pub mod migrations;
 mod store;
 
 pub use error::TasksDbError;
+pub use migrations::Migrator;
 pub use store::Store;

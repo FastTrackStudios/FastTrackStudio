@@ -24,14 +24,13 @@ use crate::write::{
     serialize_booking, serialize_day_template, serialize_event_type, serialize_schedule,
 };
 
-/// Subdir under the vault root holding scheduling content. Hard-
-/// coded for v1; if a vault wants to use a different name we'll
-/// add a config field.
-pub const VAULT_SUBDIR: &str = "scheduling";
-const TEMPLATES_DIR: &str = "scheduling/templates";
-const EVENT_TYPES_DIR: &str = "scheduling/event-types";
-const SCHEDULES_DIR: &str = "scheduling/schedules";
-const BOOKINGS_DIR: &str = "scheduling/bookings";
+// Scheduling content lives split across the vault: config under
+// `Projects/Scheduling/` (a workflow container) and historical
+// records under `Records/bookings/` (append-only history).
+const TEMPLATES_DIR: &str = "Projects/Scheduling/templates";
+const EVENT_TYPES_DIR: &str = "Projects/Scheduling/event-types";
+const SCHEDULES_DIR: &str = "Projects/Scheduling/schedules";
+const BOOKINGS_DIR: &str = "Records/bookings";
 
 /// Errors not covered by `SchedulingError` (mostly path
 /// composition + IO bubbling).
@@ -59,7 +58,8 @@ pub struct VaultScheduler {
 
 impl VaultScheduler {
     /// Open a scheduler rooted at `vault_root`. Creates the
-    /// `<root>/scheduling/<kind>/` subdirectories on demand at
+    /// `<root>/Projects/Scheduling/<kind>/` and `<root>/Records/bookings/`
+    /// subdirectories on demand at
     /// first write — we don't pre-make them so empty installs
     /// don't litter the vault.
     pub fn new(
