@@ -7,7 +7,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::model::{PantryItem, PantryItemDraft};
+use crate::model::{PantryItem, PantryItemDraft, StockEntry};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
 #[repr(u8)]
@@ -67,6 +67,58 @@ pub trait PantryService {
     /// off-the-shelf draft ready to confirm (`Draft`), or
     /// nothing was found (`NotFound`).
     fn resolve_barcode(&self, barcode: &str) -> Result<BarcodeResolution, PantryError>;
+
+    /// Push a new batch onto this item's stock entries.
+    /// Stamps `entry.id` if nil; returns the updated item.
+    /// Use this in preference to bumping `qty` directly
+    /// once stock entries exist for the item — the FIFO
+    /// consume math depends on entries.
+    fn add_stock(&self, id: &str, entry: StockEntry) -> Result<PantryItem, PantryError>;
+
+    /// Deduct `amount` of stock FIFO across entries. Order:
+    /// nearest best_before first, then oldest purchase, with
+    /// opened entries breaking ties (use them up first).
+    /// When no stock entries are present, falls back to the
+    /// page-level `qty` field (legacy path).
+    ///
+    /// Returns the updated item plus the per-entry
+    /// debit summary so callers (mealplan cook, manual
+    /// adjustments) can record what came from where.
+    fn consume_stock(&self, id: &str, amount: f64) -> Result<ConsumeReceipt, PantryError>;
+
+    /// Move one stock entry to a different location. The
+    /// entry's qty / best_before / opened state are
+    /// preserved. Pass empty `location_id` to clear it.
+    fn transfer_stock(
+        &self,
+        id: &str,
+        entry_id: &str,
+        location_id: &str,
+    ) -> Result<PantryItem, PantryError>;
+
+    /// Correct the absolute total to `qty`. Adds a single
+    /// corrective entry (positive or negative as needed) so
+    /// the audit trail remembers the manual count. Returns
+    /// the updated item.
+    fn inventory_set(&self, id: &str, qty: f64) -> Result<PantryItem, PantryError>;
+}
+
+/// Per-call result of [`PantryService::consume_stock`] — the
+/// updated item plus the per-entry debit detail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct ConsumeReceipt {
+    pub item: PantryItem,
+    /// Each row: (entry_id, qty_debited). Empty entries
+    /// (qty fully drained) are kept in the item with
+    /// `qty: 0.0` for audit; callers can prune later.
+    pub debits: Vec<EntryDebit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct EntryDebit {
+    #[serde(rename = "entryId")]
+    pub entry_id: uuid::Uuid,
+    pub qty: f64,
 }
 
 /// Outcome of [`PantryService::resolve_barcode`].

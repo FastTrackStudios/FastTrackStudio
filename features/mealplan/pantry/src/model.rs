@@ -128,6 +128,19 @@ pub struct PantryItem {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub minimum: Option<f64>,
 
+    /// Per-purchase batch entries. Each entry has its own
+    /// `qty` + `best_before` + `opened` state — modeled on
+    /// grocy's `stock` table. The page-level [`Self::qty`]
+    /// remains a fallback for un-batched legacy pages but
+    /// is otherwise treated as a derived sum (see
+    /// [`Self::stock_total`]).
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        default,
+        rename = "stockEntries"
+    )]
+    pub stock_entries: Vec<StockEntry>,
+
     /// All barcodes that resolve to this pantry item. One
     /// physical food often carries N barcodes (single-pack
     /// vs multi-pack, regional variants, etc.) — grocy's
@@ -210,6 +223,7 @@ impl PantryItemDraft {
             nutrition_per_unit: self.nutrition_per_unit,
             nutrition_unit: self.nutrition_unit,
             minimum: None,
+            stock_entries: Vec::new(),
             barcodes: vec![self.barcode],
             image_url: self.image_url,
             details: String::new(),
@@ -229,7 +243,87 @@ fn default_status() -> String {
     "stored".into()
 }
 
+/// One per-purchase batch row inside a [`PantryItem`].
+///
+/// Modeled on grocy's `stock` table: each entry tracks the
+/// remaining qty + best_before + opened/opened_date + price
+/// for one physical package or one received quantity. FIFO
+/// consume across entries powers shelf-life-aware
+/// deductions; transferring between locations swaps the
+/// `location_id` without splitting the row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct StockEntry {
+    /// Stable batch id. Survives splits / merges.
+    pub id: Uuid,
+
+    /// Remaining amount. Same `unit` as the parent
+    /// [`PantryItem::unit`].
+    pub qty: f64,
+
+    #[serde(rename = "purchasedDate")]
+    pub purchased_date: NaiveDate,
+
+    /// Best-before / use-by date. `None` for items that
+    /// don't carry one (salt, sugar, etc.).
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "bestBefore"
+    )]
+    pub best_before: Option<NaiveDate>,
+
+    /// `true` once the package has been opened — shelf
+    /// life often shifts at this point (see
+    /// [`PantryItem::default_best_before_days_after_open`]
+    /// once phase 4 lands).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opened: bool,
+
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "openedDate"
+    )]
+    pub opened_date: Option<NaiveDate>,
+
+    /// Purchase price in user-default currency. Used for
+    /// price-history queries; never required.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub price: Option<f64>,
+
+    /// Where this batch lives. Defaults to the parent
+    /// `PantryItem::location_id` when unset — only override
+    /// when the item is split across two locations
+    /// (pantry + freezer, etc.).
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "locationId"
+    )]
+    pub location_id: Option<Uuid>,
+
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub note: Option<String>,
+}
+
+impl StockEntry {
+    pub fn is_expired(&self, today: NaiveDate) -> bool {
+        self.best_before.is_some_and(|d| d < today)
+    }
+}
+
 impl PantryItem {
+    /// Total `qty` across all batch entries. Falls back to
+    /// the legacy page-level [`Self::qty`] when no entries
+    /// are present.
+    pub fn stock_total(&self) -> Option<f64> {
+        if self.stock_entries.is_empty() {
+            self.qty
+        } else {
+            Some(self.stock_entries.iter().map(|e| e.qty).sum())
+        }
+    }
+
     /// Lossy down-conversion to the inventory model. Drops
     /// the food-specific fields; useful when handing a row
     /// off to the gear-inventory UI.
@@ -288,6 +382,7 @@ impl PantryItem {
             nutrition_per_unit: None,
             nutrition_unit: None,
             minimum: None,
+            stock_entries: Vec::new(),
             barcodes: Vec::new(),
             image_url: None,
             details: item.details,

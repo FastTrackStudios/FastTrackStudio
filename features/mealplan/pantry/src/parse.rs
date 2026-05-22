@@ -77,6 +77,56 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
     let minimum = map.get("minimum").and_then(|v| v.as_f64());
     let barcodes = take_string_list(&map, "barcodes");
     let image_url = take_str(&map, "imageUrl");
+    let stock_entries = map
+        .get("stockEntries")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|row| {
+                    let m = row.as_mapping()?;
+                    let entry_id = m
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok())
+                        .unwrap_or_else(Uuid::new_v4);
+                    let qty = m.get("qty").and_then(|v| v.as_f64())?;
+                    let purchased_date = m
+                        .get("purchasedDate")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok())?;
+                    let best_before = m
+                        .get("bestBefore")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok());
+                    let opened = m.get("opened").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let opened_date = m
+                        .get("openedDate")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| s.parse().ok());
+                    let price = m.get("price").and_then(|v| v.as_f64());
+                    let location_id = m
+                        .get("locationId")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok());
+                    let note = m
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    Some(crate::model::StockEntry {
+                        id: entry_id,
+                        qty,
+                        purchased_date,
+                        best_before,
+                        opened,
+                        opened_date,
+                        price,
+                        location_id,
+                        note,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok(PantryItem {
         path: page.rel_path.clone(),
@@ -99,6 +149,7 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         nutrition_per_unit,
         nutrition_unit,
         minimum,
+        stock_entries,
         barcodes,
         image_url,
         details: body.to_string(),

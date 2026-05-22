@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use vault::Vault;
 
-use crate::model::PantryItem;
+use crate::model::{PantryItem, StockEntry};
 use crate::parse::{looks_like_pantry_item, parse_page};
 use crate::scan::scan_vault;
-use crate::service::{BarcodeResolution, PantryError, PantryService};
+use crate::service::{BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService};
 use crate::write::{default_pantry_path, serialize_pantry_item};
 
 #[derive(Clone)]
@@ -176,6 +176,168 @@ impl PantryService for Store {
             }
         }
         Err(PantryError::NotFound(format!("barcode: {needle}")))
+    }
+
+    fn add_stock(&self, id: &str, mut entry: StockEntry) -> Result<PantryItem, PantryError> {
+        if entry.qty < 0.0 {
+            return Err(PantryError::BadRequest(
+                "add_stock qty must be non-negative".into(),
+            ));
+        }
+        if entry.id.is_nil() {
+            entry.id = Uuid::new_v4();
+        }
+        let mut item = self.get(id)?;
+        item.stock_entries.push(entry);
+        self.update(item)
+    }
+
+    fn consume_stock(&self, id: &str, amount: f64) -> Result<ConsumeReceipt, PantryError> {
+        if amount < 0.0 {
+            return Err(PantryError::BadRequest(
+                "consume amount must be non-negative".into(),
+            ));
+        }
+        let mut item = self.get(id)?;
+
+        // Legacy fallback: when no stock entries are
+        // present, deduct from the page-level qty field so
+        // pre-phase-2 pantry pages keep working.
+        if item.stock_entries.is_empty() {
+            let have = item.qty.unwrap_or(0.0);
+            if amount > have {
+                return Err(PantryError::InsufficientStock {
+                    have,
+                    need: amount,
+                    unit: item.unit.clone(),
+                });
+            }
+            item.qty = Some(have - amount);
+            let updated = self.update(item)?;
+            return Ok(ConsumeReceipt {
+                item: updated,
+                debits: Vec::new(),
+            });
+        }
+
+        let have = item.stock_total().unwrap_or(0.0);
+        if amount > have {
+            return Err(PantryError::InsufficientStock {
+                have,
+                need: amount,
+                unit: item.unit.clone(),
+            });
+        }
+
+        // Sort indexes FIFO: nearest best_before first, then
+        // opened entries break ties (use up the opened
+        // ones), then oldest purchase. `None` best_before
+        // sorts last.
+        let mut order: Vec<usize> = (0..item.stock_entries.len()).collect();
+        order.sort_by(|&a, &b| {
+            let ea = &item.stock_entries[a];
+            let eb = &item.stock_entries[b];
+            ea.best_before
+                .map(|d| (false, d))
+                .unwrap_or((true, chrono::NaiveDate::MAX))
+                .cmp(
+                    &eb.best_before
+                        .map(|d| (false, d))
+                        .unwrap_or((true, chrono::NaiveDate::MAX)),
+                )
+                .then_with(|| eb.opened.cmp(&ea.opened))
+                .then_with(|| ea.purchased_date.cmp(&eb.purchased_date))
+                .then_with(|| ea.id.cmp(&eb.id))
+        });
+
+        let mut remaining = amount;
+        let mut debits: Vec<EntryDebit> = Vec::new();
+        for idx in order {
+            if remaining <= 0.0 {
+                break;
+            }
+            let entry = &mut item.stock_entries[idx];
+            let take = entry.qty.min(remaining);
+            if take > 0.0 {
+                entry.qty -= take;
+                remaining -= take;
+                debits.push(EntryDebit {
+                    entry_id: entry.id,
+                    qty: take,
+                });
+            }
+        }
+
+        // Keep drained entries in place for audit; callers
+        // can prune via `update` if desired.
+        let updated = self.update(item)?;
+        Ok(ConsumeReceipt {
+            item: updated,
+            debits,
+        })
+    }
+
+    fn transfer_stock(
+        &self,
+        id: &str,
+        entry_id: &str,
+        location_id: &str,
+    ) -> Result<PantryItem, PantryError> {
+        let entry_uuid = Uuid::parse_str(entry_id)
+            .map_err(|e| PantryError::BadRequest(format!("entry_id: {e}")))?;
+        let new_loc = if location_id.is_empty() {
+            None
+        } else {
+            Some(
+                Uuid::parse_str(location_id)
+                    .map_err(|e| PantryError::BadRequest(format!("location_id: {e}")))?,
+            )
+        };
+        let mut item = self.get(id)?;
+        let entry = item
+            .stock_entries
+            .iter_mut()
+            .find(|e| e.id == entry_uuid)
+            .ok_or_else(|| PantryError::NotFound(format!("entry: {entry_id}")))?;
+        entry.location_id = new_loc;
+        self.update(item)
+    }
+
+    fn inventory_set(&self, id: &str, qty: f64) -> Result<PantryItem, PantryError> {
+        if qty < 0.0 {
+            return Err(PantryError::BadRequest(
+                "inventory_set qty must be non-negative".into(),
+            ));
+        }
+        let mut item = self.get(id)?;
+        if item.stock_entries.is_empty() {
+            item.qty = Some(qty);
+            return self.update(item);
+        }
+        let have = item.stock_total().unwrap_or(0.0);
+        let diff = qty - have;
+        if diff.abs() < f64::EPSILON {
+            return Ok(item);
+        }
+        let today = chrono::Utc::now().date_naive();
+        if diff > 0.0 {
+            item.stock_entries.push(StockEntry {
+                id: Uuid::new_v4(),
+                qty: diff,
+                purchased_date: today,
+                best_before: None,
+                opened: false,
+                opened_date: None,
+                price: None,
+                location_id: None,
+                note: Some("inventory adjustment".into()),
+            });
+        } else {
+            // Negative diff — drain via the same FIFO logic.
+            let receipt = self.consume_stock(id, -diff)?;
+            return Ok(receipt.item);
+        }
+        self.update(item)
     }
 
     fn resolve_barcode(&self, barcode: &str) -> Result<BarcodeResolution, PantryError> {
