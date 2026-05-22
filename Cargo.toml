@@ -97,6 +97,12 @@ publish-core = { path = "crates/legacy/publish-core" }
 editor-outliner = { path = "crates/legacy/editor-outliner" }
 
 vault-obsidian = { path = "features/vault/vault-obsidian" }
+# `wiki` feature — Task's port of Karpathy's LLM-Wiki pattern
+# (see nashsu/llm_wiki). `wiki-proto` is the wire contract; a
+# `wiki-live` backend, agent-driven ingest glue, and the
+# `Wiki/` directory layout under each vault all stack on top.
+# See `plans/wiki-feature.md` for the design + slice plan.
+wiki-proto = { path = "features/wiki/wiki-proto" }
 # First-party task feature. Tasks = markdown pages with
 # TaskNotes-shape frontmatter (mirrors callumalpass/tasknotes
 # so existing vaults round-trip without conversion). Lives at
