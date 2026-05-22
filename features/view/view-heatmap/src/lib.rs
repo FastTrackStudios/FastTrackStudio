@@ -15,7 +15,9 @@
 //! ```
 
 pub mod components;
+pub mod cyclic;
 pub mod intensity;
 
 pub use components::{Heatmap, HeatmapProps, HeatmapStyle};
+pub use cyclic::{CyclicConfig, WeekCoord, WeekSlot};
 pub use intensity::{ColorTag, IntensityBucket, bucket_for};

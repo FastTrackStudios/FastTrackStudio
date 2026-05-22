@@ -23,6 +23,7 @@ pub fn HeatmapView() -> Element {
                 match style_now {
                     HeatmapStyle::Grid => "53 weeks × 7 days. Color intensity scales by activity count per day — same vocabulary as GitHub's contribution graph.",
                     HeatmapStyle::Bars => "One bar per day for the visible week. Chevron-nav backward through history.",
+                    HeatmapStyle::Cyclic => "Cyclic planning: 4 quarters × (3 cycles of 4 weeks + reset week). Same number of every weekday in every cycle — built for routine-building. Cyclic leap years get a bonus W0.",
                 }
             }
             div { class: "p-3 border border-border/60 rounded-lg",
@@ -45,7 +46,7 @@ struct StyleSwitchProps {
 
 #[component]
 fn StyleSwitch(props: StyleSwitchProps) -> Element {
-    let opts = [HeatmapStyle::Grid, HeatmapStyle::Bars];
+    let opts = [HeatmapStyle::Grid, HeatmapStyle::Cyclic, HeatmapStyle::Bars];
     rsx! {
         div { class: "inline-flex rounded-md border border-border/60 overflow-hidden text-xs",
             for s in opts.iter() {
@@ -57,7 +58,11 @@ fn StyleSwitch(props: StyleSwitchProps) -> Element {
                     } else {
                         "hover:bg-accent/50 text-muted-foreground px-2.5 py-1"
                     };
-                    let label = match s { HeatmapStyle::Grid => "Year grid", HeatmapStyle::Bars => "Weekly bars" };
+                    let label = match s {
+                        HeatmapStyle::Grid => "Year grid",
+                        HeatmapStyle::Bars => "Weekly bars",
+                        HeatmapStyle::Cyclic => "Cycles",
+                    };
                     rsx! {
                         button {
                             key: "{label}",

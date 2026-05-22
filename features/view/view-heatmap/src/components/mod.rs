@@ -3,6 +3,7 @@
 //! weekly-bar chart.
 
 mod bars;
+mod cyclic;
 mod grid;
 
 use chrono::NaiveDate;
@@ -19,6 +20,10 @@ pub enum HeatmapStyle {
     /// One bar per day for the visible week. Internal `chrono::Local`
     /// signal controls the visible week + chevron nav.
     Bars,
+    /// Cyclic-planning year: 4 quarters × (3 cycles + reset week).
+    /// Each cycle = 4 weeks. Optional 53rd "bonus / week 0" on
+    /// cyclic leap years. See [`crate::cyclic`] for the math.
+    Cyclic,
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -51,6 +56,13 @@ pub fn Heatmap(props: HeatmapProps) -> Element {
         },
         HeatmapStyle::Bars => rsx! {
             bars::BarsView {
+                anchor,
+                points: props.points,
+                color: props.color,
+            }
+        },
+        HeatmapStyle::Cyclic => rsx! {
+            cyclic::CyclicView {
                 anchor,
                 points: props.points,
                 color: props.color,
