@@ -11270,7 +11270,9 @@ dependencies = [
  "vault-obsidian",
  "vox",
  "walkdir",
+ "wiki-graph",
  "wiki-live",
+ "wiki-proto",
 ]
 
 [[package]]
@@ -13496,6 +13498,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
+name = "wiki-graph"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "walkdir",
+ "wiki-proto",
+]
+
+[[package]]
 name = "wiki-live"
 version = "0.1.0"
 dependencies = [
@@ -14645,10 +14659,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+
+[[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"

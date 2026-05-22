@@ -78,6 +78,33 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum WikiCmd {
+    /// Build the 4-signal wiki graph and dump it as JSON or
+    /// a terse text summary. No LLM — pure walk + compute.
+    Graph {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Filter by substring (matches title or path).
+        #[arg(long, default_value = "")]
+        query: String,
+        /// Filter by `type:` frontmatter (`concept`,
+        /// `entity`, ...).
+        #[arg(long, default_value = "")]
+        node_type: String,
+        /// Cap on node count. `0` = no cap.
+        #[arg(long, default_value_t = 0)]
+        limit: u32,
+        /// Emit JSON instead of the text summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Surface knowledge gaps — orphan pages (degree ≤ 1)
+    /// and missing-page wikilinks. No LLM.
+    Gaps {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Ingest one source file into `<vault>/Wiki/` via the
     /// two-step CoT pipeline (analyze → generate). Drops
     /// the source under `Wiki/raw/sources/`, runs the
@@ -386,6 +413,97 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
     use wiki_live::WikiLive;
 
     match cmd {
+        WikiCmd::Graph {
+            vault,
+            query,
+            node_type,
+            limit,
+            json,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let opts = wiki_proto::graph::GraphOpts {
+                query,
+                node_type,
+                limit,
+                weights: None,
+            };
+            let graph = wiki_graph::build_graph(&vault, opts)
+                .map_err(|e| eyre::eyre!("build_graph: {e}"))?;
+            if json {
+                let payload = serde_json::json!({
+                    "nodes": graph.nodes.iter().map(|n| serde_json::json!({
+                        "id": n.id,
+                        "label": n.label,
+                        "type": n.node_type,
+                        "link_count": n.link_count,
+                    })).collect::<Vec<_>>(),
+                    "edges": graph.edges.iter().map(|e| serde_json::json!({
+                        "source": e.source,
+                        "target": e.target,
+                        "weight": e.weight,
+                        "signals": {
+                            "direct_link": e.signals.direct_link,
+                            "source_overlap": e.signals.source_overlap,
+                            "adamic_adar": e.signals.adamic_adar,
+                            "type_affinity": e.signals.type_affinity,
+                        },
+                    })).collect::<Vec<_>>(),
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!("nodes={}  edges={}", graph.nodes.len(), graph.edges.len());
+                let mut top = graph.nodes.clone();
+                top.sort_by(|a, b| b.link_count.cmp(&a.link_count));
+                for n in top.iter().take(20) {
+                    println!("  {:3}  [{}]  {}", n.link_count, n.node_type, n.label);
+                }
+                if graph.nodes.len() > 20 {
+                    println!("  … {} more", graph.nodes.len() - 20);
+                }
+            }
+            return Ok(());
+        }
+        WikiCmd::Gaps { vault, json } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let gaps = wiki_graph::find_gaps(&vault).map_err(|e| eyre::eyre!("find_gaps: {e}"))?;
+            if json {
+                let payload: Vec<_> = gaps
+                    .iter()
+                    .map(|g| {
+                        serde_json::json!({
+                            "id": g.id,
+                            "kind": format!("{:?}", g.kind),
+                            "subjects": g.subjects,
+                            "explanation": g.explanation,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                let orphans = gaps
+                    .iter()
+                    .filter(|g| matches!(g.kind, wiki_proto::graph::GapKind::Orphan))
+                    .count();
+                let missing = gaps
+                    .iter()
+                    .filter(|g| matches!(g.kind, wiki_proto::graph::GapKind::MissingPage))
+                    .count();
+                println!(
+                    "gaps={} (orphans={} missing-pages={})",
+                    gaps.len(),
+                    orphans,
+                    missing
+                );
+                for g in &gaps {
+                    println!("  [{:?}] {}", g.kind, g.explanation);
+                }
+            }
+            return Ok(());
+        }
         WikiCmd::Ingest {
             vault,
             source,
