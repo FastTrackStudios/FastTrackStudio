@@ -1,0 +1,23 @@
+[package]
+name = "scheduling"
+description = "Scheduling feature: parse + write personal day templates, cal.com-style event types, availability schedules, and bookings as markdown files in a `vault::Vault`. Includes an in-memory `SchedulingService` backend for tests + demo routes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Native-only: the vault round-trip reads from disk. wasm builds
+# use scheduling-proto + scheduling-ui directly.
+
+[dependencies]
+scheduling-proto = { workspace = true, default-features = false }
+chrono = { workspace = true, features = ["clock", "std", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+indexmap = { workspace = true, features = ["serde"] }
+vault = { workspace = true }

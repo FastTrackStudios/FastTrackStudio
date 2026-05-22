@@ -189,6 +189,12 @@ view-kanban = { path = "features/view/view-kanban" }
 view-calendar = { path = "features/view/view-calendar" }
 view-table = { path = "features/view/view-table" }
 view-heatmap = { path = "features/view/view-heatmap" }
+# Scheduling — personal day-templates + cal.com-style bookable
+# event types, sync over CalDAV (future). Trio + facade follow the
+# vault pattern; `scheduling-proto` is wasm-clean.
+scheduling = { path = "features/scheduling/scheduling" }
+scheduling-proto = { path = "features/scheduling/scheduling-proto", default-features = false }
+scheduling-ui = { path = "features/scheduling/scheduling-ui" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Git feature — issue + PR workflow on top of forges

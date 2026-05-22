@@ -7,6 +7,7 @@
 //! per-feature local state.
 
 pub mod project;
+pub mod scheduling;
 pub mod servers;
 pub mod view_calendar;
 pub mod view_gantt;
