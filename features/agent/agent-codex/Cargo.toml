@@ -10,7 +10,7 @@ repository.workspace = true
 
 [dependencies]
 agent-proto = { workspace = true }
-architect = { workspace = true }
+architect = { workspace = true, features = ["dispatch-tokio"] }
 chrono = { workspace = true, features = ["clock", "serde"] }
 futures = { workspace = true }
 serde = { workspace = true }

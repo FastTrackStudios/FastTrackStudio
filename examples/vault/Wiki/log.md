@@ -1,13 +1,11 @@
-# Wiki log
+## [2026-05-22] ingest | Karpathy LLM Wiki
 
-Append-only operation timeline. Each entry: `## [YYYY-MM-DD] <op> | <title>`.
+## [2026-05-22] ingest | karpathy-llm-wiki.md
 
-Grep with `grep '^## \[' Wiki/log.md` for a clean timeline.
+Ingested via agent-wiki bridge.
 
-## [2026-05-21] admin | Bootstrap
+- Source: `raw/sources/karpathy-llm-wiki-ed5319e5.md`
+- Pages: 8
+- Reviews: 2
 
-Initial wiki bootstrap. `schema.md` + `purpose.md` seeded; 33 existing notes (concepts + tools, imported from the pre-wiki `concepts/` and `tools/` folders) catalogued in `index.md`. `raw/sources/` empty — no documents imported yet.
-
-## [2026-05-21] admin | Layout finalized
-
-Adopted llm_wiki-shaped layout: `Wiki/raw/sources/` for immutable input, `Wiki/<Type>/` (or flat `Wiki/`) for pages, `Wiki/_state/` for opaque agent state. `schema.md` + `purpose.md` at the wiki root. See `plans/wiki-feature.md`.
+**Pages touched:** [[sources/karpathy-llm-wiki.md]], [[entities/andrej-karpathy.md]], [[concepts/retrieval-augmented-generation.md]], [[concepts/wiki-linting.md]], [[entities/llm-wiki.md]], [[index.md]], [[log.md]], [[overview.md]]

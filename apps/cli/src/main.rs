@@ -64,12 +64,59 @@ enum Commands {
     /// `<vault>/tasks/<slug>.md` by default.
     #[command(subcommand)]
     Task(TaskCmd),
-    /// LLM-agent integration. Currently exposes a Codex
-    /// chat demo; full `agent_proto::Agents` surface
-    /// (sessions, kanban, approvals, ...) arrives once the
-    /// trait impl lands in `agent-codex` slice 2c.
+    /// LLM-agent integration. Codex backend drives `chat`
+    /// (one-shot) + `wiki ingest` (two-step CoT against a
+    /// vault's `Wiki/raw/sources/`).
     #[command(subcommand)]
     Agent(AgentCmd),
+    /// `Wiki/` operations — currently the LLM-driven
+    /// ingest pipeline. Sister surface to `agent`; the
+    /// command itself routes through `agent-wiki::bridge`.
+    #[command(subcommand)]
+    Wiki(WikiCmd),
+}
+
+#[derive(Subcommand)]
+enum WikiCmd {
+    /// Ingest one source file into `<vault>/Wiki/` via the
+    /// two-step CoT pipeline (analyze → generate). Drops
+    /// the source under `Wiki/raw/sources/`, runs the
+    /// agent, parses FILE/REVIEW blocks, writes pages,
+    /// updates `index.md` + `log.md`.
+    ///
+    /// Example:
+    ///   task wiki ingest \
+    ///     -v examples/vault \
+    ///     -s examples/vault/Wiki/raw/sources/karpathy-llm-wiki.md \
+    ///     -m gpt-5.4-mini
+    Ingest {
+        /// Vault root.
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Path to the source file to ingest. Bytes get
+        /// copied into `Wiki/raw/sources/<filename>`.
+        #[arg(short, long)]
+        source: std::path::PathBuf,
+        /// Override the filename used under `raw/sources/`.
+        /// Default: source's basename.
+        #[arg(long)]
+        filename: Option<String>,
+        /// MIME type. Default `text/markdown`.
+        #[arg(long, default_value = "text/markdown")]
+        mime: String,
+        /// Human title for the log entry.
+        #[arg(long)]
+        title: Option<String>,
+        /// Model id.
+        #[arg(short, long)]
+        model: Option<String>,
+        /// Output language. Default `English`.
+        #[arg(long, default_value = "English")]
+        language: String,
+        /// Per-turn timeout (seconds). Default 300.
+        #[arg(long, default_value_t = 300)]
+        timeout_secs: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -325,8 +372,77 @@ async fn main() -> eyre::Result<()> {
         Commands::Agent(cmd) => {
             return run_agent(cmd).await;
         }
+        Commands::Wiki(cmd) => {
+            return run_wiki(cmd).await;
+        }
     }
     Ok(())
+}
+
+async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
+    use agent_codex::CodexBackend;
+    use agent_wiki::bridge::{IngestRequest, run_ingest};
+    use std::time::Duration;
+    use wiki_live::WikiLive;
+
+    match cmd {
+        WikiCmd::Ingest {
+            vault,
+            source,
+            filename,
+            mime,
+            title,
+            model,
+            language,
+            timeout_secs,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let bytes = std::fs::read(&source)
+                .map_err(|e| eyre::eyre!("read source {}: {e}", source.display()))?;
+            let fname = filename.unwrap_or_else(|| {
+                source
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("source.md")
+                    .to_string()
+            });
+            let wiki = WikiLive::open(&vault);
+            let backend = CodexBackend::new();
+            let req = IngestRequest {
+                source_filename: fname,
+                source_mime: mime,
+                source_title: title.unwrap_or_default(),
+                source_bytes: bytes,
+                model: model.clone(),
+                timeout: Duration::from_secs(timeout_secs),
+                language,
+            };
+            eprintln!(
+                "› ingest@{} vault={}",
+                model.as_deref().unwrap_or("default"),
+                vault.display()
+            );
+            let result = run_ingest(&backend, &wiki, req)
+                .await
+                .map_err(|e| eyre::eyre!("ingest: {e}"))?;
+            println!("Ingest done.");
+            println!("  task:   {}", result.task_id);
+            println!("  source: {}", result.raw_source_path);
+            println!("  pages:  {}", result.pages_written.len());
+            for p in &result.pages_written {
+                println!("    - {p}");
+            }
+            if !result.reviews_raised.is_empty() {
+                println!("  reviews:");
+                for r in &result.reviews_raised {
+                    println!("    - {r}");
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
