@@ -8,7 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use vault::VaultPage;
 
-use crate::model::{Ingredient, Nutrition, Recipe};
+use crate::model::{Ingredient, NestedRecipe, Nutrition, Recipe};
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -70,6 +70,30 @@ pub fn parse_page(page: &VaultPage) -> Result<Recipe, ParseError> {
         .filter(|t| t != "recipe")
         .collect();
     let source = take_str(&map, "source");
+    let nested_recipes = map
+        .get("nestedRecipes")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|row| {
+                    let m = row.as_mapping()?;
+                    let recipe_id = m
+                        .get("recipeId")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok())?;
+                    let servings = m
+                        .get("servings")
+                        .and_then(|v| v.as_u64())
+                        .and_then(|n| u32::try_from(n).ok())
+                        .unwrap_or(1);
+                    Some(NestedRecipe {
+                        recipe_id,
+                        servings,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
@@ -87,6 +111,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Recipe, ParseError> {
         steps,
         nutrition,
         tags,
+        nested_recipes,
         source,
         date_created,
         date_modified,

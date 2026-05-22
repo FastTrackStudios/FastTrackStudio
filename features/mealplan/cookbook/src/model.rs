@@ -80,6 +80,18 @@ pub struct Recipe {
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
 
+    /// Sub-recipes this recipe references. Modeled on
+    /// grocy's `recipes_nestings`. Each entry says "use N
+    /// servings of recipe X" — pizza references pizza-dough,
+    /// taco-night references homemade-salsa. Fulfillment
+    /// recurses through nestings with a depth cap.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        default,
+        rename = "nestedRecipes"
+    )]
+    pub nested_recipes: Vec<NestedRecipe>,
+
     /// Optional source — URL, cookbook citation, or
     /// `"[[Some Wiki Page]]"` wikilink.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -148,6 +160,23 @@ pub struct Ingredient {
     /// quick-glance "do I have everything" check.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+}
+
+/// Sub-recipe reference. Pull in `servings` worth of
+/// recipe `recipe_id` when expanding ingredients.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct NestedRecipe {
+    #[serde(rename = "recipeId")]
+    pub recipe_id: uuid::Uuid,
+    /// How many servings of the nested recipe go into one
+    /// serving of the parent. Multiplied with parent
+    /// servings during fulfillment.
+    #[serde(default = "default_nested_servings")]
+    pub servings: u32,
+}
+
+fn default_nested_servings() -> u32 {
+    1
 }
 
 /// Per-serving nutrition. All fields optional — partial data

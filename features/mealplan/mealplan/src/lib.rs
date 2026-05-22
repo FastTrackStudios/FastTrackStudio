@@ -39,7 +39,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
-pub use fulfillment::{Fulfillment, Shortage, ShortageReason};
+pub use fulfillment::{Fulfillment, Shortage, ShortageReason, check_nested};
 pub use model::{Meal, PantryDeduction, Slot, Status};
 pub use parse::{ParseError, looks_like_meal, parse_page};
 pub use scan::{meals_between, meals_on, scan_vault};

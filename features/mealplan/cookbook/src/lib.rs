@@ -28,7 +28,7 @@ pub mod service;
 pub mod store;
 pub mod write;
 
-pub use model::{Course, Ingredient, Nutrition, Recipe};
+pub use model::{Course, Ingredient, NestedRecipe, Nutrition, Recipe};
 pub use parse::{ParseError, looks_like_recipe, parse_page};
 pub use scan::scan_vault;
 pub use service::{CookbookError, CookbookService};

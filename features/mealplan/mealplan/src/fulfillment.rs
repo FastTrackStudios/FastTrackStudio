@@ -68,8 +68,16 @@ pub enum ShortageReason {
     OptionalNoQty,
 }
 
+/// Max depth for nested-recipe resolution. Guards against
+/// accidental cycles (recipe A → recipe B → recipe A) and
+/// pathologically deep trees. Eight levels is way more than
+/// any real cookbook needs.
+const MAX_NEST_DEPTH: u32 = 8;
+
 /// Check whether `recipe` can be cooked from `pantry` at
-/// `servings`. Pure; no I/O.
+/// `servings`. Pure; no I/O. No nested-recipe resolution —
+/// use [`check_nested`] when the recipe has
+/// [`Recipe::nested_recipes`].
 pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillment {
     let scale = if let Some(base) = recipe.servings.filter(|s| *s > 0) {
         servings as f64 / base as f64
@@ -151,6 +159,108 @@ pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillme
             )
         }),
         missing,
+    }
+}
+
+/// Check fulfillment with nested-recipe support. Recurses
+/// through [`Recipe::nested_recipes`] up to
+/// [`MAX_NEST_DEPTH`] levels and aggregates ingredient
+/// quantities before matching against the pantry. Pass
+/// `all_recipes` so nested lookups can resolve; missing ids
+/// are silently skipped (they surface as missing
+/// ingredients through whatever the parent recipe
+/// references directly).
+///
+/// Same-ingredient rows across nestings are summed before
+/// matching so a "tomato sauce uses garlic" + "garlic
+/// bread uses garlic" combo asks the pantry for the sum,
+/// not twice the smaller need.
+pub fn check_nested(
+    recipe: &Recipe,
+    all_recipes: &[Recipe],
+    pantry: &[PantryItem],
+    servings: u32,
+) -> Fulfillment {
+    use std::collections::HashMap;
+
+    let index: HashMap<uuid::Uuid, &Recipe> = all_recipes.iter().map(|r| (r.id, r)).collect();
+
+    let scale = if let Some(base) = recipe.servings.filter(|s| *s > 0) {
+        servings as f64 / base as f64
+    } else {
+        1.0
+    };
+
+    let mut visited: HashMap<uuid::Uuid, ()> = HashMap::new();
+    let mut flat = flatten(recipe, &index, scale, &mut visited, 0);
+    fold_same_ingredient(&mut flat);
+
+    // Wrap the flattened rows into a synthetic recipe so we
+    // can reuse `check`. servings = 1 because `flat`'s
+    // quantities are already scaled.
+    let synthetic = Recipe {
+        ingredients: flat,
+        servings: Some(1),
+        ..recipe.clone()
+    };
+    check(&synthetic, pantry, 1)
+}
+
+fn flatten(
+    recipe: &Recipe,
+    index: &std::collections::HashMap<uuid::Uuid, &Recipe>,
+    scale: f64,
+    visited: &mut std::collections::HashMap<uuid::Uuid, ()>,
+    depth: u32,
+) -> Vec<cookbook::Ingredient> {
+    if depth > MAX_NEST_DEPTH || visited.contains_key(&recipe.id) {
+        return Vec::new();
+    }
+    visited.insert(recipe.id, ());
+
+    let mut out: Vec<cookbook::Ingredient> = recipe
+        .ingredients
+        .iter()
+        .map(|ing| cookbook::Ingredient {
+            qty: ing.qty.map(|q| q * scale),
+            ..ing.clone()
+        })
+        .collect();
+
+    for nested in &recipe.nested_recipes {
+        if let Some(child) = index.get(&nested.recipe_id) {
+            let base = child.servings.unwrap_or(1).max(1) as f64;
+            let child_scale = scale * (nested.servings as f64 / base);
+            out.extend(flatten(child, index, child_scale, visited, depth + 1));
+        }
+    }
+
+    visited.remove(&recipe.id);
+    out
+}
+
+/// Sum quantities across same-named, same-unit ingredients.
+/// Different units stay separate (they'll get unit-matched
+/// independently in `check`). Case-insensitive name + unit
+/// comparison.
+fn fold_same_ingredient(rows: &mut Vec<cookbook::Ingredient>) {
+    let mut i = 0;
+    while i < rows.len() {
+        let mut j = i + 1;
+        while j < rows.len() {
+            let merge_ok = rows[i].name.eq_ignore_ascii_case(&rows[j].name)
+                && rows[i].unit.eq_ignore_ascii_case(&rows[j].unit)
+                && rows[i].pantry_item_id == rows[j].pantry_item_id;
+            if merge_ok {
+                let add = rows[j].qty.unwrap_or(0.0);
+                let base = rows[i].qty.unwrap_or(0.0);
+                rows[i].qty = Some(base + add);
+                rows.remove(j);
+            } else {
+                j += 1;
+            }
+        }
+        i += 1;
     }
 }
 
@@ -247,6 +357,7 @@ mod tests {
             steps: Vec::new(),
             nutrition: None,
             tags: Vec::new(),
+            nested_recipes: Vec::new(),
             source: None,
             date_created: None,
             date_modified: None,
@@ -312,5 +423,47 @@ mod tests {
         let recipe = recipe_with(vec![ing("Pasta", 100.0, "g"), opt], 1);
         let stock = vec![pantry_row("Pasta", 500.0, "g")];
         assert!(check(&recipe, &stock, 1).can_cook);
+    }
+
+    #[test]
+    fn nested_recipe_aggregates_ingredients() {
+        // pizza_dough: 200g flour
+        let mut dough = recipe_with(vec![ing("Flour", 200.0, "g")], 1);
+        dough.name = "Pizza Dough".into();
+
+        // pizza: 100g flour (for dusting) + nested dough
+        let mut pizza = recipe_with(vec![ing("Flour", 100.0, "g")], 1);
+        pizza.name = "Pizza".into();
+        pizza.nested_recipes = vec![cookbook::NestedRecipe {
+            recipe_id: dough.id,
+            servings: 1,
+        }];
+
+        let stock = vec![pantry_row("Flour", 250.0, "g")];
+        let f = check_nested(&pizza, &[pizza.clone(), dough], &stock, 1);
+        // Need 300g total (100 + 200), have 250 → short.
+        assert!(!f.can_cook);
+        let short = &f.missing[0];
+        assert_eq!(short.name.to_ascii_lowercase(), "flour");
+        assert!((short.need - 300.0).abs() < 1e-6);
+        assert!((short.have - 250.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cycle_guard_doesnt_infinite_loop() {
+        // a → b → a
+        let mut a = recipe_with(vec![ing("X", 1.0, "g")], 1);
+        let mut b = recipe_with(vec![ing("Y", 1.0, "g")], 1);
+        a.nested_recipes = vec![cookbook::NestedRecipe {
+            recipe_id: b.id,
+            servings: 1,
+        }];
+        b.nested_recipes = vec![cookbook::NestedRecipe {
+            recipe_id: a.id,
+            servings: 1,
+        }];
+        let stock = vec![pantry_row("X", 10.0, "g"), pantry_row("Y", 10.0, "g")];
+        let f = check_nested(&a, &[a.clone(), b.clone()], &stock, 1);
+        assert!(f.can_cook);
     }
 }

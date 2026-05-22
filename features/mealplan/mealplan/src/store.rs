@@ -199,6 +199,20 @@ impl MealplanService for Store {
             .pantry
             .list()
             .map_err(|e| MealplanError::Pantry(e.to_string()))?;
-        Ok(fulfillment::check(&recipe, &pantry_items, servings))
+        // Pull every recipe — nested-recipe resolution
+        // needs them. Recipes are cheap to list (small N
+        // in any realistic vault); revisit if this gets hot.
+        let all_recipes = if recipe.nested_recipes.is_empty() {
+            Vec::new()
+        } else {
+            self.cookbook
+                .list()
+                .map_err(|e| MealplanError::Pantry(format!("cookbook list: {e}")))?
+        };
+        Ok(if recipe.nested_recipes.is_empty() {
+            fulfillment::check(&recipe, &pantry_items, servings)
+        } else {
+            fulfillment::check_nested(&recipe, &all_recipes, &pantry_items, servings)
+        })
     }
 }
