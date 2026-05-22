@@ -32,6 +32,10 @@ agent-proto.workspace = true
 # of source files into `<vault>/Wiki/`.
 agent-wiki.workspace = true
 wiki-live.workspace = true
+# `task-cli wiki graph|gaps` — pure-computation graph layer
+# (no LLM).
+wiki-graph.workspace = true
+wiki-proto.workspace = true
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
