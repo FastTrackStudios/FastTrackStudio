@@ -63,13 +63,17 @@ pub mod error;
 pub mod event;
 pub mod federation;
 pub mod graph;
+pub mod health;
 pub mod ingest;
 pub mod lint;
 pub mod log;
+pub mod multimodal;
 pub mod paths;
+pub mod raw;
 pub mod research;
 pub mod review;
 pub mod schema;
+pub mod search;
 pub mod service;
 
 pub use error::WikiError;
