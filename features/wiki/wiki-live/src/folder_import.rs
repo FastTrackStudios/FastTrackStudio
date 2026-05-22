@@ -94,7 +94,7 @@ impl WikiLive {
             let filename = if opts.preserve_structure {
                 rel.replace('\\', "/")
             } else {
-                rel.replace('/', "_").replace('\\', "_")
+                rel.replace(['/', '\\'], "_")
             };
             let raw_ref = self.import_raw_source(ImportRawSource {
                 filename,

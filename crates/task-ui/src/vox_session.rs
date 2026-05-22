@@ -150,7 +150,7 @@ impl VoxSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn connect_and_publish(mut status: Signal<VoxStatus>) -> Option<Self> {
+    pub async fn connect_and_publish(status: Signal<VoxStatus>) -> Option<Self> {
         let _ = status;
         None
     }

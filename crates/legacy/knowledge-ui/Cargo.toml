@@ -77,3 +77,6 @@ notify-debouncer-mini = "0.6"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+[lints]
+workspace = true

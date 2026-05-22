@@ -44,3 +44,6 @@ tracing = { workspace = true }
 # parent dir, so a user can `task list` instead of typing
 # `--server ws://...` every time.
 dotenvy = "0.15"
+
+[lints]
+workspace = true

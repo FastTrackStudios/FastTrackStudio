@@ -20,3 +20,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 fts-ui.workspace = true
+
+[lints]
+workspace = true

@@ -695,7 +695,7 @@ mod tests {
 
         let stock = vec![butter, coconut];
         // No goals — both subs visible.
-        let f = check_with_subs(&recipe, &stock, &[rule.clone()], &[]);
+        let f = check_with_subs(&recipe, &stock, std::slice::from_ref(&rule), &[]);
         assert_eq!(f.missing.len(), 1);
         let s = &f.missing[0];
         assert_eq!(s.suggestions.len(), 1);
@@ -708,7 +708,7 @@ mod tests {
         let f = check_with_subs(
             &recipe,
             &stock,
-            &[rule.clone()],
+            std::slice::from_ref(&rule),
             &[pantry::SubReason::Vegan],
         );
         assert_eq!(f.missing[0].suggestions.len(), 1);

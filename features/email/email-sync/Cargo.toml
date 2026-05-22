@@ -26,3 +26,6 @@ serde = { workspace = true, features = ["derive"] }
 email-maildir = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

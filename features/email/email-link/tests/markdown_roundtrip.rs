@@ -31,7 +31,11 @@ Reply to the studio booking is in [[email://booking@montreal.test]].
     assert_eq!(links.len(), 3);
 
     let project = EntityRef::project("montreal-album");
-    for EmailWikilink { message_id, label } in &links {
+    for EmailWikilink {
+        message_id,
+        label: _,
+    } in &links
+    {
         store
             .upsert(&EmailLink {
                 message_id: message_id.clone(),

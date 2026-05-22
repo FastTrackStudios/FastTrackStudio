@@ -266,7 +266,7 @@ mod tests {
         let end = day_start_utc(sun + Days::new(2)) + chrono::Duration::hours(12);
         let e = CalendarEvent::new("Trip", start, end);
 
-        let week1_layout = month_week_layout(week1, &[e.clone()]);
+        let week1_layout = month_week_layout(week1, std::slice::from_ref(&e));
         assert_eq!(week1_layout[0].start_col, 6);
         assert_eq!(week1_layout[0].span, 1);
         assert!(week1_layout[0].continues_right);

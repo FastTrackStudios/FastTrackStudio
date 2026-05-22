@@ -453,9 +453,7 @@ fn normalize_relative(linkpath: &str, source_folder: &str) -> Option<String> {
         match piece {
             "" | "." => {}
             ".." => {
-                if segments.pop().is_none() {
-                    return None;
-                }
+                segments.pop()?;
             }
             other => segments.push(other),
         }

@@ -3,6 +3,7 @@
 
 use super::ParseError;
 
+#[allow(dead_code)]
 pub(crate) fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
     let rest = src.strip_prefix("---\n")?;
     let end = rest.find("\n---\n")?;

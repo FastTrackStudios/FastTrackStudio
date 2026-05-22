@@ -98,7 +98,7 @@ impl WikiLive {
         Ok(file
             .findings
             .into_iter()
-            .filter(|f| status.map_or(true, |s| f.status == s))
+            .filter(|f| status.is_none_or(|s| f.status == s))
             .collect())
     }
 

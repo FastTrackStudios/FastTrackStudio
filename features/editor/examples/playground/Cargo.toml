@@ -40,3 +40,6 @@ web = ["dioxus/web"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Window", "Location"] }
 tracing-wasm = "0.2"
+
+[lints]
+workspace = true

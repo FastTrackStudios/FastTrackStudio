@@ -43,7 +43,10 @@ impl Doc {
         self.rope.slice(start..end).to_string()
     }
 
-    /// Full doc as a `String`.
+    /// Full doc as a `String`. Inherent method (mirrors the
+    /// `from_str` constructor); see `impl Display for Doc`
+    /// below for the trait equivalent.
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.rope.to_string()
     }

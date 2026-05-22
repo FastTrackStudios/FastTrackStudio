@@ -112,7 +112,7 @@ pub fn message_from_bytes(
         references.push(s.to_string());
     }
     if let Some(list) = parsed.references().as_text_list() {
-        references.extend(list.into_iter().map(|s| s.to_string()));
+        references.extend(list.iter().map(|s| s.to_string()));
     }
 
     let cutoff = bytes
@@ -133,6 +133,11 @@ pub fn message_from_bytes(
     })
 }
 
+/// Reserved for the future attachment-fetch RPC; callers
+/// will land alongside the inbox UI's attachment download
+/// flow. Kept here so the parser side stays paired with
+/// the rest of the parsing surface.
+#[allow(dead_code)]
 pub fn attachment_bytes(bytes: &[u8], part: &str) -> Result<Vec<u8>, EmailSyncError> {
     let idx: usize = part.parse().map_err(|_| EmailSyncError::NotFound)?;
     let parsed = MessageParser::default()

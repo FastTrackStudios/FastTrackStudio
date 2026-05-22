@@ -51,3 +51,6 @@ sha2 = "0.10"
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

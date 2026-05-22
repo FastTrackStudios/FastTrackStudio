@@ -23,6 +23,13 @@ use editor_state::{Changes, EditorState, Selection, TransactionSpec};
 /// rows grouped by `group`; clicks pick a command. Keyboard
 /// nav lives in `Editor`'s `onkeydown` rather than here so it
 /// works without the menu element being focused.
+//
+// Dioxus 0.7 flags `key:` on non-first nodes in a block as
+// deprecated; the slash-row rsx! emits an optional header
+// followed by the row div, which trips the lint. Suppressed
+// at the component level; refactoring to a single keyed
+// outer element would lose the leading group divider.
+#[allow(deprecated)]
 #[component]
 pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) -> Element {
     let snapshot = slash.read().clone();
@@ -89,6 +96,7 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
                             } else { rsx! {} }
                         }
                         div {
+                            key: "{idx_for_click}",
                             class: if is_selected { "slash-row selected" } else { "slash-row" },
                             // Mousedown.preventDefault keeps the
                             // editor's caret from blurring as the
@@ -107,7 +115,6 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
                                 }
                                 slash_for_click.set(None);
                             },
-                            key: "{idx_for_click}",
                             div { class: "slash-row-icon", "{entry.icon}" }
                             div { class: "slash-row-body",
                                 div { class: "slash-row-label", "{entry.label}" }

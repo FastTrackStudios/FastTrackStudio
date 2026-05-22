@@ -180,7 +180,7 @@ fn render_node(arena: &Arena, tile: TileId) -> Option<Patch> {
             ];
             // Extra spec attrs (e.g. `data-href` for links). The
             // JS-side click handler in editor.rs reads these.
-            attrs.extend(spec.attrs.into_iter());
+            attrs.extend(spec.attrs);
             Some(Patch::element("span", attrs, kids))
         }
         TileKind::Widget | TileKind::WidgetBuffer => {

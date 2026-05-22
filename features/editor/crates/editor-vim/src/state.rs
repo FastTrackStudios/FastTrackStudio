@@ -182,10 +182,7 @@ fn dispatch_normal(
         return dispatch_normal_modified(state, vim, key);
     }
 
-    let ch = match single_char(key) {
-        Some(c) => c,
-        None => return None,
-    };
+    let ch = single_char(key)?;
 
     // Count accumulation: `0` only starts a count if there's
     // already one in flight — otherwise `0` is the line-start
@@ -237,7 +234,7 @@ fn dispatch_normal(
     // Operator-pending: if `pending_operator` is `Some`, this
     // keystroke must produce a motion or be the doubled-op
     // shorthand (`dd`/`cc`/`yy`).
-    if let Some(op) = vim.pending_operator.clone() {
+    if let Some(op) = vim.pending_operator {
         return finish_operator(state, vim, op, ch);
     }
 
@@ -530,7 +527,7 @@ fn finish_operator(
 ) -> Option<TransactionSpec> {
     // Doubled-op shorthand: `dd`, `cc`, `yy` act on the current
     // line.
-    if Operator::from_char(ch) == Some(op.clone()) {
+    if Operator::from_char(ch) == Some(op) {
         let count = vim.pending_count.take().unwrap_or(1);
         let from = motions::line_start(state, caret(state));
         let to = motions::line_end_n(state, caret(state), count);
@@ -573,7 +570,7 @@ fn finish_operator(
         let to = motions::apply(state, motion, count);
         let (lo, hi) = if from <= to { (from, to) } else { (to, from) };
         vim.last_change = Some(LastChange::OperatorMotion {
-            operator: op.clone(),
+            operator: op,
             motion,
             count,
         });
@@ -616,13 +613,13 @@ fn finish_pending_input(
             // If we got here via the text-object hack inside
             // `finish_operator`, `pending_operator` is `Some` and
             // `ch` is the object key (`w`/`"`/`{`/...).
-            if let Some(op) = vim.pending_operator.clone() {
+            if let Some(op) = vim.pending_operator {
                 let around = matches!(input, MotionInput::TillForward);
                 if let Some(obj) = TextObject::from_char(ch) {
                     let count = vim.pending_count.take().unwrap_or(1);
                     let range = text_objects::apply(state, obj, around, caret(state));
                     vim.last_change = Some(LastChange::OperatorTextObject {
-                        operator: op.clone(),
+                        operator: op,
                         object: obj,
                         around,
                         count,
@@ -634,7 +631,7 @@ fn finish_pending_input(
             // Plain f/F/t/T motion case — apply directly.
             let count = vim.pending_count.take().unwrap_or(1);
             let target = motions::find_char(state, caret(state), ch, input, count)?;
-            if let Some(op) = vim.pending_operator.clone() {
+            if let Some(op) = vim.pending_operator {
                 let from = caret(state);
                 let (lo, hi) = if from <= target {
                     (from, target + 1)

@@ -278,6 +278,10 @@ pub fn serialize_parsed(parsed: &ParsedPage) -> String {
     serialize_frontmatter(&parsed.frontmatter)
 }
 
+// Re-export so callers don't need a separate `knowledge_proto` dep
+// for the common refs types used by query helpers.
+pub use vault_live::refs;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,7 +359,3 @@ mod tests {
         assert!(!hits.contains("nope.md"));
     }
 }
-
-// Re-export so callers don't need a separate `knowledge_proto` dep
-// for the common refs types used by query helpers.
-pub use vault_live::refs;

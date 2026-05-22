@@ -79,8 +79,8 @@ fn first_line(raw: &str, anchor: usize) -> String {
 /// frontmatter, capped at `max` chars.
 fn preview_of_page(raw: &str, max: usize) -> String {
     // Skip frontmatter if present.
-    let body_start = if raw.starts_with("---\n") {
-        raw[4..].find("\n---\n").map(|i| 4 + i + 5).unwrap_or(0)
+    let body_start = if let Some(rest) = raw.strip_prefix("---\n") {
+        rest.find("\n---\n").map(|i| 4 + i + 5).unwrap_or(0)
     } else {
         0
     };

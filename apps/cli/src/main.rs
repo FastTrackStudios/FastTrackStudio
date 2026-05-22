@@ -589,7 +589,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("  … {} more", graph.nodes.len() - 20);
                 }
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Gaps { vault, json } => {
             let vault = vault
@@ -628,7 +628,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("  [{:?}] {}", g.kind, g.explanation);
                 }
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Search {
             vault,
@@ -666,7 +666,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("         {}", h.snippet);
                 }
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Clusters { vault } => {
             let vault = vault
@@ -684,7 +684,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     c.name
                 );
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::WatchSources {
             vault,
@@ -728,7 +728,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("  - {d}");
                 }
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Health { vault } => {
             let vault = vault
@@ -749,7 +749,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             if let Some(t) = h.last_rescan_at {
                 println!("last_rescan_at:  {t}");
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Import {
             vault,
@@ -778,7 +778,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             if refs.len() > 40 {
                 println!("  … {} more", refs.len() - 40);
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Rescan { vault, enqueue } => {
             let vault = vault
@@ -819,7 +819,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                 }
                 println!("enqueued {count} ingest task(s)");
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Lint {
             vault,
@@ -846,7 +846,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             for f in &raised {
                 println!("  [{:?} {:?}] {}", f.kind, f.severity, f.title);
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Findings { vault } => {
             let vault = vault
@@ -863,7 +863,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("      pages: {}", f.pages.join(", "));
                 }
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Dedup {
             vault,
@@ -892,7 +892,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     g.reason
                 );
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Research {
             vault,
@@ -924,7 +924,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             for q in &plan.queries {
                 println!("QUERY: {q}");
             }
-            return Ok(());
+            Ok(())
         }
         WikiCmd::Ingest {
             vault,
@@ -1365,9 +1365,8 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             let page = v
                 .page(&rel_path)
                 .ok_or_else(|| eyre::eyre!("page not found: {rel_path}"))?;
-            match vault_obsidian::read_property(page, &key) {
-                Some(v) => println!("{v}"),
-                None => {}
+            if let Some(v) = vault_obsidian::read_property(page, &key) {
+                println!("{v}")
             }
         }
         VaultCmd::PropertySet {

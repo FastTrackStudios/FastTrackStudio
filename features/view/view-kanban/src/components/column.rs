@@ -193,7 +193,7 @@ struct DropSlotProps {
 fn DropSlot(props: DropSlotProps) -> Element {
     let ctx = use_drag_context();
     let mut hint = ctx.hint;
-    let drag_snapshot = ctx.drag.read().clone();
+    let drag_snapshot = *ctx.drag.read();
     let active = hint.read().as_ref()
         == Some(&DropHint {
             column: props.column,

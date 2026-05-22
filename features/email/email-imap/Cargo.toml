@@ -41,3 +41,6 @@ test-plaintext = []
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "io-util", "net"] }
 email-imap = { path = ".", features = ["test-plaintext"] }
+
+[lints]
+workspace = true

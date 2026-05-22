@@ -27,3 +27,6 @@ tokio = { workspace = true, optional = true, features = ["process", "io-util", "
 default = ["command", "keyring"]
 command = ["dep:tokio"]
 keyring = ["dep:keyring"]
+
+[lints]
+workspace = true

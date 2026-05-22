@@ -124,6 +124,14 @@ impl MermaidCache {
     }
 }
 
+fn with_mermaid_cache<R>(f: impl FnOnce(&mut MermaidCache) -> R) -> R {
+    thread_local! {
+        static CACHE: std::cell::RefCell<MermaidCache> =
+            std::cell::RefCell::new(MermaidCache::new(CACHE_CAP));
+    }
+    CACHE.with(|c| f(&mut c.borrow_mut()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::themify_svg;
@@ -150,12 +158,4 @@ mod tests {
         let out = themify_svg(svg);
         assert!(out.contains("#abc123"));
     }
-}
-
-fn with_mermaid_cache<R>(f: impl FnOnce(&mut MermaidCache) -> R) -> R {
-    thread_local! {
-        static CACHE: std::cell::RefCell<MermaidCache> =
-            std::cell::RefCell::new(MermaidCache::new(CACHE_CAP));
-    }
-    CACHE.with(|c| f(&mut c.borrow_mut()))
 }

@@ -31,3 +31,6 @@ web-sys = { version = "0.3", features = ["Window", "Performance"] }
 [features]
 default = []
 serde = ["dep:serde"]
+
+[lints]
+workspace = true

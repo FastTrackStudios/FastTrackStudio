@@ -28,3 +28,6 @@ vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

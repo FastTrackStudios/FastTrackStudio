@@ -742,8 +742,8 @@ pub fn parse_page(src: &str) -> ParsedPage {
         }
 
         // Plain blockquote.
-        if trimmed.starts_with('>') {
-            let rest = trimmed[1..].trim_start_matches(' ');
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            let rest = rest.trim_start_matches(' ');
             match cur.as_mut() {
                 Some(b) if b.kind == "blockquote" => {
                     b.content.push('\n');

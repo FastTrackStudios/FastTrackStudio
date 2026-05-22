@@ -50,6 +50,7 @@ pub struct UploadSessionMap {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // reserved for the upcoming GC pass
 pub(crate) struct PendingUpload {
     pub doc_id: String,
     pub filename: String,

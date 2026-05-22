@@ -326,6 +326,7 @@ pub async fn run_lint(
 /// Propose a research plan for one knowledge gap. Returns
 /// the parsed `TOPIC: …` + queries; caller dispatches the
 /// actual web search.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_propose_research(
     backend: &CodexBackend,
     wiki: &WikiLive,

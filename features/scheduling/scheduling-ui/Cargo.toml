@@ -16,3 +16,6 @@ serde = { workspace = true, features = ["derive"] }
 tracing = { workspace = true }
 
 fts-ui.workspace = true
+
+[lints]
+workspace = true

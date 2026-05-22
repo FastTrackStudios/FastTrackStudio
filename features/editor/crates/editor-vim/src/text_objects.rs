@@ -135,6 +135,7 @@ fn pair_object(
             }
         }
         let mut hi = None;
+        #[allow(clippy::needless_range_loop)]
         for i in pos..bytes.len() {
             if bytes[i] == close && Some(i) != lo {
                 hi = Some(i);
@@ -165,6 +166,7 @@ fn pair_object(
     };
     let mut depth = 0i32;
     let mut close_idx = None;
+    #[allow(clippy::needless_range_loop)]
     for i in open_idx..bytes.len() {
         if bytes[i] == open {
             depth += 1;

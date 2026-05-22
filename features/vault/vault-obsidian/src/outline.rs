@@ -60,6 +60,9 @@ pub fn outline(page: &VaultPage) -> PageOutline {
         // to text-only, then to bumping the cursor and using whatever
         // line we have, so we always emit *something* sensible.
         let mut found_line = None;
+        // Need `i` to advance the cursor on match — natural
+        // shape is the index loop.
+        #[allow(clippy::needless_range_loop)]
         for i in cursor..candidates.len() {
             let (ln, lvl, ctxt) = &candidates[i];
             if *lvl == level && ctxt.trim() == text {
@@ -69,6 +72,7 @@ pub fn outline(page: &VaultPage) -> PageOutline {
             }
         }
         if found_line.is_none() {
+            #[allow(clippy::needless_range_loop)]
             for i in cursor..candidates.len() {
                 let (ln, _, ctxt) = &candidates[i];
                 if ctxt.trim() == text {
@@ -93,7 +97,7 @@ pub fn outline(page: &VaultPage) -> PageOutline {
 /// `None`. Allows up to three leading spaces per CommonMark; strips
 /// any trailing `#`s and surrounding whitespace.
 fn parse_atx(line: &str) -> Option<(u8, String)> {
-    let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+    let trimmed = line.trim_start_matches([' ', '\t']);
     // Limit to 3 leading spaces per CommonMark.
     let leading = line.len() - trimmed.len();
     if leading > 3 {

@@ -33,3 +33,6 @@ kanban = ["dep:view-kanban"]
 calendar = ["dep:view-calendar"]
 table = ["dep:view-table"]
 heatmap = ["dep:view-heatmap"]
+
+[lints]
+workspace = true
