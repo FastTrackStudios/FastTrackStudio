@@ -185,14 +185,12 @@ Each is one commit, gated by `cargo check -p mealplan` clean.
 
 ### Phase 6 — vault + wiki integration (the wikilink layer)
 
-- `vault::Vault::scan()` discovers `Cookbook/*.cook` (today it only sees `*.md`).
-- Wiki backlinks resolve `[[ChickenFrench]]` to `Cookbook/ChickenFrench.cook`.
-- **Forward-resolve `@ingredient` as a wikilink target.** When parsing a `.cook` file, each ingredient name is registered as a wikilink emanating from that recipe. So:
-  - `Cookbook/Pasta.cook` containing `@flour{500%g}` creates a wiki edge `Pasta → flour`.
-  - Backlinks page for `Wiki/flour.md` (or pantry item "flour") lists every recipe that uses flour. Free.
-  - `[[saute]]` in step body resolves normally.
-- Wiki search indexes `.cook` files (title from `>> title:` metadata or filename; body text from steps).
-- **Verify**: wiki search returns recipes; backlinks page for a pantry item lists recipes that use it.
+**Status:** cookbook-side bridge shipped (`cookbook::recipe_wiki_edges`); vault/wiki indexing is wiki-feature work tracked separately.
+
+- ✅ `cookbook::wiki::recipe_wiki_edges(recipe) -> Vec<WikiEdge>` projects each `@ingredient` / `#cookware` / `@@recipe-ref` into a `(source_path, target_basename, kind)` edge. Wiki indexers call this on every `.cook` file they discover and feed it into the same edge store handling markdown `[[...]]` links. So `Cookbook/Pasta.cook` containing `@flour{500%g}` produces edge `Pasta.cook → flour`, and the backlinks pane for the wiki/pantry page named "flour" lists every recipe that uses it.
+- ⏳ `vault::Vault::scan()` discovering `Cookbook/*.cook` — needs a new `VaultEntryKind::Cook` plus walker + snapshot field changes. Tracked separately as wiki-feature work.
+- ⏳ Wiki search indexing `.cook` files (title from `>> title:` metadata or filename; body text from steps). Depends on the vault-side change.
+- ⏳ `[[ChickenFrench]]` in a markdown page resolving to `Cookbook/ChickenFrench.cook`. Depends on the vault-side change.
 
 ### Phase 7 — UI surfaces
 
