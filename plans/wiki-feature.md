@@ -46,13 +46,33 @@ Module map (`features/wiki/wiki-proto/src/`):
 | `schema.rs`       | `SchemaDoc`, `PurposeDoc`, defaults.            |
 | `log.rs`          | `WikiIndex`, `IndexEntry`, `LogEntry`, `LogOp`. |
 | `graph.rs`        | 4-signal relevance, `Cluster`, `KnowledgeGap`.  |
+| `raw.rs`          | `ImportRawSource`, `RawSourceRef` — the immutable layer. |
 | `ingest.rs`       | `IngestTask`, `IngestStatus`, `AnalysisDraft`, `PageDraft`. |
 | `lint.rs`         | `LintFinding`, `LintScope`, `FindingAction`.    |
 | `review.rs`       | `ReviewItem`, `ReviewKind`, `ReviewAction`.     |
 | `research.rs`     | `ResearchPlan`, `RawSource`.                    |
+| `search.rs`       | `SearchOpts`, `SearchHits`, `SearchMode` — token / hybrid. |
+| `health.rs`       | `WikiHealth` snapshot.                           |
+| `multimodal.rs`   | `ExtractOpts`, `ExtractedImage` — Phase-1 image extraction. |
 | `federation.rs`   | `PeerWiki`, `PeerPullResult`, `CrossWikiPageRef`. |
 | `event.rs`        | `WikiEvent` for live subscribers.               |
 | `error.rs`        | `WikiError`.                                    |
+
+## The raw vs. articles split
+
+`Wiki/sources/` is the **immutable** layer (mirrors llm_wiki's
+`raw/sources/`). Bytes only land via
+`import_raw_source` or `submit_research_result`; they only
+leave via `delete_raw_source`. The agent reads from
+`sources/` and cites entries via the `sources:` frontmatter
+field, but never rewrites the file bytes — backends enforce
+this by rejecting `record_pages` drafts targeting paths under
+`Wiki/sources/`.
+
+Everything else under `Wiki/` is **mutable**:
+`<Type>/<Slug>.md` pages are LLM-authored, `index.md` +
+`log.md` are LLM-maintained, `media/` holds extracted +
+captioned images, `_state/` holds opaque agent state.
 
 ## On-disk layout
 

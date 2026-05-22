@@ -18,12 +18,16 @@ use crate::{
     event::WikiEvent,
     federation::{CrossWikiPageRef, PeerPullResult, PeerWiki},
     graph::{Cluster, GraphOpts, KnowledgeGap, RelevanceScore, WikiGraph},
+    health::WikiHealth,
     ingest::{AnalysisDraft, IngestTask, PageDraft, SourceChange},
     lint::{FindingAction, LintFinding, LintScope},
     log::{LogEntry, WikiIndex},
+    multimodal::{ExtractOpts, ExtractedImage},
+    raw::{ImportRawSource, RawSourceRef},
     research::{RawSource, ResearchPlan, ResearchSourceKind, ResearchStatus},
     review::{ReviewAction, ReviewItem},
     schema::{PurposeDoc, SchemaDoc},
+    search::{SearchHits, SearchOpts},
 };
 use chrono::{DateTime, Utc};
 use vox::Tx;
@@ -54,6 +58,45 @@ pub trait WikiService {
 
     /// Overwrite `purpose.md`. Curator-only.
     fn write_purpose(&self, wiki_id: &str, markdown: &str) -> Result<(), WikiError>;
+
+    /// One-shot health snapshot — page count, queue depth,
+    /// open findings + reviews, last lint/ingest timestamps,
+    /// watcher state. Cheap; safe to poll.
+    fn health(&self, wiki_id: &str) -> Result<WikiHealth, WikiError>;
+
+    // ───────────────────────── Raw layer (immutable sources) ─────────────────────────
+
+    /// Persist `bytes` under `Wiki/sources/<unique-filename>`
+    /// and return the resulting reference. The backend
+    /// guarantees uniqueness (sha256 dedup ⇒ same bytes never
+    /// stored twice; collision-resolves by suffixing).
+    /// Optionally enqueues an ingest task (Created) so the
+    /// agent picks the new source up.
+    fn import_raw_source(
+        &self,
+        wiki_id: &str,
+        source: ImportRawSource,
+    ) -> Result<RawSourceRef, WikiError>;
+
+    /// List every entry in `Wiki/sources/` with metadata.
+    fn list_raw_sources(&self, wiki_id: &str) -> Result<Vec<RawSourceRef>, WikiError>;
+
+    /// Read raw source bytes by vault-relative path.
+    fn read_raw_source(&self, wiki_id: &str, path: &str) -> Result<Vec<u8>, WikiError>;
+
+    /// Remove a raw source. Returns review items the curator
+    /// should resolve next — typically one per
+    /// `source`-typed wiki page that cited the removed file.
+    /// Source-pages are *not* auto-deleted; the curator
+    /// decides whether the distilled write-up still stands.
+    fn delete_raw_source(&self, wiki_id: &str, path: &str) -> Result<Vec<ReviewItem>, WikiError>;
+
+    /// Walk `Wiki/sources/`, diff against the persisted
+    /// `_state/snapshot.json`, and enqueue ingest tasks for
+    /// any Created / Modified / Deleted entries. Returns
+    /// the newly-enqueued tasks. Idempotent: re-running with
+    /// no changes returns an empty vec.
+    fn rescan_sources(&self, wiki_id: &str) -> Result<Vec<IngestTask>, WikiError>;
 
     // ───────────────────────── Index + log ─────────────────────────
 
@@ -134,6 +177,38 @@ pub trait WikiService {
 
     /// Curator-cancelled a task.
     fn cancel_ingest(&self, wiki_id: &str, task_id: &str) -> Result<(), WikiError>;
+
+    /// Re-queue a `Failed` (or `Cancelled`) ingest task.
+    /// Resets `last_error` + `status` to `Pending` and bumps
+    /// `retries`. Returns the updated task.
+    fn retry_ingest(&self, wiki_id: &str, task_id: &str) -> Result<IngestTask, WikiError>;
+
+    /// Extract embedded images from a raw source. **No LLM** —
+    /// pure decode (pdfium for PDFs, zip + XML for PPTX /
+    /// DOCX, direct decode for image MIMEs). Captioning is a
+    /// separate concern handled by the `wiki-agent` boundary.
+    fn extract_images(
+        &self,
+        wiki_id: &str,
+        source_path: &str,
+        opts: ExtractOpts,
+    ) -> Result<Vec<ExtractedImage>, WikiError>;
+
+    /// Toggle the backend's source watcher. When enabled, the
+    /// backend listens for file events under `Wiki/sources/`
+    /// and auto-enqueues ingest tasks. Returns the new state.
+    fn set_watch(&self, wiki_id: &str, enabled: bool) -> Result<bool, WikiError>;
+
+    /// Report whether the source watcher is currently active.
+    fn is_watching(&self, wiki_id: &str) -> Result<bool, WikiError>;
+
+    // ───────────────────────── Search ─────────────────────────
+
+    /// Token + (optional) vector search across the wiki.
+    /// Always available in `Token` mode (cheap grep + TF-IDF);
+    /// `Hybrid` mode requires the backend to have a vector
+    /// index loaded and downgrades gracefully when it doesn't.
+    fn search(&self, wiki_id: &str, opts: SearchOpts) -> Result<SearchHits, WikiError>;
 
     // ───────────────────────── Lint ─────────────────────────
 
