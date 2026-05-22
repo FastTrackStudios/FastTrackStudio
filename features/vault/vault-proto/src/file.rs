@@ -24,10 +24,10 @@ pub struct PutAck {
 /// Conditional-write mode. Mirror of the original HTTP
 /// `If-Match` header semantics:
 /// - [`Self::CreateOnly`] — fail if the path already exists.
-/// - [`Self::Sha`]        — fail unless the server's current
-///                          sha matches.
-/// - [`Self::Force`]      — unconditional. Only safe for the
-///                          first push of a brand-new vault.
+/// - [`Self::Sha`] — fail unless the server's current sha
+///   matches.
+/// - [`Self::Force`] — unconditional. Only safe for the first
+///   push of a brand-new vault.
 #[derive(Debug, Clone, Facet)]
 #[repr(u8)]
 pub enum IfMatch {

@@ -424,10 +424,10 @@ mod tests {
         graph.gantt_display_mode = display_mode.map(|s| s.to_string());
         let mut sections = Vec::new();
         for t in &tasks {
-            if let Some(sec) = &t.section {
-                if !sections.contains(sec) {
-                    sections.push(sec.clone());
-                }
+            if let Some(sec) = &t.section
+                && !sections.contains(sec)
+            {
+                sections.push(sec.clone());
             }
         }
         graph.gantt_sections = sections;

@@ -173,6 +173,15 @@ arborium = { version = "2.16.0", default-features = false }
 arborium-theme = "2.16.0"
 arborium-tree-sitter = "2.16.0"
 attachments-proto = { path = "features/attachments/attachments-proto" }
+# `locations` — typed view of place pages (`type: location`)
+# in a `vault::Vault`. Studios / rooms / storage / venues
+# carry a stable `id` so other features reference them by
+# uuid through renames.
+locations = { path = "features/locations/locations" }
+# `inventory` — typed view of gear/equipment pages
+# (`type: item`). References locations by `location_id`;
+# rides on top of `vault` like `task` does.
+inventory = { path = "features/inventory/inventory" }
 view = { path = "features/view/view" }
 view-gantt = { path = "features/view/view-gantt" }
 view-kanban = { path = "features/view/view-kanban" }
@@ -238,6 +247,9 @@ version = "0.46"
 
 [workspace.dependencies.facet-yaml]
 version = "0.46"
+
+[workspace.dependencies.keyflow]
+path = "../FastTrackStudio/keyflow/crates/keyflow"
 
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"

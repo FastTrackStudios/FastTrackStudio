@@ -13,7 +13,7 @@ use email_proto::{Addr, Envelope};
 use mail_parser::MessageParser;
 use rusqlite::{Connection, Transaction, params};
 
-use crate::error::{Result, StoreError};
+use crate::error::Result;
 use crate::query::{SearchHit, StoredEnvelope};
 use crate::schema::{SCHEMA_V1, SCHEMA_VERSION};
 use crate::walker;

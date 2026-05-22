@@ -45,7 +45,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "uuid",
- "vox 0.3.1",
+ "vox",
 ]
 
 [[package]]
@@ -2781,7 +2781,7 @@ dependencies = [
  "futures-util",
  "generational-box",
  "http",
- "inventory",
+ "inventory 0.3.24",
  "parking_lot",
  "serde",
  "serde_json",
@@ -5926,6 +5926,25 @@ dependencies = [
 
 [[package]]
 name = "inventory"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "locations",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "vault",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "inventory"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
@@ -6529,6 +6548,24 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "locations"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "vault",
+ "vox",
+ "vox-types",
+]
 
 [[package]]
 name = "lock_api"
