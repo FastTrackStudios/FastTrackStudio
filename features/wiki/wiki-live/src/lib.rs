@@ -33,13 +33,21 @@
 
 mod context;
 mod error;
+pub mod findings;
+mod folder_import;
+mod health;
 mod index;
 pub mod log_md;
 pub mod queue;
 mod raw;
+mod snapshot;
 mod state;
 mod vault;
 
 pub use context::WikiContext;
 pub use error::WikiLiveError;
+pub use findings::{FindingStatus, LintFinding, LintKind, LintSeverity};
+pub use folder_import::ImportFolderOpts;
+pub use health::WikiHealth;
+pub use snapshot::RescanDiff;
 pub use vault::WikiLive;

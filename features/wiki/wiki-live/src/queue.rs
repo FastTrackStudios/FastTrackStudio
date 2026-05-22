@@ -67,9 +67,15 @@ pub struct PageDraft {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct QueueFile {
+pub(crate) struct QueueFile {
     #[serde(default)]
-    tasks: Vec<IngestTask>,
+    pub(crate) tasks: Vec<IngestTask>,
+}
+
+impl QueueFile {
+    pub(crate) fn tasks_ref(&self) -> &[IngestTask] {
+        &self.tasks
+    }
 }
 
 impl StateFile for QueueFile {

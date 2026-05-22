@@ -278,8 +278,95 @@ pub enum LintSeverity {
     Info,
 }
 
-pub fn parse_lint_blocks(_response: &str) -> Result<Vec<LintBlock>, AgentWikiError> {
-    todo!("port from llm_wiki/src/lib/lint.ts")
+impl LintBlockKind {
+    fn parse(s: &str) -> Result<Self, AgentWikiError> {
+        match s.trim().to_lowercase().as_str() {
+            "contradiction" => Ok(Self::Contradiction),
+            "stale" => Ok(Self::Stale),
+            "missing-page" => Ok(Self::MissingPage),
+            "suggestion" => Ok(Self::Suggestion),
+            other => Err(AgentWikiError::UnknownLintKind(other.to_string())),
+        }
+    }
+}
+
+impl LintSeverity {
+    fn parse(s: &str) -> LintSeverity {
+        match s.trim().to_lowercase().as_str() {
+            "info" => Self::Info,
+            _ => Self::Warning,
+        }
+    }
+}
+
+/// Parse `---LINT: <kind> | <severity> | <title>---` /
+/// `---END LINT---` blocks. Matches llm_wiki's lint
+/// emit format.
+pub fn parse_lint_blocks(response: &str) -> Result<Vec<LintBlock>, AgentWikiError> {
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < response.len() {
+        let after = &response[cursor..];
+        let Some(rel) = after.find("---LINT:") else {
+            break;
+        };
+        let block_start = cursor + rel;
+        let (block, end) = parse_one(response, block_start, "---LINT:", "---END LINT---")?;
+        out.push(parse_lint_block(block)?);
+        cursor = end;
+    }
+    Ok(out)
+}
+
+fn parse_lint_block(raw: &str) -> Result<LintBlock, AgentWikiError> {
+    let rest = raw
+        .strip_prefix("---LINT:")
+        .ok_or(AgentWikiError::MalformedResponse(
+            "expected ---LINT: prefix",
+            raw.chars().take(60).collect(),
+        ))?;
+    let (header, body) = rest
+        .split_once('\n')
+        .ok_or(AgentWikiError::MalformedResponse(
+            "LINT block missing newline after header",
+            raw.chars().take(60).collect(),
+        ))?;
+    let header = header.trim().trim_end_matches('-').trim();
+    let mut parts = header.splitn(3, '|');
+    let kind_str = parts.next().unwrap_or("").trim();
+    let sev_str = parts.next().unwrap_or("warning").trim();
+    let title = parts.next().unwrap_or("").trim().to_string();
+    let kind = LintBlockKind::parse(kind_str)?;
+    let severity = LintSeverity::parse(sev_str);
+
+    let body = body
+        .strip_suffix("---END LINT---")
+        .or_else(|| body.strip_suffix("---END LINT---\n"))
+        .unwrap_or(body);
+
+    let mut description = String::new();
+    let mut pages = Vec::new();
+    for line in body.lines() {
+        let l = line.trim_end();
+        if let Some(rest) = l.strip_prefix("PAGES:") {
+            pages = rest
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        } else {
+            description.push_str(l);
+            description.push('\n');
+        }
+    }
+
+    Ok(LintBlock {
+        kind,
+        severity,
+        title,
+        description: description.trim().to_string(),
+        pages,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -296,8 +383,76 @@ pub enum DuplicateConfidence {
     Low,
 }
 
-pub fn parse_dedup_groups(_response: &str) -> Result<Vec<DuplicateGroup>, AgentWikiError> {
-    todo!("expects `{{\"groups\":[...]}}` JSON")
+/// Parse `{"groups":[{"slugs":[...],"reason":"…",
+/// "confidence":"high"}]}` JSON.
+pub fn parse_dedup_groups(response: &str) -> Result<Vec<DuplicateGroup>, AgentWikiError> {
+    // Trim markdown fences in case the LLM wrapped despite
+    // instructions.
+    let body = strip_json_fence(response);
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+        AgentWikiError::MalformedResponse(
+            "expected JSON object",
+            format!("{e}: {}", body.chars().take(80).collect::<String>()),
+        )
+    })?;
+    let groups =
+        v.get("groups")
+            .and_then(|g| g.as_array())
+            .ok_or(AgentWikiError::MalformedResponse(
+                "missing `groups` array",
+                body.chars().take(80).collect(),
+            ))?;
+    let mut out = Vec::with_capacity(groups.len());
+    for g in groups {
+        let slugs: Vec<String> = g
+            .get("slugs")
+            .and_then(|s| s.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if slugs.len() < 2 {
+            continue;
+        }
+        let reason = g
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let confidence = match g.get("confidence").and_then(|v| v.as_str()) {
+            Some("high") => DuplicateConfidence::High,
+            Some("medium") => DuplicateConfidence::Medium,
+            Some("low") => DuplicateConfidence::Low,
+            _ => DuplicateConfidence::Medium,
+        };
+        out.push(DuplicateGroup {
+            slugs,
+            reason,
+            confidence,
+        });
+    }
+    Ok(out)
+}
+
+fn strip_json_fence(s: &str) -> &str {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix("```json") {
+        rest.trim_start_matches('\n')
+            .trim_end()
+            .strip_suffix("```")
+            .unwrap_or(rest)
+            .trim()
+    } else if let Some(rest) = t.strip_prefix("```") {
+        rest.trim_start_matches('\n')
+            .trim_end()
+            .strip_suffix("```")
+            .unwrap_or(rest)
+            .trim()
+    } else {
+        t
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,12 +461,53 @@ pub struct ResearchTopicPlan {
     pub queries: Vec<String>,
 }
 
-pub fn parse_research_plan(_response: &str) -> Result<ResearchTopicPlan, AgentWikiError> {
-    todo!()
+/// Parse the 4-line `TOPIC:` + 3× `QUERY:` response from
+/// `OPTIMIZE_RESEARCH_SYSTEM`. Tolerant: accepts < 3
+/// queries, but `TOPIC:` is required.
+pub fn parse_research_plan(response: &str) -> Result<ResearchTopicPlan, AgentWikiError> {
+    let mut topic = String::new();
+    let mut queries = Vec::new();
+    for line in response.lines() {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("TOPIC:") {
+            topic = rest.trim().to_string();
+        } else if let Some(rest) = l.strip_prefix("QUERY:") {
+            let q = rest.trim().to_string();
+            if !q.is_empty() {
+                queries.push(q);
+            }
+        }
+    }
+    if topic.is_empty() {
+        return Err(AgentWikiError::MalformedResponse(
+            "missing TOPIC: line",
+            response.chars().take(120).collect(),
+        ));
+    }
+    Ok(ResearchTopicPlan { topic, queries })
 }
 
-pub fn parse_sweep_resolved(_response: &str) -> Result<Vec<String>, AgentWikiError> {
-    todo!()
+/// Parse `{"resolved":["id1","id2"]}` from
+/// `SWEEP_REVIEWS_SYSTEM`.
+pub fn parse_sweep_resolved(response: &str) -> Result<Vec<String>, AgentWikiError> {
+    let body = strip_json_fence(response);
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+        AgentWikiError::MalformedResponse(
+            "expected JSON object",
+            format!("{e}: {}", body.chars().take(80).collect::<String>()),
+        )
+    })?;
+    let arr =
+        v.get("resolved")
+            .and_then(|r| r.as_array())
+            .ok_or(AgentWikiError::MalformedResponse(
+                "missing `resolved` array",
+                body.chars().take(80).collect(),
+            ))?;
+    Ok(arr
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect())
 }
 
 #[cfg(test)]
