@@ -1,10 +1,10 @@
 //! `CookbookService` — wire surface for browsing + mutating
-//! recipes, decorated with `#[architect::rpc]`.
+//! cooklang `.cook` files.
 //!
-//! Same shape as `LocationsService` / `InventoryService`: sync
-//! trait, vox async client emitted by the macro. Agent
-//! integrations (e.g. "find me a 30-minute vegan dinner using
-//! what's in the pantry") drive this surface remotely.
+//! Identity is the vault-relative `path`. There is no UUID;
+//! cooklang files don't carry one and the cookbook layer
+//! doesn't synthesize one. Meals, agents, and the wiki all
+//! reference recipes by path.
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
@@ -27,24 +27,25 @@ pub enum CookbookError {
 
 #[architect::rpc]
 pub trait CookbookService {
-    /// Every recipe currently in the vault.
+    /// Every `.cook` file currently under `<vault>/Cookbook/`.
     fn list(&self) -> Result<Vec<Recipe>, CookbookError>;
 
-    /// One recipe by id.
-    fn get(&self, id: &str) -> Result<Recipe, CookbookError>;
+    /// One recipe by vault-relative path.
+    fn get(&self, path: &str) -> Result<Recipe, CookbookError>;
 
-    /// Create a new recipe. Backend assigns `recipe.path`
-    /// (default `Wiki/Cookbook/<slug>.md`) and `recipe.id` if
-    /// either is empty / nil.
+    /// Create a new recipe. Caller supplies `path` + `source`
+    /// in [`Recipe`]; backend fills out parsed fields and
+    /// stamps `date_modified`.
     fn create(&self, recipe: Recipe) -> Result<Recipe, CookbookError>;
 
-    /// Replace the recipe whose `id` matches. Path is
-    /// preserved; rename via [`Self::rename`].
+    /// Replace the file at `recipe.path` with `recipe.source`.
+    /// Backend re-parses and returns the refreshed view.
     fn update(&self, recipe: Recipe) -> Result<Recipe, CookbookError>;
 
-    /// Move the backing file to a new vault-relative path.
-    fn rename(&self, id: &str, new_path: &str) -> Result<Recipe, CookbookError>;
+    /// Move the backing file (and sibling step/title images)
+    /// to a new vault-relative path.
+    fn rename(&self, old_path: &str, new_path: &str) -> Result<Recipe, CookbookError>;
 
-    /// Remove the backing file.
-    fn delete(&self, id: &str) -> Result<(), CookbookError>;
+    /// Delete the backing file (and sibling images).
+    fn delete(&self, path: &str) -> Result<(), CookbookError>;
 }

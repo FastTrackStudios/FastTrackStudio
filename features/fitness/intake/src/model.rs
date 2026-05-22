@@ -104,9 +104,9 @@ pub struct IntakeEntry {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[repr(u8)]
 pub enum IntakeSource {
-    /// A `cookbook::Recipe` id. `qty` is "servings of this
-    /// recipe".
-    Recipe { id: Uuid },
+    /// A `cookbook::Recipe` referenced by vault-relative
+    /// `.cook` path. `qty` is "servings of this recipe".
+    Recipe { path: String },
     /// A `pantry::PantryItem` id. `qty` is in the
     /// pantry item's `unit` (typically the canonical
     /// stock unit).

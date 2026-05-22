@@ -25,9 +25,10 @@ pub struct Store {
 
 impl Store {
     pub fn new(vault: Vault) -> Self {
+        let root = vault.root.clone();
         let pantry = mealplan::pantry::Store::new(vault);
         let inner = pantry.shared();
-        let cookbook = mealplan::cookbook::Store::from_shared(inner.clone());
+        let cookbook = mealplan::cookbook::Store::new(root);
         Self {
             inner,
             cookbook,
@@ -36,7 +37,8 @@ impl Store {
     }
 
     pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
-        let cookbook = mealplan::cookbook::Store::from_shared(inner.clone());
+        let root = inner.lock().expect("shared vault poisoned").root.clone();
+        let cookbook = mealplan::cookbook::Store::new(root);
         let pantry = mealplan::pantry::Store::from_shared(inner.clone());
         Self {
             inner,
@@ -165,7 +167,7 @@ impl IntakeService for Store {
     fn log_recipe(
         &self,
         date: &str,
-        recipe_id: &str,
+        recipe_path: &str,
         servings: f64,
         slot: &str,
     ) -> Result<IntakeLog, IntakeError> {
@@ -176,17 +178,38 @@ impl IntakeService for Store {
         }
         let recipe = self
             .cookbook
-            .get(recipe_id)
+            .get(recipe_path)
             .map_err(|e| IntakeError::Mealplan(format!("recipe lookup: {e}")))?;
-        let id = Uuid::parse_str(recipe_id)
-            .map_err(|e| IntakeError::BadRequest(format!("recipe_id: {e}")))?;
-        let nutrition = recipe
-            .nutrition
-            .as_ref()
-            .map(|n| scale_nutrition(n, servings));
+        // Recipe nutrition is computed at intake time from
+        // pantry per-unit data (the cooklang file carries no
+        // nutrition). Build a synthetic 1-serving meal and
+        // delegate; multiply by the caller's `servings`.
+        let items = self
+            .pantry
+            .list()
+            .map_err(|e| IntakeError::Mealplan(e.to_string()))?;
+        let synthetic_meal = mealplan::Meal {
+            path: String::new(),
+            id: Uuid::nil(),
+            name: recipe.name.clone(),
+            scheduled_for: chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap(),
+            slot: "snack".into(),
+            servings: 1,
+            recipe_paths: vec![recipe_path.into()],
+            status: "planned".into(),
+            pantry_deductions: Vec::new(),
+            tags: Vec::new(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+        };
+        let per_serving = synthetic_meal.nutrition_total(std::slice::from_ref(&recipe), &items);
+        let nutrition = per_serving.as_ref().map(|n| scale_nutrition(n, servings));
         let entry = IntakeEntry {
             id: Uuid::new_v4(),
-            source: IntakeSource::Recipe { id },
+            source: IntakeSource::Recipe {
+                path: recipe_path.into(),
+            },
             name: recipe.name.clone(),
             qty: servings,
             unit: "serving".into(),

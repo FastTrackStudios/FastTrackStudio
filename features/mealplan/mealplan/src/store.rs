@@ -34,12 +34,14 @@ pub struct Store {
 
 impl Store {
     /// Build mealplan + pantry + cookbook stores around one
-    /// shared vault mutex.
+    /// shared vault mutex. Cookbook walks the same vault
+    /// root for `.cook` files.
     #[must_use]
     pub fn new(vault: Vault) -> Self {
+        let root = vault.root.clone();
         let pantry = PantryStore::new(vault);
         let inner = pantry.shared();
-        let cookbook = CookbookStore::from_shared(inner.clone());
+        let cookbook = CookbookStore::new(root);
         Self {
             inner,
             pantry,
@@ -48,11 +50,12 @@ impl Store {
     }
 
     /// Reuse a vault mutex already in use by another feature
-    /// (cookbook / locations / inventory). Pairs with that
-    /// feature's `Store::shared`.
+    /// (locations / inventory). Cookbook builds a new
+    /// path-backed store from the shared vault's root.
     pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
+        let root = inner.lock().expect("shared vault poisoned").root.clone();
         let pantry = PantryStore::from_shared(inner.clone());
-        let cookbook = CookbookStore::from_shared(inner.clone());
+        let cookbook = CookbookStore::new(root);
         Self {
             inner,
             pantry,
@@ -65,9 +68,6 @@ impl Store {
         self.inner.clone()
     }
 
-    /// Borrow the underlying pantry store — useful when a
-    /// caller wants to drive both surfaces (e.g. show "what
-    /// did we eat this week and what's left in the fridge").
     #[must_use]
     pub fn pantry(&self) -> &PantryStore {
         &self.pantry
@@ -79,17 +79,19 @@ impl Store {
     }
 
     /// Convenience: total nutrition for the meal with `id`,
-    /// summed across its referenced recipes scaled by
-    /// `meal.servings`. `None` when no referenced recipe
-    /// has nutrition data. See [`Meal::nutrition_total`]
-    /// for the math.
+    /// computed from cooklang recipe ingredients × pantry
+    /// per-unit nutrition. See [`Meal::nutrition_total`].
     pub fn meal_nutrition(&self, id: &str) -> Result<Option<cookbook::Nutrition>, MealplanError> {
         let meal = self.get(id)?;
         let recipes = self
             .cookbook
             .list()
             .map_err(|e| MealplanError::Pantry(format!("cookbook list: {e}")))?;
-        Ok(meal.nutrition_total(&recipes))
+        let items = self
+            .pantry
+            .list()
+            .map_err(|e| MealplanError::Pantry(e.to_string()))?;
+        Ok(meal.nutrition_total(&recipes, &items))
     }
 }
 
@@ -211,11 +213,11 @@ impl MealplanService for Store {
         self.update(meal)
     }
 
-    fn can_cook(&self, recipe_id: &str, servings: u32) -> Result<Fulfillment, MealplanError> {
+    fn can_cook(&self, recipe_path: &str, servings: u32) -> Result<Fulfillment, MealplanError> {
         let recipe = self
             .cookbook
-            .get(recipe_id)
-            .map_err(|e| MealplanError::NotFound(format!("recipe {recipe_id}: {e}")))?;
+            .get(recipe_path)
+            .map_err(|e| MealplanError::NotFound(format!("recipe {recipe_path}: {e}")))?;
         let pantry_items = self
             .pantry
             .list()

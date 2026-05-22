@@ -1,45 +1,43 @@
-//! `Recipe` — typed view of one recipe page.
+//! `Recipe` — a cooklang `.cook` file as a typed wire value.
 //!
-//! Recipes live as markdown files in a `vault::Vault` under
-//! `Wiki/Cookbook/<slug>.md`. They're a *wiki superset* — the
-//! body is free-form markdown with wikilinks (`[[saute]]`,
-//! `[[mise en place]]`) that resolve into curated concept
-//! pages elsewhere in the wiki. The cookbook crate only owns
-//! the typed surface (ingredients, steps, nutrition); narrative
-//! and links belong on the page body and are handled by the
-//! wiki feature.
+//! Identity is the vault-relative `path` (`Cookbook/<slug>.cook`).
+//! The recipe knows nothing about pantry IDs, our nutrition
+//! database, or substitutions — those layers join by **ingredient
+//! name** at mealprep time. The file is pure cooklang and
+//! portable to every cooklang tool (cookcli, the Obsidian
+//! plugin, VSCode, HomeAssistant, etc.).
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
+/// Wire shape for a parsed `.cook` file. The original source is
+/// preserved verbatim in `source` so editors can round-trip
+/// without re-rendering through the cooklang printer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Recipe {
-    #[serde(skip)]
+    /// Vault-relative, forward-slash separated, e.g.
+    /// `Cookbook/Truffle Pasta.cook`. Identity.
     pub path: String,
 
-    pub id: Uuid,
-
-    /// Display title. Falls back to filename basename when
-    /// missing.
+    /// Display title. Pulled from `>> title:` metadata, or
+    /// falls back to the filename stem.
     pub name: String,
 
-    /// One-line summary for index views.
+    /// `>> description:` from metadata.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub description: Option<String>,
 
-    /// Free-form. Canonical set in [`Course`]
-    /// (`breakfast` / `lunch` / `dinner` / `snack` / `dessert`).
-    #[serde(default = "default_course")]
-    pub course: String,
+    /// `>> course:` from metadata. Free-form; canonical set in
+    /// [`Course`].
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub course: Option<String>,
 
-    /// Cuisine label — `"italian"`, `"japanese"`, `"thai"`. Free
-    /// form; convention only.
+    /// `>> cuisine:` from metadata.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub cuisine: Option<String>,
 
-    /// Active prep time in minutes (chopping, mixing).
+    /// `>> prep time:` in whole minutes, when parseable.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -47,7 +45,7 @@ pub struct Recipe {
     )]
     pub prep_minutes: Option<u32>,
 
-    /// Cook time in minutes (oven, stove, simmer).
+    /// `>> cook time:` in whole minutes.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -55,55 +53,42 @@ pub struct Recipe {
     )]
     pub cook_minutes: Option<u32>,
 
-    /// How many servings the recipe yields at the listed
-    /// ingredient quantities. Drives mealplan scaling.
+    /// `>> servings:` — base yield. Drives scaling at mealprep
+    /// time.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub servings: Option<u32>,
 
-    /// Ingredient list. Quantities are stored numerically so
-    /// mealplan can scale; the unit is free-form so weird
-    /// units (`"pinch"`, `"to taste"`) round-trip.
+    /// Ingredients extracted from `@name{qty%unit}` lines, in
+    /// document order. Names are wikilink targets.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub ingredients: Vec<Ingredient>,
 
-    /// Ordered steps. Each step is a markdown string; embed
-    /// wikilinks (`[[saute]]`) and inline timing freely.
+    /// Rendered step text in document order. Plain string per
+    /// step. Authoring goes through [`Recipe::source`].
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub steps: Vec<String>,
 
-    /// Per-serving nutrition, when known.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub nutrition: Option<Nutrition>,
-
-    /// Free-form tags — `"quick"`, `"weeknight"`, `"vegan"`,
-    /// `"meal-prep"`. Drives queries.
+    /// Cookware names from `#pan{}`.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    pub cookware: Vec<String>,
 
-    /// Sub-recipes this recipe references. Modeled on
-    /// grocy's `recipes_nestings`. Each entry says "use N
-    /// servings of recipe X" — pizza references pizza-dough,
-    /// taco-night references homemade-salsa. Fulfillment
-    /// recurses through nestings with a depth cap.
+    /// Sub-recipe references — paths from `@@./path/recipe{}`.
     #[serde(
         skip_serializing_if = "Vec::is_empty",
         default,
         rename = "nestedRecipes"
     )]
-    pub nested_recipes: Vec<NestedRecipe>,
+    pub nested_recipes: Vec<String>,
 
-    /// Optional source — URL, cookbook citation, or
-    /// `"[[Some Wiki Page]]"` wikilink.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub source: Option<String>,
+    /// `>> tags:` (comma-separated in the metadata block).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
 
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        default,
-        rename = "dateCreated"
-    )]
-    pub date_created: Option<DateTime<Utc>>,
+    /// `>> source:` — URL, citation, or wikilink.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "sourceUrl")]
+    pub source_url: Option<String>,
 
+    /// File mtime when scanned.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
@@ -111,133 +96,64 @@ pub struct Recipe {
     )]
     pub date_modified: Option<DateTime<Utc>>,
 
-    /// Markdown body — narrative, photos, variations,
-    /// wikilinks to technique concept pages.
-    #[serde(skip)]
-    pub details: String,
+    /// Raw cooklang source. The source of truth — editors
+    /// mutate this and re-parse.
+    pub source: String,
 }
 
-fn default_course() -> String {
-    Course::Main.as_str().to_string()
-}
-
+/// One ingredient line. `qty` is the numeric quantity for math;
+/// `qty_display` keeps the original display form (ranges,
+/// fractions, text).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Ingredient {
-    /// Free-form name. Convention: wikilink the page-worthy
-    /// ones (`"[[Olive Oil]]"`) so the wiki graph picks them
-    /// up; raw strings are fine for one-offs.
+    /// Cooklang ingredient name. Wikilink target.
     pub name: String,
 
-    /// Numeric quantity. `None` for `"to taste"` / `"as
-    /// needed"` cases.
+    /// Optional alias from `@flour|all-purpose flour{}`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub alias: Option<String>,
+
+    /// Numeric quantity. `None` for `"to taste"` / text values.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub qty: Option<f64>,
 
-    /// Free-form unit — `"g"`, `"cup"`, `"tbsp"`, `"clove"`,
-    /// `"pinch"`. Recipe fulfillment matches recipe + pantry
-    /// units with conversion via `pantry::units::convert_str`
-    /// when bases align.
+    /// Free-form unit string. Empty when no unit.
     #[serde(default)]
     pub unit: String,
 
-    /// Explicit link to a `pantry::PantryItem` id. When set,
-    /// fulfillment skips name fuzzy-match and goes straight
-    /// to the linked row. Curators set this once when the
-    /// recipe is committed; agents can resolve it via the
-    /// barcode / lookup flow.
+    /// Original display form, including ranges / fractions /
+    /// text. Use for rendering; use [`Self::qty`] for math.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
-        rename = "pantryItemId"
+        rename = "qtyDisplay"
     )]
-    pub pantry_item_id: Option<uuid::Uuid>,
+    pub qty_display: Option<String>,
 
-    /// Free-form prep note — `"finely diced"`, `"room temp"`.
+    /// Cooklang note — `@butter{20%g}(softened)`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub note: Option<String>,
 
-    /// Per-recipe substitution candidates. Curator-authored
-    /// (e.g. `buttermilk` recipe ingredient lists "milk +
-    /// lemon juice" as a sub). Fulfillment checks these
-    /// *first*, before global pantry-item subs and the
-    /// substitution registry — recipe-level wins because the
-    /// author's intent ("for this dish, X behaves like Y") is
-    /// the most specific knowledge.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub substitutes: Vec<Substitution>,
-
-    /// Skip when scaling pantry deductions or showing the
-    /// quick-glance "do I have everything" check.
+    /// `true` when the ingredient line carries `?`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
-}
 
-/// One substitution candidate. Lives in three places (see
-/// `plans/mealplan-grocy-parity.md`):
-/// - [`Ingredient::substitutes`] — recipe-author
-///   intent. Wins.
-/// - `pantry::Substitution` on a [`pantry::PantryItem`] —
-///   global, bidirectional pantry knowledge.
-/// - `mealplan::substitutions::SubstitutionRule` — the
-///   composable knowledge graph.
-///
-/// `ratio` is `units_of_substitute / unit_of_original`:
-/// `1 cup butter` → `Substitution { ratio: 0.75 }` for olive
-/// oil means "use 0.75 cup oil per cup butter".
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct Substitution {
-    /// Free-form display name — what the substitute *is*.
-    /// Required even when `pantry_item_id` is set so the
-    /// suggestion reads without a pantry lookup.
-    pub name: String,
-
-    /// Optional explicit pantry-item link for the
-    /// substitute. When set, fulfillment honors it before
-    /// name fuzzy-match — same precedence rule as
-    /// [`Ingredient::pantry_item_id`].
+    /// `true` when the line is a recipe reference (`@@...`).
+    /// `name` then holds the recipe path.
     #[serde(
-        skip_serializing_if = "Option::is_none",
         default,
-        rename = "pantryItemId"
+        skip_serializing_if = "std::ops::Not::not",
+        rename = "isRecipeRef"
     )]
-    pub pantry_item_id: Option<uuid::Uuid>,
-
-    /// `1.0` = same volume / mass; `0.75` = "use 75% as
-    /// much by the same unit"; `2.0` = "use twice as much".
-    /// Multiplied with the original ingredient's qty when
-    /// the sub is applied.
-    #[serde(default = "default_ratio")]
-    pub ratio: f64,
-
-    /// Free-form note — `"adds tangy note"`, `"only works
-    /// in baked goods"`, `"may need extra liquid"`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub note: Option<String>,
+    pub is_recipe_ref: bool,
 }
 
-fn default_ratio() -> f64 {
-    1.0
-}
-
-/// Sub-recipe reference. Pull in `servings` worth of
-/// recipe `recipe_id` when expanding ingredients.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
-pub struct NestedRecipe {
-    #[serde(rename = "recipeId")]
-    pub recipe_id: uuid::Uuid,
-    /// How many servings of the nested recipe go into one
-    /// serving of the parent. Multiplied with parent
-    /// servings during fulfillment.
-    #[serde(default = "default_nested_servings")]
-    pub servings: u32,
-}
-
-fn default_nested_servings() -> u32 {
-    1
-}
-
-/// Per-serving nutrition. All fields optional — partial data
-/// is better than none.
+/// Per-unit nutrition. Lives on a `pantry::PantryItem` (the
+/// wiki page for "Flour" carries `nutritionPerUnit` so any
+/// recipe using `@flour{...}` can be aggregated at mealprep
+/// time). Kept in this crate as the shared nutrition shape —
+/// consumers (`pantry`, `intake`, `fitness`) all reference
+/// `cookbook::Nutrition`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Nutrition {
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -254,8 +170,8 @@ pub struct Nutrition {
     pub sugar_g: Option<f64>,
 }
 
-/// Canonical course values. Parsing accepts any string —
-/// unknown courses round-trip as the raw string on `Recipe`.
+/// Canonical course values. Recipes round-trip arbitrary
+/// strings; this is a hint for UI grouping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Course {
     Breakfast,
