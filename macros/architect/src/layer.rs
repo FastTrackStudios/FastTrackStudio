@@ -350,10 +350,10 @@ impl<S, R> Cons<S, R> {
 
 /// The composable, bindable layer for backend `B`.
 ///
-/// Auto-implemented for any type that's [`Bind<B>`] + [`Descriptors`]
-/// + `Sized` — service tokens (via the `#[architect::rpc]` derive),
-/// [`Empty`], [`Cons`], [`Mounted`]. User code interacts only through
-/// the trait's methods.
+/// Auto-implemented for any type that's [`Bind<B>`], [`Descriptors`],
+/// and `Sized` — service tokens (via the `#[architect::rpc]` derive),
+/// [`Empty`], [`Cons`], and [`Mounted`]. User code interacts only
+/// through the trait's methods.
 ///
 /// `B` is the backend the layer binds to. A single layer expression
 /// can satisfy `Layer<B>` for multiple backends (e.g. `Reaper` and

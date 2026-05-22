@@ -84,7 +84,10 @@ fn user_trait_remains_directly_callable_in_process() {
 
 // ── All-async trait ─────────────────────────────────────────────────
 
+// `async_fn_in_trait` is the whole point of the AllAsync shape —
+// vox::service is applied directly and rewrites the futures itself.
 #[rpc]
+#[allow(async_fn_in_trait)]
 pub trait AllAsync {
     async fn read(&self, key: u32) -> Option<String>;
     async fn write(&self, key: u32, value: String) -> Result<(), String>;
@@ -171,6 +174,7 @@ pub trait Empty {}
 fn empty_trait_compiles() {
     // Empty traits don't get a `serve` function — there's nothing to
     // serve. This test just verifies the macro accepts the shape.
+    #[allow(dead_code)]
     struct Backend;
     impl Empty for Backend {}
 }
