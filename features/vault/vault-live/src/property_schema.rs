@@ -2,14 +2,14 @@
 //!
 //! Built on the observation that `Page.frontmatter_json: String`
 //! (top-level, untyped) blocks faithful modelling of real-world
-//! task / project / area pages. Specifically, the TaskNotes plugin
+//! task / project / area pages. Specifically, the `TaskNotes` plugin
 //! (`~/Development/research/tasknotes/src/types.ts`) needs:
 //!
 //! - nested structs in lists (`blockedBy: [{uid, reltype}]`),
 //! - typed dates for Bases comparisons,
 //! - status with attached metadata (color / icon / isCompleted /
 //!   autoArchive),
-//! - a concurrent-safe ordering primitive (LexoRank).
+//! - a concurrent-safe ordering primitive (`LexoRank`).
 //!
 //! This module gives us a registry of `KindSchema`s — one per
 //! `kind:` frontmatter convention. The Bases executor + the
@@ -148,7 +148,7 @@ pub struct KindSchema {
 
 /// Renames for core fields. Lets the user call our `status`
 /// whatever they want without breaking the schema — matches
-/// TaskNotes' `FieldMapping` pattern.
+/// `TaskNotes`' `FieldMapping` pattern.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FieldRenames {
     pub map: IndexMap<String, String>,
@@ -156,10 +156,7 @@ pub struct FieldRenames {
 
 impl FieldRenames {
     pub fn resolve<'a>(&'a self, canonical: &'a str) -> &'a str {
-        self.map
-            .get(canonical)
-            .map(String::as_str)
-            .unwrap_or(canonical)
+        self.map.get(canonical).map_or(canonical, String::as_str)
     }
 }
 
@@ -172,11 +169,13 @@ pub struct PropertySchemaRegistry {
 }
 
 impl PropertySchemaRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Build with built-in schemas pre-loaded.
+    #[must_use]
     pub fn with_builtins() -> Self {
         let mut r = Self::new();
         for s in builtins() {
@@ -193,6 +192,7 @@ impl PropertySchemaRegistry {
 
     /// Lookup the resolved schema for `kind`. Resolved = parent
     /// fields are appended (child overrides win by key).
+    #[must_use]
     pub fn get(&self, kind: &str) -> Option<KindSchema> {
         let base = self.schemas.get(kind)?;
         if base.extends.is_none() {
@@ -224,10 +224,12 @@ impl PropertySchemaRegistry {
         Some(resolved)
     }
 
+    #[must_use]
     pub fn kinds(&self) -> Vec<String> {
         self.schemas.keys().cloned().collect()
     }
 
+    #[must_use]
     pub fn renames(&self) -> &FieldRenames {
         &self.renames
     }
@@ -238,6 +240,7 @@ impl PropertySchemaRegistry {
 
     /// Resolve the property def for `kind` + `key` (after applying
     /// renames). Returns the def the executor / indexer should use.
+    #[must_use]
     pub fn lookup(&self, kind: &str, key: &str) -> Option<PropertyDef> {
         let resolved = self.get(kind)?;
         let canonical = self.renames.resolve(key);
@@ -267,6 +270,7 @@ pub enum CoerceOutcome {
 /// back to `Shadow` so the original survives. Phase 6.5a covers
 /// the common cases; nested-struct coercion is intentionally
 /// permissive (object stays as `Json` if its shape doesn't match).
+#[must_use]
 pub fn coerce_value(ty: &PropertyType, value: serde_json::Value) -> CoerceOutcome {
     use serde_json::Value as V;
     match (ty, &value) {
@@ -349,9 +353,7 @@ pub fn coerce_value(ty: &PropertyType, value: serde_json::Value) -> CoerceOutcom
         }
 
         // Link — accept a string (assume wikilink).
-        (PropertyType::Link, V::String(_)) | (PropertyType::Link, V::Null) => {
-            CoerceOutcome::Ok(value)
-        }
+        (PropertyType::Link, V::String(_) | V::Null) => CoerceOutcome::Ok(value),
 
         // EnumWithMetadata — value must be one of the declared
         // options. Otherwise shadow.
@@ -383,7 +385,7 @@ pub fn coerce_value(ty: &PropertyType, value: serde_json::Value) -> CoerceOutcom
         // Everything else: shadow with a clear reason.
         (ty, v) => CoerceOutcome::Shadow {
             original: v.clone(),
-            reason: format!("value shape doesn't match {:?}", ty),
+            reason: format!("value shape doesn't match {ty:?}"),
         },
     }
 }
@@ -405,17 +407,18 @@ fn looks_like_datetime(s: &str) -> bool {
     // Permissive: starts with YYYY-MM-DD and has a T or space.
     s.len() >= 10
         && looks_like_date(&s[..10])
-        && (s.len() == 10 || matches!(s.as_bytes().get(10), Some(b'T') | Some(b' ')))
+        && (s.len() == 10 || matches!(s.as_bytes().get(10), Some(b'T' | b' ')))
 }
 
 // ── Built-in schemas ─────────────────────────────────────────────────
 
-/// The hardcoded built-in schemas. Modelled on TaskNotes (per
+/// The hardcoded built-in schemas. Modelled on `TaskNotes` (per
 /// `~/Development/research/tasknotes/src/types.ts:445-711`) and on
 /// the top-frequency frontmatter keys observed in The Observatory
 /// (8885 .md, 81% with frontmatter; top keys include `up`,
 /// `Aliases`, `previous`/`next`, `tags`, `title`, `status`,
 /// `priority`, `due`).
+#[must_use]
 pub fn builtins() -> Vec<KindSchema> {
     vec![
         person_schema(),
@@ -820,6 +823,7 @@ fn daily_schema() -> KindSchema {
 }
 
 #[cfg(test)]
+#[allow(clippy::match_wildcard_for_single_variants)]
 mod tests {
     use super::*;
 

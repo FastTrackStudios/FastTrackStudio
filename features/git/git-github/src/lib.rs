@@ -90,6 +90,7 @@ pub enum BuildError {
 /// Map an octocrab error into the proto's `GitError`. Best
 /// effort — status codes get a dedicated variant; everything
 /// else falls into `Forge`.
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) fn map_err(err: octocrab::Error) -> git_proto::GitError {
     use git_proto::GitError;
     let msg = err.to_string();

@@ -104,7 +104,7 @@ fn tokenize(query: &str) -> Vec<String> {
     query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.len() >= 2)
-        .map(|t| t.to_lowercase())
+        .map(str::to_lowercase)
         .collect()
 }
 
@@ -123,10 +123,13 @@ fn make_snippet(body: &str, terms: &[String]) -> String {
             best = Some((hits, line));
         }
     }
-    let snippet = best.map(|(_, l)| l).unwrap_or_else(|| {
-        let first = body.lines().find(|l| !l.is_empty()).unwrap_or("");
-        first
-    });
+    let snippet = best.map_or_else(
+        || {
+            let first = body.lines().find(|l| !l.is_empty()).unwrap_or("");
+            first
+        },
+        |(_, l)| l,
+    );
     let s: String = snippet.chars().take(200).collect();
     let _ = lower;
     s

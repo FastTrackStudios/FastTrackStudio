@@ -7,6 +7,7 @@ use vault::Vault;
 use crate::model::PantryItem;
 use crate::parse::{looks_like_pantry_item, parse_page};
 
+#[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<PantryItem> {
     vault
         .pages
@@ -24,6 +25,7 @@ pub fn scan_vault(vault: &Vault) -> Vec<PantryItem> {
 
 /// Convenience: every pantry item past its printed expiry as
 /// of `today`.
+#[must_use]
 pub fn expired(vault: &Vault, today: NaiveDate) -> Vec<PantryItem> {
     scan_vault(vault)
         .into_iter()
@@ -33,10 +35,11 @@ pub fn expired(vault: &Vault, today: NaiveDate) -> Vec<PantryItem> {
 
 /// Convenience: every pantry item at or below its
 /// `minimum` reorder threshold.
+#[must_use]
 pub fn low_stock(vault: &Vault) -> Vec<PantryItem> {
     scan_vault(vault)
         .into_iter()
-        .filter(|i| i.is_low())
+        .filter(super::model::PantryItem::is_low)
         .collect()
 }
 
@@ -44,13 +47,14 @@ pub fn low_stock(vault: &Vault) -> Vec<PantryItem> {
 /// `best_before` falls within `[today, today + days)`.
 /// Drives the "expiring this week" surface — wires into
 /// shopping-list auto-populate in phase 7.
+#[must_use]
 pub fn expiring_within(
     vault: &Vault,
     today: NaiveDate,
     days: u32,
 ) -> Vec<(PantryItem, crate::model::StockEntry)> {
     let horizon = today
-        .checked_add_days(chrono::Days::new(days as u64))
+        .checked_add_days(chrono::Days::new(u64::from(days)))
         .unwrap_or(NaiveDate::MAX);
     let mut out = Vec::new();
     for item in scan_vault(vault) {

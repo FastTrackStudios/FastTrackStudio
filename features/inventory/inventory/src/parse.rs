@@ -22,6 +22,7 @@ pub enum ParseError {
     Yaml(String),
 }
 
+#[must_use]
 pub fn looks_like_item(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -55,7 +56,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Item, ParseError> {
     let model = take_str(&map, "model");
     let serial = take_str(&map, "serial");
     let purchase_date = take_str(&map, "purchaseDate").and_then(|s| s.parse().ok());
-    let value = map.get("value").and_then(|v| v.as_f64());
+    let value = map.get("value").and_then(serde_yaml::Value::as_f64);
     let tasks = take_string_list(&map, "tasks");
     let tags = take_string_list(&map, "tags")
         .into_iter()
@@ -107,7 +108,7 @@ fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
     match v {
         serde_yaml::Value::Sequence(seq) => seq
             .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
             .collect(),
         serde_yaml::Value::String(s) => vec![s.clone()],
         _ => Vec::new(),

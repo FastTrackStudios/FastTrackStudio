@@ -4,7 +4,7 @@
 //! context so children can mark themselves draggable + light up drop
 //! targets without prop-drilling. HTML5 native drag carries the
 //! card id in `DataTransfer`, but signal state is the source of
-//! truth for visual feedback (DataTransfer is opaque mid-drag in
+//! truth for visual feedback (`DataTransfer` is opaque mid-drag in
 //! most browsers).
 
 use dioxus::prelude::*;

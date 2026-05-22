@@ -83,7 +83,6 @@ pub fn CyclicView(props: CyclicViewProps) -> Element {
                     {
                         let q_weeks = q_weeks.clone();
                         let labels = weekday_labels.clone();
-                        let stem = stem;
                         let counts = counts.clone();
                         rsx! {
                             QuarterRow {
@@ -247,7 +246,7 @@ fn WeekColumn(props: WeekColumnProps) -> Element {
         div { class: "flex flex-col gap-[3px]",
             for dow in 0..7u8 {
                 {
-                    let date = start + Days::new(dow as u64);
+                    let date = start + Days::new(u64::from(dow));
                     let count = props.counts.get(&date).copied().unwrap_or(0);
                     let bucket = bucket_for(count, props.max);
                     let cls = cell_class(stem, bucket);

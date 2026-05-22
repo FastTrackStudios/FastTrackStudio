@@ -38,7 +38,7 @@ pub fn CellView(props: CellViewProps) -> Element {
                     on_event.call(TableMutation::SetCell { row: row_id, column: col_id, value: v });
                     editing.set(false);
                 },
-                on_cancel: move |_| editing.set(false),
+                on_cancel: move |()| editing.set(false),
             }
         };
     }
@@ -169,14 +169,14 @@ fn CellEditor(props: CellEditorProps) -> Element {
                     onkeydown: move |e: KeyboardEvent| {
                         if e.key() == Key::Enter {
                             let v = draft().parse::<f64>().ok();
-                            on_commit.call(v.map(CellValue::Number).unwrap_or(CellValue::Empty));
+                            on_commit.call(v.map_or(CellValue::Empty, CellValue::Number));
                         } else if e.key() == Key::Escape {
                             on_cancel.call(());
                         }
                     },
                     onfocusout: move |_| {
                         let v = draft().parse::<f64>().ok();
-                        on_commit.call(v.map(CellValue::Number).unwrap_or(CellValue::Empty));
+                        on_commit.call(v.map_or(CellValue::Empty, CellValue::Number));
                     },
                 }
             }
@@ -194,7 +194,7 @@ fn CellEditor(props: CellEditorProps) -> Element {
                     "autofocus": true,
                     onchange: move |e: FormEvent| {
                         let parsed = NaiveDate::parse_from_str(&e.value(), "%Y-%m-%d").ok();
-                        on_commit.call(parsed.map(CellValue::Date).unwrap_or(CellValue::Empty));
+                        on_commit.call(parsed.map_or(CellValue::Empty, CellValue::Date));
                     },
                     onkeydown: move |e: KeyboardEvent| {
                         if e.key() == Key::Escape {

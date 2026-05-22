@@ -102,7 +102,7 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    /// `-x` — only unary minus right now. (`!` is a FilterNode op,
+    /// `-x` — only unary minus right now. (`!` is a `FilterNode` op,
     /// not an Expr op.)
     Unary { op: UnaryOp, arg: Box<Expr> },
 }
@@ -420,7 +420,7 @@ fn parse_view(v: &serde_yaml::Value) -> Result<ViewSpec, BaseParseError> {
                     .get(serde_yaml::Value::String("direction".into()))
                     .and_then(yaml_str)
                 {
-                    Some("DESC") | Some("desc") => SortDir::Desc,
+                    Some("DESC" | "desc") => SortDir::Desc,
                     _ => SortDir::Asc,
                 };
                 out.push(SortKey {
@@ -434,7 +434,7 @@ fn parse_view(v: &serde_yaml::Value) -> Result<ViewSpec, BaseParseError> {
     };
     let limit = m
         .get(serde_yaml::Value::String("limit".into()))
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .map(|n| n as u32);
     let group_by = m
         .get(serde_yaml::Value::String("groupBy".into()))
@@ -686,14 +686,14 @@ fn expr_to_source(e: &Expr) -> String {
             if name.is_empty() {
                 "file".into()
             } else {
-                format!("file.{}", name)
+                format!("file.{name}")
             }
         }
         Expr::NoteProp { name } => {
             if name.is_empty() {
                 "note".into()
             } else if name.contains('.') {
-                format!("note.{}", name)
+                format!("note.{name}")
             } else {
                 name.clone()
             }
@@ -702,7 +702,7 @@ fn expr_to_source(e: &Expr) -> String {
             if name.is_empty() {
                 "formula".into()
             } else {
-                format!("formula.{}", name)
+                format!("formula.{name}")
             }
         }
         Expr::Literal { value } => match value {
@@ -769,8 +769,7 @@ fn yaml_to_json(v: &serde_yaml::Value) -> serde_json::Value {
                 serde_json::Value::Number(u.into())
             } else if let Some(f) = n.as_f64() {
                 serde_json::Number::from_f64(f)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number)
             } else {
                 serde_json::Value::Null
             }
@@ -1160,8 +1159,7 @@ pub mod expr_parser {
                 && self
                     .src
                     .get(self.pos + 1)
-                    .map(|c| !c.is_ascii_digit())
-                    .unwrap_or(false)
+                    .is_some_and(|c| !c.is_ascii_digit())
             {
                 self.pos += 1;
                 let arg = self.parse_unary()?;
@@ -1248,7 +1246,7 @@ pub mod expr_parser {
         fn parse_primary(&mut self) -> Result<Expr, BaseParseError> {
             self.skip_ws();
             match self.peek() {
-                Some(b'"') | Some(b'\'') => self.parse_string(),
+                Some(b'"' | b'\'') => self.parse_string(),
                 Some(b'(') => {
                     self.pos += 1;
                     let e = self.parse_expr()?;
@@ -1386,8 +1384,7 @@ pub mod expr_parser {
                 self.pos += 1;
             }
             Err(BaseParseError::Expr(format!(
-                "unterminated string starting at {}",
-                start
+                "unterminated string starting at {start}"
             )))
         }
 
@@ -1410,8 +1407,7 @@ pub mod expr_parser {
                 .map_err(|e: std::num::ParseFloatError| BaseParseError::Expr(e.to_string()))?;
             Ok(Expr::Literal {
                 value: serde_json::Number::from_f64(n)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null),
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number),
             })
         }
     }
@@ -1508,7 +1504,7 @@ views:
         // Filters round-trip into an And with 3 children.
         match parsed.global_filter {
             FilterNode::And { ref args } => assert_eq!(args.len(), 3),
-            other => panic!("expected And, got {:?}", other),
+            other => panic!("expected And, got {other:?}"),
         }
     }
 
@@ -1549,7 +1545,7 @@ views:
                     }
                 );
             }
-            other => panic!("expected Cmp, got {:?}", other),
+            other => panic!("expected Cmp, got {other:?}"),
         }
     }
 
@@ -1594,13 +1590,13 @@ filters:
                 assert!(matches!(args[0], Expr::Literal { .. }));
                 assert!(matches!(args[1], Expr::Literal { .. }));
             }
-            other => panic!("expected Call, got {:?}", other),
+            other => panic!("expected Call, got {other:?}"),
         }
     }
 
     #[test]
     fn formula_reference() {
-        let f = expr_parser::parse_filter(r#"formula.price > 10"#).unwrap();
+        let f = expr_parser::parse_filter(r"formula.price > 10").unwrap();
         match f {
             FilterNode::Cmp { left, op, .. } => {
                 assert_eq!(op, CmpOp::Gt);
@@ -1803,7 +1799,7 @@ pub fn execute_view<I: IntoIterator<Item = BaseRow>>(
         // observed. Caller can reorder via post-processing.
         buckets.into_iter().collect()
     } else {
-        vec![("".to_string(), filtered)]
+        vec![(String::new(), filtered)]
     };
 
     let limited = if let Some(limit) = view.limit {
@@ -1867,7 +1863,7 @@ fn is_truthy(v: &serde_json::Value) -> bool {
         serde_json::Value::Null => false,
         serde_json::Value::Bool(b) => *b,
         serde_json::Value::String(s) => !s.is_empty(),
-        serde_json::Value::Number(n) => n.as_f64().map(|f| f != 0.0).unwrap_or(false),
+        serde_json::Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
         serde_json::Value::Array(a) => !a.is_empty(),
         serde_json::Value::Object(m) => !m.is_empty(),
     }
@@ -1904,6 +1900,7 @@ fn cmp_values(l: &serde_json::Value, op: CmpOp, r: &serde_json::Value) -> bool {
         (V::Number(a), V::Number(b)) => {
             let af = a.as_f64().unwrap_or(0.0);
             let bf = b.as_f64().unwrap_or(0.0);
+            #[allow(clippy::float_cmp)]
             match op {
                 CmpOp::Eq => af == bf,
                 CmpOp::Neq => af != bf,
@@ -2061,9 +2058,7 @@ fn arith(
 }
 
 fn json_num(f: f64) -> serde_json::Value {
-    serde_json::Number::from_f64(f)
-        .map(serde_json::Value::Number)
-        .unwrap_or(serde_json::Value::Null)
+    serde_json::Number::from_f64(f).map_or(serde_json::Value::Null, serde_json::Value::Number)
 }
 
 fn value_to_string(v: &serde_json::Value) -> String {
@@ -2139,117 +2134,101 @@ fn eval_call(
     row: &BaseRow,
 ) -> serde_json::Value {
     use serde_json::Value as V;
-    match receiver {
-        Some(recv) => {
-            let recv_v = eval_expr(recv, row);
-            let arg_vals: Vec<V> = args.iter().map(|a| eval_expr(a, row)).collect();
-            match name {
-                "contains" if arg_vals.len() == 1 => V::Bool(value_contains(&recv_v, &arg_vals[0])),
-                "startsWith" if arg_vals.len() == 1 => {
-                    match (recv_v.as_str(), arg_vals[0].as_str()) {
-                        (Some(a), Some(b)) => V::Bool(a.starts_with(b)),
-                        _ => V::Bool(false),
-                    }
-                }
-                "endsWith" if arg_vals.len() == 1 => {
-                    match (recv_v.as_str(), arg_vals[0].as_str()) {
-                        (Some(a), Some(b)) => V::Bool(a.ends_with(b)),
-                        _ => V::Bool(false),
-                    }
-                }
-                "isEmpty" => V::Bool(match &recv_v {
-                    V::Null => true,
-                    V::String(s) => s.is_empty(),
-                    V::Array(a) => a.is_empty(),
-                    V::Object(m) => m.is_empty(),
-                    _ => false,
-                }),
-                "length" => match &recv_v {
-                    V::String(s) => json_num(s.chars().count() as f64),
-                    V::Array(a) => json_num(a.len() as f64),
-                    _ => V::Null,
-                },
-                "hasTag" if arg_vals.len() == 1 => {
-                    // Receiver is typically `file` / `note` /
-                    // `file.tags`. Normalize to an array of strings
-                    // and contains-check the needle, stripping any
-                    // leading `#` on either side.
-                    let tags = receiver_tags(&recv_v, row);
-                    let needle = match arg_vals[0].as_str() {
-                        Some(s) => s.trim_start_matches('#').to_string(),
-                        None => return V::Bool(false),
-                    };
-                    V::Bool(tags.iter().any(|t| t == &needle))
-                }
-                "floor" => recv_v
-                    .as_f64()
-                    .map(|f| json_num(f.floor()))
-                    .unwrap_or(V::Null),
-                "round" => recv_v
-                    .as_f64()
-                    .map(|f| json_num(f.round()))
-                    .unwrap_or(V::Null),
-                "ceil" => recv_v
-                    .as_f64()
-                    .map(|f| json_num(f.ceil()))
-                    .unwrap_or(V::Null),
-                // FUTURE: real date/number formatting via chrono +
-                // a locale-aware number formatter. v1 = pass-through
-                // stringification.
-                "format" => V::String(value_to_string(&recv_v)),
-                // FUTURE: proper date truncation / coercion.
-                "date" => recv_v,
-                // FUTURE: lambda-style higher-order calls. Args are
-                // mini-expressions referencing an implicit element;
-                // we'd need a scoped row binding to evaluate them.
-                "filter" | "map" | "reduce" => V::Null,
+    if let Some(recv) = receiver {
+        let recv_v = eval_expr(recv, row);
+        let arg_vals: Vec<V> = args.iter().map(|a| eval_expr(a, row)).collect();
+        match name {
+            "contains" if arg_vals.len() == 1 => V::Bool(value_contains(&recv_v, &arg_vals[0])),
+            "startsWith" if arg_vals.len() == 1 => match (recv_v.as_str(), arg_vals[0].as_str()) {
+                (Some(a), Some(b)) => V::Bool(a.starts_with(b)),
+                _ => V::Bool(false),
+            },
+            "endsWith" if arg_vals.len() == 1 => match (recv_v.as_str(), arg_vals[0].as_str()) {
+                (Some(a), Some(b)) => V::Bool(a.ends_with(b)),
+                _ => V::Bool(false),
+            },
+            "isEmpty" => V::Bool(match &recv_v {
+                V::Null => true,
+                V::String(s) => s.is_empty(),
+                V::Array(a) => a.is_empty(),
+                V::Object(m) => m.is_empty(),
+                _ => false,
+            }),
+            "length" => match &recv_v {
+                V::String(s) => json_num(s.chars().count() as f64),
+                V::Array(a) => json_num(a.len() as f64),
                 _ => V::Null,
+            },
+            "hasTag" if arg_vals.len() == 1 => {
+                // Receiver is typically `file` / `note` /
+                // `file.tags`. Normalize to an array of strings
+                // and contains-check the needle, stripping any
+                // leading `#` on either side.
+                let tags = receiver_tags(&recv_v, row);
+                let needle = match arg_vals[0].as_str() {
+                    Some(s) => s.trim_start_matches('#').to_string(),
+                    None => return V::Bool(false),
+                };
+                V::Bool(tags.iter().any(|t| t == &needle))
             }
+            "floor" => recv_v.as_f64().map_or(V::Null, |f| json_num(f.floor())),
+            "round" => recv_v.as_f64().map_or(V::Null, |f| json_num(f.round())),
+            "ceil" => recv_v.as_f64().map_or(V::Null, |f| json_num(f.ceil())),
+            // FUTURE: real date/number formatting via chrono +
+            // a locale-aware number formatter. v1 = pass-through
+            // stringification.
+            "format" => V::String(value_to_string(&recv_v)),
+            // FUTURE: proper date truncation / coercion.
+            "date" => recv_v,
+            // FUTURE: lambda-style higher-order calls. Args are
+            // mini-expressions referencing an implicit element;
+            // we'd need a scoped row binding to evaluate them.
+            "filter" | "map" | "reduce" => V::Null,
+            _ => V::Null,
         }
-        None => {
-            let arg_vals: Vec<V> = args.iter().map(|a| eval_expr(a, row)).collect();
-            match name {
-                "today" | "now" => {
-                    // ISO-8601 UTC. Tests that need determinism can
-                    // avoid these by sticking to scalar filters.
-                    // FUTURE: inject a `Clock` trait for deterministic
-                    // tests if/when formula support lands.
-                    V::String(chrono::Utc::now().to_rfc3339())
-                }
-                "date" if arg_vals.len() == 1 => arg_vals.into_iter().next().unwrap(),
-                "number" if arg_vals.len() == 1 => match &arg_vals[0] {
-                    V::Number(_) => arg_vals.into_iter().next().unwrap(),
-                    V::String(s) => s.parse::<f64>().map(json_num).unwrap_or(V::Null),
-                    V::Bool(b) => json_num(if *b { 1.0 } else { 0.0 }),
-                    _ => V::Null,
-                },
-                "list" => match arg_vals.as_slice() {
-                    [V::Array(_)] => arg_vals.into_iter().next().unwrap(),
-                    _ => V::Array(arg_vals),
-                },
-                "min" if arg_vals.len() == 2 => num_pair(&arg_vals[0], &arg_vals[1])
-                    .map(|(a, b)| json_num(a.min(b)))
-                    .unwrap_or(V::Null),
-                "max" if arg_vals.len() == 2 => num_pair(&arg_vals[0], &arg_vals[1])
-                    .map(|(a, b)| json_num(a.max(b)))
-                    .unwrap_or(V::Null),
-                "if" if args.len() == 3 => {
-                    // Lazy: only evaluate the chosen branch.
-                    if is_truthy(&eval_expr(&args[0], row)) {
-                        eval_expr(&args[1], row)
-                    } else {
-                        eval_expr(&args[2], row)
-                    }
-                }
-                "hasTag" if arg_vals.len() == 1 => {
-                    let needle = match arg_vals[0].as_str() {
-                        Some(s) => s.trim_start_matches('#').to_string(),
-                        None => return V::Bool(false),
-                    };
-                    V::Bool(row.tags.iter().any(|t| t == &needle))
-                }
-                _ => V::Null,
+    } else {
+        let arg_vals: Vec<V> = args.iter().map(|a| eval_expr(a, row)).collect();
+        match name {
+            "today" | "now" => {
+                // ISO-8601 UTC. Tests that need determinism can
+                // avoid these by sticking to scalar filters.
+                // FUTURE: inject a `Clock` trait for deterministic
+                // tests if/when formula support lands.
+                V::String(chrono::Utc::now().to_rfc3339())
             }
+            "date" if arg_vals.len() == 1 => arg_vals.into_iter().next().unwrap(),
+            "number" if arg_vals.len() == 1 => match &arg_vals[0] {
+                V::Number(_) => arg_vals.into_iter().next().unwrap(),
+                V::String(s) => s.parse::<f64>().map(json_num).unwrap_or(V::Null),
+                V::Bool(b) => json_num(if *b { 1.0 } else { 0.0 }),
+                _ => V::Null,
+            },
+            "list" => match arg_vals.as_slice() {
+                [V::Array(_)] => arg_vals.into_iter().next().unwrap(),
+                _ => V::Array(arg_vals),
+            },
+            "min" if arg_vals.len() == 2 => {
+                num_pair(&arg_vals[0], &arg_vals[1]).map_or(V::Null, |(a, b)| json_num(a.min(b)))
+            }
+            "max" if arg_vals.len() == 2 => {
+                num_pair(&arg_vals[0], &arg_vals[1]).map_or(V::Null, |(a, b)| json_num(a.max(b)))
+            }
+            "if" if args.len() == 3 => {
+                // Lazy: only evaluate the chosen branch.
+                if is_truthy(&eval_expr(&args[0], row)) {
+                    eval_expr(&args[1], row)
+                } else {
+                    eval_expr(&args[2], row)
+                }
+            }
+            "hasTag" if arg_vals.len() == 1 => {
+                let needle = match arg_vals[0].as_str() {
+                    Some(s) => s.trim_start_matches('#').to_string(),
+                    None => return V::Bool(false),
+                };
+                V::Bool(row.tags.iter().any(|t| t == &needle))
+            }
+            _ => V::Null,
         }
     }
 }

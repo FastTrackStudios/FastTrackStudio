@@ -12,6 +12,7 @@ use crate::scoring::{Indices, edge_weight_matrix, score_graph};
 
 /// Walk `<vault_root>/Wiki/`, parse all pages, and return
 /// the typed [`WikiGraph`] under the given options.
+#[allow(clippy::needless_pass_by_value)]
 pub fn build_graph(vault_root: &Path, opts: GraphOpts) -> Result<WikiGraph, ScanError> {
     let pages = scan_wiki(vault_root)?;
     let idx = Indices::build(&pages);

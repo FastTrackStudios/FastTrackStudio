@@ -9,7 +9,7 @@
 //!
 //! Mirrors `nashsu/llm_wiki`'s project shape — `Wiki/` is the
 //! entire LLM-Wiki project root, not a subfolder of it. That
-//! makes a Task `Wiki/` directory portable to llm_wiki (and
+//! makes a Task `Wiki/` directory portable to `llm_wiki` (and
 //! vice versa) with minimal restructuring.
 //!
 //! ```text
@@ -57,7 +57,7 @@ pub const LOG_MD: &str = "log.md";
 pub const OVERVIEW_MD: &str = "overview.md";
 
 /// Sub-folder under `Wiki/` for the immutable raw layer.
-/// Matches llm_wiki's `raw/` directory. Anything nested under
+/// Matches `llm_wiki`'s `raw/` directory. Anything nested under
 /// here is read-only from the wiki's perspective.
 pub const RAW_DIR: &str = "raw";
 

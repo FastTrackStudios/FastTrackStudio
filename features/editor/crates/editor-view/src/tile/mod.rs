@@ -1,4 +1,4 @@
-//! The tile tree — a Rust port of CodeMirror 6's
+//! The tile tree — a Rust port of `CodeMirror` 6's
 //! `view/src/tile.ts`. The tile tree is the editor's
 //! intermediate representation between the document model
 //! (`editor-state`) and the DOM. Every visible piece of
@@ -29,7 +29,7 @@
 //! Phase 1: this module — `Tile` struct, `TileKind` enum,
 //! `TileFlag` bitflags, `Arena`, position math
 //! (`pos_at_start`, `pos_at_end`, `pos_before`). Subsequent
-//! phases add the concrete kinds (TextTile, MarkTile, etc.)
+//! phases add the concrete kinds (`TextTile`, `MarkTile`, etc.)
 //! and the build pass.
 
 pub mod arena;
@@ -89,7 +89,7 @@ pub enum TileKind {
 /// each `TileKind` adds is summarized in the variant docs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum TileBody {
-    /// Doc / Line / BlockWrapper bodies are all empty for now —
+    /// Doc / Line / `BlockWrapper` bodies are all empty for now —
     /// their state lives in the shared `children` list. We
     /// extend as buildtile teaches us what each composite needs
     /// to carry.
@@ -103,7 +103,7 @@ pub enum TileBody {
     /// Inline / block widget. v1 holds the rendered HTML
     /// (placeholder until we have a typed `Widget` trait).
     Widget { html: String },
-    /// LineTile with extra CSS classes from `Decoration::line`.
+    /// `LineTile` with extra CSS classes from `Decoration::line`.
     /// Space-joined onto the base `cm-line` class by the patcher.
     Line { extra_classes: Vec<String> },
 }
@@ -134,6 +134,7 @@ impl Tile {
     /// `true` when this tile has a `\n` immediately after it in
     /// the doc (CM6's `breakAfter` getter, derived from the
     /// `BreakAfter` flag).
+    #[must_use]
     pub fn break_after(&self) -> bool {
         self.flags.contains(TileFlag::BreakAfter)
     }
@@ -141,27 +142,33 @@ impl Tile {
     /// Type-narrowing helpers, mirroring `isText()`, `isLine()`,
     /// etc. from `tile.ts:55-65`. We return `bool` here; the
     /// arena gives us safe access to the body when we need it.
+    #[must_use]
     pub fn is_text(&self) -> bool {
         matches!(self.kind, TileKind::Text)
     }
+    #[must_use]
     pub fn is_line(&self) -> bool {
         matches!(self.kind, TileKind::Line)
     }
+    #[must_use]
     pub fn is_widget(&self) -> bool {
         matches!(self.kind, TileKind::Widget | TileKind::WidgetBuffer)
     }
+    #[must_use]
     pub fn is_composite(&self) -> bool {
         matches!(
             self.kind,
             TileKind::Doc | TileKind::Line | TileKind::Mark | TileKind::BlockWrapper
         )
     }
+    #[must_use]
     pub fn is_block(&self) -> bool {
         matches!(
             self.kind,
             TileKind::Doc | TileKind::Line | TileKind::BlockWrapper
         )
     }
+    #[must_use]
     pub fn is_hidden(&self) -> bool {
         // Stand-in for CM6's `isHidden` getter — true when a
         // tile carries no visible content. Default false; a

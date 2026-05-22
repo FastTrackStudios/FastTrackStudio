@@ -78,7 +78,7 @@ fn seed_state() -> KanbanState {
     let cols: &mut [&mut KanbanColumn] = &mut [&mut backlog, &mut doing, &mut done];
 
     for (i, (_, titles)) in seed.iter().enumerate() {
-        let col = &mut cols[i];
+        let col = &mut *cols[i];
         for t in *titles {
             let card = KanbanCard::new(*t);
             let id: CardId = card.id;

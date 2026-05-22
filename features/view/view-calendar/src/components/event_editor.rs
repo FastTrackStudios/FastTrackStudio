@@ -37,7 +37,7 @@ pub fn EventEditor(props: EventEditorProps) -> Element {
     rsx! {
         Sheet {
             open: props.open,
-            on_close: move |_| on_close.call(()),
+            on_close: move |()| on_close.call(()),
             SheetHeader {
                 SheetTitle { "Edit event" }
                 SheetDescription { "Changes apply immediately." }

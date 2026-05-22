@@ -133,10 +133,10 @@ fn WeekRow(props: WeekRowProps) -> Element {
                     let date = *date;
                     let on_event = props.on_event;
                     let ctx = use_drag_context();
-                    let mut bg = if date.month() != props.cur_month {
-                        "bg-background/40 text-muted-foreground"
-                    } else {
+                    let mut bg = if date.month() == props.cur_month {
                         "bg-background"
+                    } else {
+                        "bg-background/40 text-muted-foreground"
                     };
                     if date == props.today {
                         bg = "bg-primary/10";
@@ -233,7 +233,7 @@ fn WeekRow(props: WeekRowProps) -> Element {
                                 key: "{id}-{chip.start_col}",
                                 placement: chip,
                                 readonly: props.readonly,
-                                on_click: move |_| on_open_editor.call(id),
+                                on_click: move |()| on_open_editor.call(id),
                                 on_event,
                             }
                         }

@@ -41,6 +41,7 @@ pub struct BlockIndex {
 
 impl BlockIndex {
     /// Walk the vault and collect every `id:: <uuid>` line.
+    #[must_use]
     pub fn build(vault: &Vault) -> Self {
         let mut map = HashMap::new();
         for (page_idx, page) in vault.pages.iter().enumerate() {
@@ -53,10 +54,12 @@ impl BlockIndex {
         Self { map }
     }
 
+    #[must_use]
     pub fn lookup(&self, uuid: &Uuid) -> Option<&BlockLocation> {
         self.map.get(uuid)
     }
 
+    #[must_use]
     pub fn lookup_str(&self, uuid: &str) -> Option<&BlockLocation> {
         let parsed = Uuid::parse_str(uuid).ok()?;
         self.lookup(&parsed)
@@ -64,22 +67,24 @@ impl BlockIndex {
 
     /// First-line content of the block (for `((uuid))` chip
     /// previews and `{{embed}}` cards).
+    #[must_use]
     pub fn block_preview<'v>(&self, vault: &'v Vault, uuid: &Uuid) -> Option<&'v str> {
         let loc = self.map.get(uuid)?;
         let page = vault.pages.get(loc.page_idx)?;
         let raw = &page.raw;
         let end = raw[loc.anchor..]
             .find('\n')
-            .map(|n| loc.anchor + n)
-            .unwrap_or(raw.len());
+            .map_or(raw.len(), |n| loc.anchor + n);
         Some(&raw[loc.anchor..end])
     }
 
     /// How many blocks across the whole vault have ids.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
@@ -162,7 +167,7 @@ fn find_block_anchor(raw: &str, id_line_start: usize) -> usize {
     let prefix = &raw[..id_line_start];
     let mut end = id_line_start;
     while end > 0 {
-        let prev_nl = prefix[..end - 1].rfind('\n').map(|n| n + 1).unwrap_or(0);
+        let prev_nl = prefix[..end - 1].rfind('\n').map_or(0, |n| n + 1);
         let line = &raw[prev_nl..end - 1];
         if !line.trim().is_empty() {
             return prev_nl;
@@ -182,7 +187,7 @@ mod tests {
         VaultPage {
             rel_path: "p.md".into(),
             basename: "p".into(),
-            folder: "".into(),
+            folder: String::new(),
             raw: raw.to_string(),
             mtime: SystemTime::UNIX_EPOCH,
         }

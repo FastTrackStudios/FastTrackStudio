@@ -109,6 +109,7 @@ fn matches_filters(row: &Row, filters: &IndexMap<ColumnId, String>) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::match_wildcard_for_single_variants)]
 mod tests {
     use super::*;
     use crate::types::{Column, ColumnType};

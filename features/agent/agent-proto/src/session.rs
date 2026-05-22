@@ -1,6 +1,6 @@
 //! Session — one conversation. Mirrors Hermes's
 //! `api/models.py:Session` shape (one-to-one with a thread,
-//! no separate thread layer) and CodexMonitor's
+//! no separate thread layer) and `CodexMonitor`'s
 //! `ThreadSummary`.
 //!
 //! Carries: messages (typed via [`crate::message::Message`]),

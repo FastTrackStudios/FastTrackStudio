@@ -14,7 +14,7 @@ pub struct SearchOpts {
     /// User query. Tokenized by the backend (lowercase, split
     /// on whitespace + punctuation).
     pub query: String,
-    /// Result cap. `0` ⇒ backend default (llm_wiki uses 20).
+    /// Result cap. `0` ⇒ backend default (`llm_wiki` uses 20).
     pub top_k: u32,
     /// If `true`, include the matched page's full markdown
     /// (with frontmatter) in each hit. `false` ⇒ snippet only.

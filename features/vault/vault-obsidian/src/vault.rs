@@ -119,6 +119,7 @@ impl Vault {
     }
 
     /// Look up a page by vault-relative path.
+    #[must_use]
     pub fn page(&self, rel_path: &str) -> Option<&VaultPage> {
         self.pages.iter().find(|p| p.rel_path == rel_path)
     }
@@ -161,6 +162,7 @@ impl Vault {
 
     /// Query: pages whose frontmatter has `key = value` (exact
     /// scalar match). Useful for Bases v0 and quick filters.
+    #[must_use]
     pub fn pages_with_frontmatter(&self, key: &str, value: &serde_json::Value) -> Vec<&VaultPage> {
         self.pages
             .iter()
@@ -177,6 +179,7 @@ impl Vault {
     /// (string, list-of-strings) and inline `#tag` markers parsed
     /// out by `parse_page` (which lands them in `ParsedBlock.refs`
     /// as `TagRef`).
+    #[must_use]
     pub fn pages_with_tag(&self, tag: &str) -> Vec<&VaultPage> {
         self.pages.iter().filter(|p| page_has_tag(p, tag)).collect()
     }
@@ -273,6 +276,7 @@ fn split_rel(rel: &str) -> (String, String) {
 /// `crate::obsidian_parse::serialize_page` once we have full
 /// `Block` structs; for the FS-first phase, callers typically edit
 /// raw markdown directly and pass it into `save_page`.
+#[must_use]
 pub fn serialize_parsed(parsed: &ParsedPage) -> String {
     // Frontmatter only; bodies are kept verbatim by callers.
     serialize_frontmatter(&parsed.frontmatter)

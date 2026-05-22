@@ -82,7 +82,6 @@ pub fn Table(props: TableProps) -> Element {
                                     let count = *count;
                                     let collapsed = *collapsed;
                                     let cols = visible_cols.len();
-                                    let on_event = on_event;
                                     rsx! {
                                         div {
                                             key: "g-{key}",
@@ -106,7 +105,6 @@ pub fn Table(props: TableProps) -> Element {
                                 {
                                     let r = r.clone();
                                     let cols = visible_cols.clone();
-                                    let on_event = on_event;
                                     rsx! {
                                         BodyRow {
                                             key: "{r.id}",

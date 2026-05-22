@@ -44,7 +44,7 @@ pub struct SqlitePersistence {
 }
 
 impl SqlitePersistence {
-    /// Open (or create) a SQLite DB at `path`. Runs schema
+    /// Open (or create) a `SQLite` DB at `path`. Runs schema
     /// migrations idempotently — safe to call on every startup.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, PersistError> {
         let path = path.as_ref().to_owned();
@@ -181,7 +181,7 @@ impl Persistence for SqlitePersistence {
     }
 }
 
-const SCHEMA_V1: &str = r#"
+const SCHEMA_V1: &str = r"
 CREATE TABLE IF NOT EXISTS snapshots (
     doc_id     TEXT PRIMARY KEY,
     bytes      BLOB NOT NULL,
@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS updates (
     appended_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_updates_doc ON updates(doc_id);
-"#;
+";
 
 #[cfg(test)]
 mod tests {

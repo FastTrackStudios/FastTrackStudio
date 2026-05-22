@@ -25,6 +25,7 @@ impl CalendarState {
     /// range_end)`. Cheap O(n) scan — fine for v1 single-calendar
     /// loads; swap for an interval-tree if a vault drops 10k events
     /// on us.
+    #[must_use]
     pub fn events_in_range(
         &self,
         range_start: DateTime<Utc>,

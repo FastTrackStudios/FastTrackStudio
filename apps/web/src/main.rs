@@ -30,11 +30,11 @@ fn Root() -> Element {
         let sw_url = SERVICE_WORKER.to_string();
         spawn(async move {
             let js = format!(
-                r#"if ('serviceWorker' in navigator) {{
+                r"if ('serviceWorker' in navigator) {{
                     navigator.serviceWorker.register('{sw_url}')
                         .then(r => console.log('sw registered', r.scope))
                         .catch(e => console.warn('sw register failed', e));
-                }}"#
+                }}"
             );
             let _ = document::eval(&js).await;
         });

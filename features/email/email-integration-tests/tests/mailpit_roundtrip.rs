@@ -20,7 +20,7 @@ use email_proto::{Addr, Draft, EmailSync, SeqRange};
 use email_smtp::SmtpSender;
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+#[ignore = "needs MAILPIT_SMTP_URL + MAILPIT_API_URL; opt-in"]
 async fn smtp_send_lands_in_mailpit() {
     let mp = Mailpit::spawn().await;
     let cfg = mp.account_config();
@@ -75,7 +75,7 @@ async fn smtp_send_lands_in_mailpit() {
 // Tracked as a follow-up; SMTP send → HTTP-API listing already
 // covers the cross-cutting path end-to-end.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore]
+#[ignore = "needs MAILPIT_SMTP_URL + MAILPIT_API_URL; opt-in"]
 async fn imap_lists_inbox_after_send() {
     let mp = Mailpit::spawn().await;
     let cfg = mp.account_config();

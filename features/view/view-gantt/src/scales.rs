@@ -34,6 +34,7 @@ pub struct ScaleGrid {
     pub total_width: f32,
 }
 
+#[must_use]
 pub fn build_scales(
     scales: &[ScaleConfig],
     start: DateTime<Utc>,
@@ -76,7 +77,7 @@ fn build_row(
     let mut cells = Vec::new();
     let mut date = unit_start(scale.unit, start, week_start);
     while date < end {
-        let next = add(scale.unit, date, scale.step as i64);
+        let next = add(scale.unit, date, i64::from(scale.step));
         let cell_start = if date < start { start } else { date };
         let cell_end = if next > end { end } else { next };
         let units = diff_f(base_unit, cell_end, cell_start);
@@ -106,13 +107,15 @@ fn format_cell(fmt: &str, date: DateTime<Utc>) -> String {
 }
 
 /// Pixel offset for `date` inside the grid (from `grid.start`).
+#[must_use]
 pub fn x_for_date(grid: &ScaleGrid, date: DateTime<Utc>) -> f32 {
     diff_f(grid.min_unit, date, grid.start) as f32 * grid.min_unit_width
 }
 
 /// Inverse — date for a pixel x offset.
+#[must_use]
 pub fn date_for_x(grid: &ScaleGrid, x: f32) -> DateTime<Utc> {
-    let units = (x / grid.min_unit_width) as f64;
+    let units = f64::from(x / grid.min_unit_width);
     let whole = units.floor() as i64;
     let frac = units - whole as f64;
     let base = add(grid.min_unit, grid.start, whole);

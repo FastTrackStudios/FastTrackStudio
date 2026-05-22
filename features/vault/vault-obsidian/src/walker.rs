@@ -78,7 +78,7 @@ fn classify(p: &Path) -> VaultEntryKind {
     let ext = p
         .extension()
         .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
+        .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     match ext.as_str() {
         "md" | "markdown" => VaultEntryKind::Markdown,
@@ -93,7 +93,7 @@ fn classify(p: &Path) -> VaultEntryKind {
 /// `.trash` / `.git` — those are anchored at the vault root, not
 /// nested. NOTE: we do NOT skip `node_modules` — Obsidian itself
 /// indexes those trees (confirmed against The Observatory, where
-/// its `files total` includes node_modules contents).
+/// its `files total` includes `node_modules` contents).
 fn is_hard_skip(path: &Path, root: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
         return false;

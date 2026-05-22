@@ -12,7 +12,7 @@ use serde::Deserialize;
 ///
 /// Obsidian writes `app.json` in camelCase
 /// (`userIgnoreFilters`, `attachmentFolderPath`, …); the struct
-/// uses snake_case + `rename_all` so Rust call sites stay
+/// uses `snake_case` + `rename_all` so Rust call sites stay
 /// idiomatic.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]

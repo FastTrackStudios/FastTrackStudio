@@ -32,6 +32,7 @@ impl DioxusKey {
     /// Returns `None` for keys we don't yet route through the
     /// modal machine (function keys, dead keys, …) — those fall
     /// through to the editor as before.
+    #[must_use]
     pub fn from_dioxus(key: &dioxus::prelude::Key, shift: bool) -> Option<Self> {
         use dioxus::prelude::Key;
         match key {

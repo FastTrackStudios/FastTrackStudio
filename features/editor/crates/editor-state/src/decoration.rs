@@ -26,7 +26,7 @@ pub enum DecorationKind {
     /// Inject content at a point that isn't in the document.
     /// Used for inline widgets like a checkbox in front of a
     /// task. v1 stores the HTML as a string; later we can swap
-    /// to a typed widget enum or Dioxus VNode.
+    /// to a typed widget enum or Dioxus `VNode`.
     Widget { html: String },
     /// Add a CSS class to the line element containing the
     /// position. Used for the active-line highlight.
@@ -77,6 +77,7 @@ impl DecoratedRange {
         }
     }
 
+    #[must_use]
     pub fn replace(range: std::ops::Range<usize>) -> Self {
         Self {
             from: range.start,
@@ -102,6 +103,7 @@ impl DecoratedRange {
             },
         }
     }
+    #[must_use]
     pub fn atomic(range: std::ops::Range<usize>) -> Self {
         Self {
             from: range.start,
@@ -110,6 +112,7 @@ impl DecoratedRange {
         }
     }
 
+    #[must_use]
     pub fn byte_range(&self) -> std::ops::Range<usize> {
         self.from..self.to
     }
@@ -122,6 +125,7 @@ impl DecoratedRange {
 /// range boundary or no atomic range contains it.
 ///
 /// Ports CM6's `skipAtomicRanges` (`view/src/cursor.ts`).
+#[must_use]
 pub fn skip_atomic(decs: &[DecoratedRange], pos: usize) -> usize {
     let mut p = pos;
     loop {
@@ -161,6 +165,7 @@ impl Decoration {
     ) -> DecoratedRange {
         DecoratedRange::mark_with_attrs(range, class, attrs)
     }
+    #[must_use]
     pub fn replace(range: std::ops::Range<usize>) -> DecoratedRange {
         DecoratedRange::replace(range)
     }
@@ -170,6 +175,7 @@ impl Decoration {
     pub fn line(at: usize, class: impl Into<String>) -> DecoratedRange {
         DecoratedRange::line(at, class)
     }
+    #[must_use]
     pub fn atomic(range: std::ops::Range<usize>) -> DecoratedRange {
         DecoratedRange::atomic(range)
     }

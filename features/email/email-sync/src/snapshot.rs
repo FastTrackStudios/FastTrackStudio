@@ -4,7 +4,7 @@
 //!
 //! This is *not* the persistent cache — that lives in
 //! `email-store`. We keep an in-memory snapshot anyway because
-//! diff calculation against on-disk SQLite would be cycle-N×N
+//! diff calculation against on-disk `SQLite` would be cycle-N×N
 //! query traffic. Snapshot is the working set; the store is
 //! the durable copy.
 
@@ -19,6 +19,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -26,6 +27,7 @@ impl Snapshot {
     /// Compute the events needed to go from `self` to `next`.
     /// Order: folder churn first (added/removed), then per-folder
     /// new messages, then deletes.
+    #[must_use]
     pub fn diff(&self, next: &Snapshot) -> Vec<EmailEvent> {
         let mut events = Vec::new();
 
@@ -63,7 +65,7 @@ mod tests {
     fn folder(name: &str, msgs: &[&str]) -> (String, BTreeSet<String>) {
         (
             name.to_string(),
-            msgs.iter().map(|s| s.to_string()).collect(),
+            msgs.iter().map(std::string::ToString::to_string).collect(),
         )
     }
 

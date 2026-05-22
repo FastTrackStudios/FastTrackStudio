@@ -63,14 +63,14 @@ pub fn ContextMenuOverlay() -> Element {
 
     let on_edit = {
         let on_event = on_event.clone();
-        move |_| {
+        move |()| {
             on_event.call(GanttEvent::OpenEditor { id });
             close();
         }
     };
     let on_delete = {
         let on_event = on_event.clone();
-        move |_| {
+        move |()| {
             on_event.call(GanttEvent::DeleteTask { id });
             close();
         }
@@ -90,7 +90,7 @@ pub fn ContextMenuOverlay() -> Element {
     let on_dup = {
         let on_event = on_event.clone();
         let mut task_clone = task.clone();
-        move |_| {
+        move |()| {
             task_clone.id = uuid::Uuid::new_v4();
             task_clone.text = format!("{} (copy)", task_clone.text);
             on_event.call(GanttEvent::AddTask {
@@ -133,7 +133,7 @@ pub fn ContextMenuOverlay() -> Element {
                     disabled: readonly || matches!(task.task_type, TaskType::Summary),
                     on_click: {
                         let mut on_convert = on_convert.clone();
-                        EventHandler::new(move |_| {
+                        EventHandler::new(move |()| {
                             let new = if matches!(task.task_type, TaskType::Task) {
                                 TaskType::Milestone
                             } else {

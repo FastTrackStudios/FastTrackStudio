@@ -1,6 +1,6 @@
 //! `agent-codex` — Codex backend for the agent feature.
 //!
-//! Vendors CodexMonitor's tokio Rust control plane for
+//! Vendors `CodexMonitor`'s tokio Rust control plane for
 //! `codex app-server` under [`vendor`] (~3100 LOC, mostly
 //! verbatim) and exposes a wrapper that implements
 //! `agent_proto::Agents` on top of it.
@@ -17,8 +17,8 @@
 //! - `CodexBackend::chat()` — single-turn convenience used
 //!   by the CLI demo and by `agent-wiki`'s ingest bridge.
 //! - `impl Agents for CodexBackend` — proto-shaped surface.
-//!   Codex-relevant methods (sessions, dispatch_turn,
-//!   subscribe_session) are real; non-Codex methods
+//!   Codex-relevant methods (sessions, `dispatch_turn`,
+//!   `subscribe_session`) are real; non-Codex methods
 //!   (profiles, kanban, projects, ...) return
 //!   `AgentError::Unsupported`.
 
@@ -51,11 +51,13 @@ pub struct BroadcastSink {
 }
 
 impl BroadcastSink {
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let (tx, _rx) = broadcast::channel(capacity);
         Self { tx }
     }
 
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<AppServerEvent> {
         self.tx.subscribe()
     }
@@ -93,6 +95,7 @@ pub(crate) struct CodexInner {
 }
 
 impl CodexBackend {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(CodexInner {
@@ -106,12 +109,14 @@ impl CodexBackend {
     /// `AppServerEvent` regardless of workspace. UIs prefer
     /// `subscribe_session` (in the trait) for filtered
     /// streams.
+    #[must_use]
     pub fn subscribe_raw(&self) -> broadcast::Receiver<AppServerEvent> {
         self.inner.sink.subscribe()
     }
 
     /// Clone of the sink so callers can spawn workspace
     /// sessions with it.
+    #[must_use]
     pub fn sink(&self) -> BroadcastSink {
         self.inner.sink.clone()
     }

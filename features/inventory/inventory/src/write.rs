@@ -70,6 +70,7 @@ pub fn write_item(
 }
 
 /// Default layout: `inventory/<slug>.md`.
+#[must_use]
 pub fn default_item_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {

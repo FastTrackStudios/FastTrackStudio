@@ -90,6 +90,7 @@ impl CellValue {
     /// Best-effort string for sort + filter. Date/number/select all
     /// flatten to a canonical string so the layout pass can stay
     /// type-agnostic.
+    #[must_use]
     pub fn as_sort_key(&self) -> String {
         match self {
             Self::Text(s) | Self::Select(s) => s.to_ascii_lowercase(),
@@ -101,6 +102,7 @@ impl CellValue {
     }
 
     /// Lowercase substring source for the per-column filter.
+    #[must_use]
     pub fn as_filter_str(&self) -> String {
         match self {
             Self::Text(s) | Self::Select(s) => s.to_ascii_lowercase(),
@@ -122,6 +124,7 @@ pub struct Row {
 }
 
 impl Row {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -129,6 +132,7 @@ impl Row {
         }
     }
 
+    #[must_use]
     pub fn with(mut self, col: ColumnId, value: CellValue) -> Self {
         self.cells.insert(col, value);
         self
@@ -150,6 +154,7 @@ pub enum SortDir {
 }
 
 impl SortDir {
+    #[must_use]
     pub fn toggle(self) -> Self {
         match self {
             Self::Asc => Self::Desc,

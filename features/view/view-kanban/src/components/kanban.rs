@@ -17,7 +17,7 @@ pub struct KanbanProps {
     /// Card payloads keyed in any order — columns pluck out their
     /// own by id. Accepts a `Vec` (not the `IndexMap` from
     /// `KanbanState`) so the prop stays trivially clonable and
-    /// PartialEq.
+    /// `PartialEq`.
     pub cards: Vec<KanbanCard>,
     #[props(default = false)]
     pub readonly: bool,

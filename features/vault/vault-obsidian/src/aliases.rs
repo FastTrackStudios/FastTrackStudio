@@ -12,6 +12,7 @@ pub struct AliasEntry<'a> {
 /// All `aliases:` (and singular `alias:`) frontmatter values across
 /// the vault, flattened to `(page, alias)` pairs. Sorted by alias
 /// then by page for deterministic output.
+#[must_use]
 pub fn list_aliases(vault: &Vault) -> Vec<AliasEntry<'_>> {
     let mut out = Vec::new();
     for p in &vault.pages {
@@ -22,6 +23,7 @@ pub fn list_aliases(vault: &Vault) -> Vec<AliasEntry<'_>> {
 }
 
 /// Total alias count across the vault.
+#[must_use]
 pub fn total_aliases(vault: &Vault) -> usize {
     vault
         .pages

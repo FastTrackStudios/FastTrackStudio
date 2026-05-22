@@ -33,6 +33,7 @@ pub struct Cursor {
 
 impl Cursor {
     /// Convenience for the common case (no sticky column).
+    #[must_use]
     pub fn new(block_id: Uuid, offset: usize) -> Self {
         Self {
             block_id,
@@ -59,6 +60,7 @@ pub struct CursorState {
 }
 
 impl CursorState {
+    #[must_use]
     pub fn single(c: Cursor) -> Self {
         Self {
             cursors: vec![c],
@@ -68,6 +70,7 @@ impl CursorState {
     }
 
     /// The cursor the user is "on" — always present.
+    #[must_use]
     pub fn primary(&self) -> Cursor {
         self.cursors[self.primary.min(self.cursors.len() - 1)]
     }
@@ -90,7 +93,7 @@ impl CursorState {
 
 /// Host-supplied view of the document so the motion engine can
 /// stay storage-agnostic. Implement once at the route level
-/// (knowledge-ui's PageBody) over your snapshot.
+/// (knowledge-ui's `PageBody`) over your snapshot.
 pub trait DocView {
     /// Block content for `id`. `None` if the block is unknown.
     fn block_content(&self, id: Uuid) -> Option<String>;
@@ -122,16 +125,18 @@ fn snap_to_boundary(s: &str, mut byte: usize) -> usize {
 /// in `content`. Column is byte-offset, not visual column —
 /// good enough for monospace + matches how textarea selection
 /// reports.
+#[must_use]
 pub fn line_col(content: &str, offset: usize) -> (usize, usize) {
     let off = snap_to_boundary(content, offset);
     let head = &content[..off];
     let line = head.bytes().filter(|b| *b == b'\n').count();
-    let col = head.rfind('\n').map(|i| off - i - 1).unwrap_or(off);
+    let col = head.rfind('\n').map_or(off, |i| off - i - 1);
     (line, col)
 }
 
 /// Inverse: given a target `(line, col)` and content, return
 /// the byte offset on that line clamped to its end.
+#[must_use]
 pub fn offset_at(content: &str, line: usize, col: usize) -> usize {
     let mut start = 0usize;
     let mut current_line = 0usize;
@@ -150,8 +155,7 @@ pub fn offset_at(content: &str, line: usize, col: usize) -> usize {
     }
     let line_end = content[start..]
         .find('\n')
-        .map(|i| start + i)
-        .unwrap_or(content.len());
+        .map_or(content.len(), |i| start + i);
     let line_slice = &content[start..line_end];
     let target = start + col.min(line_slice.len());
     snap_to_boundary(content, target)
@@ -178,8 +182,7 @@ fn line_at(content: &str, line: usize) -> &str {
     }
     let end = content[start..]
         .find('\n')
-        .map(|i| start + i)
-        .unwrap_or(content.len());
+        .map_or(content.len(), |i| start + i);
     &content[start..end]
 }
 
@@ -232,11 +235,8 @@ pub fn apply_motion<V: DocView>(cursor: Cursor, motion: Motion, view: &V) -> Cur
 fn find_char(c: Cursor, content: &str, ch: char, direction: i8, till: bool) -> Cursor {
     let off = c.offset.min(content.len());
     // Bound search to the current line.
-    let line_start = content[..off].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let line_end = content[off..]
-        .find('\n')
-        .map(|i| off + i)
-        .unwrap_or(content.len());
+    let line_start = content[..off].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = content[off..].find('\n').map_or(content.len(), |i| off + i);
     let new_off = if direction >= 0 {
         let search_from = off.saturating_add(1).min(line_end);
         content[search_from..line_end]
@@ -449,17 +449,14 @@ fn move_word_backward(c: Cursor, content: &str) -> Cursor {
         }
         prev_chars.pop();
     }
-    let in_word = prev_chars
-        .last()
-        .map(|(_, ch)| is_word_char(*ch))
-        .unwrap_or(true);
+    let in_word = prev_chars.last().is_none_or(|(_, ch)| is_word_char(*ch));
     while let Some((_, ch)) = prev_chars.last() {
         if is_word_char(*ch) != in_word {
             break;
         }
         prev_chars.pop();
     }
-    i = prev_chars.last().map(|(pos, _)| *pos).unwrap_or(0);
+    i = prev_chars.last().map_or(0, |(pos, _)| *pos);
     // We landed on the char BEFORE the boundary; bump to the
     // first char of the word we walked over.
     if !prev_chars.is_empty() {

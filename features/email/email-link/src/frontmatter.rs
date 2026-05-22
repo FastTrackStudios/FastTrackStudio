@@ -31,6 +31,7 @@ pub struct ParsedFrontmatter {
 /// Frontmatter is the content between two `---\n` lines at the
 /// very top of the file. Returns `(None, full_body)` when no
 /// frontmatter is present.
+#[must_use]
 pub fn split(content: &str) -> (Option<&str>, &str) {
     if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
         return (None, content);

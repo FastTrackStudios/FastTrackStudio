@@ -3,7 +3,7 @@
 //!
 //! Was originally part of a wider capability-token scheme that
 //! also fenced `DocId` access; the rest of that scheme was ripped
-//! along with the Loro entity layer (no DocIds left to scope).
+//! along with the Loro entity layer (no `DocIds` left to scope).
 //! What survives here is the Ed25519 keypair + the
 //! `CapabilityError` shape `BlobToken` matches on.
 
@@ -38,6 +38,7 @@ pub struct ServerKeypair {
 }
 
 impl ServerKeypair {
+    #[must_use]
     pub fn generate_ephemeral() -> Self {
         use rand::RngCore;
         let mut seed = [0u8; SECRET_KEY_LENGTH];
@@ -77,6 +78,7 @@ impl ServerKeypair {
         Ok(kp)
     }
 
+    #[must_use]
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing.verifying_key()
     }

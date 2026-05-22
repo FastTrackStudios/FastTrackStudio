@@ -21,6 +21,7 @@ pub enum ParseError {
     Yaml(String),
 }
 
+#[must_use]
 pub fn looks_like_location(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -92,7 +93,7 @@ fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
     match v {
         serde_yaml::Value::Sequence(seq) => seq
             .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
             .collect(),
         serde_yaml::Value::String(s) => vec![s.clone()],
         _ => Vec::new(),

@@ -1,7 +1,7 @@
 //! 4-signal relevance graph + Louvain clusters.
 //!
 //! Mirrors `llm_wiki`'s graph model (see `api_server.rs::handle_graph`
-//! in nashsu/llm_wiki). Nodes are wiki pages keyed by their
+//! in `nashsu/llm_wiki`). Nodes are wiki pages keyed by their
 //! vault-relative path; edges are scored by combining four signals:
 //!
 //! | Signal          | Weight | Source                                      |
@@ -12,7 +12,7 @@
 //! | Type affinity   | ×1.0   | Both have the same `type:` frontmatter      |
 //!
 //! Backends are free to expose tunable weights, but the
-//! defaults match llm_wiki for portability.
+//! defaults match `llm_wiki` for portability.
 
 use facet::Facet;
 

@@ -20,6 +20,7 @@ pub enum ParseError {
     Yaml(String),
 }
 
+#[must_use]
 pub fn looks_like_recipe(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -50,15 +51,15 @@ pub fn parse_page(page: &VaultPage) -> Result<Recipe, ParseError> {
     let cuisine = take_str(&map, "cuisine");
     let prep_minutes = map
         .get("prepMinutes")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let cook_minutes = map
         .get("cookMinutes")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let servings = map
         .get("servings")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let ingredients = parse_ingredients(&map);
     let steps = take_string_list(&map, "steps");
@@ -83,7 +84,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Recipe, ParseError> {
                         .and_then(|s| Uuid::parse_str(s).ok())?;
                     let servings = m
                         .get("servings")
-                        .and_then(|v| v.as_u64())
+                        .and_then(serde_yaml::Value::as_u64)
                         .and_then(|n| u32::try_from(n).ok())
                         .unwrap_or(1);
                     Some(NestedRecipe {
@@ -142,7 +143,7 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
             }
             let m = row.as_mapping()?;
             let name = m.get("name").and_then(|v| v.as_str())?.to_string();
-            let qty = m.get("qty").and_then(|v| v.as_f64());
+            let qty = m.get("qty").and_then(serde_yaml::Value::as_f64);
             let unit = m
                 .get("unit")
                 .and_then(|v| v.as_str())
@@ -155,8 +156,11 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
             let note = m
                 .get("note")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let optional = m.get("optional").and_then(|v| v.as_bool()).unwrap_or(false);
+                .map(std::string::ToString::to_string);
+            let optional = m
+                .get("optional")
+                .and_then(serde_yaml::Value::as_bool)
+                .unwrap_or(false);
             let substitutes = m
                 .get("substitutes")
                 .and_then(|v| v.as_sequence())
@@ -179,11 +183,14 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                                 .get("pantryItemId")
                                 .and_then(|v| v.as_str())
                                 .and_then(|s| uuid::Uuid::parse_str(s).ok());
-                            let ratio = sm.get("ratio").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                            let ratio = sm
+                                .get("ratio")
+                                .and_then(serde_yaml::Value::as_f64)
+                                .unwrap_or(1.0);
                             let note = sm
                                 .get("note")
                                 .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
+                                .map(std::string::ToString::to_string);
                             Some(Substitution {
                                 name,
                                 pantry_item_id,
@@ -199,8 +206,8 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                 qty,
                 unit,
                 pantry_item_id,
-                substitutes,
                 note,
+                substitutes,
                 optional,
             })
         })
@@ -229,7 +236,7 @@ fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
     match v {
         serde_yaml::Value::Sequence(seq) => seq
             .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
             .collect(),
         serde_yaml::Value::String(s) => vec![s.clone()],
         _ => Vec::new(),

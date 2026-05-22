@@ -86,8 +86,7 @@ fn Bar(props: BarProps) -> Element {
                 .tasks
                 .iter()
                 .find(|t| t.id == d.task_id)
-                .map(|t| matches!(t.task_type, TaskType::Summary))
-                .unwrap_or(false);
+                .is_some_and(|t| matches!(t.task_type, TaskType::Summary));
             let in_multi =
                 s.selected.len() > 1 && s.selected.contains(&d.task_id) && s.selected.contains(&id);
             if (parent_is_summary && is_descendant(&s, d.task_id, id)) || in_multi {
@@ -110,7 +109,7 @@ fn Bar(props: BarProps) -> Element {
     let custom_color = r.task.color.clone();
 
     let pending = *linking.read();
-    let is_link_source = pending.map(|p| p.source == id).unwrap_or(false);
+    let is_link_source = pending.is_some_and(|p| p.source == id);
     let link_pending_any = pending.is_some();
 
     // Visual choice for the bar. No `absolute` here — the outer
@@ -214,13 +213,7 @@ fn Bar(props: BarProps) -> Element {
     let on_bar_click = move |e: Event<MouseData>| {
         e.stop_propagation();
         // Suppress click if a drag just committed.
-        if drag
-            .state
-            .read()
-            .as_ref()
-            .map(|s| s.committed)
-            .unwrap_or(false)
-        {
+        if drag.state.read().as_ref().is_some_and(|s| s.committed) {
             return;
         }
         let mods = e.data().modifiers();

@@ -1,4 +1,4 @@
-//! Two-step CoT ingest queue.
+//! Two-step `CoT` ingest queue.
 
 use crate::error::WikiError;
 use crate::ingest::{AnalysisDraft, IngestTask, PageDraft, SourceChange};

@@ -19,7 +19,7 @@
 //!   `append_draft`, `send`) return `Unsupported` for now; the
 //!   `Email/set` shape lands next.
 //! - `subscribe()` is wired through a per-account broadcast
-//!   channel — the eventual EventSource attachment plugs in
+//!   channel — the eventual `EventSource` attachment plugs in
 //!   the same way `email-imap::start_idle` does for IMAP.
 
 #![cfg(not(target_arch = "wasm32"))]

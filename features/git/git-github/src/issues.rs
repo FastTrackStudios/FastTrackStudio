@@ -109,6 +109,10 @@ fn translate_issue(repo: &RepoId, raw: octocrab::models::issues::Issue) -> Issue
         repo: repo.clone(),
         title: raw.title,
         body: raw.body.unwrap_or_default(),
+        // `IssueState` is `#[non_exhaustive]`; the wildcard arm
+        // is for unknown future variants — keep both Closed and
+        // wildcard mapping to the same value.
+        #[allow(clippy::match_same_arms)]
         state: match raw.state {
             octocrab::models::IssueState::Open => IssueState::Open,
             octocrab::models::IssueState::Closed => IssueState::Closed,

@@ -5,7 +5,7 @@
 //! - **Token** (always on) — grep + TF-IDF over page bodies.
 //!   Pure Rust, no embeddings, no model.
 //! - **Hybrid** (feature `vector`) — token search merged
-//!   with vector retrieval over a LanceDB table. Off by
+//!   with vector retrieval over a `LanceDB` table. Off by
 //!   default; enable when the vault has been indexed via
 //!   the embedding pipeline (lands separately).
 //!

@@ -31,6 +31,7 @@ pub fn new_text_tile(text: impl Into<String>) -> Tile {
 
 /// Read the text out of a [`TileKind::Text`] tile. Panics if
 /// called on a non-text tile.
+#[must_use]
 pub fn text_of(tile: &Tile) -> &str {
     match &tile.body {
         TileBody::Text { text } => text.as_str(),

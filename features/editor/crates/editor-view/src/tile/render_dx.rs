@@ -20,7 +20,7 @@ use crate::tile::text::text_of;
 use crate::tile::{TileBody, TileKind};
 
 /// Render a tile and its descendants. The root call passes the
-/// DocTile; recursion walks into composites.
+/// `DocTile`; recursion walks into composites.
 pub fn render_tile(arena: &Arena, tile: TileId) -> Element {
     let t = arena.get(tile);
     let tid = tile.0;

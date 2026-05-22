@@ -87,6 +87,7 @@ pub enum Kind {
 }
 
 impl Kind {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Studio => "studio",
@@ -98,6 +99,8 @@ impl Kind {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "studio" => Some(Self::Studio),

@@ -1,7 +1,7 @@
 //! Named agent identity — model + system prompt + tool /
 //! MCP config. Mirrors Hermes's profile directory pattern:
 //! `~/.hermes/profiles/<name>/config.yaml` carries the
-//! per-profile state, and the WebUI swaps profiles via a
+//! per-profile state, and the `WebUI` swaps profiles via a
 //! cookie (`hermes_profile=...`).
 //!
 //! In Task: profiles live under

@@ -31,7 +31,6 @@ pub fn ColumnMenu(props: ColumnMenuProps) -> Element {
                         let id = column.id;
                         let label = column.label.clone();
                         let hidden = column.hidden;
-                        let on_event = on_event;
                         rsx! {
                             DropdownItem {
                                 key: "vis-{id}",
@@ -64,7 +63,6 @@ pub fn ColumnMenu(props: ColumnMenuProps) -> Element {
                             {
                                 let id = column.id;
                                 let label = column.label.clone();
-                                let on_event = on_event;
                                 let active = group_by == Some(id);
                                 rsx! {
                                     DropdownItem {

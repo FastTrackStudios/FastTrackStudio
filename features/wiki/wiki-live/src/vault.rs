@@ -31,11 +31,13 @@ impl WikiLive {
     }
 
     /// Vault root path.
+    #[must_use]
     pub fn vault_root(&self) -> &Path {
         &self.vault_root
     }
 
     /// `<vault_root>/Wiki/`.
+    #[must_use]
     pub fn wiki_root(&self) -> PathBuf {
         self.vault_root.join(paths::WIKI_ROOT)
     }
@@ -62,6 +64,7 @@ impl WikiLive {
     }
 
     /// Has [`Self::bootstrap`] run for this vault?
+    #[must_use]
     pub fn is_bootstrapped(&self) -> bool {
         let r = self.wiki_root();
         r.is_dir() && r.join(paths::SCHEMA_MD).is_file() && r.join(paths::PURPOSE_MD).is_file()

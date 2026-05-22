@@ -62,7 +62,7 @@ pub trait PantryService {
     fn find_by_barcode(&self, barcode: &str) -> Result<PantryItem, PantryError>;
 
     /// Resolve a barcode against the local vault first,
-    /// then OpenFoodFacts as a fallback. The result tells
+    /// then `OpenFoodFacts` as a fallback. The result tells
     /// the caller whether it's a known item (`Local`), an
     /// off-the-shelf draft ready to confirm (`Draft`), or
     /// nothing was found (`NotFound`).
@@ -76,7 +76,7 @@ pub trait PantryService {
     fn add_stock(&self, id: &str, entry: StockEntry) -> Result<PantryItem, PantryError>;
 
     /// Deduct `amount` of stock FIFO across entries. Order:
-    /// nearest best_before first, then oldest purchase, with
+    /// nearest `best_before` first, then oldest purchase, with
     /// opened entries breaking ties (use them up first).
     /// When no stock entries are present, falls back to the
     /// page-level `qty` field (legacy path).
@@ -87,7 +87,7 @@ pub trait PantryService {
     fn consume_stock(&self, id: &str, amount: f64) -> Result<ConsumeReceipt, PantryError>;
 
     /// Move one stock entry to a different location. The
-    /// entry's qty / best_before / opened state are
+    /// entry's qty / `best_before` / opened state are
     /// preserved. Pass empty `location_id` to clear it.
     fn transfer_stock(
         &self,
@@ -108,7 +108,7 @@ pub trait PantryService {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ConsumeReceipt {
     pub item: PantryItem,
-    /// Each row: (entry_id, qty_debited). Empty entries
+    /// Each row: (`entry_id`, `qty_debited`). Empty entries
     /// (qty fully drained) are kept in the item with
     /// `qty: 0.0` for audit; callers can prune later.
     pub debits: Vec<EntryDebit>,

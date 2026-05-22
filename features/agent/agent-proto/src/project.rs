@@ -1,5 +1,5 @@
 //! Project — a working-directory root that sessions belong
-//! to. Mirrors CodexMonitor's `WorkspaceInfo` + Hermes's
+//! to. Mirrors `CodexMonitor`'s `WorkspaceInfo` + Hermes's
 //! `Session.workspace` + `project_id` pair: a project pins
 //! a path (typically a vault or git repo) and provides a
 //! grouping for sessions.

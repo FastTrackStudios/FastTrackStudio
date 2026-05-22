@@ -17,7 +17,7 @@ pub fn envelope_from_bytes(
         .ok_or_else(|| EmailSyncError::Parse("mail-parser refused headers".into()))?;
 
     let message_id = message_id_override
-        .or_else(|| parsed.message_id().map(|s| s.to_string()))
+        .or_else(|| parsed.message_id().map(std::string::ToString::to_string))
         .unwrap_or_else(|| synth_message_id(bytes));
 
     let subject = parsed.subject().unwrap_or("").to_string();
@@ -27,9 +27,8 @@ pub fn envelope_from_bytes(
 
     let date_ms = parsed
         .date()
-        .map(|d| d.to_timestamp())
-        .map(|secs| secs.saturating_mul(1000))
-        .unwrap_or(0);
+        .map(mail_parser::DateTime::to_timestamp)
+        .map_or(0, |secs| secs.saturating_mul(1000));
 
     let has_attachments = parsed
         .headers()
@@ -39,12 +38,12 @@ pub fn envelope_from_bytes(
     let thread_id = parsed
         .in_reply_to()
         .as_text()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| {
             parsed
                 .references()
                 .as_text_list()
-                .and_then(|list| list.first().map(|s| s.to_string()))
+                .and_then(|list| list.first().map(std::string::ToString::to_string))
         });
 
     Ok(Envelope {
@@ -75,8 +74,8 @@ pub fn message_from_bytes(
 
     let envelope = envelope_from_bytes(bytes, folder, flags, None, size)?;
 
-    let body_text = parsed.body_text(0).map(|s| s.into_owned());
-    let body_html = parsed.body_html(0).map(|s| s.into_owned());
+    let body_text = parsed.body_text(0).map(std::borrow::Cow::into_owned);
+    let body_html = parsed.body_html(0).map(std::borrow::Cow::into_owned);
 
     let mut attachments = Vec::new();
     for (idx, part) in parsed.parts.iter().enumerate() {
@@ -85,15 +84,15 @@ pub fn message_from_bytes(
         if !is_attachment {
             continue;
         }
-        let filename = part.attachment_name().map(|s| s.to_string());
-        let mime = part
-            .content_type()
-            .map(|ct| {
+        let filename = part.attachment_name().map(std::string::ToString::to_string);
+        let mime = part.content_type().map_or_else(
+            || "application/octet-stream".into(),
+            |ct| {
                 let main = ct.ctype();
                 let sub = ct.subtype().unwrap_or("octet-stream");
                 format!("{main}/{sub}")
-            })
-            .unwrap_or_else(|| "application/octet-stream".into());
+            },
+        );
         let size = match &part.body {
             PartType::Binary(b) | PartType::InlineBinary(b) => b.len() as u64,
             PartType::Text(t) | PartType::Html(t) => t.len() as u64,
@@ -112,7 +111,7 @@ pub fn message_from_bytes(
         references.push(s.to_string());
     }
     if let Some(list) = parsed.references().as_text_list() {
-        references.extend(list.iter().map(|s| s.to_string()));
+        references.extend(list.iter().map(std::string::ToString::to_string));
     }
 
     let cutoff = bytes
@@ -157,7 +156,7 @@ fn collect_addrs(value: Option<&Address>) -> Vec<Addr> {
     };
     addr.iter()
         .map(|a| Addr {
-            name: a.name().map(|s| s.to_string()),
+            name: a.name().map(std::string::ToString::to_string),
             email: a.address().unwrap_or("").to_string(),
         })
         .collect()

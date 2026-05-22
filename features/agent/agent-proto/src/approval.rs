@@ -2,7 +2,7 @@
 //! mid-turn and asks the user for permission before doing
 //! something (run a command, write a file, send an email).
 //!
-//! Mirrors Hermes's `approval` SSE event + CodexMonitor's
+//! Mirrors Hermes's `approval` SSE event + `CodexMonitor`'s
 //! `RequestUserInputParams`. The flow:
 //!
 //! 1. Agent emits [`crate::event::AgentEvent::ApprovalRequested`].

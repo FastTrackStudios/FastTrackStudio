@@ -14,7 +14,7 @@
 //! v1 limitations:
 //! - All times treated as UTC. The schedule's `timezone` field is
 //!   carried through but not yet honored — that comes with the
-//!   real DateTime layer.
+//!   real `DateTime` layer.
 //! - `EventType.min_notice_min` / `max_future_days` aren't on the
 //!   proto yet (parity-doc 🔵). When they land, clamp the query
 //!   window here.
@@ -27,8 +27,9 @@ use scheduling_proto::{
 };
 
 /// `event_type.duration_min + event_type.buffer_min`, in minutes.
+#[must_use]
 pub fn step_minutes(et: &EventType) -> i64 {
-    et.duration_min as i64 + et.buffer_min as i64
+    i64::from(et.duration_min) + i64::from(et.buffer_min)
 }
 
 /// Open slots in `[from_utc, to_utc)` for `event_type` according
@@ -51,7 +52,7 @@ pub fn list_open_slots(
         return Ok(Vec::new());
     }
 
-    let duration = Duration::minutes(event_type.duration_min as i64);
+    let duration = Duration::minutes(i64::from(event_type.duration_min));
     let step = Duration::minutes(step_minutes(event_type));
     let live_intervals: Vec<(DateTime<Utc>, DateTime<Utc>)> = bookings
         .iter()
@@ -118,7 +119,7 @@ fn weekday_of(d: NaiveDate) -> Weekday {
 }
 
 fn day_with_time(d: NaiveDate, h: u8, m: u8) -> DateTime<Utc> {
-    let t = NaiveTime::from_hms_opt(h as u32, m as u32, 0).unwrap_or(NaiveTime::MIN);
+    let t = NaiveTime::from_hms_opt(u32::from(h), u32::from(m), 0).unwrap_or(NaiveTime::MIN);
     Utc.from_utc_datetime(&d.and_time(t))
 }
 
@@ -232,7 +233,7 @@ mod tests {
             attendee_email: "bob@x".into(),
             note: None,
             status: BookingStatus::Confirmed,
-            created_utc: "".into(),
+            created_utc: String::new(),
         };
         let slots = list_open_slots(
             &consult_30(),
@@ -262,7 +263,7 @@ mod tests {
             attendee_email: "bob@x".into(),
             note: None,
             status: BookingStatus::Cancelled,
-            created_utc: "".into(),
+            created_utc: String::new(),
         };
         let slots = list_open_slots(
             &consult_30(),

@@ -70,6 +70,7 @@ pub fn write_location(
 }
 
 /// Default layout: `locations/<slug>.md`.
+#[must_use]
 pub fn default_location_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {

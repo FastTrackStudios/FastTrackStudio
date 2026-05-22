@@ -1,7 +1,7 @@
 //! [`VimState`] + the central dispatcher.
 //!
 //! vim ref: zed/crates/vim/src/state.rs:45 (`Mode`, `Operator`)
-//! vim ref: codemirror-vim/src/vim.js (vim_api / commandDispatcher)
+//! vim ref: codemirror-vim/src/vim.js (`vim_api` / commandDispatcher)
 
 use editor_state::{Changes, EditorState, KeySpec, Range, Selection, TransactionSpec};
 
@@ -88,6 +88,7 @@ pub enum LastChange {
 }
 
 impl VimState {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -103,6 +104,7 @@ impl VimState {
         self.pending_g_case = None;
     }
 
+    #[must_use]
     pub fn is_visual(&self) -> bool {
         matches!(
             self.mode,
@@ -114,6 +116,7 @@ impl VimState {
     /// fall through to the contenteditable / text-input path.
     /// Used by `editor-view`'s onkeydown to gate
     /// `preventDefault` between non-Insert and Insert modes.
+    #[must_use]
     pub fn is_inserting(&self) -> bool {
         matches!(self.mode, Mode::Insert | Mode::Replace)
     }
@@ -121,6 +124,7 @@ impl VimState {
     /// Hook for the editor's history system. Returns `None`
     /// today; the dispatcher emits `request_undo` / `request_redo`
     /// via metadata on the returned [`TransactionSpec`].
+    #[must_use]
     pub fn request_undo(&self) -> Option<TransactionSpec> {
         Some(
             TransactionSpec::new()
@@ -129,6 +133,7 @@ impl VimState {
         )
     }
 
+    #[must_use]
     pub fn request_redo(&self) -> Option<TransactionSpec> {
         Some(
             TransactionSpec::new()

@@ -18,6 +18,7 @@ pub enum IntensityBucket {
 impl IntensityBucket {
     /// Tailwind opacity suffix for `bg-{stem}-500/{N}`. Pairs with
     /// [`ColorTag::stem`] in the renderer.
+    #[must_use]
     pub fn opacity(self) -> u8 {
         match self {
             Self::Zero => 0, // renders as a subtle neutral cell
@@ -44,6 +45,7 @@ pub enum ColorTag {
 }
 
 impl ColorTag {
+    #[must_use]
     pub fn stem(self) -> &'static str {
         match self {
             Self::Neutral => "slate",
@@ -60,6 +62,7 @@ impl ColorTag {
 /// dataset (passed in by the renderer once per layout). Empty
 /// (`count == 0`) is always `Zero`; otherwise the count maps into
 /// One..=Four by quartile of `max`.
+#[must_use]
 pub fn bucket_for(count: u32, max: u32) -> IntensityBucket {
     if count == 0 {
         return IntensityBucket::Zero;

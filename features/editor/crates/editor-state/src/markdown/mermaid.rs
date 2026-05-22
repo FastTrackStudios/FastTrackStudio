@@ -33,7 +33,7 @@ pub(crate) fn render_mermaid(body: &str) -> Option<String> {
     if let Some(cached) = with_mermaid_cache(|c| c.get(body)) {
         return Some(cached);
     }
-    let budget = COMPILE_BUDGET.with(|c| c.get());
+    let budget = COMPILE_BUDGET.with(std::cell::Cell::get);
     if budget == 0 {
         return None;
     }

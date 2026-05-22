@@ -5,12 +5,12 @@
 //! arrives alongside the `Agents` impl in slice 2c.
 //!
 //! Codex pushes events as JSON-RPC notifications whose
-//! `params.item` carries one of CodexMonitor's
+//! `params.item` carries one of `CodexMonitor`'s
 //! `ConversationItem` variants. We only handle:
 //!
-//! - `thread/started` → noop (turn_id lives on the caller)
-//! - notifications with `params.item.kind == "message"`
-//!   + `role == "assistant"` → `AgentEvent::MessageDelta`
+//! - `thread/started` → noop (`turn_id` lives on the caller)
+//! - notifications with `params.item.kind == "message"` +
+//!   `role == "assistant"` → `AgentEvent::MessageDelta`
 //!   (final text) on `item/done`, or accumulated text on
 //!   `item/updated`.
 //! - notifications with `method == "turn/completed"` →
@@ -87,9 +87,9 @@ pub fn translate(ev: &AppServerEvent, session_id: &str) -> Option<AgentEvent> {
                 .and_then(|e| {
                     e.get("message")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
+                        .map(std::string::ToString::to_string)
                 })
-                .or_else(|| err.map(|e| e.to_string()))
+                .or_else(|| err.map(std::string::ToString::to_string))
                 .unwrap_or_default();
             Some(AgentEvent::TurnErrored {
                 session_id: session_id.to_string(),
@@ -134,7 +134,7 @@ fn extract_text(item: &Value) -> Option<String> {
             .get("type")
             .or_else(|| block.get("kind"))
             .and_then(|v| v.as_str());
-        if matches!(kind, Some("text") | Some("output_text") | None) {
+        if matches!(kind, Some("text" | "output_text") | None) {
             if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
                 out.push_str(text);
             }

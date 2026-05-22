@@ -48,6 +48,7 @@ pub struct SyncHandle {
 impl SyncHandle {
     /// Get a fresh subscriber stream. Multiple subscribers
     /// share the same broadcast — slow ones see `Lagged`.
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<SyncEvent> {
         self.events.subscribe()
     }
@@ -106,6 +107,7 @@ impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
     /// persisted through it so the engine survives restart and
     /// the UI can render the last-known state without waiting
     /// for the next backend fetch.
+    #[must_use]
     pub fn with_store(mut self, store: Arc<Mutex<Store>>) -> Self {
         self.store = Some(store);
         self
@@ -119,6 +121,7 @@ impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
     }
 
     /// Spawn the sync loop and return a handle.
+    #[must_use]
     pub fn start(self) -> SyncHandle {
         let (tx, _rx) = broadcast::channel(self.options.channel_capacity);
         let events = tx.clone();

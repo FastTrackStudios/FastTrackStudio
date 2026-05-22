@@ -3,9 +3,9 @@
 //! `{name}`-style placeholders the caller fills in via
 //! [`render`].
 //!
-//! Templates are kept verbatim with their llm_wiki origin
+//! Templates are kept verbatim with their `llm_wiki` origin
 //! cited so future drift between the two projects is
-//! reviewable. Where llm_wiki uses a "language directive"
+//! reviewable. Where `llm_wiki` uses a "language directive"
 //! injection, Task replaces it with the curator's configured
 //! locale (default `en`).
 //!
@@ -32,7 +32,8 @@ use std::collections::HashMap;
 /// literal `{key}` in the output (intentional — missing
 /// context is visible in the prompt rather than silently
 /// dropped).
-pub fn render(template: &str, vars: &HashMap<&str, &str>) -> String {
+#[must_use]
+pub fn render<S: std::hash::BuildHasher>(template: &str, vars: &HashMap<&str, &str, S>) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(start) = rest.find('{') {
@@ -70,6 +71,7 @@ pub const VISION_CAPTION_CONTEXTUAL: &str = include_str!("templates/vision_capti
 pub const LANGUAGE_DIRECTIVE: &str = include_str!("templates/language_directive.txt");
 
 /// Helper: build the language directive block.
+#[must_use]
 pub fn language_directive(lang: &str) -> String {
     let mut vars = HashMap::new();
     vars.insert("language", lang);

@@ -41,6 +41,7 @@ pub fn new_widget_tile(html: impl Into<String>, length: usize, flags: TileFlagSe
 /// next to uneditable inline content.
 ///
 /// Mirrors `WidgetBufferTile` (`tile.ts:488-505`).
+#[must_use]
 pub fn new_widget_buffer_tile(flags: TileFlagSet) -> Tile {
     Tile {
         parent: None,
@@ -57,6 +58,7 @@ pub fn new_widget_buffer_tile(flags: TileFlagSet) -> Tile {
 /// `true` when this is a *point* widget (sits between
 /// characters, doesn't replace doc bytes). Mirrors CM6's
 /// `flags & PointWidget` test (`tile.ts:440`).
+#[must_use]
 pub fn is_point_widget(tile: &Tile) -> bool {
     tile.flags.intersects(TileFlag::POINT_WIDGET)
 }
@@ -64,6 +66,7 @@ pub fn is_point_widget(tile: &Tile) -> bool {
 /// `true` when the widget extends/covers the position on the
 /// given side — controls boundary collapse for selection
 /// movement. Mirrors `WidgetTile.covers` (`tile.ts:439-442`).
+#[must_use]
 pub fn widget_covers(tile: &Tile, side_negative: bool) -> bool {
     if is_point_widget(tile) {
         return false;

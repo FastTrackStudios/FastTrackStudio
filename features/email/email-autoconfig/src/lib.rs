@@ -82,6 +82,7 @@ pub struct AutoconfigResult {
 }
 
 impl AutoconfigResult {
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.incoming.is_empty() && self.outgoing.is_empty()
     }

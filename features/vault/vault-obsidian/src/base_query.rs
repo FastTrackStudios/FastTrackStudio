@@ -40,6 +40,7 @@ pub fn vault_to_rows(vault: &Vault) -> Vec<BaseRow> {
 /// `.base` file at that path exists in the snapshot; otherwise
 /// returns the parsed AST or, if parsing failed, the parse-error
 /// string captured at load time.
+#[must_use]
 pub fn find_base<'a>(vault: &'a Vault, rel_path: &str) -> Option<Result<&'a ParsedBase, &'a str>> {
     vault
         .bases
@@ -183,9 +184,9 @@ mod tests {
         let (label, rows) = &ev.groups[0];
         assert_eq!(label, "");
         let names: std::collections::HashSet<_> = rows.iter().map(|r| r.basename.clone()).collect();
-        assert!(names.contains("Alpha"), "got {:?}", names);
-        assert!(names.contains("Beta"), "got {:?}", names);
-        assert!(!names.contains("Gamma"), "got {:?}", names);
+        assert!(names.contains("Alpha"), "got {names:?}");
+        assert!(names.contains("Beta"), "got {names:?}");
+        assert!(!names.contains("Gamma"), "got {names:?}");
         assert_eq!(rows.len(), 2);
     }
 
@@ -231,7 +232,7 @@ mod tests {
     /// Smoke test against a real Observatory-style vault. Gated on
     /// `TASK_OBS_VAULT` env var — set it to a vault root to enable.
     #[test]
-    #[ignore]
+    #[ignore = "requires TASK_OBS_VAULT env var pointing at an Observatory vault"]
     fn smoke_observatory_charts_base() {
         let Ok(root) = std::env::var("TASK_OBS_VAULT") else {
             eprintln!("TASK_OBS_VAULT not set; skipping");

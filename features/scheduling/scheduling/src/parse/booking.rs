@@ -17,8 +17,7 @@ pub fn parse_booking(path: &str, frontmatter_yaml: &str) -> Result<Booking, Pars
     let note = take_str(&map, "note");
     let status = take_str(&map, "status")
         .as_deref()
-        .map(parse_status)
-        .unwrap_or(BookingStatus::Confirmed);
+        .map_or(BookingStatus::Confirmed, parse_status);
     let created_utc = take_str(&map, "created_utc").unwrap_or_default();
 
     Ok(Booking {
@@ -52,7 +51,7 @@ mod tests {
 
     #[test]
     fn parses_a_booking() {
-        let yaml = r#"
+        let yaml = r"
 type: scheduling-booking
 id: 11111111-aaaa-bbbb-cccc-222222222222
 event_type_id: consult-30
@@ -63,7 +62,7 @@ attendee_email: alice@example.com
 status: confirmed
 created_utc: 2026-05-22T10:00:00Z
 note: First call
-"#;
+";
         let b = parse_booking("bookings/xyz.md", yaml).unwrap();
         assert_eq!(b.attendee_name, "Alice");
         assert!(matches!(b.status, BookingStatus::Confirmed));

@@ -107,7 +107,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// reject writes that would corrupt sources.
 pub(crate) fn is_raw_path(rel: &str) -> bool {
     let prefix = format!("{}/", paths::SOURCES_DIR);
-    let prefix_dot = format!("./{}", prefix);
+    let prefix_dot = format!("./{prefix}");
     let raw_prefix = "raw/";
     rel.starts_with(&prefix) || rel.starts_with(&prefix_dot) || rel.starts_with(raw_prefix)
 }

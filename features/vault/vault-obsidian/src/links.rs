@@ -25,12 +25,12 @@ use crate::vault::Vault;
 /// the index, so all returned `&str`s point straight at vault data.
 pub struct LinkIndex<'a> {
     vault: &'a Vault,
-    /// rel_path -> indices into `vault.pages` of pages linking here.
+    /// `rel_path` -> indices into `vault.pages` of pages linking here.
     incoming: HashMap<&'a str, BTreeSet<usize>>,
-    /// rel_path -> outgoing edges, in source order, de-duped on
+    /// `rel_path` -> outgoing edges, in source order, de-duped on
     /// `(resolved_or_raw, alias)`.
     outgoing: HashMap<&'a str, Vec<OutgoingLink<'a>>>,
-    /// rel_paths of pages that have at least one outgoing edge
+    /// `rel_paths` of pages that have at least one outgoing edge
     /// somewhere — body refs OR frontmatter wikilinks OR any other
     /// edge-producing source we add later. Used by `deadends()` so
     /// the calculation isn't body-refs-only. Stored separately from
@@ -57,6 +57,7 @@ pub struct UnresolvedLink<'a> {
 
 impl<'a> LinkIndex<'a> {
     /// Build the index in one pass over all pages.
+    #[must_use]
     pub fn build(vault: &'a Vault) -> Self {
         // Lookup structures.
         let by_path: HashMap<&str, usize> = vault
@@ -227,7 +228,8 @@ impl<'a> LinkIndex<'a> {
         }
     }
 
-    /// Pages that link TO `rel_path`. Sorted by rel_path.
+    /// Pages that link TO `rel_path`. Sorted by `rel_path`.
+    #[must_use]
     pub fn backlinks(&self, rel_path: &str) -> Vec<&'a str> {
         let Some(set) = self.incoming.get(rel_path) else {
             return Vec::new();
@@ -245,11 +247,13 @@ impl<'a> LinkIndex<'a> {
     }
 
     /// Outgoing wikilinks from `rel_path`, de-duped in source order.
+    #[must_use]
     pub fn outgoing(&self, rel_path: &str) -> Vec<OutgoingLink<'a>> {
         self.outgoing.get(rel_path).cloned().unwrap_or_default()
     }
 
     /// Pages with zero incoming links. Sorted.
+    #[must_use]
     pub fn orphans(&self) -> Vec<&'a str> {
         let mut out: Vec<&str> = self
             .vault
@@ -267,6 +271,7 @@ impl<'a> LinkIndex<'a> {
     }
 
     /// Wikilink targets that don't resolve to any page in the vault.
+    #[must_use]
     pub fn unresolved(&self) -> Vec<UnresolvedLink<'a>> {
         self.unresolved.clone()
     }
@@ -274,6 +279,7 @@ impl<'a> LinkIndex<'a> {
     /// Pages with zero outgoing links. Counts body wikilinks,
     /// markdown links, and frontmatter wikilinks — anything that
     /// produces a graph edge.
+    #[must_use]
     pub fn deadends(&self) -> Vec<&'a str> {
         let mut out: Vec<&str> = self
             .vault
@@ -329,6 +335,7 @@ fn resolve(
     }
 
     // 1. Exact rel_path with .md.
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     if trimmed.ends_with(".md") {
         if let Some(&i) = by_path.get(trimmed) {
             return Some(i);
@@ -406,6 +413,7 @@ fn resolve_all(
     }
 
     // Exact path-y matches first (always unique).
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
     if trimmed.ends_with(".md") {
         if let Some(&i) = by_path.get(trimmed) {
             return vec![i];
@@ -462,7 +470,7 @@ fn normalize_relative(linkpath: &str, source_folder: &str) -> Option<String> {
 }
 
 /// Resolve a wikilink against vault attachments. Mirrors page
-/// resolution, but keyed on attachment rel_paths and filename-with-
+/// resolution, but keyed on attachment `rel_paths` and filename-with-
 /// extension basenames (e.g. `image.png`, `slides.pdf`).
 fn resolve_attachment<'a>(
     linkpath: &str,
@@ -803,14 +811,18 @@ mod tests {
         let orph = idx.orphans();
         assert!(orph.contains(&"OnlyPage.md"));
         assert!(
-            !orph.iter().any(|r| r.ends_with(".png")),
+            !orph.iter().any(|r| std::path::Path::new(r)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("png"))),
             "attachments leaked into orphans: {orph:?}"
         );
 
         let dead = idx.deadends();
         assert!(dead.contains(&"OnlyPage.md"));
         assert!(
-            !dead.iter().any(|r| r.ends_with(".png")),
+            !dead.iter().any(|r| std::path::Path::new(r)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("png"))),
             "attachments leaked into deadends: {dead:?}"
         );
     }

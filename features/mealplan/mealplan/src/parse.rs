@@ -18,6 +18,7 @@ pub enum ParseError {
     MissingField(&'static str),
 }
 
+#[must_use]
 pub fn looks_like_meal(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -49,7 +50,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Meal, ParseError> {
     let slot = take_str(&map, "slot").unwrap_or_else(|| "dinner".into());
     let servings = map
         .get("servings")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok())
         .unwrap_or(1);
     let recipe_ids = map
@@ -74,7 +75,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Meal, ParseError> {
                         .get("itemId")
                         .and_then(|v| v.as_str())
                         .and_then(|s| Uuid::parse_str(s).ok())?;
-                    let qty = m.get("qty").and_then(|v| v.as_f64())?;
+                    let qty = m.get("qty").and_then(serde_yaml::Value::as_f64)?;
                     let unit = m
                         .get("unit")
                         .and_then(|v| v.as_str())
@@ -131,7 +132,7 @@ fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
     match v {
         serde_yaml::Value::Sequence(seq) => seq
             .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
             .collect(),
         serde_yaml::Value::String(s) => vec![s.clone()],
         _ => Vec::new(),

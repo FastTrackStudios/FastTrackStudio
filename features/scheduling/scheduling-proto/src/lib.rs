@@ -22,7 +22,7 @@
 //! fn save_template       <S: DayTemplates>                 (s: &S, /* … */) { /* … */ }
 //! ```
 //!
-//! Backends mix + match — a CalDAV peer might impl just
+//! Backends mix + match — a `CalDAV` peer might impl just
 //! `EventTypes + Slots`; the local `VaultScheduler` impls all
 //! five.
 //!

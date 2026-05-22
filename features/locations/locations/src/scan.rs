@@ -7,6 +7,7 @@ use vault::Vault;
 use crate::model::Location;
 use crate::parse::{looks_like_location, parse_page};
 
+#[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<Location> {
     vault
         .pages

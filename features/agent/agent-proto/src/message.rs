@@ -1,12 +1,12 @@
 //! Message — one turn in a session. Models the
 //! multimodal-friendly `role + content blocks` shape used by
-//! Anthropic / OpenAI / Hermes.
+//! Anthropic / `OpenAI` / Hermes.
 //!
 //! For tool-calling, content blocks carry `ToolUse` /
 //! `ToolResult` variants inline (matches Hermes's
 //! `Message.content` list-form) rather than a parallel
 //! tool-calls array. External-monitor backends translate
-//! their own representations (e.g. CodexMonitor's
+//! their own representations (e.g. `CodexMonitor`'s
 //! `ConversationItem` union) into this shape.
 
 use chrono::{DateTime, Utc};

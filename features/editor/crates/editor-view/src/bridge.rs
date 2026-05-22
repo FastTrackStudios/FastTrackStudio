@@ -97,7 +97,7 @@ pub(crate) fn handle_bridge_msg(
                     inserted: vis_vec[0].inserted.clone(),
                 });
             } else {
-                for c in vis_vec.iter() {
+                for c in &vis_vec {
                     let doc_from = old_visible.visible_to_doc(c.from);
                     let doc_to = old_visible.visible_to_doc(c.to);
                     doc_changes.push(Change {
@@ -108,21 +108,23 @@ pub(crate) fn handle_bridge_msg(
                 }
             }
             let changes = Changes::from_sorted(doc_changes);
-            let new_doc_len =
-                cur.doc.len() as isize + changes.iter().map(|c| c.delta()).sum::<isize>();
+            let new_doc_len = cur.doc.len() as isize
+                + changes
+                    .iter()
+                    .map(editor_state::Change::delta)
+                    .sum::<isize>();
             let new_doc_len = new_doc_len.max(0) as usize;
             let intended_caret = changes
                 .iter()
                 .last()
-                .map(|c| {
+                .map_or(s_off, |c| {
                     let prior_delta: isize = changes
                         .iter()
                         .take_while(|x| x.from < c.from)
-                        .map(|x| x.delta())
+                        .map(editor_state::Change::delta)
                         .sum();
                     (c.from as isize + prior_delta + c.inserted.len() as isize).max(0) as usize
                 })
-                .unwrap_or(s_off)
                 .min(new_doc_len);
             tracing::debug!(
                 old_visible_len = old_visible.text.len(),
@@ -281,8 +283,11 @@ pub(crate) fn handle_bridge_msg(
             }
         }
         "copy-range" => {
-            let from = v.get("from").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
-            let to = v.get("to").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let from = v
+                .get("from")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
+            let to = v.get("to").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
             let cur = state.read();
             let doc = cur.doc.to_string();
             let from = from.min(doc.len());
@@ -290,18 +295,21 @@ pub(crate) fn handle_bridge_msg(
             let slice = doc[from..to].to_string();
             let escaped = slice.replace('\\', "\\\\").replace('`', "\\`");
             let script =
-                format!(r#"navigator.clipboard && navigator.clipboard.writeText(`{escaped}`);"#);
+                format!(r"navigator.clipboard && navigator.clipboard.writeText(`{escaped}`);");
             let _ = document::eval(&script);
         }
         "task-toggle" => {
-            let pos = v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let pos = v
+                .get("pos")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
             let cur = state.read().clone();
             let doc = cur.doc.to_string();
             let bracket_idx = pos + 3;
             let next_char = doc.as_bytes().get(bracket_idx).copied();
             let new_char = match next_char {
                 Some(b' ') => "x",
-                Some(b'x') | Some(b'X') => " ",
+                Some(b'x' | b'X') => " ",
                 _ => return,
             };
             let changes = Changes::replace(bracket_idx..bracket_idx + 1, new_char);
@@ -316,7 +324,10 @@ pub(crate) fn handle_bridge_msg(
             );
         }
         "widget-focus" => {
-            let focused = v.get("focused").and_then(|b| b.as_bool()).unwrap_or(false);
+            let focused = v
+                .get("focused")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             widget_focus.set(focused);
         }
         "prop-leave" => {
@@ -327,7 +338,7 @@ pub(crate) fn handle_bridge_msg(
                 vs.set(next);
             }
             let script =
-                r#"(()=>{const el=document.querySelector('.editor-root');if(el)el.focus();})();"#;
+                r"(()=>{const el=document.querySelector('.editor-root');if(el)el.focus();})();";
             let _ = document::eval(script);
         }
         "prop-set" => {
@@ -337,8 +348,7 @@ pub(crate) fn handle_bridge_msg(
                     "text" => PropValue::Text(value.to_string()),
                     "number" => value
                         .parse::<f64>()
-                        .map(PropValue::Number)
-                        .unwrap_or_else(|_| PropValue::Text(value.to_string())),
+                        .map_or_else(|_| PropValue::Text(value.to_string()), PropValue::Number),
                     "date" => PropValue::Date(value.to_string()),
                     "bool" => PropValue::Bool(value == "true"),
                     _ => {
@@ -442,7 +452,10 @@ pub(crate) fn handle_bridge_msg(
             });
         }
         "focus-pos" => {
-            let pos = v.get("pos").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+            let pos = v
+                .get("pos")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
             let cur = state.read().clone();
             let pos = pos.min(cur.doc.len());
             state.set(
@@ -514,10 +527,11 @@ fn values_equal(
     a: &editor_state::markdown::PropValue,
     b: &editor_state::markdown::PropValue,
 ) -> bool {
-    use editor_state::markdown::PropValue::*;
+    use editor_state::markdown::PropValue::{Bool, Date, Empty, List, Number, Text};
     match (a, b) {
         (Text(x), Text(y)) | (Date(x), Date(y)) => x == y,
         (Bool(x), Bool(y)) => x == y,
+        #[allow(clippy::float_cmp)]
         (Number(x), Number(y)) => x == y,
         (List(x), List(y)) => x == y,
         (Empty, Empty) => true,

@@ -18,6 +18,7 @@ pub struct SelfWriteGuard {
 }
 
 impl SelfWriteGuard {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -34,7 +35,7 @@ impl SelfWriteGuard {
     pub fn is_recent(&self, path: &Path) -> bool {
         if let Ok(mut g) = self.recent.lock() {
             prune(&mut g);
-            return g.get(path).map(|t| t.elapsed() < WINDOW).unwrap_or(false);
+            return g.get(path).is_some_and(|t| t.elapsed() < WINDOW);
         }
         false
     }

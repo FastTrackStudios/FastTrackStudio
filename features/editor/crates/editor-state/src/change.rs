@@ -36,6 +36,7 @@ impl Change {
     }
 
     /// Pure deletion of a byte range.
+    #[must_use]
     pub fn delete(range: std::ops::Range<usize>) -> Self {
         Self {
             from: range.start,
@@ -55,6 +56,7 @@ impl Change {
 
     /// Net length change: positive = doc grows, negative = doc
     /// shrinks.
+    #[must_use]
     pub fn delta(&self) -> isize {
         self.inserted.len() as isize - (self.to as isize - self.from as isize)
     }
@@ -70,11 +72,13 @@ pub struct Changes {
 
 impl Changes {
     /// Empty change set — applying it is a no-op.
+    #[must_use]
     pub fn empty() -> Self {
         Self { inner: Vec::new() }
     }
 
     /// Convenience: a single change.
+    #[must_use]
     pub fn single(c: Change) -> Self {
         Self { inner: vec![c] }
     }
@@ -82,6 +86,7 @@ impl Changes {
     /// Build from a pre-sorted, non-overlapping list of changes.
     /// Panics in debug if the invariant is violated — caller's
     /// responsibility to maintain.
+    #[must_use]
     pub fn from_sorted(changes: Vec<Change>) -> Self {
         #[cfg(debug_assertions)]
         {
@@ -103,6 +108,7 @@ impl Changes {
     }
 
     /// `true` when there's nothing to apply.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -113,6 +119,7 @@ impl Changes {
     }
 
     /// Convenience constructor: pure deletion.
+    #[must_use]
     pub fn delete(range: std::ops::Range<usize>) -> Self {
         Self::single(Change::delete(range))
     }
@@ -123,6 +130,7 @@ impl Changes {
     }
 
     /// Apply to a document and return the resulting doc.
+    #[must_use]
     pub fn apply(&self, doc: &Doc) -> Doc {
         // Walk changes in reverse so earlier offsets aren't
         // invalidated by later edits.
@@ -151,6 +159,7 @@ impl Changes {
     /// CM6 calls this `bias` / `assoc`. The behavior matters for
     /// cursors at edit boundaries — a typing cursor sits *after*
     /// its insert, a fixed anchor stays *before*.
+    #[must_use]
     pub fn map_position(&self, mut pos: usize, assoc: Assoc) -> usize {
         for change in &self.inner {
             let is_insert = change.from == change.to;

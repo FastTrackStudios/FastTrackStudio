@@ -16,9 +16,9 @@
 //!   own boards; global firehose is `subscribe_raw` on the
 //!   backend handle instead).
 //!
-//! Codex *does not* implement: ToolCalls, Reasoning,
+//! Codex *does not* implement: `ToolCalls`, Reasoning,
 //! Attachments, Approvals, Questions, Kanban, Profiles,
-//! Projects, Backends, ExternalImport. Other backends
+//! Projects, Backends, `ExternalImport`. Other backends
 //! (Hermes for kanban / approvals / profiles, the future
 //! `agent-task` for projects) cover those.
 
@@ -382,7 +382,7 @@ impl Subscriptions for CodexBackend {
         let rx = {
             let sessions = self.inner.sessions.lock().await;
             let Some(row) = sessions.get(&session_id) else {
-                let _ = tx.close(Default::default()).await;
+                let _ = tx.close(vox::Metadata::default()).await;
                 return;
             };
             row.events_tx.subscribe()
@@ -406,7 +406,7 @@ impl Subscriptions for CodexBackend {
     }
 
     async fn subscribe_board(&self, _board_id: String, tx: Tx<AgentEvent>) {
-        let _ = tx.close(Default::default()).await;
+        let _ = tx.close(vox::Metadata::default()).await;
     }
 
     async fn subscribe_global(&self, _tx: Tx<AgentEvent>) {

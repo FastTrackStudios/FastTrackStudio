@@ -18,6 +18,8 @@ use serde_json::{Value, json};
 use tokio_stream::wrappers::BroadcastStream;
 use uuid::Uuid;
 
+use crate::vendor::types::WorkspaceSettings;
+
 use agent_proto::event::AgentEvent;
 
 use crate::CodexBackend;
@@ -43,7 +45,7 @@ pub struct ChatOpts {
     /// (`"none" | "minimal" | "low" | "medium" | "high"`).
     pub effort: Option<String>,
     /// `"read-only" | "current" | "full-access"`. Default
-    /// is `"current"` (matches CodexMonitor).
+    /// is `"current"` (matches `CodexMonitor`).
     pub access_mode: Option<String>,
 }
 
@@ -95,7 +97,7 @@ impl CodexBackend {
             kind: WorkspaceKind::Main,
             parent_id: None,
             worktree: None,
-            settings: Default::default(),
+            settings: WorkspaceSettings::default(),
         };
 
         let session = spawn_workspace_session(

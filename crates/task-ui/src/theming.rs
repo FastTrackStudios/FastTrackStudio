@@ -51,11 +51,13 @@ pub struct ProjectThemeOverrides {
 
 /// Read the per-project override context. Call from inside the project
 /// route or any of its descendants.
+#[must_use]
 pub fn use_project_theme_overrides() -> ProjectThemeOverrides {
     use_context::<ProjectThemeOverrides>()
 }
 
 /// Read the per-org override context.
+#[must_use]
 pub fn use_org_theme_overrides() -> OrgThemeOverrides {
     use_context::<OrgThemeOverrides>()
 }

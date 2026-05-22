@@ -28,7 +28,7 @@
 //!   broadcast channel (currently we only generate events from
 //!   poll diffs).
 //! - Write fetched messages into `email-store`'s Maildir +
-//!   SQLite index.
+//!   `SQLite` index.
 //! - Outbound queue for drafts + pending flag changes when the
 //!   backend is offline.
 

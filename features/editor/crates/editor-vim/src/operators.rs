@@ -20,6 +20,7 @@ pub enum Operator {
 }
 
 impl Operator {
+    #[must_use]
     pub fn from_char(ch: char) -> Option<Self> {
         Some(match ch {
             'd' => Self::Delete,

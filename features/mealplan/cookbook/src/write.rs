@@ -72,6 +72,7 @@ pub fn write_recipe(
 /// Default layout: `Wiki/Cookbook/<slug>.md`. Override
 /// `folder` only when you want a different sub-folder under
 /// the wiki (e.g. `"Wiki/Cookbook/Drafts"`).
+#[must_use]
 pub fn default_recipe_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {

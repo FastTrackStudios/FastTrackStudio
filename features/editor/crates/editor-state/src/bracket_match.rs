@@ -15,6 +15,7 @@ const PAIRS: &[(u8, u8)] = &[(b'(', b')'), (b'[', b']'), (b'{', b'}')];
 /// Walks at most [`SCAN_LIMIT`] bytes from the caret looking for
 /// the matching bracket. Stops if the doc is malformed or the
 /// match falls outside the scan window.
+#[must_use]
 pub fn bracket_match(state: &EditorState) -> Vec<DecoratedRange> {
     let primary = state.selection.primary();
     if primary.anchor != primary.head {

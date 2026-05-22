@@ -1,11 +1,11 @@
 //! `TaskInfo` data model.
 //!
 //! Mirrors `callumalpass/tasknotes`'s `TaskInfo` interface
-//! (`src/types.ts:453`) so existing TaskNotes vaults round-trip.
+//! (`src/types.ts:453`) so existing `TaskNotes` vaults round-trip.
 //! Field names are the same — `due` not `dueDate`, `scheduled`
 //! not `start`, `timeEntries` not `time_entries`. Configurable
-//! field-mapping (à la TaskNotes' `FieldMapper`) is a future
-//! addition; v1 fixes the names to TaskNotes defaults.
+//! field-mapping (à la `TaskNotes`' `FieldMapper`) is a future
+//! addition; v1 fixes the names to `TaskNotes` defaults.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use facet::Facet;
@@ -149,6 +149,7 @@ pub enum Status {
 }
 
 impl Status {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -161,6 +162,8 @@ impl Status {
 
     /// Parse the canonical status set. Returns `None` for
     /// unknown statuses — callers keep the raw string.
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "open" | "todo" | "none" => Some(Self::Open),
@@ -172,6 +175,7 @@ impl Status {
         }
     }
 
+    #[must_use]
     pub fn is_done(self) -> bool {
         matches!(self, Self::Done)
     }
@@ -187,6 +191,7 @@ pub enum Priority {
 }
 
 impl Priority {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -197,6 +202,8 @@ impl Priority {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "none" | "" => Some(Self::None),

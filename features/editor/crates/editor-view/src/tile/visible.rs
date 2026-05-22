@@ -54,6 +54,7 @@ pub struct MapEntry {
 impl VisibleText {
     /// Walk the arena starting at `root` and accumulate text +
     /// offset map.
+    #[must_use]
     pub fn from_arena(arena: &Arena, root: TileId) -> Self {
         let mut out = Self {
             text: String::new(),
@@ -75,7 +76,9 @@ impl VisibleText {
     ///   leading `**`, inside bold).
     /// - `visible_to_doc(4)` → 6 (just past "d" — before
     ///   trailing `**`, still inside bold).
+    ///
     /// User typing at either edge extends the bold span.
+    #[must_use]
     pub fn visible_to_doc(&self, visible_pos: usize) -> usize {
         if self.map.is_empty() {
             return visible_pos;

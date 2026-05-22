@@ -29,6 +29,7 @@ const MAX_INSTANCES: u16 = 1024;
 /// `vec![event]` when they overlap and `vec![]` otherwise. Bad
 /// RRULE strings degrade to a single-instance render (the master)
 /// so a typo doesn't make the event disappear.
+#[must_use]
 pub fn expand_in_range(
     event: &CalendarEvent,
     range_start: DateTime<Utc>,
@@ -90,6 +91,7 @@ pub fn expand_in_range(
 
 /// Apply [`expand_in_range`] to each event in `events` and
 /// flatten the results.
+#[must_use]
 pub fn expand_all(
     events: &[CalendarEvent],
     range_start: DateTime<Utc>,

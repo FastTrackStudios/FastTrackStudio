@@ -23,6 +23,7 @@ pub enum ParseError {
     Yaml(String),
 }
 
+#[must_use]
 pub fn looks_like_pantry_item(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -64,34 +65,39 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
     let food_category = take_str(&map, "foodCategory").unwrap_or_default();
-    let qty = map.get("qty").and_then(|v| v.as_f64());
+    let qty = map.get("qty").and_then(serde_yaml::Value::as_f64);
     let unit = take_str(&map, "unit").unwrap_or_default();
     let purchase_unit = take_str(&map, "purchaseUnit");
-    let purchase_to_stock_factor = map.get("purchaseToStockFactor").and_then(|v| v.as_f64());
+    let purchase_to_stock_factor = map
+        .get("purchaseToStockFactor")
+        .and_then(serde_yaml::Value::as_f64);
     let expiry = take_str(&map, "expiry").and_then(|s| s.parse().ok());
-    let opened = map.get("opened").and_then(|v| v.as_bool()).unwrap_or(false);
+    let opened = map
+        .get("opened")
+        .and_then(serde_yaml::Value::as_bool)
+        .unwrap_or(false);
     let opened_date = take_str(&map, "openedDate").and_then(|s| s.parse().ok());
     let brand = take_str(&map, "brand");
     let nutrition_per_unit = map
         .get("nutritionPerUnit")
         .and_then(|v| serde_yaml::from_value::<Nutrition>(v.clone()).ok());
     let nutrition_unit = take_str(&map, "nutritionUnit");
-    let minimum = map.get("minimum").and_then(|v| v.as_f64());
+    let minimum = map.get("minimum").and_then(serde_yaml::Value::as_f64);
     let default_best_before_days = map
         .get("defaultBestBeforeDays")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let default_best_before_days_after_open = map
         .get("defaultBestBeforeDaysAfterOpen")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let default_best_before_days_after_freezing = map
         .get("defaultBestBeforeDaysAfterFreezing")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let default_best_before_days_after_thawing = map
         .get("defaultBestBeforeDaysAfterThawing")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
     let due_type = take_str(&map, "dueType").unwrap_or_else(|| "best-before".into());
     let substitutes = map
@@ -105,7 +111,10 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
                         .get("itemId")
                         .and_then(|v| v.as_str())
                         .and_then(|s| Uuid::parse_str(s).ok())?;
-                    let ratio = m.get("ratio").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                    let ratio = m
+                        .get("ratio")
+                        .and_then(serde_yaml::Value::as_f64)
+                        .unwrap_or(1.0);
                     let reasons = m
                         .get("reasons")
                         .and_then(|v| v.as_sequence())
@@ -119,7 +128,7 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
                     let note = m
                         .get("note")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     Some(Substitution {
                         item_id,
                         ratio,
@@ -144,7 +153,7 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
                         .and_then(|v| v.as_str())
                         .and_then(|s| Uuid::parse_str(s).ok())
                         .unwrap_or_else(Uuid::new_v4);
-                    let qty = m.get("qty").and_then(|v| v.as_f64())?;
+                    let qty = m.get("qty").and_then(serde_yaml::Value::as_f64)?;
                     let purchased_date = m
                         .get("purchasedDate")
                         .and_then(|v| v.as_str())
@@ -153,12 +162,15 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
                         .get("bestBefore")
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse().ok());
-                    let opened = m.get("opened").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let opened = m
+                        .get("opened")
+                        .and_then(serde_yaml::Value::as_bool)
+                        .unwrap_or(false);
                     let opened_date = m
                         .get("openedDate")
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse().ok());
-                    let price = m.get("price").and_then(|v| v.as_f64());
+                    let price = m.get("price").and_then(serde_yaml::Value::as_f64);
                     let location_id = m
                         .get("locationId")
                         .and_then(|v| v.as_str())
@@ -166,7 +178,7 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
                     let note = m
                         .get("note")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     Some(crate::model::StockEntry {
                         id: entry_id,
                         qty,
@@ -241,7 +253,7 @@ fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
     match v {
         serde_yaml::Value::Sequence(seq) => seq
             .iter()
-            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
             .collect(),
         serde_yaml::Value::String(s) => vec![s.clone()],
         _ => Vec::new(),

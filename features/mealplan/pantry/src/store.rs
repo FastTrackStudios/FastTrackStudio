@@ -17,6 +17,7 @@ pub struct Store {
 }
 
 impl Store {
+    #[must_use]
     pub fn new(vault: Vault) -> Self {
         Self {
             inner: Arc::new(Mutex::new(vault)),
@@ -27,6 +28,7 @@ impl Store {
         Self { inner }
     }
 
+    #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
     }
@@ -195,7 +197,7 @@ impl PantryService for Store {
             if let Some(days) = item.default_best_before_days {
                 entry.best_before = entry
                     .purchased_date
-                    .checked_add_days(chrono::Days::new(days as u64));
+                    .checked_add_days(chrono::Days::new(u64::from(days)));
             }
         }
         item.stock_entries.push(entry);
@@ -248,12 +250,10 @@ impl PantryService for Store {
             let ea = &item.stock_entries[a];
             let eb = &item.stock_entries[b];
             ea.best_before
-                .map(|d| (false, d))
-                .unwrap_or((true, chrono::NaiveDate::MAX))
+                .map_or((true, chrono::NaiveDate::MAX), |d| (false, d))
                 .cmp(
                     &eb.best_before
-                        .map(|d| (false, d))
-                        .unwrap_or((true, chrono::NaiveDate::MAX)),
+                        .map_or((true, chrono::NaiveDate::MAX), |d| (false, d)),
                 )
                 .then_with(|| eb.opened.cmp(&ea.opened))
                 .then_with(|| ea.purchased_date.cmp(&eb.purchased_date))
@@ -281,7 +281,7 @@ impl PantryService for Store {
                     if let Some(days) = after_open {
                         if let Some(new_bb) = entry
                             .opened_date
-                            .and_then(|d| d.checked_add_days(chrono::Days::new(days as u64)))
+                            .and_then(|d| d.checked_add_days(chrono::Days::new(u64::from(days))))
                         {
                             entry.best_before = Some(match entry.best_before {
                                 Some(existing) if existing < new_bb => existing,

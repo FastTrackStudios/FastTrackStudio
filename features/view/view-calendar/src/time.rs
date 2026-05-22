@@ -10,12 +10,14 @@ use chrono::{DateTime, Datelike, Days, Duration, NaiveDate, TimeZone, Utc, Weekd
 pub const WEEK_START: Weekday = Weekday::Mon;
 
 /// The Monday of the ISO week containing `date`.
+#[must_use]
 pub fn week_start(date: NaiveDate) -> NaiveDate {
     let dow = date.weekday().num_days_from_monday();
-    date - Days::new(dow as u64)
+    date - Days::new(u64::from(dow))
 }
 
 /// Seven consecutive dates starting at `week_start(date)`.
+#[must_use]
 pub fn week_days(date: NaiveDate) -> [NaiveDate; 7] {
     let start = week_start(date);
     let mut out = [start; 7];
@@ -30,6 +32,7 @@ pub fn week_days(date: NaiveDate) -> [NaiveDate; 7] {
 /// next month so each row has seven cells and the grid always has
 /// six rows (matching Google's layout — keeps the chart height
 /// stable when paging between months).
+#[must_use]
 pub fn month_grid(date: NaiveDate) -> [[NaiveDate; 7]; 6] {
     let first = NaiveDate::from_ymd_opt(date.year(), date.month(), 1).expect("valid month");
     let grid_start = week_start(first);
@@ -48,11 +51,13 @@ pub fn month_grid(date: NaiveDate) -> [[NaiveDate; 7]; 6] {
 /// Midnight UTC for `date`. Cheap convenience that keeps the
 /// timezone hand-wave (v1 == "treat user time as UTC") out of the
 /// caller's hair.
+#[must_use]
 pub fn day_start_utc(date: NaiveDate) -> DateTime<Utc> {
     Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).expect("valid midnight"))
 }
 
 /// Exclusive day end (midnight UTC of the next day).
+#[must_use]
 pub fn day_end_utc(date: NaiveDate) -> DateTime<Utc> {
     day_start_utc(date) + Duration::days(1)
 }
@@ -63,6 +68,7 @@ pub fn day_end_utc(date: NaiveDate) -> DateTime<Utc> {
 /// month-view concern, not a time-grid one.
 ///
 /// `day` is the date whose grid row the event lives in.
+#[must_use]
 pub fn position_in_day(day: NaiveDate, start: DateTime<Utc>, end: DateTime<Utc>) -> (f32, f32) {
     let day_start = day_start_utc(day);
     let day_end = day_end_utc(day);
@@ -78,6 +84,7 @@ pub fn position_in_day(day: NaiveDate, start: DateTime<Utc>, end: DateTime<Utc>)
 /// Hour labels for the time-grid axis (e.g. `"1 AM"`, `"12 PM"`).
 /// Returns 24 entries skipping the 0th (drawn as just the day
 /// header) — matches Google's display.
+#[must_use]
 pub fn hour_labels() -> Vec<(u32, String)> {
     (1..24)
         .map(|h| {
@@ -93,6 +100,7 @@ pub fn hour_labels() -> Vec<(u32, String)> {
 }
 
 /// Shift `start` and `end` by `delta` days, keeping duration.
+#[must_use]
 pub fn shift_days(
     start: DateTime<Utc>,
     end: DateTime<Utc>,

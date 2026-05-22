@@ -162,7 +162,8 @@ fn category_stem(c: BlockCategory) -> &'static str {
 fn totals(dt: &DayTemplate) -> Vec<(&'static str, String)> {
     let mut by_cat: Vec<(BlockCategory, i32)> = Vec::new();
     for b in &dt.blocks {
-        let mins = b.end.minutes_since_midnight as i32 - b.start.minutes_since_midnight as i32;
+        let mins =
+            i32::from(b.end.minutes_since_midnight) - i32::from(b.start.minutes_since_midnight);
         if let Some(entry) = by_cat
             .iter_mut()
             .find(|(c, _)| *c as u8 == b.category as u8)

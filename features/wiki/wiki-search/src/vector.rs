@@ -240,7 +240,7 @@ pub fn search_hybrid_with(
                 .column_by_name("_distance")
                 .and_then(|c| c.as_any().downcast_ref::<Float32Array>());
             for i in 0..batch.num_rows() {
-                let dist = distance_col.map(|c| c.value(i)).unwrap_or(0.0);
+                let dist = distance_col.map_or(0.0, |c| c.value(i));
                 // Convert distance → score (higher is
                 // better). Caller may further re-rank.
                 let score = 1.0 / (1.0 + dist);

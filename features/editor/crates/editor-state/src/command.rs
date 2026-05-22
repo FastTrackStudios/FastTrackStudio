@@ -25,7 +25,7 @@ pub struct KeyBinding {
     pub run: Command,
 }
 
-/// Manual PartialEq: we compare the key spec and treat the
+/// Manual `PartialEq`: we compare the key spec and treat the
 /// command function pointers as opaque (Rust warns that fn
 /// pointer equality is unstable across codegen units; for
 /// keymap-equality purposes "same key, same fn at this address"
@@ -55,16 +55,19 @@ pub struct Keymap {
 
 impl Keymap {
     /// Empty keymap. Add bindings via [`Self::with`].
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Build with a list of bindings.
+    #[must_use]
     pub fn from_bindings(bindings: Vec<KeyBinding>) -> Self {
         Self { bindings }
     }
 
     /// Append a binding. Chains for fluent construction.
+    #[must_use]
     pub fn with(mut self, key: impl Into<KeySpec>, run: Command) -> Self {
         self.bindings.push(KeyBinding {
             key: key.into(),
@@ -74,12 +77,14 @@ impl Keymap {
     }
 
     /// All bindings in order.
+    #[must_use]
     pub fn bindings(&self) -> &[KeyBinding] {
         &self.bindings
     }
 
     /// Find the first binding whose key matches and whose
     /// command returns `Some(spec)`. Returns the resulting spec.
+    #[must_use]
     pub fn dispatch(&self, key: &KeySpec, state: &EditorState) -> Option<TransactionSpec> {
         for b in &self.bindings {
             if b.key.matches(key) {
@@ -126,6 +131,7 @@ impl KeySpec {
     ///
     /// This mirrors CM6's behavior where `"Mod-z"` resolves to
     /// the platform-appropriate modifier at parse / dispatch time.
+    #[must_use]
     pub fn matches(&self, other: &KeySpec) -> bool {
         let key_eq = if self.key.len() == 1 && other.key.len() == 1 {
             self.key.eq_ignore_ascii_case(&other.key)

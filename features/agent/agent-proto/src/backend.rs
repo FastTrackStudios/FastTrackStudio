@@ -35,7 +35,7 @@ pub struct AgentBackend {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
 #[repr(C)]
 pub enum BackendKind {
-    /// Embeds an agent runtime — Hermes Rust SDK, OpenAI
+    /// Embeds an agent runtime — Hermes Rust SDK, `OpenAI`
     /// SDK, custom Rust agent. Owns the conversation lock,
     /// streams events directly.
     InProcess,

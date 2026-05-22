@@ -104,11 +104,11 @@ pub fn Calendar(props: CalendarProps) -> Element {
             Toolbar {
                 anchor: *anchor.read(),
                 view: *view.read(),
-                on_prev: move |_| anchor.with_mut(|d| *d = step(*d, *view.read(), -1)),
-                on_next: move |_| anchor.with_mut(|d| *d = step(*d, *view.read(), 1)),
-                on_today: move |_| anchor.set(today),
+                on_prev: move |()| anchor.with_mut(|d| *d = step(*d, *view.read(), -1)),
+                on_next: move |()| anchor.with_mut(|d| *d = step(*d, *view.read(), 1)),
+                on_today: move |()| anchor.set(today),
                 on_view_change: move |v: ViewMode| view.set(v),
-                on_create: move |_| {
+                on_create: move |()| {
                     let start = chrono::Utc::now().date_naive().and_hms_opt(9, 0, 0)
                         .expect("9 am") ;
                     let start = chrono::Utc.from_utc_datetime(&start);
@@ -159,7 +159,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                 EventEditor {
                     event: ev,
                     open: true,
-                    on_close: move |_| editing.set(None),
+                    on_close: move |()| editing.set(None),
                     on_event,
                 }
             }

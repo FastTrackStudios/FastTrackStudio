@@ -14,8 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("bytes:           {:.1} MiB", bytes as f64 / 1024.0 / 1024.0);
     println!("block ids:       {}", idx.len());
     println!("property hints:  {}", vault.property_types.map.len());
-    println!("open:            {:>7.2?}", t_open);
-    println!("index:           {:>7.2?}", t_index);
+    println!("open:            {t_open:>7.2?}");
+    println!("index:           {t_index:>7.2?}");
     // List unique folders, top 10 by page count.
     let mut by_folder = std::collections::HashMap::<String, usize>::new();
     for p in &vault.pages {

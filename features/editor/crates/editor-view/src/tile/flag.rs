@@ -53,10 +53,12 @@ impl TileFlag {
 pub struct TileFlagSet(pub u16);
 
 impl TileFlagSet {
+    #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
+    #[must_use]
     pub fn contains(self, flag: TileFlag) -> bool {
         (self.0 & flag as u16) != 0
     }
@@ -69,6 +71,7 @@ impl TileFlagSet {
         self.0 &= !(flag as u16);
     }
 
+    #[must_use]
     pub fn intersects(self, mask: u16) -> bool {
         (self.0 & mask) != 0
     }

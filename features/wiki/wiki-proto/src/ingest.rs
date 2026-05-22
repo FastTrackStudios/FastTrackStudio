@@ -46,7 +46,7 @@ pub struct IngestTask {
     /// `record_pages` lands.
     pub pages: Vec<PageDraft>,
     /// Retry count. Backends auto-retry transient failures
-    /// up to a cap (default 3, matches llm_wiki).
+    /// up to a cap (default 3, matches `llm_wiki`).
     pub retries: u32,
     /// Last failure message, if any.
     pub last_error: Option<String>,

@@ -125,7 +125,7 @@ fn is_markdown(path: &std::path::Path) -> bool {
             .and_then(|s| s.to_str())
             .map(str::to_ascii_lowercase)
             .as_deref(),
-        Some("md") | Some("markdown")
+        Some("md" | "markdown")
     )
 }
 

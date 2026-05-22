@@ -90,7 +90,7 @@ pub fn GridView(props: GridViewProps) -> Element {
                                 div { key: "w-{w}", class: "flex flex-col gap-[3px]",
                                     for dow in 0..7u8 {
                                         {
-                                            let date = col_start + Days::new(dow as u64);
+                                            let date = col_start + Days::new(u64::from(dow));
                                             let count = counts.get(&date).copied().unwrap_or(0);
                                             let bucket = bucket_for(count, max);
                                             let cell_class = cell_class(stem, bucket);

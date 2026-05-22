@@ -8,9 +8,9 @@ use email_proto::{Addr, AttachmentMeta, EmailSyncError, Envelope, Message};
 use mail_parser::{Address, MessageParser, MimeHeaders, PartType};
 use std::path::Path;
 
-/// Parse one on-disk maildir file into an envelope. `folder`
-/// + `path_id` are echoed onto the result; the parser supplies
-/// everything else from the headers.
+/// Parse one on-disk maildir file into an envelope.
+/// `folder` + `path_id` are echoed onto the result; the
+/// parser supplies everything else from the headers.
 pub fn envelope_from_bytes(
     bytes: &[u8],
     folder: &str,
@@ -22,8 +22,7 @@ pub fn envelope_from_bytes(
 
     let message_id = parsed
         .message_id()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| synth_message_id(bytes));
+        .map_or_else(|| synth_message_id(bytes), std::string::ToString::to_string);
 
     let subject = parsed.subject().unwrap_or("").to_string();
     let from = collect_addrs(parsed.from());
@@ -32,9 +31,8 @@ pub fn envelope_from_bytes(
 
     let date_ms = parsed
         .date()
-        .map(|d| d.to_timestamp())
-        .map(|secs| secs.saturating_mul(1000))
-        .unwrap_or(0);
+        .map(mail_parser::DateTime::to_timestamp)
+        .map_or(0, |secs| secs.saturating_mul(1000));
 
     let has_attachments = parsed
         .headers()
@@ -44,12 +42,12 @@ pub fn envelope_from_bytes(
     let thread_id = parsed
         .in_reply_to()
         .as_text()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .or_else(|| {
             parsed
                 .references()
                 .as_text_list()
-                .and_then(|list| list.first().map(|s| s.to_string()))
+                .and_then(|list| list.first().map(std::string::ToString::to_string))
         });
 
     Ok(Envelope {
@@ -80,8 +78,8 @@ pub fn message_from_bytes(
 
     let envelope = envelope_from_bytes(bytes, folder, flags)?;
 
-    let body_text = parsed.body_text(0).map(|s| s.into_owned());
-    let body_html = parsed.body_html(0).map(|s| s.into_owned());
+    let body_text = parsed.body_text(0).map(std::borrow::Cow::into_owned);
+    let body_html = parsed.body_html(0).map(std::borrow::Cow::into_owned);
 
     let mut attachments = Vec::new();
     for (idx, part) in parsed.parts.iter().enumerate() {
@@ -90,15 +88,15 @@ pub fn message_from_bytes(
         if !is_attachment {
             continue;
         }
-        let filename = part.attachment_name().map(|s| s.to_string());
-        let mime = part
-            .content_type()
-            .map(|ct| {
+        let filename = part.attachment_name().map(std::string::ToString::to_string);
+        let mime = part.content_type().map_or_else(
+            || "application/octet-stream".into(),
+            |ct| {
                 let main = ct.ctype();
                 let sub = ct.subtype().unwrap_or("octet-stream");
                 format!("{main}/{sub}")
-            })
-            .unwrap_or_else(|| "application/octet-stream".into());
+            },
+        );
         let size = match &part.body {
             PartType::Binary(b) | PartType::InlineBinary(b) => b.len() as u64,
             PartType::Text(t) | PartType::Html(t) => t.len() as u64,
@@ -147,7 +145,7 @@ fn collect_addrs(value: Option<&Address>) -> Vec<Addr> {
     };
     addr.iter()
         .map(|a| Addr {
-            name: a.name().map(|s| s.to_string()),
+            name: a.name().map(std::string::ToString::to_string),
             email: a.address().unwrap_or("").to_string(),
         })
         .collect()
@@ -159,7 +157,7 @@ fn collect_references(parsed: &mail_parser::Message<'_>) -> Vec<String> {
         out.push(s.to_string());
     }
     if let Some(list) = parsed.references().as_text_list() {
-        out.extend(list.iter().map(|s| s.to_string()));
+        out.extend(list.iter().map(std::string::ToString::to_string));
     }
     out
 }
@@ -168,8 +166,8 @@ fn collect_references(parsed: &mail_parser::Message<'_>) -> Vec<String> {
 /// header — content hash, prefixed so it's distinguishable from
 /// real RFC2822 ids.
 fn synth_message_id(bytes: &[u8]) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
     use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
     hasher.write(bytes);
     format!("<sha-{:016x}@local.maildir>", hasher.finish())
 }

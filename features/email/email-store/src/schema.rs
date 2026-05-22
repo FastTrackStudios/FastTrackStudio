@@ -1,4 +1,4 @@
-//! SQLite schema. Disposable: the maildir on disk is canonical;
+//! `SQLite` schema. Disposable: the maildir on disk is canonical;
 //! `Store::rebuild_from_disk` reconstructs every row by walking
 //! the tree.
 

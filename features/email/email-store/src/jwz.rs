@@ -37,7 +37,7 @@ pub struct ThreadInput<'a> {
     pub references: &'a [&'a str],
 }
 
-/// One output row: message_id → thread_id. `thread_id` is the
+/// One output row: `message_id` → `thread_id`. `thread_id` is the
 /// Message-ID of the thread root (which may be the message
 /// itself for a single-message thread).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +49,7 @@ pub struct ThreadAssignment {
 /// Run the JWZ pass over `inputs`. Returns one assignment per
 /// input row, plus implicit IDs are dropped — only IDs we
 /// actually have a message for are returned.
+#[must_use]
 pub fn compute_threads(inputs: &[ThreadInput<'_>]) -> Vec<ThreadAssignment> {
     // 1. Build the container set. Real messages first, then
     //    referenced-but-missing IDs as placeholders.
@@ -85,8 +86,8 @@ pub fn compute_threads(inputs: &[ThreadInput<'_>]) -> Vec<ThreadAssignment> {
         // neither (orphan / root).
         let direct_parent: Option<String> = refs
             .last()
-            .map(|s| s.to_string())
-            .or_else(|| input.in_reply_to.map(|s| s.to_string()));
+            .map(std::string::ToString::to_string)
+            .or_else(|| input.in_reply_to.map(std::string::ToString::to_string));
         if let Some(p) = direct_parent {
             parent.entry(p.clone()).or_insert(None);
             let entry = parent.entry(input.message_id.to_string()).or_insert(None);

@@ -35,6 +35,7 @@ impl EditorState {
         }
     }
 
+    #[must_use]
     pub fn update(&self, spec: TransactionSpec) -> EditorState {
         Transaction::new(self.clone(), spec).apply()
     }

@@ -1,3 +1,12 @@
+// Dioxus 0.7's `Callback<T>` is `Copy`, but this port hits
+// the upstream's `Callback.clone()` pattern in ~40 places
+// across `components/`. Reverse-engineering each Svelte
+// reactive-statement → Dioxus signal flow to remove the
+// clones (while preserving the port's structure) buys very
+// little against the diff churn. Lint stays off in this
+// crate only; everything else in the workspace enforces it.
+#![allow(clippy::clone_on_copy)]
+
 //! Gantt chart — Dioxus port of svar-widgets/gantt.
 //!
 //! Dumb UI crate: feed `tasks` and `links` in via props, receive

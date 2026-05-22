@@ -38,6 +38,6 @@ pub fn use_drag_context() -> DragContext {
     use_context::<DragContext>()
 }
 
-/// MIME used by HTML5 DataTransfer for cross-view drag carrying
+/// MIME used by HTML5 `DataTransfer` for cross-view drag carrying
 /// the event id. Same pattern as `view-kanban`.
 pub(crate) const DT_MIME: &str = "text/x-calendar-event-id";

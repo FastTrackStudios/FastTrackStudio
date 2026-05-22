@@ -22,7 +22,7 @@ fn normalize_key(key: &str) -> String {
 }
 
 /// Load extra property keys declared in `.obsidian/types.json`. These
-/// are plugin-injected property declarations (LanguageTool's `lt-*`,
+/// are plugin-injected property declarations (`LanguageTool`'s `lt-*`,
 /// Tasks plugin's `TQ_*`, etc.) that Obsidian exposes via the
 /// properties pane even on vaults where no page sets them.
 fn read_types_json_keys(vault: &Vault) -> BTreeSet<String> {
@@ -51,6 +51,7 @@ fn read_types_json_keys(vault: &Vault) -> BTreeSet<String> {
 /// Obsidian's `properties` CLI does NOT expand nested objects or
 /// list-of-objects into dotted paths — only top-level keys are
 /// listed, so we mirror that.
+#[must_use]
 pub fn list_property_keys(vault: &Vault) -> Vec<String> {
     let mut set: BTreeSet<String> = BTreeSet::new();
     for p in &vault.pages {
@@ -66,6 +67,7 @@ pub fn list_property_keys(vault: &Vault) -> Vec<String> {
 /// document order (first occurrence wins). Duplicate values are
 /// suppressed by JSON-stringified identity so e.g. two pages with
 /// `status: active` only contribute one sample.
+#[must_use]
 pub fn property_values(vault: &Vault, key: &str, max_samples: usize) -> Vec<serde_json::Value> {
     let mut out: Vec<serde_json::Value> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -90,6 +92,7 @@ pub fn property_values(vault: &Vault, key: &str, max_samples: usize) -> Vec<serd
 }
 
 /// Read one property from one page.
+#[must_use]
 pub fn read_property<'a>(page: &'a VaultPage, key: &str) -> Option<&'a serde_json::Value> {
     page.parsed
         .frontmatter
@@ -222,7 +225,10 @@ mod tests {
             read_property(p, "status"),
             Some(&serde_json::json!("active"))
         );
-        assert_eq!(read_property(p, "count").and_then(|v| v.as_i64()), Some(3));
+        assert_eq!(
+            read_property(p, "count").and_then(serde_json::Value::as_i64),
+            Some(3)
+        );
         assert!(read_property(p, "missing").is_none());
     }
 }

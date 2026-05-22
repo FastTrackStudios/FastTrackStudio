@@ -15,6 +15,7 @@ pub enum FrontmatterKind {
 }
 
 impl FrontmatterKind {
+    #[must_use]
     pub const fn frontmatter_value(self) -> &'static str {
         match self {
             Self::DayTemplate => "scheduling-day-template",
@@ -26,6 +27,7 @@ impl FrontmatterKind {
 }
 
 /// Return the kind a frontmatter `type` string maps to, if any.
+#[must_use]
 pub fn frontmatter_kind(ty: &str) -> Option<FrontmatterKind> {
     Some(match ty {
         "scheduling-day-template" => FrontmatterKind::DayTemplate,

@@ -27,16 +27,19 @@ pub struct TimeOfDay {
 }
 
 impl TimeOfDay {
+    #[must_use]
     pub const fn new(hours: u8, minutes: u8) -> Self {
         Self {
             minutes_since_midnight: hours as u16 * 60 + minutes as u16,
         }
     }
 
+    #[must_use]
     pub const fn hours(self) -> u8 {
         (self.minutes_since_midnight / 60) as u8
     }
 
+    #[must_use]
     pub const fn minutes(self) -> u8 {
         (self.minutes_since_midnight % 60) as u8
     }

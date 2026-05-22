@@ -1,7 +1,7 @@
 //! `Wiki/_state/snapshot.json` — sha256-keyed bookkeeping
 //! of every tracked raw source. Used by [`rescan_sources`]
-//! to skip re-ingest of unchanged bytes (matches llm_wiki's
-//! file_sync model).
+//! to skip re-ingest of unchanged bytes (matches `llm_wiki`'s
+//! `file_sync` model).
 
 use std::collections::HashMap;
 use std::fs;
@@ -129,10 +129,10 @@ fn collect_files(
             collect_files(root, &path, prefix, out)?;
             continue;
         }
-        let rel = path
-            .strip_prefix(root)
-            .map(|p| format!("{prefix}/{}", p.to_string_lossy()))
-            .unwrap_or_else(|_| path.to_string_lossy().to_string());
+        let rel = path.strip_prefix(root).map_or_else(
+            |_| path.to_string_lossy().to_string(),
+            |p| format!("{prefix}/{}", p.to_string_lossy()),
+        );
         // `.gitkeep` and other dotfiles are ignored.
         if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
             if name.starts_with('.') {

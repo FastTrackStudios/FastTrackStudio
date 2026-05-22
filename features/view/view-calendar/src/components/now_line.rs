@@ -33,7 +33,7 @@ pub fn NowLine(props: NowLineProps) -> Element {
     let Some(col) = props.days.iter().position(|d| *d == today) else {
         return rsx! {};
     };
-    let total_minutes = now.hour() as i64 * 60 + now.minute() as i64;
+    let total_minutes = i64::from(now.hour()) * 60 + i64::from(now.minute());
     let top_px = (total_minutes * props.px_per_hour) / 60;
     let col_one = col + 1;
 

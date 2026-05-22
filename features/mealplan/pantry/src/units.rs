@@ -76,6 +76,7 @@ impl Unit {
     /// Parse a free-form unit string into a canonical
     /// [`Unit`]. Returns `None` for anything unrecognized so
     /// callers can keep the raw string for round-trip.
+    #[must_use]
     pub fn parse(raw: &str) -> Option<Self> {
         let s = raw.trim().to_ascii_lowercase();
         Some(match s.as_str() {
@@ -122,6 +123,7 @@ impl Unit {
     /// without density, count↔mass, etc.) or one of the
     /// `Package` variants is involved (no canonical
     /// conversion between bag and box).
+    #[must_use]
     pub fn convert(self, qty: f64, target: Unit) -> Option<f64> {
         if self == target {
             return Some(qty);
@@ -139,6 +141,7 @@ impl Unit {
 
 impl MassUnit {
     /// Conversion factor to grams.
+    #[must_use]
     pub fn to_grams(self) -> f64 {
         match self {
             Self::Microgram => 1e-6,
@@ -154,6 +157,7 @@ impl MassUnit {
 impl VolumeUnit {
     /// Conversion factor to milliliters (US-customary
     /// for cup/tbsp/tsp/floz).
+    #[must_use]
     pub fn to_milliliters(self) -> f64 {
         match self {
             Self::Milliliter => 1.0,
@@ -176,6 +180,7 @@ impl VolumeUnit {
 ///
 /// This is the entry point recipe-pos → pantry consumes
 /// will use during phase 5's fulfillment math.
+#[must_use]
 pub fn convert_str(qty: f64, from_unit: &str, to_unit: &str) -> Option<f64> {
     if from_unit.trim().eq_ignore_ascii_case(to_unit.trim()) {
         return Some(qty);

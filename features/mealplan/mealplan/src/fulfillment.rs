@@ -138,9 +138,10 @@ const MAX_NEST_DEPTH: u32 = 8;
 /// `servings`. Pure; no I/O. No nested-recipe resolution —
 /// use [`check_nested`] when the recipe has
 /// [`Recipe::nested_recipes`].
+#[must_use]
 pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillment {
     let scale = if let Some(base) = recipe.servings.filter(|s| *s > 0) {
-        servings as f64 / base as f64
+        f64::from(servings) / f64::from(base)
     } else {
         // Recipe didn't specify a base — assume 1:1.
         1.0
@@ -239,6 +240,7 @@ pub fn check(recipe: &Recipe, pantry: &[PantryItem], servings: u32) -> Fulfillme
 /// matching so a "tomato sauce uses garlic" + "garlic
 /// bread uses garlic" combo asks the pantry for the sum,
 /// not twice the smaller need.
+#[must_use]
 pub fn check_nested(
     recipe: &Recipe,
     all_recipes: &[Recipe],
@@ -250,12 +252,12 @@ pub fn check_nested(
     let index: HashMap<uuid::Uuid, &Recipe> = all_recipes.iter().map(|r| (r.id, r)).collect();
 
     let scale = if let Some(base) = recipe.servings.filter(|s| *s > 0) {
-        servings as f64 / base as f64
+        f64::from(servings) / f64::from(base)
     } else {
         1.0
     };
 
-    let mut visited: HashMap<uuid::Uuid, ()> = HashMap::new();
+    let mut visited: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
     let mut flat = flatten(recipe, &index, scale, &mut visited, 0);
     fold_same_ingredient(&mut flat);
 
@@ -274,13 +276,13 @@ fn flatten(
     recipe: &Recipe,
     index: &std::collections::HashMap<uuid::Uuid, &Recipe>,
     scale: f64,
-    visited: &mut std::collections::HashMap<uuid::Uuid, ()>,
+    visited: &mut std::collections::HashSet<uuid::Uuid>,
     depth: u32,
 ) -> Vec<cookbook::Ingredient> {
-    if depth > MAX_NEST_DEPTH || visited.contains_key(&recipe.id) {
+    if depth > MAX_NEST_DEPTH || visited.contains(&recipe.id) {
         return Vec::new();
     }
-    visited.insert(recipe.id, ());
+    visited.insert(recipe.id);
 
     let mut out: Vec<cookbook::Ingredient> = recipe
         .ingredients
@@ -293,8 +295,8 @@ fn flatten(
 
     for nested in &recipe.nested_recipes {
         if let Some(child) = index.get(&nested.recipe_id) {
-            let base = child.servings.unwrap_or(1).max(1) as f64;
-            let child_scale = scale * (nested.servings as f64 / base);
+            let base = f64::from(child.servings.unwrap_or(1).max(1));
+            let child_scale = scale * (f64::from(nested.servings) / base);
             out.extend(flatten(child, index, child_scale, visited, depth + 1));
         }
     }
@@ -346,6 +348,7 @@ fn fold_same_ingredient(rows: &mut Vec<cookbook::Ingredient>) {
 /// (no reasons) always stay visible since the author put them
 /// there on purpose. When `goals` is empty, every viable sub
 /// is returned, sorted by `OutOfStock`-first then source.
+#[must_use]
 pub fn check_with_subs(
     recipe: &Recipe,
     pantry: &[PantryItem],
@@ -356,7 +359,7 @@ pub fn check_with_subs(
     let pantry_by_id: std::collections::HashMap<uuid::Uuid, &PantryItem> =
         pantry.iter().map(|p| (p.id, p)).collect();
 
-    for short in base.missing.iter_mut() {
+    for short in &mut base.missing {
         let idx = short.ingredient_idx as usize;
         let Some(ing) = recipe.ingredients.get(idx) else {
             continue;
@@ -433,19 +436,7 @@ pub fn check_with_subs(
         }
 
         // Goal filter + ordering.
-        if !goals.is_empty() {
-            // Keep recipe-level subs (no reasons declared) +
-            // any sub whose reasons overlap with goals.
-            short.suggestions.retain(|s| {
-                matches!(s.source, SubstitutionSource::RecipeIngredient)
-                    || s.reasons.iter().any(|r| goals.contains(r))
-            });
-            short.suggestions.sort_by(|a, b| {
-                let a_score = a.reasons.iter().filter(|r| goals.contains(r)).count();
-                let b_score = b.reasons.iter().filter(|r| goals.contains(r)).count();
-                b_score.cmp(&a_score)
-            });
-        } else {
+        if goals.is_empty() {
             // Default ordering: OutOfStock-tagged first,
             // then recipe-level subs, then by source.
             short.suggestions.sort_by_key(|s| {
@@ -456,6 +447,18 @@ pub fn check_with_subs(
                     SubstitutionSource::Registry => 2,
                 };
                 (oos, layer)
+            });
+        } else {
+            // Keep recipe-level subs (no reasons declared) +
+            // any sub whose reasons overlap with goals.
+            short.suggestions.retain(|s| {
+                matches!(s.source, SubstitutionSource::RecipeIngredient)
+                    || s.reasons.iter().any(|r| goals.contains(r))
+            });
+            short.suggestions.sort_by(|a, b| {
+                let a_score = a.reasons.iter().filter(|r| goals.contains(r)).count();
+                let b_score = b.reasons.iter().filter(|r| goals.contains(r)).count();
+                b_score.cmp(&a_score)
             });
         }
     }

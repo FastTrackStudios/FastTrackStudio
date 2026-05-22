@@ -12,7 +12,7 @@
 //!   square off the cut edge.
 //! - [`day_overlap_layout`] clusters transitively-overlapping
 //!   events on a single day and assigns each event a sub-column
-//!   (FullCalendar / Google Calendar's algorithm). The view turns
+//!   (`FullCalendar` / Google Calendar's algorithm). The view turns
 //!   the `column` + `cluster_size` pair into `left%` / `width%`.
 
 use chrono::{Days, NaiveDate};
@@ -22,14 +22,14 @@ use crate::types::CalendarEvent;
 
 /// One event's placement inside a horizontal day-window (a month
 /// week row, or the all-day strip above a week / day time grid).
-/// Coordinates are in the local 0..window_len day-column frame;
+/// Coordinates are in the local `0..window_len` day-column frame;
 /// the renderer turns them into CSS `grid-column: X / span Y`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChipPlacement {
     pub event: CalendarEvent,
-    /// 0..window_len — first day column the chip occupies.
+    /// `0..window_len` — first day column the chip occupies.
     pub start_col: u8,
-    /// 1..=window_len — number of day columns spanned.
+    /// `1..=window_len` — number of day columns spanned.
     pub span: u8,
     /// 0..N — vertical stacking order ("track") in the row.
     pub track: u8,
@@ -50,11 +50,12 @@ pub type MonthChipPlacement = ChipPlacement;
 /// month-view week rows (`len = 7`) and the time-grid all-day
 /// strip (`len = days.len()` for week or day view).
 ///
-/// Sorted by (track, start_col) so the renderer can iterate in
+/// Sorted by (track, `start_col`) so the renderer can iterate in
 /// display order.
+#[must_use]
 pub fn track_layout(start: NaiveDate, len: u8, events: &[CalendarEvent]) -> Vec<ChipPlacement> {
     assert!(len >= 1, "window must be non-empty");
-    let end = start + Days::new(len as u64);
+    let end = start + Days::new(u64::from(len));
     let window_start_utc = day_start_utc(start);
     let window_end_utc = day_start_utc(end);
 
@@ -76,15 +77,12 @@ pub fn track_layout(start: NaiveDate, len: u8, events: &[CalendarEvent]) -> Vec<
         let last_col = (last_visible - start).num_days() as u8;
         let span = last_col.saturating_sub(start_col) + 1;
 
-        let track = match tracks.iter().position(|&right| right <= start_col) {
-            Some(i) => {
-                tracks[i] = start_col + span;
-                i as u8
-            }
-            None => {
-                tracks.push(start_col + span);
-                (tracks.len() - 1) as u8
-            }
+        let track = if let Some(i) = tracks.iter().position(|&right| right <= start_col) {
+            tracks[i] = start_col + span;
+            i as u8
+        } else {
+            tracks.push(start_col + span);
+            (tracks.len() - 1) as u8
         };
 
         out.push(ChipPlacement {
@@ -102,6 +100,7 @@ pub fn track_layout(start: NaiveDate, len: u8, events: &[CalendarEvent]) -> Vec<
 }
 
 /// Convenience wrapper: month view always lays out 7-day rows.
+#[must_use]
 pub fn month_week_layout(week_start: NaiveDate, events: &[CalendarEvent]) -> Vec<ChipPlacement> {
     track_layout(week_start, 7, events)
 }
@@ -111,7 +110,7 @@ pub fn month_week_layout(week_start: NaiveDate, events: &[CalendarEvent]) -> Vec
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimeBlockPlacement {
     pub event: CalendarEvent,
-    /// 0..cluster_size — which sub-column the event occupies.
+    /// `0..cluster_size` — which sub-column the event occupies.
     pub column: u8,
     /// Total sub-columns in the cluster the event belongs to.
     /// Width of each is `100 / cluster_size %`.
@@ -125,7 +124,7 @@ pub struct TimeBlockPlacement {
 
 /// Cluster + column-assign overlapping events on `day`.
 ///
-/// Algorithm (FullCalendar / Google):
+/// Algorithm (`FullCalendar` / Google):
 /// 1. Sort events by `start`, then by descending duration so
 ///    longer events land in the leftmost columns.
 /// 2. Walk events; an event joins the active cluster if it starts
@@ -135,6 +134,7 @@ pub struct TimeBlockPlacement {
 ///    new.start`).
 /// 4. When the cluster closes (`new.start >= max_end`), commit
 ///    `cluster_size = max(col) + 1` to every event in it.
+#[must_use]
 pub fn day_overlap_layout(day: NaiveDate, events: &[CalendarEvent]) -> Vec<TimeBlockPlacement> {
     let day_start = day_start_utc(day);
     let day_end = day_end_utc(day);
@@ -175,15 +175,12 @@ pub fn day_overlap_layout(day: NaiveDate, events: &[CalendarEvent]) -> Vec<TimeB
         }
 
         // Pick the lowest column whose existing occupant has ended.
-        let column = match active_cols.iter().position(|end| *end <= ev.start) {
-            Some(i) => {
-                active_cols[i] = ev.end;
-                i as u8
-            }
-            None => {
-                active_cols.push(ev.end);
-                (active_cols.len() - 1) as u8
-            }
+        let column = if let Some(i) = active_cols.iter().position(|end| *end <= ev.start) {
+            active_cols[i] = ev.end;
+            i as u8
+        } else {
+            active_cols.push(ev.end);
+            (active_cols.len() - 1) as u8
         };
 
         if ev.end > cluster_max_end {

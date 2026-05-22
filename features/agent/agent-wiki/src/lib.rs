@@ -10,7 +10,7 @@
 //! Ported from `nashsu/llm_wiki`:
 //!
 //! - [`prompts`] — system + user prompt templates for the
-//!   wiki workflows. Modeled on llm_wiki's
+//!   wiki workflows. Modeled on `llm_wiki`'s
 //!   `src/lib/ingest.ts`, `deep-research.ts`, `lint.ts`,
 //!   `dedup.ts`, `optimize-research-topic.ts`,
 //!   `vision-caption.ts`, `sweep-reviews.ts`.

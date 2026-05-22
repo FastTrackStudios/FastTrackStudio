@@ -1,5 +1,5 @@
 //! End-to-end vault scan + block-index round trip on a real
-//! temp directory. Exercises walker → loader → BlockIndex →
+//! temp directory. Exercises walker → loader → `BlockIndex` →
 //! lookup as a pipeline, separately from the per-module unit
 //! tests.
 
@@ -43,8 +43,7 @@ fn vault_scan_and_block_lookup() {
             let page = &v.pages[loc.page_idx];
             let end = page.raw[loc.anchor..]
                 .find('\n')
-                .map(|n| loc.anchor + n)
-                .unwrap_or(page.raw.len());
+                .map_or(page.raw.len(), |n| loc.anchor + n);
             page.raw[loc.anchor..end].to_string()
         })
         .unwrap();

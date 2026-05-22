@@ -36,18 +36,23 @@ fn arb_rfc_like() -> impl Strategy<Value = Vec<u8>> {
         proptest::string::string_regex("[a-zA-Z0-9 \r\n]{0,4096}").unwrap(),
     )
         .prop_map(|(hdrs, msgid_n, body)| {
+            use std::fmt::Write as _;
             let mut out = String::new();
             for h in hdrs {
                 // 50/50 the line has a colon (real header) or
                 // not (folded continuation).
                 if msgid_n & 1 == 0 {
-                    out.push_str(&format!("X-Test: {h}\r\n"));
+                    write!(&mut out, "X-Test: {h}\r").unwrap();
+                    out.push('\n');
                 } else {
-                    out.push_str(&format!("{h}\r\n"));
+                    write!(&mut out, "{h}\r").unwrap();
+                    out.push('\n');
                 }
             }
-            out.push_str(&format!("Message-ID: <{msgid_n}@p.test>\r\n"));
-            out.push_str(&format!("Subject: prop test {msgid_n}\r\n"));
+            write!(&mut out, "Message-ID: <{msgid_n}@p.test>\r").unwrap();
+            out.push('\n');
+            write!(&mut out, "Subject: prop test {msgid_n}\r").unwrap();
+            out.push('\n');
             out.push_str("\r\n");
             out.push_str(&body);
             out.into_bytes()
@@ -62,9 +67,9 @@ fn write_maildir(root: &std::path::Path, files: &[Vec<u8>]) {
         // Half the files go into new/, half into cur/ with a
         // `:2,S` info section so we exercise both flag paths.
         let (sub, name) = if i % 2 == 0 {
-            ("new", format!("{:020}.M.host", i))
+            ("new", format!("{i:020}.M.host"))
         } else {
-            ("cur", format!("{:020}.M.host:2,S", i))
+            ("cur", format!("{i:020}.M.host:2,S"))
         };
         std::fs::write(root.join(sub).join(name), bytes).unwrap();
     }

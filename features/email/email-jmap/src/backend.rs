@@ -134,8 +134,7 @@ impl Backend {
             let ui_name = state
                 .aliases
                 .alias_for(&backend_name)
-                .map(str::to_string)
-                .unwrap_or_else(|| backend_name.clone());
+                .map_or_else(|| backend_name.clone(), str::to_string);
             out.push(Folder {
                 id: ui_name.clone(),
                 name: ui_name,
@@ -253,7 +252,7 @@ impl EmailSync for Backend {
 
     async fn subscribe(&self, account: String, tx: vox::Tx<EmailEvent>) {
         if self.state(&account).is_err() {
-            let _ = tx.close(Default::default()).await;
+            let _ = tx.close(vox::Metadata::default()).await;
             return;
         }
         let sender = self.channel(&account).await;

@@ -32,6 +32,7 @@ impl EmailLink {
     /// Strip angle brackets from `message_id` if present.
     /// Helpers and callers can rely on this to compare ids
     /// without worrying about wrapping.
+    #[must_use]
     pub fn bare_message_id(&self) -> &str {
         bare_message_id(&self.message_id)
     }

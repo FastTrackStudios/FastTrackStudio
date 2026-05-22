@@ -10,7 +10,7 @@ use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let command = args.first().map(|s| s.as_str()).unwrap_or("help");
+    let command = args.first().map_or("help", std::string::String::as_str);
 
     match command {
         "build" => {

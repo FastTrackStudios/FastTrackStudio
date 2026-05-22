@@ -269,6 +269,7 @@ pub enum Course {
 }
 
 impl Course {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Breakfast => "breakfast",
@@ -282,6 +283,8 @@ impl Course {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "breakfast" => Some(Self::Breakfast),

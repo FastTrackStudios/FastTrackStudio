@@ -124,6 +124,7 @@ pub enum Condition {
 }
 
 impl Condition {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::New => "new",
@@ -134,6 +135,8 @@ impl Condition {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "new" | "mint" => Some(Self::New),
@@ -147,6 +150,7 @@ impl Condition {
 
     /// `true` for conditions that should surface a "needs
     /// attention" affordance in UIs.
+    #[must_use]
     pub fn needs_attention(self) -> bool {
         matches!(self, Self::Poor | Self::Broken)
     }
@@ -165,6 +169,7 @@ pub enum Status {
 }
 
 impl Status {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InUse => "in-use",
@@ -176,6 +181,8 @@ impl Status {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "in-use" | "in_use" | "using" | "active" => Some(Self::InUse),

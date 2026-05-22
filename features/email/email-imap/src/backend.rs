@@ -21,9 +21,9 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use crate::connect::{self, ConnectError, ImapSession};
 use crate::parse;
 
-/// One configured IMAP account. Holds the connection parameters
-/// + folder alias map; the actual session is opened per-op
-/// until we add pooling.
+/// One configured IMAP account. Holds the connection
+/// parameters + folder alias map; the actual session is
+/// opened per-op until we add pooling.
 struct AccountState {
     account: Account,
     host: String,
@@ -252,8 +252,7 @@ impl Backend {
             let ui_name = state
                 .aliases
                 .alias_for(&backend_name)
-                .map(str::to_string)
-                .unwrap_or_else(|| backend_name.clone());
+                .map_or_else(|| backend_name.clone(), str::to_string);
             folders.push(Folder {
                 id: ui_name.clone(),
                 name: ui_name,
@@ -303,8 +302,8 @@ impl Backend {
         while let Some(item) = stream.next().await {
             let fetch = item.map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
             let header = fetch.header().unwrap_or(&[]).to_vec();
-            let flags: Vec<String> = fetch.flags().map(|f| format!("{:?}", f)).collect();
-            let size = fetch.size.unwrap_or(0) as u64;
+            let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
+            let size = u64::from(fetch.size.unwrap_or(0));
             // IMAP UID isn't a Message-ID, but we use it as a
             // stable secondary key when the header lacks one.
             let uid_synth = fetch.uid.map(|u| format!("<uid-{u}@imap.local>"));
@@ -341,12 +340,11 @@ impl Backend {
                 "HEADER Message-ID \"{}\"",
                 message_id.trim_matches(|c| c == '<' || c == '>')
             );
-            let uids: Vec<u32> = match session.uid_search(&needle).await {
-                Ok(u) => u.into_iter().collect(),
-                Err(_) => {
-                    let _ = session.logout().await;
-                    continue;
-                }
+            let uids: Vec<u32> = if let Ok(u) = session.uid_search(&needle).await {
+                u.into_iter().collect()
+            } else {
+                let _ = session.logout().await;
+                continue;
             };
             if uids.is_empty() {
                 let _ = session.logout().await;
@@ -365,8 +363,8 @@ impl Backend {
                 };
                 let fetch = item.map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
                 let body = fetch.body().unwrap_or(&[]).to_vec();
-                let flags: Vec<String> = fetch.flags().map(|f| format!("{:?}", f)).collect();
-                let size = fetch.size.unwrap_or(0) as u64;
+                let flags: Vec<String> = fetch.flags().map(|f| format!("{f:?}")).collect();
+                let size = u64::from(fetch.size.unwrap_or(0));
                 (body, flags, size)
             };
             let _ = session.logout().await;
@@ -399,12 +397,11 @@ impl Backend {
                 "HEADER Message-ID \"{}\"",
                 message_id.trim_matches(|c| c == '<' || c == '>')
             );
-            let uids: Vec<u32> = match session.uid_search(&needle).await {
-                Ok(u) => u.into_iter().collect(),
-                Err(_) => {
-                    let _ = session.logout().await;
-                    continue;
-                }
+            let uids: Vec<u32> = if let Ok(u) = session.uid_search(&needle).await {
+                u.into_iter().collect()
+            } else {
+                let _ = session.logout().await;
+                continue;
             };
             let _ = session.logout().await;
             if let Some(uid) = uids.first() {

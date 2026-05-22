@@ -35,12 +35,14 @@ const MAX_CH: u8 = b'z';
 /// space. Anything `between(MIN, FIRST)` or `between(FIRST, MAX)`
 /// will yield a single-character result for the first few
 /// hundred insertions.
+#[must_use]
 pub fn first() -> String {
     "m".to_string()
 }
 
 /// Pick a rank strictly greater than `low` and strictly less than
 /// `high`. Returns `None` when `low >= high`.
+#[must_use]
 pub fn between(low: &str, high: &str) -> Option<String> {
     if low >= high {
         return None;
@@ -73,6 +75,7 @@ pub fn between(low: &str, high: &str) -> Option<String> {
 
 /// Pick a rank strictly greater than `low`. Convenience: append a
 /// `MIN_CH` advance.
+#[must_use]
 pub fn after(low: &str) -> String {
     // Append a midpoint character to bias toward leaving room on
     // both sides for future inserts.
@@ -82,6 +85,7 @@ pub fn after(low: &str) -> String {
 }
 
 /// Pick a rank strictly less than `high`. Prepend logic.
+#[must_use]
 pub fn before(high: &str) -> String {
     let hb = high.as_bytes();
     let mut out = Vec::with_capacity(hb.len());
@@ -115,6 +119,7 @@ fn string_from(bytes: &[u8]) -> String {
 
 /// Quick validation — only used by tests and a few defensive
 /// paths. Returns true iff every byte is in the alphabet.
+#[must_use]
 pub fn is_valid(rank: &str) -> bool {
     !rank.is_empty() && rank.bytes().all(|b| ALPHABET.contains(&b))
 }

@@ -19,6 +19,7 @@ pub struct Store {
 }
 
 impl Store {
+    #[must_use]
     pub fn new(vault: Vault) -> Self {
         Self {
             inner: Arc::new(Mutex::new(vault)),
@@ -32,6 +33,7 @@ impl Store {
         Self { inner }
     }
 
+    #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
     }

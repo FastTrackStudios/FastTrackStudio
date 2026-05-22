@@ -1,9 +1,9 @@
 //! Stripped-down app shell: the only surface is the
 //! CodeMirror-style markdown editor from the `editor` crate.
 //! Other routes (projects, kanban, federated tasks, servers,
-//! vox test, settings, dashboard) used to live behind a router
-//! + sidebar — they're parked while we focus the product on the
-//! editor + file-backed vault flow.
+//! vox test, settings, dashboard) used to live behind a
+//! router + sidebar — they're parked while we focus the
+//! product on the editor + file-backed vault flow.
 //!
 //! Restoring them is a `git checkout` of this file.
 
