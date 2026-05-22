@@ -34,6 +34,11 @@
 #[path = "../vendor/mod.rs"]
 mod vendor;
 
+mod chat;
+mod translate;
+
+pub use chat::{ChatHandle, ChatOpts};
+
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast};
 

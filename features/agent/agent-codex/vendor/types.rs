@@ -8,23 +8,23 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(super) struct WorkspaceEntry {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) path: String,
+pub(crate) struct WorkspaceEntry {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) path: String,
     #[serde(default)]
-    pub(super) kind: WorkspaceKind,
+    pub(crate) kind: WorkspaceKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) parent_id: Option<String>,
+    pub(crate) parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) worktree: Option<WorktreeInfo>,
+    pub(crate) worktree: Option<WorktreeInfo>,
     #[serde(default)]
-    pub(super) settings: WorkspaceSettings,
+    pub(crate) settings: WorkspaceSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum WorkspaceKind {
+pub(crate) enum WorkspaceKind {
     Main,
     Worktree,
 }
@@ -37,29 +37,29 @@ impl Default for WorkspaceKind {
 
 impl WorkspaceKind {
     #[allow(dead_code)]
-    pub(super) fn is_worktree(&self) -> bool {
+    pub(crate) fn is_worktree(&self) -> bool {
         matches!(self, WorkspaceKind::Worktree)
     }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(super) struct WorktreeInfo {
-    pub(super) branch: String,
+pub(crate) struct WorktreeInfo {
+    pub(crate) branch: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(super) struct WorkspaceSettings {
+pub(crate) struct WorkspaceSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) launch_script: Option<String>,
+    pub(crate) launch_script: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) git_root: Option<String>,
+    pub(crate) git_root: Option<String>,
 }
 
 /// Only the field used by the vendored `args.rs`. Other
 /// CodexMonitor settings (theme, fonts, shortcuts, dictation)
 /// are intentionally absent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(super) struct AppSettings {
+pub(crate) struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) codex_args: Option<String>,
+    pub(crate) codex_args: Option<String>,
 }

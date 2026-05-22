@@ -24,6 +24,10 @@ vault-live = { workspace = true }
 vault-obsidian = { workspace = true }
 # `task-cli task …` subcommands — first-party task feature.
 task.workspace = true
+# `task-cli agent …` subcommands — drives `codex app-server`
+# via agent-codex (vendored CodexMonitor control plane).
+agent-codex.workspace = true
+agent-proto.workspace = true
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
