@@ -1,7 +1,7 @@
 //! Recursive folder import. Walks a directory and lands
 //! every file under `Wiki/raw/sources/`, optionally
 //! preserving the relative subdirectory structure
-//! (matches llm_wiki's "folder context as classification
+//! (matches `llm_wiki`'s "folder context as classification
 //! hint" feature).
 
 use std::path::Path;
@@ -68,8 +68,7 @@ impl WikiLive {
             }
             let rel = path
                 .strip_prefix(dir)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| name.to_string());
+                .map_or_else(|_| name.to_string(), |p| p.to_string_lossy().to_string());
             if opts
                 .exclude_substrings
                 .iter()
@@ -81,7 +80,7 @@ impl WikiLive {
                 let ext = path
                     .extension()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.to_ascii_lowercase())
+                    .map(str::to_ascii_lowercase)
                     .unwrap_or_default();
                 if !opts.include_exts.contains(&ext) {
                     continue;

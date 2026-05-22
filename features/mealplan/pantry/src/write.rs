@@ -80,6 +80,7 @@ pub fn write_pantry_item(
 /// Default layout: `pantry/<slug>.md`. Lives alongside (not
 /// inside) `inventory/` so casual filesystem inspection
 /// surfaces food vs. gear without reading frontmatter.
+#[must_use]
 pub fn default_pantry_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {

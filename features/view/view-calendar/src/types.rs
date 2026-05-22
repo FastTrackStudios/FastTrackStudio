@@ -19,6 +19,7 @@ pub enum ViewMode {
 }
 
 impl ViewMode {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Month => "Month",
@@ -45,6 +46,7 @@ pub enum ColorTag {
 
 impl ColorTag {
     /// Tailwind color stem (e.g. `"violet"`).
+    #[must_use]
     pub fn stem(self) -> &'static str {
         match self {
             Self::Neutral => "slate",
@@ -97,6 +99,7 @@ impl CalendarEvent {
 
     /// Duration in whole minutes. Used by the time-grid views to
     /// compute the rendered height.
+    #[must_use]
     pub fn duration_minutes(&self) -> i64 {
         (self.end - self.start).num_minutes().max(0)
     }

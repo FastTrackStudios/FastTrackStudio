@@ -136,6 +136,7 @@ impl Vault {
 
     /// Find a page by basename (case-insensitive). Used by
     /// `[[Wikilink]]` resolution.
+    #[must_use]
     pub fn page_by_basename(&self, basename: &str) -> Option<&VaultPage> {
         self.pages
             .iter()
@@ -143,11 +144,13 @@ impl Vault {
     }
 
     /// Find a page by vault-relative path.
+    #[must_use]
     pub fn page_by_rel_path(&self, rel_path: &str) -> Option<&VaultPage> {
         self.pages.iter().find(|p| p.rel_path == rel_path)
     }
 
     /// Find a `.base` file by basename.
+    #[must_use]
     pub fn base_by_basename(&self, basename: &str) -> Option<&VaultBase> {
         self.bases
             .iter()

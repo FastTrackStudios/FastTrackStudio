@@ -39,6 +39,7 @@ impl LocalFsStore {
     /// Compute the on-disk path for a given content hash. Public
     /// so tests can poke at the layout without going through
     /// `get_blob`.
+    #[must_use] 
     pub fn path_for(&self, content_hash: &str) -> PathBuf {
         let prefix = &content_hash.get(..2).unwrap_or("");
         self.root.join(prefix).join(content_hash)

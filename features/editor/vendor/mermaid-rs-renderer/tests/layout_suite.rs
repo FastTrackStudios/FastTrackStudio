@@ -188,7 +188,7 @@ fn assert_flowchart_visual_invariants(layout: &Layout, fixture: &str) {
 
     for (idx, left) in layout.subgraphs.iter().enumerate() {
         let left_nodes: std::collections::HashSet<&str> =
-            left.nodes.iter().map(|node| node.as_str()).collect();
+            left.nodes.iter().map(std::string::String::as_str).collect();
         for right in layout.subgraphs.iter().skip(idx + 1) {
             let shares_nodes = right
                 .nodes
@@ -345,7 +345,7 @@ fn render_all_fixtures() {
 
     for rel in fixtures {
         let path = root.join(&rel);
-        assert!(path.exists(), "fixture missing: {}", rel);
+        assert!(path.exists(), "fixture missing: {rel}");
         let (layout, svg) = render_fixture(&path);
         assert_layout_is_well_formed(&layout, &rel);
         assert_flowchart_visual_invariants(&layout, &rel);
@@ -514,13 +514,11 @@ fn sequence_alt_frame_geometry_matches_mermaid() {
     );
     assert!(
         lbw > 30.0 && lbw < 80.0,
-        "label box width should be reasonable (got {})",
-        lbw
+        "label box width should be reasonable (got {lbw})"
     );
     assert!(
         lbh > 10.0 && lbh < 30.0,
-        "label box height should be reasonable (got {})",
-        lbh
+        "label box height should be reasonable (got {lbh})"
     );
 
     assert!(

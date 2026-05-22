@@ -16,7 +16,7 @@ use crate::entity::{EntityKind, EntityRef};
 use crate::error::Result;
 use crate::link::{EmailLink, bare_message_id};
 
-const SCHEMA_V1: &str = r#"
+const SCHEMA_V1: &str = r"
 CREATE TABLE IF NOT EXISTS email_links (
     message_id  TEXT NOT NULL,
     entity_kind TEXT NOT NULL,
@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_email_links_by_entity
 
 CREATE INDEX IF NOT EXISTS idx_email_links_by_message
     ON email_links(message_id);
-"#;
+";
 
 pub struct LinkStore {
     pub root: PathBuf,

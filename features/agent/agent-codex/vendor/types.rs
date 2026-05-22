@@ -1,4 +1,4 @@
-//! Minimal type shim for the vendored modules. CodexMonitor's
+//! Minimal type shim for the vendored modules. `CodexMonitor`'s
 //! `types.rs` is 1418 lines of UI config; the vendored
 //! `app_server.rs` + `args.rs` only touch a tiny subset
 //! (`entry.id`, `entry.path`, and `AppSettings.codex_args`).
@@ -56,7 +56,7 @@ pub(crate) struct WorkspaceSettings {
 }
 
 /// Only the field used by the vendored `args.rs`. Other
-/// CodexMonitor settings (theme, fonts, shortcuts, dictation)
+/// `CodexMonitor` settings (theme, fonts, shortcuts, dictation)
 /// are intentionally absent.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct AppSettings {

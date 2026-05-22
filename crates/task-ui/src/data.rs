@@ -10,6 +10,7 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             TaskStatus::Todo => "todo",
@@ -21,6 +22,7 @@ impl TaskStatus {
 
     /// Tailwind classes used to color the status badge in the UI.
     /// Keep one source of truth here so views never hand-color statuses.
+    #[must_use]
     pub fn badge_class(self) -> &'static str {
         match self {
             TaskStatus::Todo => "border-slate-700 bg-slate-800/70 text-slate-200",
@@ -49,10 +51,12 @@ pub struct Project {
 }
 
 impl Project {
+    #[must_use]
     pub fn first_task(&self) -> Option<&Task> {
         self.tasks.iter().find(|t| t.status != TaskStatus::Done)
     }
 
+    #[must_use]
     pub fn open_count(&self) -> usize {
         self.tasks
             .iter()
@@ -60,6 +64,7 @@ impl Project {
             .count()
     }
 
+    #[must_use]
     pub fn done_count(&self) -> usize {
         self.tasks
             .iter()
@@ -68,6 +73,7 @@ impl Project {
     }
 }
 
+#[must_use]
 pub fn active_projects() -> Vec<Project> {
     vec![
         Project {
@@ -157,6 +163,7 @@ pub enum InboxSource {
 }
 
 impl InboxSource {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             InboxSource::Email => "Email",
@@ -166,6 +173,7 @@ impl InboxSource {
         }
     }
 
+    #[must_use]
     pub fn icon(self) -> &'static str {
         match self {
             InboxSource::Email => "✉",
@@ -191,6 +199,7 @@ pub struct InboxItem {
     pub project_hint: Option<&'static str>,
 }
 
+#[must_use]
 pub fn inbox_items() -> Vec<InboxItem> {
     vec![
         InboxItem {
@@ -243,6 +252,7 @@ pub fn inbox_items() -> Vec<InboxItem> {
 
 /// Look up the project name for a hint id, if any. Used by the inbox
 /// view to render the project chip on items the source already tagged.
+#[must_use]
 pub fn project_name(id: &str) -> Option<&'static str> {
     active_projects()
         .into_iter()
@@ -264,6 +274,7 @@ pub struct Organization {
     pub theme_preset: &'static str,
 }
 
+#[must_use]
 pub fn organizations() -> Vec<Organization> {
     vec![
         Organization {

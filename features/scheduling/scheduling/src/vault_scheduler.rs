@@ -2,7 +2,7 @@
 //! `<vault_root>/scheduling/<kind>/<file>.md`; app-state goes
 //! through pluggable `KvStore` + `LogStore` impls (see
 //! `store-proto`). The scheduler doesn't care where the state
-//! actually lands — JSON-on-disk, SQLite, in-memory all wire in
+//! actually lands — JSON-on-disk, `SQLite`, in-memory all wire in
 //! the same way.
 
 use std::path::PathBuf;
@@ -343,9 +343,10 @@ fn write_err(e: crate::write::WriteError) -> SchedulingError {
 
 /// Vault-relative forward-slash path.
 fn relativize(root: &std::path::Path, abs: &std::path::Path) -> String {
-    abs.strip_prefix(root)
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| abs.display().to_string())
+    abs.strip_prefix(root).map_or_else(
+        |_| abs.display().to_string(),
+        |p| p.to_string_lossy().replace('\\', "/"),
+    )
 }
 
 /// Strip anything that doesn't belong in a vault filename so a

@@ -1,12 +1,11 @@
 //! `task` CLI — vertical-slice scaffold.
 //!
 //! After the Loro entity layer was ripped, the surface is:
-//! - `task doctor`        — print resolved vox endpoint URL.
-//! - `task vault <cmd>`   — filesystem-native vault queries +
-//!                          mutations (open / pages / tags /
-//!                          tasks / backlinks / outline / grep /
-//!                          property-{read,set,remove} / create /
-//!                          append / delete / move / base-query).
+//! - `task doctor` — print resolved vox endpoint URL.
+//! - `task vault <cmd>` — filesystem-native vault queries +
+//!   mutations (open / pages / tags / tasks / backlinks /
+//!   outline / grep / property-{read,set,remove} / create /
+//!   append / delete / move / base-query).
 //!
 //! Task / project commands (`list`, `set-done`, `new-task`,
 //! `new-project`) went away with `project-crdt`. Rebuild them
@@ -26,7 +25,7 @@ use std::collections::HashMap;
 #[derive(Parser)]
 #[command(name = "task", about = "Task management CLI", version)]
 struct Cli {
-    /// Vox WebSocket URL (e.g. ws://127.0.0.1:9090/vox). Falls back
+    /// Vox WebSocket URL (e.g. <ws://127.0.0.1:9090/vox>). Falls back
     /// to `TASK_VOX_URL` (loaded from .env) then to the localhost
     /// default.
     #[arg(
@@ -65,7 +64,7 @@ enum Commands {
     #[command(subcommand)]
     Task(TaskCmd),
     /// LLM-agent integration. Codex backend drives `chat`
-    /// (one-shot) + `wiki ingest` (two-step CoT against a
+    /// (one-shot) + `wiki ingest` (two-step `CoT` against a
     /// vault's `Wiki/raw/sources/`).
     #[command(subcommand)]
     Agent(AgentCmd),
@@ -232,7 +231,7 @@ enum WikiCmd {
         language: String,
     },
     /// Ingest one source file into `<vault>/Wiki/` via the
-    /// two-step CoT pipeline (analyze → generate). Drops
+    /// two-step `CoT` pipeline (analyze → generate). Drops
     /// the source under `Wiki/raw/sources/`, runs the
     /// agent, parses FILE/REVIEW blocks, writes pages,
     /// updates `index.md` + `log.md`.
@@ -275,9 +274,9 @@ enum WikiCmd {
 #[derive(Subcommand)]
 enum AgentCmd {
     /// One-shot chat against `codex app-server`. Spawns the
-    /// daemon rooted at `--workspace`, sends `thread/start`
-    /// + `turn/start`, prints streamed assistant text until
-    /// the turn completes.
+    /// daemon rooted at `--workspace`, sends `thread/start` +
+    /// `turn/start`, prints streamed assistant text until the
+    /// turn completes.
     ///
     /// Example:
     ///   task agent chat -w . -m gpt-5.4-mini "summarize this repo"
@@ -295,7 +294,7 @@ enum AgentCmd {
         effort: Option<String>,
         /// Sandbox / access mode
         /// (`read-only|current|full-access`). Default
-        /// `current` (matches CodexMonitor).
+        /// `current` (matches `CodexMonitor`).
         #[arg(long)]
         access_mode: Option<String>,
         /// Override `codex` binary path. Falls back to
@@ -1123,8 +1122,8 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
             tasks.sort_by(|a, b| {
                 // Open before done; then by due date ascending
                 // (None last); then by title.
-                let a_done = task::Status::from_str(&a.status).is_some_and(|s| s.is_done());
-                let b_done = task::Status::from_str(&b.status).is_some_and(|s| s.is_done());
+                let a_done = task::Status::from_str(&a.status).is_some_and(task::Status::is_done);
+                let b_done = task::Status::from_str(&b.status).is_some_and(task::Status::is_done);
                 a_done
                     .cmp(&b_done)
                     .then_with(|| a.due.is_none().cmp(&b.due.is_none()))
@@ -1136,7 +1135,8 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 return Ok(());
             }
             for t in &tasks {
-                let marker = if task::Status::from_str(&t.status).is_some_and(|s| s.is_done()) {
+                let marker = if task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
+                {
                     "[x]"
                 } else {
                     "[ ]"
@@ -1169,8 +1169,7 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                         || std::path::Path::new(&t.path)
                             .file_stem()
                             .and_then(|s| s.to_str())
-                            .map(|s| s.to_ascii_lowercase().starts_with(&needle))
-                            .unwrap_or(false)
+                            .is_some_and(|s| s.to_ascii_lowercase().starts_with(&needle))
                 })
                 .collect();
             let matched = match matches.as_slice() {
@@ -1366,7 +1365,7 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
                 .page(&rel_path)
                 .ok_or_else(|| eyre::eyre!("page not found: {rel_path}"))?;
             if let Some(v) = vault_obsidian::read_property(page, &key) {
-                println!("{v}")
+                println!("{v}");
             }
         }
         VaultCmd::PropertySet {
@@ -1422,18 +1421,15 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
         }
         VaultCmd::BaseQuery { path, base, view } => {
             let v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            match view {
-                Some(view_name) => {
-                    let ev = vault_obsidian::query_view(&v, &base, &view_name)
-                        .map_err(|e| eyre::eyre!("query: {e}"))?;
-                    print_executed_view(&view_name, &ev);
-                }
-                None => {
-                    let results = vault_obsidian::query_all_views(&v, &base)
-                        .map_err(|e| eyre::eyre!("query: {e}"))?;
-                    for (name, ev) in results {
-                        print_executed_view(&name, &ev);
-                    }
+            if let Some(view_name) = view {
+                let ev = vault_obsidian::query_view(&v, &base, &view_name)
+                    .map_err(|e| eyre::eyre!("query: {e}"))?;
+                print_executed_view(&view_name, &ev);
+            } else {
+                let results = vault_obsidian::query_all_views(&v, &base)
+                    .map_err(|e| eyre::eyre!("query: {e}"))?;
+                for (name, ev) in results {
+                    print_executed_view(&name, &ev);
                 }
             }
         }
@@ -1443,14 +1439,13 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             body,
         } => {
             let mut v = Vault::open(&path).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let body = match body {
-                Some(b) => b,
-                None => {
-                    use std::io::Read;
-                    let mut buf = String::new();
-                    std::io::stdin().read_to_string(&mut buf)?;
-                    buf
-                }
+            let body = if let Some(b) = body {
+                b
+            } else {
+                use std::io::Read;
+                let mut buf = String::new();
+                std::io::stdin().read_to_string(&mut buf)?;
+                buf
             };
             let guard = vault_obsidian::SelfWriteGuard::new();
             vault_obsidian::create_page(&mut v, &rel_path, &[], &body, &guard)

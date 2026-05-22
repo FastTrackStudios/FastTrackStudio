@@ -81,6 +81,7 @@ pub fn write_task(
 /// Default layout: `tasks/<slug>.md`. Slug is lowercase, spaces
 /// → `-`, non-alphanumerics dropped. Pass `folder` to override
 /// the default `tasks/` (e.g. `Some("projects/website")`).
+#[must_use]
 pub fn default_task_path(title: &str, folder: Option<&str>) -> String {
     let slug = slugify(title);
     match folder {

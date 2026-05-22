@@ -8,7 +8,8 @@
     unused_variables,
     unused_mut,
     private_interfaces,
-    clippy::all
+    clippy::all,
+    clippy::pedantic
 )]
 
 //! Vendored from `nashsu/CodexMonitor` (BSD-licensed; see

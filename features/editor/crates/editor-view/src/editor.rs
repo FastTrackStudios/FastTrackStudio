@@ -109,8 +109,7 @@ fn now_ms() -> f64 {
     // some reason there's no `performance` (Workers etc.).
     web_sys::window()
         .and_then(|w| w.performance())
-        .map(|p| p.now())
-        .unwrap_or(0.0)
+        .map_or(0.0, |p| p.now())
 }
 
 /// `keymap` is optional. When `None` the browser handles every
@@ -1776,8 +1775,7 @@ pub fn Editor(
                                 .props
                                 .iter()
                                 .find(|p| pre >= p.range.start && pre < p.range.end)
-                                .map(|p| p.key.as_str())
-                                .unwrap_or("");
+                                .map_or("", |p| p.key.as_str());
                             let safe_key = row_key.replace('"', "\\\"");
                             let script = format!(
                                 r#"(()=>{{const r=document.querySelector('.md-property-row[data-prop-key="{safe_key}"]');if(!r)return;const c=r.querySelector('[data-edit-role]');if(c){{c.focus();if(c.matches('input'))return;const rng=document.createRange();rng.selectNodeContents(c);rng.collapse(false);const s=window.getSelection();s.removeAllRanges();s.addRange(rng);}}}})();"#
@@ -1946,7 +1944,7 @@ pub fn Editor(
             let patch_json_lit =
                 serde_json::to_string(&patch_json).unwrap_or_else(|_| "\"\"".into());
             let script = format!(
-                r#"
+                r"
                 (function() {{
                     const payload = {patch_json_lit};
                     // Always stash the latest payload — the
@@ -1956,7 +1954,7 @@ pub fn Editor(
                     const fn = window['__cm_patch_{id}'];
                     if (typeof fn === 'function') fn(payload);
                 }})();
-                "#
+                "
             );
             let _ = document::eval(&script);
         });
@@ -1965,17 +1963,15 @@ pub fn Editor(
     // CSS hook so caret-shape / theming can branch on vim mode.
     // Falls back to `vim-mode-insert` (bar caret) when vim is
     // disabled — same as plain editing.
-    let vim_class = vim
-        .map(|sig| match sig.peek().mode {
-            editor_vim::Mode::Normal => "vim-mode-normal",
-            editor_vim::Mode::Insert => "vim-mode-insert",
-            editor_vim::Mode::VisualChar
-            | editor_vim::Mode::VisualLine
-            | editor_vim::Mode::VisualBlock => "vim-mode-visual",
-            editor_vim::Mode::Replace => "vim-mode-replace",
-            editor_vim::Mode::Command => "vim-mode-command",
-        })
-        .unwrap_or("vim-mode-insert");
+    let vim_class = vim.map_or("vim-mode-insert", |sig| match sig.peek().mode {
+        editor_vim::Mode::Normal => "vim-mode-normal",
+        editor_vim::Mode::Insert => "vim-mode-insert",
+        editor_vim::Mode::VisualChar
+        | editor_vim::Mode::VisualLine
+        | editor_vim::Mode::VisualBlock => "vim-mode-visual",
+        editor_vim::Mode::Replace => "vim-mode-replace",
+        editor_vim::Mode::Command => "vim-mode-command",
+    });
     let read_only = state.read().reading_mode;
     let root_class = if read_only {
         format!("editor-root reading-mode {vim_class}")

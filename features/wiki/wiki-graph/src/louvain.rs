@@ -21,7 +21,7 @@
 //!
 //! ## Cohesion
 //!
-//! Reuses llm_wiki's interpretation: 0..1, where ≥ 0.5 is
+//! Reuses `llm_wiki`'s interpretation: 0..1, where ≥ 0.5 is
 //! "well-connected" and < 0.15 surfaces as a sparse
 //! cluster gap. Computed as `internal_weight /
 //! total_weight` per community (with the cross-community

@@ -112,7 +112,7 @@ impl Store {
                 env.date_ms,
                 flags,
                 env.size as i64,
-                env.has_attachments as i64,
+                i64::from(env.has_attachments),
                 env.snippet,
                 path,
                 content_hash,
@@ -175,7 +175,7 @@ impl Store {
              ORDER BY date_ms DESC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![folder, limit as i64], row_to_stored)?;
+        let rows = stmt.query_map(params![folder, i64::from(limit)], row_to_stored)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)
     }
@@ -219,7 +219,7 @@ impl Store {
              ORDER BY rank ASC
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![query, limit as i64], |row| {
+        let rows = stmt.query_map(params![query, i64::from(limit)], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
         })?;
 
@@ -331,9 +331,9 @@ impl Store {
     }
 }
 
-/// Stable rowid derived from message-id. SQLite rowids are i64;
-/// we take the low 63 bits of FxHash and clear the sign bit so
-/// the value is always positive (SQLite reserves negatives).
+/// Stable rowid derived from message-id. `SQLite` rowids are i64;
+/// we take the low 63 bits of `FxHash` and clear the sign bit so
+/// the value is always positive (`SQLite` reserves negatives).
 fn stable_rowid(message_id: &str) -> i64 {
     use std::hash::Hasher;
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -413,7 +413,7 @@ fn parse_envelope(bytes: &[u8], folder: &str, flag_chars: &[char]) -> Option<Env
         .map(|a| {
             a.iter()
                 .map(|x| Addr {
-                    name: x.name().map(|s| s.to_string()),
+                    name: x.name().map(std::string::ToString::to_string),
                     email: x.address().unwrap_or("").to_string(),
                 })
                 .collect()
@@ -424,7 +424,7 @@ fn parse_envelope(bytes: &[u8], folder: &str, flag_chars: &[char]) -> Option<Env
         .map(|a| {
             a.iter()
                 .map(|x| Addr {
-                    name: x.name().map(|s| s.to_string()),
+                    name: x.name().map(std::string::ToString::to_string),
                     email: x.address().unwrap_or("").to_string(),
                 })
                 .collect()
@@ -435,7 +435,7 @@ fn parse_envelope(bytes: &[u8], folder: &str, flag_chars: &[char]) -> Option<Env
         .map(|a| {
             a.iter()
                 .map(|x| Addr {
-                    name: x.name().map(|s| s.to_string()),
+                    name: x.name().map(std::string::ToString::to_string),
                     email: x.address().unwrap_or("").to_string(),
                 })
                 .collect()
@@ -443,18 +443,23 @@ fn parse_envelope(bytes: &[u8], folder: &str, flag_chars: &[char]) -> Option<Env
         .unwrap_or_default();
     let date_ms = parsed
         .date()
-        .map(|d| d.to_timestamp().saturating_mul(1000))
-        .unwrap_or(0);
-    let message_id = parsed
-        .message_id()
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("<sha-{}@local.store>", content_hash_hex(bytes)));
-    let thread_id = parsed.in_reply_to().as_text().map(|s| s.to_string());
+        .map_or(0, |d| d.to_timestamp().saturating_mul(1000));
+    let message_id = parsed.message_id().map_or_else(
+        || format!("<sha-{}@local.store>", content_hash_hex(bytes)),
+        std::string::ToString::to_string,
+    );
+    let thread_id = parsed
+        .in_reply_to()
+        .as_text()
+        .map(std::string::ToString::to_string);
     let has_attachments = parsed
         .headers()
         .iter()
         .any(|h| h.name().eq_ignore_ascii_case("Content-Disposition"));
-    let flags: Vec<String> = flag_chars.iter().map(|c| c.to_string()).collect();
+    let flags: Vec<String> = flag_chars
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     Some(Envelope {
         message_id,
         folder: folder.to_string(),
@@ -473,7 +478,7 @@ fn parse_envelope(bytes: &[u8], folder: &str, flag_chars: &[char]) -> Option<Env
 
 fn body_text(bytes: &[u8]) -> Option<String> {
     let parsed = MessageParser::default().parse(bytes)?;
-    parsed.body_text(0).map(|s| s.into_owned())
+    parsed.body_text(0).map(std::borrow::Cow::into_owned)
 }
 
 fn content_hash_hex(bytes: &[u8]) -> String {

@@ -66,13 +66,10 @@ fn init_vault() {
     // `features/editor/examples/playground/`; the in-repo vault
     // is four levels up.
     let crate_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    candidates.push(
-        crate_root
-            .ancestors()
-            .nth(3)
-            .map(|p| p.join("examples/vault"))
-            .unwrap_or_else(|| crate_root.join("../../../../examples/vault")),
-    );
+    candidates.push(crate_root.ancestors().nth(3).map_or_else(
+        || crate_root.join("../../../../examples/vault"),
+        |p| p.join("examples/vault"),
+    ));
     if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
         candidates.push(home.join("Documents/Task"));
         candidates.push(home.join("Documents/The Observatory"));

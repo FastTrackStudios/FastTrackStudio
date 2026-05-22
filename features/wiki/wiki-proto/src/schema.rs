@@ -39,6 +39,7 @@ pub struct PurposeDoc {
 /// page types, frontmatter keys, where the catalog + log live.
 /// Backends are free to override; the LLM agent reads whatever
 /// the file actually contains.
+#[must_use]
 pub fn default_schema_doc() -> &'static str {
     DEFAULT_SCHEMA
 }
@@ -46,6 +47,7 @@ pub fn default_schema_doc() -> &'static str {
 /// Default `purpose.md` text — a stub for the curator to fill
 /// in. Tells the agent: "this is undefined, ask the curator
 /// before writing anything substantial."
+#[must_use]
 pub fn default_purpose_doc() -> &'static str {
     DEFAULT_PURPOSE
 }
@@ -89,7 +91,7 @@ Use `[[Page title]]` wikilinks. Bare basename; folder moves don't break links.
 - `Wiki/log.md` is append-only. Each entry starts `## [YYYY-MM-DD] <op> | <title>` so `grep '^## \['` gives a clean timeline.
 "#;
 
-const DEFAULT_PURPOSE: &str = r#"# Wiki purpose
+const DEFAULT_PURPOSE: &str = r"# Wiki purpose
 
 > Curator: fill this in. The agent reads it on every ingest to know what to emphasize.
 
@@ -109,4 +111,4 @@ const DEFAULT_PURPOSE: &str = r#"# Wiki purpose
 ## Out of scope
 
 (Anything explicitly *not* in this wiki's remit.)
-"#;
+";

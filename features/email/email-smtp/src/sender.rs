@@ -33,6 +33,7 @@ pub struct SmtpSender {
 }
 
 impl SmtpSender {
+    #[must_use]
     pub fn new(config: SmtpConfig) -> Self {
         Self { config }
     }
@@ -128,6 +129,7 @@ impl SmtpSender {
         Ok(message_id)
     }
 
+    #[allow(clippy::unused_self)]
     fn collect_recipients(&self, draft: &Draft) -> Vec<String> {
         let mut out = Vec::with_capacity(draft.to.len() + draft.cc.len() + draft.bcc.len());
         for a in draft.to.iter().chain(&draft.cc).chain(&draft.bcc) {

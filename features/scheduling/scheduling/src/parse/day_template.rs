@@ -38,8 +38,7 @@ fn parse_block(raw: &serde_yaml::Value) -> Result<TimeBlock, ParseError> {
     let id = m
         .get(serde_yaml::Value::String("id".into()))
         .and_then(serde_yaml::Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
     let label = m
         .get(serde_yaml::Value::String("label".into()))
         .and_then(serde_yaml::Value::as_str)
@@ -56,8 +55,7 @@ fn parse_block(raw: &serde_yaml::Value) -> Result<TimeBlock, ParseError> {
     let category = m
         .get(serde_yaml::Value::String("category".into()))
         .and_then(serde_yaml::Value::as_str)
-        .map(parse_category)
-        .unwrap_or(BlockCategory::Other);
+        .map_or(BlockCategory::Other, parse_category);
     let note = m
         .get(serde_yaml::Value::String("note".into()))
         .and_then(serde_yaml::Value::as_str)

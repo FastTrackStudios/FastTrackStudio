@@ -22,6 +22,7 @@ pub struct PageOutline {
 /// Walks `page.parsed.blocks` for `kind="heading"` entries; reconstructs
 /// line numbers by scanning `page.raw` for each heading occurrence in
 /// order, so multiple headings with the same text get distinct lines.
+#[must_use]
 pub fn outline(page: &VaultPage) -> PageOutline {
     // Pre-collect (line_no, level, text) candidates from the raw file
     // so we can match parsed headings to a real source line. We scan
@@ -94,7 +95,7 @@ pub fn outline(page: &VaultPage) -> PageOutline {
 }
 
 /// Parse a single line as an ATX heading. Returns `(level, text)` or
-/// `None`. Allows up to three leading spaces per CommonMark; strips
+/// `None`. Allows up to three leading spaces per `CommonMark`; strips
 /// any trailing `#`s and surrounding whitespace.
 fn parse_atx(line: &str) -> Option<(u8, String)> {
     let trimmed = line.trim_start_matches([' ', '\t']);

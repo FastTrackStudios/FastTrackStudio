@@ -71,7 +71,7 @@ impl WikiLive {
         let mut out = String::from("# Wiki index\n\n");
         out.push_str(&format!(
             "Catalog of {} pages. LLM-maintained; rebuilt on every ingest pass.\n\n",
-            grouped.values().map(|v| v.len()).sum::<usize>()
+            grouped.values().map(std::vec::Vec::len).sum::<usize>()
         ));
         // Stable ordering: known types in convention order, then leftovers.
         let known = [

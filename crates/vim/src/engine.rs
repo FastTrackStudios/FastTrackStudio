@@ -92,6 +92,7 @@ impl Default for VimEngine {
 }
 
 impl VimEngine {
+    #[must_use]
     pub fn mode(&self) -> VimMode {
         self.machine.mode()
     }
@@ -99,6 +100,7 @@ impl VimEngine {
     /// The currently-pending count, if the user has typed digits
     /// since the last completed action. Useful for status-line
     /// rendering (`3` shows up while typing `3j`).
+    #[must_use]
     pub fn pending_count(&self) -> Option<u32> {
         self.count
     }
@@ -106,6 +108,7 @@ impl VimEngine {
     /// The current ex-command buffer contents, if the engine is in
     /// [`VimMode::Command`]. Status-line renderers display this
     /// preceded by `:` so the user sees their input.
+    #[must_use]
     pub fn command_buffer(&self) -> Option<&str> {
         self.command_buffer.as_deref()
     }
@@ -114,6 +117,7 @@ impl VimEngine {
     /// echoes what the user is typing; after submit it holds the
     /// last query so `n` / `N` can replay it. Returns `None` until
     /// the first `/` has been typed.
+    #[must_use]
     pub fn search_buffer(&self) -> Option<&str> {
         self.search_buffer.as_deref()
     }
@@ -342,11 +346,7 @@ impl VimEngine {
             DioxusKey::Enter => {
                 self.machine.reset_mode();
                 // Keep search_buffer populated for `n` / `N`.
-                let empty = self
-                    .search_buffer
-                    .as_deref()
-                    .map(|s| s.is_empty())
-                    .unwrap_or(true);
+                let empty = self.search_buffer.as_deref().is_none_or(str::is_empty);
                 if empty {
                     // Submitting an empty query is a no-op.
                     self.search_buffer = None;

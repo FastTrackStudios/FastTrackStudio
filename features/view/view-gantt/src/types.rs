@@ -36,6 +36,7 @@ pub enum LengthUnit {
 
 impl LengthUnit {
     /// Smaller = earlier in this list. Mirrors svar's `units` array.
+    #[must_use]
     pub fn rank(self) -> u8 {
         match self {
             Self::Minute => 0,
@@ -160,8 +161,9 @@ impl Default for ZoomConfig {
 }
 
 /// Default zoom levels — year/quarter/month/week/day/hour granularity.
+#[must_use]
 pub fn default_zoom_levels() -> Vec<ZoomLevel> {
-    use LengthUnit::*;
+    use LengthUnit::{Day, Hour, Month, Quarter, Week, Year};
     vec![
         ZoomLevel {
             min_cell_width: 200.0,
@@ -237,6 +239,7 @@ pub struct GanttColumn {
 }
 
 impl GanttColumn {
+    #[must_use]
     pub fn name(width: f32) -> Self {
         Self {
             kind: ColumnKind::Name,
@@ -244,6 +247,7 @@ impl GanttColumn {
             width,
         }
     }
+    #[must_use]
     pub fn start(width: f32) -> Self {
         Self {
             kind: ColumnKind::Start,
@@ -251,6 +255,7 @@ impl GanttColumn {
             width,
         }
     }
+    #[must_use]
     pub fn end(width: f32) -> Self {
         Self {
             kind: ColumnKind::End,
@@ -258,6 +263,7 @@ impl GanttColumn {
             width,
         }
     }
+    #[must_use]
     pub fn progress(width: f32) -> Self {
         Self {
             kind: ColumnKind::Progress,
@@ -265,6 +271,7 @@ impl GanttColumn {
             width,
         }
     }
+    #[must_use]
     pub fn duration(width: f32) -> Self {
         Self {
             kind: ColumnKind::Duration,
@@ -272,6 +279,7 @@ impl GanttColumn {
             width,
         }
     }
+    #[must_use]
     pub fn type_col(width: f32) -> Self {
         Self {
             kind: ColumnKind::Type,
@@ -281,6 +289,7 @@ impl GanttColumn {
     }
 }
 
+#[must_use]
 pub fn default_columns() -> Vec<GanttColumn> {
     vec![GanttColumn::name(280.0)]
 }

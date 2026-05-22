@@ -38,7 +38,7 @@ pub(crate) fn require_str(
 
 pub(crate) fn take_u16(map: &serde_yaml::Mapping, key: &str) -> Option<u16> {
     map.get(serde_yaml::Value::String(key.into()))
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u16::try_from(n).ok())
 }
 

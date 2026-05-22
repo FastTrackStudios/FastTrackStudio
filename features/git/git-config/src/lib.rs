@@ -7,7 +7,7 @@
 //!   One task may link to N issues/PRs.
 //!
 //! First pass ships types + an in-memory [`Store`] so the rest
-//! of the feature can build and integrate. SQLite persistence
+//! of the feature can build and integrate. `SQLite` persistence
 //! lands next (matching `email-config`'s store).
 
 use std::collections::HashMap;
@@ -86,6 +86,7 @@ struct MemoryInner {
 }
 
 impl MemoryStore {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }

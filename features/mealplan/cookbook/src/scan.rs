@@ -6,6 +6,7 @@ use vault::Vault;
 use crate::model::Recipe;
 use crate::parse::{looks_like_recipe, parse_page};
 
+#[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<Recipe> {
     vault
         .pages

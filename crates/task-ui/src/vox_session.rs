@@ -31,6 +31,7 @@ pub enum VoxStatus {
 }
 
 impl VoxStatus {
+    #[must_use]
     pub fn label(&self) -> &'static str {
         match self {
             Self::Idle => "idle",
@@ -40,6 +41,7 @@ impl VoxStatus {
         }
     }
 
+    #[must_use]
     pub fn is_connected(&self) -> bool {
         matches!(self, Self::Connected { .. })
     }
@@ -50,6 +52,7 @@ impl VoxStatus {
 pub struct VoxStatusCtx(pub Signal<VoxStatus>);
 
 impl VoxStatusCtx {
+    #[must_use]
     pub fn new() -> Self {
         Self(Signal::new(VoxStatus::Idle))
     }
@@ -87,16 +90,13 @@ impl VoxSession {
             vox_websocket::WsLink::connect(&server_url).await
         });
         let connect_result = futures_util::FutureExt::catch_unwind(connect_fut).await;
-        let link_result = match connect_result {
-            Ok(r) => r,
-            Err(_) => {
-                tracing::warn!(%server_url, "vox WS connect panicked (likely WebSocket::new threw)");
-                status.set(VoxStatus::Failed {
-                    stage: "connect".into(),
-                    error: "WebSocket::new threw (page not ready or invalid URL)".into(),
-                });
-                return None;
-            }
+        let Ok(link_result) = connect_result else {
+            tracing::warn!(%server_url, "vox WS connect panicked (likely WebSocket::new threw)");
+            status.set(VoxStatus::Failed {
+                stage: "connect".into(),
+                error: "WebSocket::new threw (page not ready or invalid URL)".into(),
+            });
+            return None;
         };
         match link_result {
             Ok(link) => {
@@ -107,16 +107,15 @@ impl VoxSession {
                         .await
                 });
                 let establish_result = futures_util::FutureExt::catch_unwind(establish_fut).await;
-                let final_result = match establish_result {
-                    Ok(r) => r,
-                    Err(_) => {
-                        tracing::warn!(%server_url, "vox handshake panicked");
-                        status.set(VoxStatus::Failed {
-                            stage: "establish".into(),
-                            error: "vox handshake threw (server may not be running an acceptor on /vox)".into(),
-                        });
-                        return None;
-                    }
+                let Ok(final_result) = establish_result else {
+                    tracing::warn!(%server_url, "vox handshake panicked");
+                    status.set(VoxStatus::Failed {
+                        stage: "establish".into(),
+                        error:
+                            "vox handshake threw (server may not be running an acceptor on /vox)"
+                                .into(),
+                    });
+                    return None;
                 };
                 match final_result {
                     Ok(session) => {
@@ -181,6 +180,7 @@ pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:9090/vox";
 ///   when unset so the desktop app starts in offline-only mode
 ///   without spamming connection-refused errors. Set
 ///   `TASK_VOX_URL=ws://host:9090/vox` to opt into syncing.
+#[must_use]
 pub fn vox_url() -> String {
     #[cfg(target_arch = "wasm32")]
     {

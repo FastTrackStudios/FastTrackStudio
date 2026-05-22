@@ -246,7 +246,7 @@ pub fn Gantt(props: GanttProps) -> Element {
             let s = state.peek();
             let grid = s.build_grid();
             let unit_secs = (add(grid.min_unit, grid.start, 1) - grid.start).num_seconds() as f64;
-            let secs = (st.dx as f64 / grid.min_unit_width as f64) * unit_secs;
+            let secs = (f64::from(st.dx) / f64::from(grid.min_unit_width)) * unit_secs;
             Duration::seconds(secs as i64)
         };
         // Dispatch the mutation FIRST so the consumer's task signal

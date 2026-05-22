@@ -7,7 +7,7 @@
 //! - an `Arc<dyn ObjectStore>` for the actual bytes,
 //! - an in-memory `UploadSessionMap` keyed by `upload_id`. The map
 //!   records what the client said they were uploading
-//!   (filename / mime / doc_id) so `complete_upload` can stitch
+//!   (filename / mime / `doc_id`) so `complete_upload` can stitch
 //!   together the [`AttachmentMeta`] without re-asking.
 //! - a "committed" map keyed by `content_hash` so
 //!   `get_download_url` knows which blobs actually exist.
@@ -60,6 +60,7 @@ pub(crate) struct PendingUpload {
 }
 
 impl UploadSessionMap {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -76,6 +77,7 @@ impl UploadSessionMap {
         self.inner.lock().unwrap().get(id).cloned()
     }
 
+    #[must_use]
     pub fn pending_count(&self) -> usize {
         self.inner.lock().unwrap().len()
     }
@@ -88,6 +90,7 @@ pub struct AttachmentCatalog {
 }
 
 impl AttachmentCatalog {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -99,6 +102,7 @@ impl AttachmentCatalog {
             .insert(meta.content_hash.clone(), meta);
     }
 
+    #[must_use]
     pub fn get(&self, content_hash: &str) -> Option<AttachmentMeta> {
         self.inner.lock().unwrap().get(content_hash).cloned()
     }

@@ -29,13 +29,13 @@ fn extract_thread_id(value: &Value) -> Option<String> {
             .get("threadId")
             .or_else(|| container.get("thread_id"))
             .and_then(|t| t.as_str())
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| {
                 container
                     .get("thread")
                     .and_then(|thread| thread.get("id"))
                     .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
             })
     }
 
@@ -47,7 +47,7 @@ fn push_thread_id(out: &mut Vec<String>, value: Option<&Value>) {
     let Some(value) = value else {
         return;
     };
-    if let Some(thread_id) = value.as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    if let Some(thread_id) = value.as_str().map(str::trim).filter(|s| !s.is_empty()) {
         out.push(thread_id.to_string());
         return;
     }
@@ -201,7 +201,7 @@ fn normalize_root_path(value: &str) -> String {
     if is_drive_path || normalized.starts_with("//") {
         normalized.to_ascii_lowercase()
     } else {
-        normalized.to_string()
+        normalized.clone()
     }
 }
 
@@ -227,13 +227,13 @@ fn extract_thread_entries_from_thread_list_result(value: &Value) -> Vec<ThreadLi
         let cwd = object
             .get("cwd")
             .and_then(|value| value.as_str())
-            .map(|value| value.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| {
                 object
                     .get("thread")
                     .and_then(|thread| thread.get("cwd"))
                     .and_then(|value| value.as_str())
-                    .map(|value| value.to_string())
+                    .map(std::string::ToString::to_string)
             });
 
         let thread_id = object
@@ -241,13 +241,13 @@ fn extract_thread_entries_from_thread_list_result(value: &Value) -> Vec<ThreadLi
             .or_else(|| object.get("thread_id"))
             .or_else(|| object.get("id"))
             .and_then(|value| value.as_str())
-            .map(|value| value.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| {
                 object
                     .get("thread")
                     .and_then(|thread| thread.get("id"))
                     .and_then(|value| value.as_str())
-                    .map(|value| value.to_string())
+                    .map(std::string::ToString::to_string)
             });
         if let Some(thread_id) = thread_id {
             let source = object
@@ -391,7 +391,7 @@ fn should_suppress_hidden_thread_event(
     !has_result_or_error
         && !matches!(
             method_name,
-            Some("thread/archived") | Some("codex/backgroundThread")
+            Some("thread/archived" | "codex/backgroundThread")
         )
 }
 
@@ -819,7 +819,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 }
             };
 
-            let maybe_id = value.get("id").and_then(|id| id.as_u64());
+            let maybe_id = value.get("id").and_then(serde_json::Value::as_u64);
             let has_method = value.get("method").is_some();
             let has_result_or_error = value.get("result").is_some() || value.get("error").is_some();
             let method_name = value.get("method").and_then(|method| method.as_str());
@@ -944,7 +944,7 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
                 }
             }
 
-            if matches!(method_name, Some("item/started") | Some("item/completed")) {
+            if matches!(method_name, Some("item/started" | "item/completed")) {
                 let related_thread_ids = extract_related_thread_ids(&value);
                 if !related_thread_ids.is_empty() {
                     let mut thread_workspace = session_clone.thread_workspace.lock().await;
@@ -1086,16 +1086,15 @@ pub(crate) async fn spawn_workspace_session<E: EventSink>(
         session.send_request("initialize", init_params),
     )
     .await;
-    let init_response = match init_result {
-        Ok(response) => response,
-        Err(_) => {
-            let mut child = session.child.lock().await;
-            kill_child_process_tree(&mut child).await;
-            return Err(
-                "Codex app-server did not respond to initialize. Check that `codex app-server` works in Terminal."
-                    .to_string(),
-            );
-        }
+    let init_response = if let Ok(response) = init_result {
+        response
+    } else {
+        let mut child = session.child.lock().await;
+        kill_child_process_tree(&mut child).await;
+        return Err(
+            "Codex app-server did not respond to initialize. Check that `codex app-server` works in Terminal."
+                .to_string(),
+        );
     };
     init_response?;
     session.send_notification("initialized", None).await?;
@@ -1160,7 +1159,7 @@ mod tests {
             params
                 .get("capabilities")
                 .and_then(|caps| caps.get("experimentalApi"))
-                .and_then(|value| value.as_bool()),
+                .and_then(serde_json::Value::as_bool),
             Some(true)
         );
     }

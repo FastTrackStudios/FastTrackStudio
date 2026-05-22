@@ -28,6 +28,7 @@ pub struct TaskItem<'a> {
 
 impl TaskItem<'_> {
     /// Done state — Obsidian treats both `x` and `X` as completed.
+    #[must_use]
     pub fn is_done(&self) -> bool {
         matches!(self.marker, 'x' | 'X')
     }
@@ -35,12 +36,14 @@ impl TaskItem<'_> {
     /// Open state — only the literal unchecked marker (a single
     /// space) counts as open; any other glyph is some sentinel
     /// (in-progress, cancelled, question, etc.).
+    #[must_use]
     pub fn is_open(&self) -> bool {
         matches!(self.marker, ' ')
     }
 }
 
 /// Scan every page in the vault for task list items.
+#[must_use]
 pub fn list_tasks(vault: &Vault) -> Vec<TaskItem<'_>> {
     let mut out = Vec::new();
     for page in &vault.pages {
@@ -50,6 +53,7 @@ pub fn list_tasks(vault: &Vault) -> Vec<TaskItem<'_>> {
 }
 
 /// Tasks belonging to a single page.
+#[must_use]
 pub fn page_tasks(page: &VaultPage) -> Vec<TaskItem<'_>> {
     // Pre-scan the raw to get every (line_no, marker) for task
     // list items, in source order. We then zip this with the
@@ -112,7 +116,7 @@ fn scan_task_marker(line: &str) -> Option<char> {
         r
     } else {
         // Ordered list: digits then `. `.
-        let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = trimmed.chars().take_while(char::is_ascii_digit).collect();
         if digits.is_empty() {
             return None;
         }

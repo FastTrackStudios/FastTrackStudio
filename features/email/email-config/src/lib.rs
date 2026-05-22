@@ -41,6 +41,7 @@ pub struct AccountConfig {
 }
 
 impl AccountConfig {
+    #[must_use]
     pub fn to_account(&self) -> Account {
         Account {
             id: self.id.clone(),

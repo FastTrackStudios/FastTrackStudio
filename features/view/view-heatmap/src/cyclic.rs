@@ -67,6 +67,7 @@ impl CyclicConfig {
     /// Mirrors the rule the source video describes: week 1 is the
     /// first `week_start` whose 7-day window contains ≥ 4 days of
     /// `year`.
+    #[must_use]
     pub fn for_year(year: i32, week_start: Weekday) -> Self {
         let year_start = first_week_start(year, week_start);
         let next_year_start = first_week_start(year + 1, week_start);
@@ -81,6 +82,7 @@ impl CyclicConfig {
     }
 
     /// Total weeks rendered for this year (52 or 53).
+    #[must_use]
     pub fn total_weeks(self) -> u32 {
         if self.bonus_week { 53 } else { 52 }
     }
@@ -92,7 +94,7 @@ impl CyclicConfig {
         let start = self.year_start;
         let bonus = self.bonus_week;
         (0..self.total_weeks()).map(move |i| {
-            let week_start = start + Days::new((i as u64) * 7);
+            let week_start = start + Days::new(u64::from(i) * 7);
             if bonus && i == 52 {
                 WeekCoord {
                     quarter: 4,
@@ -124,8 +126,8 @@ impl CyclicConfig {
 /// week-1 rule, applied to an arbitrary first day-of-week.
 fn first_week_start(year: i32, week_start: Weekday) -> NaiveDate {
     let jan1 = NaiveDate::from_ymd_opt(year, 1, 1).expect("valid jan 1");
-    let dow_diff =
-        jan1.weekday().num_days_from_monday() as i64 - week_start.num_days_from_monday() as i64;
+    let dow_diff = i64::from(jan1.weekday().num_days_from_monday())
+        - i64::from(week_start.num_days_from_monday());
     let dow_diff = ((dow_diff % 7) + 7) % 7; // 0..7
     let candidate = jan1 - Days::new(dow_diff as u64);
     let days_in_year = (0..7)

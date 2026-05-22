@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn parses_consultation() {
-        let yaml = r#"
+        let yaml = r"
 type: scheduling-event-type
 id: consult-30
 title: 30-minute consultation
@@ -101,7 +101,7 @@ schedule_id: working-hours
 location:
   kind: link
   url: https://meet.example/room/abc
-"#;
+";
         let et = parse_event_type("event-types/consult-30.md", yaml).unwrap();
         assert_eq!(et.title, "30-minute consultation");
         assert_eq!(et.duration_min, 30);
@@ -111,11 +111,11 @@ location:
 
     #[test]
     fn missing_duration_errors() {
-        let yaml = r#"
+        let yaml = r"
 type: scheduling-event-type
 title: x
 slug: x
-"#;
+";
         assert!(matches!(
             parse_event_type("p", yaml),
             Err(ParseError::MissingField {

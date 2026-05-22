@@ -1,3 +1,4 @@
+#![allow(clippy::large_futures)]
 //! Phase 2 integration test — architect-auth wired over vox.
 //!
 //! Plan (`plans/decentralized-foundation.md` §13 Phase 2):

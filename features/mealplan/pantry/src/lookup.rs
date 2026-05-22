@@ -35,13 +35,13 @@ pub enum LookupError {
     Decode(String),
 }
 
-/// Look `barcode` up against OpenFoodFacts and return a
+/// Look `barcode` up against `OpenFoodFacts` and return a
 /// partly-populated [`PantryItemDraft`]. `Ok(None)` when OFF
 /// returns 404 / status=0 (no product); `Err` on network or
 /// decode failure. The caller layers local-vault precedence
 /// in [`PantryService::resolve_barcode`].
 pub fn lookup_external(barcode: &str) -> Result<Option<PantryItemDraft>, LookupError> {
-    let digits: String = barcode.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = barcode.chars().filter(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return Ok(None);
     }
@@ -66,7 +66,7 @@ pub fn lookup_external(barcode: &str) -> Result<Option<PantryItemDraft>, LookupE
     let raw: serde_json::Value = resp
         .json()
         .map_err(|e| LookupError::Decode(e.to_string()))?;
-    if raw.get("status").and_then(|v| v.as_u64()) != Some(1) {
+    if raw.get("status").and_then(serde_json::Value::as_u64) != Some(1) {
         return Ok(None);
     }
     let product = raw
@@ -95,7 +95,7 @@ fn map_product(p: &serde_json::Value, barcode: &str) -> PantryItemDraft {
     let image_url = p
         .get("image_url")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .filter(|s| !s.is_empty());
 
     // `categories_tags` is OFF's normalized taxonomy
@@ -114,7 +114,7 @@ fn map_product(p: &serde_json::Value, barcode: &str) -> PantryItemDraft {
     let serving_size = p
         .get("serving_size")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .filter(|s| !s.is_empty());
     let nutrition_per_unit = parse_nutriments(p.get("nutriments"));
     // Nutriments on OFF are *per 100g* / *per 100ml* by
@@ -148,7 +148,7 @@ fn map_product(p: &serde_json::Value, barcode: &str) -> PantryItemDraft {
 
 fn parse_nutriments(v: Option<&serde_json::Value>) -> Option<Nutrition> {
     let m = v?.as_object()?;
-    let get = |k: &str| m.get(k).and_then(|v| v.as_f64());
+    let get = |k: &str| m.get(k).and_then(serde_json::Value::as_f64);
     let calories = get("energy-kcal_100g").or_else(|| get("energy-kcal"));
     let protein_g = get("proteins_100g");
     let carbs_g = get("carbohydrates_100g");
@@ -157,7 +157,7 @@ fn parse_nutriments(v: Option<&serde_json::Value>) -> Option<Nutrition> {
     let sugar_g = get("sugars_100g");
     if [calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g]
         .iter()
-        .all(|v| v.is_none())
+        .all(std::option::Option::is_none)
     {
         return None;
     }
@@ -204,5 +204,7 @@ fn map_food_category(tag: String) -> String {
     } else {
         None
     };
-    canonical.map(|s| s.to_string()).unwrap_or(tag)
+    canonical
+        .map(std::string::ToString::to_string)
+        .unwrap_or(tag)
 }

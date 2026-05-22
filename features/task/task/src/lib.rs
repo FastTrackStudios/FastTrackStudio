@@ -3,13 +3,13 @@
 //! Tasks are plain markdown pages with YAML frontmatter living
 //! inside a `vault::Vault`. The schema mirrors
 //! [callumalpass/tasknotes](https://github.com/callumalpass/tasknotes)
-//! so existing TaskNotes vaults round-trip into Task without
+//! so existing `TaskNotes` vaults round-trip into Task without
 //! conversion.
 //!
 //! Surface:
 //! - [`TaskInfo`] — the parsed task model.
 //! - [`Status`] / [`Priority`] — configurable enums (default set
-//!   mirrors TaskNotes defaults).
+//!   mirrors `TaskNotes` defaults).
 //! - [`parse_page`] — `vault::VaultPage` → `TaskInfo`.
 //! - [`serialize_task`] — `TaskInfo` → markdown bytes.
 //! - [`scan_vault`] — collect every `type: task` (or

@@ -33,6 +33,7 @@ impl ColorTag {
     /// to compose `bg-{stem}-500` / `text-{stem}-500` class names
     /// against the theme. Kept here so consumers can reuse it for
     /// chips, badges, etc.
+    #[must_use]
     pub fn stem(self) -> &'static str {
         match self {
             Self::Neutral => "slate",

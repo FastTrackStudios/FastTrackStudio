@@ -65,11 +65,11 @@ pub fn extract_path(path: &Path, opts: &ExtractOpts) -> Result<Vec<ExtractedImag
     let mime = match path
         .extension()
         .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase())
+        .map(str::to_ascii_lowercase)
         .as_deref()
     {
         Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("jpg" | "jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
         Some("pdf") => "application/pdf",

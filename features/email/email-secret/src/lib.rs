@@ -133,9 +133,11 @@ impl SecretValue {
     pub fn new(s: impl Into<String>) -> Self {
         Self(Zeroizing::new(s.into()))
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+    #[must_use]
     pub fn into_string(self) -> Zeroizing<String> {
         self.0
     }

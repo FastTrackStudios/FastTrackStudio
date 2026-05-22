@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("recent in {}:", f.id);
         for e in envs {
-            let from = e.from.first().map(|a| a.email.as_str()).unwrap_or("?");
+            let from = e.from.first().map_or("?", |a| a.email.as_str());
             println!("  [{}] {}  —  {}", e.date_ms, from, e.subject);
         }
         println!();

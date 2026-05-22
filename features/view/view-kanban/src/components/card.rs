@@ -74,7 +74,7 @@ pub fn CardTile(props: CardTileProps) -> Element {
     }
 }
 
-/// MIME used in DataTransfer. Exposed so the column drop handler
+/// MIME used in `DataTransfer`. Exposed so the column drop handler
 /// can parse the dragged id without re-declaring the constant.
 pub(crate) const fn dt_mime() -> &'static str {
     DT_MIME

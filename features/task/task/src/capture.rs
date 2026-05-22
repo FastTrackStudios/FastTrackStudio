@@ -5,18 +5,18 @@
 //! remaining text as `title`.
 //!
 //! Extraction rules (v1 — kept small on purpose):
-//! - `#tag`         → push to `tags`. The literal `#task` is
-//!                    auto-added so the page passes the
-//!                    `looks_like_task` discriminator.
+//! - `#tag` → push to `tags`. The literal `#task` is
+//!   auto-added so the page passes the
+//!   `looks_like_task` discriminator.
 //! - `@context`     → push to `contexts`.
 //! - `[[Wikilink]]` → push to `projects`.
 //! - `!low|normal|high|critical` → set `priority`.
 //! - Bare date tokens (case-insensitive):
-//!     `today`           → today (`due`)
-//!     `tomorrow`        → today + 1
-//!     `next monday`…    → next Mon…Sun
-//!     `mon`/`tue`/…     → next occurrence of that weekday
-//!     `YYYY-MM-DD`      → that date
+//!   - `today` → today (`due`)
+//!   - `tomorrow` → today + 1
+//!   - `next monday` … → next Mon…Sun
+//!   - `mon` / `tue` / … → next occurrence of that weekday
+//!   - `YYYY-MM-DD` → that date
 //!
 //! Whatever's left after extraction becomes the `title`. NLP
 //! expansion (priority words "asap"/"urgent", deadline phrases
@@ -194,8 +194,8 @@ fn consume_date_phrase(tokens: Vec<String>, today: NaiveDate) -> (Vec<String>, O
 }
 
 fn next_weekday(today: NaiveDate, target: Weekday) -> NaiveDate {
-    let today_num = today.weekday().num_days_from_monday() as i64;
-    let target_num = target.num_days_from_monday() as i64;
+    let today_num = i64::from(today.weekday().num_days_from_monday());
+    let target_num = i64::from(target.num_days_from_monday());
     let delta = (target_num - today_num).rem_euclid(7);
     // "next mon" when it IS monday: 7 days out (next-next-monday).
     let delta = if delta == 0 { 7 } else { delta };

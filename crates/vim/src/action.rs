@@ -75,7 +75,7 @@ pub enum BlockOp {
     /// `yy` — yank (copy) the current block into the engine's
     /// register. Host doesn't have to do anything — the engine
     /// captures content from the host's last block-edit emission
-    /// or via a paired YankCurrent action that the host fulfills.
+    /// or via a paired `YankCurrent` action that the host fulfills.
     YankCurrent,
     /// `p` — paste the register's contents as a new block after
     /// the current block.
@@ -147,12 +147,12 @@ pub enum VimAction {
     /// submit the buffer stays alive so `n` / `N` can replay it.
     SubmitSearch,
 
-    /// `d` / `x` in VisualLine — delete every block in the host's
+    /// `d` / `x` in `VisualLine` — delete every block in the host's
     /// current selection range. Engine doesn't track selection;
     /// host iterates its own anchor/cursor span.
     DeleteSelection,
 
-    /// `y` in VisualLine — yank every block in the host's current
+    /// `y` in `VisualLine` — yank every block in the host's current
     /// selection range into the host's register.
     YankSelection,
 }
@@ -177,6 +177,7 @@ pub enum VimCommand {
 impl VimCommand {
     /// Parse a buffer string into a known command. Returns `None`
     /// for empty or unrecognized input.
+    #[must_use]
     pub fn parse(buf: &str) -> Option<Self> {
         match buf.trim() {
             "w" | "write" => Some(Self::Save),

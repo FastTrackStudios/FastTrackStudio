@@ -17,12 +17,13 @@ pub struct VaultLookupView<'v> {
 }
 
 impl<'v> VaultLookupView<'v> {
+    #[must_use]
     pub fn new(vault: &'v Vault, blocks: &'v BlockIndex) -> Self {
         Self { vault, blocks }
     }
 }
 
-impl<'v> VaultLookup for VaultLookupView<'v> {
+impl VaultLookup for VaultLookupView<'_> {
     fn lookup_block(&self, uuid: &str) -> Option<VaultBlockHit> {
         let loc = self.blocks.lookup_str(uuid)?;
         let page = self.vault.pages.get(loc.page_idx)?;
@@ -49,11 +50,8 @@ impl<'v> VaultLookup for VaultLookupView<'v> {
         let p = self.vault.page_by_basename(page)?;
         let needle = format!("^{short_id}");
         let pos = p.raw.find(&needle)?;
-        let line_start = p.raw[..pos].rfind('\n').map(|n| n + 1).unwrap_or(0);
-        let line_end = p.raw[pos..]
-            .find('\n')
-            .map(|n| pos + n)
-            .unwrap_or(p.raw.len());
+        let line_start = p.raw[..pos].rfind('\n').map_or(0, |n| n + 1);
+        let line_end = p.raw[pos..].find('\n').map_or(p.raw.len(), |n| pos + n);
         let line = &p.raw[line_start..line_end];
         Some(line[..line.len() - needle.len()].trim_end().to_string())
     }
@@ -62,10 +60,7 @@ impl<'v> VaultLookup for VaultLookupView<'v> {
 /// First line of the block at `anchor` in `raw`, capped at 80
 /// chars for chip display.
 fn first_line(raw: &str, anchor: usize) -> String {
-    let end = raw[anchor..]
-        .find('\n')
-        .map(|n| anchor + n)
-        .unwrap_or(raw.len());
+    let end = raw[anchor..].find('\n').map_or(raw.len(), |n| anchor + n);
     let line = &raw[anchor..end];
     if line.chars().count() > 80 {
         let truncated: String = line.chars().take(80).collect();
@@ -80,7 +75,7 @@ fn first_line(raw: &str, anchor: usize) -> String {
 fn preview_of_page(raw: &str, max: usize) -> String {
     // Skip frontmatter if present.
     let body_start = if let Some(rest) = raw.strip_prefix("---\n") {
-        rest.find("\n---\n").map(|i| 4 + i + 5).unwrap_or(0)
+        rest.find("\n---\n").map_or(0, |i| 4 + i + 5)
     } else {
         0
     };
@@ -171,7 +166,7 @@ mod tests {
                 .and_then(|s| s.to_str())
                 .unwrap_or(rel)
                 .into(),
-            folder: "".into(),
+            folder: String::new(),
             raw: raw.into(),
             mtime: SystemTime::UNIX_EPOCH,
         }

@@ -19,6 +19,7 @@ pub struct WordCount {
 }
 
 /// Vault-wide totals.
+#[must_use]
 pub fn vault_wordcount(vault: &Vault) -> WordCount {
     let mut out = WordCount::default();
     for page in &vault.pages {
@@ -31,6 +32,7 @@ pub fn vault_wordcount(vault: &Vault) -> WordCount {
 }
 
 /// Word/char count for a single page.
+#[must_use]
 pub fn page_wordcount(page: &VaultPage) -> WordCount {
     let cleaned = clean_for_count(&page.raw);
     WordCount {

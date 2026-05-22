@@ -69,6 +69,7 @@ pub fn write_meal(
 /// `name` for the disambiguating slug when multiple meals
 /// share a slot (e.g. `"prep batch"`); the date stays at the
 /// front so weekly views read cleanly in directory listings.
+#[must_use]
 pub fn default_meal_path(
     date: chrono::NaiveDate,
     slot: &str,

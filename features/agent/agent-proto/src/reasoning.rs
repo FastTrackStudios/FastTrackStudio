@@ -1,6 +1,6 @@
 //! Extended-thinking block. Some providers expose the
 //! model's reasoning trace separately from the final
-//! response (Anthropic's "thinking" mode, OpenAI o1's
+//! response (Anthropic's "thinking" mode, `OpenAI` o1's
 //! reasoning summary, Hermes's reasoning effort levels).
 //! Stored on the message but distinct so UIs can collapse /
 //! redact it independently.

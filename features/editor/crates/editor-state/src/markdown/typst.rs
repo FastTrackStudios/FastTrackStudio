@@ -64,7 +64,7 @@ pub(crate) fn render_typst(kind: TypstKind, body: &str) -> Option<String> {
     if let Some(cached) = with_typst_cache(|c| c.get(kind, body)) {
         return Some(cached);
     }
-    let budget = COMPILE_BUDGET.with(|c| c.get());
+    let budget = COMPILE_BUDGET.with(std::cell::Cell::get);
     if budget == 0 {
         return None;
     }

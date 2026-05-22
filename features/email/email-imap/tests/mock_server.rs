@@ -30,10 +30,12 @@ pub struct Transcript {
 }
 
 impl Transcript {
+    #[must_use]
     pub fn contains(&self, needle: &str) -> bool {
         self.lines.iter().any(|l| l.contains(needle))
     }
     #[allow(dead_code)] // used by other tests in the suite once they wire it
+    #[must_use]
     pub fn count(&self, needle: &str) -> usize {
         self.lines.iter().filter(|l| l.contains(needle)).count()
     }

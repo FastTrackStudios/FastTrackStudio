@@ -114,6 +114,7 @@ impl Meal {
     /// `recipes` is the full list (or any subset that
     /// contains the ones this meal references); ids that
     /// aren't found are silently skipped.
+    #[must_use]
     pub fn nutrition_total(&self, recipes: &[cookbook::Recipe]) -> Option<cookbook::Nutrition> {
         use std::collections::HashMap;
         let index: HashMap<uuid::Uuid, &cookbook::Recipe> =
@@ -132,7 +133,7 @@ impl Meal {
             // meal multiplies by its own `servings`. We do
             // NOT re-scale by recipe.servings because the
             // recipe's nutrition is *already* per-serving.
-            let scale = self.servings as f64;
+            let scale = f64::from(self.servings);
             any = true;
             acc.calories = sum(acc.calories, n.calories.map(|v| v * scale));
             acc.protein_g = sum(acc.protein_g, n.protein_g.map(|v| v * scale));
@@ -170,6 +171,7 @@ pub enum Slot {
 }
 
 impl Slot {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Breakfast => "breakfast",
@@ -179,6 +181,8 @@ impl Slot {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "breakfast" | "brunch" => Some(Self::Breakfast),
@@ -199,6 +203,7 @@ pub enum Status {
 }
 
 impl Status {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Planned => "planned",
@@ -208,6 +213,8 @@ impl Status {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "planned" | "scheduled" => Some(Self::Planned),

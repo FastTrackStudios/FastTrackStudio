@@ -9,7 +9,7 @@
 //! disposable.** When a user links a message to a Project, we
 //! write the message-id into the project's `.md` frontmatter
 //! under `emails:` (mirrors Obsidian's convention) AND insert a
-//! row into the `email_links` SQLite table for fast reverse
+//! row into the `email_links` `SQLite` table for fast reverse
 //! lookup. The vault file is the source of truth — rebuild the
 //! index by walking the vault if it goes stale.
 //!

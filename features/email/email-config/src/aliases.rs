@@ -25,6 +25,7 @@ impl FolderName {
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -40,6 +41,7 @@ pub struct FolderAliases {
 }
 
 impl FolderAliases {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -54,6 +56,7 @@ impl FolderAliases {
     }
 
     /// Look up a backend name by alias. Case-insensitive.
+    #[must_use]
     pub fn backend_for<'a>(&'a self, alias: &str) -> Option<&'a str> {
         self.inner
             .get(&alias.to_lowercase())
@@ -63,6 +66,7 @@ impl FolderAliases {
     /// Reverse lookup — find the alias for a backend folder name.
     /// O(n); only used on the way up to the UI so the cost is
     /// rare. Returns the canonical (user-typed) spelling.
+    #[must_use]
     pub fn alias_for(&self, backend_name: &str) -> Option<&str> {
         self.inner
             .values()
@@ -70,9 +74,11 @@ impl FolderAliases {
             .map(|(a, _)| a.as_str())
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -85,6 +91,7 @@ impl FolderAliases {
     /// Resolve a UI-side folder name through the alias map; if no
     /// alias is registered, pass the name through unchanged so
     /// callers don't have to branch.
+    #[must_use]
     pub fn resolve<'a>(&'a self, ui_name: &'a str) -> &'a str {
         self.backend_for(ui_name).unwrap_or(ui_name)
     }

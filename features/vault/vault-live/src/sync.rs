@@ -109,6 +109,7 @@ impl Backend {
 
     /// Build a backend from a pre-built `vault_id → root` map.
     /// Caller is responsible for creating the directories.
+    #[must_use]
     pub fn with_roots(roots: HashMap<String, PathBuf>) -> Self {
         Self::from_layout(Layout::Explicit(roots))
     }
@@ -201,7 +202,7 @@ impl Backend {
     ///   watcher emits again on the disk event). The duplicate
     ///   carries the same `sha256`, so clients can dedupe on
     ///   that.
-    /// - Only `Explicit` / `UnderParent`-registered vault_ids
+    /// - Only `Explicit` / `UnderParent`-registered `vault_ids`
     ///   resolve. The watcher fails up front for unknown ids.
     /// - For `UnderParent` layouts the root dir must already
     ///   exist (which it always does after the first write); to
@@ -281,7 +282,7 @@ impl VaultSync for Backend {
         if_match: IfMatch,
     ) -> Result<PutAck, VaultSyncError> {
         let abs = self.file_path(vault_id, path)?;
-        let _g = self
+        let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
@@ -315,9 +316,8 @@ impl VaultSync for Backend {
             .ok()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        drop(_g);
+            .map_or(0, |d| d.as_millis() as i64);
+        drop(g);
         let tx = self.channel_blocking(vault_id);
         let _ = tx.send(VaultEvent::Put {
             path: path.to_string(),
@@ -338,7 +338,7 @@ impl VaultSync for Backend {
         if_match: IfMatch,
     ) -> Result<(), VaultSyncError> {
         let abs = self.file_path(vault_id, path)?;
-        let _g = self
+        let g = self
             .write_lock
             .lock()
             .expect("vault::sync write_lock poisoned");
@@ -357,7 +357,7 @@ impl VaultSync for Backend {
             }
         }
         std::fs::remove_file(&abs).map_err(io_err)?;
-        drop(_g);
+        drop(g);
         let tx = self.channel_blocking(vault_id);
         let _ = tx.send(VaultEvent::Delete {
             path: path.to_string(),
@@ -411,8 +411,7 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<ManifestEntry>) -> Result<(), 
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as i64);
         out.push(ManifestEntry {
             path: rel,
             sha256,
@@ -443,8 +442,7 @@ fn mtime_ms(abs: &Path) -> i64 {
         .ok()
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Pump `watcher` events into the broadcast channel. Runs on a

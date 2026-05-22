@@ -92,17 +92,17 @@ pub fn Grid() -> Element {
                         on_select: {
                             let on_event = on_event.clone();
                             let id = r.task.id;
-                            EventHandler::new(move |_| on_event.call(GanttEvent::Select { id: Some(id), mode: crate::store::SelectMode::Replace }))
+                            EventHandler::new(move |()| on_event.call(GanttEvent::Select { id: Some(id), mode: crate::store::SelectMode::Replace }))
                         },
                         on_toggle: {
                             let on_event = on_event.clone();
                             let id = r.task.id;
-                            EventHandler::new(move |_| on_event.call(GanttEvent::ToggleOpen { id }))
+                            EventHandler::new(move |()| on_event.call(GanttEvent::ToggleOpen { id }))
                         },
                         on_open_editor: {
                             let on_event = on_event.clone();
                             let id = r.task.id;
-                            EventHandler::new(move |_| on_event.call(GanttEvent::OpenEditor { id }))
+                            EventHandler::new(move |()| on_event.call(GanttEvent::OpenEditor { id }))
                         },
                         on_drop: {
                             let on_event = on_event.clone();
@@ -137,7 +137,7 @@ pub fn Grid() -> Element {
     }
 }
 
-/// Sentinel for "insert *after* target": the apply() handler treats
+/// Sentinel for "insert *after* target": the `apply()` handler treats
 /// `before: Some(next_sibling)` as before-next, which is functionally
 /// after-target. Computing `next_sibling` here would require
 /// re-walking the tree; we leave it `None` (append to parent) for
@@ -209,8 +209,7 @@ fn GridRow(props: GridRowProps) -> Element {
         .dragging_id
         .read()
         .as_ref()
-        .map(|d| *d == task_id)
-        .unwrap_or(false);
+        .is_some_and(|d| *d == task_id);
     let row_opacity = if is_target_self { "0.3" } else { "1" };
     let (top_ind, bot_ind, child_ind) = match dt {
         Some((id, mode)) if id == task_id => match mode {
@@ -242,8 +241,7 @@ fn GridRow(props: GridRowProps) -> Element {
                     .dragging_id
                     .peek()
                     .as_ref()
-                    .map(|d| *d == task_id)
-                    .unwrap_or(true)
+                    .is_none_or(|d| *d == task_id)
                 {
                     return;
                 }

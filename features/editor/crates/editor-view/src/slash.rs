@@ -8,7 +8,7 @@
 //! catalog is markdown-flavored (callouts, code fences, math
 //! blocks, headings, etc.).
 //!
-//! Architecture follows CodeMirror's `@codemirror/autocomplete`:
+//! Architecture follows `CodeMirror`'s `@codemirror/autocomplete`:
 //! a `SlashState` signal holds the open menu + query; each
 //! state update re-runs `detect_slash` against the current
 //! line; selection nav fires `move_selection`; pick fires
@@ -40,7 +40,7 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
     // render. Lets the menu track the user's typing position
     // instead of docking at the bottom of the editor frame.
     use_effect(|| {
-        let script = r#"(()=>{
+        let script = r"(()=>{
             const menu = document.querySelector('.slash-menu');
             if (!menu) return;
             const sel = window.getSelection && window.getSelection();
@@ -62,7 +62,7 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
             if (left < 8) left = 8;
             menu.style.top = top + 'px';
             menu.style.left = left + 'px';
-        })();"#;
+        })();";
         let _ = document::eval(script);
     });
     let hits = filter_commands(&current.query);
@@ -80,7 +80,7 @@ pub fn SlashMenu(state: Signal<EditorState>, slash: Signal<Option<SlashState>>) 
         div { class: "slash-menu",
             for entry in hits.iter().cloned() {
                 {
-                    let show_header = last_group.map(|g| g != entry.group).unwrap_or(true);
+                    let show_header = last_group != Some(entry.group);
                     last_group = Some(entry.group);
                     let is_selected = row_idx == selected;
                     let idx_for_click = row_idx;
@@ -195,9 +195,10 @@ pub struct SlashState {
 /// but operates on the slice from the start of the current line
 /// up to the caret, so a `/` deep in the doc doesn't keep the
 /// menu open across line breaks.
+#[must_use]
 pub fn detect_slash(doc: &str, caret: usize) -> Option<(usize, String)> {
     let caret = caret.min(doc.len());
-    let line_start = doc[..caret].rfind('\n').map(|n| n + 1).unwrap_or(0);
+    let line_start = doc[..caret].rfind('\n').map_or(0, |n| n + 1);
     let segment = &doc[line_start..caret];
     let bytes = segment.as_bytes();
     let mut i = bytes.len();
@@ -225,6 +226,7 @@ pub fn detect_slash(doc: &str, caret: usize) -> Option<(usize, String)> {
 }
 
 /// Case-insensitive substring filter over label / group / desc.
+#[must_use]
 pub fn filter_commands(query: &str) -> Vec<CommandEntry> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {
@@ -243,6 +245,7 @@ pub fn filter_commands(query: &str) -> Vec<CommandEntry> {
 /// Resolve a picked command into a `TransactionSpec`. Removes
 /// the `/query` first, then either splices a snippet or runs a
 /// line-level transform (heading / list / task).
+#[must_use]
 pub fn run_command(
     state: &EditorState,
     slash_range: std::ops::Range<usize>,
@@ -266,10 +269,7 @@ pub fn run_command(
             // Snap to the start of the current line. If there's
             // other text before the slash on this line, drop the
             // whole block on a fresh line below.
-            let line_start = doc[..slash_range.start]
-                .rfind('\n')
-                .map(|n| n + 1)
-                .unwrap_or(0);
+            let line_start = doc[..slash_range.start].rfind('\n').map_or(0, |n| n + 1);
             let prefix_text = &doc[line_start..slash_range.start];
             let line_has_content = !prefix_text.trim().is_empty();
             let snippet = if line_has_content {
@@ -404,14 +404,10 @@ fn uuid_v4_string() -> String {
 /// slash range is guaranteed to live on one line because the
 /// parser closes on newlines.
 fn line_bounds(doc: &str, slash_range: &std::ops::Range<usize>) -> (usize, usize) {
-    let line_start = doc[..slash_range.start]
-        .rfind('\n')
-        .map(|n| n + 1)
-        .unwrap_or(0);
+    let line_start = doc[..slash_range.start].rfind('\n').map_or(0, |n| n + 1);
     let line_end = doc[slash_range.end..]
         .find('\n')
-        .map(|n| slash_range.end + n)
-        .unwrap_or(doc.len());
+        .map_or(doc.len(), |n| slash_range.end + n);
     (line_start, line_end)
 }
 
@@ -464,6 +460,7 @@ fn strip_list_marker(line: &str) -> &str {
 /// The full catalog. Lives as a function (not const) so the
 /// `&'static str` text gets the right ownership semantics
 /// through the filter pipeline.
+#[must_use]
 pub fn all_commands() -> Vec<CommandEntry> {
     let mut out = Vec::new();
 
@@ -730,7 +727,7 @@ mod tests {
         // Typing `/` at the end of normal prose should open
         // the menu — matches Notion / most modern editors. The
         // previous Logseq-strict behavior wouldn't fire here.
-        assert_eq!(detect_slash("hello/", 6), Some((5, "".to_string())));
+        assert_eq!(detect_slash("hello/", 6), Some((5, String::new())));
         assert_eq!(detect_slash("hello/cal", 9), Some((5, "cal".to_string())));
     }
 

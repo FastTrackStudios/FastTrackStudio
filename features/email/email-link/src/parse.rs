@@ -46,6 +46,7 @@ fn email_link_re() -> &'static Regex {
 /// Find every `[[email://...]]` wikilink in `content`. Returns
 /// them in source order; duplicate Message-IDs are reported
 /// once each (with the first label seen).
+#[must_use]
 pub fn parse_wikilinks(content: &str) -> Vec<EmailWikilink> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
@@ -69,6 +70,7 @@ pub fn parse_wikilinks(content: &str) -> Vec<EmailWikilink> {
 /// Inverse of [`parse_wikilinks`]: produce a wikilink string
 /// for one message. Brackets are stripped from the id so the
 /// rendered form is `[[email://abc@example.com|Subject]]`.
+#[must_use]
 pub fn format_wikilink(message_id: &str, label: Option<&str>) -> String {
     let bare = bare_message_id(message_id);
     match label {

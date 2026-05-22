@@ -132,10 +132,10 @@ async fn handle_download(
     match state.service.store.get_blob(&content_hash).await {
         Ok(bytes) => {
             let meta = state.service.catalog.get(&content_hash);
-            let mime = meta
-                .as_ref()
-                .map(|m| m.mime_type.clone())
-                .unwrap_or_else(|| "application/octet-stream".into());
+            let mime = meta.as_ref().map_or_else(
+                || "application/octet-stream".into(),
+                |m| m.mime_type.clone(),
+            );
             let headers = [(axum::http::header::CONTENT_TYPE, mime)];
             (StatusCode::OK, headers, bytes).into_response()
         }

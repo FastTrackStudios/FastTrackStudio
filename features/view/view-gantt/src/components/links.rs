@@ -49,8 +49,7 @@ pub fn LinkLayer(props: LinkLayerProps) -> Element {
             .tasks
             .iter()
             .find(|t| t.id == id)
-            .map(|t| matches!(t.task_type, TaskType::Summary))
-            .unwrap_or(false);
+            .is_some_and(|t| matches!(t.task_type, TaskType::Summary));
         if is_summary { Some((id, dx)) } else { None }
     } else {
         None

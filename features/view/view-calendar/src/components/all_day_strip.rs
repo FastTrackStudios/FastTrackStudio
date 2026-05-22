@@ -40,7 +40,7 @@ pub fn AllDayStrip(props: AllDayStripProps) -> Element {
     // Always reserve at least one track-height so the strip stays
     // visible (the renderer needs somewhere to drop a chip when the
     // user creates the first all-day event).
-    let strip_height = (track_count.max(1) as i64) * TRACK_HEIGHT_PX;
+    let strip_height = i64::from(track_count.max(1)) * TRACK_HEIGHT_PX;
 
     rsx! {
         div {
@@ -76,7 +76,7 @@ pub fn AllDayStrip(props: AllDayStripProps) -> Element {
                                     key: "{id}-{chip.start_col}",
                                     placement: chip,
                                     readonly: props.readonly,
-                                    on_click: move |_| on_open_editor.call(id),
+                                    on_click: move |()| on_open_editor.call(id),
                                 }
                             }
                         }

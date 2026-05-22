@@ -59,6 +59,7 @@ pub struct ServerRegistry {
 impl ServerRegistry {
     /// Build a registry, loading any persisted entries from
     /// localStorage on wasm. On native, starts empty.
+    #[must_use]
     pub fn new() -> Self {
         let initial = load_from_storage().unwrap_or_default();
         Self {
@@ -67,12 +68,14 @@ impl ServerRegistry {
     }
 
     /// Snapshot of current entries, sorted by label.
+    #[must_use]
     pub fn list(&self) -> Vec<ServerEntry> {
         let mut out: Vec<ServerEntry> = self.entries.read().values().cloned().collect();
         out.sort_by(|a, b| a.label.cmp(&b.label));
         out
     }
 
+    #[must_use]
     pub fn get(&self, id: Uuid) -> Option<ServerEntry> {
         self.entries.read().get(&id).cloned()
     }
@@ -91,10 +94,12 @@ impl ServerRegistry {
         self.persist();
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.read().len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.read().is_empty()
     }

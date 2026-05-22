@@ -40,6 +40,7 @@ pub enum Motion {
 }
 
 impl Motion {
+    #[must_use]
     pub fn from_char(ch: char) -> Option<Self> {
         Some(match ch {
             'h' => Self::Left,
@@ -74,6 +75,7 @@ impl Motion {
     }
 }
 
+#[must_use]
 pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
     let pos = state.selection.primary().head;
     let count = count.max(1);
@@ -109,6 +111,7 @@ pub fn apply(state: &EditorState, motion: Motion, count: usize) -> usize {
     }
 }
 
+#[must_use]
 pub fn find_char(
     state: &EditorState,
     pos: usize,
@@ -388,6 +391,7 @@ fn big_word_end(state: &EditorState, pos: usize, n: usize) -> usize {
 
 // --- line helpers ----------------------------------------------
 
+#[must_use]
 pub fn line_start(state: &EditorState, pos: usize) -> usize {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
@@ -398,10 +402,12 @@ pub fn line_start(state: &EditorState, pos: usize) -> usize {
     p
 }
 
+#[must_use]
 pub fn line_end(state: &EditorState, pos: usize) -> usize {
     next_newline(state, pos).unwrap_or(state.doc.len())
 }
 
+#[must_use]
 pub fn line_end_n(state: &EditorState, pos: usize, count: usize) -> usize {
     // `$` with count=1 → end of current line; with count=N → end
     // of line N-1 below.
@@ -419,6 +425,7 @@ pub fn line_end_n(state: &EditorState, pos: usize, count: usize) -> usize {
 /// Position at the first non-blank character of the `n`-th
 /// line (0-indexed). Used by `gg` / `<N>G`. Clamps `n` to the
 /// last line of the doc.
+#[must_use]
 pub fn nth_line_first_nonblank(state: &EditorState, n: usize) -> usize {
     let s = state.doc.to_string();
     let bytes = s.as_bytes();
@@ -436,6 +443,7 @@ pub fn nth_line_first_nonblank(state: &EditorState, n: usize) -> usize {
     line_first_nonblank(state, p)
 }
 
+#[must_use]
 pub fn line_first_nonblank(state: &EditorState, pos: usize) -> usize {
     let start = line_start(state, pos);
     let end = line_end(state, pos);
@@ -473,11 +481,7 @@ fn para_forward(state: &EditorState, pos: usize, n: usize) -> usize {
             };
             p = nl + 1;
             let line_end_pos = next_newline(state, p).unwrap_or(bytes.len());
-            if p == line_end_pos
-                || bytes[p..line_end_pos]
-                    .iter()
-                    .all(|b| b.is_ascii_whitespace())
-            {
+            if p == line_end_pos || bytes[p..line_end_pos].iter().all(u8::is_ascii_whitespace) {
                 break;
             }
         }
@@ -497,11 +501,7 @@ fn para_backward(state: &EditorState, pos: usize, n: usize) -> usize {
             let line_lo = line_start(state, p.saturating_sub(1));
             let line_hi = next_newline(state, line_lo).unwrap_or(bytes.len());
             p = line_lo;
-            if line_lo == line_hi
-                || bytes[line_lo..line_hi]
-                    .iter()
-                    .all(|b| b.is_ascii_whitespace())
-            {
+            if line_lo == line_hi || bytes[line_lo..line_hi].iter().all(u8::is_ascii_whitespace) {
                 break;
             }
             if p == 0 {

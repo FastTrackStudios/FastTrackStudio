@@ -17,18 +17,23 @@ impl EntityKind {
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into().to_lowercase())
     }
+    #[must_use]
     pub fn task() -> Self {
         Self("task".into())
     }
+    #[must_use]
     pub fn project() -> Self {
         Self("project".into())
     }
+    #[must_use]
     pub fn note() -> Self {
         Self("note".into())
     }
+    #[must_use]
     pub fn person() -> Self {
         Self("person".into())
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

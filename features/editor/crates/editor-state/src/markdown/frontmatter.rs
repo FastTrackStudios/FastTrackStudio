@@ -11,6 +11,7 @@
 //!   - `key: [a, b]` (flow list)
 //!   - `key: true|false` (checkbox)
 //!   - `tags: [...]` and other arrays
+//!
 //! Anything we don't understand falls back to a plain text row.
 //! A real YAML lib (`saphyr` / `yaml-rust2`) can replace this
 //! later — the byte-range-per-property contract is what the
@@ -62,6 +63,7 @@ impl PropValue {
     }
 }
 
+#[must_use]
 pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
     let bytes = text.as_bytes();
     // Opening fence must be at position 0: literal `---` then
@@ -96,8 +98,7 @@ pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
     let closer_end = bytes[closer_start..]
         .iter()
         .position(|&b| b == b'\n')
-        .map(|n| closer_start + n + 1)
-        .unwrap_or(bytes.len());
+        .map_or(bytes.len(), |n| closer_start + n + 1);
     let props = parse_frontmatter_body(text, body_start, closer_start);
     Some(FrontMatter {
         outer: 0..closer_end,
@@ -186,7 +187,7 @@ fn parse_frontmatter_body(text: &str, body_start: usize, body_end: usize) -> Vec
             // Drop trailing blank lines so the value isn't padded
             // by whatever blank lines sat between the block and
             // the next key (or the closing `---`).
-            while lines.last().is_some_and(|s| s.is_empty()) {
+            while lines.last().is_some_and(std::string::String::is_empty) {
                 lines.pop();
             }
             PropValue::Text(lines.join("\n"))
@@ -383,13 +384,14 @@ fn format_number(n: f64) -> String {
     if n.fract() == 0.0 && n.abs() < 1e16 {
         format!("{}", n as i64)
     } else {
-        format!("{}", n)
+        format!("{n}")
     }
 }
 
 /// Re-serialize a property's YAML form. Returns a string that
 /// includes its trailing newline so it can be dropped in for
 /// `text[range]` as-is.
+#[must_use]
 pub fn serialize_property(key: &str, value: &PropValue) -> String {
     match value {
         PropValue::Text(s) if s.contains('\n') => {
@@ -405,7 +407,7 @@ pub fn serialize_property(key: &str, value: &PropValue) -> String {
             out
         }
         PropValue::Text(s) => format!("{key}: {}\n", yaml_quote_if_needed(s)),
-        PropValue::Bool(b) => format!("{key}: {}\n", b),
+        PropValue::Bool(b) => format!("{key}: {b}\n"),
         PropValue::Number(n) => format!("{key}: {}\n", format_number(*n)),
         PropValue::Date(s) => format!("{key}: {s}\n"),
         PropValue::Empty => format!("{key}:\n"),

@@ -304,7 +304,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                             event,
                             position_style: style,
                             readonly: props.readonly,
-                            on_click: move |_| on_open_editor.call(id),
+                            on_click: move |()| on_open_editor.call(id),
                         }
                     }
                 }
@@ -321,8 +321,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
 fn block_style(p: &TimeBlockPlacement) -> String {
     let top = minutes_to_px(p.top_min);
     let h = minutes_to_px(p.height_min);
-    let width_pct = 100.0_f32 / p.cluster_size as f32;
-    let left_pct = p.column as f32 * width_pct;
+    let width_pct = 100.0_f32 / f32::from(p.cluster_size);
+    let left_pct = f32::from(p.column) * width_pct;
     // Inner gutter via percentage subtraction would over-shrink
     // narrow clusters; instead use calc() so each block loses a
     // fixed 3px of effective width regardless of column count.

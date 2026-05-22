@@ -3,7 +3,7 @@
 //! `ContentBlock::ToolUse` + the matching `ToolResult` block.
 //! Backends typically maintain both representations so the UI
 //! can render tool history independently of the conversation
-//! transcript (matches CodexMonitor's `ConversationItem::Tool`).
+//! transcript (matches `CodexMonitor`'s `ConversationItem::Tool`).
 
 use chrono::{DateTime, Utc};
 use facet::Facet;

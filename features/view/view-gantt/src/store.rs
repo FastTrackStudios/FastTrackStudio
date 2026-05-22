@@ -116,6 +116,7 @@ impl Default for GanttState {
 }
 
 impl GanttState {
+    #[must_use]
     pub fn active_scales(&self) -> &[ScaleConfig] {
         let i = self
             .zoom
@@ -149,6 +150,7 @@ impl GanttState {
         (add(unit, s, -1), add(unit, e, 1))
     }
 
+    #[must_use]
     pub fn build_grid(&self) -> ScaleGrid {
         let (s, e) = self.resolved_range();
         scales::build_scales(self.active_scales(), s, e, self.cell_width, self.week_start)
@@ -162,6 +164,7 @@ impl GanttState {
     /// behaviour (summaries are read-only rollups; you move them by
     /// moving their children, or by move-dragging the whole bar,
     /// which cascades to every descendant — see [`descendants_of`]).
+    #[must_use]
     pub fn layout(&self, grid: &ScaleGrid) -> (Vec<LaidOutTask>, Vec<LaidOutLink>) {
         let mut children: HashMap<Option<TaskId>, Vec<usize>> = HashMap::new();
         for (i, t) in self.tasks.iter().enumerate() {
@@ -353,6 +356,7 @@ fn descendant_bounds(state: &GanttState, root: TaskId) -> Option<(DateTime<Utc>,
 /// True if `candidate` is somewhere underneath `ancestor` in the
 /// task tree (used to decide whether a child bar should follow its
 /// summary ancestor during a live drag preview).
+#[must_use]
 pub fn is_descendant(state: &GanttState, ancestor: TaskId, candidate: TaskId) -> bool {
     let mut current = state.tasks.iter().find(|t| t.id == candidate);
     while let Some(t) = current {
@@ -367,6 +371,7 @@ pub fn is_descendant(state: &GanttState, ancestor: TaskId, candidate: TaskId) ->
 
 /// Collect every descendant id of `root` (excluding `root` itself).
 /// Used for cascade-move when the user drags a summary bar.
+#[must_use]
 pub fn descendants_of(state: &GanttState, root: TaskId) -> Vec<TaskId> {
     let mut by_parent: HashMap<TaskId, Vec<TaskId>> = HashMap::new();
     for t in &state.tasks {
@@ -409,6 +414,7 @@ fn anchor(t: &LaidOutTask, link: LinkType, is_source: bool) -> (f32, f32) {
 ///   bypass row above or below the target, then comes back into the
 ///   target — avoiding drawing through bars between source and
 ///   target.
+#[must_use]
 pub fn link_path(sx: f32, sy: f32, tx: f32, ty: f32, link_type: LinkType) -> String {
     let lead: f32 = 12.0;
     // Source-side stub direction: if anchored at end, stub points
@@ -434,7 +440,7 @@ pub fn link_path(sx: f32, sy: f32, tx: f32, ty: f32, link_type: LinkType) -> Str
         // made arrows feel like they "lunged" out of the source bar
         // before swinging across — confusing when source and target
         // were close together.
-        let mid = (sx_lead + tx_lead) / 2.0;
+        let mid = f32::midpoint(sx_lead, tx_lead);
         if (sy - ty).abs() < 0.5 {
             // Same row — straight horizontal segment is cleaner.
             format!("M {sx} {sy} L {tx} {ty}")
@@ -637,19 +643,21 @@ pub fn apply(state: &mut GanttState, event: &GanttEvent) {
             state.tasks.insert(insert_at, task);
         }
         GanttEvent::ZoomTo { level } => {
-            state.zoom.level = (*level).min(state.zoom.levels.len().saturating_sub(1))
+            state.zoom.level = (*level).min(state.zoom.levels.len().saturating_sub(1));
         }
     }
 }
 
 /// Helper for drag/resize: snap a date to the current minimum unit.
+#[must_use]
 pub fn snap(grid: &ScaleGrid, date: DateTime<Utc>, week_start: WeekStart) -> DateTime<Utc> {
     unit_start(grid.min_unit, date, week_start)
 }
 
 /// Compute the duration a drag should move, given pixel delta.
+#[must_use]
 pub fn dx_to_duration(grid: &ScaleGrid, dx: f32) -> Duration {
-    let units = (dx / grid.min_unit_width) as f64;
+    let units = f64::from(dx / grid.min_unit_width);
     let secs_per_unit = {
         let next = add(grid.min_unit, grid.start, 1);
         (next - grid.start).num_seconds() as f64
@@ -658,6 +666,7 @@ pub fn dx_to_duration(grid: &ScaleGrid, dx: f32) -> Duration {
 }
 
 /// Convenience for default zoom + scales (used by docs/tests).
+#[must_use]
 pub fn default_state() -> GanttState {
     GanttState {
         zoom: ZoomConfig {

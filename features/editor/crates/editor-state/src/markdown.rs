@@ -14,7 +14,7 @@
 //! it's a renderer trick, not a document-model change.
 //!
 //! The parser is single-pass and intentionally tiny. Not a real
-//! CommonMark implementation; just enough to demo the
+//! `CommonMark` implementation; just enough to demo the
 //! decoration pipeline. A future commit can swap in a proper
 //! markdown parser (pulldown-cmark or a port of CM6's
 //! lang-markdown) without touching the decoration shape.
@@ -57,6 +57,7 @@ pub struct VaultPageHit {
     pub preview: String,
 }
 
+#[must_use]
 pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
     live_preview_with(state, None)
 }
@@ -289,9 +290,7 @@ pub fn live_preview_with(
                 // `[[Page#Section]]` resolves when Page exists.
                 let cls = if span.class == "md-wikilink" {
                     let page_part = h.split(['#', '|']).next().unwrap_or(&h).trim();
-                    let resolved = vault
-                        .map(|v| v.lookup_page(page_part).is_some())
-                        .unwrap_or(false);
+                    let resolved = vault.is_some_and(|v| v.lookup_page(page_part).is_some());
                     if resolved {
                         "md-wikilink"
                     } else {
@@ -354,8 +353,7 @@ fn now_ms_native() -> f64 {
     {
         web_sys::window()
             .and_then(|w| w.performance())
-            .map(|p| p.now())
-            .unwrap_or(0.0)
+            .map_or(0.0, |p| p.now())
     }
 }
 
@@ -533,8 +531,8 @@ fn resolve_heading_section(doc: &str, name: &str) -> Option<String> {
 fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
     let needle = format!("^{short_id}");
     let pos = doc.find(&needle)?;
-    let line_start = doc[..pos].rfind('\n').map(|n| n + 1).unwrap_or(0);
-    let line_end = doc[pos..].find('\n').map(|n| pos + n).unwrap_or(doc.len());
+    let line_start = doc[..pos].rfind('\n').map_or(0, |n| n + 1);
+    let line_end = doc[pos..].find('\n').map_or(doc.len(), |n| pos + n);
     let line = &doc[line_start..line_end];
     // Strip the trailing `^id` so the embed shows the body text.
     Some(line[..line.len() - needle.len()].trim_end().to_string())
@@ -802,7 +800,7 @@ fn scan_blocks(
             None
         };
         if let Some(rows) = table_match {
-            let table_end = rows.last().map(|r| r.1).unwrap_or(line_to);
+            let table_end = rows.last().map_or(line_to, |r| r.1);
             // Header / separator + body cells.
             let cells = collect_table_cells(text, &rows);
             let html = render_table_html(&cells);
@@ -916,8 +914,7 @@ fn scan_blocks(
                             "md-typst-widget"
                         };
                         let html = format!(
-                            r#"<div class="{class}" data-focus-pos="{pos}">{svg}</div>"#,
-                            pos = content_start,
+                            r#"<div class="{class}" data-focus-pos="{content_start}">{svg}</div>"#,
                         );
                         out.push(Decoration::replace(fence_range.clone()));
                         out.push(Decoration::widget(fence_range.start, html));
@@ -976,14 +973,10 @@ fn scan_blocks(
             // directly and clicks/motions land on real text.
             let html = if checked {
                 format!(
-                    r#"<span class="md-task-checkbox checked" data-task-pos="{p}">✓</span>"#,
-                    p = line_from
+                    r#"<span class="md-task-checkbox checked" data-task-pos="{line_from}">✓</span>"#
                 )
             } else {
-                format!(
-                    r#"<span class="md-task-checkbox" data-task-pos="{p}"></span>"#,
-                    p = line_from
-                )
+                format!(r#"<span class="md-task-checkbox" data-task-pos="{line_from}"></span>"#)
             };
             // Two states: source-visible when the caret is on
             // the line (so `- [ ]` is editable), checkbox-widget
@@ -1125,7 +1118,7 @@ fn parse_callout_header(after: &str) -> Option<(&'static str, usize)> {
     // `+`/`-` on the closing bracket — `[!note]+` / `[!note]-`.
     let kind = canonical_callout_kind(raw)?;
     let mut end = 2 + close + 1;
-    if matches!(b.get(end), Some(b'+') | Some(b'-')) {
+    if matches!(b.get(end), Some(b'+' | b'-')) {
         end += 1;
     }
     // Consume the space that typically follows.
@@ -1230,7 +1223,7 @@ fn split_pipe_cells(line: &str) -> Vec<&str> {
     if let Some(stripped) = t.strip_suffix('|') {
         t = stripped;
     }
-    t.split('|').map(|s| s.trim()).collect()
+    t.split('|').map(str::trim).collect()
 }
 
 fn collect_table_cells(text: &str, rows: &[(usize, usize)]) -> Vec<Vec<String>> {
@@ -1240,7 +1233,7 @@ fn collect_table_cells(text: &str, rows: &[(usize, usize)]) -> Vec<Vec<String>> 
         .map(|(_, (f, t))| {
             split_pipe_cells(&text[*f..*t])
                 .into_iter()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect()
         })
         .collect()
@@ -1255,7 +1248,7 @@ fn render_table_html(cells: &[Vec<String>]) -> String {
     if let Some(header) = iter.next() {
         s.push_str("<thead><tr>");
         for c in header {
-            s.push_str(r#"<th>"#);
+            s.push_str(r"<th>");
             s.push_str(&html_escape(c));
             s.push_str("</th>");
         }
@@ -1265,7 +1258,7 @@ fn render_table_html(cells: &[Vec<String>]) -> String {
     for row in iter {
         s.push_str("<tr>");
         for c in row {
-            s.push_str(r#"<td>"#);
+            s.push_str(r"<td>");
             s.push_str(&html_escape(c));
             s.push_str("</td>");
         }
@@ -1513,13 +1506,12 @@ fn emit_fence_tokens(
     let t_tok = now_ms_native();
     let cached = with_fence_cache(|cache| cache.get(lang, body));
     let was_cached = cached.is_some();
-    let tokens = match cached {
-        Some(toks) => toks,
-        None => {
-            let toks = editor_syntax::highlight(lang, body);
-            with_fence_cache(|cache| cache.put(lang, body.to_string(), toks.clone()));
-            toks
-        }
+    let tokens = if let Some(toks) = cached {
+        toks
+    } else {
+        let toks = editor_syntax::highlight(lang, body);
+        with_fence_cache(|cache| cache.put(lang, body.to_string(), toks.clone()));
+        toks
     };
     let tok_ms = now_ms_native() - t_tok;
     tracing::trace!(
@@ -1960,7 +1952,7 @@ fn find_block_anchor(text: &str, id_line_from: usize) -> usize {
     // `id::` line should be flush against the block).
     let mut end = id_line_from;
     while end > 0 {
-        let prev_nl = prefix[..end - 1].rfind('\n').map(|n| n + 1).unwrap_or(0);
+        let prev_nl = prefix[..end - 1].rfind('\n').map_or(0, |n| n + 1);
         let line = &text[prev_nl..end - 1];
         if !line.trim().is_empty() {
             return prev_nl;
@@ -1994,10 +1986,7 @@ pub(crate) fn register_block_id(uuid: &str, block_anchor: usize) {
 /// markdown markers for chip display. Stops at the first
 /// newline.
 pub(crate) fn block_preview(text: &str, anchor: usize) -> String {
-    let line_end = text[anchor..]
-        .find('\n')
-        .map(|n| anchor + n)
-        .unwrap_or(text.len());
+    let line_end = text[anchor..].find('\n').map_or(text.len(), |n| anchor + n);
     let line = &text[anchor..line_end];
     let cleaned = line.trim_start_matches(|c: char| {
         c == '#'
@@ -2426,8 +2415,7 @@ mod tests {
         let id_line_start = src.find("id::").unwrap();
         let id_line_end = src[id_line_start..]
             .find('\n')
-            .map(|n| id_line_start + n + 1)
-            .unwrap_or(src.len());
+            .map_or(src.len(), |n| id_line_start + n + 1);
         let has_replace = decs.iter().any(|d| {
             d.from == id_line_start
                 && d.to == id_line_end
@@ -2465,6 +2453,7 @@ mod tests {
     }
 
     /// Stub vault for cross-doc resolution tests.
+    #[allow(clippy::struct_field_names)]
     struct FakeVault {
         block_hits: std::collections::HashMap<String, super::VaultBlockHit>,
         page_hits: std::collections::HashMap<String, super::VaultPageHit>,
@@ -2599,8 +2588,7 @@ mod tests {
             .expect("chip widget");
         assert!(
             chip_html.contains("First block content here"),
-            "expected chip to preview target, got: {}",
-            chip_html
+            "expected chip to preview target, got: {chip_html}"
         );
         assert!(!chip_html.contains("md-block-ref-unresolved"));
     }

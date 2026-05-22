@@ -83,12 +83,122 @@ name = "task"
 #   purely cosmetic markdown nits in doc comments. Worth
 #   fixing eventually, but not on the path to a clean push.
 [workspace.lints.clippy]
-clone_on_copy = "allow"
-should_implement_trait = "allow"
+# Default-level (correctness / suspicious / style /
+# complexity / perf) runs under `-D warnings` already.
+# Pedantic adds another ~150 lints aimed at idiomatic Rust.
+# We opt in workspace-wide at deny level; the allows below
+# are scoped pedantic carve-outs where the lint is high-
+# volume and low-signal for this codebase.
+pedantic = { level = "deny", priority = -1 }
+
+# ── Pedantic carve-outs ───────────────────────────────────
+# `missing_errors_doc` / `missing_panics_doc` —
+#   would require `# Errors` / `# Panics` blocks on every
+#   public fn that returns Result or might panic. Long
+#   tail across the workspace; revisit when we add a
+#   docs-pass requirement.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# `must_use_candidate` — fires on every plain `pub fn ->
+#   T`. We can't `#[must_use]` everything blindly; revisit
+#   when we have a usage audit.
+must_use_candidate = "allow"
+# `doc_markdown` — flags every CamelCase / snake_case ident
+#   in doc comments that isn't in backticks. Mostly noise
+#   around prose like "the WikiBackend handle".
+doc_markdown = "allow"
+# `cast_*` — explicit `as` casts in math + index code.
+#   Switching to `try_into()` everywhere fights ergonomics
+#   for known-safe casts; we'll add per-site asserts
+#   where overflow really matters.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+# `too_many_lines` — pedantic's 100-line cap fires on
+#   the few real workhorse functions (ingest bridge,
+#   markdown live preview, etc.). Splitting them solely
+#   to satisfy the lint hurts readability.
+too_many_lines = "allow"
+# `module_name_repetitions` — fires on names like
+#   `WikiBackend` inside `wiki_live`. The repetition is
+#   what makes the cross-crate name unambiguous.
+module_name_repetitions = "allow"
+# `similar_names` — `req` vs `res`, `from` vs `to` etc.
+#   The 1-char similarity threshold is too aggressive.
+similar_names = "allow"
+# `unsafe_derive_deserialize` — flags any `Deserialize`
+#   on a type with an unsafe-trait impl elsewhere. Our
+#   `Facet` derives transitively trip this; revisit if
+#   we ever actually hit a soundness issue.
+unsafe_derive_deserialize = "allow"
+# `manual_let_else` — would require rewriting `match`
+#   blocks to `let ... else` form in ~15 spots. Cosmetic.
+manual_let_else = "allow"
+# `redundant_closure_for_method_calls` — `.map(|x|
+#   x.clone())` → `.map(Foo::clone)`. Mostly cosmetic;
+#   the closure form reads more locally.
+redundant_closure_for_method_calls = "allow"
+# `default_trait_access` — `Vec::default()` vs
+#   `Default::default()`. Both are idiomatic; the
+#   inferred form is fine when the context disambiguates.
+default_trait_access = "allow"
+# `format_push_string` — `s.push_str(&format!(…))` vs
+#   `write!(s, …)`. The format-into-push form is a few
+#   bytes of extra alloc; converting every call site is
+#   churn that adds an awkward `unwrap()` per write.
+format_push_string = "allow"
+# `unnecessary_wraps` — our editor commands have a
+#   uniform `fn(&EditorState) -> Option<TransactionSpec>`
+#   signature where `None` = "do nothing this keystroke".
+#   Some commands always produce a transaction; the
+#   Option is part of the trait shape, not dead code.
+unnecessary_wraps = "allow"
+# `struct_excessive_bools` — config / state structs
+#   genuinely accumulate flags; the alternative is a
+#   bitfield wrapper that hurts readability.
+struct_excessive_bools = "allow"
+# `unused_async` — async functions that don't `.await`
+#   anything are normal in trait impls where the trait
+#   signature is async; sync bodies are valid impls.
+unused_async = "allow"
+# `redundant_closure` — `.map(|x| f(x))` vs `.map(f)`.
+#   Cosmetic; closure form is sometimes clearer at the
+#   call site.
 redundant_closure = "allow"
-redundant_locals = "allow"
-doc_lazy_continuation = "allow"
-doc_overindented_list_items = "allow"
+# `assigning_clones` — `x = y.clone()` vs
+#   `x.clone_from(&y)`. The latter shaves an allocation
+#   only when both sides own enough capacity. Not worth
+#   the churn workspace-wide.
+assigning_clones = "allow"
+# `items_after_statements` — `use` mid-function is
+#   sometimes the clearest place for a local-scope
+#   import; lifting it to the top of the fn isn't
+#   always better.
+items_after_statements = "allow"
+# `match_same_arms` — match arms with identical bodies
+#   often encode "all of these mean X" where the variant
+#   names themselves are the documentation. Collapsing
+#   loses that signal.
+match_same_arms = "allow"
+# `needless_pass_by_value` — borrow-or-own decisions in
+#   public APIs depend on call-site ergonomics, not just
+#   body usage. Per-site `&` rewrites would change
+#   surface signatures.
+needless_pass_by_value = "allow"
+# `trivially_copy_pass_by_ref` — flip side of the
+#   above; pass-by-ref is sometimes the consistent
+#   choice for an API even when the type is Copy.
+trivially_copy_pass_by_ref = "allow"
+# `unused_self` — methods that don't read `self` are
+#   sometimes intentional placeholders or part of a
+#   trait-implementing impl block.
+unused_self = "allow"
+# `needless_continue` — `continue;` at the end of a
+#   long branch is sometimes clearer than relying on
+#   fall-through.
+needless_continue = "allow"
 
 [workspace.package]
 version = "0.1.0"

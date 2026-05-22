@@ -6,6 +6,7 @@ use vault::Vault;
 use crate::model::Item;
 use crate::parse::{looks_like_item, parse_page};
 
+#[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<Item> {
     vault
         .pages
@@ -22,6 +23,7 @@ pub fn scan_vault(vault: &Vault) -> Vec<Item> {
 }
 
 /// Convenience: every item whose `location_id` matches.
+#[must_use]
 pub fn items_at(vault: &Vault, location_id: uuid::Uuid) -> Vec<Item> {
     scan_vault(vault)
         .into_iter()
@@ -31,13 +33,14 @@ pub fn items_at(vault: &Vault, location_id: uuid::Uuid) -> Vec<Item> {
 
 /// Convenience: every item flagged for attention (poor /
 /// broken / missing / in-repair).
+#[must_use]
 pub fn items_needing_attention(vault: &Vault) -> Vec<Item> {
     scan_vault(vault)
         .into_iter()
         .filter(|i| {
             let cond = crate::model::Condition::from_str(&i.condition);
             let stat = crate::model::Status::from_str(&i.status);
-            cond.map(|c| c.needs_attention()).unwrap_or(false)
+            cond.is_some_and(super::model::Condition::needs_attention)
                 || matches!(
                     stat,
                     Some(crate::model::Status::Missing | crate::model::Status::InRepair)

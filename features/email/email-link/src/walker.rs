@@ -38,6 +38,7 @@ pub struct WalkedFile {
 
 impl WalkedFile {
     /// Every Message-ID referenced from this file, deduplicated.
+    #[must_use]
     pub fn all_message_ids(&self) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
@@ -64,6 +65,7 @@ pub type EntityResolver = dyn Fn(&Path, &ParsedFrontmatter) -> Option<EntityRef>
 /// Default resolver: kind from `type:` / `kind:` frontmatter
 /// (lower-cased), id from `id:` / `uuid:` if present otherwise
 /// from the file stem. Files without any kind are skipped.
+#[must_use]
 pub fn default_resolver(path: &Path, fm: &ParsedFrontmatter) -> Option<EntityRef> {
     let kind = fm.kind.as_deref()?;
     let id = match &fm.id {
@@ -71,7 +73,7 @@ pub fn default_resolver(path: &Path, fm: &ParsedFrontmatter) -> Option<EntityRef
         None => path
             .file_stem()
             .and_then(|s| s.to_str())
-            .map(|s| s.to_string())?,
+            .map(std::string::ToString::to_string)?,
     };
     Some(EntityRef::new(EntityKind::new(kind), id))
 }
@@ -84,7 +86,7 @@ pub fn default_resolver(path: &Path, fm: &ParsedFrontmatter) -> Option<EntityRef
 pub fn walk_vault(root: &Path) -> Vec<WalkedFile> {
     let mut out = Vec::new();
     let walker = WalkDir::new(root).follow_links(false).into_iter();
-    for entry in walker.filter_map(|e| e.ok()) {
+    for entry in walker.filter_map(std::result::Result::ok) {
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -95,7 +97,7 @@ pub fn walk_vault(root: &Path) -> Vec<WalkedFile> {
         // Skip Obsidian / vault metadata dirs by convention.
         if path
             .components()
-            .any(|c| matches!(c.as_os_str().to_str(), Some(".obsidian") | Some(".trash")))
+            .any(|c| matches!(c.as_os_str().to_str(), Some(".obsidian" | ".trash")))
         {
             continue;
         }

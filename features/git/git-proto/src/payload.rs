@@ -129,7 +129,10 @@ pub enum Reviewer {
 #[cfg(feature = "vox")]
 #[allow(unsafe_code)]
 mod reborrow_impls {
-    use super::*;
+    use super::{
+        Forge, IssueId, IssueState, Label, Milestone, PullRequest, PullRequestId, PullRequestState,
+        Repo, RepoId, Reviewer, User,
+    };
     macro_rules! reborrow_owned {
         ($($t:ty),* $(,)?) => {
             $(

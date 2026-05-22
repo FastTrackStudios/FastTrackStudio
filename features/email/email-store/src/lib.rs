@@ -1,4 +1,4 @@
-//! On-disk Maildir + SQLite FTS5 index for the email feature.
+//! On-disk Maildir + `SQLite` FTS5 index for the email feature.
 //!
 //! Per-account layout:
 //! ```text
@@ -16,7 +16,7 @@
 //! reconstructing the table from scratch.
 //!
 //! Same shape as the rest of Task: markdown/maildir on disk is
-//! canonical, SQLite is the query layer.
+//! canonical, `SQLite` is the query layer.
 
 #![cfg(not(target_arch = "wasm32"))]
 

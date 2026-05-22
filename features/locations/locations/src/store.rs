@@ -26,6 +26,7 @@ pub struct Store {
 }
 
 impl Store {
+    #[must_use]
     pub fn new(vault: Vault) -> Self {
         Self {
             inner: Arc::new(Mutex::new(vault)),

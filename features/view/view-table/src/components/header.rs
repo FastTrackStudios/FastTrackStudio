@@ -35,8 +35,7 @@ pub fn HeaderRow(props: HeaderRowProps) -> Element {
                     let active = props
                         .sort
                         .as_ref()
-                        .map(|(c, _)| *c == col_id)
-                        .unwrap_or(false);
+                        .is_some_and(|(c, _)| *c == col_id);
                     let dir = props
                         .sort
                         .as_ref()

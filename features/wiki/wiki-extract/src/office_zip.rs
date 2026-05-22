@@ -1,4 +1,4 @@
-//! PPTX / DOCX (and other zipped OpenXML) image extraction.
+//! PPTX / DOCX (and other zipped `OpenXML`) image extraction.
 //! Walks the archive for `ppt/media/`, `word/media/`, or
 //! `xl/media/` entries; decodes each with `image` to read
 //! dimensions for the size filter.
@@ -80,6 +80,9 @@ pub(crate) fn extract_office(
     Ok(out)
 }
 
+// `lower` is already lowercased so case-sensitive comparisons here are
+// correct — silence the lint that can't see the prior `.to_ascii_lowercase()`.
+#[allow(clippy::case_sensitive_file_extension_comparisons)]
 fn guess_mime(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".png") {

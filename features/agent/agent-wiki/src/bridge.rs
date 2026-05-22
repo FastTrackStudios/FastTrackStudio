@@ -63,7 +63,7 @@ pub struct IngestRunResult {
     pub analysis: String,
 }
 
-/// Drive one full ingest pipeline (two-step CoT) against
+/// Drive one full ingest pipeline (two-step `CoT`) against
 /// `codex app-server`.
 pub async fn run_ingest(
     backend: &CodexBackend,
@@ -124,8 +124,7 @@ pub async fn run_ingest(
     let source_basename = req
         .source_filename
         .rsplit_once('.')
-        .map(|(stem, _)| stem)
-        .unwrap_or(req.source_filename.as_str());
+        .map_or(req.source_filename.as_str(), |(stem, _)| stem);
     let mut vars2 = HashMap::new();
     vars2.insert("language_directive", lang.as_str());
     vars2.insert("source_filename", req.source_filename.as_str());
@@ -258,8 +257,8 @@ impl Default for LintRequest {
     }
 }
 
-/// Run one semantic-lint pass. Reads page summaries (title
-/// + first ~500 chars), drives the LLM through
+/// Run one semantic-lint pass. Reads page summaries (title +
+/// first ~500 chars), drives the LLM through
 /// `LINT_SEMANTIC_SYSTEM`, parses the LINT blocks,
 /// persists newly-raised findings.
 pub async fn run_lint(
@@ -510,6 +509,7 @@ pub async fn run_dedup_merge(
 /// capable backend (or a direct Anthropic-API helper)
 /// lands, it consumes this prompt + the
 /// `ExtractedImage::bytes` and returns the caption.
+#[must_use]
 pub fn vision_caption_prompt(before: &str, after: &str) -> String {
     if before.is_empty() && after.is_empty() {
         prompts::VISION_CAPTION_PINNED.to_string()

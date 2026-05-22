@@ -1,7 +1,7 @@
 //! Deep-Research flow. The LLM proposes search queries
 //! grounded in a [`crate::graph::KnowledgeGap`] or
 //! [`crate::review::ReviewItem`], the agent executes them
-//! externally (Tavily / SerpApi / SearXNG / manual), and
+//! externally (Tavily / `SerpApi` / `SearXNG` / manual), and
 //! submits results back as raw sources to be re-ingested.
 
 use chrono::{DateTime, Utc};

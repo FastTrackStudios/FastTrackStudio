@@ -14,7 +14,7 @@
 //! - `MemStore` (in this crate) — impls both, for tests + the
 //!   default demo route. Wasm-clean.
 //! - `store-json` — JSON-on-disk, native. Impls both.
-//! - `store-sqlite` — SQLite, native. Impls both with indexed
+//! - `store-sqlite` — `SQLite`, native. Impls both with indexed
 //!   audit-log queries.
 //!
 //! Features that need app state hold a `Box<dyn KvStore>` (and

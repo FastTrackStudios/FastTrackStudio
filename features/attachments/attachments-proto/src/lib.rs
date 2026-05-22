@@ -20,8 +20,8 @@
 //!    [`AttachmentService::get_download_url`] to obtain a signed
 //!    HTTP GET URL.
 //!
-//! The `kind: attachment` page convention (content_hash +
-//! filename + mime_type in frontmatter) is documented in §13
+//! The `kind: attachment` page convention (`content_hash` +
+//! filename + `mime_type` in frontmatter) is documented in §13
 //! Phase 7 but lives entirely in the Knowledge layer — proto
 //! here doesn't enforce it.
 

@@ -1,7 +1,7 @@
 //! Output parsers for the wiki-flavored prompts.
 //!
 //! See [`crate::prompts`] for the prompts these consume.
-//! Each parser is strict by design — llm_wiki's pipeline
+//! Each parser is strict by design — `llm_wiki`'s pipeline
 //! drops responses that don't match the expected format
 //! and the port preserves that contract.
 
@@ -18,7 +18,7 @@ pub struct IngestBlocks {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileBlock {
     /// Vault-relative path (e.g. `Concepts/Spaced repetition.md`
-    /// — llm_wiki uses `wiki/...` prefix which we strip).
+    /// — `llm_wiki` uses `wiki/...` prefix which we strip).
     pub path: String,
     /// Full markdown including frontmatter.
     pub content: String,
@@ -300,7 +300,7 @@ impl LintSeverity {
 }
 
 /// Parse `---LINT: <kind> | <severity> | <title>---` /
-/// `---END LINT---` blocks. Matches llm_wiki's lint
+/// `---END LINT---` blocks. Matches `llm_wiki`'s lint
 /// emit format.
 pub fn parse_lint_blocks(response: &str) -> Result<Vec<LintBlock>, AgentWikiError> {
     let mut out = Vec::new();
@@ -409,7 +409,7 @@ pub fn parse_dedup_groups(response: &str) -> Result<Vec<DuplicateGroup>, AgentWi
             .and_then(|s| s.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
                     .collect()
             })
             .unwrap_or_default();
@@ -506,7 +506,7 @@ pub fn parse_sweep_resolved(response: &str) -> Result<Vec<String>, AgentWikiErro
             ))?;
     Ok(arr
         .iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
         .collect())
 }
 
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn parses_one_file_block() {
-        let resp = r#"---FILE: wiki/Concepts/Foo.md---
+        let resp = r"---FILE: wiki/Concepts/Foo.md---
 ---
 type: concept
 title: Foo
@@ -525,7 +525,7 @@ title: Foo
 # Foo
 
 Body.
----END FILE---"#;
+---END FILE---";
         let parsed = parse_ingest_blocks(resp).expect("parse");
         assert_eq!(parsed.files.len(), 1);
         assert_eq!(parsed.files[0].path, "Concepts/Foo.md");

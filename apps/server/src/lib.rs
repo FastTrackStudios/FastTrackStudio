@@ -2,13 +2,13 @@
 //!
 //! Surface after the knowledge + project-CRDT rip:
 //! - `/health` — liveness probe.
-//! - `/vox`    — architect/vox WebSocket endpoint hosting three
-//!               services: `AuthService` (architect-auth),
-//!               `AttachmentService` (signed upload/download), and
-//!               `VaultSyncRpc` (file replication backed by
-//!               `vault::Backend`).
-//! - `/blobs/*` — signed-URL endpoint for attachment uploads and
-//!                downloads, mounted via `attachments::routes`.
+//! - `/vox` — architect/vox WebSocket endpoint hosting three
+//!   services: `AuthService` (architect-auth),
+//!   `AttachmentService` (signed upload/download), and
+//!   `VaultSyncRpc` (file replication backed by
+//!   `vault::Backend`).
+//! - `/blobs/*` — signed-URL endpoint for attachment uploads
+//!   and downloads, mounted via `attachments::routes`.
 //!
 //! The previous CRDT machinery (`DocRegistry`, `OpenDoc`,
 //! `WorkspaceSyncImpl`, `task-db` / `crdt-seaorm` persistence,
@@ -113,14 +113,15 @@ impl AppState {
         // Vault file-replication. Storage root defaults to
         // `$XDG_DATA_HOME/task-server/vaults`, overridable via
         // `TASK_SERVER_VAULT_ROOT` for tests / containers.
-        let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
+        let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT").map_or_else(
+            |_| {
                 dirs_local_share()
                     .unwrap_or_else(|| PathBuf::from("./vaults"))
                     .join("task-server")
                     .join("vaults")
-            });
+            },
+            PathBuf::from,
+        );
         let vault_sync_state = vault::Backend::under_parent(vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
         let wiki = wiki_live::WikiBackend::under_parent(vault_root.clone())

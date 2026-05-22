@@ -27,6 +27,7 @@ struct Inner {
 }
 
 impl InMemoryScheduler {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -245,11 +246,11 @@ mod tests {
     /// picks them up from `InMemoryScheduler` without an umbrella
     /// trait. The body is intentionally trivial — what matters is
     /// the bound resolving.
-    fn _bound_compiles<S: DayTemplates + Bookings>(_: &S) {}
+    fn bound_compiles<S: DayTemplates + Bookings>(_: &S) {}
 
     #[test]
     fn sub_trait_bounds_resolve() {
         let s = InMemoryScheduler::new();
-        _bound_compiles(&s);
+        bound_compiles(&s);
     }
 }

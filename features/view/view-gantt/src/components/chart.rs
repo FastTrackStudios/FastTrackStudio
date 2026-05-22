@@ -28,7 +28,6 @@ pub fn Chart() -> Element {
     let body_h = (row_h * rows.len() as f32).max(row_h);
     let total_h = scale_h + body_h;
     let markers = s.markers.clone();
-    let _min_unit_width = grid.min_unit_width;
     drop(s);
 
     // Virtualization — drop bars far outside the viewport. The
@@ -53,7 +52,7 @@ pub fn Chart() -> Element {
     let mut cell_lines: Vec<(f32, bool, f32)> = Vec::new();
     if let Some(br) = bottom_row {
         use chrono::Datelike;
-        for cell in br.cells.iter() {
+        for cell in &br.cells {
             let weekend = matches!(
                 cell.start.weekday(),
                 chrono::Weekday::Sat | chrono::Weekday::Sun

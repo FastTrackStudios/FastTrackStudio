@@ -26,6 +26,7 @@ pub enum ScanError {
 /// Split a markdown file's leading YAML frontmatter from the
 /// body. Returns `(frontmatter, body)`. Mirrors the parser in
 /// `task::parse`.
+#[must_use]
 pub fn frontmatter_split(src: &str) -> Option<(&str, &str)> {
     let rest = src.strip_prefix("---\n")?;
     let end = rest.find("\n---\n")?;

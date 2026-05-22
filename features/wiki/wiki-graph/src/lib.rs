@@ -4,7 +4,7 @@
 //! Walks `<vault>/Wiki/`, parses frontmatter + wikilinks,
 //! and builds nodes + 4-signal-weighted edges.
 //!
-//! ## Signals (matches llm_wiki defaults)
+//! ## Signals (matches `llm_wiki` defaults)
 //!
 //! | Signal          | Weight | Condition                            |
 //! |-----------------|--------|--------------------------------------|

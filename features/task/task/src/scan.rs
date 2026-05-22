@@ -7,6 +7,7 @@ use vault::Vault;
 use crate::model::TaskInfo;
 use crate::parse::{looks_like_task, parse_page};
 
+#[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<TaskInfo> {
     vault
         .pages

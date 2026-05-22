@@ -1,4 +1,4 @@
-//! Image extraction from raw sources — Phase 1 of llm_wiki's
+//! Image extraction from raw sources — Phase 1 of `llm_wiki`'s
 //! `multimodal-images.md` plan. **No LLM involved**: this is
 //! pure decode + filter (pdfium for PDFs, zip + XML walking
 //! for PPTX / DOCX, plain decode for image MIME types).

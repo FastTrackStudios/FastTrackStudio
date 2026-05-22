@@ -55,7 +55,7 @@ pub fn walk_vault(root: &Path) -> Vec<VaultEntry> {
             .and_then(|s| s.to_str())
             .map(str::to_ascii_lowercase);
         let kind = match ext.as_deref() {
-            Some("md") | Some("markdown") => VaultEntryKind::Markdown,
+            Some("md" | "markdown") => VaultEntryKind::Markdown,
             Some("base") => VaultEntryKind::Base,
             _ => continue,
         };

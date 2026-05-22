@@ -130,6 +130,7 @@ fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
     Some((&rest[..end], &rest[end + 5..]))
 }
 
+#[must_use]
 pub fn looks_like_substitution_rule(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -156,7 +157,10 @@ fn parse_page(page: &VaultPage) -> Option<SubstitutionRule> {
     let name = take_str("name").unwrap_or_else(|| page.basename.clone());
     let from_item_id = take_str("fromItemId").and_then(|s| Uuid::parse_str(&s).ok())?;
     let to_item_id = take_str("toItemId").and_then(|s| Uuid::parse_str(&s).ok())?;
-    let ratio = map.get("ratio").and_then(|v| v.as_f64()).unwrap_or(1.0);
+    let ratio = map
+        .get("ratio")
+        .and_then(serde_yaml::Value::as_f64)
+        .unwrap_or(1.0);
     let reasons = map
         .get("reasons")
         .and_then(|v| v.as_sequence())
@@ -173,7 +177,7 @@ fn parse_page(page: &VaultPage) -> Option<SubstitutionRule> {
         .map(|s| {
             s.iter()
                 .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect()
         })
         .unwrap_or_default();
@@ -249,6 +253,7 @@ pub struct Store {
 }
 
 impl Store {
+    #[must_use]
     pub fn new(vault: Vault) -> Self {
         Self {
             inner: Arc::new(Mutex::new(vault)),
@@ -259,6 +264,7 @@ impl Store {
         Self { inner }
     }
 
+    #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
     }
@@ -269,9 +275,10 @@ fn map_io(e: impl std::fmt::Display) -> SubstitutionError {
 }
 
 fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault.pages.iter().position(|p| {
-        looks_like_substitution_rule(p) && parse_page(p).map(|r| r.id == id).unwrap_or(false)
-    })
+    vault
+        .pages
+        .iter()
+        .position(|p| looks_like_substitution_rule(p) && parse_page(p).is_some_and(|r| r.id == id))
 }
 
 impl SubstitutionService for Store {

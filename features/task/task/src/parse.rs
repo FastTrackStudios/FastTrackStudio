@@ -25,6 +25,7 @@ pub enum ParseError {
 
 /// Whether the page looks like a task. Conventional discriminators:
 /// `type: task` field, OR `task` present in the `tags` array.
+#[must_use]
 pub fn looks_like_task(page: &VaultPage) -> bool {
     let Some((fm, _body)) = split_frontmatter(&page.raw) else {
         return false;
@@ -67,7 +68,7 @@ pub fn parse_page(page: &VaultPage) -> Result<TaskInfo, ParseError> {
 
     let time_estimate = map
         .get("timeEstimate")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_yaml::Value::as_u64)
         .and_then(|n| u32::try_from(n).ok());
 
     let time_entries = map

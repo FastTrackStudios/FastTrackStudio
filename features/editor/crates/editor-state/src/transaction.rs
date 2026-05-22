@@ -23,35 +23,42 @@ pub struct TransactionSpec {
 }
 
 impl TransactionSpec {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn changes(mut self, changes: Changes) -> Self {
         self.changes = changes;
         self
     }
 
+    #[must_use]
     pub fn selection(mut self, sel: Selection) -> Self {
         self.selection = Some(sel);
         self
     }
 
+    #[must_use]
     pub fn user_event(mut self, name: impl Into<String>) -> Self {
         self.user_event = Some(name.into());
         self
     }
 
+    #[must_use]
     pub fn annotate(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.annotations.push((key.into(), value.into()));
         self
     }
 
+    #[must_use]
     pub fn folds(mut self, folds: Vec<std::ops::Range<usize>>) -> Self {
         self.folds = Some(folds);
         self
     }
 
+    #[must_use]
     pub fn reading_mode(mut self, on: bool) -> Self {
         self.reading_mode = Some(on);
         self
@@ -65,10 +72,12 @@ pub struct Transaction {
 }
 
 impl Transaction {
+    #[must_use]
     pub fn new(before: EditorState, spec: TransactionSpec) -> Self {
         Self { before, spec }
     }
 
+    #[must_use]
     pub fn apply(&self) -> EditorState {
         let new_doc = self.spec.changes.apply(&self.before.doc);
         let new_selection = self

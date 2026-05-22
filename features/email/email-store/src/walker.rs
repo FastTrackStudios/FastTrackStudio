@@ -38,7 +38,10 @@ pub fn walk_folder<'a>(
         .flat_map(move |sub| {
             let dir = folder_path.join(sub);
             let entries = std::fs::read_dir(&dir).ok();
-            entries.into_iter().flatten().filter_map(|e| e.ok())
+            entries
+                .into_iter()
+                .flatten()
+                .filter_map(std::result::Result::ok)
         })
         .filter_map(move |entry| {
             let abs = entry.path();
@@ -66,6 +69,7 @@ pub fn walk_folder<'a>(
 /// `.`. Returns an owned `Vec` because the iterator chain would
 /// otherwise have to hold borrows across multiple `read_dir`
 /// calls.
+#[must_use]
 pub fn walk_account(account_root: &Path) -> Vec<MailEntry> {
     let mut out = Vec::new();
 

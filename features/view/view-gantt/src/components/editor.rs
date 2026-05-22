@@ -92,7 +92,7 @@ pub fn TaskEditor(props: TaskEditorProps) -> Element {
     rsx! {
         Sheet {
             open: true,
-            on_close: move |_| close_event.call(GanttEvent::CloseEditor),
+            on_close: move |()| close_event.call(GanttEvent::CloseEditor),
             side: SheetSide::Right,
             SheetHeader {
                 SheetTitle { "Task details" }

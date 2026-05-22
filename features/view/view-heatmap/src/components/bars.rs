@@ -1,4 +1,4 @@
-//! Weekly-bar view inspired by CodexMonitor's usage chart: one
+//! Weekly-bar view inspired by `CodexMonitor`'s usage chart: one
 //! vertical bar per day of the visible week, height ∝ count, with
 //! prev/next chevrons to walk through history.
 

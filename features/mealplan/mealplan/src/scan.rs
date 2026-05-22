@@ -7,6 +7,7 @@ use vault::Vault;
 use crate::model::Meal;
 use crate::parse::{looks_like_meal, parse_page};
 
+#[must_use]
 pub fn scan_vault(vault: &Vault) -> Vec<Meal> {
     vault
         .pages
@@ -23,6 +24,7 @@ pub fn scan_vault(vault: &Vault) -> Vec<Meal> {
 }
 
 /// Meals scheduled on a specific day.
+#[must_use]
 pub fn meals_on(vault: &Vault, day: NaiveDate) -> Vec<Meal> {
     scan_vault(vault)
         .into_iter()
@@ -31,6 +33,7 @@ pub fn meals_on(vault: &Vault, day: NaiveDate) -> Vec<Meal> {
 }
 
 /// Meals scheduled in `[start, end)`. Useful for week views.
+#[must_use]
 pub fn meals_between(vault: &Vault, start: NaiveDate, end: NaiveDate) -> Vec<Meal> {
     scan_vault(vault)
         .into_iter()

@@ -19,6 +19,7 @@ pub enum TextObject {
 }
 
 impl TextObject {
+    #[must_use]
     pub fn from_char(ch: char) -> Option<Self> {
         Some(match ch {
             'w' => Self::Word,
@@ -38,6 +39,7 @@ impl TextObject {
 /// Resolve a text object to a half-open byte range `[lo, hi)`
 /// around `pos`. `around=true` for `a<obj>` (includes delimiters
 /// / trailing space); `around=false` for `i<obj>` (inner).
+#[must_use]
 pub fn apply(
     state: &EditorState,
     obj: TextObject,
@@ -88,12 +90,12 @@ fn word_object(bytes: &[u8], pos: usize, around: bool) -> std::ops::Range<usize>
             while hi < bytes.len() && bytes[hi] == b' ' {
                 hi += 1;
             }
-            if !had_trail {
+            if had_trail {
+                // also strip leading ws to mop up isolated words
                 while lo > 0 && bytes[lo - 1] == b' ' {
                     lo -= 1;
                 }
             } else {
-                // also strip leading ws to mop up isolated words
                 while lo > 0 && bytes[lo - 1] == b' ' {
                     lo -= 1;
                 }
@@ -192,7 +194,7 @@ fn paragraph_object(bytes: &[u8], pos: usize, around: bool) -> std::ops::Range<u
     let is_blank = |line_start: usize, line_end: usize| {
         bytes[line_start..line_end]
             .iter()
-            .all(|b| b.is_ascii_whitespace())
+            .all(u8::is_ascii_whitespace)
     };
     // find current line start
     let p = pos.min(bytes.len());

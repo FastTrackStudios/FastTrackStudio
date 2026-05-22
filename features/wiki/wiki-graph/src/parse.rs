@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_field_names)]
 pub(crate) struct Page {
     /// Wiki-relative path (e.g. `Concepts/Foo.md`).
     pub rel_path: String,

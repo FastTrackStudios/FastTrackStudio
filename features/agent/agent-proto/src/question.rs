@@ -4,8 +4,8 @@
 //! questions are open-ended clarifications with N labeled
 //! options.
 //!
-//! Maps to CodexMonitor's `RequestUserInputParams.questions`
-//! and the AskUserQuestion CLI tool pattern. Multi-question
+//! Maps to `CodexMonitor`'s `RequestUserInputParams.questions`
+//! and the `AskUserQuestion` CLI tool pattern. Multi-question
 //! requests are supported (one round-trip can carry several
 //! related questions).
 

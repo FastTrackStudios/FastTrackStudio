@@ -35,6 +35,7 @@ pub struct Store {
 impl Store {
     /// Build mealplan + pantry + cookbook stores around one
     /// shared vault mutex.
+    #[must_use]
     pub fn new(vault: Vault) -> Self {
         let pantry = PantryStore::new(vault);
         let inner = pantry.shared();
@@ -59,6 +60,7 @@ impl Store {
         }
     }
 
+    #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
     }
@@ -66,10 +68,12 @@ impl Store {
     /// Borrow the underlying pantry store — useful when a
     /// caller wants to drive both surfaces (e.g. show "what
     /// did we eat this week and what's left in the fridge").
+    #[must_use]
     pub fn pantry(&self) -> &PantryStore {
         &self.pantry
     }
 
+    #[must_use]
     pub fn cookbook(&self) -> &CookbookStore {
         &self.cookbook
     }

@@ -58,7 +58,7 @@ pub(crate) fn scan_wiki(vault_root: &Path) -> Result<Vec<Page>, ScanError> {
         }
         if SKIP_PREFIXES
             .iter()
-            .any(|p| rel_str.starts_with(p) || rel_str.starts_with(&format!("./{}", p)))
+            .any(|p| rel_str.starts_with(p) || rel_str.starts_with(&format!("./{p}")))
         {
             continue;
         }

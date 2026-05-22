@@ -1,4 +1,4 @@
-//! Cursor / block motions — Normal, Visual, VisualLine.
+//! Cursor / block motions — Normal, Visual, `VisualLine`.
 //!
 //! Vocabulary mirrors the reference plugin's `up.ts` / `down.ts` /
 //! `wordForward.ts` etc.

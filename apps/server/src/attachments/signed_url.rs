@@ -2,7 +2,7 @@
 //!
 //! Format mirrors the capability tokens from Phase 3:
 //! `base64url(signature || canonical_message)` over Ed25519. The
-//! canonical_message is short, hand-rolled, deterministic UTF-8:
+//! `canonical_message` is short, hand-rolled, deterministic UTF-8:
 //!
 //! ```text
 //! blob/v1|<purpose>|<expires_unix>|<subject>
@@ -53,6 +53,7 @@ pub struct BlobToken {
 }
 
 impl BlobToken {
+    #[must_use]
     pub fn upload(upload_id: Uuid, expires_unix: i64) -> Self {
         Self {
             purpose: BlobTokenPurpose::Upload,
@@ -68,6 +69,7 @@ impl BlobToken {
         }
     }
 
+    #[must_use]
     pub fn upload_id(&self) -> Option<Uuid> {
         if matches!(self.purpose, BlobTokenPurpose::Upload) {
             Uuid::parse_str(&self.subject).ok()
@@ -75,6 +77,7 @@ impl BlobToken {
             None
         }
     }
+    #[must_use]
     pub fn content_hash(&self) -> Option<&str> {
         if matches!(self.purpose, BlobTokenPurpose::Download) {
             Some(self.subject.as_str())
@@ -93,6 +96,7 @@ impl BlobToken {
     }
 
     /// Sign + encode this token. The string is opaque to clients.
+    #[must_use]
     pub fn issue(&self, kp: &ServerKeypair) -> String {
         kp.issue_blob_token(self)
     }

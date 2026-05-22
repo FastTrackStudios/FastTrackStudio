@@ -11,12 +11,13 @@
 //! - [`watch`]: a debounced filesystem watcher that emits change
 //!   events the editor can use to refresh state.
 //!
-//! Architectural shape mirrors [`vault-obsidian`]: small focused
-//! modules, native-only `cfg`, vault snapshot + walker + watcher
-//! + a thin mutate layer for create / append / save. The
-//! difference is block-awareness: every vault page is parsed for
-//! its `id:: <uuid>` lines, and the [`BlockIndex`] gives O(1)
-//! cross-vault lookup of a block's containing page and offset.
+//! Architectural shape mirrors [`vault-obsidian`]: small
+//! focused modules, native-only `cfg`, vault snapshot +
+//! walker + watcher + a thin mutate layer for create /
+//! append / save. The difference is block-awareness:
+//! every vault page is parsed for its `id:: <uuid>` lines,
+//! and the [`BlockIndex`] gives O(1) cross-vault lookup of
+//! a block's containing page and offset.
 //!
 //! Compared to the older [`editor-outliner::db::Vault`] this
 //! replaces (still in-tree under `crates/editor-outliner/` until

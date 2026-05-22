@@ -1,3 +1,4 @@
+#![allow(clippy::large_futures)]
 //! End-to-end check for the `VaultSync` architect-rpc service
 //! against a live `task-server`. Boots `AppState` on an
 //! ephemeral TCP port (with `TASK_SERVER_VAULT_ROOT` pointed at
@@ -28,14 +29,14 @@ static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn boot_server() -> eyre::Result<(String, tempfile::TempDir)> {
     let tmp = tempfile::tempdir()?;
-    let _guard = ENV_LOCK.lock().await;
+    let guard = ENV_LOCK.lock().await;
     // SAFETY: held under `ENV_LOCK` for the duration of
     // `AppState::new`, which reads the var exactly once.
     unsafe {
         std::env::set_var("TASK_SERVER_VAULT_ROOT", tmp.path());
     }
     let state = AppState::new().await?;
-    drop(_guard);
+    drop(guard);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let app = router(state);

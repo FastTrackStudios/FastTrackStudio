@@ -244,7 +244,7 @@ pub struct PantryItem {
     pub barcodes: Vec<String>,
 
     /// Optional product picture — typically populated from
-    /// the OpenFoodFacts lookup. URL or vault-relative
+    /// the `OpenFoodFacts` lookup. URL or vault-relative
     /// path; consumers display verbatim.
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "imageUrl")]
     pub image_url: Option<String>,
@@ -293,6 +293,7 @@ impl PantryItemDraft {
     /// ready for [`crate::PantryService::create`]. The
     /// barcode is added to `barcodes`. Identity (id) is
     /// left nil so the store can assign one.
+    #[must_use]
     pub fn into_item(self, location_id: Option<uuid::Uuid>) -> PantryItem {
         PantryItem {
             path: String::new(),
@@ -361,6 +362,7 @@ pub enum DueType {
 }
 
 impl DueType {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::BestBefore => "best-before",
@@ -368,6 +370,8 @@ impl DueType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "best-before" | "best_before" | "bestbefore" | "soft" => Some(Self::BestBefore),
@@ -380,7 +384,7 @@ impl DueType {
 /// One per-purchase batch row inside a [`PantryItem`].
 ///
 /// Modeled on grocy's `stock` table: each entry tracks the
-/// remaining qty + best_before + opened/opened_date + price
+/// remaining qty + `best_before` + `opened/opened_date` + price
 /// for one physical package or one received quantity. FIFO
 /// consume across entries powers shelf-life-aware
 /// deductions; transferring between locations swaps the
@@ -441,6 +445,7 @@ pub struct StockEntry {
 }
 
 impl StockEntry {
+    #[must_use]
     pub fn is_expired(&self, today: NaiveDate) -> bool {
         self.best_before.is_some_and(|d| d < today)
     }
@@ -509,6 +514,7 @@ pub enum SubReason {
 }
 
 impl SubReason {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::OutOfStock => "out-of-stock",
@@ -529,6 +535,8 @@ impl SubReason {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "out-of-stock" | "out_of_stock" | "oos" => Some(Self::OutOfStock),
@@ -555,6 +563,7 @@ impl PantryItem {
     /// Total `qty` across all batch entries. Falls back to
     /// the legacy page-level [`Self::qty`] when no entries
     /// are present.
+    #[must_use]
     pub fn stock_total(&self) -> Option<f64> {
         if self.stock_entries.is_empty() {
             self.qty
@@ -566,6 +575,7 @@ impl PantryItem {
     /// Lossy down-conversion to the inventory model. Drops
     /// the food-specific fields; useful when handing a row
     /// off to the gear-inventory UI.
+    #[must_use]
     pub fn to_item(&self) -> Item {
         Item {
             path: self.path.clone(),
@@ -591,6 +601,7 @@ impl PantryItem {
     /// Lift an existing inventory row into a pantry shape.
     /// Food fields start empty; the caller fills them in
     /// before persisting via [`crate::Store::create`].
+    #[must_use]
     pub fn from_item(item: Item) -> Self {
         let mut tags = item.tags.clone();
         if !tags.iter().any(|t| t == "pantry") {
@@ -636,10 +647,12 @@ impl PantryItem {
         }
     }
 
+    #[must_use]
     pub fn is_expired(&self, today: NaiveDate) -> bool {
         self.expiry.is_some_and(|d| d < today)
     }
 
+    #[must_use]
     pub fn is_low(&self) -> bool {
         match (self.qty, self.minimum) {
             (Some(q), Some(m)) => q <= m,
@@ -666,6 +679,7 @@ pub enum FoodCategory {
 }
 
 impl FoodCategory {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Produce => "produce",
@@ -684,6 +698,8 @@ impl FoodCategory {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "produce" | "veg" | "vegetable" | "fruit" => Some(Self::Produce),

@@ -192,6 +192,7 @@ impl Default for ParsedBlock {
 ///   (consistent with Obsidian, which renders the raw `---` line).
 /// - YAML parse failures fall back to empty frontmatter to keep the
 ///   helper infallible.
+#[must_use]
 pub fn parse_frontmatter(src: &str) -> (Vec<FrontmatterEntry>, usize) {
     if !src.starts_with("---\n") && !src.starts_with("---\r\n") {
         return (Vec::new(), 0);
@@ -251,6 +252,7 @@ pub fn parse_frontmatter(src: &str) -> (Vec<FrontmatterEntry>, usize) {
 /// Serialize frontmatter back to YAML, preserving key order. Returns
 /// the empty string when `fm` is empty (so the parent serializer can
 /// skip the `---` fences entirely).
+#[must_use]
 pub fn serialize_frontmatter(fm: &[FrontmatterEntry]) -> String {
     if fm.is_empty() {
         return String::new();
@@ -261,7 +263,7 @@ pub fn serialize_frontmatter(fm: &[FrontmatterEntry]) -> String {
     }
     // serde_yaml::to_string preserves IndexMap order.
     let body = serde_yaml::to_string(&map).unwrap_or_default();
-    format!("---\n{}---\n", body)
+    format!("---\n{body}---\n")
 }
 
 fn yaml_to_json(v: serde_yaml::Value) -> serde_json::Value {
@@ -273,8 +275,7 @@ fn yaml_to_json(v: serde_yaml::Value) -> serde_json::Value {
                 serde_json::Value::Number(i.into())
             } else if let Some(f) = n.as_f64() {
                 serde_json::Number::from_f64(f)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null)
+                    .map_or(serde_json::Value::Null, serde_json::Value::Number)
             } else {
                 serde_json::Value::Null
             }
@@ -335,6 +336,7 @@ fn json_to_yaml(v: &serde_json::Value) -> serde_yaml::Value {
 /// - `"^abc"` on its own (no preceding whitespace) → `("", Some("abc"))`
 /// - `"text ^"` (no id chars) → `("text ^", None)` (no match)
 /// - `"text ^abc trailing"` → no match, id must be at end-of-line
+#[must_use]
 pub fn parse_block_id(line: &str) -> (String, Option<String>) {
     let re = block_id_re();
     if let Some(caps) = re.captures(line) {
@@ -352,6 +354,7 @@ pub fn parse_block_id(line: &str) -> (String, Option<String>) {
 /// Pull every `[[…]]` / `![[…]]` / `#tag` / `[[entity://…]]` out of
 /// the given content. Order matches their byte position in the source
 /// so consumers can re-attach span data later.
+#[must_use]
 pub fn extract_refs(content: &str) -> Vec<Ref> {
     let mut out: Vec<(usize, Ref)> = Vec::new();
 
@@ -578,7 +581,10 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
             continue;
         }
         let raw = caps.get(1).unwrap().as_str();
-        let path: Vec<String> = raw.split('/').map(|s| s.to_string()).collect();
+        let path: Vec<String> = raw
+            .split('/')
+            .map(std::string::ToString::to_string)
+            .collect();
         out.push((
             m.start(),
             Ref::Tag(TagRef {
@@ -616,6 +622,7 @@ pub fn extract_refs(content: &str) -> Vec<Ref> {
 /// - Nested callouts collapse into the outer callout's content.
 /// - HTML blocks are emitted as `html` kind but with no further
 ///   tag-balancing logic.
+#[must_use]
 pub fn parse_page(src: &str) -> ParsedPage {
     let (frontmatter, body_offset) = parse_frontmatter(src);
     let body = &src[body_offset..];

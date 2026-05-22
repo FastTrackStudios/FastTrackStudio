@@ -42,6 +42,8 @@ pub struct World {
 impl World {
     /// Build a world preloaded with the typst-assets bundled
     /// font set (`typst-assets/fonts` feature).
+    #[must_use]
+    #[allow(clippy::items_after_statements)]
     pub fn with_bundled_fonts() -> Self {
         let mut fonts = Vec::new();
         for data in typst_assets::fonts() {
@@ -52,13 +54,13 @@ impl World {
         }
         let book = FontBook::from_fonts(&fonts);
         let main_id = FileId::new(None, typst::syntax::VirtualPath::new(MAIN_VIRTUAL_PATH));
+        use chrono::Datelike;
         let mut sources = HashMap::new();
         sources.insert(main_id, Source::new(main_id, String::new()));
         // `chrono` with `clock` + `wasmbind` routes through
         // `Date.now()` on `wasm32-unknown-unknown`; without
         // `wasmbind` `Local::now()` panics with "time not
         // implemented on this platform".
-        use chrono::Datelike;
         let now = chrono::Local::now();
         let today = Datetime::from_ymd(now.year(), now.month() as u8, now.day() as u8)
             .unwrap_or_else(|| Datetime::from_ymd(2026, 1, 1).unwrap());

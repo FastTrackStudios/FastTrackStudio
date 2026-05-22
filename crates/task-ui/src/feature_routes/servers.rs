@@ -87,7 +87,7 @@ pub fn ServersView() -> Element {
                         on_remove: {
                             let id = entry.id;
                             let mut registry = registry;
-                            EventHandler::new(move |_| registry.remove(id))
+                            EventHandler::new(move |()| registry.remove(id))
                         },
                     }
                 }

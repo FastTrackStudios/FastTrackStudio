@@ -63,6 +63,7 @@ impl WikiBackend {
         Ok(Self::from_layout(Layout::UnderParent(parent)))
     }
 
+    #[must_use]
     pub fn with_roots(roots: HashMap<String, PathBuf>) -> Self {
         Self::from_layout(Layout::Explicit(roots))
     }

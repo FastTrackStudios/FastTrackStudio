@@ -21,9 +21,11 @@ pub struct Transcript {
 }
 
 impl Transcript {
+    #[must_use]
     pub fn contains(&self, needle: &str) -> bool {
         self.lines.iter().any(|l| l.contains(needle))
     }
+    #[must_use]
     pub fn payload_str(&self) -> String {
         String::from_utf8_lossy(&self.data_payload).into_owned()
     }

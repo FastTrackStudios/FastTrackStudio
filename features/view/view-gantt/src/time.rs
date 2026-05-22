@@ -17,8 +17,9 @@ pub type WeekStart = u8;
 pub const MONDAY_START: WeekStart = 0;
 
 /// Snap `date` to the start of the unit it belongs to.
+#[must_use]
 pub fn unit_start(unit: LengthUnit, date: DateTime<Utc>, week_start: WeekStart) -> DateTime<Utc> {
-    use LengthUnit::*;
+    use LengthUnit::{Day, Hour, Minute, Month, Quarter, Week, Year};
     match unit {
         Minute => date
             .with_second(0)
@@ -39,8 +40,8 @@ pub fn unit_start(unit: LengthUnit, date: DateTime<Utc>, week_start: WeekStart) 
                 .single()
                 .unwrap_or(date);
             // 0-indexed-from-monday.
-            let dow = day.weekday().num_days_from_monday() as i64;
-            let target = week_start as i64;
+            let dow = i64::from(day.weekday().num_days_from_monday());
+            let target = i64::from(week_start);
             let shift = (dow - target).rem_euclid(7);
             day - Duration::days(shift)
         }
@@ -62,8 +63,9 @@ pub fn unit_start(unit: LengthUnit, date: DateTime<Utc>, week_start: WeekStart) 
 }
 
 /// Add `n` units to `date`. Negative values subtract.
+#[must_use]
 pub fn add(unit: LengthUnit, date: DateTime<Utc>, n: i64) -> DateTime<Utc> {
-    use LengthUnit::*;
+    use LengthUnit::{Day, Hour, Minute, Month, Quarter, Week, Year};
     match unit {
         Minute => date + Duration::minutes(n),
         Hour => date + Duration::hours(n),
@@ -72,14 +74,14 @@ pub fn add(unit: LengthUnit, date: DateTime<Utc>, n: i64) -> DateTime<Utc> {
         Month => add_months(date, n),
         Quarter => add_months(date, n * 3),
         Year => {
-            let y = date.year() as i64 + n;
+            let y = i64::from(date.year()) + n;
             date.with_year(y as i32).unwrap_or(date)
         }
     }
 }
 
 fn add_months(date: DateTime<Utc>, n: i64) -> DateTime<Utc> {
-    let total = date.year() as i64 * 12 + (date.month() as i64 - 1) + n;
+    let total = i64::from(date.year()) * 12 + (i64::from(date.month()) - 1) + n;
     let new_year = total.div_euclid(12) as i32;
     let new_month = total.rem_euclid(12) as u32 + 1;
     let day = clamp_day(new_year, new_month, date.day());
@@ -114,6 +116,7 @@ fn last_day_of_month(year: i32, month: u32) -> u32 {
 }
 
 /// Difference `a - b` in whole units (fractional via `diff_f`).
+#[must_use]
 pub fn diff(unit: LengthUnit, a: DateTime<Utc>, b: DateTime<Utc>) -> i64 {
     diff_f(unit, a, b) as i64
 }
@@ -125,8 +128,9 @@ pub fn diff(unit: LengthUnit, a: DateTime<Utc>, b: DateTime<Utc>) -> i64 {
 /// measured against the actual length of the month `b` falls in,
 /// which is what svar's `lib-schedule` does. This avoids the 1.0%
 /// drift the prior 30-day approximation had near long months.
+#[must_use]
 pub fn diff_f(unit: LengthUnit, a: DateTime<Utc>, b: DateTime<Utc>) -> f64 {
-    use LengthUnit::*;
+    use LengthUnit::{Day, Hour, Minute, Month, Quarter, Week, Year};
     let secs = (a - b).num_milliseconds() as f64 / 1000.0;
     match unit {
         Minute => secs / 60.0,
@@ -135,12 +139,13 @@ pub fn diff_f(unit: LengthUnit, a: DateTime<Utc>, b: DateTime<Utc>) -> f64 {
         Week => secs / (86_400.0 * 7.0),
         Month => calendar_month_diff(a, b),
         Quarter => calendar_month_diff(a, b) / 3.0,
-        Year => (a.year() - b.year()) as f64 + calendar_month_diff(a, b) / 12.0,
+        Year => f64::from(a.year() - b.year()) + calendar_month_diff(a, b) / 12.0,
     }
 }
 
 fn calendar_month_diff(a: DateTime<Utc>, b: DateTime<Utc>) -> f64 {
-    let whole = (a.year() as i64 - b.year() as i64) * 12 + (a.month() as i64 - b.month() as i64);
+    let whole = (i64::from(a.year()) - i64::from(b.year())) * 12
+        + (i64::from(a.month()) - i64::from(b.month()));
     // Fractional remainder is `(a - first-of-a's-month) / days-in-a's-month`
     // minus the same for b. Each ratio is the position-within-month
     // in [0, 1).
@@ -150,16 +155,17 @@ fn calendar_month_diff(a: DateTime<Utc>, b: DateTime<Utc>) -> f64 {
 }
 
 fn month_fraction(d: DateTime<Utc>) -> f64 {
-    let days_in_month = last_day_of_month(d.year(), d.month()) as f64;
-    let seconds_into_month = (d.day() as f64 - 1.0) * 86_400.0
-        + d.hour() as f64 * 3600.0
-        + d.minute() as f64 * 60.0
-        + d.second() as f64;
+    let days_in_month = f64::from(last_day_of_month(d.year(), d.month()));
+    let seconds_into_month = (f64::from(d.day()) - 1.0) * 86_400.0
+        + f64::from(d.hour()) * 3600.0
+        + f64::from(d.minute()) * 60.0
+        + f64::from(d.second());
     seconds_into_month / (days_in_month * 86_400.0)
 }
 
 /// Approximate width-in-pixels of one `unit` cell given the chart's
 /// base cell width (the *min* unit width).
+#[must_use]
 pub fn unit_pixel_width(unit: LengthUnit, min_unit: LengthUnit, cell_width: f32) -> f32 {
     let sample = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
     let next = add(unit, sample, 1);
@@ -167,6 +173,7 @@ pub fn unit_pixel_width(unit: LengthUnit, min_unit: LengthUnit, cell_width: f32)
 }
 
 /// Pick the smallest-granularity unit from a scale list.
+#[must_use]
 pub fn min_unit(units: &[LengthUnit]) -> LengthUnit {
     units
         .iter()

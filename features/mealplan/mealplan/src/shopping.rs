@@ -138,7 +138,7 @@ pub trait ShoppingService {
     fn add_low_stock(&self, list_id: &str) -> Result<ShoppingList, ShoppingError>;
 
     /// Add every pantry item with a stock entry already
-    /// past its best_before as of `today`.
+    /// past its `best_before` as of `today`.
     fn add_expired_or_overdue(
         &self,
         list_id: &str,
@@ -165,6 +165,7 @@ fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
     Some((&rest[..end], &rest[end + 5..]))
 }
 
+#[must_use]
 pub fn looks_like_shopping_list(page: &VaultPage) -> bool {
     let Some((fm, _)) = split_frontmatter(&page.raw) else {
         return false;
@@ -207,7 +208,7 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
                         .and_then(|v| v.as_str())
                         .and_then(|s| Uuid::parse_str(s).ok());
                     let name = m.get("name").and_then(|v| v.as_str())?.to_string();
-                    let qty = m.get("qty").and_then(|v| v.as_f64());
+                    let qty = m.get("qty").and_then(serde_yaml::Value::as_f64);
                     let unit = m
                         .get("unit")
                         .and_then(|v| v.as_str())
@@ -216,10 +217,10 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
                     let note = m
                         .get("note")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     let purchased = m
                         .get("purchased")
-                        .and_then(|v| v.as_bool())
+                        .and_then(serde_yaml::Value::as_bool)
                         .unwrap_or(false);
                     Some(ShoppingEntry {
                         id: entry_id,
@@ -309,6 +310,7 @@ pub struct Store {
 }
 
 impl Store {
+    #[must_use]
     pub fn new(vault: Vault) -> Self {
         let pantry = PantryStore::new(vault);
         let inner = pantry.shared();
@@ -330,10 +332,12 @@ impl Store {
         }
     }
 
+    #[must_use]
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
         self.inner.clone()
     }
 
+    #[must_use]
     pub fn pantry(&self) -> &PantryStore {
         &self.pantry
     }
@@ -344,9 +348,10 @@ fn map_io(e: impl std::fmt::Display) -> ShoppingError {
 }
 
 fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault.pages.iter().position(|p| {
-        looks_like_shopping_list(p) && parse_page(p).map(|l| l.id == id).unwrap_or(false)
-    })
+    vault
+        .pages
+        .iter()
+        .position(|p| looks_like_shopping_list(p) && parse_page(p).is_some_and(|l| l.id == id))
 }
 
 fn push_or_merge(list: &mut ShoppingList, entry: ShoppingEntry) {
@@ -480,12 +485,11 @@ impl ShoppingService for Store {
             .pantry
             .list()
             .map_err(|e| ShoppingError::Pantry(e.to_string()))?;
-        for item in items.into_iter().filter(|i| i.is_low()) {
+        for item in items.into_iter().filter(pantry::PantryItem::is_low) {
             let need = item
                 .minimum
                 .zip(item.stock_total())
-                .map(|(min, have)| (min - have).max(0.0))
-                .unwrap_or(0.0);
+                .map_or(0.0, |(min, have)| (min - have).max(0.0));
             push_or_merge(
                 &mut list,
                 ShoppingEntry {

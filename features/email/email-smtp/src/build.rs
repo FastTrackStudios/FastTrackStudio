@@ -30,8 +30,7 @@ pub fn build_message(draft: &Draft) -> Result<(Vec<u8>, String), BuildError> {
         .from
         .email
         .split_once('@')
-        .map(|(_, d)| d)
-        .unwrap_or("localhost");
+        .map_or("localhost", |(_, d)| d);
     let message_id = generate_message_id(domain);
 
     let mut builder = MessageBuilder::new()
@@ -83,6 +82,7 @@ fn addrs_to_list(list: &[Addr]) -> Address<'static> {
 }
 
 fn generate_message_id(domain: &str) -> String {
+    use std::hash::Hasher;
     use std::time::{SystemTime, UNIX_EPOCH};
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -90,7 +90,6 @@ fn generate_message_id(domain: &str) -> String {
         .unwrap_or(0);
     // ns + a hash of the address-time pair = adequate uniqueness
     // for a client. Server may rewrite anyway.
-    use std::hash::Hasher;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     h.write(domain.as_bytes());
     h.write_u128(now);
