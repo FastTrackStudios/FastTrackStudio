@@ -72,6 +72,53 @@ pub struct WatcherGuard {
     _debouncer: notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>,
 }
 
+/// Generic file event — not filtered by extension. Used by
+/// the wiki feature to watch its raw-sources folder for any
+/// file type (PDFs, .txt, .docx, ...).
+#[derive(Clone, Debug)]
+pub enum FsEvent {
+    /// File was created or modified.
+    Changed { abs_path: PathBuf },
+    /// File was removed or renamed (notify-debouncer-mini
+    /// surfaces renames as a remove + create pair).
+    Removed { abs_path: PathBuf },
+}
+
+/// Start watching `root` for **any file** event (no extension
+/// filter). Events arrive on the returned receiver at the
+/// given debounce delay.
+pub fn watch_any(
+    root: PathBuf,
+    delay: Duration,
+) -> Result<(mpsc::Receiver<FsEvent>, WatcherGuard), WatchError> {
+    let (tx, rx) = mpsc::channel::<FsEvent>();
+    let mut debouncer = new_debouncer(delay, move |res: DebounceEventResult| match res {
+        Ok(events) => {
+            for event in events {
+                let abs = event.path.clone();
+                let evt = match event.kind {
+                    DebouncedEventKind::Any => FsEvent::Changed { abs_path: abs },
+                    DebouncedEventKind::AnyContinuous => FsEvent::Changed { abs_path: abs },
+                    _ => continue,
+                };
+                let _ = tx.send(evt);
+            }
+        }
+        Err(e) => tracing::warn!(?e, "watcher error"),
+    })
+    .map_err(|e| WatchError::Notify(e.to_string()))?;
+    debouncer
+        .watcher()
+        .watch(&root, notify::RecursiveMode::Recursive)
+        .map_err(|e| WatchError::Notify(e.to_string()))?;
+    Ok((
+        rx,
+        WatcherGuard {
+            _debouncer: debouncer,
+        },
+    ))
+}
+
 fn is_markdown(path: &std::path::Path) -> bool {
     matches!(
         path.extension()

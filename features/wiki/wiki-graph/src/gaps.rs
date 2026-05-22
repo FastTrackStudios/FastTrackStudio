@@ -10,15 +10,21 @@ use std::path::Path;
 
 use wiki_proto::graph::{GapKind, KnowledgeGap};
 
+use wiki_proto::graph::RelevanceWeights;
+
+use crate::louvain::{cluster_gaps, louvain_clusters};
 use crate::scan::{ScanError, scan_wiki};
-use crate::scoring::Indices;
+use crate::scoring::{Indices, edge_weight_matrix};
 
 /// Compute knowledge gaps for a vault. Returns an empty
 /// list when the wiki is empty or perfectly connected.
 pub fn find_gaps(vault_root: &Path) -> Result<Vec<KnowledgeGap>, ScanError> {
     let pages = scan_wiki(vault_root)?;
     let idx = Indices::build(&pages);
-    let mut out = Vec::new();
+    let weights = RelevanceWeights::default();
+    let matrix = edge_weight_matrix(&pages, &idx, &weights);
+    let clusters = louvain_clusters(&pages, &idx, &matrix);
+    let mut out = cluster_gaps(&clusters, &pages, &idx);
 
     // ── Orphans ───────────────────────────────────────
     for (i, p) in pages.iter().enumerate() {

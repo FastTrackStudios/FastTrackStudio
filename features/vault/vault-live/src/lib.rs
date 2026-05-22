@@ -71,4 +71,4 @@ pub use sync::Backend;
 pub use vault::{LoadError, SaveError, Vault, VaultPage};
 pub use vault::{PropertyTypes, VaultBase};
 pub use walker::{VaultEntry, VaultEntryKind, walk_vault};
-pub use watcher::{VaultEvent, WatchError, watch};
+pub use watcher::{FsEvent, VaultEvent, WatchError, watch, watch_any};

@@ -33,10 +33,11 @@
 
 mod build;
 mod gaps;
+mod louvain;
 mod parse;
 mod scan;
 mod scoring;
 
-pub use build::build_graph;
+pub use build::{build_clusters, build_graph};
 pub use gaps::find_gaps;
 pub use scan::ScanError;

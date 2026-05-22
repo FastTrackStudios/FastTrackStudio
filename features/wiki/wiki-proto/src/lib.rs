@@ -78,16 +78,19 @@ pub mod service;
 
 pub use error::WikiError;
 pub use event::WikiEvent;
-pub use service::{WikiService, WikiServiceRpc};
 
-// architect-emitted vox bits from the auto-generated mirror
-// trait. Re-exported with shorter aliases (`Dispatcher`,
-// `descriptor`) so consumer mounting code reads
-// `wiki_proto::descriptor()` and `wiki_proto::serve(state)`
-// rather than juggling the underscored mirror names. Mirrors
-// the `vault_proto::serve(backend)` shape.
-#[cfg(feature = "vox")]
+// Per-capability trait re-exports. There is **no**
+// umbrella `WikiService` — callers express what they need
+// via bounds:
+//
+// ```ignore
+// fn run_ingest<W: Schema + Catalog + Ingest + RawLayer>(wiki: &W, /* ... */) { /* ... */ }
+// ```
+//
+// Each trait is `#[architect::rpc]`-decorated and emits
+// its own client + dispatcher + descriptor under the
+// `vox` feature.
 pub use service::{
-    Service, WikiServiceClient, WikiServiceRpcDispatcher as Dispatcher, layer, serve,
-    wiki_service_rpc_service_descriptor as descriptor,
+    Catalog, Events, Federation, Graph, Ingest, Lint, Multimodal, RawLayer, Research, Review,
+    Schema, Search, Watcher,
 };

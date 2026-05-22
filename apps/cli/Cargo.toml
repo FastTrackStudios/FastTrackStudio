@@ -36,6 +36,7 @@ wiki-live.workspace = true
 # (no LLM).
 wiki-graph.workspace = true
 wiki-proto.workspace = true
+wiki-search.workspace = true
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
