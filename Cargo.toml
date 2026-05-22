@@ -224,12 +224,6 @@ version = "0.46"
 [workspace.dependencies.facet-yaml]
 version = "0.46"
 
-[workspace.dependencies.daw]
-path = "../FastTrackStudio/daw/crates/daw"
-
-[workspace.dependencies.keyflow]
-path = "../FastTrackStudio/keyflow/crates/keyflow"
-
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"
 tag = "v0.2.0"
