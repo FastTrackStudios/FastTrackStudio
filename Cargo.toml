@@ -103,6 +103,7 @@ vault-obsidian = { path = "features/vault/vault-obsidian" }
 # `Wiki/` directory layout under each vault all stack on top.
 # See `plans/wiki-feature.md` for the design + slice plan.
 wiki-proto = { path = "features/wiki/wiki-proto" }
+wiki-live = { path = "features/wiki/wiki-live" }
 # `agent` feature — LLM-agent integration. `agent-proto` is
 # the wire contract (sessions, messages, tools, kanban,
 # approvals, streaming events). Backends live in sibling

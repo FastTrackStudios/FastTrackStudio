@@ -28,6 +28,10 @@ task.workspace = true
 # via agent-codex (vendored CodexMonitor control plane).
 agent-codex.workspace = true
 agent-proto.workspace = true
+# `task-cli wiki ingest` — agent-driven two-step CoT ingest
+# of source files into `<vault>/Wiki/`.
+agent-wiki.workspace = true
+wiki-live.workspace = true
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }
