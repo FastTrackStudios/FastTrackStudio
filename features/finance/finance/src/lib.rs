@@ -38,7 +38,10 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-// Concrete modules land in follow-up commits. The proto + db
-// crates are the shape; the facade wires them together.
+pub mod firefly;
+
+// Concrete service modules land in follow-up commits. The
+// proto + db crates are the shape; the facade wires them
+// together.
 
 pub use finance_proto::*;

@@ -5368,6 +5368,7 @@ dependencies = [
  "finance-proto",
  "rust_decimal",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
@@ -5389,6 +5390,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
 ]
@@ -14097,9 +14099,14 @@ dependencies = [
  "dotenvy",
  "eyre",
  "futures",
+ "project",
+ "sea-orm",
+ "sea-orm-migration",
  "serde",
  "serde_json",
  "task",
+ "timer",
+ "timer-proto",
  "tokio",
  "tracing",
  "uuid",
@@ -17689,10 +17696,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
-
-[[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"
