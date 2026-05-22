@@ -30,6 +30,13 @@
 
 pub use architect_derive::Entity;
 
+// Companion derive for any type carried by an `#[architect(json)]`
+// field. Emits the four sea_orm traits (`Into<Value>`, `TryGetable`,
+// `ValueType`, `Nullable`) via a `serde_json` round-trip, cfg-gated
+// on the user's `server` feature. See the derive's docs in
+// `architect-derive` for the Vec<T> newtype pattern.
+pub use architect_derive::JsonField;
+
 // `#[architect::rpc]` attribute macro — turns a sync (or mixed) trait
 // into a sync API + async vox client + server-side host. See
 // `DESIGN.md` and the `dispatch` module for the runtime contract the
