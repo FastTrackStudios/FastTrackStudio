@@ -24,7 +24,12 @@ const path = require("path");
 // users might have a long-running dev session on). Override via
 // `PW_PORT=…` if 9091 is also taken.
 const PORT = parseInt(process.env.PW_PORT || "9091", 10);
-const repoRoot = path.resolve(__dirname, "..");
+// `features/editor/` is now a subdir of the Task workspace
+// rather than the editor's own repo root. We still launch
+// `dx serve --package playground` from the workspace root so
+// dx finds the (single) Cargo manifest + the playground's
+// Dioxus.toml via package resolution.
+const workspaceRoot = path.resolve(__dirname, "../../..");
 
 module.exports = defineConfig({
   testDir: ".",
@@ -47,7 +52,7 @@ module.exports = defineConfig({
     // (which is "desktop" for local dev). dx serve will build
     // the wasm bundle and host it.
     command: `dx serve --package playground --platform web --addr 127.0.0.1 --port ${PORT}`,
-    cwd: repoRoot,
+    cwd: workspaceRoot,
     port: PORT,
     // First-time wasm build can be slow.
     timeout: 10 * 60 * 1000,
