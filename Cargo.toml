@@ -181,6 +181,18 @@ view-table = { path = "features/view/view-table" }
 view-heatmap = { path = "features/view/view-heatmap" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
+# Git feature — issue + PR workflow on top of forges
+# (GitHub now, Forgejo next). `git-proto` is the wire
+# contract: three `#[architect::rpc]` traits — `RepoCatalog`,
+# `IssueTracker`, `ReviewSurface`. Backends in sibling crates
+# impl whichever traits the forge supports. `git-config` owns
+# `RepoBinding` + `IssueLink` persistence. See
+# `plans/git-feature.md`.
+git-proto = { path = "features/git/git-proto" }
+git-github = { path = "features/git/git-github" }
+git-config = { path = "features/git/git-config" }
+octocrab = "0.46"
+
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault
 # directories. Server-only dep; never reaches wasm.
 walkdir = "2"
@@ -226,12 +238,6 @@ version = "0.46"
 
 [workspace.dependencies.facet-yaml]
 version = "0.46"
-
-[workspace.dependencies.daw]
-path = "../FastTrackStudio/daw/crates/daw"
-
-[workspace.dependencies.keyflow]
-path = "../FastTrackStudio/keyflow/crates/keyflow"
 
 [workspace.dependencies.lumen-blocks]
 git = "https://github.com/Leaf-Computer/lumen-blocks.git"
