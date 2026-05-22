@@ -1,19 +1,32 @@
-//! On-disk Maildir + SQLite FTS5 index. Source of truth for
-//! cached mail. Scaffold for phase 1.
+//! On-disk Maildir + SQLite FTS5 index for the email feature.
 //!
-//! Layout (per account):
+//! Per-account layout:
 //! ```text
-//! <root>/<account-id>/
-//!   index.db               SQLite (envelopes, threads, FTS5)
-//!   INBOX/{cur,new,tmp}/   Maildir per folder
-//!   Sent/{cur,new,tmp}/
+//! <account_root>/
+//!   index.db               SQLite (envelopes, FTS5, threads, queue)
+//!   INBOX/{cur,new,tmp}/
+//!   .Sent/{cur,new,tmp}/
+//!   .Drafts/{cur,new,tmp}/
 //!   ...
 //! ```
 //!
-//! The index is disposable — it can be rebuilt by walking the
-//! maildir. The maildir is canonical. Same shape as Task's
-//! markdown-first + index-cache philosophy.
+//! The maildir is the source of truth on disk. The index is a
+//! disposable cache — `Store::rebuild_from_disk` walks the
+//! maildir and replays every message through `upsert_envelope`,
+//! reconstructing the table from scratch.
+//!
+//! Same shape as the rest of Task: markdown/maildir on disk is
+//! canonical, SQLite is the query layer.
 
 #![cfg(not(target_arch = "wasm32"))]
 
-pub mod schema;
+mod error;
+mod query;
+mod schema;
+mod store;
+mod walker;
+
+pub use error::{Result, StoreError};
+pub use query::{SearchHit, StoredEnvelope};
+pub use store::Store;
+pub use walker::{MailEntry, walk_account, walk_folder};

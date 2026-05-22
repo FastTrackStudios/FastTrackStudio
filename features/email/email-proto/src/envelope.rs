@@ -3,8 +3,9 @@
 //! [`crate::EmailSync::fetch_message`].
 
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, Facet, Serialize, Deserialize)]
 pub struct Addr {
     pub name: Option<String>,
     pub email: String,
@@ -15,7 +16,7 @@ pub struct Addr {
 /// list of strings — IMAP keyword flags and backend custom
 /// labels alike. `date` is a unix-ms timestamp; the proto
 /// avoids carrying `chrono` types over the wire.
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, Facet, Serialize, Deserialize)]
 pub struct Envelope {
     pub message_id: String,
     pub folder: String,

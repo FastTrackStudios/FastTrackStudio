@@ -3798,8 +3798,12 @@ dependencies = [
 name = "email-store"
 version = "0.1.0"
 dependencies = [
- "architect",
  "email-proto",
+ "mail-parser",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
 ]

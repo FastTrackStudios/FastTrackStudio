@@ -1,5 +1,6 @@
-//! SQLite index schema. Disposable: the maildir on disk is
-//! canonical; the index can be rebuilt by walking it.
+//! SQLite schema. Disposable: the maildir on disk is canonical;
+//! `Store::rebuild_from_disk` reconstructs every row by walking
+//! the tree.
 
 pub const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS messages (
@@ -15,8 +16,8 @@ CREATE TABLE IF NOT EXISTS messages (
     size         INTEGER NOT NULL,
     has_atts     INTEGER NOT NULL,
     snippet      TEXT,
-    path         TEXT NOT NULL,
-    content_hash TEXT NOT NULL
+    path         TEXT,
+    content_hash TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_folder_date
@@ -25,9 +26,15 @@ CREATE INDEX IF NOT EXISTS idx_messages_folder_date
 CREATE INDEX IF NOT EXISTS idx_messages_thread
     ON messages(thread_id);
 
+-- FTS5 over the queryable text fields. Standard content table
+-- (NOT contentless) so DELETE works without the special
+-- `INSERT … VALUES('delete', …)` dance. We manage the rowid
+-- ourselves via a stable hash of message_id so DELETE +
+-- upsert stay symmetric. Cost is ~2x storage on the text
+-- columns vs a contentless table — acceptable for a cache.
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     subject, from_addr, to_addrs, body_text,
-    content='', tokenize='unicode61 remove_diacritics 2'
+    tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE TABLE IF NOT EXISTS threads (
@@ -36,10 +43,19 @@ CREATE TABLE IF NOT EXISTS threads (
     last_date INTEGER NOT NULL
 );
 
+-- Outbound queue: drafts + flag deltas + moves the sync layer
+-- wants to replay when the backend comes back online. Lives in
+-- the cache because the maildir doesn't have a natural place to
+-- record "this needs to be replayed."
 CREATE TABLE IF NOT EXISTS pending_ops (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    op_kind   TEXT NOT NULL,
     op_json   TEXT NOT NULL,
     queued_at INTEGER NOT NULL,
     last_err  TEXT
 );
 "#;
+
+/// Schema version. Bump + add a migration when the layout
+/// changes; for now the index is treated as disposable.
+pub const SCHEMA_VERSION: i64 = 1;
