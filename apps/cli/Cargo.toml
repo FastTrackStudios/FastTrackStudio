@@ -44,6 +44,12 @@ timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
+# `task-cli auth …` — local-sqlite ArchitectAuth flow. Same
+# auth.sqlite the server opens (matched by XDG path). Remote
+# vox-client sign-in lands in a follow-up.
+architect-auth = { workspace = true, features = ["full"] }
+sha2 = "0.10"
+base64 = { workspace = true }
 # Project lookup for timer's project-defaults resolver.
 project = { workspace = true }
 # Finance — reports + invoice build. CLI shells out to the
