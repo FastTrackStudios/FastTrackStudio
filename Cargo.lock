@@ -13281,7 +13281,9 @@ version = "0.1.0"
 dependencies = [
  "view-calendar",
  "view-gantt",
+ "view-heatmap",
  "view-kanban",
+ "view-table",
 ]
 
 [[package]]
@@ -13315,9 +13317,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "view-heatmap"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "fts-ui",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "view-kanban"
 version = "0.1.0"
 dependencies = [
+ "dioxus",
+ "fts-ui",
+ "indexmap 2.14.0",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "view-table"
+version = "0.1.0"
+dependencies = [
+ "chrono",
  "dioxus",
  "fts-ui",
  "indexmap 2.14.0",

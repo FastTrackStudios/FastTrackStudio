@@ -5,16 +5,13 @@
 //! `features/view/` should depend on this crate. Internal view
 //! crates depend on each other directly and skip the facade.
 //!
-//! Feature flags:
-//! - `gantt` (default) — pull in `view-gantt`, exposed as
-//!   `view::gantt`. Drop-in Dioxus gantt chart.
-//! - `kanban` (default) — pull in `view-kanban`, exposed as
-//!   `view::kanban`. Drop-in Dioxus kanban board.
-//! - `calendar` (default) — pull in `view-calendar`, exposed as
-//!   `view::calendar`. Drop-in Dioxus calendar (month / week / day).
-//!
-//! Future flags (placeholders, not yet implemented):
-//! - `table` — `view-table` Obsidian-Bases-style table.
+//! Feature flags (every flag is default-on):
+//! - `gantt` — `view-gantt`, exposed as `view::gantt`.
+//! - `kanban` — `view-kanban`, exposed as `view::kanban`.
+//! - `calendar` — `view-calendar`, exposed as `view::calendar`.
+//! - `table` — `view-table` data grid, exposed as `view::table`.
+//! - `heatmap` — `view-heatmap` (grid + bars), exposed as
+//!   `view::heatmap`.
 
 #[cfg(feature = "gantt")]
 pub use view_gantt as gantt;
@@ -24,3 +21,9 @@ pub use view_kanban as kanban;
 
 #[cfg(feature = "calendar")]
 pub use view_calendar as calendar;
+
+#[cfg(feature = "table")]
+pub use view_table as table;
+
+#[cfg(feature = "heatmap")]
+pub use view_heatmap as heatmap;

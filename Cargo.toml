@@ -176,6 +176,8 @@ view = { path = "features/view/view" }
 view-gantt = { path = "features/view/view-gantt" }
 view-kanban = { path = "features/view/view-kanban" }
 view-calendar = { path = "features/view/view-calendar" }
+view-table = { path = "features/view/view-table" }
+view-heatmap = { path = "features/view/view-heatmap" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault

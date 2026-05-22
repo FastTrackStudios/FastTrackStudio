@@ -12,18 +12,24 @@ repository.workspace = true
 # real code lives in the sibling `view-*` crates.
 #
 # Feature gates:
-#   default  — `gantt` + `kanban` + `calendar`. Add table here when
-#              it lands so a plain `view` dep brings the full set.
+#   default  — every view crate (gantt + kanban + calendar + table +
+#              heatmap). A plain `view` dep brings the full set.
 #   gantt    — pull in view-gantt (Dioxus gantt chart).
 #   kanban   — pull in view-kanban (Dioxus kanban board).
 #   calendar — pull in view-calendar (Dioxus calendar — month / week / day).
+#   table    — pull in view-table (Airtable / Notion-style data grid).
+#   heatmap  — pull in view-heatmap (GitHub-grid + weekly bars).
 [dependencies]
 view-gantt = { workspace = true, optional = true }
 view-kanban = { workspace = true, optional = true }
 view-calendar = { workspace = true, optional = true }
+view-table = { workspace = true, optional = true }
+view-heatmap = { workspace = true, optional = true }
 
 [features]
-default = ["gantt", "kanban", "calendar"]
+default = ["gantt", "kanban", "calendar", "table", "heatmap"]
 gantt = ["dep:view-gantt"]
 kanban = ["dep:view-kanban"]
 calendar = ["dep:view-calendar"]
+table = ["dep:view-table"]
+heatmap = ["dep:view-heatmap"]
