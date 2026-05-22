@@ -133,6 +133,85 @@ impl Backend {
         tx
     }
 
+    /// Start a long-lived IDLE loop on `folder` (alias name).
+    /// Returns a `JoinHandle` callers (typically `email-sync`)
+    /// can abort to stop the loop. Server responses break IDLE
+    /// every ~28 minutes (under the RFC 2177 30-minute cap) so
+    /// the session never goes stale; on each break we emit
+    /// `EmailEvent::Resync` on the per-account broadcast and
+    /// re-enter IDLE.
+    ///
+    /// Emitting `Resync` instead of fine-grained events is
+    /// intentional for phase 1 — `email-sync`'s next poll cycle
+    /// will pick up the actual deltas. A future pass will parse
+    /// IDLE's untagged EXISTS / EXPUNGE / FETCH responses and
+    /// emit the matching `NewMessage` / `Deleted` /
+    /// `FlagsChanged` events directly.
+    pub async fn start_idle(
+        &self,
+        account: &str,
+        folder: &str,
+    ) -> Result<tokio::task::JoinHandle<()>, EmailSyncError> {
+        let state = self.state(account)?;
+        let resolved = state.aliases.resolve(folder).to_string();
+        let sender = self.channel(account).await;
+        let backend = self.clone();
+        let account = account.to_string();
+        let handle = tokio::spawn(async move {
+            backend.idle_loop(account, resolved, sender).await;
+        });
+        Ok(handle)
+    }
+
+    /// Continuous IDLE driver. Reconnects on any error with a
+    /// short backoff so a transient network blip doesn't kill
+    /// the watcher.
+    async fn idle_loop(
+        self,
+        account: String,
+        folder: String,
+        sender: broadcast::Sender<EmailEvent>,
+    ) {
+        const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(28 * 60);
+        const RECONNECT_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
+
+        loop {
+            let state = match self.state(&account) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let session = match self.open(state).await {
+                Ok(s) => s,
+                Err(err) => {
+                    tracing::warn!(%err, "idle: open failed, backing off");
+                    tokio::time::sleep(RECONNECT_BACKOFF).await;
+                    continue;
+                }
+            };
+            // The whole IDLE cycle takes a separate borrow of
+            // the session, so wrap it in a block + reassign.
+            let session_result = run_idle_cycle(session, &folder, IDLE_TIMEOUT).await;
+            match session_result {
+                Ok(()) => {
+                    // Break of IDLE = server told us something
+                    // changed (or the timeout fired). Either
+                    // way the safe answer is `Resync` — let
+                    // `email-sync` re-pull deltas. If everyone
+                    // unsubscribed, `send` returns Err and we
+                    // exit gracefully.
+                    if sender.send(EmailEvent::Resync).is_err() {
+                        tracing::debug!("idle: no subscribers, exiting");
+                        return;
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "idle: cycle failed, backing off");
+                    tokio::time::sleep(RECONNECT_BACKOFF).await;
+                }
+            }
+        }
+    }
+
     /// Open + login. Used inside every op for now; pooling
     /// lands in the IDLE pass.
     async fn open(&self, state: &AccountState) -> Result<ImapSession, EmailSyncError> {
@@ -518,6 +597,37 @@ impl Backend {
 
         Ok(message_id)
     }
+}
+
+/// Run one IDLE round on `session`: SELECT, IDLE for at most
+/// `timeout`, then DONE. Drops the session when complete (the
+/// caller opens a fresh one for each cycle so a stale TLS
+/// connection doesn't accumulate).
+async fn run_idle_cycle(
+    mut session: ImapSession,
+    folder: &str,
+    timeout: std::time::Duration,
+) -> Result<(), EmailSyncError> {
+    session
+        .select(folder)
+        .await
+        .map_err(|e| EmailSyncError::Protocol(format!("idle select: {e}")))?;
+    let mut idle = session.idle();
+    idle.init()
+        .await
+        .map_err(|e| EmailSyncError::Protocol(format!("idle init: {e}")))?;
+    let (idle_wait, _interrupt) = idle.wait_with_timeout(timeout);
+    // We discard the response detail — `idle_loop` translates
+    // any break into `EmailEvent::Resync` and lets `email-sync`
+    // re-pull the deltas. Parsing the untagged EXISTS / EXPUNGE
+    // / FETCH details for fine-grained events is the next pass.
+    let _ = idle_wait.await;
+    let mut session = idle
+        .done()
+        .await
+        .map_err(|e| EmailSyncError::Protocol(format!("idle done: {e}")))?;
+    let _ = session.logout().await;
+    Ok(())
 }
 
 impl HasDispatcher for Backend {
