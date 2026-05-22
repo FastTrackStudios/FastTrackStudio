@@ -93,7 +93,7 @@ struct ParsePageRef<'a> {
 }
 
 fn parse_page_impl(page: &ParsePageRef<'_>) -> Result<TaskInfo, ParseError> {
-    let (fm, body) = split_frontmatter(&page.raw).ok_or(ParseError::NoFrontmatter)?;
+    let (fm, body) = split_frontmatter(page.raw).ok_or(ParseError::NoFrontmatter)?;
     let map: serde_yaml::Mapping =
         serde_yaml::from_str(fm).map_err(|e| ParseError::Yaml(e.to_string()))?;
 

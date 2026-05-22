@@ -20,6 +20,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
 sea-orm = { workspace = true, optional = true }
+fake = { workspace = true, optional = true }
 
 [features]
 default = ["vox"]
@@ -29,6 +30,11 @@ vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 # rows). Pulls `sea-orm` into the dep graph; wasm clients leave
 # this off.
 server = ["architect/server-seaorm", "dep:sea-orm"]
+# Adds `fake::Dummy` derives to architect-emitted structs.
+# The Entity derive emits `#[cfg_attr(feature = "fake", ...)]`
+# attributes unconditionally, so the host crate has to define
+# the feature even when it's off by default.
+fake = ["dep:fake", "architect/fake"]
 
 [lints]
 workspace = true

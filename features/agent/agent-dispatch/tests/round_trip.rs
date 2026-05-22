@@ -3,7 +3,7 @@
 //! on-disk task note's `dispatchedAgentTasks` frontmatter and
 //! `completedDate` (or `complete_instances` for recurring).
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use agent_proto::service::tasks::AgentTaskQueue;
 use agent_proto::tasks::{Queue, status};
@@ -33,7 +33,7 @@ async fn setup() -> (TempDir, Store) {
     (tmp, store)
 }
 
-fn write_task_note(vault_root: &PathBuf, rel: &str, body: &str) {
+fn write_task_note(vault_root: &Path, rel: &str, body: &str) {
     let abs = vault_root.join(rel);
     if let Some(p) = abs.parent() {
         std::fs::create_dir_all(p).unwrap();

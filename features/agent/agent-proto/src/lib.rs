@@ -47,8 +47,8 @@
 //! - [`service::questions::Questions`] — mid-turn structured
 //!   questions.
 //! - [`service::tasks::AgentTaskQueue`] — queues + agent tasks
-//!   + links + comments. Modeled on hermes-webui's kanban; see
-//!   `plans/agent-dispatch.md`.
+//!   plus links + comments. Modeled on hermes-webui's kanban;
+//!   see `plans/agent-dispatch.md`.
 //! - [`service::profiles::Profiles`] — agent identities.
 //! - [`service::projects::Projects`] — workspace registry.
 //! - [`service::backends::Backends`] — backend registry.

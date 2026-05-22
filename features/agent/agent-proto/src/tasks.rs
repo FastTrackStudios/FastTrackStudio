@@ -39,6 +39,7 @@ use uuid::Uuid;
 /// derive `architect::JsonField` on it — orphan rules forbid
 /// implementing `From<Vec<String>>` for `sea_orm::Value`
 /// directly, so the Vec lives behind a named struct.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(
     architect::JsonField,
     ::facet::Facet,
@@ -92,7 +93,7 @@ pub mod status {
 
     #[must_use]
     pub fn is_known(s: &str) -> bool {
-        ALL.iter().any(|v| *v == s)
+        ALL.contains(&s)
     }
 }
 
@@ -114,6 +115,7 @@ pub mod link_kind {
 
 /// A queue is a grouping of agent tasks — typically scoped to a
 /// project. Each queue is one row in the `agent_queues` table.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(architect::Entity, ::facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[architect(table_name = "agent_queues", repo)]
 pub struct Queue {
@@ -150,6 +152,7 @@ pub struct QueueSnapshot {
 
 /// One dispatchable unit of agent work. One row in the
 /// `agent_tasks` table.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(architect::Entity, ::facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[architect(table_name = "agent_tasks", repo)]
 pub struct AgentTask {
@@ -225,6 +228,7 @@ pub struct AgentTask {
 
 /// Edge between two agent tasks. Composite primary key is
 /// `(from_task, to_task, kind)`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(
     architect::Entity, ::facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq,
 )]
@@ -249,6 +253,7 @@ pub struct AgentTaskLink {
 // AgentTaskComment — append-only thread per agent task
 // ────────────────────────────────────────────────────────────────────
 
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(
     architect::Entity, ::facet::Facet, Serialize, Deserialize, Clone, Debug, PartialEq, Eq,
 )]

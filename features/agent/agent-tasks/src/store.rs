@@ -199,7 +199,7 @@ impl Store {
         let backend = self.conn.get_database_backend();
         let stmt = Statement::from_sql_and_values(
             backend,
-            &format!("SELECT COALESCE(MAX(id), 0) FROM {QUEUE_EVENTS_TABLE} WHERE queue_id = ?"),
+            format!("SELECT COALESCE(MAX(id), 0) FROM {QUEUE_EVENTS_TABLE} WHERE queue_id = ?"),
             vec![queue_id.into()],
         );
         let row = self
@@ -524,7 +524,7 @@ async fn log_event<C: ConnectionTrait>(
     let backend = conn.get_database_backend();
     let stmt = Statement::from_sql_and_values(
         backend,
-        &format!(
+        format!(
             "INSERT INTO {QUEUE_EVENTS_TABLE} (queue_id, agent_task_id, kind, payload, ts) \
              VALUES (?, ?, ?, ?, ?)"
         ),

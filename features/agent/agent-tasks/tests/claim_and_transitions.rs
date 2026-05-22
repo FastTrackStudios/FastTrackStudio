@@ -194,8 +194,10 @@ async fn filter_excludes_archived_by_default() {
     assert_eq!(snap.tasks.len(), 1, "archived should be hidden");
     assert_eq!(snap.tasks[0].id, a.id);
 
-    let mut with_arch = QueueFilter::default();
-    with_arch.include_archived = true;
+    let with_arch = QueueFilter {
+        include_archived: true,
+        ..Default::default()
+    };
     let snap2 = store.read_queue("q1".into(), with_arch).await.unwrap();
     assert_eq!(snap2.tasks.len(), 2);
 }
