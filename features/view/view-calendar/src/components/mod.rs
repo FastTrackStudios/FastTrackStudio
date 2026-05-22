@@ -4,12 +4,14 @@
 //! [`drag::DragContext`] and dispatch mutations back through the
 //! `on_event` prop wired by [`calendar::Calendar`].
 
+mod all_day_strip;
 mod calendar;
 mod day_view;
 mod drag;
 mod event_chip;
 mod event_editor;
 mod month_view;
+mod now_line;
 mod time_grid;
 mod toolbar;
 mod week_view;

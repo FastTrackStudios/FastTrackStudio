@@ -17,8 +17,10 @@ use crate::store::CalendarMutation;
 use crate::time::{day_start_utc, hour_labels};
 use crate::types::{CalendarEvent, EventId};
 
+use super::all_day_strip::AllDayStrip;
 use super::drag::{DT_MIME, DragKind, use_drag_context};
 use super::event_chip::EventChip;
+use super::now_line::NowLine;
 
 const PX_PER_HOUR: i64 = 48;
 const COL_HEIGHT_PX: i64 = PX_PER_HOUR * 24;
@@ -37,6 +39,17 @@ pub struct TimeGridViewProps {
 #[component]
 pub fn TimeGridView(props: TimeGridViewProps) -> Element {
     let today = chrono::Local::now().date_naive();
+    // Split: all-day events go to the top strip, timed events to
+    // the time grid itself. `position` would mis-classify multi-day
+    // timed events; we treat duration ≥ 24h with midnight-aligned
+    // start as effectively all-day too, so a "Vacation" event the
+    // user created via month view (start at 00:00, end exclusive)
+    // also shows in the all-day strip.
+    let (all_day_events, timed_events): (Vec<_>, Vec<_>) = props
+        .events
+        .iter()
+        .cloned()
+        .partition(|ev| ev.all_day || is_effectively_all_day(ev));
 
     rsx! {
         div { class: "flex flex-col h-full w-full",
@@ -67,6 +80,14 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                     }
                 }
             }
+            // All-day strip
+            AllDayStrip {
+                days: props.days.clone(),
+                events: all_day_events,
+                readonly: props.readonly,
+                on_event: props.on_event,
+                on_open_editor: props.on_open_editor,
+            }
             // Scrollable grid body
             div { class: "flex-1 min-h-0 overflow-y-auto",
                 div {
@@ -77,17 +98,30 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                         DayColumn {
                             key: "{date}",
                             date: *date,
-                            placements: day_overlap_layout(*date, &props.events),
+                            placements: day_overlap_layout(*date, &timed_events),
                             is_last: idx == props.days.len() - 1,
                             readonly: props.readonly,
                             on_event: props.on_event,
                             on_open_editor: props.on_open_editor,
                         }
                     }
+                    // Now-line overlay — placed after columns so
+                    // it stacks on top.
+                    NowLine { days: props.days.clone(), px_per_hour: PX_PER_HOUR }
                 }
             }
         }
     }
+}
+
+/// Heuristic: a 24h+ duration event starting at midnight is
+/// effectively an all-day event regardless of the `all_day` flag.
+/// Lets month-view-created "Vacation" events render in the all-day
+/// strip without forcing a data migration.
+fn is_effectively_all_day(ev: &CalendarEvent) -> bool {
+    let dur = (ev.end - ev.start).num_minutes();
+    let starts_at_midnight = ev.start.time() == chrono::NaiveTime::MIN;
+    dur >= 24 * 60 && starts_at_midnight
 }
 
 #[component]

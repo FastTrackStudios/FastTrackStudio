@@ -25,6 +25,12 @@ use crate::types::{CalendarEvent, EventId};
 
 use super::drag::{DT_MIME, use_drag_context};
 
+/// Cap of visible chip tracks per week row before the renderer
+/// folds overflow into a `+N more` link at the bottom of each
+/// affected cell. Matches Google Calendar's default of three rows
+/// per cell.
+const MAX_VISIBLE_TRACKS: u8 = 3;
+
 #[derive(Props, Clone, PartialEq)]
 pub struct MonthViewProps {
     /// Any date inside the month to render.
@@ -34,6 +40,9 @@ pub struct MonthViewProps {
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
     pub on_open_editor: EventHandler<EventId>,
+    /// Clicked the "+N more" link in a day cell — Calendar root
+    /// switches to Day view anchored at that date (matches Google).
+    pub on_zoom_to_day: EventHandler<NaiveDate>,
 }
 
 #[component]
@@ -70,6 +79,7 @@ pub fn MonthView(props: MonthViewProps) -> Element {
                                 readonly: props.readonly,
                                 on_event: props.on_event,
                                 on_open_editor: props.on_open_editor,
+                                on_zoom_to_day: props.on_zoom_to_day,
                             }
                         }
                     }
@@ -89,12 +99,30 @@ struct WeekRowProps {
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
     on_open_editor: EventHandler<EventId>,
+    on_zoom_to_day: EventHandler<NaiveDate>,
 }
 
 #[component]
 fn WeekRow(props: WeekRowProps) -> Element {
     let border_b = if props.is_last_row { "" } else { "border-b" };
-    let tracks: u8 = props.chips.iter().map(|c| c.track + 1).max().unwrap_or(0);
+
+    // Split chips into visible vs. overflow tracks. Overflow chips
+    // never paint; they only bump a per-cell counter so we can
+    // render a "+N more" link in each column they would have
+    // touched.
+    let (visible_chips, hidden_chips): (Vec<_>, Vec<_>) = props
+        .chips
+        .iter()
+        .cloned()
+        .partition(|c| c.track < MAX_VISIBLE_TRACKS);
+    let mut overflow_per_col: [u8; 7] = [0; 7];
+    for c in &hidden_chips {
+        let end = (c.start_col + c.span).min(7);
+        for col in c.start_col..end {
+            overflow_per_col[col as usize] = overflow_per_col[col as usize].saturating_add(1);
+        }
+    }
+    let tracks: u8 = visible_chips.iter().map(|c| c.track + 1).max().unwrap_or(0);
 
     rsx! {
         div {
@@ -158,8 +186,33 @@ fn WeekRow(props: WeekRowProps) -> Element {
                                 }
                             }
                             // Reserve vertical space for the track
-                            // chips (overlaid below).
-                            div { class: "flex-1", style: "min-height: {tracks as i32 * 18}px;" }
+                            // chips (overlaid below). Add one more
+                            // row when this cell has overflow so
+                            // the "+N more" link doesn't escape.
+                            {
+                                let extra = if overflow_per_col[col] > 0 { 18 } else { 0 };
+                                rsx! {
+                                    div { class: "flex-1", style: "min-height: {tracks as i32 * 18 + extra}px;" }
+                                }
+                            }
+                            // Overflow link
+                            if overflow_per_col[col] > 0 {
+                                {
+                                    let n = overflow_per_col[col];
+                                    let on_zoom = props.on_zoom_to_day;
+                                    rsx! {
+                                        button {
+                                            r#type: "button",
+                                            class: "text-[10px] text-muted-foreground hover:text-foreground hover:underline self-start px-1",
+                                            onclick: move |e: MouseEvent| {
+                                                e.stop_propagation();
+                                                on_zoom.call(date);
+                                            },
+                                            "+{n} more"
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -169,7 +222,7 @@ fn WeekRow(props: WeekRowProps) -> Element {
             // pills. Uses a 7-col grid so chips line up with cells.
             div {
                 class: "absolute inset-x-0 top-6 grid grid-cols-7 gap-y-0.5 pointer-events-none px-0.5",
-                for chip in props.chips.iter() {
+                for chip in visible_chips.iter() {
                     {
                         let chip = chip.clone();
                         let id = chip.event.id;

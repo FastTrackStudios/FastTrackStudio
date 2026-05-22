@@ -27,6 +27,7 @@
 
 pub mod components;
 pub mod layout;
+pub mod recurrence;
 pub mod store;
 pub mod time;
 pub mod types;

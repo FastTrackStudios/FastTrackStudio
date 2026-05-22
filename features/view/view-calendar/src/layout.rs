@@ -20,65 +20,62 @@ use chrono::{Days, NaiveDate};
 use crate::time::{day_end_utc, day_start_utc};
 use crate::types::CalendarEvent;
 
-/// One event's placement inside a single week row of the month
-/// view. Coordinates are in the local 0..7 day-column frame; the
-/// view's renderer turns them into CSS `grid-column: X / span Y`.
+/// One event's placement inside a horizontal day-window (a month
+/// week row, or the all-day strip above a week / day time grid).
+/// Coordinates are in the local 0..window_len day-column frame;
+/// the renderer turns them into CSS `grid-column: X / span Y`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct MonthChipPlacement {
+pub struct ChipPlacement {
     pub event: CalendarEvent,
-    /// 0..7 — first day column in this week the chip occupies.
+    /// 0..window_len — first day column the chip occupies.
     pub start_col: u8,
-    /// 1..=7 — number of day columns spanned in this week.
+    /// 1..=window_len — number of day columns spanned.
     pub span: u8,
     /// 0..N — vertical stacking order ("track") in the row.
     pub track: u8,
-    /// Event actually started in a previous week — the renderer
+    /// Event actually started before this window — the renderer
     /// should drop the left rounded corner so the pill looks
     /// continuous.
     pub continues_left: bool,
-    /// Event continues past this week.
+    /// Event continues past this window.
     pub continues_right: bool,
 }
 
-/// Lay out all event chips for the week starting at `week_start`
-/// (which must be a Monday — caller's responsibility). Sorted by
-/// (track, start_col) so the renderer can iterate in display order.
-pub fn month_week_layout(
-    week_start: NaiveDate,
-    events: &[CalendarEvent],
-) -> Vec<MonthChipPlacement> {
-    let week_end = week_start + Days::new(7);
-    let week_start_utc = day_start_utc(week_start);
-    let week_end_utc = day_start_utc(week_end);
+/// Backwards-compatible alias for callers that want the month-week
+/// shape (now unified with the all-day-strip shape).
+pub type MonthChipPlacement = ChipPlacement;
 
-    // Filter to events overlapping the week.
+/// Greedy-track lay out events across a horizontal day-window
+/// starting at `start` and spanning `len` days. Used for both the
+/// month-view week rows (`len = 7`) and the time-grid all-day
+/// strip (`len = days.len()` for week or day view).
+///
+/// Sorted by (track, start_col) so the renderer can iterate in
+/// display order.
+pub fn track_layout(start: NaiveDate, len: u8, events: &[CalendarEvent]) -> Vec<ChipPlacement> {
+    assert!(len >= 1, "window must be non-empty");
+    let end = start + Days::new(len as u64);
+    let window_start_utc = day_start_utc(start);
+    let window_end_utc = day_start_utc(end);
+
     let mut hits: Vec<&CalendarEvent> = events
         .iter()
-        .filter(|ev| ev.end > week_start_utc && ev.start < week_end_utc)
+        .filter(|ev| ev.end > window_start_utc && ev.start < window_end_utc)
         .collect();
-    // Stable order: earlier-starting and longer events first so
-    // multi-day pills land on lower tracks.
     hits.sort_by_key(|ev| (ev.start, std::cmp::Reverse(ev.duration_minutes())));
 
-    // `tracks[i]` is the right edge (exclusive col) of the chip
-    // currently occupying track i. New event fits in track i if
-    // its `start_col >= tracks[i]`.
     let mut tracks: Vec<u8> = Vec::new();
-    let mut out: Vec<MonthChipPlacement> = Vec::with_capacity(hits.len());
+    let mut out: Vec<ChipPlacement> = Vec::with_capacity(hits.len());
 
     for ev in hits {
-        // Clip to the week and convert to day columns.
-        let start_day = ev.start.date_naive().max(week_start);
-        // `end` is exclusive — last *visible* day column is
-        // `end - 1 minute` clamped into [start, week_end - 1].
+        let start_day = ev.start.date_naive().max(start);
         let last_visible = (ev.end - chrono::Duration::minutes(1))
             .date_naive()
-            .min(week_end - Days::new(1));
-        let start_col = (start_day - week_start).num_days() as u8;
-        let last_col = (last_visible - week_start).num_days() as u8;
+            .min(end - Days::new(1));
+        let start_col = (start_day - start).num_days() as u8;
+        let last_col = (last_visible - start).num_days() as u8;
         let span = last_col.saturating_sub(start_col) + 1;
 
-        // First track where this event fits.
         let track = match tracks.iter().position(|&right| right <= start_col) {
             Some(i) => {
                 tracks[i] = start_col + span;
@@ -90,18 +87,23 @@ pub fn month_week_layout(
             }
         };
 
-        out.push(MonthChipPlacement {
+        out.push(ChipPlacement {
             event: ev.clone(),
             start_col,
             span,
             track,
-            continues_left: ev.start < week_start_utc,
-            continues_right: ev.end > week_end_utc,
+            continues_left: ev.start < window_start_utc,
+            continues_right: ev.end > window_end_utc,
         });
     }
 
     out.sort_by_key(|p| (p.track, p.start_col));
     out
+}
+
+/// Convenience wrapper: month view always lays out 7-day rows.
+pub fn month_week_layout(week_start: NaiveDate, events: &[CalendarEvent]) -> Vec<ChipPlacement> {
+    track_layout(week_start, 7, events)
 }
 
 /// One event's placement on a single day of the time grid. The view

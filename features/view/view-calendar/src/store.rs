@@ -69,6 +69,14 @@ pub enum CalendarMutation {
         id: EventId,
         description: Option<String>,
     },
+    /// Set or clear the RRULE string. Empty or `None` removes
+    /// recurrence; non-empty is parsed at expand time so a bad
+    /// string degrades to "single-instance" rather than a hard
+    /// error.
+    SetRecurrence {
+        id: EventId,
+        recurrence: Option<String>,
+    },
     Remove {
         id: EventId,
     },
@@ -106,6 +114,14 @@ pub fn apply(state: &mut CalendarState, mu: &CalendarMutation) {
         CalendarMutation::SetDescription { id, description } => {
             if let Some(ev) = state.events.get_mut(id) {
                 ev.description = description.clone();
+            }
+        }
+        CalendarMutation::SetRecurrence { id, recurrence } => {
+            if let Some(ev) = state.events.get_mut(id) {
+                ev.recurrence = recurrence
+                    .as_ref()
+                    .filter(|s| !s.trim().is_empty())
+                    .cloned();
             }
         }
         CalendarMutation::Remove { id } => {

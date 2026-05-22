@@ -129,6 +129,14 @@ pub fn EventEditor(props: EventEditorProps) -> Element {
                         },
                     }
                 }
+                // Recurrence — preset chips + raw RRULE input. The
+                // chips set common rules; the input shows the raw
+                // RFC-5545 string for power users.
+                RecurrenceField {
+                    event_id: id,
+                    current: event.recurrence.clone(),
+                    on_event,
+                }
             }
             SheetFooter {
                 Button {
@@ -195,6 +203,75 @@ fn DateTimeField(props: DateTimeFieldProps) -> Element {
                         },
                     }
                 }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct RecurrenceFieldProps {
+    event_id: EventId,
+    current: Option<String>,
+    on_event: EventHandler<CalendarMutation>,
+}
+
+const RRULE_PRESETS: &[(&str, &str)] = &[
+    ("None", ""),
+    ("Daily", "FREQ=DAILY"),
+    ("Weekly", "FREQ=WEEKLY"),
+    ("Mon-Fri", "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
+    ("Monthly", "FREQ=MONTHLY"),
+    ("Yearly", "FREQ=YEARLY"),
+];
+
+#[component]
+fn RecurrenceField(props: RecurrenceFieldProps) -> Element {
+    let id = props.event_id;
+    let on_event = props.on_event;
+    let current = props.current.clone().unwrap_or_default();
+
+    rsx! {
+        div { class: "flex flex-col gap-1.5",
+            Label { "Repeats" }
+            div { class: "flex flex-wrap gap-1.5",
+                for (label, rule) in RRULE_PRESETS.iter() {
+                    {
+                        let label = *label;
+                        let rule_str = (*rule).to_string();
+                        let active = if rule.is_empty() {
+                            current.is_empty()
+                        } else {
+                            current == *rule
+                        };
+                        let cls = if active {
+                            "px-2 py-0.5 text-xs rounded bg-primary text-primary-foreground"
+                        } else {
+                            "px-2 py-0.5 text-xs rounded border border-border hover:bg-accent"
+                        };
+                        rsx! {
+                            button {
+                                key: "{label}",
+                                r#type: "button",
+                                class: "{cls}",
+                                onclick: move |_| {
+                                    let recurrence = if rule_str.is_empty() { None } else { Some(rule_str.clone()) };
+                                    on_event.call(CalendarMutation::SetRecurrence { id, recurrence });
+                                },
+                                "{label}"
+                            }
+                        }
+                    }
+                }
+            }
+            input {
+                class: "w-full bg-background border border-input rounded px-2 py-1 text-xs font-mono",
+                placeholder: "RRULE: FREQ=…",
+                value: "{current}",
+                oninput: move |e: FormEvent| {
+                    let v = e.value();
+                    let recurrence = if v.trim().is_empty() { None } else { Some(v) };
+                    on_event.call(CalendarMutation::SetRecurrence { id, recurrence });
+                },
             }
         }
     }

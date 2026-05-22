@@ -72,6 +72,13 @@ pub struct CalendarEvent {
     pub color: ColorTag,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Optional RFC-5545 RRULE string (e.g. `"FREQ=WEEKLY;BYDAY=MO,WE"`).
+    /// The `start`/`end` window is the *first* occurrence; later
+    /// occurrences are expanded at view time. For v1, editing or
+    /// dragging an instance edits the master (and therefore the
+    /// whole series).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recurrence: Option<String>,
 }
 
 impl CalendarEvent {
@@ -84,6 +91,7 @@ impl CalendarEvent {
             all_day: false,
             color: ColorTag::default(),
             description: None,
+            recurrence: None,
         }
     }
 
