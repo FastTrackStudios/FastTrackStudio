@@ -64,6 +64,54 @@ enum Commands {
     /// `<vault>/tasks/<slug>.md` by default.
     #[command(subcommand)]
     Task(TaskCmd),
+    /// LLM-agent integration. Currently exposes a Codex
+    /// chat demo; full `agent_proto::AgentService` surface
+    /// (sessions, kanban, approvals, ...) arrives once the
+    /// trait impl lands in `agent-codex` slice 2c.
+    #[command(subcommand)]
+    Agent(AgentCmd),
+}
+
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// One-shot chat against `codex app-server`. Spawns the
+    /// daemon rooted at `--workspace`, sends `thread/start`
+    /// + `turn/start`, prints streamed assistant text until
+    /// the turn completes.
+    ///
+    /// Example:
+    ///   task agent chat -w . -m gpt-5.4-mini "summarize this repo"
+    Chat {
+        /// Workspace root the agent runs in. Default: cwd.
+        #[arg(short, long, default_value = ".")]
+        workspace: std::path::PathBuf,
+        /// Model id (e.g. `gpt-5.4-mini`, `o3`). Default:
+        /// daemon's configured default.
+        #[arg(short, long)]
+        model: Option<String>,
+        /// Reasoning effort hint
+        /// (`none|minimal|low|medium|high`).
+        #[arg(long)]
+        effort: Option<String>,
+        /// Sandbox / access mode
+        /// (`read-only|current|full-access`). Default
+        /// `current` (matches CodexMonitor).
+        #[arg(long)]
+        access_mode: Option<String>,
+        /// Override `codex` binary path. Falls back to
+        /// `$PATH` lookup.
+        #[arg(long)]
+        codex_bin: Option<String>,
+        /// `$CODEX_HOME` override.
+        #[arg(long)]
+        codex_home: Option<std::path::PathBuf>,
+        /// Max time to wait for the turn to complete
+        /// (seconds). Default 120.
+        #[arg(long, default_value_t = 120)]
+        timeout_secs: u64,
+        /// The user message. Quote it.
+        message: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -274,8 +322,87 @@ async fn main() -> eyre::Result<()> {
         Commands::Task(cmd) => {
             return run_task(cmd);
         }
+        Commands::Agent(cmd) => {
+            return run_agent(cmd).await;
+        }
     }
     Ok(())
+}
+
+async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
+    use std::io::Write;
+
+    use agent_codex::{ChatOpts, CodexBackend};
+    use agent_proto::event::AgentEvent;
+    use futures::StreamExt;
+
+    match cmd {
+        AgentCmd::Chat {
+            workspace,
+            model,
+            effort,
+            access_mode,
+            codex_bin,
+            codex_home,
+            timeout_secs,
+            message,
+        } => {
+            let workspace = workspace
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("workspace {}: {e}", workspace.display()))?;
+            let backend = CodexBackend::new();
+            let opts = ChatOpts {
+                codex_bin,
+                codex_args: None,
+                codex_home,
+                model: model.clone(),
+                effort,
+                access_mode,
+            };
+            eprintln!(
+                "› codex@{} workspace={}",
+                model.as_deref().unwrap_or("default"),
+                workspace.display()
+            );
+            let handle = backend
+                .chat(workspace, message, opts)
+                .await
+                .map_err(|e| eyre::eyre!("chat: {e}"))?;
+            eprintln!(
+                "  session={} thread={}",
+                handle.session_id, handle.thread_id
+            );
+            let mut events = handle.events;
+            let mut stdout = std::io::stdout().lock();
+            let deadline =
+                tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+            loop {
+                let next = tokio::time::timeout_at(deadline, events.next()).await;
+                match next {
+                    Err(_) => {
+                        eprintln!("\n(turn timed out after {timeout_secs}s)");
+                        break;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(AgentEvent::MessageDelta { content_delta, .. })) => {
+                        write!(stdout, "{content_delta}")?;
+                        stdout.flush()?;
+                    }
+                    Ok(Some(AgentEvent::TurnFinished { .. })) => {
+                        writeln!(stdout)?;
+                        break;
+                    }
+                    Ok(Some(AgentEvent::TurnErrored { kind, message, .. })) => {
+                        writeln!(stdout)?;
+                        eprintln!("(turn error: {kind}: {message})");
+                        break;
+                    }
+                    Ok(Some(_)) => {}
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 fn run_task(cmd: TaskCmd) -> eyre::Result<()> {

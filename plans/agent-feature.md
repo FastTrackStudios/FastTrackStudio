@@ -138,7 +138,28 @@ External deps pinned: `tokio` (full), `serde`, `serde_json`,
 `shell-words`, `tracing`, `chrono`, `thiserror`, plus
 `agent-proto` as the trait surface.
 
-#### 2b. ⏳ AgentService impl
+#### 2b. ✅ Chat demo + CLI wiring (shipped)
+
+- `agent_codex::chat()` spawns `codex app-server`, sends
+  `thread/start` + `turn/start`, returns a
+  `Stream<AgentEvent>` filtered to that workspace's events.
+- `agent_codex::translate` maps the daemon's
+  `item/agentMessage/delta` /`item/reasoning/delta` /
+  `turn/completed` / `turn/error` notifications to typed
+  events.
+- `task-cli` exposes `task agent chat` with `--workspace`,
+  `--model`, `--effort`, `--access-mode`, `--codex-bin`,
+  `--codex-home`, `--timeout-secs`. Set
+  `AGENT_CODEX_DEBUG=1` to dump the raw `AppServerEvent`
+  firehose.
+- Working command:
+  ```bash
+  task agent chat -w examples/vault \
+    "Reply with exactly the word PONG."
+  # → PONG
+  ```
+
+#### 2c. ⏳ Full AgentService impl
 
 Next commit. Translation layer that turns JSON-RPC messages
 into `agent_proto` shapes:
