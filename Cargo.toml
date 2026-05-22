@@ -335,6 +335,16 @@ inventory = { path = "features/inventory/inventory" }
 cookbook = { path = "features/mealplan/cookbook" }
 pantry = { path = "features/mealplan/pantry" }
 mealplan = { path = "features/mealplan/mealplan" }
+# `fitness` slice — exercises + workouts + body + intake +
+# facade. Models ported from wger (read-only checkout at
+# `~/Development/research/wger`). `intake` depends on
+# `mealplan` for nutrition lookup; the `fitness` facade
+# composes a `DailySummary` from all four sub-crates.
+exercises = { path = "features/fitness/exercises" }
+workouts = { path = "features/fitness/workouts" }
+body = { path = "features/fitness/body" }
+intake = { path = "features/fitness/intake" }
+fitness = { path = "features/fitness/fitness" }
 view = { path = "features/view/view" }
 view-gantt = { path = "features/view/view-gantt" }
 view-kanban = { path = "features/view/view-kanban" }

@@ -1,0 +1,30 @@
+[package]
+name = "body"
+description = "Body metrics feature — weight, bodyfat, waist, biceps, anything tracked as (date, value, unit). One page per metric (e.g. `body/weight.md`) containing the entry log; readers chart, callers append. Modeled on wger's `Measurement` + `Category` tables, flattened so one page = one metric's full history."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { workspace = true, features = ["clock", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
+facet = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+architect = { workspace = true }
+vault = { workspace = true }
+
+vox = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+
+[dev-dependencies]
+tempfile = "3"
