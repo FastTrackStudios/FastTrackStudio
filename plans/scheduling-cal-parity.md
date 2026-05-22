@@ -118,7 +118,64 @@ in as a `SchedulingService` impl:
 
 The CalDAV impl wraps the vault scheduler — every write fans out to
 both the markdown vault *and* the remote server, with a sync token
-held in vault metadata so reconnects are idempotent.
+held in the `.task/` sidecar (see below) so reconnects are
+idempotent.
+
+## Storage split — content vs. app state
+
+Two stores, one trait. The `SchedulingService` impl doesn't care
+which is which; the split is purely a backend detail.
+
+**`<vault>/scheduling/` — markdown content (portable, git-friendly,
+project-associated):**
+
+- `templates/<slug>.md` — `DayTemplate`s.
+- `event-types/<slug>.md` — `EventType`s.
+- `schedules/<slug>.md` — `AvailabilitySchedule`s.
+- `bookings/<uuid>.md` — `Booking`s. One file per booking so the
+  meeting and its notes / attached project / agenda live together.
+
+**`<vault>/.task/scheduling/` — app state (hidden, gitignored, can
+swap backends freely):**
+
+- `sync/<calendar-id>.json` — CalDAV sync tokens, ETags, last-seen
+  revision per remote calendar.
+- `cache/busy-times.json` — external-calendar busy-time cache
+  (TTL'd, refreshed on demand).
+- `audit/booking-events.jsonl` — append-only log of booking creates
+  / status changes / webhook receipts.
+- `credentials.json` — last-resort OAuth fallback when the OS
+  keyring isn't available. Documented as machine-only, never
+  synced.
+
+The proto stays one trait. Internally:
+
+```rust
+pub struct VaultScheduler {
+    vault: vault::Vault,            // → <vault>/scheduling/*.md
+    state: Box<dyn SchedulerStateStore>,  // → <vault>/.task/scheduling/
+}
+
+/// App-state side. JSON-on-disk first; swap for SQLite when write
+/// contention bites or we want indexed queries on the audit log.
+pub trait SchedulerStateStore: Send + Sync {
+    fn get_sync_token(&self, calendar_id: &str) -> Option<String>;
+    fn put_sync_token(&self, calendar_id: &str, token: &str);
+    fn append_audit(&self, event: AuditEvent);
+    fn read_busy_cache(&self, calendar_id: &str) -> Option<BusyTimes>;
+    fn write_busy_cache(&self, calendar_id: &str, busy: BusyTimes, ttl: Duration);
+    // …
+}
+
+pub struct JsonStateStore  { root: PathBuf }  // v1
+pub struct SqliteStateStore { conn: ...    }  // when we need indexing
+```
+
+This mirrors how Obsidian splits content (`*.md`) from app state
+(`.obsidian/`). We keep portability where it matters (every
+template / event-type / schedule / booking is plain markdown the
+user can grep + diff + grep) and free ourselves to pick the right
+store for high-churn machine data.
 
 ## Out of scope (locked)
 
