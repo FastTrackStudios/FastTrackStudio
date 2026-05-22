@@ -1,5 +1,6 @@
 //! Disk-backed scheduler. Markdown content lives at
-//! `<vault_root>/scheduling/<kind>/<file>.md`; app-state goes
+//! `<vault_root>/Projects/Scheduling/<kind>/<file>.md` (config)
+//! and `<vault_root>/Records/bookings/<id>.md` (history); app-state goes
 //! through pluggable `KvStore` + `LogStore` impls (see
 //! `store-proto`). The scheduler doesn't care where the state
 //! actually lands — JSON-on-disk, `SQLite`, in-memory all wire in
@@ -423,7 +424,7 @@ mod tests {
             note: None,
         };
         let persisted = sched.create_booking(&new).unwrap();
-        assert!(persisted.path.starts_with("scheduling/bookings/"));
+        assert!(persisted.path.starts_with("Records/bookings/"));
         assert!(matches!(persisted.status, BookingStatus::Confirmed));
 
         let listed = sched.list_bookings().unwrap();

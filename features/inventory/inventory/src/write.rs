@@ -69,13 +69,13 @@ pub fn write_item(
     Ok(abs)
 }
 
-/// Default layout: `inventory/<slug>.md`.
+/// Default layout: `Operations/Inventory/<slug>.md`.
 #[must_use]
 pub fn default_item_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {
         Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("inventory/{slug}.md"),
+        None => format!("Operations/Inventory/{slug}.md"),
     }
 }
 

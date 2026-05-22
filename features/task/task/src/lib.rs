@@ -33,6 +33,6 @@ pub mod write;
 
 pub use capture::capture;
 pub use model::{Priority, Status, TaskInfo, TimeEntry};
-pub use parse::{ParseError, parse_page};
+pub use parse::{ParseError, parse_page, parse_str};
 pub use scan::scan_vault;
 pub use write::{WriteError, serialize_task, write_task};

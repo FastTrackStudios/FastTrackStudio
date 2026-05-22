@@ -33,9 +33,9 @@ use uuid::Uuid;
 use vault::Vault;
 
 fn fresh_vault(root: &Path) -> Vault {
-    std::fs::create_dir_all(root.join("pantry")).unwrap();
+    std::fs::create_dir_all(root.join("Operations/Inventory/Pantry")).unwrap();
     std::fs::create_dir_all(root.join("Wiki/Cookbook")).unwrap();
-    std::fs::create_dir_all(root.join("mealplan")).unwrap();
+    std::fs::create_dir_all(root.join("Projects/Mealplan/meals")).unwrap();
     std::fs::create_dir_all(root.join("shopping")).unwrap();
     std::fs::create_dir_all(root.join("substitutions")).unwrap();
     Vault::open(root).expect("open vault")

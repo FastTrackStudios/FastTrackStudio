@@ -99,6 +99,34 @@ pub struct TaskInfo {
     )]
     pub completed_date: Option<NaiveDate>,
 
+    /// `agent-dispatch`: which agent profile (codex, hermes, …)
+    /// is allowed to claim this task when it's dispatched to an
+    /// agent queue. Empty = any. Setting this on a task note
+    /// makes it *eligible* for agent dispatch — the actual
+    /// dispatch is an explicit user action (or the recurring-
+    /// task cron in `agent-dispatch::schedule_recurring`).
+    #[serde(
+        skip_serializing_if = "String::is_empty",
+        default,
+        rename = "agentProfile"
+    )]
+    pub agent_profile: String,
+
+    /// `agent-dispatch`: stable ids of agent tasks dispatched
+    /// from this task note. Each entry is a UUID; the
+    /// corresponding row lives in
+    /// `agent_tasks` on the server. `agent-dispatch::dispatch`
+    /// appends to this list when it creates a card, and
+    /// `complete_agent_task` doesn't remove from it — the list
+    /// is an audit trail of every dispatch over the task's
+    /// lifetime.
+    #[serde(
+        skip_serializing_if = "Vec::is_empty",
+        default,
+        rename = "dispatchedAgentTasks"
+    )]
+    pub dispatched_agent_tasks: Vec<String>,
+
     /// File-created ISO timestamp. Re-derived from `file.ctime`
     /// when missing — kept in the frontmatter so it round-trips
     /// across machines (mtime / ctime is per-filesystem).

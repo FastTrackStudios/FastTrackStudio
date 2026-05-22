@@ -1,7 +1,8 @@
 //! `body` — body-metric time series in a `vault::Vault`.
 //!
-//! One page per metric (`body/weight.md`, `body/bodyfat.md`,
-//! `body/waist.md`) carrying the entry log. Modeled on
+//! One page per metric
+//! (`Projects/Fitness/body/weight.md`, `.../bodyfat.md`,
+//! `.../waist.md`) carrying the entry log. Modeled on
 //! wger's `Measurement` + `Category` tables, flattened so a
 //! year of daily weigh-ins doesn't explode into 365 files.
 //!

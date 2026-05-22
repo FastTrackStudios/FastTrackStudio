@@ -60,5 +60,5 @@ disk for audit, see [[2026-05-29-cancelled]].
 Originally a markdown table in The Observatory's `Daily Plan.md`.
 Lifting it into the scheduling feature gives it real structure: each
 block is queryable, bookings can resolve against the available
-sub-windows, and the [[Bases]] view in
-[[Bases/Daily Plan blocks.base]] can render the whole day inline.
+sub-windows, and the colocated `.base` view in
+[[Journal/Daily/daily-plan-blocks.base]] can render the whole day inline.

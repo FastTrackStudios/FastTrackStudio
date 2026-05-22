@@ -164,7 +164,7 @@ impl Bookings for InMemoryScheduler {
         let now = chrono::Utc::now().to_rfc3339();
         let persisted = Booking {
             id: BookingId(id.clone()),
-            path: format!("scheduling/bookings/{id}.md"),
+            path: format!("Records/bookings/{id}.md"),
             event_type_id: booking.event_type_id.clone(),
             start_utc: booking.start_utc.clone(),
             end_utc: booking.end_utc.clone(),
