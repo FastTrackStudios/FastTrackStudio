@@ -119,6 +119,7 @@ arborium = { version = "2.16.0", default-features = false }
 arborium-theme = "2.16.0"
 arborium-tree-sitter = "2.16.0"
 attachments-proto = { path = "features/attachments/attachments-proto" }
+view-gantt = { path = "features/view/view-gantt" }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault

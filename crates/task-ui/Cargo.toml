@@ -30,6 +30,7 @@ project-ui.workspace = true
 # `editor::EditorApp` now. Re-add the dep when we mine the
 # legacy shell (virt-folder views, properties pane, tasks-kanban).
 editor.workspace = true
+view-gantt.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

@@ -4,6 +4,7 @@
 @source "./src/**/*.{rs,html,css}";
 @source "../../crates/task-ui/src/**/*.rs";
 @source "../../features/*/*-ui/src/**/*.rs";
+@source "../../features/*/view-*/src/**/*.rs";
 @source "../../../FastTrackStudio/fts-ui/crates/fts-ui/src/**/*.rs";
 
 @theme {
