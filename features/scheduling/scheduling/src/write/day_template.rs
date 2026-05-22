@@ -1,18 +1,9 @@
-//! Proto → markdown serialization. Emits frontmatter only — the
-//! body is left to the caller to compose (notes, agenda, etc.).
-
-use thiserror::Error;
+//! `DayTemplate` → markdown frontmatter.
 
 use scheduling_proto::{BlockCategory, DayTemplate, TimeBlock, TimeOfDay};
 
-#[derive(Debug, Error)]
-pub enum WriteError {
-    #[error("yaml serialize: {0}")]
-    Yaml(String),
-}
+use super::{WriteError, yaml_to_page};
 
-/// Serialize a day template as a full markdown page (frontmatter +
-/// empty body). Round-trips with [`crate::parse::parse_day_template`].
 pub fn serialize_day_template(dt: &DayTemplate) -> Result<String, WriteError> {
     let mut blocks = Vec::with_capacity(dt.blocks.len());
     for b in &dt.blocks {
@@ -28,9 +19,7 @@ pub fn serialize_day_template(dt: &DayTemplate) -> Result<String, WriteError> {
     }
     map.insert("blocks".into(), serde_yaml::Value::Sequence(blocks));
 
-    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(map))
-        .map_err(|e| WriteError::Yaml(e.to_string()))?;
-    Ok(format!("---\n{yaml}---\n"))
+    yaml_to_page(map)
 }
 
 fn serialize_block(b: &TimeBlock) -> serde_yaml::Value {
@@ -46,7 +35,7 @@ fn serialize_block(b: &TimeBlock) -> serde_yaml::Value {
     serde_yaml::Value::Mapping(m)
 }
 
-fn format_time(t: TimeOfDay) -> String {
+pub(crate) fn format_time(t: TimeOfDay) -> String {
     format!("{:02}:{:02}", t.hours(), t.minutes())
 }
 
@@ -87,8 +76,6 @@ mod tests {
             }],
         };
         let md = serialize_day_template(&dt).unwrap();
-        // Frontmatter is "---\n...---\n" — strip the fences before
-        // re-parsing.
         let inner = md
             .trim_start_matches("---\n")
             .trim_end_matches("---\n")

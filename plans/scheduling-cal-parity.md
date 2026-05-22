@@ -37,7 +37,7 @@ schema since the shapes are the same).
 | cal.com behavior | Our behavior | Status |
 | --- | --- | --- |
 | Public `/book/<user>/<event-slug>` page | Cal.com-style booking page | 🔵 planned (commit 2) |
-| Listing open slots = `Schedule rules ∩ ¬existing bookings` | `SchedulingService::list_open_slots` | 🟡 partial — trait exists; `InMemoryScheduler` returns `Vec::new()`. Real impl in commit 2. |
+| Listing open slots = `Schedule rules ∩ ¬existing bookings` | `slots::list_open_slots` + `VaultScheduler::list_open_slots` | 🟢 done — pure algorithm in `slots.rs` (5 tests), wired into `VaultScheduler` end-to-end (intersect test passes). |
 | Slot timezone conversion (bookee's TZ vs host's) | TZ string on `AvailabilitySchedule`; conversion at UI render time | 🔵 planned |
 | Buffer time before / after | `EventType.buffer_min` | 🟢 done (proto field exists, slot impl 🔵) |
 | Minimum notice / max future booking window | EventType fields | 🔵 planned (add `min_notice_min`, `max_future_days`) |
@@ -248,9 +248,12 @@ These are cal.com features we explicitly aren't building:
 
 Suggested order for follow-up commits (top = next):
 
-1. **Vault-backed `SchedulingService`** — round-trip event types,
-   schedules, and bookings through markdown files in the vault. Slot
-   generation reads from real data.
+1. ~~**Vault-backed `SchedulingService`**~~ — 🟢 done. `VaultScheduler`
+   round-trips every entity through `<vault>/scheduling/*.md`,
+   uses pluggable `KvStore` + `LogStore` for sidecar state, and
+   includes a real slot-generation algorithm (rules ∩ ¬bookings).
+   21/21 tests cover parse/write + slot edges + end-to-end on-disk
+   roundtrips.
 2. **Event-type editor UI** — form for title / duration / location /
    schedule pick. Drives `upsert_event_type`.
 3. **Schedule editor UI** — weekly grid of availability rules. Click
@@ -259,9 +262,9 @@ Suggested order for follow-up commits (top = next):
    client-facing surface; the existing `view-calendar` time-grid is
    the natural starting point for the slot picker.
 5. **CalDAV backend** — Apple iCloud first. New crate
-   `scheduling-caldav` implementing `SchedulingService`, mounted via
-   `architect::serve` so the UI talks to it through vox the same way
-   it talks to the in-memory backend.
+   `scheduling-caldav` implementing the same capability sub-traits,
+   mounted via `architect::serve` so the UI talks to it through vox
+   the same way it talks to the in-memory backend.
 6. **Day-template editor** — drag block edges + inline rename +
    category swap. Reuse view-table inline-edit patterns.
 7. **Allocation flow** — drag a `task` / `view-calendar` event onto

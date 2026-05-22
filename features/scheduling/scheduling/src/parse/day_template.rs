@@ -1,55 +1,25 @@
-//! Markdown ↔ proto parse. v1 surface covers day-templates only;
-//! event-type / schedule / booking parsers land alongside the
-//! `VaultScheduler` impl in a follow-up.
-
-use thiserror::Error;
+//! Day-template frontmatter → `DayTemplate`.
 
 use scheduling_proto::{
     BlockCategory, DayTemplate, DayTemplateId, TimeBlock, TimeBlockId, TimeOfDay,
 };
 
-#[derive(Debug, Error)]
-pub enum ParseError {
-    #[error("invalid frontmatter: {0}")]
-    Frontmatter(String),
-    #[error("invalid time string '{value}' (expected HH:MM)")]
-    Time { value: String },
-    #[error("missing required field: {field}")]
-    MissingField { field: &'static str },
-}
+use super::ParseError;
+use super::yaml::{parse_mapping, require_str, take_sequence, take_str};
 
 /// Parse the frontmatter side of a day-template markdown page.
-/// The body is not consumed — callers can keep it as a free-form
-/// notes field if they want.
+/// `frontmatter_yaml` is the text between the leading `---` fences.
 pub fn parse_day_template(path: &str, frontmatter_yaml: &str) -> Result<DayTemplate, ParseError> {
-    let value: serde_yaml::Value = serde_yaml::from_str(frontmatter_yaml)
-        .map_err(|e| ParseError::Frontmatter(e.to_string()))?;
-    let map = value
-        .as_mapping()
-        .ok_or_else(|| ParseError::Frontmatter("expected mapping".into()))?;
+    let map = parse_mapping(frontmatter_yaml)?;
 
-    let id = map
-        .get(serde_yaml::Value::String("id".into()))
-        .and_then(serde_yaml::Value::as_str)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| path.to_string());
-    let name = map
-        .get(serde_yaml::Value::String("name".into()))
-        .and_then(serde_yaml::Value::as_str)
-        .ok_or(ParseError::MissingField { field: "name" })?
-        .to_string();
-    let description = map
-        .get(serde_yaml::Value::String("description".into()))
-        .and_then(serde_yaml::Value::as_str)
-        .map(str::to_string);
+    let id = take_str(&map, "id").unwrap_or_else(|| path.to_string());
+    let name = require_str(&map, "name")?;
+    let description = take_str(&map, "description");
 
-    let blocks_raw = map
-        .get(serde_yaml::Value::String("blocks".into()))
-        .and_then(serde_yaml::Value::as_sequence)
-        .ok_or(ParseError::MissingField { field: "blocks" })?;
-
+    let blocks_raw =
+        take_sequence(&map, "blocks").ok_or(ParseError::MissingField { field: "blocks" })?;
     let mut blocks = Vec::with_capacity(blocks_raw.len());
-    for raw in blocks_raw {
+    for raw in &blocks_raw {
         blocks.push(parse_block(raw)?);
     }
 
@@ -102,7 +72,7 @@ fn parse_block(raw: &serde_yaml::Value) -> Result<TimeBlock, ParseError> {
     })
 }
 
-fn parse_time(value: &str) -> Result<TimeOfDay, ParseError> {
+pub(crate) fn parse_time(value: &str) -> Result<TimeOfDay, ParseError> {
     let (h, m) = value.split_once(':').ok_or_else(|| ParseError::Time {
         value: value.into(),
     })?;

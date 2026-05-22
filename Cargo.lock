@@ -9789,6 +9789,8 @@ dependencies = [
  "scheduling-proto",
  "serde",
  "serde_yaml",
+ "store-proto",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "uuid",

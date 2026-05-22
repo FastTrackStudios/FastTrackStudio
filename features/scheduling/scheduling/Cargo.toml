@@ -13,6 +13,7 @@ repository.workspace = true
 
 [dependencies]
 scheduling-proto = { workspace = true, default-features = false }
+store-proto = { workspace = true, default-features = false }
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = { workspace = true }
@@ -21,3 +22,6 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 indexmap = { workspace = true, features = ["serde"] }
 vault = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
