@@ -3743,6 +3743,7 @@ dependencies = [
  "async-imap",
  "async-native-tls",
  "email-config",
+ "email-imap",
  "email-proto",
  "email-secret",
  "email-smtp",
