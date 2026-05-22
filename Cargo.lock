@@ -5360,6 +5360,72 @@ dependencies = [
 ]
 
 [[package]]
+name = "finance"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "finance-db",
+ "finance-proto",
+ "rust_decimal",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "timer-proto",
+ "tracing",
+ "uuid",
+ "vault",
+]
+
+[[package]]
+name = "finance-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "finance-proto",
+ "rust_decimal",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "finance-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "timer-proto",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "finance-ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "finance-proto",
+ "fts-ui",
+ "rust_decimal",
+ "serde",
+ "timer-proto",
+ "tracing",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11224,6 +11290,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "project"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "facet",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "vault",
+]
+
+[[package]]
 name = "proptest"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14049,6 +14131,7 @@ dependencies = [
  "ed25519-dalek",
  "eyre",
  "futures",
+ "project",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "sea-orm",
@@ -14060,6 +14143,8 @@ dependencies = [
  "task",
  "tempfile",
  "thiserror 2.0.18",
+ "timer",
+ "timer-proto",
  "tokio",
  "tower",
  "tower-http",
@@ -14289,6 +14374,42 @@ checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "timer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "project",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "timer-proto",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "timer-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -17568,10 +17689,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+
+[[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"

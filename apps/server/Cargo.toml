@@ -44,6 +44,9 @@ agent-proto = { workspace = true, features = ["server", "vox"] }
 agent-tasks = { workspace = true }
 agent-dispatch = { workspace = true }
 task = { workspace = true }
+project = { workspace = true }
+timer-proto = { workspace = true, features = ["server", "vox"] }
+timer = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server-axum", "dispatch-tokio"] }

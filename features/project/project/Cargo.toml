@@ -1,0 +1,26 @@
+[package]
+name = "project"
+description = "First-party project feature for Task: `ProjectInfo` schema, frontmatter parser/writer, vault scanner. Projects are markdown pages in a `vault::Vault` with YAML frontmatter — billing fields (client, currency, default rate, billable default) live on the project itself so downstream features (`timer`, `finances`, `agent-dispatch`) can resolve them by reading the file. No CRDT, no database — the markdown file is the source of truth, same as the `task` crate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { workspace = true, features = ["clock", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+facet = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+vault.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
