@@ -3,10 +3,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::time::Instant;
     let root = PathBuf::from(std::env::var("HOME")?).join("Documents/The Observatory");
     let t0 = Instant::now();
-    let vault = vault::Vault::open(&root)?;
+    let vault = vault_live::Vault::open(&root)?;
     let t_open = t0.elapsed();
     let t1 = Instant::now();
-    let idx = vault::BlockIndex::build(&vault);
+    let idx = vault_live::BlockIndex::build(&vault);
     let t_index = t1.elapsed();
     let bytes: usize = vault.pages.iter().map(|p| p.raw.len()).sum();
     println!("pages:           {}", vault.pages.len());

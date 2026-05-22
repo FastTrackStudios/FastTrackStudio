@@ -4,7 +4,7 @@
 //! ([`crate::walker::walk_vault`]) — which respects
 //! `.obsidian/app.json`'s `userIgnoreFilters` and the
 //! `.obsidian` / `.trash` / `.git` skip set — to the canonical
-//! [`vault::Vault`] / [`vault::Backend`] in the sibling crate.
+//! [`vault_live::Vault`] / [`vault_live::Backend`] in the sibling crate.
 //!
 //! The point: a directory that an Obsidian user opens with their
 //! editor can be opened by Task with the same semantics, and
@@ -13,11 +13,11 @@
 //! was Obsidian.
 //!
 //! Use either:
-//! - [`open_as_vault`] — load an in-memory `vault::Vault`
+//! - [`open_as_vault`] — load an in-memory `vault_live::Vault`
 //!   snapshot. Cheapest path; right for read-only inspection,
 //!   editor opens, etc.
 //! - [`open_as_backend`] — register the same directory under a
-//!   `vault_id` on a new [`vault::Backend`] so it can be
+//!   `vault_id` on a new [`vault_live::Backend`] so it can be
 //!   mounted on a vox router. Use this when you want the
 //!   directory exposed via RPC.
 
@@ -27,57 +27,57 @@ use std::path::Path;
 use crate::config::read_obsidian_config;
 use crate::walker::{VaultEntry as ObsidianEntry, VaultEntryKind as ObsidianKind, walk_vault};
 
-/// Open an Obsidian-shaped directory as a [`vault::Vault`]
+/// Open an Obsidian-shaped directory as a [`vault_live::Vault`]
 /// snapshot. Reads `.obsidian/app.json` to honor
 /// `userIgnoreFilters`; skips `.obsidian`, `.trash`, `.git`,
 /// dotfiles, and unsupported file types in the same way
 /// Obsidian itself does.
 ///
 /// Attachments + canvas files in the source vault are *not*
-/// loaded — [`vault::Vault`] only models `.md` pages and
+/// loaded — [`vault_live::Vault`] only models `.md` pages and
 /// `.base` files. They remain on disk and round-trip via the
 /// byte-level [`vault_proto::VaultSync::get_file`] /
 /// `put_file` path.
-pub fn open_as_vault(root: &Path) -> Result<vault::Vault, vault::LoadError> {
+pub fn open_as_vault(root: &Path) -> Result<vault_live::Vault, vault_live::LoadError> {
     let cfg = read_obsidian_config(root);
     let obsidian_entries = walk_vault(root, &cfg);
     let entries = obsidian_entries
         .into_iter()
         .filter_map(translate_entry)
         .collect();
-    vault::Vault::from_entries(root, entries)
+    vault_live::Vault::from_entries(root, entries)
 }
 
 /// Open an Obsidian-shaped directory and register it on a new
-/// single-vault [`vault::Backend`] under `vault_id`. Use this
+/// single-vault [`vault_live::Backend`] under `vault_id`. Use this
 /// when you want to mount the directory via
 /// `vault_proto::serve(backend)` on a vox router.
 ///
 /// The Backend is in `Explicit` layout with just this one entry
-/// — call [`vault::Backend::start_watcher`] separately to
+/// — call [`vault_live::Backend::start_watcher`] separately to
 /// receive external-edit events from Obsidian / vim / git.
 pub fn open_as_backend(
     vault_id: impl Into<String>,
     root: &Path,
-) -> Result<vault::Backend, std::io::Error> {
+) -> Result<vault_live::Backend, std::io::Error> {
     let mut roots = HashMap::with_capacity(1);
     roots.insert(vault_id.into(), root.to_path_buf());
     std::fs::create_dir_all(root)?;
-    Ok(vault::Backend::with_roots(roots))
+    Ok(vault_live::Backend::with_roots(roots))
 }
 
 /// Translate one of this crate's [`ObsidianEntry`]s into the
-/// `vault` crate's [`vault::VaultEntry`] shape. Canvas +
-/// attachment entries are dropped — `vault::Vault` doesn't
+/// `vault` crate's [`vault_live::VaultEntry`] shape. Canvas +
+/// attachment entries are dropped — `vault_live::Vault` doesn't
 /// model them, and they're available byte-for-byte through
 /// `VaultSync::get_file` anyway.
-fn translate_entry(entry: ObsidianEntry) -> Option<vault::VaultEntry> {
+fn translate_entry(entry: ObsidianEntry) -> Option<vault_live::VaultEntry> {
     let kind = match entry.kind {
-        ObsidianKind::Markdown => vault::VaultEntryKind::Markdown,
-        ObsidianKind::Base => vault::VaultEntryKind::Base,
+        ObsidianKind::Markdown => vault_live::VaultEntryKind::Markdown,
+        ObsidianKind::Base => vault_live::VaultEntryKind::Base,
         ObsidianKind::Canvas | ObsidianKind::Attachment => return None,
     };
-    Some(vault::VaultEntry {
+    Some(vault_live::VaultEntry {
         abs_path: entry.abs_path,
         rel_path: entry.rel_path,
         kind,

@@ -3,8 +3,8 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
     let root = PathBuf::from(std::env::var("HOME")?).join("Documents/Task");
-    let vault = vault::Vault::open(&root)?;
-    let idx = vault::BlockIndex::build(&vault);
+    let vault = vault_live::Vault::open(&root)?;
+    let idx = vault_live::BlockIndex::build(&vault);
     println!("pages: {}", vault.pages.len());
     for p in &vault.pages {
         println!("  - {} ({} bytes)", p.basename, p.raw.len());
@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("indexed block ids: {}", idx.len());
     // Try one specific lookup that the seed mentions.
     let uuid = "01950000-0000-7000-8000-000000000001";
-    let view = vault::VaultLookupView::new(&vault, &idx);
+    let view = vault_live::VaultLookupView::new(&vault, &idx);
     use editor_state::markdown::VaultLookup;
     match view.lookup_block(uuid) {
         Some(hit) => println!("  ✓ ((:{uuid})) → {} : {}", hit.page, hit.preview),

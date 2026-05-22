@@ -1,6 +1,6 @@
 [package]
 name = "vault"
-description = "Filesystem-backed vault: reads + writes `.md` files, indexes block IDs and refs. Sits below the editor."
+description = "Vault feature facade. Re-exports the wire trait (`vault-proto`) unconditionally and the live filesystem impl + obsidian translation layer behind feature flags. Every consumer outside `features/vault/` should depend on this crate — the sibling impl crates are internal."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,37 +8,29 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Pure facade — no source other than `pub use`s in `lib.rs`. All real
+# code lives in the sibling impl crates.
+#
+# Feature gates:
+#   default  — `live` + `obsidian` + `vox`. Right for native apps
+#              (desktop / cli / server / playground).
+#   live     — pull in vault-live (fs backend, watcher, in-memory
+#              snapshot, block index). Native-only.
+#   obsidian — pull in vault-obsidian (translation layer + parsed
+#              helpers). Native-only.
+#   vox      — propagate vault-proto's `vox` feature for the
+#              architect-emitted client + dispatcher.
+#
+# wasm consumers (`apps/web` etc.) should set
+# `default-features = false, features = ["vox"]` to get only the
+# wire types + the generated `VaultSyncClient`.
 [dependencies]
-# Vault is native-only (file IO + watching). The `#![cfg(not(wasm))]`
-# at the crate root keeps wasm builds happy.
-walkdir = { workspace = true }
-notify = "8"
-notify-debouncer-mini = "0.7"
-thiserror = { workspace = true }
-tracing = { workspace = true }
-chrono = { workspace = true }
-uuid = { workspace = true }
-# Parallel file reads. ~4x speedup on the cold-open scan for
-# the 8k-page Observatory vault (350ms → ~80ms on M-class
-# hardware with 8 cores).
-rayon = "1"
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-# `editor-state::markdown::parse_frontmatter` + the block-id
-# parser. We depend on the editor for the *parsing*; the vault
-# owns the file storage + index layer above it.
-editor-state = { workspace = true }
-# Bases (`.base` YAML files) — parser + executor live in
-# knowledge-proto so the vault crate stays focused on storage.
-knowledge-proto = { workspace = true }
-# `VaultSync` wire trait + payload types. The `sync` module impls
-# `vault_proto::VaultSync` on the backend, making this crate the
-# canonical filesystem backend mounted on a `task-server` vox route.
-vault-proto = { workspace = true }
-architect = { workspace = true, features = ["dispatch-tokio"] }
-tokio = { workspace = true, features = ["sync", "rt", "macros"] }
-sha2 = "0.10"
+vault-proto = { workspace = true, default-features = false }
+vault-live = { workspace = true, optional = true }
+vault-obsidian = { workspace = true, optional = true }
 
-[dev-dependencies]
-tempfile = "3"
-tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "time"] }
+[features]
+default = ["live", "obsidian", "vox"]
+live = ["dep:vault-live"]
+obsidian = ["dep:vault-obsidian", "live"]
+vox = ["vault-proto/vox"]

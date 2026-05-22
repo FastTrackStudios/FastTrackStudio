@@ -32,12 +32,13 @@ license.workspace = true
 #   mutate.rs         — create / append / prepend / delete / move / property ops
 
 [dependencies]
-# `vault` is the canonical `VaultSync` backend. vault-obsidian
-# is the translation layer that lets `vault` open an Obsidian-
-# shaped directory (respecting `.obsidian/app.json`'s
-# `userIgnoreFilters` etc.) and serve it through the same wire
-# trait as any other vault.
-vault.workspace = true
+# Internal sibling deps — vault-obsidian lives inside the vault
+# feature, so it talks to `vault-live` (the impl crate)
+# directly rather than going through the public `vault` facade.
+# `vault-live` ships the canonical `VaultSync` backend +
+# in-memory snapshot; vault-obsidian translates obsidian-shaped
+# directories into that shape.
+vault-live.workspace = true
 vault-proto.workspace = true
 knowledge-proto.workspace = true
 chrono.workspace = true

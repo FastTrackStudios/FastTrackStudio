@@ -1,60 +1,63 @@
-//! Filesystem-backed vault.
+//! `vault` — facade for the vault feature.
 //!
-//! Native-only crate. `.md` files on disk are authoritative; this
-//! crate provides:
+//! Every consumer outside `features/vault/` should depend on this
+//! crate. Internal vault-feature crates (`vault-live`,
+//! `vault-obsidian`, eventually `vault-graph`) depend on each
+//! other directly and skip the facade.
 //!
-//! - [`Vault`]: an in-memory snapshot of a vault root, rebuildable
-//!   from disk in one pass.
-//! - [`BlockIndex`]: a `uuid → (page, byte offset)` map covering
-//!   every `id:: <uuid>` block-id property line across the vault.
-//!   Enables cross-page block refs (`((uuid))`) and embeds.
-//! - [`watch`]: a debounced filesystem watcher that emits change
-//!   events the editor can use to refresh state.
+//! Feature flags:
+//! - `live` (default) — pull in the filesystem backend, in-memory
+//!   `Vault` snapshot, watcher, and block index from `vault-live`.
+//! - `obsidian` (default) — pull in the Obsidian translation
+//!   layer (parsed helpers, `open_as_vault`, `open_as_backend`).
+//! - `vox` (default) — propagate `vault-proto`'s vox feature so
+//!   the architect-emitted `VaultSyncClient` + dispatcher are
+//!   available.
 //!
-//! Architectural shape mirrors [`vault-obsidian`]: small focused
-//! modules, native-only `cfg`, vault snapshot + walker + watcher
-//! + a thin mutate layer for create / append / save. The
-//! difference is block-awareness: every vault page is parsed for
-//! its `id:: <uuid>` lines, and the [`BlockIndex`] gives O(1)
-//! cross-vault lookup of a block's containing page and offset.
-//!
-//! Compared to the older [`editor-outliner::db::Vault`] this
-//! replaces (still in-tree under `crates/editor-outliner/` until
-//! its consumers migrate):
-//!
-//! - File content is canonical; we don't materialize a separate
-//!   `Block` table parallel to the markdown source. The block
-//!   index points back into the file.
-//! - Pages can live anywhere under the vault root (matches
-//!   Obsidian's free-form folders), not just `pages/` and
-//!   `journals/`.
-//! - Block-property storage is the file itself (`id:: <uuid>`,
-//!   `key:: value` lines under a block), not a `properties_json`
-//!   blob.
-//! - `editor-outliner` made the page-and-block tables the source
-//!   of truth in memory and re-serialized markdown on save —
-//!   reading round-trips were lossy. Here, raw file bytes ARE the
-//!   doc; rewrites touch only the byte ranges we identified.
+//! Wasm consumers typically want
+//! `default-features = false, features = ["vox"]` — that ships
+//! the wire trait + payloads + generated client without dragging
+//! the native fs deps in.
 
-#![cfg(not(target_arch = "wasm32"))]
+// ── Wire trait + payload types ────────────────────────────────────
+// Unconditional; these are wasm-clean and the smallest unit any
+// consumer is likely to need.
+pub use vault_proto::{
+    FileBytes, IfMatch, Manifest, ManifestEntry, PutAck, VaultSync, VaultSyncError,
+};
 
-pub mod blocks;
-pub mod lookup;
-pub mod mutate;
-/// `VaultSync` backend — canonical filesystem impl of the
-/// [`vault_proto::VaultSync`] wire trait. Consumers use
-/// `vault::sync::Backend` (also re-exported as
-/// [`Backend`]).
-pub mod sync;
-pub mod vault;
-pub mod walker;
-pub mod watcher;
+/// Wire change-event type (`Put` / `Delete` / `Resync`). Aliased
+/// because `vault_live::VaultEvent` (the filesystem-watcher event)
+/// collides at the facade boundary; this name keeps the two
+/// distinguishable when both features are on.
+pub use vault_proto::VaultEvent as SyncEvent;
 
-pub use blocks::{BlockIndex, BlockLocation};
-pub use lookup::VaultLookupView;
-pub use mutate::{MutateError, append_to_page, create_page, delete_page, save_page};
-pub use sync::Backend;
-pub use vault::{LoadError, SaveError, Vault, VaultPage};
-pub use vault::{PropertyTypes, VaultBase};
-pub use walker::{VaultEntry, VaultEntryKind, walk_vault};
-pub use watcher::{VaultEvent, WatchError, watch};
+// architect-emitted vox bits (client, server bridge, descriptor,
+// mount verb). Gated behind the facade's `vox` feature, which
+// propagates to vault-proto.
+#[cfg(feature = "vox")]
+pub use vault_proto::{
+    Dispatcher as SyncDispatcher, Service as SyncService, VaultSyncClient, VaultSyncRpc,
+    descriptor, layer, serve,
+};
+
+// ── Live filesystem implementation ────────────────────────────────
+/// Sub-module access into the live backend implementation, when
+/// callers need `vault::sync::WatcherHandle` or the like.
+#[cfg(feature = "live")]
+pub use vault_live::sync;
+#[cfg(feature = "live")]
+pub use vault_live::watcher;
+#[cfg(feature = "live")]
+pub use vault_live::{
+    Backend, BlockIndex, BlockLocation, LoadError, MutateError, PropertyTypes, SaveError, Vault,
+    VaultBase, VaultEntry, VaultEntryKind, VaultEvent, VaultLookupView, VaultPage, WatchError,
+    append_to_page, create_page, delete_page, save_page, walk_vault, watch,
+};
+
+// ── Obsidian translation layer ────────────────────────────────────
+/// Obsidian-aware helpers: parsed page reads (outline, tasks,
+/// properties, aliases), `.base` query DSL, link index, and the
+/// `open_as_vault` / `open_as_backend` translation entry points.
+#[cfg(feature = "obsidian")]
+pub use vault_obsidian as obsidian;

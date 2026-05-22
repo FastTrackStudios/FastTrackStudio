@@ -85,6 +85,7 @@ editor-outliner = { path = "crates/editor-outliner" }
 # `id:: <uuid>` line in the vault to its containing page +
 # anchor offset.
 vault = { path = "features/vault/vault" }
+vault-live = { path = "features/vault/vault-live" }
 vault-proto = { path = "features/vault/vault-proto" }
 # CodeMirror-style editor (subtree). `editor` is the umbrella
 # crate that re-exports the others — apps consume that.

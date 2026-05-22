@@ -12324,6 +12324,15 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 name = "vault"
 version = "0.1.0"
 dependencies = [
+ "vault-live",
+ "vault-obsidian",
+ "vault-proto",
+]
+
+[[package]]
+name = "vault-live"
+version = "0.1.0"
+dependencies = [
  "architect",
  "chrono",
  "editor-state",
@@ -12360,7 +12369,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "vault",
+ "vault-live",
  "vault-proto",
  "walkdir",
 ]

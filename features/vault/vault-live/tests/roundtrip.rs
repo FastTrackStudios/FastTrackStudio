@@ -7,7 +7,7 @@
 
 use std::fs;
 
-use vault::{BlockIndex, Vault};
+use vault_live::{BlockIndex, Vault};
 
 #[test]
 fn vault_scan_and_block_lookup() {
