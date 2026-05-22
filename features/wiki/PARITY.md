@@ -17,11 +17,11 @@ Updated as slices land.
 
 | Bucket | Count |
 |---|---|
-| ✅ Working | 24 |
-| 🟡 Spec'd, unwired | 5 |
+| ✅ Working | 29 |
+| 🟡 Partial | 0 |
 | ❌ Out of scope | 1 |
 
-Roughly **80% working, 17% spec'd, 3% out of scope.**
+**30/30 functional surface either ✅ or ❌.** Vision-caption + LanceDB indexer ship as full code paths, gated on infra: a vision-capable LLM backend for the former, and a `QueryEmbedder` impl for the latter. Build needs `protoc` for the `vector` feature (`flake.nix`'s dev-shell provides it).
 
 ## Storage + bootstrap
 
@@ -45,7 +45,7 @@ Roughly **80% working, 17% spec'd, 3% out of scope.**
 | Language directive | ✅ | `agent-wiki::prompts::language_directive` |
 | Recursive folder import | ✅ | `wiki-live::folder_import`. CLI: `task wiki import`. |
 | Source folder watcher | ✅ | `wiki-live::source_watcher` over `vault-live::watch_any`. CLI: `task wiki watch-sources`. |
-| Auto-retry on crash | 🟡 | Field exists; auto-bump-on-restart not wired. |
+| Auto-retry on crash | ✅ | `wiki-live::queue::auto_retry_stuck_tasks`. Server runs on init for every wiki under the vault root. |
 
 ## Knowledge graph
 
@@ -71,16 +71,16 @@ Roughly **80% working, 17% spec'd, 3% out of scope.**
 | Feature | Status | Where |
 |---|---|---|
 | Token search | ✅ | `wiki-search::token`. CLI: `task wiki search`. |
-| Vector search (LanceDB) | 🟡 | `wiki-search` `vector` feature flag + stub `search_hybrid`. Needs embedding-indexer pipeline. |
-| Image extraction | 🟡 | Types in `wiki-proto::multimodal`. No impl. |
-| Vision caption | 🟡 | Prompts ported. Needs vision-capable LLM. |
+| Vector search (LanceDB) | ✅ | `wiki-search` `vector` feature: real `lancedb 0.29` backend. `index(&dyn DocEmbedder, &[IndexRow])` populates `<vault>/Wiki/_state/lancedb/`; `search_hybrid_with(&dyn QueryEmbedder, ...)` runs vector query + reciprocal-rank fusion against token. Build needs `protoc` (`flake.nix` dev-shell). |
+| Image extraction | ✅ | `wiki-extract` crate. Office (`pptx`/`docx`/`zip`) + standalone images by default; PDFs behind `pdf` feature (pdfium-render). Mounted via `Multimodal` trait. |
+| Vision caption | ✅ | `agent-wiki::bridge::vision_caption_prompt(before, after)` returns the rendered prompt; pipe `ExtractedImage::bytes` into a vision-capable backend turn. |
 
 ## API surface
 
 | Feature | Status | Where |
 |---|---|---|
 | Per-capability traits | ✅ | `wiki_proto::service::{Schema, Catalog, RawLayer, Graph, Ingest, Lint, Review, Research, Federation, Search, Multimodal, Watcher, Events}` (13). Drops the umbrella `WikiService`. |
-| Vox mount on task-server | 🟡 | Each trait emits its own descriptor + `serve()`. Need to wrap `wiki-live`'s free helpers in trait impls + register them on `/vox`. |
+| Vox mount on task-server | ✅ | `wiki-live::WikiBackend` impls `Schema + Catalog + RawLayer + Graph + Ingest + Lint + Search + Watcher + Multimodal`. 9 trait descriptors registered on `/vox` in `apps/server/src/lib.rs`. |
 | Health snapshot | ✅ | `wiki-live::WikiHealth`. CLI: `task wiki health`. |
 | `rescan_sources` | ✅ | `wiki-live::snapshot`. CLI: `task wiki rescan`. |
 

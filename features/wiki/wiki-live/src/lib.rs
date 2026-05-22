@@ -31,6 +31,7 @@
 //! trait-split the same way `agent-proto` is, the impls
 //! become per-capability and slot in cleanly.
 
+mod backend;
 mod context;
 mod error;
 pub mod findings;
@@ -45,6 +46,7 @@ mod source_watcher;
 mod state;
 mod vault;
 
+pub use backend::WikiBackend;
 pub use context::WikiContext;
 pub use error::WikiLiveError;
 pub use findings::{FindingStatus, LintFinding, LintKind, LintSeverity};

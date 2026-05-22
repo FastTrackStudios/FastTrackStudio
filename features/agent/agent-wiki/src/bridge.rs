@@ -495,6 +495,33 @@ pub async fn run_dedup_merge(
     Ok((target_path.to_string(), trimmed.to_string()))
 }
 
+// ────────────────────── Vision caption ──────────────────────
+
+/// Build the vision-caption prompt for one image. The
+/// caller supplies prose context excerpts (before / after
+/// the image in the source); passes empty strings for the
+/// no-context "pinned" variant.
+///
+/// Returning just the prompt — not driving the LLM —
+/// keeps this layer backend-agnostic. The Codex chat
+/// surface today doesn't carry image bytes through
+/// `turn/start`'s `input` array end-to-end; once a vision-
+/// capable backend (or a direct Anthropic-API helper)
+/// lands, it consumes this prompt + the
+/// `ExtractedImage::bytes` and returns the caption.
+pub fn vision_caption_prompt(before: &str, after: &str) -> String {
+    if before.is_empty() && after.is_empty() {
+        prompts::VISION_CAPTION_PINNED.to_string()
+    } else {
+        let mut vars = HashMap::new();
+        let b = if before.is_empty() { "(none)" } else { before };
+        let a = if after.is_empty() { "(none)" } else { after };
+        vars.insert("before", b);
+        vars.insert("after", a);
+        prompts::render(prompts::VISION_CAPTION_CONTEXTUAL, &vars)
+    }
+}
+
 // ────────────────────── Shared helpers ──────────────────────
 
 /// Drive one turn with an LLM and return its full text

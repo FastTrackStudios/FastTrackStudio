@@ -106,6 +106,7 @@ wiki-proto = { path = "features/wiki/wiki-proto" }
 wiki-live = { path = "features/wiki/wiki-live" }
 wiki-graph = { path = "features/wiki/wiki-graph" }
 wiki-search = { path = "features/wiki/wiki-search" }
+wiki-extract = { path = "features/wiki/wiki-extract" }
 # `agent` feature — LLM-agent integration. `agent-proto` is
 # the wire contract (sessions, messages, tools, kanban,
 # approvals, streaming events). Backends live in sibling
