@@ -40,6 +40,10 @@ vault-proto = { workspace = true }
 vault = { workspace = true }
 wiki-proto = { workspace = true }
 wiki-live = { workspace = true }
+agent-proto = { workspace = true, features = ["server", "vox"] }
+agent-tasks = { workspace = true }
+agent-dispatch = { workspace = true }
+task = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
 architect = { workspace = true, features = ["server-axum", "dispatch-tokio"] }

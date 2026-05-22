@@ -23,8 +23,10 @@
 
 #![allow(clippy::large_futures)]
 
+mod cron;
 mod error;
 mod ops;
 
+pub use cron::{ScheduleReport, WeeklyDigest, digest_since, schedule_recurring, weekly_digest};
 pub use error::DispatchError;
 pub use ops::{DispatchOptions, DispatchOutcome, complete_dispatched, dispatch};

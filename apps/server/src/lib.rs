@@ -79,6 +79,16 @@ pub struct AppState {
     /// `wiki_id` maps to `<vault_root>/{wiki_id}/`. Mounted
     /// on `/vox` as the 13 per-capability traits.
     pub wiki: wiki_live::WikiBackend,
+    /// Agent-task queue store. One SQLite DB shared across
+    /// all queues — partitioned by `queue_id` column. Mounted
+    /// on `/vox` as `AgentTaskQueue` (the slim domain trait;
+    /// CRUD is handled by the architect-emitted per-entity
+    /// Repo traits, which we don't currently mount).
+    pub agent_tasks: agent_tasks::Store,
+    /// Vault root used by agent-dispatch when folding agent
+    /// task completions back into source task notes. Shared
+    /// with `vault_sync` so the same on-disk layout is used.
+    pub agent_dispatch_vault_root: PathBuf,
 }
 
 impl AppState {
@@ -127,6 +137,25 @@ impl AppState {
         let wiki = wiki_live::WikiBackend::under_parent(vault_root.clone())
             .map_err(|e| eyre::eyre!("wiki backend: {e}"))?;
 
+        // Agent-task queue store. SQLite at
+        // `$XDG_DATA_HOME/task-server/agent-tasks.sqlite`
+        // (override via `TASK_SERVER_AGENT_TASKS_URL`); shared
+        // across queues, partitioned by `queue_id`.
+        let agent_tasks_url = std::env::var("TASK_SERVER_AGENT_TASKS_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                default_agent_tasks_db_path()
+                    .map_or_else(|_| ":memory:".into(), |p| p.display().to_string())
+            )
+        });
+        let agent_tasks_conn = Database::connect(&agent_tasks_url)
+            .await
+            .map_err(|e| eyre::eyre!("connect agent-tasks db `{agent_tasks_url}`: {e}"))?;
+        agent_tasks::Migrator::up(&agent_tasks_conn, None)
+            .await
+            .map_err(|e| eyre::eyre!("agent-tasks migrations: {e}"))?;
+        let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
+
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
@@ -158,8 +187,27 @@ impl AppState {
             attachments: attachment_service,
             vault_sync: vault_sync_state,
             wiki,
+            agent_tasks,
+            agent_dispatch_vault_root: vault_root,
         })
     }
+}
+
+/// Resolve `$XDG_DATA_HOME/task-server/agent-tasks.sqlite`.
+/// Mirror of [`default_auth_db_path`]; kept separate so the
+/// two DBs can be swapped/backed up independently.
+pub fn default_agent_tasks_db_path() -> eyre::Result<PathBuf> {
+    let base = match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => PathBuf::from(v),
+        _ => {
+            let home = std::env::var("HOME")
+                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
+            PathBuf::from(home).join(".local").join("share")
+        }
+    };
+    let dir = base.join("task-server");
+    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("agent-tasks.sqlite"))
 }
 
 /// Dev default — replace via config in a later phase. Length-checked
@@ -221,6 +269,7 @@ async fn vox_ws_handler(
         let attachment_service = state.attachments.clone();
         let vault_sync_state = state.vault_sync.clone();
         let wiki = state.wiki.clone();
+        let agent_tasks_store = state.agent_tasks.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "AuthService" => {
@@ -244,6 +293,19 @@ async fn vox_ws_handler(
                 // `vault_proto::descriptor()`.
                 name if name == vault_proto::descriptor().service_name => {
                     connection.handle_with(vault_proto::serve(vault_sync_state.clone()));
+                    Ok(())
+                }
+                // Agent-task queue — slim domain trait (claim,
+                // complete, set-status). Plain CRUD is the
+                // architect-emitted per-entity Repo traits, not
+                // mounted here yet.
+                name if name
+                    == agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(agent_proto::service::tasks::serve(
+                        agent_tasks_store.clone(),
+                    ));
                     Ok(())
                 }
                 // Wiki feature — 13 per-capability traits, one
