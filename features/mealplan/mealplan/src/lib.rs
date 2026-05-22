@@ -36,6 +36,7 @@ pub mod model;
 pub mod parse;
 pub mod scan;
 pub mod service;
+pub mod shopping;
 pub mod store;
 pub mod write;
 
@@ -44,6 +45,10 @@ pub use model::{Meal, PantryDeduction, Slot, Status};
 pub use parse::{ParseError, looks_like_meal, parse_page};
 pub use scan::{meals_between, meals_on, scan_vault};
 pub use service::{MealplanError, MealplanService};
+pub use shopping::{
+    ShoppingEntry, ShoppingError, ShoppingList, ShoppingService, Store as ShoppingStore,
+    looks_like_shopping_list,
+};
 pub use store::Store;
 pub use write::{WriteError, default_meal_path, serialize_meal, write_meal};
 
