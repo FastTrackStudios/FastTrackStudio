@@ -21,12 +21,14 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 mod error;
+mod jwz;
 mod query;
 mod schema;
 mod store;
 mod walker;
 
 pub use error::{Result, StoreError};
+pub use jwz::{ThreadAssignment, ThreadInput, compute_threads};
 pub use query::{SearchHit, StoredEnvelope};
 pub use store::Store;
 pub use walker::{MailEntry, walk_account, walk_folder};

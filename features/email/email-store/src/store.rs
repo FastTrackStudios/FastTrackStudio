@@ -247,6 +247,56 @@ impl Store {
         Ok(hits)
     }
 
+    /// Re-run JWZ thread reconstruction against every indexed
+    /// message and update `thread_id` per the algorithm. Walks
+    /// the `messages` table twice (once to read, once to
+    /// update); cheap on realistic mailbox sizes since the
+    /// algorithm is O(N + edges) memory + ~O(N) lookups.
+    ///
+    /// Currently uses each message's `thread_id` field (already
+    /// populated with In-Reply-To at upsert time) as the only
+    /// reference signal. A future pass will store the full
+    /// `References` header in a sidecar column for proper
+    /// multi-hop chain resolution; the JWZ implementation
+    /// already accepts the full reference list when we have it.
+    pub fn rebuild_threads(&mut self) -> Result<usize> {
+        // Pull all (message_id, in_reply_to) rows.
+        let rows: Vec<(String, Option<String>)> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT message_id, thread_id FROM messages")?;
+            let iter = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?;
+            iter.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        // Translate to the borrowed ThreadInput shape JWZ
+        // expects. References vec is owned; we hand out borrows.
+        let inputs: Vec<crate::jwz::ThreadInput<'_>> = rows
+            .iter()
+            .map(|(mid, parent)| crate::jwz::ThreadInput {
+                message_id: mid.as_str(),
+                in_reply_to: parent.as_deref(),
+                references: &[],
+            })
+            .collect();
+        let assignments = crate::jwz::compute_threads(&inputs);
+
+        let tx = self.conn.transaction()?;
+        let mut updated = 0usize;
+        {
+            let mut stmt =
+                tx.prepare("UPDATE messages SET thread_id = ?1 WHERE message_id = ?2")?;
+            for a in &assignments {
+                stmt.execute(params![a.thread_id, a.message_id])?;
+                updated += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(updated)
+    }
+
     /// Rebuild the index from on-disk maildirs. Parses headers
     /// with mail-parser and re-indexes every message. Slow on
     /// big mailboxes — meant for the once-per-machine warmup
@@ -540,6 +590,39 @@ mod tests {
         let hits = store.search("migration", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].envelope.envelope.message_id, "<a>");
+    }
+
+    #[test]
+    fn rebuild_threads_assigns_root_to_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+
+        let mut a = env("<root>", "INBOX", "Start", "");
+        a.thread_id = None;
+        let mut b = env("<r1>", "INBOX", "Re: Start", "");
+        b.thread_id = Some("<root>".into());
+        let mut c = env("<r2>", "INBOX", "Re: Re: Start", "");
+        c.thread_id = Some("<r1>".into());
+        let mut other = env("<x>", "INBOX", "Unrelated", "");
+        other.thread_id = None;
+
+        store.upsert_envelope(&a, None, None, None).unwrap();
+        store.upsert_envelope(&b, None, None, None).unwrap();
+        store.upsert_envelope(&c, None, None, None).unwrap();
+        store.upsert_envelope(&other, None, None, None).unwrap();
+
+        let n = store.rebuild_threads().unwrap();
+        assert_eq!(n, 4);
+
+        let envs = store.query_envelopes("INBOX", 10).unwrap();
+        let map: std::collections::HashMap<_, _> = envs
+            .iter()
+            .map(|s| (s.envelope.message_id.clone(), s.envelope.thread_id.clone()))
+            .collect();
+        assert_eq!(map["<root>"], Some("<root>".into()));
+        assert_eq!(map["<r1>"], Some("<root>".into()));
+        assert_eq!(map["<r2>"], Some("<root>".into()));
+        assert_eq!(map["<x>"], Some("<x>".into()));
     }
 
     #[test]
