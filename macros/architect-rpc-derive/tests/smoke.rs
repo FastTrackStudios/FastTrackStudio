@@ -11,170 +11,201 @@
 //! - `<T>Client` (auto, vox-emitted) — for callers
 //! - `serve` (auto, in the trait's module) — for mounting
 //!
+//! Each `#[rpc]` trait lives in its own module — the macro emits a
+//! `Service` token at the trait's module scope, so two `#[rpc]`
+//! traits in the same module would collide on `Service` /
+//! `BindAny`/`Bind`/`Append`/`Descriptors` impls. Real consumers
+//! (scheduling-proto, finance-proto, …) already structure
+//! per-capability submodules; the tests mirror that.
+//!
 //! The internal bridge (`__<T>Bridge`) is `#[doc(hidden)]` and isn't
 //! intended for direct use, but tests reach for it to exercise the
 //! bridge body without going through vox::service.
 
-use std::sync::Mutex;
-
-use architect::dispatch::CurrentThreadDispatcher;
 use architect::rpc;
 
 // ── All-sync trait ──────────────────────────────────────────────────
 
-#[rpc]
-pub trait AllSync {
-    fn read(&self, key: u32) -> Option<String>;
-    fn write(&self, key: u32, value: String) -> Result<(), String>;
-    fn echo_str(&self, s: &str) -> String;
-}
+mod all_sync {
+    use std::sync::Mutex;
 
-#[derive(Default)]
-struct AllSyncBackend {
-    store: Mutex<Vec<(u32, String)>>,
-}
+    use architect::dispatch::CurrentThreadDispatcher;
 
-impl AllSync for AllSyncBackend {
-    fn read(&self, key: u32) -> Option<String> {
-        self.store
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| v.clone())
+    use super::rpc;
+
+    #[rpc]
+    pub trait AllSync {
+        fn read(&self, key: u32) -> Option<String>;
+        fn write(&self, key: u32, value: String) -> Result<(), String>;
+        fn echo_str(&self, s: &str) -> String;
     }
 
-    fn write(&self, key: u32, value: String) -> Result<(), String> {
-        self.store.lock().unwrap().push((key, value));
-        Ok(())
+    #[derive(Default)]
+    struct AllSyncBackend {
+        store: Mutex<Vec<(u32, String)>>,
     }
 
-    fn echo_str(&self, s: &str) -> String {
-        s.to_string()
+    impl AllSync for AllSyncBackend {
+        fn read(&self, key: u32) -> Option<String> {
+            self.store
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
+        }
+
+        fn write(&self, key: u32, value: String) -> Result<(), String> {
+            self.store.lock().unwrap().push((key, value));
+            Ok(())
+        }
+
+        fn echo_str(&self, s: &str) -> String {
+            s.to_string()
+        }
     }
-}
 
-#[test]
-fn all_sync_bridge_marshals_through_dispatcher() {
-    let bridge = __AllSyncBridge::new(AllSyncBackend::default(), CurrentThreadDispatcher);
+    #[test]
+    fn all_sync_bridge_marshals_through_dispatcher() {
+        let bridge = __AllSyncBridge::new(AllSyncBackend::default(), CurrentThreadDispatcher);
 
-    // The bridge implements the AllSyncRpc mirror; calling its async
-    // methods runs the underlying sync ops through the dispatcher.
-    futures_lite::future::block_on(async {
-        AllSyncRpc::write(&bridge, 1, "hello".into()).await.unwrap();
-        let v = AllSyncRpc::read(&bridge, 1).await;
-        assert_eq!(v.as_deref(), Some("hello"));
+        // The bridge implements the AllSyncRpc mirror; calling its async
+        // methods runs the underlying sync ops through the dispatcher.
+        futures_lite::future::block_on(async {
+            AllSyncRpc::write(&bridge, 1, "hello".into()).await.unwrap();
+            let v = AllSyncRpc::read(&bridge, 1).await;
+            assert_eq!(v.as_deref(), Some("hello"));
 
-        // Borrowed-arg path: `&str` was rewritten to `String` in the
-        // mirror; the bridge passes `&owned` back into the sync trait.
-        let echoed = AllSyncRpc::echo_str(&bridge, "ping".into()).await;
-        assert_eq!(echoed, "ping");
-    });
-}
+            // Borrowed-arg path: `&str` was rewritten to `String` in the
+            // mirror; the bridge passes `&owned` back into the sync trait.
+            let echoed = AllSyncRpc::echo_str(&bridge, "ping".into()).await;
+            assert_eq!(echoed, "ping");
+        });
+    }
 
-#[test]
-fn user_trait_remains_directly_callable_in_process() {
-    // The whole point of #[architect::rpc] is that the user-written
-    // trait still works as a plain sync API — no .await, no bridge.
-    let backend = AllSyncBackend::default();
-    backend.write(7, "direct".into()).unwrap();
-    assert_eq!(backend.read(7).as_deref(), Some("direct"));
-    assert_eq!(backend.echo_str("x"), "x");
+    #[test]
+    fn user_trait_remains_directly_callable_in_process() {
+        // The whole point of #[architect::rpc] is that the user-written
+        // trait still works as a plain sync API — no .await, no bridge.
+        let backend = AllSyncBackend::default();
+        backend.write(7, "direct".into()).unwrap();
+        assert_eq!(backend.read(7).as_deref(), Some("direct"));
+        assert_eq!(backend.echo_str("x"), "x");
+    }
 }
 
 // ── All-async trait ─────────────────────────────────────────────────
 
-// `async_fn_in_trait` is the whole point of the AllAsync shape —
-// vox::service is applied directly and rewrites the futures itself.
-#[rpc]
-#[allow(async_fn_in_trait)]
-pub trait AllAsync {
-    async fn read(&self, key: u32) -> Option<String>;
-    async fn write(&self, key: u32, value: String) -> Result<(), String>;
-}
+mod all_async {
+    use std::sync::Mutex;
 
-#[derive(Default)]
-struct AllAsyncBackend {
-    store: Mutex<Vec<(u32, String)>>,
-}
+    use super::rpc;
 
-impl AllAsync for AllAsyncBackend {
-    async fn read(&self, key: u32) -> Option<String> {
-        self.store
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| v.clone())
+    // `async_fn_in_trait` is the whole point of the AllAsync shape —
+    // vox::service is applied directly and rewrites the futures itself.
+    #[rpc]
+    #[allow(async_fn_in_trait)]
+    pub trait AllAsync {
+        async fn read(&self, key: u32) -> Option<String>;
+        async fn write(&self, key: u32, value: String) -> Result<(), String>;
     }
 
-    async fn write(&self, key: u32, value: String) -> Result<(), String> {
-        self.store.lock().unwrap().push((key, value));
-        Ok(())
+    #[derive(Default)]
+    struct AllAsyncBackend {
+        store: Mutex<Vec<(u32, String)>>,
     }
-}
 
-#[test]
-fn all_async_bridge_passes_through() {
-    let bridge = __AllAsyncBridge::new(AllAsyncBackend::default());
+    impl AllAsync for AllAsyncBackend {
+        async fn read(&self, key: u32) -> Option<String> {
+            self.store
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
+        }
 
-    futures_lite::future::block_on(async {
-        AllAsync::write(&bridge, 1, "async".into()).await.unwrap();
-        let v = AllAsync::read(&bridge, 1).await;
-        assert_eq!(v.as_deref(), Some("async"));
-    });
+        async fn write(&self, key: u32, value: String) -> Result<(), String> {
+            self.store.lock().unwrap().push((key, value));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn all_async_bridge_passes_through() {
+        let bridge = __AllAsyncBridge::new(AllAsyncBackend::default());
+
+        futures_lite::future::block_on(async {
+            AllAsync::write(&bridge, 1, "async".into()).await.unwrap();
+            let v = AllAsync::read(&bridge, 1).await;
+            assert_eq!(v.as_deref(), Some("async"));
+        });
+    }
 }
 
 // ── Mixed trait ─────────────────────────────────────────────────────
 
-#[rpc]
-pub trait Mixed {
-    fn read(&self, key: u32) -> Option<String>;
-    async fn write(&self, key: u32, value: String) -> Result<(), String>;
-}
+mod mixed {
+    use std::sync::Mutex;
 
-#[derive(Default)]
-struct MixedBackend {
-    store: Mutex<Vec<(u32, String)>>,
-}
+    use architect::dispatch::CurrentThreadDispatcher;
 
-impl Mixed for MixedBackend {
-    fn read(&self, key: u32) -> Option<String> {
-        self.store
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| v.clone())
+    use super::rpc;
+
+    #[rpc]
+    pub trait Mixed {
+        fn read(&self, key: u32) -> Option<String>;
+        async fn write(&self, key: u32, value: String) -> Result<(), String>;
     }
 
-    async fn write(&self, key: u32, value: String) -> Result<(), String> {
-        self.store.lock().unwrap().push((key, value));
-        Ok(())
+    #[derive(Default)]
+    struct MixedBackend {
+        store: Mutex<Vec<(u32, String)>>,
     }
-}
 
-#[test]
-fn mixed_bridge_marshals_sync_and_passes_async() {
-    let bridge = __MixedBridge::new(MixedBackend::default(), CurrentThreadDispatcher);
+    impl Mixed for MixedBackend {
+        fn read(&self, key: u32) -> Option<String> {
+            self.store
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
+        }
 
-    futures_lite::future::block_on(async {
-        MixedRpc::write(&bridge, 1, "x".into()).await.unwrap();
-        let v = MixedRpc::read(&bridge, 1).await;
-        assert_eq!(v.as_deref(), Some("x"));
-    });
+        async fn write(&self, key: u32, value: String) -> Result<(), String> {
+            self.store.lock().unwrap().push((key, value));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mixed_bridge_marshals_sync_and_passes_async() {
+        let bridge = __MixedBridge::new(MixedBackend::default(), CurrentThreadDispatcher);
+
+        futures_lite::future::block_on(async {
+            MixedRpc::write(&bridge, 1, "x".into()).await.unwrap();
+            let v = MixedRpc::read(&bridge, 1).await;
+            assert_eq!(v.as_deref(), Some("x"));
+        });
+    }
 }
 
 // ── Empty trait ─────────────────────────────────────────────────────
 
-#[rpc]
-pub trait Empty {}
+mod empty {
+    use super::rpc;
 
-#[test]
-fn empty_trait_compiles() {
-    // Empty traits don't get a `serve` function — there's nothing to
-    // serve. This test just verifies the macro accepts the shape.
+    #[rpc]
     #[allow(dead_code)]
-    struct Backend;
-    impl Empty for Backend {}
+    pub trait Empty {}
+
+    #[test]
+    fn empty_trait_compiles() {
+        // Empty traits don't get a `serve` function — there's nothing to
+        // serve. This test just verifies the macro accepts the shape.
+        #[allow(dead_code)]
+        struct Backend;
+        impl Empty for Backend {}
+    }
 }
