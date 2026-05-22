@@ -1,0 +1,29 @@
+[package]
+name = "email-imap"
+description = "IMAP backend implementing `email_proto::EmailSync`. async-imap at the runtime edge, with an internal `Op` enum (steal #1 from himalaya/io-imap) carrying parsed command results so the protocol layer is unit-testable against recorded transcripts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+email-proto = { workspace = true }
+email-config = { workspace = true }
+email-secret = { workspace = true }
+architect = { workspace = true, features = ["dispatch-tokio"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Connection: async-imap drives the protocol, async-native-tls
+# handles the TLS layer. Both are MIT/Apache.
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = { version = "0.5", default-features = false, features = ["runtime-tokio"] }
+# Re-parsing fetched RFC822 headers via Stalwart's mail-parser
+# so the envelope shape matches what `email-maildir` produces.
+mail-parser = "0.11"
+tokio = { workspace = true, features = ["net", "io-util", "macros", "rt", "sync", "time"] }
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }

@@ -24,6 +24,10 @@ members = [
     # Editor playground — Dioxus app that dogfoods the editor.
     # Built with `dx serve --package playground`.
     "features/editor/examples/playground",
+    # Email feature harness — same pattern as the editor
+    # playground: standalone Dioxus binary that exercises the
+    # email-* crates without pulling in the full task-ui shell.
+    "features/email/examples/email-client",
 ]
 exclude = [
     "features/project/spec",
@@ -40,6 +44,11 @@ exclude = [
     "features/editor/docs",
     "features/editor/plans",
     "features/editor/tests",
+    # The `features/*/*` glob would otherwise try to parse
+    # `features/email/examples/` and `features/email/plans/`
+    # as crate manifests.
+    "features/email/examples",
+    "features/email/plans",
 ]
 resolver = "2"
 
@@ -86,6 +95,21 @@ editor-outliner = { path = "crates/editor-outliner" }
 # anchor offset.
 vault = { path = "features/vault/vault" }
 vault-proto = { path = "features/vault/vault-proto" }
+# Email feature — wire contract + backends. Same shape as
+# `vault-proto`: one `#[architect::rpc] trait EmailSync` proto
+# crate, sibling backend crates (`email-imap`, `email-jmap`,
+# `email-maildir`, `email-nextcloud`) impl it, and
+# `email-store` caches behind the same surface.
+email-proto = { path = "features/email/email-proto" }
+email-imap = { path = "features/email/email-imap" }
+email-smtp = { path = "features/email/email-smtp" }
+email-jmap = { path = "features/email/email-jmap" }
+email-maildir = { path = "features/email/email-maildir" }
+email-nextcloud = { path = "features/email/email-nextcloud" }
+email-store = { path = "features/email/email-store" }
+email-secret = { path = "features/email/email-secret" }
+email-config = { path = "features/email/email-config" }
+email-autoconfig = { path = "features/email/email-autoconfig" }
 # CodeMirror-style editor (subtree). `editor` is the umbrella
 # crate that re-exports the others — apps consume that.
 editor-state = { path = "features/editor/crates/editor-state" }
