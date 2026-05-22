@@ -34,3 +34,6 @@ default = ["live", "obsidian", "vox"]
 live = ["dep:vault-live"]
 obsidian = ["dep:vault-obsidian", "live"]
 vox = ["vault-proto/vox"]
+
+[lints]
+workspace = true

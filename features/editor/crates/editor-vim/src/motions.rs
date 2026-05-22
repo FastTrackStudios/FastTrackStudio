@@ -128,6 +128,8 @@ pub fn find_char(
     let mut hits = 0;
     if forward {
         let start = (pos + 1).min(bytes.len());
+        // Need the index `i` for the saturating-1 return shape.
+        #[allow(clippy::needless_range_loop)]
         for i in start..bytes.len() {
             if bytes[i] == target {
                 hits += 1;
@@ -527,6 +529,7 @@ fn match_bracket(state: &EditorState, pos: usize) -> Option<usize> {
     };
     let mut depth = 0i32;
     if forward {
+        #[allow(clippy::needless_range_loop)]
         for i in pos..bytes.len() {
             if bytes[i] == open {
                 depth += 1;

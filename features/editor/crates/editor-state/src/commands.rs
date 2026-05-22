@@ -622,7 +622,7 @@ fn toggle_marker(state: &EditorState, marker: &str) -> Option<TransactionSpec> {
     if from == to {
         // Empty caret. If the next bytes are the marker, skip
         // past it — closes an open span the user just filled.
-        if doc.get(from..).map_or(false, |s| s.starts_with(m)) {
+        if doc.get(from..).is_some_and(|s| s.starts_with(m)) {
             return Some(TransactionSpec::new().selection(Selection::caret(from + mlen)));
         }
         // Open a new span: insert "marker + marker" with caret

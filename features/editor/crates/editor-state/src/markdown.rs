@@ -404,7 +404,7 @@ fn embed_widget_html(raw: &str, doc: &str, vault: Option<&dyn VaultLookup>) -> O
     let ext = target.rsplit_once('.').map(|x| x.1.to_ascii_lowercase());
     let ext = ext.as_deref().unwrap_or("");
     let safe_target = html_escape(target);
-    let style = opts.and_then(|o| parse_size_opts(o)).unwrap_or_default();
+    let style = opts.and_then(parse_size_opts).unwrap_or_default();
     // 1. Media extensions first (image / video / audio / pdf).
     match ext {
         "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "avif" | "bmp" => {
@@ -543,7 +543,9 @@ fn resolve_block_short_id(doc: &str, short_id: &str) -> Option<String> {
 fn render_embed_card_page(icon: &str, page: &str, resolved: Option<&str>) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#),
+        None => {
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#.to_string()
+        }
     };
     format!(
         r#"<div class="md-embed-card md-embed-page"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -558,7 +560,9 @@ fn render_embed_card_section(
 ) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#),
+        None => {
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#.to_string()
+        }
     };
     format!(
         r#"<div class="md-embed-card md-embed-section"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{heading}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -568,7 +572,9 @@ fn render_embed_card_section(
 fn render_embed_card_short(icon: &str, page: &str, short: &str, resolved: Option<&str>) -> String {
     let body = match resolved {
         Some(s) => html_escape(s),
-        None => format!(r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#),
+        None => {
+            r#"<span class="md-embed-placeholder">multi-file lookup pending</span>"#.to_string()
+        }
     };
     format!(
         r#"<div class="md-embed-card md-embed-block"><div class="md-embed-head">{icon} <span class="md-embed-title">{page}</span> <span class="md-embed-sep">›</span> <span class="md-embed-frag">{short}</span></div><div class="md-embed-body">{body}</div></div>"#
@@ -1964,11 +1970,11 @@ fn find_block_anchor(text: &str, id_line_from: usize) -> usize {
     0
 }
 
-/// Per-`live_preview`-pass registry of UUIDs in the current
-/// doc. Refreshed on each pass via `reset_block_index`. Used by
-/// the `((uuid))` chip renderer to look up the target block's
-/// first-line content and by the `🔗` indicator to know which
-/// blocks have ids.
+// Per-`live_preview`-pass registry of UUIDs in the current
+// doc. Refreshed on each pass via `reset_block_index`. Used by
+// the `((uuid))` chip renderer to look up the target block's
+// first-line content and by the `🔗` indicator to know which
+// blocks have ids.
 thread_local! {
     static BLOCK_INDEX: std::cell::RefCell<std::collections::HashMap<String, usize>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
@@ -2069,7 +2075,7 @@ fn find_close(b: &[u8], from: usize, needle: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::doc::Doc;
-    use crate::selection::{Range, Selection};
+    use crate::selection::Selection;
 
     fn state(text: &str, caret: usize) -> EditorState {
         EditorState {
@@ -2632,7 +2638,7 @@ mod tests {
         let has_h1 = decs.iter().any(|d| {
             matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-h1")
+                if class == "md-h1")
         });
         assert!(has_h1);
     }
@@ -2644,7 +2650,7 @@ mod tests {
         let has_h2 = decs.iter().any(|d| {
             matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-h2")
+                if class == "md-h2")
         });
         assert!(has_h2);
     }
@@ -2660,7 +2666,7 @@ mod tests {
             .filter(|d| {
                 matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-task")
+                if class == "md-task")
             })
             .count();
         assert!(has_task_line >= 2);
@@ -2928,7 +2934,7 @@ mod tests {
         let has_depth = decs.iter().any(|d| {
             matches!(&d.kind,
             crate::decoration::DecorationKind::Line { class }
-                if class == &"md-callout-nested-2")
+                if class == "md-callout-nested-2")
                 && d.from == inner_line_from
         });
         assert!(has_warning, "expected inner line to be warning-classed");
@@ -3007,7 +3013,7 @@ mod tests {
         });
         // Either no Line at "after" (it's a plain line) or one
         // without the callout class.
-        assert!(after_class.map_or(true, |c| !c.contains("md-callout")));
+        assert!(after_class.is_none_or(|c| !c.contains("md-callout")));
     }
 
     #[test]

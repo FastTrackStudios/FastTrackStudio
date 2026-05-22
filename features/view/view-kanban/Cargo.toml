@@ -21,3 +21,6 @@ tracing = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 
 fts-ui.workspace = true
+
+[lints]
+workspace = true

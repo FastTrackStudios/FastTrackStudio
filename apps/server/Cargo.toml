@@ -56,3 +56,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 walkdir = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 vault-proto = { workspace = true }
+
+[lints]
+workspace = true

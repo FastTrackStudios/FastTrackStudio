@@ -69,3 +69,6 @@ vox-websocket.workspace = true
 default = []
 # Opt-in WASM bundle splitting along route variants.
 wasm-split = ["dioxus-router/wasm-split"]
+
+[lints]
+workspace = true

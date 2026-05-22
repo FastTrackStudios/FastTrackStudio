@@ -28,12 +28,19 @@ pub enum ConnectError {
     Tcp(String),
     #[error("tls handshake: {0}")]
     Tls(String),
+    /// Reserved for the future STARTTLS / greeting parser
+    /// path. Kept so callers don't need to match-other on
+    /// new variants when we wire them up.
+    #[allow(dead_code)]
     #[error("imap greeting: {0}")]
     Greeting(String),
     #[error("login: {0}")]
     Login(String),
     #[error("starttls is not yet implemented in this backend")]
     StarttlsUnsupported,
+    /// Same — reserved for the upcoming plaintext-refusal
+    /// path when STARTTLS isn't supported.
+    #[allow(dead_code)]
     #[error("plaintext IMAP is refused (tests/loopback only)")]
     PlaintextRefused,
 }

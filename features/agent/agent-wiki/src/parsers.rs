@@ -98,12 +98,12 @@ pub fn parse_ingest_blocks(response: &str) -> Result<IngestBlocks, AgentWikiErro
             // Anything before this is filler between blocks.
             let block_start = cursor + file_start_rel;
             let (block, end) = parse_one(response, block_start, "---FILE:", "---END FILE---")?;
-            out.files.push(parse_file_block(&block)?);
+            out.files.push(parse_file_block(block)?);
             cursor = end;
         } else if let Some(rev_start_rel) = after.find("---REVIEW:") {
             let block_start = cursor + rev_start_rel;
             let (block, end) = parse_one(response, block_start, "---REVIEW:", "---END REVIEW---")?;
-            out.reviews.push(parse_review_block(&block)?);
+            out.reviews.push(parse_review_block(block)?);
             cursor = end;
         } else {
             break;

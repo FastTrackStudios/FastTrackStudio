@@ -19,3 +19,6 @@ web = ["dioxus/web", "dioxus/launch"]
 # Bundle-split the wasm binary along route variants. Requires
 # running `dx serve --wasm-split`.
 wasm-split = ["task-ui/wasm-split"]
+
+[lints]
+workspace = true

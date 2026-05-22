@@ -34,6 +34,9 @@ pub fn month_grid(date: NaiveDate) -> [[NaiveDate; 7]; 6] {
     let first = NaiveDate::from_ymd_opt(date.year(), date.month(), 1).expect("valid month");
     let grid_start = week_start(first);
     let mut out = [[grid_start; 7]; 6];
+    // 6×7 fixed grid; we want (row, col) indices for the
+    // arithmetic, so the index loop is the natural shape.
+    #[allow(clippy::needless_range_loop)]
     for row in 0..6 {
         for col in 0..7 {
             out[row][col] = grid_start + Days::new((row * 7 + col) as u64);

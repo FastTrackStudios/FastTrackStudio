@@ -129,10 +129,10 @@ impl GanttState {
         let mut s = self.start;
         let mut e = self.end;
         for t in &self.tasks {
-            if s.map_or(true, |cur| t.start < cur) {
+            if s.is_none_or(|cur| t.start < cur) {
                 s = Some(t.start);
             }
-            if e.map_or(true, |cur| t.end > cur) {
+            if e.is_none_or(|cur| t.end > cur) {
                 e = Some(t.end);
             }
         }
@@ -330,10 +330,10 @@ fn descendant_bounds(state: &GanttState, root: TaskId) -> Option<(DateTime<Utc>,
                 if matches!(kid.task_type, crate::types::TaskType::Summary) {
                     stack.push(kid.id);
                 } else {
-                    if min_start.map_or(true, |m| kid.start < m) {
+                    if min_start.is_none_or(|m| kid.start < m) {
                         min_start = Some(kid.start);
                     }
-                    if max_end.map_or(true, |m| kid.end > m) {
+                    if max_end.is_none_or(|m| kid.end > m) {
                         max_end = Some(kid.end);
                     }
                 }
@@ -582,11 +582,7 @@ pub fn apply(state: &mut GanttState, event: &GanttEvent) {
                 // Range needs a layout-aware anchor. Without one we
                 // degrade to a Replace; the route can prefill a
                 // smarter range if it tracks the anchor itself.
-                if state.selected.is_empty() {
-                    state.selected.insert(*id);
-                } else {
-                    state.selected.insert(*id);
-                }
+                state.selected.insert(*id);
             }
         },
         GanttEvent::SetSort { key, dir } => state.sort = (*key, *dir),

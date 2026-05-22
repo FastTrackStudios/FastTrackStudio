@@ -117,7 +117,7 @@ pub(crate) fn handle_bridge_msg(
                 .map(|c| {
                     let prior_delta: isize = changes
                         .iter()
-                        .take_while(|x| (*x).from < c.from)
+                        .take_while(|x| x.from < c.from)
                         .map(|x| x.delta())
                         .sum();
                     (c.from as isize + prior_delta + c.inserted.len() as isize).max(0) as usize

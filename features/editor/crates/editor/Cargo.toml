@@ -17,3 +17,6 @@ editor-typst = { workspace = true }
 # dioxus in transitively; declaring it here just makes the
 # component's source compile cleanly.
 dioxus = { workspace = true }
+
+[lints]
+workspace = true

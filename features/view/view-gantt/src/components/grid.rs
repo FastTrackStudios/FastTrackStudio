@@ -143,6 +143,7 @@ pub fn Grid() -> Element {
 /// re-walking the tree; we leave it `None` (append to parent) for
 /// the after-mode, which is good enough for now and matches a
 /// common drop-on-bottom-half UX.
+#[allow(non_snake_case)]
 fn None_after(_target: Uuid) -> Option<Uuid> {
     None
 }

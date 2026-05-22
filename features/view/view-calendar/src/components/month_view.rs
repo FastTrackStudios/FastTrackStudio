@@ -166,7 +166,7 @@ fn WeekRow(props: WeekRowProps) -> Element {
                                 e.prevent_default();
                                 let dt = e.data().data_transfer();
                                 let Ok(id) = dt.get_data(DT_MIME).unwrap_or_default().parse::<Uuid>() else { return };
-                                let snapshot = ctx.state.peek().clone();
+                                let snapshot = *ctx.state.peek();
                                 let Some(ds) = snapshot else { return };
                                 if ds.event != id { return; }
                                 let orig_day = ds.orig_start.date_naive();

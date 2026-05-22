@@ -29,3 +29,6 @@ dioxus = { workspace = true }
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 
 knowledge-proto = { workspace = true }
+
+[lints]
+workspace = true

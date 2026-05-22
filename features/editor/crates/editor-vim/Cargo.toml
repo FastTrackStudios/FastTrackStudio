@@ -10,3 +10,6 @@ rust-version.workspace = true
 [dependencies]
 editor-state = { workspace = true }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -331,7 +331,7 @@ fn full_grocery_to_meal_loop() {
 
     // ── 7. Meal nutrition aggregation ──
     let total = cooked
-        .nutrition_total(&[recipe.clone()])
+        .nutrition_total(std::slice::from_ref(&recipe))
         .expect("nutrition");
     // 2 servings of a 520-cal recipe = 1040 cal.
     assert!((total.calories.unwrap() - 1040.0).abs() < 1e-6);

@@ -119,7 +119,7 @@ fn make_snippet(body: &str, terms: &[String]) -> String {
                 hits += 1;
             }
         }
-        if hits > 0 && best.map_or(true, |(h, _)| hits > h) {
+        if hits > 0 && best.is_none_or(|(h, _)| hits > h) {
             best = Some((hits, line));
         }
     }

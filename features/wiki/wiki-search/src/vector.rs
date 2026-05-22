@@ -31,6 +31,7 @@
 //! Lance vector search, merges with token results via
 //! reciprocal-rank fusion.
 
+#![allow(dead_code)]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

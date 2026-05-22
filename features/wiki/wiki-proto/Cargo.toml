@@ -23,3 +23,6 @@ vox-types = { workspace = true, optional = true }
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+
+[lints]
+workspace = true

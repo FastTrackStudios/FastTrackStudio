@@ -93,10 +93,10 @@ pub fn message_from_bytes(
         let filename = part.attachment_name().map(|s| s.to_string());
         let mime = part
             .content_type()
-            .and_then(|ct| {
+            .map(|ct| {
                 let main = ct.ctype();
                 let sub = ct.subtype().unwrap_or("octet-stream");
-                Some(format!("{main}/{sub}"))
+                format!("{main}/{sub}")
             })
             .unwrap_or_else(|| "application/octet-stream".into());
         let size = match &part.body {
@@ -159,7 +159,7 @@ fn collect_references(parsed: &mail_parser::Message<'_>) -> Vec<String> {
         out.push(s.to_string());
     }
     if let Some(list) = parsed.references().as_text_list() {
-        out.extend(list.into_iter().map(|s| s.to_string()));
+        out.extend(list.iter().map(|s| s.to_string()));
     }
     out
 }

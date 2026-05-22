@@ -16,3 +16,6 @@ vox-types = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 octocrab = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

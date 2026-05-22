@@ -23,7 +23,6 @@ pub mod capability;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use architect::vox;
 use architect_auth::{
     ArchitectAuth, AuthServiceDispatcher,
     db::{AuthSeaOrmStorage, Migrator as AuthMigrator},

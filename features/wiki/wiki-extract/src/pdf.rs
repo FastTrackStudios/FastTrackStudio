@@ -27,7 +27,7 @@ pub(crate) fn extract_pdf(
                 Ok(i) => i,
                 Err(_) => continue,
             };
-            let (w, h) = (image.width() as u32, image.height() as u32);
+            let (w, h) = (image.width(), image.height());
             if w < opts.min_width || h < opts.min_height {
                 continue;
             }
@@ -35,7 +35,7 @@ pub(crate) fn extract_pdf(
             // so the caption helper has a normal file format.
             let mut buf: Vec<u8> = Vec::new();
             let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-            let pixels: Vec<u8> = image.as_raw_bytes().to_vec();
+            let pixels: Vec<u8> = image.as_bytes().to_vec();
             if let Err(e) = ::image::ImageEncoder::write_image(
                 encoder,
                 &pixels,

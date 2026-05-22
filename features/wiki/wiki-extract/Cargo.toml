@@ -27,3 +27,6 @@ pdfium-render = { version = "0.8", optional = true }
 [features]
 default = []
 pdf = ["dep:pdfium-render"]
+
+[lints]
+workspace = true

@@ -15,7 +15,7 @@ use crate::scoring::{Indices, edge_weight_matrix, score_graph};
 pub fn build_graph(vault_root: &Path, opts: GraphOpts) -> Result<WikiGraph, ScanError> {
     let pages = scan_wiki(vault_root)?;
     let idx = Indices::build(&pages);
-    let weights = opts.weights.unwrap_or_else(RelevanceWeights::default);
+    let weights = opts.weights.unwrap_or_default();
     let mut graph = score_graph(&pages, &idx, &weights, &opts.query, &opts.node_type);
     // Decorate nodes with cluster ids — cheap, runs the
     // same Louvain pass `build_clusters` does.

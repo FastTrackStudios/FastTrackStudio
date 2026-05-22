@@ -132,9 +132,7 @@ async fn handle_connection(stream: TcpStream, log: Arc<Mutex<Transcript>>) {
         } else if upper.starts_with("QUIT") {
             let _ = wr.write_all(b"221 2.0.0 bye\r\n").await;
             return;
-        } else if upper.starts_with("RSET") {
-            let _ = wr.write_all(b"250 2.0.0 ok\r\n").await;
-        } else if upper.starts_with("NOOP") {
+        } else if upper.starts_with("RSET") || upper.starts_with("NOOP") {
             let _ = wr.write_all(b"250 2.0.0 ok\r\n").await;
         } else {
             let _ = wr.write_all(b"500 5.5.2 syntax error\r\n").await;

@@ -184,8 +184,8 @@ mod tests {
         a[doc].children = vec![line];
         a[line].children = vec![text];
 
-        assert_eq!(pos_at_start(&arena_view(&a), text), 0);
-        assert_eq!(pos_at_end(&arena_view(&a), text), 5);
+        assert_eq!(pos_at_start(arena_view(&a), text), 0);
+        assert_eq!(pos_at_end(arena_view(&a), text), 5);
     }
 
     /// Tiny helper for the nested test — clones the arena

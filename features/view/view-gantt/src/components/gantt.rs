@@ -83,15 +83,17 @@ const DRAG_THRESHOLD_PX: f32 = 4.0;
 #[component]
 pub fn Gantt(props: GanttProps) -> Element {
     let mut state = use_signal(|| {
-        let mut s = GanttState::default();
-        s.tasks = props.tasks.clone();
-        s.links = props.links.clone();
-        s.markers = props.markers.clone();
+        let mut s = GanttState {
+            tasks: props.tasks.clone(),
+            links: props.links.clone(),
+            markers: props.markers.clone(),
+            cell_width: props.cell_width,
+            readonly: props.readonly,
+            ..GanttState::default()
+        };
         if let Some(z) = props.zoom.clone() {
             s.zoom = z;
         }
-        s.cell_width = props.cell_width;
-        s.readonly = props.readonly;
         s
     });
 

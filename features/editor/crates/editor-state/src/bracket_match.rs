@@ -74,6 +74,11 @@ fn match_at(bytes: &[u8], at: usize) -> Option<(usize, usize, bool)> {
 fn scan_forward(bytes: &[u8], at: usize, open: u8, close: u8) -> Option<usize> {
     let mut depth = 1;
     let end = (at + 1 + SCAN_LIMIT).min(bytes.len());
+    // Bracket scan walks a tight inner loop; the `for i in
+    // start..end` shape is the natural one even though
+    // clippy's `needless_range_loop` would prefer a slice
+    // iter. We need `i` itself for the `Some(i)` return.
+    #[allow(clippy::needless_range_loop)]
     for i in (at + 1)..end {
         let b = bytes[i];
         if b == open {

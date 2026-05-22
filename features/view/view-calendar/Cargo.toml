@@ -25,3 +25,6 @@ indexmap = { workspace = true, features = ["serde"] }
 rrule = { workspace = true }
 
 fts-ui.workspace = true
+
+[lints]
+workspace = true

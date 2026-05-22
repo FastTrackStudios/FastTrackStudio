@@ -13,3 +13,6 @@ git-proto = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 facet = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

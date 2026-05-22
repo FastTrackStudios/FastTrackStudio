@@ -13,16 +13,12 @@ pub type TaskId = Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum TaskType {
+    #[default]
     Task,
     Summary,
     Milestone,
-}
-
-impl Default for TaskType {
-    fn default() -> Self {
-        Self::Task
-    }
 }
 
 /// Length unit for time scales (granularity of a single cell).

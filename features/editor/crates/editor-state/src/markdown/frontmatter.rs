@@ -69,10 +69,7 @@ pub fn parse_frontmatter(text: &str) -> Option<FrontMatter> {
     if !text.starts_with("---") {
         return None;
     }
-    let opener_end = match bytes.iter().position(|&b| b == b'\n') {
-        Some(n) => n,
-        None => return None,
-    };
+    let opener_end = bytes.iter().position(|&b| b == b'\n')?;
     let first_line = &text[..opener_end];
     if first_line.trim_end() != "---" {
         return None;

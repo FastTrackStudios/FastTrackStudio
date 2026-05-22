@@ -60,8 +60,11 @@ pub async fn lookup(domain: &str) -> Result<AutoconfigResult, Error> {
         TokioAsyncResolver::tokio(ResolverConfig::google(), ResolverOpts::default())
     });
 
-    let mut out = AutoconfigResult::default();
-    out.source = Some(format!("dns-srv:{domain}"));
+    let out = AutoconfigResult {
+        source: Some(format!("dns-srv:{domain}")),
+        ..AutoconfigResult::default()
+    };
+    let mut out = out;
 
     for probe in PROBES {
         let name = format!("{}.{}.", probe.record, domain);

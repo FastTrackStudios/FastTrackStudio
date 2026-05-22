@@ -122,6 +122,13 @@ pub struct EntryDebit {
 }
 
 /// Outcome of [`PantryService::resolve_barcode`].
+//
+// `PantryItem` + `PantryItemDraft` are both large enums; the
+// size difference vs. `NotFound` is intentional — wrapping
+// either in `Box<>` to silence clippy would obscure the
+// happy path here, which is read-heavy and almost always
+// returns `Local(_)`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 #[repr(u8)]
 pub enum BarcodeResolution {

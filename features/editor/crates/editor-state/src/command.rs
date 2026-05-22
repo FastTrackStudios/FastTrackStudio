@@ -101,7 +101,7 @@ impl Keymap {
 /// case-insensitive against the platform key (`"a"` matches an
 /// `a` keypress regardless of whether shift is held — that's
 /// what users expect for `Mod-z` to fire on both `z` and `Z`).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub struct KeySpec {
     pub key: String,
     pub ctrl: bool,
@@ -336,18 +336,5 @@ mod tests {
         };
         let spec = km.dispatch(&press, &state).expect("second binding fires");
         assert!(!spec.changes.is_empty());
-    }
-}
-
-impl Default for KeySpec {
-    fn default() -> Self {
-        Self {
-            key: String::new(),
-            ctrl: false,
-            alt: false,
-            shift: false,
-            meta: false,
-            r#mod: false,
-        }
     }
 }

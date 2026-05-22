@@ -21,3 +21,6 @@ tracing = { workspace = true }
 jmap-client = "0.4"
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 futures = { workspace = true }
+
+[lints]
+workspace = true
