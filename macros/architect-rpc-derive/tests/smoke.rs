@@ -97,7 +97,7 @@ mod all_sync {
 // ── All-async trait ─────────────────────────────────────────────────
 
 mod all_async {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::rpc;
 
@@ -110,9 +110,12 @@ mod all_async {
         async fn write(&self, key: u32, value: String) -> Result<(), String>;
     }
 
-    #[derive(Default)]
+    // Backend is `Clone` because the vox-enabled `Service::bind_into`
+    // path clones the backend to seed the layer's dispatcher. Arc
+    // around the inner state keeps the writes visible across clones.
+    #[derive(Default, Clone)]
     struct AllAsyncBackend {
-        store: Mutex<Vec<(u32, String)>>,
+        store: Arc<Mutex<Vec<(u32, String)>>>,
     }
 
     impl AllAsync for AllAsyncBackend {

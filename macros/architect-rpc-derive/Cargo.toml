@@ -44,6 +44,9 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 [dev-dependencies]
 # The runtime crate re-exports the macro as `architect::rpc`. Tests
 # consume it that way so the smoke surface matches the user-facing
-# import path.
-architect = { path = "../architect" }
+# import path. `vox` feature on so `--all-features` builds resolve
+# the `::vox::service` paths the macro emits — workspace feature
+# unification turns vox on transitively under that flag.
+architect = { path = "../architect", features = ["vox"] }
+vox.workspace = true
 futures-lite = "2"
