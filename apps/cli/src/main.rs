@@ -79,6 +79,10 @@ enum Commands {
     /// rate cascade.
     #[command(subcommand)]
     Timer(TimerCmd),
+    /// Finance — reports + invoice generation from billable
+    /// sessions, PDF rendering via fulgur.
+    #[command(subcommand)]
+    Finance(FinanceCmd),
 }
 
 #[derive(Subcommand)]
@@ -584,6 +588,53 @@ enum TimerCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum FinanceCmd {
+    /// Print the weekly summary (hours + billable amount per
+    /// project) as markdown. Reads the timer DB.
+    Weekly {
+        /// Any date inside the target week. Defaults to today.
+        #[arg(long)]
+        week_of: Option<chrono::NaiveDate>,
+    },
+    /// Per-project hours rollup for a range. Defaults to
+    /// the last 7 days.
+    Project {
+        #[arg(long)]
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        #[arg(long)]
+        until: Option<chrono::DateTime<chrono::Utc>>,
+    },
+    /// Build + render an invoice from billable sessions on
+    /// one project. Writes a PDF to `--out`.
+    Invoice {
+        /// Project frontmatter uuid.
+        #[arg(long)]
+        project: uuid::Uuid,
+        /// Inclusive lower bound on `start_time`.
+        #[arg(long)]
+        since: chrono::DateTime<chrono::Utc>,
+        /// Exclusive upper bound on `start_time`.
+        #[arg(long)]
+        until: chrono::DateTime<chrono::Utc>,
+        /// Invoice number, e.g. `INV-2026-0042`.
+        #[arg(long)]
+        number: String,
+        /// Net N days for due date. Default 30.
+        #[arg(long, default_value_t = 30)]
+        net_days: i64,
+        /// Free-text bill-to (display name). Used because we
+        /// don't have a Party row yet in the local CLI flow.
+        /// Once finance-db is mounted this becomes
+        /// `--party-id <uuid>`.
+        #[arg(long, default_value = "Bill-to")]
+        client_name: String,
+        /// Output PDF path.
+        #[arg(long, short)]
+        out: std::path::PathBuf,
+    },
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // Best-effort .env load before clap reads env. Missing file is
@@ -611,8 +662,207 @@ async fn main() -> eyre::Result<()> {
         Commands::Timer(cmd) => {
             return run_timer(cmd).await;
         }
+        Commands::Finance(cmd) => {
+            return run_finance(cmd).await;
+        }
     }
     Ok(())
+}
+
+async fn run_finance(cmd: FinanceCmd) -> eyre::Result<()> {
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+
+    let db_url = std::env::var("TASK_TIMER_DB").unwrap_or_else(|_| {
+        let base = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+                    .map(|p| p.join(".local/share"))
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let dir = base.join("task");
+        let _ = std::fs::create_dir_all(&dir);
+        format!("sqlite://{}?mode=rwc", dir.join("timer.sqlite").display())
+    });
+    let timer_conn = Database::connect(&db_url)
+        .await
+        .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
+    timer::Migrator::up(&timer_conn, None).await.ok();
+
+    match cmd {
+        FinanceCmd::Weekly { week_of } => {
+            let day = week_of.unwrap_or_else(|| chrono::Utc::now().date_naive());
+            let summary = finance::reports::weekly_summary(&timer_conn, None, day)
+                .await
+                .map_err(|e| eyre::eyre!("weekly: {e}"))?;
+            print!("{}", summary.to_markdown());
+        }
+        FinanceCmd::Project { since, until } => {
+            use finance::reports::DateRange;
+            let range = if let (Some(s), Some(u)) = (since, until) {
+                DateRange { since: s, until: u }
+            } else {
+                DateRange::last_7_days()
+            };
+            let rows = finance::reports::hours_by_project(&timer_conn, None, range)
+                .await
+                .map_err(|e| eyre::eyre!("project: {e}"))?;
+            if rows.is_empty() {
+                println!("(no closed sessions in range)");
+            }
+            for r in rows {
+                let project = if r.project_path.is_empty() {
+                    "(unscoped)".to_string()
+                } else {
+                    r.project_path.clone()
+                };
+                println!(
+                    "{project}\n  sessions: {}\n  total:    {}\n  billable: {} ({} {})",
+                    r.session_count,
+                    fmt_seconds(r.total_seconds),
+                    fmt_seconds(r.billable_seconds),
+                    fmt_minor(r.billable_amount_minor),
+                    if r.currency.is_empty() {
+                        "(no currency)".to_string()
+                    } else {
+                        r.currency
+                    },
+                );
+            }
+        }
+        FinanceCmd::Invoice {
+            project,
+            since,
+            until,
+            number,
+            net_days,
+            client_name,
+            out,
+        } => {
+            let book = finance_proto::book::Book {
+                id: uuid::Uuid::nil(),
+                name: "CLI Book".into(),
+                kind: finance_proto::book::BookKind::Personal,
+                base_currency: "USD".into(),
+                settings_json: "{}".into(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            let party = finance_proto::party::Party {
+                id: uuid::Uuid::nil(),
+                book_id: book.id,
+                kind: finance_proto::party::PartyKind::Client,
+                display_name: client_name.clone(),
+                legal_name: client_name.clone(),
+                email: String::new(),
+                phone: String::new(),
+                address: String::new(),
+                tax_id: String::new(),
+                default_currency: "USD".into(),
+                default_net_days: net_days.try_into().unwrap_or(30),
+                default_rate_minor_per_hour: 0,
+                notes: String::new(),
+                is_archived: false,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            let build = finance::invoice_from_sessions::build_invoice_from_sessions(
+                &timer_conn,
+                finance::invoice_from_sessions::BuildInvoiceArgs {
+                    book,
+                    party: party.clone(),
+                    project_id: project,
+                    since,
+                    until,
+                    net_days,
+                    number,
+                    notes_public: "Thank you for your business.".into(),
+                    notes_private: String::new(),
+                    terms: format!("Net {net_days} from issue date."),
+                },
+            )
+            .await
+            .map_err(|e| eyre::eyre!("build invoice: {e}"))?;
+
+            let issuer = finance::pdf_adapter::IssuerProfile {
+                name: std::env::var("TASK_ISSUER_NAME").unwrap_or_else(|_| "Your Name".into()),
+                address: std::env::var("TASK_ISSUER_ADDRESS").unwrap_or_default(),
+                email: std::env::var("TASK_ISSUER_EMAIL").unwrap_or_default(),
+                phone: String::new(),
+                tax_id: String::new(),
+            };
+            let ifp = finance::pdf_adapter::invoice_for_pdf(&build.invoice, &issuer, &party);
+            // Shell out to the `task-pdf-render` binary (in
+            // libs/pdf). Fulgur's compile tree triggers a
+            // stylo recursion-limit issue when pulled into
+            // the CLI's larger graph; isolating it to a
+            // standalone binary keeps both compiles clean.
+            let request = serde_json::json!({
+                "mode": "invoice",
+                "data": ifp,
+            });
+            let render_bin = std::env::var("TASK_PDF_RENDER_BIN")
+                .unwrap_or_else(|_| "task-pdf-render".to_string());
+            let mut child = std::process::Command::new(&render_bin)
+                .arg("--out")
+                .arg(&out)
+                .stdin(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()
+                .map_err(|e| {
+                    eyre::eyre!(
+                        "spawn `{render_bin}`: {e}. Build with `cargo build -p pdf` and put it on PATH, or set TASK_PDF_RENDER_BIN."
+                    )
+                })?;
+            {
+                let stdin = child
+                    .stdin
+                    .as_mut()
+                    .ok_or_else(|| eyre::eyre!("render: no stdin"))?;
+                serde_json::to_writer(stdin, &request)
+                    .map_err(|e| eyre::eyre!("write request: {e}"))?;
+            }
+            let status = child.wait().map_err(|e| eyre::eyre!("wait: {e}"))?;
+            if !status.success() {
+                return Err(eyre::eyre!("`{render_bin}` exited with {status}"));
+            }
+            let bytes_len = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+            println!(
+                "Wrote {} ({bytes_len} bytes, {} sessions, {} {})",
+                out.display(),
+                build.source_session_ids.len(),
+                fmt_minor(build.invoice.total_minor),
+                build.invoice.currency,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn fmt_seconds(s: i64) -> String {
+    let h = s / 3600;
+    let m = (s % 3600) / 60;
+    if h > 0 {
+        format!("{h}h{m:02}m")
+    } else {
+        format!("{m}m")
+    }
+}
+
+fn fmt_minor(c: i64) -> String {
+    let neg = c < 0;
+    let abs = c.unsigned_abs();
+    format!(
+        "{}{}.{:02}",
+        if neg { "-" } else { "" },
+        abs / 100,
+        abs % 100
+    )
 }
 
 async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {

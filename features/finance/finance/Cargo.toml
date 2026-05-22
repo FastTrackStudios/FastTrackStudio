@@ -11,9 +11,12 @@ repository.workspace = true
 # Native-only: the facade owns the markdown export path into the
 # Records sub-vault. wasm builds use finance-proto + finance-ui.
 [dependencies]
-finance-proto = { workspace = true, default-features = false }
+finance-proto = { workspace = true, default-features = false, features = ["server"] }
 finance-db = { workspace = true }
-timer-proto = { workspace = true, default-features = false }
+timer-proto = { workspace = true, default-features = false, features = ["server"] }
+timer = { workspace = true }
+sea-orm = { workspace = true }
+async-trait = "0.1"
 vault = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 serde = { workspace = true, features = ["derive"] }
@@ -26,6 +29,8 @@ rust_decimal = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+sea-orm-migration = { workspace = true }
 
 [lints]
 workspace = true

@@ -298,6 +298,16 @@ finance-proto = { path = "features/finance/finance-proto" }
 finance-db = { path = "features/finance/finance-db" }
 finance = { path = "features/finance/finance" }
 finance-ui = { path = "features/finance/finance-ui" }
+# `pdf` is intentionally OUTSIDE this workspace (see
+# `libs/pdf/Cargo.toml`). Fulgur's transitive stylo dep
+# hits a rustc trait-solver recursion limit whenever the
+# fulgur tree enters the larger workspace compile graph
+# (cause unknown — likely feature-unification with
+# something else in the workspace's giant dep set).
+# Quarantining keeps `cargo check --workspace` clean. The
+# `task-pdf-render` bin in libs/pdf/ is the interop point;
+# `task-cli`'s `finance invoice` shells out to it over
+# stdin/stdout.
 # File-backed vault layer. Modeled on `vault-obsidian` (clean
 # small modules, native-only `cfg`, walker / watcher / mutate)
 # but adds block-id awareness: a `BlockIndex` maps every
