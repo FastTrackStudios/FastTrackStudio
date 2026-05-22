@@ -39,6 +39,13 @@ pub enum WikiEdgeKind {
     /// `target` is the relative path (cooklang convention),
     /// not a basename.
     RecipeRef,
+    /// `[[wikilink]]` embedded in a step body — concept
+    /// pages, techniques, related recipes. Cooklang treats
+    /// `[[...]]` as plain text, so the syntax round-trips
+    /// through the parser unchanged; we extract it here so
+    /// the wiki graph picks up the same backlinks it would
+    /// for a markdown page.
+    Concept,
 }
 
 /// Project the recipe into a flat list of wiki edges. One
@@ -85,6 +92,59 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
         });
     }
 
+    // `[[wikilinks]]` embedded in step text. Cooklang passes
+    // these through as plain text, so we scan the rendered
+    // step strings plus the raw source as a fallback (covers
+    // links sitting in metadata values or text-only sections).
+    for step in &recipe.steps {
+        for target in scan_wikilinks(step) {
+            let key = (target.to_ascii_lowercase(), WikiEdgeKind::Concept);
+            if seen.insert(key) {
+                out.push(WikiEdge {
+                    source: recipe.path.clone(),
+                    target,
+                    kind: WikiEdgeKind::Concept,
+                });
+            }
+        }
+    }
+    for target in scan_wikilinks(&recipe.source) {
+        let key = (target.to_ascii_lowercase(), WikiEdgeKind::Concept);
+        if seen.insert(key) {
+            out.push(WikiEdge {
+                source: recipe.path.clone(),
+                target,
+                kind: WikiEdgeKind::Concept,
+            });
+        }
+    }
+
+    out
+}
+
+/// Find every `[[target]]` in `s`. Targets are returned
+/// trimmed; nested or escaped brackets are not supported
+/// (matches Obsidian-style wikilink semantics).
+fn scan_wikilinks(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let rest = &s[i + 2..];
+            if let Some(end) = rest.find("]]") {
+                let target = rest[..end].trim();
+                // Strip pipe-display syntax: `[[target|alias]]`.
+                let target = target.split('|').next().unwrap_or(target).trim();
+                if !target.is_empty() && !target.contains('\n') {
+                    out.push(target.to_string());
+                }
+                i += 2 + end + 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
     out
 }
 
@@ -107,6 +167,43 @@ Cook @flour{200%g} and toss with @flour{50%g} for dusting and @salt{1%tsp}.
             .map(|e| e.target.as_str())
             .collect();
         assert_eq!(names, vec!["flour", "salt"]);
+    }
+
+    #[test]
+    fn extracts_concept_wikilinks_from_step_bodies() {
+        let src = "\
+>> title: Carbonara
+
+Whisk @eggs{2} per [[mise en place]] guidelines.
+Cook @pancetta{100%g} until crisp - see [[render fat]] for technique.
+Reference [[render fat]] again to dedupe.
+";
+        let r = parse_cook("Cookbook/Carbonara.cook", src).unwrap();
+        let edges = recipe_wiki_edges(&r);
+        let concepts: Vec<&str> = edges
+            .iter()
+            .filter(|e| e.kind == WikiEdgeKind::Concept)
+            .map(|e| e.target.as_str())
+            .collect();
+        // Order: first-occurrence; dedup case-insensitive.
+        assert!(concepts.contains(&"mise en place"));
+        assert!(concepts.contains(&"render fat"));
+        // Dedup: "render fat" appears twice in source but
+        // only once in edges.
+        assert_eq!(concepts.iter().filter(|t| **t == "render fat").count(), 1);
+    }
+
+    #[test]
+    fn wikilink_with_pipe_alias() {
+        let src = "Use [[saute|sautéing]] on medium heat.";
+        let r = parse_cook("Cookbook/X.cook", src).unwrap();
+        let edges = recipe_wiki_edges(&r);
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.kind == WikiEdgeKind::Concept && e.target == "saute"),
+            "got {edges:?}"
+        );
     }
 
     #[test]
