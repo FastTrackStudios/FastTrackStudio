@@ -10,3 +10,8 @@ pub use editor_vim;
 pub mod commands {
     pub use editor_state::commands::*;
 }
+
+/// Turnkey [`EditorApp`] Dioxus component — drop into any app
+/// for a working markdown editor with no setup.
+pub mod app;
+pub use app::EditorApp;

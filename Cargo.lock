@@ -3454,6 +3454,7 @@ dependencies = [
 name = "editor"
 version = "0.1.0"
 dependencies = [
+ "dioxus",
  "editor-state",
  "editor-typst",
  "editor-view",
@@ -11006,7 +11007,7 @@ dependencies = [
  "crdt",
  "dioxus",
  "dioxus-router",
- "editor-outliner",
+ "editor",
  "fake",
  "fts-ui",
  "futures-channel",

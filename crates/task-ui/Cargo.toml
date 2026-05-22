@@ -27,7 +27,7 @@ project-proto = { workspace = true, features = ["fake"] }
 project-crdt.workspace = true
 project-ui.workspace = true
 knowledge-ui.workspace = true
-editor-outliner.workspace = true
+editor.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

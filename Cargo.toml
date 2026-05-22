@@ -7,26 +7,39 @@ members = [
     "features/*/tests/native",
     "xtask",
     # CodeMirror-style editor — subtree-imported from
-    # github.com/.../Editor. Lives under `external/editor/` so its
+    # github.com/.../Editor. Lives under `features/editor/` so its
     # internal Cargo.toml + git history stay intact. We re-expose
     # its crates here so the rest of Task can depend on them.
-    "external/editor/crates/editor-state",
-    "external/editor/crates/editor-syntax",
-    "external/editor/crates/editor-view",
-    "external/editor/crates/editor-vim",
-    "external/editor/crates/editor-typst",
-    "external/editor/crates/editor-mermaid",
-    "external/editor/crates/editor",
+    "features/editor/crates/editor-state",
+    "features/editor/crates/editor-syntax",
+    "features/editor/crates/editor-view",
+    "features/editor/crates/editor-vim",
+    "features/editor/crates/editor-typst",
+    "features/editor/crates/editor-mermaid",
+    "features/editor/crates/editor",
     # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
     # patched in for wasm32 compat. Lives next to the editor it
     # supports.
-    "external/editor/vendor/mermaid-rs-renderer",
+    "features/editor/vendor/mermaid-rs-renderer",
     # Editor playground — Dioxus app that dogfoods the editor.
     # Built with `dx serve --package playground`.
-    "external/editor/examples/playground",
+    "features/editor/examples/playground",
 ]
 exclude = [
-    "features/project/spec",    "features/project/tests",
+    "features/project/spec",
+    "features/project/tests",
+    # `features/editor/` keeps its imported `crates/` + `vendor/`
+    # + `examples/` subdirs so the editor's internal layout
+    # stays intact. Each real crate is listed above explicitly;
+    # exclude the intermediate parent dirs from the
+    # `features/*/*` glob so cargo doesn't try to parse them as
+    # manifests.
+    "features/editor/crates",
+    "features/editor/vendor",
+    "features/editor/examples",
+    "features/editor/docs",
+    "features/editor/plans",
+    "features/editor/tests",
 ]
 resolver = "2"
 
@@ -75,13 +88,13 @@ vault = { path = "features/vault/vault" }
 vault-proto = { path = "features/vault/vault-proto" }
 # CodeMirror-style editor (subtree). `editor` is the umbrella
 # crate that re-exports the others — apps consume that.
-editor-state = { path = "external/editor/crates/editor-state" }
-editor-syntax = { path = "external/editor/crates/editor-syntax" }
-editor-view = { path = "external/editor/crates/editor-view" }
-editor-vim = { path = "external/editor/crates/editor-vim" }
-editor-typst = { path = "external/editor/crates/editor-typst" }
-editor-mermaid = { path = "external/editor/crates/editor-mermaid" }
-editor = { path = "external/editor/crates/editor" }
+editor-state = { path = "features/editor/crates/editor-state" }
+editor-syntax = { path = "features/editor/crates/editor-syntax" }
+editor-view = { path = "features/editor/crates/editor-view" }
+editor-vim = { path = "features/editor/crates/editor-vim" }
+editor-typst = { path = "features/editor/crates/editor-typst" }
+editor-mermaid = { path = "features/editor/crates/editor-mermaid" }
+editor = { path = "features/editor/crates/editor" }
 
 # Deps the editor's inner crates inherit via `workspace = true`.
 # `serde`, `serde_json` are already declared elsewhere in the
@@ -529,6 +542,6 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 # its layout pipeline, which panics on `wasm32-unknown-unknown`.
 # Our fork swaps that for `web_time::Instant` so editor-mermaid
 # can render diagrams in the browser. Subtree-imported with the
-# editor, lives at `external/editor/vendor/mermaid-rs-renderer`.
+# editor, lives at `features/editor/vendor/mermaid-rs-renderer`.
 [patch.crates-io.mermaid-rs-renderer]
-path = "external/editor/vendor/mermaid-rs-renderer"
+path = "features/editor/vendor/mermaid-rs-renderer"
