@@ -103,10 +103,10 @@ facet-core = "0.46"
 # use `vox::serve` — we go through axum directly so we only need this.
 # Wasm clients depend on `vox-websocket` directly, not through this dep.
 # Pattern lifted from vox's own `rust/wasm-browser-tests` crate.
-vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-types = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-websocket = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
