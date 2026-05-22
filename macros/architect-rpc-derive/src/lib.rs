@@ -95,7 +95,7 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     // bound so it's safe to share through `Arc<dyn Trait>` from inside
     // the bridge. We don't mutate the input AST; we re-emit with the
     // augmented supertraits.
-    let user_trait = emit_user_trait(&trait_item);
+    let user_trait = emit_user_trait(&trait_item, shape);
 
     let (mirror_trait, host_struct, host_impl) = match shape {
         Shape::Empty | Shape::AllAsync => {
@@ -128,7 +128,29 @@ fn expand(trait_item: ItemTrait) -> syn::Result<TokenStream2> {
     // AllAsync the vox-generated client is named off the user trait
     // directly, so no alias is needed.
     let client_alias = match shape {
-        Shape::Empty | Shape::AllAsync => quote! {},
+        Shape::Empty => quote! {},
+        Shape::AllAsync => {
+            // vox::service is applied to the user trait directly, so it
+            // emits `<Trait>Client`, `<Trait>Dispatcher`, and
+            // `<snake_name>_service_descriptor`. Architect downstream
+            // (serve / layer) refers to the Rpc-suffixed names, so
+            // alias them through.
+            let vox_dispatcher = format_ident!("{}Dispatcher", trait_name);
+            let vox_descriptor = format_ident!(
+                "{}_service_descriptor",
+                to_snake_case(&trait_name.to_string())
+            );
+            let rpc_descriptor = format_ident!(
+                "{}_rpc_service_descriptor",
+                to_snake_case(&trait_name.to_string())
+            );
+            quote! {
+                #[cfg(feature = "vox")]
+                #vis use #vox_dispatcher as #rpc_dispatcher_name;
+                #[cfg(feature = "vox")]
+                #vis use #vox_descriptor as #rpc_descriptor;
+            }
+        }
         Shape::AllSync | Shape::Mixed => quote! {
             /// Async caller proxy — type alias for the vox-emitted
             /// `<Trait>RpcClient` generated from the hidden mirror.
@@ -498,14 +520,49 @@ fn classify_shape(methods: &[Method]) -> Shape {
 
 // ── Emission ───────────────────────────────────────────────────────────
 
-/// Re-emit the user's trait unchanged. `Send + Sync + 'static` bounds
-/// live on the bridge's where-clauses (not the trait itself) so the
-/// trait remains impl-able by borrowed-view types like `Foo<'a>` in
-/// codebases that already use that pattern. Backends meant to mount
-/// on `<T>Host` must satisfy the bounds; backends used only
-/// in-process can be borrowed.
-fn emit_user_trait(trait_item: &ItemTrait) -> TokenStream2 {
-    quote! { #trait_item }
+/// Re-emit the user's trait, rewriting any `async fn` to
+/// `fn -> impl Future<Output = R> + Send` so backends promise
+/// `Send` futures. The bridge calls `self.inner.method(...).await`
+/// in a context that requires Send (the mirror's `async fn`
+/// expands via vox::service to a Send-bounded future), so the
+/// inner trait must guarantee Send too.
+///
+/// Sync methods are re-emitted verbatim. `Send + Sync + 'static`
+/// bounds live on the bridge's where-clauses (not the trait
+/// itself) so the trait remains impl-able by borrowed-view types.
+fn emit_user_trait(trait_item: &ItemTrait, shape: Shape) -> TokenStream2 {
+    // AllAsync: vox::service is applied to the user trait directly
+    // (no hidden mirror), so leave `async fn` intact — vox's parser
+    // rewrites it to `fn -> impl Future + MaybeSend` itself. Sync/
+    // Mixed shapes go through the architect bridge, where we rewrite
+    // async signatures to `fn -> impl Future + Send` so the bridge's
+    // `.await` on the inner method satisfies the mirror's Send bound.
+    let apply_vox = matches!(shape, Shape::AllAsync);
+    let mut out = trait_item.clone();
+    if !apply_vox {
+        for item in &mut out.items {
+            if let syn::TraitItem::Fn(f) = item
+                && f.sig.asyncness.is_some()
+            {
+                f.sig.asyncness = None;
+                let ret_ty: Type = match &f.sig.output {
+                    ReturnType::Default => parse_quote! { () },
+                    ReturnType::Type(_, ty) => (**ty).clone(),
+                };
+                f.sig.output = parse_quote! {
+                    -> impl ::core::future::Future<Output = #ret_ty> + ::core::marker::Send
+                };
+            }
+        }
+    }
+    if apply_vox {
+        quote! {
+            #[cfg_attr(feature = "vox", ::architect::vox::service)]
+            #out
+        }
+    } else {
+        quote! { #out }
+    }
 }
 
 /// Hidden mirror trait — the vox-served async surface. Each user
