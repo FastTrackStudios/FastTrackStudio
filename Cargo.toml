@@ -24,6 +24,10 @@ members = [
     # Editor playground — Dioxus app that dogfoods the editor.
     # Built with `dx serve --package playground`.
     "features/editor/examples/playground",
+    # Parked: legacy Logseq-style shell. Kept buildable so we can
+    # mine pieces (virt-folder, properties pane, tasks-kanban) into
+    # the new editor + vault stack on demand.
+    "crates/legacy/knowledge-ui",
 ]
 exclude = [
     "features/project/spec",
@@ -40,6 +44,9 @@ exclude = [
     "features/editor/docs",
     "features/editor/plans",
     "features/editor/tests",
+    # `crates/legacy/` parks older shells we want to keep readable
+    # without forcing them into the workspace member glob.
+    "crates/legacy",
 ]
 resolver = "2"
 
@@ -72,7 +79,11 @@ project-db = { path = "features/project/project-db" }
 project-ui = { path = "features/project/project-ui" }
 knowledge-proto = { path = "features/knowledge/knowledge-proto" }
 knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
-knowledge-ui = { path = "features/knowledge/knowledge-ui" }
+# Parked: the legacy Logseq-style shell. Lives under
+# `crates/legacy/` until we mine pieces (folder shell,
+# virt-folder views, properties pane, tasks-kanban) into the
+# new editor + vault stack.
+knowledge-ui = { path = "crates/legacy/knowledge-ui" }
 
 vault-obsidian = { path = "features/vault/vault-obsidian" }
 publish-core = { path = "crates/publish-core" }

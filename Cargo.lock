@@ -11013,7 +11013,6 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "js-sys",
- "knowledge-ui",
  "loro",
  "project-crdt",
  "project-proto",

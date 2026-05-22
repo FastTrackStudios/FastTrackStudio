@@ -26,7 +26,9 @@ crdt = { path = "../../../architect/libs/crdt" }
 project-proto = { workspace = true, features = ["fake"] }
 project-crdt.workspace = true
 project-ui.workspace = true
-knowledge-ui.workspace = true
+# `knowledge-ui` parked under `crates/legacy/` — task-ui mounts
+# `editor::EditorApp` now. Re-add the dep when we mine the
+# legacy shell (virt-folder views, properties pane, tasks-kanban).
 editor.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
