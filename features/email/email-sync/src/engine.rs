@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use email_proto::{EmailSync, SeqRange};
+use email_proto::{EmailSync, Envelope, SeqRange};
+use email_store::Store;
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinHandle;
 
@@ -75,6 +76,11 @@ pub struct SyncEngine<B: EmailSync + Send + Sync + 'static> {
     account_id: String,
     options: SyncOptions,
     snapshot: Arc<Mutex<Snapshot>>,
+    /// Optional durable cache. When set, each cycle persists
+    /// every fetched envelope through `Store::upsert_envelope`
+    /// so the engine survives restart with the same state it
+    /// last saw on the server.
+    store: Option<Arc<Mutex<Store>>>,
 }
 
 impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
@@ -92,7 +98,17 @@ impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
             account_id: account_id.into(),
             options,
             snapshot: Arc::new(Mutex::new(Snapshot::new())),
+            store: None,
         }
+    }
+
+    /// Attach a durable cache. Each cycle's envelopes are
+    /// persisted through it so the engine survives restart and
+    /// the UI can render the last-known state without waiting
+    /// for the next backend fetch.
+    pub fn with_store(mut self, store: Arc<Mutex<Store>>) -> Self {
+        self.store = Some(store);
+        self
     }
 
     /// Borrow the current snapshot. Useful for tests and for
@@ -136,13 +152,26 @@ impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
             folder_count: prev.folders.len(),
         });
 
-        let next = match self.collect_snapshot().await {
-            Ok(s) => s,
+        let fetched = match self.collect_envelopes().await {
+            Ok(v) => v,
             Err(reason) => {
                 let _ = tx.send(SyncEvent::CycleFailed { reason });
                 return;
             }
         };
+
+        // Build the new snapshot and persist through the store
+        // (if one is attached) before diff'ing — so a consumer
+        // who reads the store right after a CycleCompleted event
+        // sees the new state.
+        let mut next = Snapshot::new();
+        for (folder, envelopes) in &fetched {
+            let ids: BTreeSet<String> = envelopes.iter().map(|e| e.message_id.clone()).collect();
+            next.folders.insert(folder.clone(), ids);
+        }
+        if let Some(store) = &self.store {
+            self.persist(store, &fetched).await;
+        }
 
         for evt in prev.diff(&next) {
             let _ = tx.send(SyncEvent::Email(evt));
@@ -154,21 +183,23 @@ impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
         });
     }
 
-    async fn collect_snapshot(&self) -> Result<Snapshot, String> {
+    /// Collect envelopes from every folder. Returns a `Vec` of
+    /// `(folder_id, envelopes)` pairs so `run_cycle` can both
+    /// snapshot and persist without re-fetching.
+    async fn collect_envelopes(&self) -> Result<Vec<(String, Vec<Envelope>)>, String> {
         // `EmailSync` methods are sync. We're inside a tokio
         // runtime — hop to the blocking pool so we don't stall
-        // it. Same pattern any consumer of an architect::rpc
-        // sync trait needs from async code.
+        // it.
         let backend = self.backend.clone();
         let account = self.account_id.clone();
         let envelopes_per_folder = self.options.envelopes_per_folder;
 
-        tokio::task::spawn_blocking(move || -> Result<Snapshot, String> {
+        tokio::task::spawn_blocking(move || -> Result<Vec<(String, Vec<Envelope>)>, String> {
             let folders = backend
                 .list_folders(&account)
                 .map_err(|e| format!("list_folders: {e}"))?;
 
-            let mut snapshot = Snapshot::new();
+            let mut out = Vec::with_capacity(folders.len());
             for f in &folders {
                 let envs = match backend.fetch_envelopes(
                     &account,
@@ -178,16 +209,33 @@ impl<B: EmailSync + Send + Sync + 'static> SyncEngine<B> {
                     Ok(v) => v,
                     Err(err) => {
                         tracing::warn!(folder = %f.id, %err, "fetch_envelopes failed");
-                        continue;
+                        Vec::new()
                     }
                 };
-                let ids: BTreeSet<String> = envs.into_iter().map(|e| e.message_id).collect();
-                snapshot.folders.insert(f.id.clone(), ids);
+                out.push((f.id.clone(), envs));
             }
-            Ok(snapshot)
+            Ok(out)
         })
         .await
         .map_err(|e| format!("blocking task panic: {e}"))?
+    }
+
+    /// Best-effort persist. Errors are logged but don't fail
+    /// the cycle — the in-memory snapshot is still updated, so
+    /// a downstream cache failure doesn't lose live events.
+    async fn persist(&self, store: &Arc<Mutex<Store>>, fetched: &[(String, Vec<Envelope>)]) {
+        let mut s = store.lock().await;
+        for (_folder, envelopes) in fetched {
+            for env in envelopes {
+                if let Err(err) = s.upsert_envelope(env, None, None, None) {
+                    tracing::warn!(
+                        msg_id = %env.message_id,
+                        %err,
+                        "upsert_envelope failed"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -338,5 +386,42 @@ mod tests {
             }
         }
         assert!(saw_m2, "expected NewMessage for the second file");
+    }
+
+    #[tokio::test]
+    async fn cycle_persists_envelopes_through_store() {
+        let (_dir, root) = build_fixture_maildir();
+        let account = fixture_account();
+        let backend = Arc::new(email_maildir::Backend::single(account.clone(), root).unwrap());
+
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Mutex::new(
+            email_store::Store::open(store_dir.path()).unwrap(),
+        ));
+
+        let engine = SyncEngine::with_options(
+            backend,
+            account.id.0.clone(),
+            SyncOptions {
+                poll_interval: Duration::from_secs(3600),
+                envelopes_per_folder: 50,
+                channel_capacity: 64,
+            },
+        )
+        .with_store(store.clone());
+
+        let (tx, _rx) = broadcast::channel::<SyncEvent>(64);
+        engine.run_cycle(&tx).await;
+
+        // The fixture INBOX message should now be in the store.
+        let s = store.lock().await;
+        let known = s.known_message_ids("INBOX").unwrap();
+        assert!(
+            known.iter().any(|id| id.contains("m1@example.com")),
+            "store known_message_ids should contain m1: {known:?}"
+        );
+        let envs = s.query_envelopes("INBOX", 10).unwrap();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].envelope.subject, "First");
     }
 }

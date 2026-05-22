@@ -10,6 +10,9 @@ repository.workspace = true
 
 [dependencies]
 email-proto = { workspace = true }
+# Cache layer the engine writes through on each cycle.
+# Optional at the engine level — callers without persistence
+# (tests, ephemeral demos) just leave it unset.
 email-store = { workspace = true }
 email-config = { workspace = true }
 architect = { workspace = true, features = ["dispatch-tokio"] }
