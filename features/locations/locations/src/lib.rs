@@ -1,0 +1,36 @@
+//! `locations` — typed view of place pages in a `vault::Vault`.
+//!
+//! Locations are markdown files with YAML frontmatter
+//! (`type: location`). Each carries a stable `id` (uuid) so
+//! other features (notably `inventory`) reference them by id
+//! and renames don't break links.
+//!
+//! Surface:
+//! - [`Location`] / [`Kind`] — the parsed model + canonical
+//!   `kind` enum.
+//! - [`parse_page`] / [`looks_like_location`] — `VaultPage`
+//!   → `Location`.
+//! - [`serialize_location`] / [`write_location`] —
+//!   `Location` → markdown bytes (+ disk write helper).
+//! - [`scan_vault`] — collect every location page from a
+//!   `vault::Vault`.
+//! - [`LocationsService`] — `#[architect::rpc]` trait giving
+//!   agents a uniform call surface over vox.
+//! - [`Store`] — in-process `LocationsService` impl backed
+//!   by a `vault::Vault`.
+
+#![cfg(not(target_arch = "wasm32"))]
+
+pub mod model;
+pub mod parse;
+pub mod scan;
+pub mod service;
+pub mod store;
+pub mod write;
+
+pub use model::{Kind, Location};
+pub use parse::{ParseError, looks_like_location, parse_page};
+pub use scan::scan_vault;
+pub use service::{LocationsError, LocationsService};
+pub use store::Store;
+pub use write::{WriteError, default_location_path, serialize_location, write_location};
