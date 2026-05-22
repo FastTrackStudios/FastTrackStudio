@@ -7,7 +7,7 @@
 //!
 //! 1. Agent emits [`crate::event::AgentEvent::ApprovalRequested`].
 //! 2. UI renders the prompt + options.
-//! 3. User picks; UI calls [`crate::service::AgentService::resolve_approval`].
+//! 3. User picks; UI calls [`crate::service::Agents::resolve_approval`].
 //! 4. Backend forwards the decision; agent continues or
 //!    aborts.
 

@@ -1,4 +1,4 @@
-//! Orchestration helpers — sequences `agent_proto::AgentService`
+//! Orchestration helpers — sequences `agent_proto::Agents`
 //! dispatches with `wiki_proto::WikiService` writes to run
 //! whole pipelines (ingest, lint pass, deep research, dedup
 //! merge).
@@ -69,7 +69,7 @@ pub struct IngestRunResult {
 /// [`AgentWikiError::Bridge`] if either service errors or
 /// the LLM output fails parsing.
 pub fn run_ingest(_run: IngestRun<'_>) -> Result<IngestRunResult, AgentWikiError> {
-    todo!("wires agent_proto::AgentService + wiki_proto::WikiService")
+    todo!("wires agent_proto::Agents + wiki_proto::WikiService")
 }
 
 /// Run a lint pass over the wiki. Bridges

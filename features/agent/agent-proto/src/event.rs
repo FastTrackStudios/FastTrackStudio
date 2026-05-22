@@ -1,5 +1,5 @@
 //! Streaming event union. Backends emit these from
-//! [`crate::service::AgentService::subscribe_session`] (and
+//! [`crate::service::Agents::subscribe_session`] (and
 //! the board / global subscriptions). Mirrors Hermes's SSE
 //! event types verbatim where it matters; CodexMonitor's
 //! `AppServerEvent` payloads translate into the same union.

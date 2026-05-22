@@ -18,7 +18,7 @@
 //! that exposes just the fields the vendored code touches.
 //!
 //! The wrapper in `agent-codex/src/lib.rs` is what
-//! implements `agent_proto::AgentService`; this module just
+//! implements `agent_proto::Agents`; this module just
 //! supplies the `WorkspaceSession` + `EventSink` primitives
 //! it builds on.
 

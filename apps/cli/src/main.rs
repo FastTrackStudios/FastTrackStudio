@@ -65,7 +65,7 @@ enum Commands {
     #[command(subcommand)]
     Task(TaskCmd),
     /// LLM-agent integration. Currently exposes a Codex
-    /// chat demo; full `agent_proto::AgentService` surface
+    /// chat demo; full `agent_proto::Agents` surface
     /// (sessions, kanban, approvals, ...) arrives once the
     /// trait impl lands in `agent-codex` slice 2c.
     #[command(subcommand)]

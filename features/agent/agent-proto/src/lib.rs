@@ -4,9 +4,7 @@
 //! [`hermes-webui`](https://github.com/nesquena/hermes-webui)
 //! (in-process Hermes) and
 //! [`CodexMonitor`](https://github.com/Dimillian/CodexMonitor)
-//! (external Codex CLI monitor). The trait deliberately
-//! abstracts over both shapes so a single Task UI can chat
-//! with whatever backends are configured.
+//! (external Codex CLI monitor).
 //!
 //! ## Two backend shapes
 //!
@@ -15,42 +13,61 @@
 //!   `dispatch_turn` synchronously by spinning up a worker
 //!   that emits [`event::AgentEvent`]s.
 //! - **External-monitor** — the backend watches an external
-//!   CLI's on-disk session logs (`~/.codex/`, `~/.claude/`,
-//!   etc.) and translates them into the same
-//!   [`event::AgentEvent`] stream. `dispatch_turn` may be
-//!   read-only or shell out to the CLI's IPC channel.
+//!   CLI's on-disk session logs and translates them into the
+//!   same [`event::AgentEvent`] stream.
 //!
-//! ## Modules
+//! ## Capabilities, not one trait
 //!
-//! - [`backend`] — `AgentBackend`, `BackendKind`, configuration.
-//! - [`profile`] — named agent identities (model, system
-//!   prompt, MCP servers, toolsets). Mirrors Hermes's
-//!   `~/.hermes/profiles/<name>/`.
-//! - [`project`] — workspace roots; sessions belong to projects.
-//! - [`session`] — one conversation; carries messages, tool
-//!   calls, compression state, source tagging, worktree
-//!   metadata.
-//! - [`message`] — turn in a session; role + content blocks
-//!   (multimodal: text, image, tool_use, tool_result).
-//! - [`tool`] — tool call shape (independent of message so
-//!   external monitors can stream tool events distinctly).
-//! - [`reasoning`] — extended-thinking blocks.
-//! - [`attachment`] — file / image attachments on a message.
-//! - [`approval`] — agent-initiated permission requests.
-//! - [`question`] — structured multi-choice questions (matches
-//!   CodexMonitor's `RequestUserInputParams`).
-//! - [`kanban`] — boards, cards, columns, comments, links.
-//!   Cards optionally link to sessions.
-//! - [`event`] — streaming `AgentEvent` union.
+//! There is **no** umbrella `Agents` trait. Each capability
+//! is its own `#[architect::rpc]`-decorated trait under
+//! [`service`]; backends implement only what they support,
+//! and callers list what they need:
+//!
+//! ```ignore
+//! fn drive_chat<A: Sessions + TurnDispatch + Subscriptions>(
+//!     agent: &A,
+//!     // ...
+//! ) { /* ... */ }
+//! ```
+//!
+//! The trait set covers:
+//!
+//! - [`service::sessions::Sessions`] — session lifecycle.
+//! - [`service::turn_dispatch::TurnDispatch`] — dispatch /
+//!   cancel / resume turns.
+//! - [`service::threads::Threads`] — message history +
+//!   curator notes.
+//! - [`service::tool_calls::ToolCalls`] — tool-call audit.
+//! - [`service::reasoning::Reasoning`] — extended-thinking
+//!   access.
+//! - [`service::attachments::Attachments`] — file / image
+//!   store.
+//! - [`service::approvals::Approvals`] — mid-turn permission
+//!   gating.
+//! - [`service::questions::Questions`] — mid-turn structured
+//!   questions.
+//! - [`service::kanban::Kanban`] — boards + cards + links +
+//!   comments.
+//! - [`service::profiles::Profiles`] — agent identities.
+//! - [`service::projects::Projects`] — workspace registry.
+//! - [`service::backends::Backends`] — backend registry.
+//! - [`service::subscriptions::Subscriptions`] — live event
+//!   streams.
+//! - [`service::external_import::ExternalImport`] — import
+//!   external-CLI session logs.
+//!
+//! Each trait emits its own async client + dispatcher +
+//! descriptor through the `vox` feature.
+//!
+//! ## Type modules
+//!
+//! - [`backend`], [`profile`], [`project`], [`session`],
+//!   [`message`], [`tool`], [`reasoning`], [`attachment`],
+//!   [`approval`], [`question`], [`kanban`] — typed value
+//!   objects the traits operate on.
+//! - [`event`] — `AgentEvent` streaming union.
 //! - [`error`] — `AgentError`.
 //! - [`paths`] — disk layout for backends.
-//!
-//! ## The trait
-//!
-//! [`service::AgentService`] is decorated with
-//! `#[architect::rpc]`. The default `vox` feature emits an
-//! async client + dispatcher for remote callers; in-process
-//! callers use the sync trait directly.
 
 pub mod approval;
 pub mod attachment;
@@ -70,10 +87,12 @@ pub mod tool;
 
 pub use error::AgentError;
 pub use event::AgentEvent;
-pub use service::{AgentService, AgentServiceRpc};
 
-#[cfg(feature = "vox")]
+// Convenience re-exports of the per-capability traits.
+// Concrete RPC scaffolding (per-trait `Rpc` mirror,
+// `Client`, `Dispatcher`, descriptor function) lives in
+// each `service::<name>` module.
 pub use service::{
-    AgentServiceClient, AgentServiceRpcDispatcher as Dispatcher, Service,
-    agent_service_rpc_service_descriptor as descriptor, layer, serve,
+    Approvals, Attachments, Backends, ExternalImport, Kanban, Profiles, Projects, Questions,
+    Reasoning, Sessions, Subscriptions, Threads, ToolCalls, TurnDispatch,
 };
