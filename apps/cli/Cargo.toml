@@ -46,6 +46,13 @@ sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 # Project lookup for timer's project-defaults resolver.
 project = { workspace = true }
+# Finance — reports + invoice build. CLI shells out to the
+# `task-pdf-render` binary (libs/pdf) for the actual PDF
+# render; pulling fulgur into the CLI's compile graph hits a
+# stylo recursion-limit issue we can't easily patch around.
+finance-proto = { workspace = true, features = ["server"] }
+finance-db = { workspace = true }
+finance = { workspace = true }
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }

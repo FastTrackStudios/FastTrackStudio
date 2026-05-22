@@ -1,3 +1,9 @@
+// Stylo (transitive: finance → pdf → fulgur → blitz → style)
+// blows rustc's trait-solver recursion limit on its giant
+// generic `Debug` impl whenever feature unification activates
+// the right combination of cfgs. Bump for the crate so the
+// `pdf` feature can pull fulgur without surfacing the issue.
+#![recursion_limit = "1024"]
 //! `finance` — facade for the finance feature.
 //!
 //! ## Architectural carve-out
@@ -39,6 +45,14 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod firefly;
+pub mod invoice_from_sessions;
+pub mod pdf_adapter;
+pub mod reports;
+
+// Conventional re-export so `reports.rs` can write
+// `finance_db_entity::InvoiceColumn` without forcing every
+// consumer to repeat the path.
+pub use finance_db::entity as finance_db_entity;
 
 // Concrete service modules land in follow-up commits. The
 // proto + db crates are the shape; the facade wires them
