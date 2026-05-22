@@ -271,6 +271,33 @@ agent-dispatch = { path = "features/agent/agent-dispatch" }
 # so existing vaults round-trip without conversion). Lives at
 # `features/task/task/`.
 task = { path = "features/task/task" }
+# First-party project feature. Projects = markdown pages under
+# `Projects/*.md` with frontmatter carrying the stable `id:`,
+# billing knobs (client, currency, default rate), and agent
+# defaults. The markdown file is the source of truth; the
+# `timer` and `finances` crates FK against the frontmatter
+# `id:` UUID, not the file path.
+project = { path = "features/project/project" }
+# Timer feature — billable time tracking modeled on SolidTime.
+# `timer-proto` is the wire contract (Client / WorkSession /
+# Tag / Rate entities, `TimerService` slim trait for active-
+# timer atomics). `timer` is the server-side SeaORM-backed
+# impl. Sessions reference projects by the project note's
+# frontmatter `id:` UUID; the project crate is the source of
+# truth for the project metadata.
+timer-proto = { path = "features/timer/timer-proto" }
+timer = { path = "features/timer/timer" }
+# Finance feature — double-entry ledger + invoicing + expenses.
+# `finance-proto` is the wire contract (Book/Account/Transaction/
+# Split/Party/Invoice/Payment/Expense entities, plus the
+# Invoicing + Ledger workflow traits). `finance-db` owns SeaORM
+# migrations + storage. `finance` is the facade that adds the
+# one-way markdown export into `Records/Finance/`. `finance-ui`
+# is the dumb Dioxus component set.
+finance-proto = { path = "features/finance/finance-proto" }
+finance-db = { path = "features/finance/finance-db" }
+finance = { path = "features/finance/finance" }
+finance-ui = { path = "features/finance/finance-ui" }
 # File-backed vault layer. Modeled on `vault-obsidian` (clean
 # small modules, native-only `cfg`, walker / watcher / mutate)
 # but adds block-id awareness: a `BlockIndex` maps every

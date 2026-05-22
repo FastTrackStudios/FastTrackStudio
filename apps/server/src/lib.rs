@@ -89,6 +89,12 @@ pub struct AppState {
     /// task completions back into source task notes. Shared
     /// with `vault_sync` so the same on-disk layout is used.
     pub agent_dispatch_vault_root: PathBuf,
+    /// Timer store — billable time tracking. SQLite at
+    /// `$XDG_DATA_HOME/task-server/timer.sqlite` (override
+    /// via `TASK_SERVER_TIMER_URL`). Project markdown
+    /// defaults are read from the same vault root as
+    /// `vault_sync`, so the rate cascade resolves on disk.
+    pub timer: timer::Store,
 }
 
 impl AppState {
@@ -156,6 +162,31 @@ impl AppState {
             .map_err(|e| eyre::eyre!("agent-tasks migrations: {e}"))?;
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
 
+        // Timer store. SQLite at
+        // `$XDG_DATA_HOME/task-server/timer.sqlite`
+        // (override via `TASK_SERVER_TIMER_URL`). Project
+        // defaults are resolved off the same vault root the
+        // rest of the server uses — the rate cascade calls
+        // `VaultProjectDefaults::lookup` to read each
+        // session's project markdown on close.
+        let timer_url = std::env::var("TASK_SERVER_TIMER_URL").unwrap_or_else(|_| {
+            format!(
+                "sqlite://{}?mode=rwc",
+                default_timer_db_path()
+                    .map_or_else(|_| ":memory:".into(), |p| p.display().to_string())
+            )
+        });
+        let timer_conn = Database::connect(&timer_url)
+            .await
+            .map_err(|e| eyre::eyre!("connect timer db `{timer_url}`: {e}"))?;
+        timer::Migrator::up(&timer_conn, None)
+            .await
+            .map_err(|e| eyre::eyre!("timer migrations: {e}"))?;
+        let timer_defaults = std::sync::Arc::new(timer::store::VaultProjectDefaults {
+            vault_root: vault_root.clone(),
+        });
+        let timer = timer::Store::new(timer_conn, timer_defaults);
+
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
         // failures here shouldn't block startup.
@@ -189,8 +220,26 @@ impl AppState {
             wiki,
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
+            timer,
         })
     }
+}
+
+/// Resolve `$XDG_DATA_HOME/task-server/timer.sqlite`. Mirror
+/// of [`default_agent_tasks_db_path`]; kept separate so the
+/// DBs can be swapped/backed up independently.
+pub fn default_timer_db_path() -> eyre::Result<PathBuf> {
+    let base = match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => PathBuf::from(v),
+        _ => {
+            let home = std::env::var("HOME")
+                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
+            PathBuf::from(home).join(".local").join("share")
+        }
+    };
+    let dir = base.join("task-server");
+    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("timer.sqlite"))
 }
 
 /// Resolve `$XDG_DATA_HOME/task-server/agent-tasks.sqlite`.
@@ -270,6 +319,7 @@ async fn vox_ws_handler(
         let vault_sync_state = state.vault_sync.clone();
         let wiki = state.wiki.clone();
         let agent_tasks_store = state.agent_tasks.clone();
+        let timer_store = state.timer.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "AuthService" => {
@@ -306,6 +356,19 @@ async fn vox_ws_handler(
                     connection.handle_with(agent_proto::service::tasks::serve(
                         agent_tasks_store.clone(),
                     ));
+                    Ok(())
+                }
+                // Timer — billable time tracking. The slim
+                // TimerService trait (start/stop/active/
+                // switch/log/resolve_rate). Plain CRUD on
+                // Client/Tag/Rate/WorkSession entities goes
+                // through their architect-emitted Repo
+                // traits, not mounted here yet.
+                name if name
+                    == timer_proto::service::timer_service_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(timer_proto::service::serve(timer_store.clone()));
                     Ok(())
                 }
                 // Wiki feature — 13 per-capability traits, one

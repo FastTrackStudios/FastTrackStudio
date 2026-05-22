@@ -1,0 +1,23 @@
+[package]
+name = "finance-ui"
+description = "Dioxus components for the finance feature: ledger views (book switcher, account tree, transaction list), invoice editor + viewer, expense entry, party manager, reports (P&L, AR aging). Dumb components — binds to `finance-proto` capability traits through facade providers."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dioxus = { workspace = true }
+finance-proto = { workspace = true, default-features = false }
+timer-proto = { workspace = true, default-features = false }
+chrono = { workspace = true, features = ["clock", "std", "wasmbind", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
+rust_decimal = { workspace = true }
+
+fts-ui.workspace = true
+
+[lints]
+workspace = true
