@@ -254,3 +254,32 @@ Cook the @pasta{400%g}.
         assert!(!r.nested_recipes.is_empty());
     }
 }
+
+#[cfg(test)]
+mod migration_check {
+    use super::*;
+    #[test]
+    fn parses_multiword_ingredients_from_migration() {
+        // Output shape produced by migrate-md-to-cook.
+        let src = "\
+>> title: Truffle Pasta
+>> servings: 2
+
+Cook @Pasta{200%g} for 8 minutes.
+Drain and toss with @Olive Oil{30%ml} and @Truffles{5%g}.
+";
+        let r = parse_cook("Cookbook/Truffle Pasta.cook", src).unwrap();
+        assert_eq!(
+            r.ingredients.len(),
+            3,
+            "got {:?}",
+            r.ingredients.iter().map(|i| &i.name).collect::<Vec<_>>()
+        );
+        assert!(
+            r.ingredients
+                .iter()
+                .any(|i| i.name.eq_ignore_ascii_case("olive oil")),
+            "olive oil missing"
+        );
+    }
+}

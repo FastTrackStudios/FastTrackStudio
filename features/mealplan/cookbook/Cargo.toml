@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -24,6 +25,10 @@ vox-types = { workspace = true, optional = true }
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+
+[[bin]]
+name = "migrate-md-to-cook"
+path = "src/bin/migrate_md_to_cook.rs"
 
 [dev-dependencies]
 tempfile = "3"
