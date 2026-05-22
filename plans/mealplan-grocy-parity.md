@@ -11,10 +11,25 @@ Reference checkout: `~/Development/research/grocy/`
 
 ## Status
 
-Phase 0 (cookbook + pantry + mealplan trio) shipped in PR
-[#50](https://git.starcommand.live/FastTrackStudios/task/pulls/50).
-This plan covers phases 1–N as separate PRs stacking on that
-base.
+All 7 phases shipped in PR
+[#50](https://git.starcommand.live/FastTrackStudios/task/pulls/50)
+on top of phase 0 (cookbook + pantry + mealplan trio).
+Each phase is a separate commit; the plan stays as the
+read-the-room reference for what each piece does + why.
+
+- ✅ Phase 0 — cookbook + pantry + mealplan trio
+- ✅ Phase 1 — barcode lookup via OpenFoodFacts
+- ✅ Phase 2 — per-batch stock entries
+- ✅ Phase 3 — quantity units + conversions
+- ✅ Phase 4 — shelf-life math
+- ✅ Phase 5 — recipe fulfillment
+- ✅ Phase 6 — recipe nestings
+- ✅ Phase 7 — shopping list
+
+Follow-up (smaller scope, separate PRs): wire a Dioxus
+route into `task-ui`; CLI commands in `task-cli`; integration
+tests over `examples/vault/` end-to-end (scan → resolve →
+add stock → cook a meal → fulfillment view).
 
 ## Scope
 
