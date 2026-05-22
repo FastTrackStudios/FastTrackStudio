@@ -76,13 +76,16 @@ writes (commit broadcast + watcher echo). Both carry the same
 
 ## Example vault
 
-`examples/vault/` — 79 markdown pages + 2 `.base` files, tracked
-in git. Every concept / project / synthesis page carries
-explicit `type:` + `sources:` frontmatter so the future
-`vault-graph` 4-signal relevance model has shape to score
-against. Folder hierarchy mirrors a realistic PKM:
-`concepts/`, `tools/`, `projects/`, `people/`, `meetings/`,
-`daily/`, `bases/`, `stubs/`, plus root-level demo pages.
+`examples/vault/` — 139 markdown pages + 5 `.base` files,
+tracked in git. Every concept / project / synthesis page
+carries explicit `type:` + `sources:` frontmatter so the
+future `vault-graph` 4-signal relevance model has shape to
+score against. Layout is the 9-folder shape documented in
+`examples/vault/README.md`: `Inbox/`, `People/`, `Wiki/`,
+`Wisdom/`, `Journal/{Daily,Meetings}/`, `Projects/`, `Task/`,
+`Operations/{Locations,Inventory/Pantry}/`,
+`Records/bookings/`. `.base` files live colocated with the
+data they query (no top-level `Bases/`).
 
 CLI smoke:
 ```

@@ -1,7 +1,7 @@
 //! `Meal` — one cooked-or-planned meal on the calendar.
 //!
 //! Meals live as markdown pages with YAML frontmatter
-//! (`type: meal`) under `<vault>/mealplan/`. They reference
+//! (`type: meal`) under `<vault>/Projects/Mealplan/meals/`. They reference
 //! [`cookbook::Recipe`]s by id (so renames don't break the
 //! link) and, once cooked, record the [`pantry::PantryItem`]s
 //! they consumed.

@@ -78,15 +78,15 @@ pub fn write_task(
 }
 
 /// Compute a vault-relative path for a new task from its title.
-/// Default layout: `tasks/<slug>.md`. Slug is lowercase, spaces
+/// Default layout: `Task/<slug>.md`. Slug is lowercase, spaces
 /// → `-`, non-alphanumerics dropped. Pass `folder` to override
-/// the default `tasks/` (e.g. `Some("projects/website")`).
+/// the default `Task/` (e.g. `Some("Projects/website")`).
 #[must_use]
 pub fn default_task_path(title: &str, folder: Option<&str>) -> String {
     let slug = slugify(title);
     match folder {
         Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("tasks/{slug}.md"),
+        None => format!("Task/{slug}.md"),
     }
 }
 
@@ -127,10 +127,10 @@ mod tests {
 
     #[test]
     fn default_path_uses_tasks_folder() {
-        assert_eq!(default_task_path("Buy milk", None), "tasks/buy-milk.md");
+        assert_eq!(default_task_path("Buy milk", None), "Task/buy-milk.md");
         assert_eq!(
-            default_task_path("Buy milk", Some("projects/groceries")),
-            "projects/groceries/buy-milk.md"
+            default_task_path("Buy milk", Some("Projects/groceries")),
+            "Projects/groceries/buy-milk.md"
         );
     }
 }

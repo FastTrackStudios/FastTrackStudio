@@ -2,7 +2,7 @@
 //! the calendar together.
 //!
 //! Meals live as markdown pages (`type: meal`) under
-//! `<vault>/mealplan/`. Each meal references one or more
+//! `<vault>/Projects/Mealplan/meals/`. Each meal references one or more
 //! [`cookbook::Recipe`]s by id and, once cooked, records the
 //! exact [`pantry::PantryItem`] consumes via
 //! [`PantryDeduction`].

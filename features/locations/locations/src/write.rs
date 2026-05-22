@@ -69,13 +69,13 @@ pub fn write_location(
     Ok(abs)
 }
 
-/// Default layout: `locations/<slug>.md`.
+/// Default layout: `Operations/Locations/<slug>.md`.
 #[must_use]
 pub fn default_location_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {
         Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("locations/{slug}.md"),
+        None => format!("Operations/Locations/{slug}.md"),
     }
 }
 

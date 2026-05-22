@@ -65,7 +65,7 @@ pub fn write_meal(
     Ok(abs)
 }
 
-/// Default layout: `mealplan/<YYYY-MM-DD>-<slot>.md`. Pass
+/// Default layout: `Projects/Mealplan/meals/<YYYY-MM-DD>-<slot>.md`. Pass
 /// `name` for the disambiguating slug when multiple meals
 /// share a slot (e.g. `"prep batch"`); the date stays at the
 /// front so weekly views read cleanly in directory listings.
@@ -83,7 +83,7 @@ pub fn default_meal_path(
     let date_str = date.format("%Y-%m-%d");
     match folder {
         Some(f) => format!("{}/{date_str}-{slug}.md", f.trim_end_matches('/')),
-        None => format!("mealplan/{date_str}-{slug}.md"),
+        None => format!("Projects/Mealplan/meals/{date_str}-{slug}.md"),
     }
 }
 

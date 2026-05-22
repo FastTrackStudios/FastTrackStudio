@@ -74,7 +74,7 @@ pub struct Item {
     pub value: Option<f64>,
 
     /// Links to task pages — repairs, follow-ups, maintenance.
-    /// Stored as vault-relative paths (`tasks/restring-strat.md`)
+    /// Stored as vault-relative paths (`Task/restring-strat.md`)
     /// or wikilinks (`"[[Restring Strat]]"`); the `task` crate's
     /// scanner resolves them.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]

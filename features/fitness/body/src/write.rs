@@ -71,13 +71,13 @@ pub fn write_metric(
     Ok(abs)
 }
 
-/// Default layout: `body/<slug>.md` (e.g.
-/// `body/weight.md`, `body/bodyfat.md`).
+/// Default layout: `Projects/Fitness/body/<slug>.md` (e.g.
+/// `Projects/Fitness/body/weight.md`, `.../bodyfat.md`).
 pub fn default_metric_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {
         Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("body/{slug}.md"),
+        None => format!("Projects/Fitness/body/{slug}.md"),
     }
 }
 

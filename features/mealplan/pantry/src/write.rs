@@ -77,15 +77,15 @@ pub fn write_pantry_item(
     Ok(abs)
 }
 
-/// Default layout: `pantry/<slug>.md`. Lives alongside (not
-/// inside) `inventory/` so casual filesystem inspection
-/// surfaces food vs. gear without reading frontmatter.
+/// Default layout: `Operations/Inventory/Pantry/<slug>.md`.
+/// Pantry is a slice of the household inventory registry — food
+/// items the Mealplan project consumes via wikilinks.
 #[must_use]
 pub fn default_pantry_path(name: &str, folder: Option<&str>) -> String {
     let slug = slugify(name);
     match folder {
         Some(f) => format!("{}/{slug}.md", f.trim_end_matches('/')),
-        None => format!("pantry/{slug}.md"),
+        None => format!("Operations/Inventory/Pantry/{slug}.md"),
     }
 }
 

@@ -48,15 +48,56 @@ pub fn looks_like_task(page: &VaultPage) -> bool {
     false
 }
 
+/// Parse the raw bytes of a task note (frontmatter + body) into
+/// a `TaskInfo`. `rel_path` and `basename` only affect the
+/// defaulting (basename fills `title` when frontmatter omits
+/// it; `rel_path` populates `TaskInfo::path`). Useful when the
+/// caller doesn't have a full `VaultPage` — e.g. the dispatcher
+/// reads the source task back from disk after the agent
+/// completes.
+pub fn parse_str(rel_path: &str, basename: &str, raw: &str) -> Result<TaskInfo, ParseError> {
+    let page = VaultPageShim {
+        rel_path: rel_path.to_string(),
+        basename: basename.to_string(),
+        raw: raw.to_string(),
+    };
+    parse_page_inner(&page.rel_path, &page.basename, &page.raw)
+}
+
+struct VaultPageShim {
+    rel_path: String,
+    basename: String,
+    raw: String,
+}
+
 /// Parse a `VaultPage` into a `TaskInfo`. The page must have
 /// YAML frontmatter; missing optional fields default to their
 /// `Default::default()` equivalent.
 pub fn parse_page(page: &VaultPage) -> Result<TaskInfo, ParseError> {
-    let (fm, body) = split_frontmatter(&page.raw).ok_or(ParseError::NoFrontmatter)?;
+    parse_page_inner(&page.rel_path, &page.basename, &page.raw)
+}
+
+fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<TaskInfo, ParseError> {
+    let page = ParsePageRef {
+        rel_path,
+        basename,
+        raw,
+    };
+    parse_page_impl(&page)
+}
+
+struct ParsePageRef<'a> {
+    rel_path: &'a str,
+    basename: &'a str,
+    raw: &'a str,
+}
+
+fn parse_page_impl(page: &ParsePageRef<'_>) -> Result<TaskInfo, ParseError> {
+    let (fm, body) = split_frontmatter(page.raw).ok_or(ParseError::NoFrontmatter)?;
     let map: serde_yaml::Mapping =
         serde_yaml::from_str(fm).map_err(|e| ParseError::Yaml(e.to_string()))?;
 
-    let title = take_str(&map, "title").unwrap_or_else(|| page.basename.clone());
+    let title = take_str(&map, "title").unwrap_or_else(|| page.basename.to_string());
     let status = take_str(&map, "status").unwrap_or_else(|| "open".into());
     let priority = take_str(&map, "priority").unwrap_or_else(|| "normal".into());
     let due = take_str(&map, "due");
@@ -103,7 +144,7 @@ pub fn parse_page(page: &VaultPage) -> Result<TaskInfo, ParseError> {
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
     Ok(TaskInfo {
-        path: page.rel_path.clone(),
+        path: page.rel_path.to_string(),
         title,
         status,
         priority,
@@ -118,6 +159,8 @@ pub fn parse_page(page: &VaultPage) -> Result<TaskInfo, ParseError> {
         recurrence_anchor,
         complete_instances,
         completed_date,
+        agent_profile: take_str(&map, "agentProfile").unwrap_or_default(),
+        dispatched_agent_tasks: take_string_list(&map, "dispatchedAgentTasks"),
         date_created,
         date_modified,
         details: body.to_string(),

@@ -106,6 +106,8 @@ pub fn capture(input: &str) -> TaskInfo {
         recurrence_anchor: None,
         complete_instances: Vec::new(),
         completed_date: None,
+        agent_profile: String::new(),
+        dispatched_agent_tasks: Vec::new(),
         date_created: None,
         date_modified: None,
         details: String::new(),

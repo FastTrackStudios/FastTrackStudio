@@ -46,8 +46,9 @@
 //!   gating.
 //! - [`service::questions::Questions`] — mid-turn structured
 //!   questions.
-//! - [`service::kanban::Kanban`] — boards + cards + links +
-//!   comments.
+//! - [`service::tasks::AgentTaskQueue`] — queues + agent tasks
+//!   plus links + comments. Modeled on hermes-webui's kanban;
+//!   see `plans/agent-dispatch.md`.
 //! - [`service::profiles::Profiles`] — agent identities.
 //! - [`service::projects::Projects`] — workspace registry.
 //! - [`service::backends::Backends`] — backend registry.
@@ -63,7 +64,7 @@
 //!
 //! - [`backend`], [`profile`], [`project`], [`session`],
 //!   [`message`], [`tool`], [`reasoning`], [`attachment`],
-//!   [`approval`], [`question`], [`kanban`] — typed value
+//!   [`approval`], [`question`], [`tasks`] — typed value
 //!   objects the traits operate on.
 //! - [`event`] — `AgentEvent` streaming union.
 //! - [`error`] — `AgentError`.
@@ -74,7 +75,6 @@ pub mod attachment;
 pub mod backend;
 pub mod error;
 pub mod event;
-pub mod kanban;
 pub mod message;
 pub mod paths;
 pub mod profile;
@@ -83,6 +83,7 @@ pub mod question;
 pub mod reasoning;
 pub mod service;
 pub mod session;
+pub mod tasks;
 pub mod tool;
 
 pub use error::AgentError;
@@ -93,6 +94,6 @@ pub use event::AgentEvent;
 // `Client`, `Dispatcher`, descriptor function) lives in
 // each `service::<name>` module.
 pub use service::{
-    Approvals, Attachments, Backends, ExternalImport, Kanban, Profiles, Projects, Questions,
-    Reasoning, Sessions, Subscriptions, Threads, ToolCalls, TurnDispatch,
+    AgentTaskQueue, Approvals, Attachments, Backends, ExternalImport, Profiles, Projects,
+    Questions, Reasoning, Sessions, Subscriptions, Threads, ToolCalls, TurnDispatch,
 };
