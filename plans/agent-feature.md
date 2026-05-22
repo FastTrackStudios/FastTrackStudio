@@ -35,7 +35,7 @@ implementation varies. UIs and CLIs depend only on the trait.
 features/agent/
 ├── agent-proto/   ✅ shipped — wire contract
 ├── agent-wiki/    ✅ shipped — wiki bindings (prompts + parsers)
-├── agent-codex/   ⏳ next — Codex backend (vendor CodexMonitor's app_server.rs)
+├── agent-codex/   🚧 in flight — vendor + skeleton shipped; AgentService impl queued
 ├── agent-hermes/  ⏳ future — in-process Hermes backend
 ├── agent-task/    ⏳ future — task/kanban bindings
 ├── agent-cli/     ⏳ future — `task agent ...` CLI subcommands
@@ -101,13 +101,47 @@ that drive `codex app-server` (the official Codex daemon)
 over JSON-RPC stdio. See
 `~/Development/research/CodexMonitor/src-tauri/src/backend/app_server.rs`.
 
-Plan:
+#### 2a. ✅ Vendor + skeleton (shipped)
 
-1. Vendor `app_server.rs` + `events.rs` under
-   `features/agent/agent-codex/vendor/` (subtree-style; keep
-   upstream attribution).
-2. Write `agent-codex/src/lib.rs` that implements
-   `agent_proto::AgentService` by:
+Vendored modules now live under
+`features/agent/agent-codex/vendor/` (mounted via
+`#[path = "../vendor/mod.rs"] mod vendor;` so the directory
+stays at the crate root for visible attribution):
+
+- `app_server.rs` (1388 LOC) — verbatim, only import paths
+  rewritten (`crate::backend::*` → `super::*`).
+- `events.rs` — trimmed to just `AppServerEvent` + the
+  `emit_app_server_event` half of `EventSink` (terminal
+  events stripped).
+- `process_core.rs` — verbatim; provides `tokio_command`,
+  `kill_child_process_tree`, Windows cmd-wrapper helpers.
+- `args.rs` — verbatim, `parse_codex_args` +
+  `resolve_workspace_codex_args`.
+- `types.rs` — minimal shim. CodexMonitor's `types.rs` is
+  1418 LOC of UI config; we only need `WorkspaceEntry`,
+  `WorkspaceKind`, `WorkspaceSettings`, `AppSettings` (~30
+  LOC). Everything else is intentionally absent.
+
+Skeleton wrapper at `src/lib.rs`:
+
+- `BroadcastSink` — implements `EventSink` over
+  `tokio::sync::broadcast` so multiple subscribers can tap
+  the same Codex event stream.
+- `CodexBackend` — top-level handle. Owns the broadcast
+  sink + a registry of per-workspace `WorkspaceSession`
+  handles.
+- `subscribe_raw()` — for now, callers can subscribe to
+  the unfiltered `AppServerEvent` firehose. The trait-shaped
+  `subscribe_session` arrives in 2b.
+
+External deps pinned: `tokio` (full), `serde`, `serde_json`,
+`shell-words`, `tracing`, `chrono`, `thiserror`, plus
+`agent-proto` as the trait surface.
+
+#### 2b. ⏳ AgentService impl
+
+Next commit. Translation layer that turns JSON-RPC messages
+into `agent_proto` shapes:
    - mapping `AgentBackend::kind = ExternalMonitor` ↔
      `CliBridge` (Codex supports both modes — read-only logs
      + active subprocess dispatch).

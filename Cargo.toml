@@ -114,6 +114,7 @@ wiki-proto = { path = "features/wiki/wiki-proto" }
 # See `plans/agent-feature.md`.
 agent-proto = { path = "features/agent/agent-proto" }
 agent-wiki = { path = "features/agent/agent-wiki" }
+agent-codex = { path = "features/agent/agent-codex" }
 # First-party task feature. Tasks = markdown pages with
 # TaskNotes-shape frontmatter (mirrors callumalpass/tasknotes
 # so existing vaults round-trip without conversion). Lives at
