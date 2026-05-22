@@ -188,6 +188,16 @@ impl PantryService for Store {
             entry.id = Uuid::new_v4();
         }
         let mut item = self.get(id)?;
+        // Phase-4 shelf-life: compute best_before from
+        // purchased_date + default_best_before_days when
+        // the caller didn't pass one.
+        if entry.best_before.is_none() {
+            if let Some(days) = item.default_best_before_days {
+                entry.best_before = entry
+                    .purchased_date
+                    .checked_add_days(chrono::Days::new(days as u64));
+            }
+        }
         item.stock_entries.push(entry);
         self.update(item)
     }
@@ -252,6 +262,8 @@ impl PantryService for Store {
 
         let mut remaining = amount;
         let mut debits: Vec<EntryDebit> = Vec::new();
+        let today = chrono::Utc::now().date_naive();
+        let after_open = item.default_best_before_days_after_open;
         for idx in order {
             if remaining <= 0.0 {
                 break;
@@ -259,6 +271,25 @@ impl PantryService for Store {
             let entry = &mut item.stock_entries[idx];
             let take = entry.qty.min(remaining);
             if take > 0.0 {
+                // Phase-4 auto-open: first consume from an
+                // unopened entry flips it open and tightens
+                // best_before to opened_date + after_open
+                // days when the new date is sooner.
+                if !entry.opened {
+                    entry.opened = true;
+                    entry.opened_date.get_or_insert(today);
+                    if let Some(days) = after_open {
+                        if let Some(new_bb) = entry
+                            .opened_date
+                            .and_then(|d| d.checked_add_days(chrono::Days::new(days as u64)))
+                        {
+                            entry.best_before = Some(match entry.best_before {
+                                Some(existing) if existing < new_bb => existing,
+                                _ => new_bb,
+                            });
+                        }
+                    }
+                }
                 entry.qty -= take;
                 remaining -= take;
                 debits.push(EntryDebit {

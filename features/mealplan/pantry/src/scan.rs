@@ -39,3 +39,28 @@ pub fn low_stock(vault: &Vault) -> Vec<PantryItem> {
         .filter(|i| i.is_low())
         .collect()
 }
+
+/// Stock entries (paired with their parent item) whose
+/// `best_before` falls within `[today, today + days)`.
+/// Drives the "expiring this week" surface — wires into
+/// shopping-list auto-populate in phase 7.
+pub fn expiring_within(
+    vault: &Vault,
+    today: NaiveDate,
+    days: u32,
+) -> Vec<(PantryItem, crate::model::StockEntry)> {
+    let horizon = today
+        .checked_add_days(chrono::Days::new(days as u64))
+        .unwrap_or(NaiveDate::MAX);
+    let mut out = Vec::new();
+    for item in scan_vault(vault) {
+        for entry in &item.stock_entries {
+            if let Some(bb) = entry.best_before {
+                if bb >= today && bb < horizon {
+                    out.push((item.clone(), entry.clone()));
+                }
+            }
+        }
+    }
+    out
+}

@@ -77,6 +77,23 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         .and_then(|v| serde_yaml::from_value::<Nutrition>(v.clone()).ok());
     let nutrition_unit = take_str(&map, "nutritionUnit");
     let minimum = map.get("minimum").and_then(|v| v.as_f64());
+    let default_best_before_days = map
+        .get("defaultBestBeforeDays")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok());
+    let default_best_before_days_after_open = map
+        .get("defaultBestBeforeDaysAfterOpen")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok());
+    let default_best_before_days_after_freezing = map
+        .get("defaultBestBeforeDaysAfterFreezing")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok());
+    let default_best_before_days_after_thawing = map
+        .get("defaultBestBeforeDaysAfterThawing")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok());
+    let due_type = take_str(&map, "dueType").unwrap_or_else(|| "best-before".into());
     let barcodes = take_string_list(&map, "barcodes");
     let image_url = take_str(&map, "imageUrl");
     let stock_entries = map
@@ -153,6 +170,11 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         nutrition_per_unit,
         nutrition_unit,
         minimum,
+        default_best_before_days,
+        default_best_before_days_after_open,
+        default_best_before_days_after_freezing,
+        default_best_before_days_after_thawing,
+        due_type,
         stock_entries,
         barcodes,
         image_url,

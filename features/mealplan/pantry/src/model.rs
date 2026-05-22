@@ -160,6 +160,56 @@ pub struct PantryItem {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub minimum: Option<f64>,
 
+    /// Default shelf life *from purchase*. When set,
+    /// [`crate::PantryService::add_stock`] auto-fills
+    /// `best_before = purchased_date + days` for entries
+    /// added without an explicit date. Modeled on grocy's
+    /// `default_best_before_days`.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "defaultBestBeforeDays"
+    )]
+    pub default_best_before_days: Option<u32>,
+
+    /// Default shelf life *from open*. When set,
+    /// opening an entry (via [`crate::PantryService::open`]
+    /// or auto-open on first consume) tightens its
+    /// `best_before` to `opened_date + days` — but only
+    /// when the new date is *sooner* than the existing
+    /// one. Mirrors grocy's
+    /// `default_best_before_days_after_open`.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "defaultBestBeforeDaysAfterOpen"
+    )]
+    pub default_best_before_days_after_open: Option<u32>,
+
+    /// Default shelf life *from freezing*. Future-use field
+    /// — reserved for a freeze/thaw flow.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "defaultBestBeforeDaysAfterFreezing"
+    )]
+    pub default_best_before_days_after_freezing: Option<u32>,
+
+    /// Default shelf life *from thaw*. Future-use field.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "defaultBestBeforeDaysAfterThawing"
+    )]
+    pub default_best_before_days_after_thawing: Option<u32>,
+
+    /// `"best-before"` (soft — tastes fine past the date)
+    /// vs `"expires"` (hard — toss past the date). Free-form
+    /// so custom values (`"use-by"`, `"sell-by"`) round-trip;
+    /// canonical set in [`DueType`].
+    #[serde(default = "default_due_type", rename = "dueType")]
+    pub due_type: String,
+
     /// Per-purchase batch entries. Each entry has its own
     /// `qty` + `best_before` + `opened` state — modeled on
     /// grocy's `stock` table. The page-level [`Self::qty`]
@@ -257,6 +307,11 @@ impl PantryItemDraft {
             nutrition_per_unit: self.nutrition_per_unit,
             nutrition_unit: self.nutrition_unit,
             minimum: None,
+            default_best_before_days: None,
+            default_best_before_days_after_open: None,
+            default_best_before_days_after_freezing: None,
+            default_best_before_days_after_thawing: None,
+            due_type: default_due_type(),
             stock_entries: Vec::new(),
             barcodes: vec![self.barcode],
             image_url: self.image_url,
@@ -275,6 +330,40 @@ fn default_condition() -> String {
 
 fn default_status() -> String {
     "stored".into()
+}
+
+fn default_due_type() -> String {
+    DueType::BestBefore.as_str().to_string()
+}
+
+/// Canonical [`PantryItem::due_type`] values. Free-form on
+/// the wire; this enum names the recognized ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DueType {
+    /// Soft date — quality drops past it, but the food is
+    /// still safe. Drives the "expiring soon" surface, not
+    /// the "throw it out" surface.
+    BestBefore,
+    /// Hard date — toss past it. Surfaces a stronger
+    /// warning + auto-suggests adding to the shopping list.
+    Expires,
+}
+
+impl DueType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::BestBefore => "best-before",
+            Self::Expires => "expires",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "best-before" | "best_before" | "bestbefore" | "soft" => Some(Self::BestBefore),
+            "expires" | "expire" | "expiry" | "use-by" | "useby" | "hard" => Some(Self::Expires),
+            _ => None,
+        }
+    }
 }
 
 /// One per-purchase batch row inside a [`PantryItem`].
@@ -418,6 +507,11 @@ impl PantryItem {
             nutrition_per_unit: None,
             nutrition_unit: None,
             minimum: None,
+            default_best_before_days: None,
+            default_best_before_days_after_open: None,
+            default_best_before_days_after_freezing: None,
+            default_best_before_days_after_thawing: None,
+            due_type: default_due_type(),
             stock_entries: Vec::new(),
             barcodes: Vec::new(),
             image_url: None,
