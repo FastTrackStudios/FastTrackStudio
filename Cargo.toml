@@ -103,6 +103,17 @@ vault-obsidian = { path = "features/vault/vault-obsidian" }
 # `Wiki/` directory layout under each vault all stack on top.
 # See `plans/wiki-feature.md` for the design + slice plan.
 wiki-proto = { path = "features/wiki/wiki-proto" }
+# `agent` feature — LLM-agent integration. `agent-proto` is
+# the wire contract (sessions, messages, tools, kanban,
+# approvals, streaming events). Backends live in sibling
+# crates (`agent-hermes` for in-process Hermes,
+# `agent-codex` for the Codex CLI monitor, etc.).
+# Binding crates layer per-feature prompts/parsers on top
+# (`agent-wiki` drives `wiki-proto`, future `agent-task`
+# drives the task feature, etc.).
+# See `plans/agent-feature.md`.
+agent-proto = { path = "features/agent/agent-proto" }
+agent-wiki = { path = "features/agent/agent-wiki" }
 # First-party task feature. Tasks = markdown pages with
 # TaskNotes-shape frontmatter (mirrors callumalpass/tasknotes
 # so existing vaults round-trip without conversion). Lives at

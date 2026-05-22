@@ -9,6 +9,7 @@ Forward-looking design docs for Task.
 | [`vault-feature.md`](vault-feature.md) | Current vault architecture (proto / live / facade / obsidian). Not "future work" — captures the shipped shape so a fresh reader can orient. |
 | [`task-feature.md`](task-feature.md) | First-party TaskNotes-style task feature. Foundation shipped; slices 2–7 (time tracking, .base view runner, kanban UI, recurrence, field mapping, TaskService) queued. |
 | [`wiki-feature.md`](wiki-feature.md) | LLM-Wiki port (Karpathy / nashsu). `wiki-proto` spec shipped; backends, agent glue, CLI, UI, federation, multimodal queued. Subsumes the older `knowledge-graph.md` design. |
+| [`agent-feature.md`](agent-feature.md) | LLM-agent integration (Hermes / Codex / Claude CLI / custom). `agent-proto` spec + `agent-wiki` bindings shipped; backends, UI, CLI, more bindings queued. |
 | [`knowledge-graph.md`](knowledge-graph.md) | Earlier graph-only design notes from reading `nashsu/llm_wiki`. Folded into `wiki-feature.md` slice 3; kept for the algorithm details. |
 | [`vault-sync-desktop-multiserver.md`](vault-sync-desktop-multiserver.md) | Wire a `Local | Remote { VaultSyncClient }` `VaultBackend` enum into the desktop app's vault selector. Pending. |
 
