@@ -8,11 +8,15 @@
 //! Feature flags:
 //! - `gantt` (default) — pull in `view-gantt`, exposed as
 //!   `view::gantt`. Drop-in Dioxus gantt chart.
+//! - `kanban` (default) — pull in `view-kanban`, exposed as
+//!   `view::kanban`. Drop-in Dioxus kanban board.
 //!
 //! Future flags (placeholders, not yet implemented):
-//! - `kanban` — `view-kanban` board.
 //! - `calendar` — `view-calendar` month/week grid.
 //! - `table` — `view-table` Obsidian-Bases-style table.
 
 #[cfg(feature = "gantt")]
 pub use view_gantt as gantt;
+
+#[cfg(feature = "kanban")]
+pub use view_kanban as kanban;

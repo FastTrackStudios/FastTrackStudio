@@ -12,12 +12,15 @@ repository.workspace = true
 # real code lives in the sibling `view-*` crates.
 #
 # Feature gates:
-#   default — `gantt`. Add kanban / calendar / table here as they
+#   default — `gantt` + `kanban`. Add calendar / table here as they
 #             land so a plain `view` dep brings the full set.
 #   gantt   — pull in view-gantt (Dioxus gantt chart).
+#   kanban  — pull in view-kanban (Dioxus kanban board).
 [dependencies]
 view-gantt = { workspace = true, optional = true }
+view-kanban = { workspace = true, optional = true }
 
 [features]
-default = ["gantt"]
+default = ["gantt", "kanban"]
 gantt = ["dep:view-gantt"]
+kanban = ["dep:view-kanban"]

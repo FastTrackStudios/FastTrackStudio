@@ -11021,7 +11021,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "uuid",
- "view-gantt",
+ "view",
  "vox 0.3.1",
  "vox-core 0.3.1",
  "vox-websocket",
@@ -12414,10 +12414,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "view"
+version = "0.1.0"
+dependencies = [
+ "view-gantt",
+ "view-kanban",
+]
+
+[[package]]
 name = "view-gantt"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dioxus",
+ "fts-ui",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "view-kanban"
+version = "0.1.0"
+dependencies = [
  "dioxus",
  "fts-ui",
  "indexmap",
