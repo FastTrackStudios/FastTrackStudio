@@ -1,0 +1,23 @@
+[package]
+name = "wiki-search"
+description = "Search over `<vault>/Wiki/`. Token mode (grep + TF-IDF over page bodies) is always available; the optional `vector` feature pulls in LanceDB for embedding-backed hybrid retrieval. Lives in the wiki feature so personal vault material outside `Wiki/` doesn't leak into search results."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+wiki-proto = { workspace = true }
+
+# Vector search lives behind a feature flag — LanceDB
+# (arrow + rocksdb) is heavy and isn't needed for the
+# token path.
+lancedb = { version = "0.23", optional = true }
+
+[features]
+default = []
+vector = ["dep:lancedb"]

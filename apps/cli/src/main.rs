@@ -105,6 +105,50 @@ enum WikiCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Louvain communities — partition the wiki graph and
+    /// print each cluster with its cohesion score.
+    Clusters {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+    },
+    /// Token search over `Wiki/`. TF-IDF over page bodies;
+    /// `--hybrid` opts into vector retrieval where the
+    /// `vector` feature has been built in (else
+    /// downgrades to token).
+    Search {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Query string.
+        query: String,
+        /// Filter by `type:` frontmatter.
+        #[arg(long, default_value = "")]
+        node_type: String,
+        /// Result cap. `0` = unbounded.
+        #[arg(long, default_value_t = 10)]
+        top_k: u32,
+        /// Include full page content in the response
+        /// (skip for normal listings — the snippet usually
+        /// suffices).
+        #[arg(long)]
+        include_content: bool,
+        /// Use hybrid (token + vector) mode. Requires the
+        /// `vector` feature build; otherwise downgrades
+        /// transparently.
+        #[arg(long)]
+        hybrid: bool,
+    },
+    /// Watch `Wiki/raw/sources/` for FS events; on each
+    /// debounced burst, rescan + (optionally) enqueue.
+    /// Runs until interrupted.
+    WatchSources {
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        #[arg(long, default_value_t = 2)]
+        debounce_secs: u64,
+        /// Don't auto-enqueue diffs — just print them.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// One-shot wiki health snapshot — queue depth, open
     /// findings, source count, last ingest/rescan.
     Health {
@@ -582,6 +626,106 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                 );
                 for g in &gaps {
                     println!("  [{:?}] {}", g.kind, g.explanation);
+                }
+            }
+            return Ok(());
+        }
+        WikiCmd::Search {
+            vault,
+            query,
+            node_type,
+            top_k,
+            include_content,
+            hybrid,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let opts = wiki_proto::search::SearchOpts {
+                query: query.clone(),
+                top_k,
+                include_content,
+                mode: if hybrid {
+                    wiki_proto::search::SearchMode::Hybrid
+                } else {
+                    wiki_proto::search::SearchMode::Token
+                },
+                node_type,
+            };
+            let hits = wiki_search::search(&vault, opts).map_err(|e| eyre::eyre!("search: {e}"))?;
+            println!(
+                "mode={:?}  token={}  vector={}  total={}",
+                hits.mode,
+                hits.token_count,
+                hits.vector_count,
+                hits.hits.len()
+            );
+            for h in &hits.hits {
+                println!("  {:>5.2}  [{}]  {}", h.score, h.path, h.title);
+                if !h.snippet.is_empty() {
+                    println!("         {}", h.snippet);
+                }
+            }
+            return Ok(());
+        }
+        WikiCmd::Clusters { vault } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let clusters = wiki_graph::build_clusters(&vault)
+                .map_err(|e| eyre::eyre!("build_clusters: {e}"))?;
+            println!("clusters: {}", clusters.len());
+            for c in &clusters {
+                println!(
+                    "  {}  ({:>3} members, cohesion {:.2})  — {}",
+                    c.id,
+                    c.members.len(),
+                    c.cohesion,
+                    c.name
+                );
+            }
+            return Ok(());
+        }
+        WikiCmd::WatchSources {
+            vault,
+            debounce_secs,
+            dry_run,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = wiki_live::WikiLive::open(&vault);
+            wiki.bootstrap()
+                .map_err(|e| eyre::eyre!("bootstrap: {e}"))?;
+            let opts = wiki_live::WatchSourcesOpts {
+                debounce: Duration::from_secs(debounce_secs),
+                auto_enqueue: !dry_run,
+            };
+            let (rx, _guard) = wiki
+                .watch_sources(opts)
+                .map_err(|e| eyre::eyre!("watch_sources: {e}"))?;
+            eprintln!(
+                "Watching {}/Wiki/raw/sources/ (debounce {}s, auto_enqueue={})",
+                vault.display(),
+                debounce_secs,
+                !dry_run
+            );
+            for event in rx {
+                println!(
+                    "diff: +{} ~{} -{}  enqueued={}",
+                    event.diff.created.len(),
+                    event.diff.modified.len(),
+                    event.diff.deleted.len(),
+                    event.enqueued_task_ids.len(),
+                );
+                for c in &event.diff.created {
+                    println!("  + {c}");
+                }
+                for m in &event.diff.modified {
+                    println!("  ~ {m}");
+                }
+                for d in &event.diff.deleted {
+                    println!("  - {d}");
                 }
             }
             return Ok(());

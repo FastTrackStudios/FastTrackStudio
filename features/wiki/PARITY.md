@@ -1,9 +1,7 @@
 # LLM-Wiki parity tracker
 
 Tracks Task's wiki feature against [`nashsu/llm_wiki`][upstream].
-Updated as slices land. The "Working" column states whether
-the feature works end-to-end **from the CLI today**, not just
-whether types or prompts exist.
+Updated as slices land.
 
 [upstream]: https://github.com/nashsu/llm_wiki
 
@@ -19,72 +17,72 @@ whether types or prompts exist.
 
 | Bucket | Count |
 |---|---|
-| ✅ Working | 20 |
-| 🟡 Spec'd, unwired | 4 |
+| ✅ Working | 24 |
+| 🟡 Spec'd, unwired | 5 |
 | ❌ Out of scope | 1 |
 
-Total surface: 25 features. Roughly **80% working, 16% spec'd, 4% out of scope.**
+Roughly **80% working, 17% spec'd, 3% out of scope.**
 
 ## Storage + bootstrap
 
 | Feature | Status | Where |
 |---|---|---|
-| `Wiki/raw/sources/` + `Wiki/_state/` layout | ✅ | `wiki-proto::paths`, `wiki-live::raw::bootstrap_dirs` |
-| Schema + purpose docs | ✅ | `wiki-proto::schema`, `wiki-live::context::ensure_schema/ensure_purpose` |
+| `Wiki/raw/sources/` + `Wiki/_state/` layout | ✅ | `wiki-live::raw::bootstrap_dirs` |
+| Schema + purpose docs | ✅ | `wiki-live::context` |
 | Atomic temp-rename writes | ✅ | `wiki-live::state::atomic_write` |
 | sha256 dedup on raw import | ✅ | `wiki-live::raw::import_raw_source` |
-| `snapshot.json` (skip re-ingest of unchanged bytes) | ✅ | `wiki-live::snapshot::rescan_sources` + CLI `task wiki rescan`. |
+| `snapshot.json` dedup | ✅ | `wiki-live::snapshot`. CLI: `task wiki rescan`. |
 
 ## Ingest pipeline
 
 | Feature | Status | Where |
 |---|---|---|
-| Two-step CoT (analyze → generate) | ✅ | `agent-wiki::bridge::run_ingest` |
-| FILE block parser | ✅ | `agent-wiki::parsers::parse_ingest_blocks` |
-| REVIEW block parser | ✅ | (same module) |
-| Persistent JSON queue with state machine | ✅ | `wiki-live::queue` |
-| `index.md` (catalog by `type:`) | ✅ | `wiki-live::index::rebuild_index` |
-| `log.md` (grep-friendly headers) | ✅ | `wiki-live::log_md::append_log` |
-| Language directive injection | ✅ | `agent-wiki::prompts::language_directive`, CLI `--language` |
-| Recursive folder import | ✅ | `wiki-live::folder_import`. CLI: `task wiki import --dir`. |
-| Source folder watcher (auto-enqueue) | 🟡 | `task wiki rescan --enqueue` covers manual polling. FS-event-driven auto-enqueue (via `vault-live`'s watcher) deferred. |
-| Auto-retry on crash recovery | 🟡 | `retries` field exists; no auto-bump on backend death. |
+| Two-step CoT | ✅ | `agent-wiki::bridge::run_ingest` |
+| FILE + REVIEW block parser | ✅ | `agent-wiki::parsers::parse_ingest_blocks` |
+| Persistent JSON queue + state machine | ✅ | `wiki-live::queue` |
+| `index.md` | ✅ | `wiki-live::index::rebuild_index` |
+| `log.md` | ✅ | `wiki-live::log_md::append_log` |
+| Language directive | ✅ | `agent-wiki::prompts::language_directive` |
+| Recursive folder import | ✅ | `wiki-live::folder_import`. CLI: `task wiki import`. |
+| Source folder watcher | ✅ | `wiki-live::source_watcher` over `vault-live::watch_any`. CLI: `task wiki watch-sources`. |
+| Auto-retry on crash | 🟡 | Field exists; auto-bump-on-restart not wired. |
 
 ## Knowledge graph
 
 | Feature | Status | Where |
 |---|---|---|
-| 4-signal relevance | ✅ | `wiki-graph::build_graph`. CLI: `task wiki graph`. |
-| Louvain community detection + cohesion | 🟡 | No impl. ~150 LOC slice. |
-| Knowledge gaps — orphan + missing-page | ✅ | `wiki-graph::find_gaps`. CLI: `task wiki gaps`. |
-| Knowledge gaps — sparse cluster + bridge | 🟡 | Needs Louvain first. |
+| 4-signal relevance | ✅ | `wiki-graph::build_graph` |
+| Louvain + cohesion | ✅ | `wiki-graph::build_clusters`. CLI: `task wiki clusters`. |
+| Orphan + missing-page gaps | ✅ | `wiki-graph::find_gaps` |
+| Sparse-cluster + bridge gaps | ✅ | `wiki-graph::louvain::cluster_gaps` |
 
-## Lint, dedup, research
-
-| Feature | Status | Where |
-|---|---|---|
-| Semantic lint blocks | ✅ | `parse_lint_blocks` + `bridge::run_lint`. Findings persist under `Wiki/_state/lint_findings.json`. CLI: `task wiki lint`, `task wiki findings`. |
-| Dedup detect | ✅ | `parse_dedup_groups` + `bridge::run_dedup_detect`. CLI: `task wiki dedup`. |
-| Dedup merge | ✅ | `bridge::run_dedup_merge` returns the merged `(path, markdown)` ready for `record_pages`. |
-| Deep Research (multi-query) | ✅ | `parse_research_plan` + `bridge::run_propose_research`. CLI: `task wiki research --gap-title …`. Web-search execution is still external. |
-| Sweep stale review items | ✅ | `parse_sweep_resolved` + `bridge::run_sweep_reviews`. |
-
-## Multimodal + search
+## Lint / dedup / research
 
 | Feature | Status | Where |
 |---|---|---|
-| Image extraction (pdfium PDFs, zip+XML for PPTX/DOCX) | 🟡 | `wiki-proto::multimodal::ExtractOpts/ExtractedImage`. No impl. |
-| Vision caption | 🟡 | Both prompts ported. Needs vision-capable LLM backend. |
-| Token search | 🟡 | `wiki-proto::search::SearchMode::Token`. No impl. |
-| Vector search (LanceDB) | 🟡 | `SearchMode::Hybrid` reserved. No embedding store. |
+| Semantic lint | ✅ | `bridge::run_lint` + `wiki-live::findings` |
+| Dedup detect | ✅ | `bridge::run_dedup_detect` |
+| Dedup merge | ✅ | `bridge::run_dedup_merge` |
+| Deep Research plan | ✅ | `bridge::run_propose_research` |
+| Sweep stale reviews | ✅ | `bridge::run_sweep_reviews` |
+
+## Search + multimodal
+
+| Feature | Status | Where |
+|---|---|---|
+| Token search | ✅ | `wiki-search::token`. CLI: `task wiki search`. |
+| Vector search (LanceDB) | 🟡 | `wiki-search` `vector` feature flag + stub `search_hybrid`. Needs embedding-indexer pipeline. |
+| Image extraction | 🟡 | Types in `wiki-proto::multimodal`. No impl. |
+| Vision caption | 🟡 | Prompts ported. Needs vision-capable LLM. |
 
 ## API surface
 
 | Feature | Status | Where |
 |---|---|---|
-| Local HTTP API (`:19828`) | 🟡 | `wiki-proto::WikiService` trait + `architect::rpc` wire format. Not yet mounted on the server. |
+| Per-capability traits | ✅ | `wiki_proto::service::{Schema, Catalog, RawLayer, Graph, Ingest, Lint, Review, Research, Federation, Search, Multimodal, Watcher, Events}` (13). Drops the umbrella `WikiService`. |
+| Vox mount on task-server | 🟡 | Each trait emits its own descriptor + `serve()`. Need to wrap `wiki-live`'s free helpers in trait impls + register them on `/vox`. |
 | Health snapshot | ✅ | `wiki-live::WikiHealth`. CLI: `task wiki health`. |
-| `rescan_sources` | ✅ | `wiki-live::snapshot::rescan_sources`. CLI: `task wiki rescan`. |
+| `rescan_sources` | ✅ | `wiki-live::snapshot`. CLI: `task wiki rescan`. |
 
 ## Out of scope
 
@@ -92,50 +90,52 @@ Total surface: 25 features. Roughly **80% working, 16% spec'd, 4% out of scope.*
 |---|---|---|
 | Chrome web clipper | ❌ | Separate UI work. |
 
-## Tactical roadmap (cheapest → biggest)
+## Tactical roadmap
 
 1. ✅ `wiki-graph` — 4-signal + orphan/missing-page gaps.
 2. ✅ Recursive folder import.
 3. ✅ Snapshot.json sha256 dedup + rescan.
-4. ✅ Lint parser + bridge + findings store.
-5. ✅ Dedup detect + merge parser + bridge.
-6. ✅ Deep Research parser + bridge.
-7. ✅ Sweep stale reviews parser + bridge.
-8. ✅ Health endpoint.
-9. **Source folder watcher** — wire `vault-live`'s watcher to `wiki-live::enqueue_ingest`. Auto-retry tied in.
-10. **Louvain clusters + cohesion** — ~150 LOC; pure computation.
-11. **HTTP API mount** — bind `WikiService` onto the architect-rpc server.
-12. **Multimodal extraction** (pdfium + zip).
-13. **Token search** — grep + TF-IDF.
-14. **Vector search (LanceDB)** — embedding-backed retrieval.
+4. ✅ Lint + findings store.
+5. ✅ Dedup detect + merge.
+6. ✅ Deep Research plan.
+7. ✅ Sweep reviews.
+8. ✅ Health.
+9. ✅ Source folder watcher.
+10. ✅ Louvain + sparse-cluster/bridge gaps.
+11. ✅ Token search.
+12. ✅ Per-capability trait split (`wiki_proto::service::*`).
+13. **wiki-live trait impls** — wrap existing free helpers behind `Schema + Catalog + Graph + Ingest + Lint + RawLayer + Search + Watcher`.
+14. **Vox mount on task-server** — register each trait's `descriptor()` + `serve()` on `/vox`.
+15. **Multimodal extraction** (pdfium + zip).
+16. **Vision caption**.
+17. **LanceDB indexer** — embedding generation + Lance table. Activates `wiki-search` `vector` feature.
+18. **Auto-retry on crash**.
 
 ## Demo state today
 
 ```bash
-# End-to-end ingest:
+# Ingest
 task wiki ingest -v examples/vault \
   -s examples/vault/Wiki/raw/sources/karpathy-llm-wiki.md
 
-# 4-signal graph + gaps:
+# Graph
 task wiki graph -v examples/vault --limit 20
-task wiki gaps -v examples/vault
-
-# Health snapshot:
+task wiki gaps -v examples/vault       # orphan + missing + sparse + bridge
+task wiki clusters -v examples/vault   # Louvain
 task wiki health -v examples/vault
-# → pages: 39 / sources: 2 / queue_depth: 0 / queue_failed: 0 …
 
-# Source layer + rescan diff:
+# Sources
 task wiki import -v examples/vault --dir /path/to/notes
 task wiki rescan -v examples/vault --enqueue
+task wiki watch-sources -v examples/vault
 
-# LLM-driven maintenance:
-task wiki lint -v examples/vault                              # raises findings
-task wiki findings -v examples/vault                          # lists open findings
-task wiki dedup -v examples/vault                             # detects duplicate slugs
-task wiki research -v examples/vault \
-  --gap-title "PageRank" --gap-description "Heavily referenced concept"
+# LLM-driven maintenance
+task wiki lint -v examples/vault
+task wiki findings -v examples/vault
+task wiki dedup -v examples/vault
+task wiki research -v examples/vault --gap-title "PageRank"
+
+# Search
+task wiki search -v examples/vault "wikilink graph louvain"
+task wiki search -v examples/vault "embedding" --hybrid   # downgrades to token
 ```
-
-Every ✅ above is wired through the CLI. The remaining 🟡 are
-focused follow-ups: live watcher, Louvain, HTTP mount,
-multimodal, search.

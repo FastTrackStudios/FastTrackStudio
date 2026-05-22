@@ -41,6 +41,7 @@ pub mod log_md;
 pub mod queue;
 mod raw;
 mod snapshot;
+mod source_watcher;
 mod state;
 mod vault;
 
@@ -50,4 +51,5 @@ pub use findings::{FindingStatus, LintFinding, LintKind, LintSeverity};
 pub use folder_import::ImportFolderOpts;
 pub use health::WikiHealth;
 pub use snapshot::RescanDiff;
+pub use source_watcher::{SourceEvent, SourceWatcherGuard, WatchSourcesOpts};
 pub use vault::WikiLive;

@@ -139,6 +139,30 @@ pub(crate) fn score_graph(
     WikiGraph { nodes, edges }
 }
 
+/// Build the `(i, j) → total_weight` matrix used by
+/// `louvain` (and any future graph algorithm). Same
+/// scoring as `score_graph` but keyed for direct lookup
+/// instead of producing `GraphEdge`s.
+pub(crate) fn edge_weight_matrix(
+    pages: &[Page],
+    idx: &Indices,
+    weights: &RelevanceWeights,
+) -> HashMap<(usize, usize), f32> {
+    let mut out = HashMap::new();
+    for i in 0..pages.len() {
+        for &j in &idx.neighbors[i] {
+            if i >= j {
+                continue;
+            }
+            let score = signal_score(pages, idx, i, j, weights);
+            if score.total > 0.0 {
+                out.insert((i, j), score.total);
+            }
+        }
+    }
+    out
+}
+
 fn signal_score(
     pages: &[Page],
     idx: &Indices,
