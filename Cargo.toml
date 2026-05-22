@@ -110,6 +110,10 @@ email-store = { path = "features/email/email-store" }
 email-secret = { path = "features/email/email-secret" }
 email-config = { path = "features/email/email-config" }
 email-autoconfig = { path = "features/email/email-autoconfig" }
+# Per-account sync engine — wraps any EmailSync backend in a
+# periodic reconciliation loop and broadcasts merged events.
+# Mirrors pimalaya's neverest+mirador split out of himalaya.
+email-sync = { path = "features/email/email-sync" }
 # CodeMirror-style editor (subtree). `editor` is the umbrella
 # crate that re-exports the others — apps consume that.
 editor-state = { path = "features/editor/crates/editor-state" }

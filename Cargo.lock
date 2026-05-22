@@ -3805,6 +3805,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "email-sync"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "email-config",
+ "email-maildir",
+ "email-proto",
+ "email-store",
+ "futures",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "embedded-io"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

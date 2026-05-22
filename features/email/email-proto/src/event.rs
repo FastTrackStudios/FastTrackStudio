@@ -4,8 +4,9 @@
 //! subscriber lag.
 
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Facet)]
+#[derive(Debug, Clone, Facet, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum EmailEvent {
     NewMessage {
