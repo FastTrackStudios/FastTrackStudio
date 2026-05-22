@@ -24,6 +24,7 @@ pub mod parse;
 pub mod scan;
 pub mod service;
 pub mod store;
+pub mod units;
 pub mod write;
 
 pub use lookup::{LookupError, lookup_external};
@@ -32,4 +33,5 @@ pub use parse::{ParseError, looks_like_pantry_item, parse_page};
 pub use scan::{expired, low_stock, scan_vault};
 pub use service::{BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService};
 pub use store::Store;
+pub use units::{CountUnit, MassUnit, PackageUnit, Unit, VolumeUnit, convert_str};
 pub use write::{WriteError, default_pantry_path, serialize_pantry_item, write_pantry_item};

@@ -84,11 +84,43 @@ pub struct PantryItem {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub qty: Option<f64>,
 
-    /// Free-form unit (`"g"`, `"ml"`, `"cup"`, `"each"`,
-    /// `"clove"`, `"bunch"`). Mealplan deductions require the
-    /// pantry `unit` and the recipe ingredient unit to match.
+    /// Canonical **stock unit** — how the item is measured
+    /// once it's on the shelf. Free-form so unknown units
+    /// round-trip; [`crate::units::Unit::parse`] resolves
+    /// the common ones (`g` / `ml` / `cup` / `each` /
+    /// `clove` / `bunch` / etc.). Recipe deductions match
+    /// against this unit (with conversion via
+    /// [`crate::units::convert_str`] when bases align).
     #[serde(default)]
     pub unit: String,
+
+    /// Optional **purchase unit** — what you buy in,
+    /// when it differs from the stock unit. Buy by the
+    /// `"box"`, store by the `"can"`; record both so the
+    /// shopping list reads in the purchase unit but the
+    /// recipe math runs in stock units. Pair with
+    /// [`Self::purchase_to_stock_factor`].
+    ///
+    /// Modeled on grocy's `qu_id_purchase` /
+    /// `qu_id_stock` / `qu_factor_purchase_to_stock`.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "purchaseUnit"
+    )]
+    pub purchase_unit: Option<String>,
+
+    /// Multiplier: `1 purchase_unit ==
+    /// purchase_to_stock_factor stock_units`. Required
+    /// when `purchase_unit` is set; ignored otherwise. For
+    /// "box of 24 cans": `purchase_unit: "box"`,
+    /// `unit: "can"`, `purchase_to_stock_factor: 24.0`.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "purchaseToStockFactor"
+    )]
+    pub purchase_to_stock_factor: Option<f64>,
 
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub expiry: Option<NaiveDate>,
@@ -216,6 +248,8 @@ impl PantryItemDraft {
             food_category: self.food_category,
             qty: None,
             unit: self.unit,
+            purchase_unit: None,
+            purchase_to_stock_factor: None,
             expiry: None,
             opened: false,
             opened_date: None,
@@ -375,6 +409,8 @@ impl PantryItem {
             food_category: String::new(),
             qty: None,
             unit: String::new(),
+            purchase_unit: None,
+            purchase_to_stock_factor: None,
             expiry: None,
             opened: false,
             opened_date: None,

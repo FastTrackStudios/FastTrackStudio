@@ -66,6 +66,8 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
     let food_category = take_str(&map, "foodCategory").unwrap_or_default();
     let qty = map.get("qty").and_then(|v| v.as_f64());
     let unit = take_str(&map, "unit").unwrap_or_default();
+    let purchase_unit = take_str(&map, "purchaseUnit");
+    let purchase_to_stock_factor = map.get("purchaseToStockFactor").and_then(|v| v.as_f64());
     let expiry = take_str(&map, "expiry").and_then(|s| s.parse().ok());
     let opened = map.get("opened").and_then(|v| v.as_bool()).unwrap_or(false);
     let opened_date = take_str(&map, "openedDate").and_then(|s| s.parse().ok());
@@ -142,6 +144,8 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         food_category,
         qty,
         unit,
+        purchase_unit,
+        purchase_to_stock_factor,
         expiry,
         opened,
         opened_date,
