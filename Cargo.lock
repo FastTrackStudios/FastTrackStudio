@@ -3744,6 +3744,7 @@ dependencies = [
  "email-config",
  "email-proto",
  "email-secret",
+ "email-smtp",
  "futures",
  "mail-parser",
  "thiserror 2.0.18",

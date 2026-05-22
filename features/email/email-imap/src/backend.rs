@@ -32,7 +32,7 @@ struct AccountState {
     username: String,
     password: email_secret::Secret,
     aliases: FolderAliases,
-    _smtp: Option<SmtpConfig>,
+    smtp: Option<SmtpConfig>,
 }
 
 /// IMAP backend. Cheap to `Clone` — all internals are `Arc`'d.
@@ -90,7 +90,7 @@ impl Backend {
                     username,
                     password,
                     aliases: cfg.folder_aliases.clone(),
-                    _smtp: submit,
+                    smtp: submit,
                 },
             );
         }
@@ -295,6 +295,229 @@ impl Backend {
         }
         Err(EmailSyncError::NotFound)
     }
+
+    /// Locate `(folder, uid)` for one Message-ID across every
+    /// folder on the account. Returns the **backend** folder
+    /// name (already alias-resolved) so callers can re-use it
+    /// directly with `session.select`. O(folders) — the
+    /// `email-store` index avoids this in steady state.
+    async fn locate_uid(
+        &self,
+        state: &AccountState,
+        message_id: &str,
+    ) -> Result<(String, u32), EmailSyncError> {
+        let folders = self.run_list_folders(state).await?;
+        for folder in folders {
+            let backend_name = state.aliases.resolve(&folder.id).to_string();
+            let lock = self.account_lock(&state.account.id.0).await;
+            let _g = lock.lock().await;
+            let mut session = self.open(state).await?;
+            if session.select(&backend_name).await.is_err() {
+                let _ = session.logout().await;
+                continue;
+            }
+            let needle = format!(
+                "HEADER Message-ID \"{}\"",
+                message_id.trim_matches(|c| c == '<' || c == '>')
+            );
+            let uids: Vec<u32> = match session.uid_search(&needle).await {
+                Ok(u) => u.into_iter().collect(),
+                Err(_) => {
+                    let _ = session.logout().await;
+                    continue;
+                }
+            };
+            let _ = session.logout().await;
+            if let Some(uid) = uids.first() {
+                return Ok((backend_name, *uid));
+            }
+        }
+        Err(EmailSyncError::NotFound)
+    }
+
+    async fn run_set_flags(
+        &self,
+        state: &AccountState,
+        message_id: &str,
+        delta: FlagDelta,
+    ) -> Result<(), EmailSyncError> {
+        let (folder, uid) = self.locate_uid(state, message_id).await?;
+        let lock = self.account_lock(&state.account.id.0).await;
+        let _g = lock.lock().await;
+        let mut session = self.open(state).await?;
+        session
+            .select(&folder)
+            .await
+            .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+
+        let uid_seq = uid.to_string();
+        if !delta.add.is_empty() {
+            let flags = delta.add.join(" ");
+            let cmd = format!("+FLAGS ({flags})");
+            // `uid_store` returns a stream of updated FETCH
+            // responses; drive it to completion + discard.
+            let mut stream = session
+                .uid_store(&uid_seq, &cmd)
+                .await
+                .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+            while stream.next().await.is_some() {}
+        }
+        if !delta.remove.is_empty() {
+            let flags = delta.remove.join(" ");
+            let cmd = format!("-FLAGS ({flags})");
+            let mut stream = session
+                .uid_store(&uid_seq, &cmd)
+                .await
+                .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+            while stream.next().await.is_some() {}
+        }
+        let _ = session.logout().await;
+        Ok(())
+    }
+
+    async fn run_move_message(
+        &self,
+        state: &AccountState,
+        message_id: &str,
+        dest: &str,
+    ) -> Result<(), EmailSyncError> {
+        let (source_folder, uid) = self.locate_uid(state, message_id).await?;
+        // Caller's `dest` is the alias/UI name; translate.
+        let dest_backend = state.aliases.resolve(dest).to_string();
+        let lock = self.account_lock(&state.account.id.0).await;
+        let _g = lock.lock().await;
+        let mut session = self.open(state).await?;
+        session
+            .select(&source_folder)
+            .await
+            .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+
+        // Prefer UID MOVE (RFC 6851). async-imap's
+        // `uid_mv` issues the command but doesn't gate on the
+        // server advertising the MOVE capability — if the server
+        // doesn't support it, we fall back to UID COPY + STORE
+        // \Deleted + UID EXPUNGE.
+        if let Err(err) = session.uid_mv(uid.to_string(), &dest_backend).await {
+            tracing::debug!(?err, "UID MOVE failed, falling back to COPY+EXPUNGE");
+            session
+                .uid_copy(uid.to_string(), &dest_backend)
+                .await
+                .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+            {
+                let s = session
+                    .uid_store(uid.to_string(), "+FLAGS (\\Deleted)")
+                    .await
+                    .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+                let mut s = Box::pin(s);
+                while s.next().await.is_some() {}
+            }
+            {
+                let e = session
+                    .uid_expunge(uid.to_string())
+                    .await
+                    .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+                let mut e = Box::pin(e);
+                while e.next().await.is_some() {}
+            }
+        }
+        let _ = session.logout().await;
+        Ok(())
+    }
+
+    async fn run_delete_message(
+        &self,
+        state: &AccountState,
+        message_id: &str,
+    ) -> Result<(), EmailSyncError> {
+        let (folder, uid) = self.locate_uid(state, message_id).await?;
+        let lock = self.account_lock(&state.account.id.0).await;
+        let _g = lock.lock().await;
+        let mut session = self.open(state).await?;
+        session
+            .select(&folder)
+            .await
+            .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+        // Scope each `&mut session` borrow to drain its stream
+        // before issuing the next command — async-imap streams
+        // hold the session borrow, and `uid_expunge`'s stream is
+        // not Unpin so we pin it on the heap.
+        {
+            let s = session
+                .uid_store(uid.to_string(), "+FLAGS (\\Deleted)")
+                .await
+                .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+            let mut s = Box::pin(s);
+            while s.next().await.is_some() {}
+        }
+        {
+            let e = session
+                .uid_expunge(uid.to_string())
+                .await
+                .map_err(|e| EmailSyncError::Protocol(e.to_string()))?;
+            let mut e = Box::pin(e);
+            while e.next().await.is_some() {}
+        }
+        let _ = session.logout().await;
+        Ok(())
+    }
+
+    async fn run_append_draft(
+        &self,
+        state: &AccountState,
+        draft: Draft,
+    ) -> Result<String, EmailSyncError> {
+        let (bytes, message_id) = email_smtp::build_message(&draft)
+            .map_err(|e| EmailSyncError::Protocol(format!("draft build: {e}")))?;
+        // Look up the Drafts folder via the alias map; fall
+        // back to the literal name `Drafts` when unaliased.
+        let drafts_folder = state.aliases.resolve("Drafts").to_string();
+
+        let lock = self.account_lock(&state.account.id.0).await;
+        let _g = lock.lock().await;
+        let mut session = self.open(state).await?;
+        session
+            .append(&drafts_folder, Some("(\\Draft)"), None, &bytes)
+            .await
+            .map_err(|e| EmailSyncError::Protocol(format!("APPEND: {e}")))?;
+        let _ = session.logout().await;
+        Ok(message_id)
+    }
+
+    async fn run_send(&self, state: &AccountState, draft: Draft) -> Result<String, EmailSyncError> {
+        let smtp = state.smtp.clone().ok_or_else(|| {
+            EmailSyncError::Unsupported(
+                "imap: send requires SmtpConfig on the account (submit field)".into(),
+            )
+        })?;
+        let sender = email_smtp::SmtpSender::new(smtp);
+        let message_id = sender
+            .send(&draft)
+            .await
+            .map_err(|e| EmailSyncError::Protocol(format!("smtp: {e}")))?;
+
+        // After a successful submit, append a sent copy to the
+        // server's Sent folder. Best-effort — the message is
+        // already on the wire; an APPEND failure shouldn't
+        // surface as a send failure.
+        let sent_folder = state.aliases.resolve("Sent").to_string();
+        if let Ok((bytes, _)) = email_smtp::build_message(&draft) {
+            let lock = self.account_lock(&state.account.id.0).await;
+            let _g = lock.lock().await;
+            match self.open(state).await {
+                Ok(mut session) => {
+                    let _ = session
+                        .append(&sent_folder, Some("(\\Seen)"), None, &bytes)
+                        .await;
+                    let _ = session.logout().await;
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "append sent-copy: open failed");
+                }
+            }
+        }
+
+        Ok(message_id)
+    }
 }
 
 impl HasDispatcher for Backend {
@@ -368,42 +591,61 @@ impl EmailSync for Backend {
 
     fn set_flags(
         &self,
-        _account: &str,
-        _message_id: &str,
-        _delta: FlagDelta,
+        account: &str,
+        message_id: &str,
+        delta: FlagDelta,
     ) -> Result<(), EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "imap: set_flags lands in phase 3".into(),
-        ))
+        let backend = self.clone();
+        let account = account.to_string();
+        let message_id = message_id.to_string();
+        self.runtime.block_on(async move {
+            let state = backend.state(&account)?;
+            backend.run_set_flags(state, &message_id, delta).await
+        })
     }
 
     fn move_message(
         &self,
-        _account: &str,
-        _message_id: &str,
-        _dest_folder: &str,
+        account: &str,
+        message_id: &str,
+        dest_folder: &str,
     ) -> Result<(), EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "imap: move_message lands in phase 3".into(),
-        ))
+        let backend = self.clone();
+        let account = account.to_string();
+        let message_id = message_id.to_string();
+        let dest = dest_folder.to_string();
+        self.runtime.block_on(async move {
+            let state = backend.state(&account)?;
+            backend.run_move_message(state, &message_id, &dest).await
+        })
     }
 
-    fn delete_message(&self, _account: &str, _message_id: &str) -> Result<(), EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "imap: delete_message lands in phase 3".into(),
-        ))
+    fn delete_message(&self, account: &str, message_id: &str) -> Result<(), EmailSyncError> {
+        let backend = self.clone();
+        let account = account.to_string();
+        let message_id = message_id.to_string();
+        self.runtime.block_on(async move {
+            let state = backend.state(&account)?;
+            backend.run_delete_message(state, &message_id).await
+        })
     }
 
-    fn append_draft(&self, _account: &str, _draft: Draft) -> Result<String, EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "imap: append_draft lands in phase 3".into(),
-        ))
+    fn append_draft(&self, account: &str, draft: Draft) -> Result<String, EmailSyncError> {
+        let backend = self.clone();
+        let account = account.to_string();
+        self.runtime.block_on(async move {
+            let state = backend.state(&account)?;
+            backend.run_append_draft(state, draft).await
+        })
     }
 
-    fn send(&self, _account: &str, _draft: Draft) -> Result<String, EmailSyncError> {
-        Err(EmailSyncError::Unsupported(
-            "imap: send lives in `email-smtp`".into(),
-        ))
+    fn send(&self, account: &str, draft: Draft) -> Result<String, EmailSyncError> {
+        let backend = self.clone();
+        let account = account.to_string();
+        self.runtime.block_on(async move {
+            let state = backend.state(&account)?;
+            backend.run_send(state, draft).await
+        })
     }
 
     async fn subscribe(&self, account: String, tx: vox::Tx<EmailEvent>) {
