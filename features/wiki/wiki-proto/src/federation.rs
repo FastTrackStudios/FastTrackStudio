@@ -2,7 +2,7 @@
 //! peer wikis (other people's vaults, public knowledge bases,
 //! team wikis). Cross-wiki wikilinks resolve via the registered
 //! peer set; pulled pages are mirrored under
-//! `Wiki/sources/<peer-id>/` and treated as raw sources for
+//! `Wiki/raw/sources/<peer-id>/` and treated as raw sources for
 //! ingest — the local LLM rewrites them in the local voice.
 //!
 //! Federation is an *optional* layer. A wiki with zero peers
@@ -15,7 +15,7 @@ use facet::Facet;
 #[repr(C)]
 pub struct PeerWiki {
     /// Stable id chosen by the curator (e.g. `"alice-pkm"`).
-    /// Becomes the `Wiki/sources/<peer-id>/` directory name
+    /// Becomes the `Wiki/raw/sources/<peer-id>/` directory name
     /// + the prefix in federated wikilinks (`[[alice:Page]]`).
     pub id: String,
     /// URL to the peer's wiki-proto endpoint
@@ -73,7 +73,7 @@ pub struct CrossWikiPageRef {
     pub peer_id: String,
     pub path: String,
     pub title: String,
-    /// Local mirror path under `Wiki/sources/<peer-id>/` if
+    /// Local mirror path under `Wiki/raw/sources/<peer-id>/` if
     /// we've already pulled this page. Empty if we haven't.
     pub local_mirror: String,
 }

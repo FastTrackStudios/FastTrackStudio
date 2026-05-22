@@ -60,14 +60,14 @@ Module map (`features/wiki/wiki-proto/src/`):
 
 ## The raw vs. articles split
 
-`Wiki/sources/` is the **immutable** layer (mirrors llm_wiki's
+`Wiki/raw/sources/` is the **immutable** layer (mirrors llm_wiki's
 `raw/sources/`). Bytes only land via
 `import_raw_source` or `submit_research_result`; they only
 leave via `delete_raw_source`. The agent reads from
 `sources/` and cites entries via the `sources:` frontmatter
 field, but never rewrites the file bytes — backends enforce
 this by rejecting `record_pages` drafts targeting paths under
-`Wiki/sources/`.
+`Wiki/raw/sources/`.
 
 Everything else under `Wiki/` is **mutable**:
 `<Type>/<Slug>.md` pages are LLM-authored, `index.md` +
@@ -86,7 +86,8 @@ curator-visible state, JSON for opaque agent state.
 ├── index.md           ← content catalog, LLM-maintained
 ├── log.md             ← append-only operation timeline
 ├── overview.md        ← optional global synthesis
-├── sources/           ← imported raw documents
+├── raw/
+│   └── sources/       ← imported raw documents (immutable)
 ├── media/             ← extracted images, attachments
 ├── _state/            ← opaque agent state (JSON)
 │   ├── ingest_queue.json
@@ -221,7 +222,7 @@ schema changes.
 - **Log header date** — local wall-clock or UTC? llm_wiki uses
   local. Easier to grep with local; UTC is portable. Lean local
   since these are personal vaults.
-- **Sources mirror** — `Wiki/sources/` mirrors disk; do we also
+- **Sources mirror** — `Wiki/raw/sources/` mirrors disk; do we also
   hash + dedupe so the same PDF imported twice doesn't bloat?
   Yes, via the `snapshot.json` mechanism (sha256 keyed).
 - **Federation transport** — reuse `vault-sync`'s WebSocket

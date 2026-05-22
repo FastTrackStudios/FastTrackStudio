@@ -16,7 +16,7 @@ pub struct WikiHealth {
     pub purpose_present: bool,
     /// Pages tracked by the index.
     pub page_count: u32,
-    /// Files under `Wiki/sources/`.
+    /// Files under `Wiki/raw/sources/`.
     pub source_count: u32,
     /// `Pending` + `Analyzing` + `Generating` + `Writing`.
     pub queue_depth: u32,
