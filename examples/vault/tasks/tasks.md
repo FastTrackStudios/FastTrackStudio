@@ -1,7 +1,7 @@
 ---
 title: tasks
 type: folder
-tags: [task]
+tags: [tasks-folder]
 ---
 
 # tasks
