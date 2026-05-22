@@ -8,7 +8,7 @@ use vault::Vault;
 use crate::model::PantryItem;
 use crate::parse::{looks_like_pantry_item, parse_page};
 use crate::scan::scan_vault;
-use crate::service::{PantryError, PantryService};
+use crate::service::{BarcodeResolution, PantryError, PantryService};
 use crate::write::{default_pantry_path, serialize_pantry_item};
 
 #[derive(Clone)]
@@ -160,6 +160,34 @@ impl PantryService for Store {
         let mut item = self.get(id)?;
         item.qty = Some(item.qty.unwrap_or(0.0) + amount);
         self.update(item)
+    }
+
+    fn find_by_barcode(&self, barcode: &str) -> Result<PantryItem, PantryError> {
+        let needle = barcode.trim();
+        if needle.is_empty() {
+            return Err(PantryError::BadRequest("empty barcode".into()));
+        }
+        let guard = self.inner.lock().expect("pantry store poisoned");
+        for page in guard.pages.iter().filter(|p| looks_like_pantry_item(p)) {
+            if let Ok(i) = parse_page(page) {
+                if i.barcodes.iter().any(|b| b == needle) {
+                    return Ok(i);
+                }
+            }
+        }
+        Err(PantryError::NotFound(format!("barcode: {needle}")))
+    }
+
+    fn resolve_barcode(&self, barcode: &str) -> Result<BarcodeResolution, PantryError> {
+        match self.find_by_barcode(barcode) {
+            Ok(item) => Ok(BarcodeResolution::Local(item)),
+            Err(PantryError::NotFound(_)) => match crate::lookup::lookup_external(barcode) {
+                Ok(Some(draft)) => Ok(BarcodeResolution::Draft(draft)),
+                Ok(None) => Ok(BarcodeResolution::NotFound),
+                Err(e) => Err(PantryError::Lookup(e.to_string())),
+            },
+            Err(e) => Err(e),
+        }
     }
 
     fn open(&self, id: &str) -> Result<PantryItem, PantryError> {

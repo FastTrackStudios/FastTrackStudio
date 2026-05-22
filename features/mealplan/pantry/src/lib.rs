@@ -18,6 +18,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod lookup;
 pub mod model;
 pub mod parse;
 pub mod scan;
@@ -25,9 +26,10 @@ pub mod service;
 pub mod store;
 pub mod write;
 
-pub use model::{FoodCategory, PantryItem};
+pub use lookup::{LookupError, lookup_external};
+pub use model::{FoodCategory, PantryItem, PantryItemDraft};
 pub use parse::{ParseError, looks_like_pantry_item, parse_page};
 pub use scan::{expired, low_stock, scan_vault};
-pub use service::{PantryError, PantryService};
+pub use service::{BarcodeResolution, PantryError, PantryService};
 pub use store::Store;
 pub use write::{WriteError, default_pantry_path, serialize_pantry_item, write_pantry_item};

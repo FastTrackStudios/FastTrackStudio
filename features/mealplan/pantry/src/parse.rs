@@ -75,6 +75,8 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         .and_then(|v| serde_yaml::from_value::<Nutrition>(v.clone()).ok());
     let nutrition_unit = take_str(&map, "nutritionUnit");
     let minimum = map.get("minimum").and_then(|v| v.as_f64());
+    let barcodes = take_string_list(&map, "barcodes");
+    let image_url = take_str(&map, "imageUrl");
 
     Ok(PantryItem {
         path: page.rel_path.clone(),
@@ -97,6 +99,8 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         nutrition_per_unit,
         nutrition_unit,
         minimum,
+        barcodes,
+        image_url,
         details: body.to_string(),
     })
 }

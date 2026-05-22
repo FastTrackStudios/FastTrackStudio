@@ -128,8 +128,93 @@ pub struct PantryItem {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub minimum: Option<f64>,
 
+    /// All barcodes that resolve to this pantry item. One
+    /// physical food often carries N barcodes (single-pack
+    /// vs multi-pack, regional variants, etc.) — grocy's
+    /// `product_barcodes` table is the precedent. Scanning
+    /// any of these via [`crate::lookup`] or
+    /// [`crate::PantryService::find_by_barcode`] resolves
+    /// to the same row.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub barcodes: Vec<String>,
+
+    /// Optional product picture — typically populated from
+    /// the OpenFoodFacts lookup. URL or vault-relative
+    /// path; consumers display verbatim.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "imageUrl")]
+    pub image_url: Option<String>,
+
     #[serde(skip)]
     pub details: String,
+}
+
+/// Partly-populated pantry row returned from an external
+/// barcode lookup (see [`crate::lookup`]). Callers decide
+/// whether to merge into an existing [`PantryItem`] or
+/// create a new one — the draft never touches the vault.
+///
+/// Only the food-level fields are populated; identity
+/// (id / location / qty / expiry / etc.) is the caller's
+/// responsibility because those reflect *your* physical
+/// stock, not the lookup source's catalog.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+pub struct PantryItemDraft {
+    pub barcode: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub brand: Option<String>,
+    #[serde(default, rename = "foodCategory")]
+    pub food_category: String,
+    #[serde(default)]
+    pub unit: String,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "nutritionPerUnit"
+    )]
+    pub nutrition_per_unit: Option<Nutrition>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "nutritionUnit"
+    )]
+    pub nutrition_unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "imageUrl")]
+    pub image_url: Option<String>,
+}
+
+impl PantryItemDraft {
+    /// Lift the draft into a brand-new [`PantryItem`]
+    /// ready for [`crate::PantryService::create`]. The
+    /// barcode is added to `barcodes`. Identity (id) is
+    /// left nil so the store can assign one.
+    pub fn into_item(self, location_id: Option<uuid::Uuid>) -> PantryItem {
+        PantryItem {
+            path: String::new(),
+            id: uuid::Uuid::nil(),
+            name: self.name,
+            category: default_category(),
+            location_id,
+            condition: default_condition(),
+            status: default_status(),
+            tags: vec!["item".into(), "pantry".into()],
+            date_created: None,
+            date_modified: None,
+            food_category: self.food_category,
+            qty: None,
+            unit: self.unit,
+            expiry: None,
+            opened: false,
+            opened_date: None,
+            brand: self.brand,
+            nutrition_per_unit: self.nutrition_per_unit,
+            nutrition_unit: self.nutrition_unit,
+            minimum: None,
+            barcodes: vec![self.barcode],
+            image_url: self.image_url,
+            details: String::new(),
+        }
+    }
 }
 
 fn default_category() -> String {
@@ -203,6 +288,8 @@ impl PantryItem {
             nutrition_per_unit: None,
             nutrition_unit: None,
             minimum: None,
+            barcodes: Vec::new(),
+            image_url: None,
             details: item.details,
         }
     }

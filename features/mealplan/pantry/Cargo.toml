@@ -21,6 +21,12 @@ vault = { workspace = true }
 inventory = { workspace = true }
 cookbook = { workspace = true }
 
+# OpenFoodFacts external barcode lookup. Blocking client keeps
+# the sync `architect::rpc` trait surface uniform — barcode
+# scans are infrequent and the call site is happy to wait.
+reqwest = { workspace = true, features = ["blocking"] }
+serde_json = { workspace = true }
+
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
 
