@@ -61,34 +61,68 @@ impl SmtpSender {
         let password = self.config.password.resolve().await?;
         let creds: (String, String) = (self.config.username.clone(), password.as_str().to_string());
 
+        // Pick a builder configured for the requested TLS mode.
+        // The plaintext path is gated behind the `test-plaintext`
+        // feature; production builds refuse it.
+        let builder = match self.config.tls {
+            TlsMode::Implicit => SmtpClientBuilder::new(self.config.host.clone(), self.config.port)
+                .implicit_tls(true)
+                .credentials(creds),
+            TlsMode::Starttls => return Err(SendError::StarttlsUnsupported),
+            TlsMode::None => {
+                #[cfg(feature = "test-plaintext")]
+                {
+                    SmtpClientBuilder::new(self.config.host.clone(), self.config.port)
+                        .implicit_tls(false)
+                        .credentials(creds)
+                }
+                #[cfg(not(feature = "test-plaintext"))]
+                {
+                    let _ = creds;
+                    return Err(SendError::PlaintextRefused);
+                }
+            }
+        };
+
+        // `mail-send` builds the envelope from the
+        // MessageBuilder fields, then uses our raw bytes as the
+        // body. body_raw is the path that lets us emit the
+        // message we already encoded with mail-builder upstream
+        // — keeps the wire format we wrote in `build_message`
+        // intact.
+        let message = MessageBuilder::new()
+            .from(from.to_string())
+            .to(recipients.to_vec());
+        let raw_payload = String::from_utf8_lossy(raw).into_owned();
+        let message = message.text_body(raw_payload);
+
+        // The connect path differs between TLS and plaintext: TLS
+        // returns `SmtpClient<TlsStream<...>>`, plaintext returns
+        // `SmtpClient<TcpStream>`. Branch + drive each
+        // separately so the type isn't shared across the
+        // boundary.
         match self.config.tls {
-            TlsMode::Implicit => {
-                let mut client = SmtpClientBuilder::new(self.config.host.clone(), self.config.port)
-                    .implicit_tls(true)
-                    .credentials(creds)
-                    .connect()
+            TlsMode::None if cfg!(feature = "test-plaintext") => {
+                let mut client = builder
+                    .connect_plain()
                     .await
                     .map_err(|e| SendError::Connect(e.to_string()))?;
-
-                // `mail-send` builds the envelope from the
-                // MessageBuilder fields, then uses our raw bytes
-                // as the body. body_raw is the path that lets us
-                // emit the message we already encoded with
-                // mail-builder upstream — keeps the wire format
-                // we wrote in `build_message` intact.
-                let message = MessageBuilder::new()
-                    .from(from.to_string())
-                    .to(recipients.to_vec());
-                let raw_payload = String::from_utf8_lossy(raw).into_owned();
-                let message = message.text_body(raw_payload);
-
                 client
                     .send(message)
                     .await
                     .map_err(|e| SendError::Send(e.to_string()))?;
             }
-            TlsMode::Starttls => return Err(SendError::StarttlsUnsupported),
-            TlsMode::None => return Err(SendError::PlaintextRefused),
+            TlsMode::Implicit => {
+                let mut client = builder
+                    .connect()
+                    .await
+                    .map_err(|e| SendError::Connect(e.to_string()))?;
+                client
+                    .send(message)
+                    .await
+                    .map_err(|e| SendError::Send(e.to_string()))?;
+            }
+            _ => return Err(SendError::PlaintextRefused),
         }
 
         Ok(message_id)

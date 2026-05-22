@@ -22,5 +22,14 @@ mail-builder = "0.4"
 mail-send = "0.5"
 tokio = { workspace = true, features = ["rt", "macros"] }
 
+[features]
+default = []
+# Allow TlsMode::None on send. NEVER enable in production —
+# credentials go over plaintext when this is on. Tests use it
+# to drive against an in-process mock SMTP server bound to
+# 127.0.0.1.
+test-plaintext = []
+
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "io-util", "net"] }
+email-smtp = { path = ".", features = ["test-plaintext"] }
