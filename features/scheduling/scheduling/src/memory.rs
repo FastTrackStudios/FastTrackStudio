@@ -1,21 +1,16 @@
-//! In-memory `SchedulingService` impl.
-//!
-//! Backs every CRUD call with an `IndexMap` keyed by the entity's
-//! id. Slot generation is naive (walks rules + bookings linearly)
-//! — fine for the demo route, swap for a smarter index when a real
-//! vault scheduler ships.
-//!
-//! Lives in `scheduling` rather than `scheduling-proto` because
-//! the trait impl + IndexMap deps would otherwise leak into the
-//! wasm-clean wire crate.
+//! In-memory backend impls. Each capability sub-trait gets its
+//! own impl block so unsupported capabilities (e.g. a future
+//! read-only peer) drop trivially. Useful for the demo route +
+//! tests; the real `VaultScheduler` lands in a follow-up commit.
 
 use std::sync::Mutex;
 
 use indexmap::IndexMap;
 
 use scheduling_proto::{
-    AvailabilitySchedule, Booking, BookingId, BookingStatus, DayTemplate, DayTemplateId, EventType,
-    EventTypeId, NewBooking, ScheduleId, SchedulingError, SchedulingService, SlotQuery, TimeSlot,
+    AvailabilitySchedule, Booking, BookingId, BookingStatus, Bookings, DayTemplate, DayTemplateId,
+    DayTemplates, EventType, EventTypeId, EventTypes, NewBooking, ScheduleId, Schedules,
+    SchedulingError, SlotQuery, Slots, TimeSlot,
 };
 
 #[derive(Default)]
@@ -43,7 +38,8 @@ impl InMemoryScheduler {
     }
 }
 
-impl SchedulingService for InMemoryScheduler {
+// ── Personal: day templates ──────────────────────────────────────
+impl DayTemplates for InMemoryScheduler {
     fn list_day_templates(&self) -> Result<Vec<DayTemplate>, SchedulingError> {
         let inner = self.inner.lock().map_err(poisoned)?;
         Ok(inner.day_templates.values().cloned().collect())
@@ -71,7 +67,10 @@ impl SchedulingService for InMemoryScheduler {
         inner.day_templates.shift_remove(&id.0);
         Ok(())
     }
+}
 
+// ── Cal.com-style: event types ───────────────────────────────────
+impl EventTypes for InMemoryScheduler {
     fn list_event_types(&self) -> Result<Vec<EventType>, SchedulingError> {
         let inner = self.inner.lock().map_err(poisoned)?;
         Ok(inner.event_types.values().cloned().collect())
@@ -99,7 +98,10 @@ impl SchedulingService for InMemoryScheduler {
         inner.event_types.shift_remove(&id.0);
         Ok(())
     }
+}
 
+// ── Availability schedules ───────────────────────────────────────
+impl Schedules for InMemoryScheduler {
     fn list_schedules(&self) -> Result<Vec<AvailabilitySchedule>, SchedulingError> {
         let inner = self.inner.lock().map_err(poisoned)?;
         Ok(inner.schedules.values().cloned().collect())
@@ -127,7 +129,10 @@ impl SchedulingService for InMemoryScheduler {
         inner.schedules.shift_remove(&id.0);
         Ok(())
     }
+}
 
+// ── Open-slot listing ────────────────────────────────────────────
+impl Slots for InMemoryScheduler {
     fn list_open_slots(&self, _query: &SlotQuery) -> Result<Vec<TimeSlot>, SchedulingError> {
         // v1 stub: slot generation lands with the vault-backed
         // impl. The in-memory backend just returns an empty list
@@ -135,7 +140,10 @@ impl SchedulingService for InMemoryScheduler {
         // state without crashing.
         Ok(Vec::new())
     }
+}
 
+// ── Bookings ─────────────────────────────────────────────────────
+impl Bookings for InMemoryScheduler {
     fn list_bookings(&self) -> Result<Vec<Booking>, SchedulingError> {
         let inner = self.inner.lock().map_err(poisoned)?;
         Ok(inner.bookings.values().cloned().collect())
@@ -194,7 +202,7 @@ fn poisoned<T>(_: std::sync::PoisonError<T>) -> SchedulingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scheduling_proto::{BlockCategory, DayTemplateId, TimeBlock, TimeBlockId, TimeOfDay};
+    use scheduling_proto::{BlockCategory, TimeBlock, TimeBlockId, TimeOfDay};
 
     fn weekday_template() -> DayTemplate {
         DayTemplate {
@@ -231,5 +239,17 @@ mod tests {
             s.get_day_template(&dt.id),
             Err(SchedulingError::NotFound { .. })
         ));
+    }
+
+    /// Compile-time check: a function bound to two capabilities
+    /// picks them up from `InMemoryScheduler` without an umbrella
+    /// trait. The body is intentionally trivial — what matters is
+    /// the bound resolving.
+    fn _bound_compiles<S: DayTemplates + Bookings>(_: &S) {}
+
+    #[test]
+    fn sub_trait_bounds_resolve() {
+        let s = InMemoryScheduler::new();
+        _bound_compiles(&s);
     }
 }

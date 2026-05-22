@@ -3,21 +3,31 @@
 //! Two distinct surfaces share this proto:
 //!
 //! 1. **Personal scheduling** — [`DayTemplate`] / [`TimeBlock`] /
-//!    [`BlockCategory`] capture the user's daily rhythm (morning
-//!    reset, three allocatable work blocks, maintenance hour, etc.)
-//!    as a structured template that can be edited in the UI and
-//!    round-tripped through markdown frontmatter.
+//!    [`BlockCategory`] capture the user's daily rhythm. The
+//!    personal day-template editor binds to [`service::DayTemplates`].
 //!
-//! 2. **Business / cal.com-style scheduling** — [`EventType`] is the
-//!    bookable surface (30-min consultation, strategy session, …)
-//!    backed by an [`AvailabilitySchedule`]. Public callers turn
-//!    [`SchedulingService::list_open_slots`] into a booking page;
-//!    [`SchedulingService::create_booking`] commits an instance.
+//! 2. **Business / cal.com-style scheduling** — [`EventType`] is
+//!    the bookable surface backed by an [`AvailabilitySchedule`].
+//!    The public booking page binds to [`service::EventTypes`] +
+//!    [`service::Slots`] + [`service::Bookings`].
+//!
+//! ## Capability sub-traits
+//!
+//! No umbrella trait. Each capability is its own
+//! `#[architect::rpc]` so function signatures express exactly
+//! what they need:
+//!
+//! ```ignore
+//! fn render_booking_page<S: EventTypes + Slots + Bookings>(s: &S, /* … */) { /* … */ }
+//! fn save_template       <S: DayTemplates>                 (s: &S, /* … */) { /* … */ }
+//! ```
+//!
+//! Backends mix + match — a CalDAV peer might impl just
+//! `EventTypes + Slots`; the local `VaultScheduler` impls all
+//! five.
 //!
 //! Both surfaces live in the same vault as plain markdown files —
 //! the `scheduling` crate (sibling) owns the parse / write side.
-//! `scheduling-proto` itself is the wasm-clean wire layer: facet
-//! types + the `#[architect::rpc]` trait that backends implement.
 
 pub mod booking;
 pub mod error;
@@ -32,19 +42,34 @@ pub use event_type::{EventType, EventTypeId, EventTypeLocation};
 pub use schedule::{
     AvailabilityRule, AvailabilitySchedule, ScheduleId, SlotQuery, TimeSlot, Weekday,
 };
-pub use service::SchedulingService;
+pub use service::{Bookings, DayTemplates, EventTypes, Schedules, Slots};
 pub use time_block::{
     BlockCategory, DayTemplate, DayTemplateId, TimeBlock, TimeBlockId, TimeOfDay,
 };
 
-pub use service::SchedulingServiceRpc;
-
-// architect-emitted vox bits from the auto-generated mirror
-// trait. Aliased to shorter names so consumer mounting code
-// reads consistently with `vault::sync_descriptor` /
-// `vault::SyncDispatcher`.
+// architect-emitted vox bits. Each capability gets its own
+// client / dispatcher / descriptor. Consumer mount sites stitch
+// the ones they need into an `architect::Services` bundle.
 #[cfg(feature = "vox")]
 pub use service::{
-    SchedulingServiceClient, SchedulingServiceRpcDispatcher as Dispatcher, Service, layer,
-    scheduling_service_rpc_service_descriptor as descriptor, serve,
+    bookings::{
+        BookingsClient, BookingsRpc, BookingsRpcDispatcher, Service as BookingsService,
+        layer as bookings_layer, serve as bookings_serve,
+    },
+    day_templates::{
+        DayTemplatesClient, DayTemplatesRpc, DayTemplatesRpcDispatcher,
+        Service as DayTemplatesService, layer as day_templates_layer, serve as day_templates_serve,
+    },
+    event_types::{
+        EventTypesClient, EventTypesRpc, EventTypesRpcDispatcher, Service as EventTypesService,
+        layer as event_types_layer, serve as event_types_serve,
+    },
+    schedules::{
+        SchedulesClient, SchedulesRpc, SchedulesRpcDispatcher, Service as SchedulesService,
+        layer as schedules_layer, serve as schedules_serve,
+    },
+    slots::{
+        Service as SlotsService, SlotsClient, SlotsRpc, SlotsRpcDispatcher, layer as slots_layer,
+        serve as slots_serve,
+    },
 };

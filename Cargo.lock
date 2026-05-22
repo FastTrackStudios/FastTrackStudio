@@ -10864,6 +10864,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "store-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "facet",
+ "thiserror 2.0.18",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "str_indices"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

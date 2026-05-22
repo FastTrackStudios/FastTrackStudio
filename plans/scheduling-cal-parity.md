@@ -121,10 +121,36 @@ both the markdown vault *and* the remote server, with a sync token
 held in the `.task/` sidecar (see below) so reconnects are
 idempotent.
 
+## Trait surface — capability sub-traits, no umbrella
+
+We don't have one fat `SchedulingService`. The proto exposes five
+`#[architect::rpc]` capability sub-traits (mirrors `wiki-proto`),
+each with its own auto-emitted async client / dispatcher /
+descriptor:
+
+- `DayTemplates` — personal day-template CRUD.
+- `EventTypes` — cal.com-style event-type CRUD.
+- `Schedules` — availability-schedule CRUD.
+- `Slots` — open-slot listing (derived; read-only).
+- `Bookings` — booking CRUD + status transitions.
+
+Function signatures bind to exactly the capabilities they touch,
+so the requirements are self-documenting:
+
+```rust
+fn render_booking_page<S: EventTypes + Slots + Bookings>(s: &S, /* … */) { /* … */ }
+fn save_template       <S: DayTemplates>                 (s: &S, /* … */) { /* … */ }
+```
+
+Backends mix + match. A read-only federation peer could impl just
+`EventTypes + Slots`; the local `VaultScheduler` impls all five.
+`InMemoryScheduler` (in the `scheduling` crate) is the test +
+demo-route backend and impls everything.
+
 ## Storage split — content vs. app state
 
-Two stores, one trait. The `SchedulingService` impl doesn't care
-which is which; the split is purely a backend detail.
+Two stores, one set of capability traits. The backend that owns
+both is what `scheduling-ui` mounts.
 
 **`<vault>/scheduling/` — markdown content (portable, git-friendly,
 project-associated):**
@@ -148,34 +174,64 @@ swap backends freely):**
   keyring isn't available. Documented as machine-only, never
   synced.
 
-The proto stays one trait. Internally:
+App-state lives behind a **general** persistence proto so any
+feature can use it, not just scheduling. `crates/store-proto/`
+exposes two capability sub-traits — same pattern as the scheduling
+ones:
+
+- `KvStore` — `get` / `put` / `delete` / `list_keys` over
+  opaque-byte values, scoped by `(namespace, key)`.
+- `LogStore` — `append` / `read` / `truncate` for append-only
+  channels (audit logs, webhook receipts).
+
+Backends pick whichever they support. `MemStore` (in `store-proto`)
+impls both for tests. Future siblings:
+
+- `store-json` — JSON-on-disk under `<vault>/.task/<feature>/`.
+- `store-sqlite` — single SQLite file when we want indexed queries.
+
+The scheduling backend internally:
 
 ```rust
 pub struct VaultScheduler {
-    vault: vault::Vault,            // → <vault>/scheduling/*.md
-    state: Box<dyn SchedulerStateStore>,  // → <vault>/.task/scheduling/
+    vault: vault::Vault,                 // → <vault>/scheduling/*.md
+    kv:    Box<dyn KvStore + Send + Sync>,   // sync tokens, busy cache
+    log:   Box<dyn LogStore + Send + Sync>,  // audit, webhook receipts
 }
 
-/// App-state side. JSON-on-disk first; swap for SQLite when write
-/// contention bites or we want indexed queries on the audit log.
-pub trait SchedulerStateStore: Send + Sync {
-    fn get_sync_token(&self, calendar_id: &str) -> Option<String>;
-    fn put_sync_token(&self, calendar_id: &str, token: &str);
-    fn append_audit(&self, event: AuditEvent);
-    fn read_busy_cache(&self, calendar_id: &str) -> Option<BusyTimes>;
-    fn write_busy_cache(&self, calendar_id: &str, busy: BusyTimes, ttl: Duration);
-    // …
+impl DayTemplates for VaultScheduler { /* reads `vault` */ }
+impl EventTypes   for VaultScheduler { /* reads `vault` */ }
+impl Schedules    for VaultScheduler { /* reads `vault` */ }
+impl Bookings     for VaultScheduler {
+    fn create_booking(&self, b: &NewBooking) -> ... {
+        // 1. write markdown to vault
+        // 2. log.append("audit", "booking-created:<id>")
+        // 3. kv.delete("scheduling.cache", "busy:<calendar>") — invalidate
+    }
 }
+impl Slots for VaultScheduler {
+    fn list_open_slots(&self, q: &SlotQuery) -> ... {
+        // Read schedule from vault, busy cache from kv, intersect.
+    }
+}
+```
 
-pub struct JsonStateStore  { root: PathBuf }  // v1
-pub struct SqliteStateStore { conn: ...    }  // when we need indexing
+`VaultScheduler::new()` accepts boxed trait objects so callers
+swap the backend without touching the proto or the UI:
+
+```rust
+let scheduler = VaultScheduler::new(
+    vault,
+    Box::new(JsonStore::open(".task/scheduling")?),
+    Box::new(JsonStore::open(".task/scheduling")?),  // or SqliteStore::open(...)
+);
 ```
 
 This mirrors how Obsidian splits content (`*.md`) from app state
 (`.obsidian/`). We keep portability where it matters (every
 template / event-type / schedule / booking is plain markdown the
-user can grep + diff + grep) and free ourselves to pick the right
-store for high-churn machine data.
+user can grep + diff + ship to git) and free ourselves to pick
+the right store for high-churn machine data.
 
 ## Out of scope (locked)
 

@@ -195,6 +195,9 @@ view-heatmap = { path = "features/view/view-heatmap" }
 scheduling = { path = "features/scheduling/scheduling" }
 scheduling-proto = { path = "features/scheduling/scheduling-proto", default-features = false }
 scheduling-ui = { path = "features/scheduling/scheduling-ui" }
+# General app-state persistence. Capability sub-traits
+# (`KvStore` / `LogStore`) so any feature can mount any backend.
+store-proto = { path = "crates/store-proto", default-features = false }
 architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Git feature — issue + PR workflow on top of forges
