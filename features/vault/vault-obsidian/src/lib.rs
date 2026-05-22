@@ -49,3 +49,10 @@ pub use mutate::{
     MutateError, append_to_page, create_page, delete_page, move_page, prepend_to_page,
     remove_property, set_property,
 };
+
+/// "Open an Obsidian vault as a Task vault" translation tool —
+/// produces a `vault::Vault` snapshot or a single-vault
+/// `vault::Backend` from an Obsidian-shaped directory, honoring
+/// the skip set + `userIgnoreFilters`.
+pub mod translate;
+pub use translate::{open_as_backend, open_as_vault};

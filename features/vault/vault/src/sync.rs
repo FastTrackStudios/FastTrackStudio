@@ -24,14 +24,18 @@
 //! manifest.
 //!
 //! Disk-side externalities (file changes from outside the
-//! backend) are *not* forwarded here — for that, a higher-level
-//! integration plumbs [`crate::watcher`] events into the same
-//! channel. The pure-RPC subscriber only sees changes the
-//! backend itself applied.
+//! backend — vim/obsidian/git pulls/etc.) are picked up by
+//! attaching a watcher via [`Backend::start_watcher`]: the
+//! returned [`WatcherHandle`] keeps a [`crate::watcher`] alive
+//! and forwards every FS change into the same broadcast channel
+//! that powers `subscribe`. Drop the handle to detach. Caller
+//! is expected to start one watcher per registered vault; the
+//! backend itself doesn't auto-spawn.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use architect::HasDispatcher;
 use architect::dispatch::TokioBlockingDispatcher;
@@ -41,6 +45,21 @@ use tokio::sync::{RwLock, broadcast};
 use vault_proto::{
     FileBytes, IfMatch, Manifest, ManifestEntry, PutAck, VaultEvent, VaultSync, VaultSyncError,
 };
+
+use crate::watcher::{self, WatchError};
+
+/// Debounce window for the FS watcher attached by
+/// [`Backend::start_watcher`]. Coalesces editor swap-file dances
+/// + git-pull bursts into one event per touched path.
+const WATCHER_DEBOUNCE: Duration = Duration::from_millis(500);
+
+/// Handle for a per-vault filesystem watcher attached via
+/// [`Backend::start_watcher`]. Keeps the watcher + the
+/// forwarding thread alive; drop to stop receiving external
+/// disk events.
+pub struct WatcherHandle {
+    _guard: watcher::WatcherGuard,
+}
 
 /// How the backend resolves `vault_id` → on-disk path.
 #[derive(Debug, Clone)]
@@ -162,6 +181,45 @@ impl Backend {
         let (tx, _rx) = broadcast::channel::<VaultEvent>(256);
         chans.insert(vault_id.to_string(), tx.clone());
         tx
+    }
+
+    /// Attach a debounced filesystem watcher to `vault_id`.
+    /// External edits (vim, Obsidian, `git pull`, …) under the
+    /// vault root are translated into the same
+    /// [`vault_proto::VaultEvent`]s that PUT/DELETE wire calls
+    /// emit, and pushed onto the broadcast channel `subscribe`
+    /// listens to.
+    ///
+    /// The forwarder runs on a dedicated OS thread. Dropping the
+    /// returned [`WatcherHandle`] closes the underlying
+    /// debouncer; the thread exits naturally on the next loop
+    /// iteration as the sender side hangs up.
+    ///
+    /// Caveats:
+    /// - Subscribers may observe duplicates after their own
+    ///   writes (the broadcast emits once on commit, the
+    ///   watcher emits again on the disk event). The duplicate
+    ///   carries the same `sha256`, so clients can dedupe on
+    ///   that.
+    /// - Only `Explicit` / `UnderParent`-registered vault_ids
+    ///   resolve. The watcher fails up front for unknown ids.
+    /// - For `UnderParent` layouts the root dir must already
+    ///   exist (which it always does after the first write); to
+    ///   pre-attach before any write, create the subdir first.
+    pub async fn start_watcher(&self, vault_id: &str) -> Result<WatcherHandle, WatchError> {
+        let root = self
+            .root(vault_id)
+            .map_err(|_| WatchError::Notify(format!("unknown vault id `{vault_id}`")))?;
+        let tx = self.channel(vault_id).await;
+        let (rx, guard) = watcher::watch(root.clone(), WATCHER_DEBOUNCE)?;
+
+        let thread_name = format!("vault-sync-watcher:{vault_id}");
+        std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || forward_watcher_events(root, rx, tx))
+            .map_err(|e| WatchError::Notify(format!("spawn watcher thread: {e}")))?;
+
+        Ok(WatcherHandle { _guard: guard })
     }
 
     /// Sync sibling of [`Self::channel`] for use inside the
@@ -377,6 +435,66 @@ fn io_err(e: std::io::Error) -> VaultSyncError {
     VaultSyncError::Io(e.to_string())
 }
 
+/// Read mtime in unix-ms, defaulting to 0 on any error. Matches
+/// the `0` fallback used elsewhere in the backend so wire shapes
+/// stay consistent.
+fn mtime_ms(abs: &Path) -> i64 {
+    std::fs::metadata(abs)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Pump `watcher` events into the broadcast channel. Runs on a
+/// dedicated OS thread spawned by [`Backend::start_watcher`];
+/// exits when the watcher guard drops (closing the sender).
+fn forward_watcher_events(
+    root: PathBuf,
+    rx: std::sync::mpsc::Receiver<watcher::VaultEvent>,
+    tx: broadcast::Sender<VaultEvent>,
+) {
+    while let Ok(evt) = rx.recv() {
+        let abs = match evt {
+            watcher::VaultEvent::Changed { abs_path } => abs_path,
+            watcher::VaultEvent::Removed { abs_path } => abs_path,
+        };
+        let Ok(rel_path) = abs.strip_prefix(&root) else {
+            continue;
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if rel.is_empty() {
+            continue;
+        }
+        // `Changed` events from the debouncer cover both
+        // create+modify AND delete. Reload-or-classify by
+        // existence — cheaper than disambiguating the raw
+        // `notify::EventKind`.
+        let payload = if abs.exists() {
+            match std::fs::read(&abs) {
+                Ok(bytes) => VaultEvent::Put {
+                    path: rel,
+                    sha256: sha256_hex(&bytes),
+                    mtime_ms: mtime_ms(&abs),
+                    size: bytes.len() as u64,
+                },
+                Err(e) => {
+                    tracing::warn!(?abs, ?e, "watcher: failed to read changed file");
+                    continue;
+                }
+            }
+        } else {
+            VaultEvent::Delete { path: rel }
+        };
+        if tx.send(payload).is_err() {
+            // No active subscribers — keep pumping; new
+            // subscribers attach later via the same channel.
+            continue;
+        }
+    }
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -498,6 +616,37 @@ mod tests {
         assert!(tmp.path().join("fresh-vault").join("n.md").exists());
         // Manifest of an unwritten id is empty, not an error.
         assert!(b.manifest("never-touched").unwrap().files.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn watcher_forwards_external_writes() {
+        let (tmp, b) = make_backend();
+        let tx = b.channel("v1").await;
+        let mut rx = tx.subscribe();
+        // Hold the watcher alive across the write+recv.
+        let _watch = b.start_watcher("v1").await.expect("start watcher");
+        // notify-debouncer-mini ignores events that fire before
+        // the watcher has fully attached on some platforms; a
+        // brief settle prevents flakes.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Write a file directly to disk — bypasses the backend
+        // entirely, simulating an external editor.
+        std::fs::write(tmp.path().join("ext.md"), b"hi from vim").unwrap();
+
+        // The debounce window is 500ms; wait up to 3s for the
+        // event to land.
+        let evt = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+            .await
+            .expect("watcher event timeout")
+            .expect("rx recv ok");
+        match evt {
+            VaultEvent::Put { path, size, .. } => {
+                assert_eq!(path, "ext.md");
+                assert_eq!(size, 11);
+            }
+            other => panic!("expected Put, got {other:?}"),
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -29,7 +29,15 @@ features/vault/
                      directories: skip `.obsidian` / `.trash`,
                      parse `.base` files, frontmatter conventions,
                      wikilink index, tasks, properties, outline,
-                     wordcount, base queries.
+                     wordcount, base queries. The "open as Task
+                     vault" entry points are
+                     [`vault_obsidian::open_as_vault`] and
+                     [`vault_obsidian::open_as_backend`] — both
+                     honor `userIgnoreFilters` from
+                     `.obsidian/app.json` and produce the
+                     canonical `vault::Vault` / `vault::Backend`
+                     types so the rest of the stack doesn't care
+                     where the directory came from.
 ```
 
 ## What shipped

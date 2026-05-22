@@ -9,7 +9,13 @@ use serde::Deserialize;
 /// Subset of `.obsidian/app.json` we care about for sync. Fields we
 /// don't need stay unread; serde's default `deny_unknown_fields` is
 /// *off* so future Obsidian additions don't break the importer.
+///
+/// Obsidian writes `app.json` in camelCase
+/// (`userIgnoreFilters`, `attachmentFolderPath`, …); the struct
+/// uses snake_case + `rename_all` so Rust call sites stay
+/// idiomatic.
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ObsidianConfig {
     /// Where Obsidian stores attachments by default. Vault-relative.
     #[serde(default)]

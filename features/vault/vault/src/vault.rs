@@ -92,7 +92,20 @@ impl Vault {
     /// `.obsidian` / `.git` / `.trash` directories are skipped
     /// during the walk (see [`crate::walker::walk_vault`]).
     pub fn open(root: &Path) -> Result<Self, LoadError> {
-        let entries = walk_vault(root);
+        Self::from_entries(root, walk_vault(root))
+    }
+
+    /// Build a snapshot from a pre-resolved entry list. Useful
+    /// when a caller wants their own walker semantics (e.g.
+    /// `vault-obsidian` honoring `userIgnoreFilters` from
+    /// `.obsidian/app.json`) while still going through this
+    /// crate's parallel-load + indexing pipeline.
+    ///
+    /// `root` is the path entries are relative to;
+    /// `.obsidian/types.json` is still loaded from
+    /// `root/.obsidian/types.json` regardless of the entry
+    /// list.
+    pub fn from_entries(root: &Path, entries: Vec<VaultEntry>) -> Result<Self, LoadError> {
         // Read every file in parallel. I/O dominates the cold
         // scan (350ms single-threaded for an 8k-page vault);
         // rayon brings it under 100ms on a multi-core box.
