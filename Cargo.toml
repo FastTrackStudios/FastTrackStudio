@@ -4,7 +4,10 @@ members = [
     "apps/*",
     "crates/*",
     "features/*/*",
-    "features/*/tests/native",
+# `features/*/tests/native` glob — gone since `features/project/tests/`
+# was deleted alongside the project crates. Re-add if a feature
+# grows native integration tests again.
+#    "features/*/tests/native",
     "xtask",
     # CodeMirror-style editor — subtree-imported from
     # github.com/.../Editor. Lives under `features/editor/` so its
@@ -29,8 +32,6 @@ members = [
     # the new editor + vault stack on demand.
 ]
 exclude = [
-    "features/project/spec",
-    "features/project/tests",
     # `features/editor/` keeps its imported `crates/` + `vendor/`
     # + `examples/` subdirs so the editor's internal layout
     # stays intact. Each real crate is listed above explicitly;
@@ -71,10 +72,10 @@ futures = "0.3"
 rrule = "0.11"
 thiserror = "2.0"
 tracing = "0.1"
-project = { path = "features/project/project" }
-project-proto = { path = "features/project/project-proto" }
-project-crdt = { path = "features/project/project-crdt" }
-project-db = { path = "features/project/project-db" }
+# `project` feature crates (project, project-proto, project-crdt,
+# project-db) deleted along with the Loro entity layer. Tasks +
+# projects are now plain markdown pages under the vault. The legacy
+# `project-ui` shell is parked.
 project-ui = { path = "crates/legacy/project-ui" }
 # `knowledge` feature deleted. File-backed `vault` is now the
 # only storage path. Pieces of the old stack survive as legacy

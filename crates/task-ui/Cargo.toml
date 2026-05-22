@@ -17,18 +17,11 @@ dioxus = { workspace = true, features = ["router"] }
 dioxus-router.workspace = true
 fts-ui = { workspace = true, features = ["router"] }
 
-# Local-first source-of-truth in the browser.
-loro.workspace = true
-architect = { path = "../../../architect/macros/architect" }
-crdt = { path = "../../../architect/libs/crdt" }
-
-# Vertical-slice reset: only project trio remains.
-project-proto = { workspace = true, features = ["fake"] }
-project-crdt.workspace = true
-# `knowledge-ui` and `project-ui` parked under `crates/legacy/`.
-# task-ui mounts `editor::EditorApp` for /  and stubs the
-# /projects route until project-ui is rebuilt against
-# `project_crdt::TaskRepoLoro` (no knowledge dep).
+# Loro + CRDT machinery + project-proto/project-crdt were
+# ripped along with the Loro entity layer. The editor crate now
+# owns any future CRDT integration (per-file collaborative
+# editing); UI routes drive plain components against the
+# file-backed vault.
 editor.workspace = true
 view.workspace = true
 

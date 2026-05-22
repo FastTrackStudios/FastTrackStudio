@@ -11,15 +11,13 @@
 //! exercises sign-in + current-session.
 
 use architect_auth::{CreateEmailPasswordUser, SignInEmailPassword};
-use crdt_seaorm::SeaOrmPersistence;
-use task_db::{default_database_url, open_and_migrate};
-use task_server::{AppState, AuthState, router};
+use task_server::{AppState, AuthState, capability::ServerKeypair, router};
 
 async fn boot_server() -> eyre::Result<(String, AuthState)> {
-    let persistence: SeaOrmPersistence = open_and_migrate(&default_database_url()).await?;
     // In-memory auth DB so tests don't touch the user's XDG dir.
     let auth = AuthState::open("sqlite::memory:", "test-secret-at-least-32-bytes!!!").await?;
-    let state = AppState::new_with_auth(persistence, auth.clone()).await?;
+    let keypair = ServerKeypair::generate_ephemeral();
+    let state = AppState::new_with_auth(auth.clone(), keypair).await?;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();

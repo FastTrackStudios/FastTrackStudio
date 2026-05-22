@@ -30,15 +30,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 
-crdt.workspace = true
-crdt-seaorm.workspace = true
+# architect-auth uses sea-orm for its sqlite auth tables; the server
+# inherits that through the full feature.
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 
-task-db = { path = "../db" }
-
-project-proto = { workspace = true }
-project-crdt = { workspace = true }
 attachments-proto = { workspace = true }
 vault-proto = { workspace = true }
 vault = { workspace = true }
@@ -48,13 +44,8 @@ architect = { workspace = true, features = ["server-axum", "dispatch-tokio"] }
 architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
-# Native vox client for the end-to-end sync test in `tests/sync.rs`.
 vox = { workspace = true, features = ["transport-websocket"] }
-loro = "1.10"
 futures = { workspace = true }
-crdt = { workspace = true }
-project-crdt = { workspace = true }
-project-proto = { workspace = true, features = ["fake"] }
 attachments-proto = { workspace = true }
 architect = { workspace = true }
 chrono = { workspace = true }

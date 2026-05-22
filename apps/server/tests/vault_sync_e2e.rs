@@ -14,8 +14,6 @@
 
 use std::time::Duration;
 
-use crdt_seaorm::SeaOrmPersistence;
-use task_db::{default_database_url, open_and_migrate};
 use task_server::{AppState, router};
 use vault_proto::{IfMatch, VaultEvent, VaultSyncClient, VaultSyncError};
 use vox::VoxError;
@@ -36,8 +34,7 @@ async fn boot_server() -> eyre::Result<(String, tempfile::TempDir)> {
     unsafe {
         std::env::set_var("TASK_SERVER_VAULT_ROOT", tmp.path());
     }
-    let persistence: SeaOrmPersistence = open_and_migrate(&default_database_url()).await?;
-    let state = AppState::new(persistence).await?;
+    let state = AppState::new().await?;
     drop(_guard);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
