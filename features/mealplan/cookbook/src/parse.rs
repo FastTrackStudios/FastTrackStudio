@@ -1,106 +1,95 @@
-//! `vault::VaultPage` → `Recipe`.
+//! Cooklang source → [`Recipe`].
 //!
-//! Discriminator: `type: recipe` in the frontmatter (or
-//! `recipe` in `tags:`). Missing optional fields fall back
-//! to defaults.
+//! Wraps `cooklang::CooklangParser` (all extensions enabled,
+//! bundled units). Projects the parsed AST into our flat wire
+//! shape: a list of ingredients with numeric quantities (when
+//! possible), a list of rendered step strings, and metadata
+//! lifted from the `>> key: value` block.
 
+use chrono::{DateTime, Utc};
+use cooklang::{Converter, CooklangParser, Extensions, Value};
 use thiserror::Error;
-use uuid::Uuid;
-use vault::VaultPage;
 
-use crate::model::{Ingredient, NestedRecipe, Nutrition, Recipe, Substitution};
+use crate::model::{Ingredient, Recipe};
 
 #[derive(Debug, Error)]
 pub enum ParseError {
-    #[error("page has no frontmatter")]
-    NoFrontmatter,
-    #[error("frontmatter is not a YAML mapping")]
-    NotAMapping,
-    #[error("frontmatter parse: {0}")]
-    Yaml(String),
+    #[error("cooklang parse failed: {0}")]
+    Cooklang(String),
 }
 
-#[must_use]
-pub fn looks_like_recipe(page: &VaultPage) -> bool {
-    let Some((fm, _)) = split_frontmatter(&page.raw) else {
-        return false;
-    };
-    let Ok(map) = serde_yaml::from_str::<serde_yaml::Mapping>(fm) else {
-        return false;
-    };
-    if map.get("type").and_then(|v| v.as_str()) == Some("recipe") {
-        return true;
-    }
-    if let Some(seq) = map.get("tags").and_then(|v| v.as_sequence()) {
-        return seq.iter().any(|v| v.as_str() == Some("recipe"));
-    }
-    false
+/// Parse a `.cook` source string into a [`Recipe`].
+pub fn parse_cook(path: &str, source: &str) -> Result<Recipe, ParseError> {
+    parse_cook_at(path, source, None)
 }
 
-pub fn parse_page(page: &VaultPage) -> Result<Recipe, ParseError> {
-    let (fm, body) = split_frontmatter(&page.raw).ok_or(ParseError::NoFrontmatter)?;
-    let map: serde_yaml::Mapping =
-        serde_yaml::from_str(fm).map_err(|e| ParseError::Yaml(e.to_string()))?;
+/// Like [`parse_cook`] but stamps `date_modified` from the
+/// caller (typically the file's mtime).
+pub fn parse_cook_at(
+    path: &str,
+    source: &str,
+    date_modified: Option<DateTime<Utc>>,
+) -> Result<Recipe, ParseError> {
+    let parser = parser();
+    let (parsed, _report) = parser
+        .parse(source)
+        .into_result()
+        .map_err(|e| ParseError::Cooklang(format!("{e:?}")))?;
 
-    let id = take_str(&map, "id")
-        .and_then(|s| Uuid::parse_str(&s).ok())
-        .unwrap_or_else(|| Uuid::new_v5(&Uuid::NAMESPACE_URL, page.rel_path.as_bytes()));
-    let name = take_str(&map, "name").unwrap_or_else(|| page.basename.clone());
-    let description = take_str(&map, "description");
-    let course = take_str(&map, "course").unwrap_or_else(|| "main".into());
-    let cuisine = take_str(&map, "cuisine");
-    let prep_minutes = map
-        .get("prepMinutes")
-        .and_then(serde_yaml::Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok());
-    let cook_minutes = map
-        .get("cookMinutes")
-        .and_then(serde_yaml::Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok());
-    let servings = map
-        .get("servings")
-        .and_then(serde_yaml::Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok());
-    let ingredients = parse_ingredients(&map);
-    let steps = take_string_list(&map, "steps");
-    let nutrition = map
-        .get("nutrition")
-        .and_then(|v| serde_yaml::from_value::<Nutrition>(v.clone()).ok());
-    let tags = take_string_list(&map, "tags")
-        .into_iter()
-        .filter(|t| t != "recipe")
-        .collect();
-    let source = take_str(&map, "source");
-    let nested_recipes = map
-        .get("nestedRecipes")
-        .and_then(|v| v.as_sequence())
-        .map(|seq| {
-            seq.iter()
-                .filter_map(|row| {
-                    let m = row.as_mapping()?;
-                    let recipe_id = m
-                        .get("recipeId")
-                        .and_then(|v| v.as_str())
-                        .and_then(|s| Uuid::parse_str(s).ok())?;
-                    let servings = m
-                        .get("servings")
-                        .and_then(serde_yaml::Value::as_u64)
-                        .and_then(|n| u32::try_from(n).ok())
-                        .unwrap_or(1);
-                    Some(NestedRecipe {
-                        recipe_id,
-                        servings,
-                    })
-                })
-                .collect()
-        })
+    let name = parsed
+        .metadata
+        .title()
+        .map(str::to_string)
+        .unwrap_or_else(|| basename_of(path));
+    let description = parsed.metadata.description().map(str::to_string);
+    let course = take_meta_str(&parsed.metadata, "course");
+    let cuisine = take_meta_str(&parsed.metadata, "cuisine");
+    let tags = parsed
+        .metadata
+        .tags()
+        .map(|ts| ts.into_iter().map(|s| s.into_owned()).collect())
         .unwrap_or_default();
-    let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
-    let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
+    let source_url = parsed.metadata.source().and_then(|s| {
+        s.url()
+            .map(str::to_string)
+            .or_else(|| s.name().map(str::to_string))
+    });
+
+    let (prep_minutes, cook_minutes) = match parsed.metadata.time(parser.converter()) {
+        Some(cooklang::metadata::RecipeTime::Total(t)) => (None, Some(t)),
+        Some(cooklang::metadata::RecipeTime::Composed {
+            prep_time,
+            cook_time,
+        }) => (prep_time, cook_time),
+        None => (None, None),
+    };
+
+    let servings = parsed.metadata.servings().and_then(|s| s.as_number());
+
+    let ingredients = parsed
+        .ingredients
+        .iter()
+        .filter(|i| i.modifiers().should_be_listed())
+        .map(project_ingredient)
+        .collect();
+
+    let cookware = parsed.cookware.iter().map(|c| c.name.clone()).collect();
+
+    let nested_recipes = parsed
+        .ingredients
+        .iter()
+        .filter_map(|i| i.reference.as_ref().map(|r| r.path("/")))
+        .collect();
+
+    let steps = parsed
+        .sections
+        .iter()
+        .flat_map(|s| s.content.iter())
+        .filter_map(render_content)
+        .collect();
 
     Ok(Recipe {
-        path: page.rel_path.clone(),
-        id,
+        path: path.to_string(),
         name,
         description,
         course,
@@ -110,135 +99,158 @@ pub fn parse_page(page: &VaultPage) -> Result<Recipe, ParseError> {
         servings,
         ingredients,
         steps,
-        nutrition,
-        tags,
+        cookware,
         nested_recipes,
-        source,
-        date_created,
+        tags,
+        source_url,
         date_modified,
-        details: body.to_string(),
+        source: source.to_string(),
     })
 }
 
-fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
-    let Some(seq) = map.get("ingredients").and_then(|v| v.as_sequence()) else {
-        return Vec::new();
+fn project_ingredient(i: &cooklang::Ingredient) -> Ingredient {
+    let (qty, unit, qty_display) = match &i.quantity {
+        Some(q) => {
+            let unit = q.unit().unwrap_or_default().to_string();
+            let qty = number_value(q.value());
+            let display = Some(format!("{}", q.value()));
+            (qty, unit, display)
+        }
+        None => (None, String::new(), None),
     };
-    seq.iter()
-        .filter_map(|row| {
-            // Tolerate string-only shorthand:
-            //   ingredients: ["1 tbsp olive oil"]
-            // (parsed best-effort; agents that need structure
-            // should round-trip through the typed shape).
-            if let Some(s) = row.as_str() {
-                return Some(Ingredient {
-                    name: s.to_string(),
-                    qty: None,
-                    unit: String::new(),
-                    pantry_item_id: None,
-                    substitutes: Vec::new(),
-                    note: None,
-                    optional: false,
-                });
-            }
-            let m = row.as_mapping()?;
-            let name = m.get("name").and_then(|v| v.as_str())?.to_string();
-            let qty = m.get("qty").and_then(serde_yaml::Value::as_f64);
-            let unit = m
-                .get("unit")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let pantry_item_id = m
-                .get("pantryItemId")
-                .and_then(|v| v.as_str())
-                .and_then(|s| uuid::Uuid::parse_str(s).ok());
-            let note = m
-                .get("note")
-                .and_then(|v| v.as_str())
-                .map(std::string::ToString::to_string);
-            let optional = m
-                .get("optional")
-                .and_then(serde_yaml::Value::as_bool)
-                .unwrap_or(false);
-            let substitutes = m
-                .get("substitutes")
-                .and_then(|v| v.as_sequence())
-                .map(|seq| {
-                    seq.iter()
-                        .filter_map(|sv| {
-                            // String shorthand: a sub can be
-                            // just `"olive oil"`.
-                            if let Some(s) = sv.as_str() {
-                                return Some(Substitution {
-                                    name: s.to_string(),
-                                    pantry_item_id: None,
-                                    ratio: 1.0,
-                                    note: None,
-                                });
-                            }
-                            let sm = sv.as_mapping()?;
-                            let name = sm.get("name").and_then(|v| v.as_str())?.to_string();
-                            let pantry_item_id = sm
-                                .get("pantryItemId")
-                                .and_then(|v| v.as_str())
-                                .and_then(|s| uuid::Uuid::parse_str(s).ok());
-                            let ratio = sm
-                                .get("ratio")
-                                .and_then(serde_yaml::Value::as_f64)
-                                .unwrap_or(1.0);
-                            let note = sm
-                                .get("note")
-                                .and_then(|v| v.as_str())
-                                .map(std::string::ToString::to_string);
-                            Some(Substitution {
-                                name,
-                                pantry_item_id,
-                                ratio,
-                                note,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            Some(Ingredient {
-                name,
-                qty,
-                unit,
-                pantry_item_id,
-                note,
-                substitutes,
-                optional,
-            })
-        })
-        .collect()
+    Ingredient {
+        name: i.name.clone(),
+        alias: i.alias.clone(),
+        qty,
+        unit,
+        qty_display,
+        note: i.note.clone(),
+        optional: i.modifiers().contains(cooklang::Modifiers::OPT),
+        is_recipe_ref: i.modifiers().contains(cooklang::Modifiers::RECIPE),
+    }
 }
 
-pub(crate) fn split_frontmatter(src: &str) -> Option<(&str, &str)> {
-    let rest = src.strip_prefix("---\n")?;
-    let end = rest.find("\n---\n")?;
-    Some((&rest[..end], &rest[end + 5..]))
-}
-
-fn take_str(map: &serde_yaml::Mapping, key: &str) -> Option<String> {
-    map.get(key).and_then(|v| match v {
-        serde_yaml::Value::String(s) => Some(s.clone()),
-        serde_yaml::Value::Number(n) => Some(n.to_string()),
-        serde_yaml::Value::Bool(b) => Some(b.to_string()),
-        _ => None,
-    })
-}
-
-fn take_string_list(map: &serde_yaml::Mapping, key: &str) -> Vec<String> {
-    let Some(v) = map.get(key) else {
-        return Vec::new();
-    };
+fn number_value(v: &Value) -> Option<f64> {
     match v {
-        serde_yaml::Value::Sequence(seq) => seq
-            .iter()
-            .filter_map(|item| item.as_str().map(std::string::ToString::to_string))
-            .collect(),
-        serde_yaml::Value::String(s) => vec![s.clone()],
-        _ => Vec::new(),
+        Value::Number(n) => Some(n.value()),
+        Value::Range { start, end } => Some((f64::from(*start) + f64::from(*end)) / 2.0),
+        Value::Text(_) => None,
+    }
+}
+
+fn render_content(c: &cooklang::Content) -> Option<String> {
+    match c {
+        cooklang::Content::Step(step) => Some(render_step(step)),
+        cooklang::Content::Text(t) => {
+            let trimmed = t.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+    }
+}
+
+fn render_step(step: &cooklang::Step) -> String {
+    // Items reference the recipe-level vecs by index. We don't
+    // have those vecs in scope; render plain text and drop a
+    // bullet for non-text items. Editors / UI re-parse via
+    // cooklang directly for the rich form. `Recipe::steps` is
+    // for index views + grep.
+    let mut out = String::new();
+    for item in &step.items {
+        match item {
+            cooklang::Item::Text { value } => out.push_str(value),
+            cooklang::Item::Ingredient { .. }
+            | cooklang::Item::Cookware { .. }
+            | cooklang::Item::Timer { .. }
+            | cooklang::Item::InlineQuantity { .. } => out.push('·'),
+        }
+    }
+    out.trim().to_string()
+}
+
+fn take_meta_str(m: &cooklang::Metadata, key: &str) -> Option<String> {
+    m.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn basename_of(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn parser() -> &'static CooklangParser {
+    use std::sync::OnceLock;
+    static P: OnceLock<CooklangParser> = OnceLock::new();
+    P.get_or_init(|| CooklangParser::new(Extensions::all(), Converter::bundled()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_minimal_recipe() {
+        let src = ">> title: Pasta\n>> servings: 2\n\nBoil @pasta{200%g} in salted water.";
+        let r = parse_cook("Cookbook/Pasta.cook", src).expect("parse");
+        assert_eq!(r.name, "Pasta");
+        assert_eq!(r.servings, Some(2));
+        assert_eq!(r.ingredients.len(), 1);
+        assert_eq!(r.ingredients[0].name, "pasta");
+        assert_eq!(r.ingredients[0].qty, Some(200.0));
+        assert_eq!(r.ingredients[0].unit, "g");
+        assert_eq!(r.steps.len(), 1);
+    }
+
+    #[test]
+    fn falls_back_to_filename_for_title() {
+        let r = parse_cook("Cookbook/Truffle Pasta.cook", "Just cook it.").unwrap();
+        assert_eq!(r.name, "Truffle Pasta");
+    }
+
+    #[test]
+    fn parses_metadata_block() {
+        let src = "\
+>> title: Carbonara
+>> description: Roman classic
+>> course: dinner
+>> cuisine: italian
+>> servings: 4
+>> prep time: 5 min
+>> cook time: 15 min
+>> tags: weeknight, pasta
+
+Cook the @pasta{400%g}.
+";
+        let r = parse_cook("Cookbook/Carbonara.cook", src).unwrap();
+        assert_eq!(r.name, "Carbonara");
+        assert_eq!(r.description.as_deref(), Some("Roman classic"));
+        assert_eq!(r.course.as_deref(), Some("dinner"));
+        assert_eq!(r.cuisine.as_deref(), Some("italian"));
+        assert_eq!(r.servings, Some(4));
+        assert_eq!(r.prep_minutes, Some(5));
+        assert_eq!(r.cook_minutes, Some(15));
+        assert_eq!(r.tags, vec!["weeknight", "pasta"]);
+    }
+
+    #[test]
+    fn optional_ingredient_modifier() {
+        let r = parse_cook("Cookbook/X.cook", "Top with @?parmesan{}.").unwrap();
+        assert_eq!(r.ingredients.len(), 1);
+        assert!(r.ingredients[0].optional);
+    }
+
+    #[test]
+    fn recipe_reference_is_collected() {
+        let r = parse_cook(
+            "Cookbook/Pizza.cook",
+            "Make @@./Shared/Pizza Dough{}, then top.",
+        )
+        .unwrap();
+        assert!(!r.nested_recipes.is_empty());
     }
 }

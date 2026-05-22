@@ -1,41 +1,36 @@
-//! File-backed [`CookbookService`] impl. Same shape as the
-//! locations / inventory stores: `Arc<Mutex<vault::Vault>>`,
-//! cheap to `Clone`, source of truth is markdown on disk.
+//! File-backed [`CookbookService`] impl. Source of truth is
+//! `<vault_root>/Cookbook/*.cook` on disk.
+//!
+//! Cheap to `Clone` (one `Arc<PathBuf>` inside). Re-scans the
+//! cookbook directory on every `list`. The cookbook is
+//! typically <100 recipes so this is fine; switch to a cached
+//! snapshot if it ever bites.
 
-use std::sync::{Arc, Mutex};
-
-use uuid::Uuid;
-use vault::Vault;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::model::Recipe;
-use crate::parse::{looks_like_recipe, parse_page};
-use crate::scan::scan_vault;
+use crate::parse::parse_cook;
+use crate::scan::scan_cookbook;
 use crate::service::{CookbookError, CookbookService};
-use crate::write::{default_recipe_path, serialize_recipe};
+use crate::write::{delete_cook, rename_cook, write_cook};
 
 #[derive(Clone)]
 pub struct Store {
-    inner: Arc<Mutex<Vault>>,
+    vault_root: Arc<PathBuf>,
 }
 
 impl Store {
     #[must_use]
-    pub fn new(vault: Vault) -> Self {
+    pub fn new(vault_root: impl Into<PathBuf>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(vault)),
+            vault_root: Arc::new(vault_root.into()),
         }
     }
 
-    /// Reuse a `vault::Vault` mutex already owned by another
-    /// feature (locations / inventory / pantry / mealplan) so
-    /// every surface sees one consistent snapshot.
-    pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
-        Self { inner }
-    }
-
     #[must_use]
-    pub fn shared(&self) -> Arc<Mutex<Vault>> {
-        self.inner.clone()
+    pub fn vault_root(&self) -> &Path {
+        self.vault_root.as_path()
     }
 }
 
@@ -43,92 +38,56 @@ fn map_io(e: impl std::fmt::Display) -> CookbookError {
     CookbookError::Io(e.to_string())
 }
 
-fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
-    vault
-        .pages
-        .iter()
-        .position(|p| looks_like_recipe(p) && parse_page(p).map(|r| r.id == id).unwrap_or(false))
-}
-
 impl CookbookService for Store {
     fn list(&self) -> Result<Vec<Recipe>, CookbookError> {
-        let guard = self.inner.lock().expect("cookbook store poisoned");
-        Ok(scan_vault(&guard))
+        Ok(scan_cookbook(self.vault_root.as_path()))
     }
 
-    fn get(&self, id: &str) -> Result<Recipe, CookbookError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| CookbookError::BadRequest(format!("id: {e}")))?;
-        let guard = self.inner.lock().expect("cookbook store poisoned");
-        for page in guard.pages.iter().filter(|p| looks_like_recipe(p)) {
-            if let Ok(r) = parse_page(page) {
-                if r.id == uuid {
-                    return Ok(r);
-                }
-            }
+    fn get(&self, path: &str) -> Result<Recipe, CookbookError> {
+        let abs = self.vault_root.join(path);
+        if !abs.exists() {
+            return Err(CookbookError::NotFound(path.to_string()));
         }
-        Err(CookbookError::NotFound(id.to_string()))
+        let src = std::fs::read_to_string(&abs).map_err(map_io)?;
+        let mtime = std::fs::metadata(&abs)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(chrono::DateTime::<chrono::Utc>::from);
+        let mut r = parse_cook(path, &src).map_err(map_io)?;
+        r.date_modified = mtime;
+        Ok(r)
     }
 
-    fn create(&self, mut recipe: Recipe) -> Result<Recipe, CookbookError> {
-        if recipe.id.is_nil() {
-            recipe.id = Uuid::new_v4();
-        }
+    fn create(&self, recipe: Recipe) -> Result<Recipe, CookbookError> {
         if recipe.path.is_empty() {
-            recipe.path = default_recipe_path(&recipe.name, None);
+            return Err(CookbookError::BadRequest("recipe.path is empty".into()));
         }
-        let now = chrono::Utc::now();
-        recipe.date_created.get_or_insert(now);
-        recipe.date_modified = Some(now);
-        let body = serialize_recipe(&recipe).map_err(map_io)?;
-        let mut guard = self.inner.lock().expect("cookbook store poisoned");
-        if guard.pages.iter().any(|p| p.rel_path == recipe.path) {
+        let abs = self.vault_root.join(&recipe.path);
+        if abs.exists() {
             return Err(CookbookError::AlreadyExists(recipe.path));
         }
-        vault::create_page(&mut guard, &recipe.path, body).map_err(map_io)?;
-        Ok(recipe)
+        write_cook(self.vault_root.as_path(), &recipe, false).map_err(map_io)?;
+        self.get(&recipe.path)
     }
 
-    fn update(&self, mut recipe: Recipe) -> Result<Recipe, CookbookError> {
-        let mut guard = self.inner.lock().expect("cookbook store poisoned");
-        let idx = find_idx(&guard, recipe.id)
-            .ok_or_else(|| CookbookError::NotFound(recipe.id.to_string()))?;
-        recipe.path = guard.pages[idx].rel_path.clone();
-        recipe.date_modified = Some(chrono::Utc::now());
-        let body = serialize_recipe(&recipe).map_err(map_io)?;
-        guard.pages[idx].raw = body;
-        let path = recipe.path.clone();
-        vault::save_page(&mut guard, &path).map_err(map_io)?;
-        Ok(recipe)
-    }
-
-    fn rename(&self, id: &str, new_path: &str) -> Result<Recipe, CookbookError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| CookbookError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("cookbook store poisoned");
-        let idx = find_idx(&guard, uuid).ok_or_else(|| CookbookError::NotFound(id.to_string()))?;
-        if guard.pages.iter().any(|p| p.rel_path == new_path) {
-            return Err(CookbookError::AlreadyExists(new_path.to_string()));
+    fn update(&self, recipe: Recipe) -> Result<Recipe, CookbookError> {
+        if recipe.path.is_empty() {
+            return Err(CookbookError::BadRequest("recipe.path is empty".into()));
         }
-        let old_path = guard.pages[idx].rel_path.clone();
-        let raw = guard.pages[idx].raw.clone();
-        vault::delete_page(&mut guard, &old_path).map_err(map_io)?;
-        vault::create_page(&mut guard, new_path, raw).map_err(map_io)?;
-        let new_page = guard
-            .pages
-            .iter()
-            .find(|p| p.rel_path == new_path)
-            .ok_or_else(|| CookbookError::Io("rename: page missing post-write".into()))?;
-        parse_page(new_page).map_err(|e| CookbookError::Io(e.to_string()))
+        let abs = self.vault_root.join(&recipe.path);
+        if !abs.exists() {
+            return Err(CookbookError::NotFound(recipe.path));
+        }
+        write_cook(self.vault_root.as_path(), &recipe, true).map_err(map_io)?;
+        self.get(&recipe.path)
     }
 
-    fn delete(&self, id: &str) -> Result<(), CookbookError> {
-        let uuid =
-            Uuid::parse_str(id).map_err(|e| CookbookError::BadRequest(format!("id: {e}")))?;
-        let mut guard = self.inner.lock().expect("cookbook store poisoned");
-        let idx = find_idx(&guard, uuid).ok_or_else(|| CookbookError::NotFound(id.to_string()))?;
-        let path = guard.pages[idx].rel_path.clone();
-        vault::delete_page(&mut guard, &path).map_err(map_io)?;
-        Ok(())
+    fn rename(&self, old_path: &str, new_path: &str) -> Result<Recipe, CookbookError> {
+        rename_cook(self.vault_root.as_path(), old_path, new_path).map_err(map_io)?;
+        self.get(new_path)
+    }
+
+    fn delete(&self, path: &str) -> Result<(), CookbookError> {
+        delete_cook(self.vault_root.as_path(), path).map_err(map_io)
     }
 }

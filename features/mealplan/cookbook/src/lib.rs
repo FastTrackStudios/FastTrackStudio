@@ -1,23 +1,22 @@
-//! `cookbook` — typed view of recipe pages in a
-//! `vault::Vault`.
+//! `cookbook` — cooklang-native recipe storage.
 //!
-//! Recipes are markdown files with YAML frontmatter
-//! (`type: recipe`) living under `<vault>/Wiki/Cookbook/` so
-//! they ride on the wiki feature: bodies link freely into
-//! curated concept pages (`[[saute]]`, `[[mise en place]]`),
-//! and the wiki graph picks recipes up as just-another-page.
-//! This crate only owns the typed surface — ingredients,
-//! steps, nutrition. Narrative lives on the page body.
+//! Recipes are `.cook` files under `<vault>/Cookbook/` parsed
+//! by the [`cooklang`](https://cooklang.org) crate. One file
+//! per recipe, no sidecar; identity is the vault-relative path.
+//!
+//! Ingredient names ARE wikilink targets — the wiki layer
+//! resolves `@flour` to a `[[flour]]` page (e.g. a pantry item
+//! holding nutrition data) so the recipe knows nothing about
+//! pantry IDs. Mealprep matches at runtime by name.
 //!
 //! Surface:
-//! - [`Recipe`] / [`Ingredient`] / [`Nutrition`] / [`Course`]
-//! - [`parse_page`] / [`looks_like_recipe`]
-//! - [`serialize_recipe`] / [`write_recipe`]
-//! - [`scan_vault`]
+//! - [`Recipe`] / [`Ingredient`] / [`Course`]
+//! - [`parse_cook`] / [`parse_cook_at`]
+//! - [`scan_cookbook`] / [`image_paths_for`] / [`RecipeImage`]
+//! - [`write_cook`] / [`rename_cook`] / [`delete_cook`] /
+//!   [`default_recipe_path`]
 //! - [`CookbookService`] — `#[architect::rpc]` trait
-//! - [`Store`] — `Arc<Mutex<vault::Vault>>`-backed impl that
-//!   can share its vault snapshot with locations / inventory /
-//!   pantry / mealplan via `Store::from_shared`.
+//! - [`Store`] — file-backed impl. Cheap to `Clone`.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -28,9 +27,9 @@ pub mod service;
 pub mod store;
 pub mod write;
 
-pub use model::{Course, Ingredient, NestedRecipe, Nutrition, Recipe, Substitution};
-pub use parse::{ParseError, looks_like_recipe, parse_page};
-pub use scan::scan_vault;
+pub use model::{Course, Ingredient, Recipe};
+pub use parse::{ParseError, parse_cook, parse_cook_at};
+pub use scan::{COOKBOOK_DIR, RecipeImage, image_paths_for, scan_cookbook, scan_cookbook_at};
 pub use service::{CookbookError, CookbookService};
 pub use store::Store;
-pub use write::{WriteError, default_recipe_path, serialize_recipe, write_recipe};
+pub use write::{WriteError, default_recipe_path, delete_cook, rename_cook, write_cook};

@@ -1,6 +1,6 @@
 [package]
 name = "cookbook"
-description = "Cookbook feature — typed view of recipe pages in a `vault::Vault`. Recipes are markdown files with YAML frontmatter (`type: recipe`) living under `<vault>/Wiki/Cookbook/` so they ride on the wiki feature for curation + wikilinks (e.g. `[[saute]]` resolves into a concept page). Provides parse / serialize / scan plus a `#[architect::rpc] trait CookbookService` for agent integrations."
+description = "Cookbook feature — cooklang-native recipe storage. Recipes are `.cook` files under `<vault>/Cookbook/` parsed by the `cooklang` crate. One file per recipe; no sidecar; identity = vault-relative path. Ingredient names ARE wikilink targets — the wiki layer resolves `@flour` to a `[[flour]]` page (e.g. a pantry item or concept page) so the recipe knows nothing about pantry IDs. Mealprep matches at runtime by name. Provides parse / scan / write plus a `#[architect::rpc] trait CookbookService`."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,13 +11,12 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
-serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
-vault = { workspace = true }
+cooklang = { workspace = true }
+walkdir = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }

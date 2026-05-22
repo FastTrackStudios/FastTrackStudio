@@ -333,17 +333,23 @@ locations = { path = "features/locations/locations" }
 # rides on top of `vault` like `task` does.
 inventory = { path = "features/inventory/inventory" }
 # `mealplan` slice — vault-superset trio for food/cooking.
-# `cookbook` holds recipe pages (`type: recipe`) under
-# `<vault>/Wiki/Cookbook/` so they ride on the wiki feature
-# for curation + wikilinks. `pantry` rides on `inventory`
-# (`type: item` + `tags: [pantry]`) with food extras (qty /
-# unit / expiry / nutrition). `mealplan` is the facade
-# crate — meal pages on a calendar that reference recipes
-# and deduct from pantry on cook. The (future) `fitness`
-# feature will depend on `mealplan` for nutrition data.
+# `cookbook` owns cooklang `.cook` files under `<vault>/Cookbook/`
+# (single file per recipe, no sidecar; ingredient names ARE
+# wikilinks resolved by the wiki layer). `pantry` rides on
+# `inventory` (`type: item` + `tags: [pantry]`) with food extras
+# (qty / unit / expiry / nutrition). `mealplan` is the facade
+# crate — meal pages on a calendar that reference recipes by
+# vault-relative path and deduct from pantry on cook. The
+# `fitness` feature depends on `mealplan` for nutrition data.
+# See `plans/cooklang-migration.md`.
 cookbook = { path = "features/mealplan/cookbook" }
 pantry = { path = "features/mealplan/pantry" }
 mealplan = { path = "features/mealplan/mealplan" }
+
+# Cooklang recipe format parser (https://cooklang.org).
+# Native parser + scaling + unit conversion + aisle.conf.
+# Used by `cookbook` as the canonical recipe model.
+cooklang = "0.18"
 # `fitness` slice — exercises + workouts + body + intake +
 # facade. Models ported from wger (read-only checkout at
 # `~/Development/research/wger`). `intake` depends on
