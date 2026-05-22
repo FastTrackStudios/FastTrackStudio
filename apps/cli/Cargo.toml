@@ -37,6 +37,15 @@ wiki-live.workspace = true
 wiki-graph.workspace = true
 wiki-proto.workspace = true
 wiki-search.workspace = true
+# `task-cli timer …` — local time tracking against a sqlite
+# db. No server needed; the same `timer::Store` the server
+# mounts works fine for a single-user CLI session.
+timer-proto = { workspace = true, features = ["server", "vox"] }
+timer = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+# Project lookup for timer's project-defaults resolver.
+project = { workspace = true }
 walkdir = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true }

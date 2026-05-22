@@ -17,6 +17,7 @@ timer-proto = { workspace = true, default-features = false }
 vault = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

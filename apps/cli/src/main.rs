@@ -73,6 +73,12 @@ enum Commands {
     /// command itself routes through `agent-wiki::bridge`.
     #[command(subcommand)]
     Wiki(WikiCmd),
+    /// Billable time tracking. Local SQLite backed (no
+    /// server needed); same `timer::Store` the server
+    /// mounts. Project lookup reads `Projects/*.md` for the
+    /// rate cascade.
+    #[command(subcommand)]
+    Timer(TimerCmd),
 }
 
 #[derive(Subcommand)]
@@ -503,6 +509,81 @@ enum VaultCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum TimerCmd {
+    /// Start the timer for the configured user. Fails if a
+    /// session is already open.
+    Start {
+        /// Free-text description. Quoted to allow spaces.
+        description: String,
+        /// Project frontmatter id (uuid) the session is
+        /// logged against. Empty = uncategorized.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Vault-relative path to the task note this
+        /// session is for.
+        #[arg(long, default_value = "")]
+        task_note: String,
+    },
+    /// Stop the current session. Snapshots `rate_cents` +
+    /// `currency` via the rate cascade and writes the closed
+    /// row.
+    Stop,
+    /// Show the active session, if any.
+    Active,
+    /// Atomic stop-then-start. Same args as `start`.
+    Switch {
+        description: String,
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        #[arg(long, default_value = "")]
+        task_note: String,
+    },
+    /// Retro-log a past session: `--from` / `--to` ISO 8601
+    /// timestamps + description. Skips the active-timer
+    /// invariant.
+    Log {
+        description: String,
+        #[arg(long)]
+        from: chrono::DateTime<chrono::Utc>,
+        #[arg(long)]
+        to: chrono::DateTime<chrono::Utc>,
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        #[arg(long, default_value = "")]
+        task_note: String,
+        /// `true` / `false` to override the project default.
+        /// Omit to inherit.
+        #[arg(long)]
+        billable: Option<bool>,
+    },
+    /// List sessions. Defaults to the last 7 days.
+    List {
+        /// Only sessions on this project (frontmatter uuid).
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Inclusive since-date. Defaults to 7 days ago.
+        #[arg(long)]
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        /// Exclusive until-date. Defaults to "now".
+        #[arg(long)]
+        until: Option<chrono::DateTime<chrono::Utc>>,
+        /// Filter open / closed sessions; omit for both.
+        #[arg(long)]
+        open: Option<bool>,
+        /// Filter billable / non-billable; omit for both.
+        #[arg(long)]
+        billable: Option<bool>,
+    },
+    /// Resolve the rate cascade for the configured user +
+    /// project. Useful to preview "what will this session
+    /// bill at" before stopping.
+    Resolve {
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // Best-effort .env load before clap reads env. Missing file is
@@ -527,8 +608,315 @@ async fn main() -> eyre::Result<()> {
         Commands::Wiki(cmd) => {
             return run_wiki(cmd).await;
         }
+        Commands::Timer(cmd) => {
+            return run_timer(cmd).await;
+        }
     }
     Ok(())
+}
+
+async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+    use std::sync::Arc;
+    use timer::store::{Store, VaultProjectDefaults};
+    use timer_proto::service::{LogSessionRequest, StartTimerRequest, TimerService};
+
+    // Layout — single-user CLI mode:
+    // - DB at $XDG_DATA_HOME/task/timer.sqlite (override via
+    //   `TASK_TIMER_DB`).
+    // - Vault root at `TASK_VAULT_ROOT` (defaults to
+    //   `./examples/vault` so the rate-cascade lookup
+    //   works against the demo vault out of the box).
+    // - User + org ids from `TASK_USER_ID` / `TASK_ORG_ID`
+    //   env, falling back to nil-uuid so a fresh setup
+    //   "just works" before auth is wired in.
+    let db_url = std::env::var("TASK_TIMER_DB").unwrap_or_else(|_| {
+        let base = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+                    .map(|p| p.join(".local/share"))
+            })
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let dir = base.join("task");
+        let _ = std::fs::create_dir_all(&dir);
+        format!("sqlite://{}?mode=rwc", dir.join("timer.sqlite").display())
+    });
+    let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
+        |_| std::path::PathBuf::from("examples/vault"),
+        std::path::PathBuf::from,
+    );
+    let user_id = std::env::var("TASK_USER_ID")
+        .ok()
+        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
+    let org_id = std::env::var("TASK_ORG_ID")
+        .ok()
+        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+        .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap());
+
+    let conn = Database::connect(&db_url)
+        .await
+        .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
+    timer::Migrator::up(&conn, None)
+        .await
+        .map_err(|e| eyre::eyre!("timer migrations: {e}"))?;
+    let defaults = Arc::new(VaultProjectDefaults {
+        vault_root: vault_root.clone(),
+    });
+    let store = Store::new(conn, defaults);
+
+    match cmd {
+        TimerCmd::Start {
+            description,
+            project,
+            task_note,
+        } => {
+            let project_path = project_path_for(&vault_root, project);
+            let session = store
+                .start_timer(StartTimerRequest {
+                    user_id,
+                    org_id,
+                    project_id: project,
+                    project_path,
+                    task_note_path: task_note,
+                    description,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("start: {e}"))?;
+            println!("Started {} at {}", session.id, session.start_time);
+            println!("  description: {}", session.description);
+            if !session.project_path.is_empty() {
+                println!("  project:     {}", session.project_path);
+            }
+            println!("  billable:    {}", session.billable);
+        }
+        TimerCmd::Stop => {
+            let session = store
+                .stop_timer(user_id)
+                .await
+                .map_err(|e| eyre::eyre!("stop: {e}"))?;
+            let elapsed = session
+                .end_time
+                .unwrap_or_else(chrono::Utc::now)
+                .signed_duration_since(session.start_time);
+            println!("Stopped {}", session.id);
+            println!("  description: {}", session.description);
+            println!("  elapsed:     {}", fmt_duration(elapsed));
+            if session.billable {
+                println!(
+                    "  billed:      {} {} (rate: {} {}/h)",
+                    fmt_money(billed_cents(&session, elapsed)),
+                    session.currency,
+                    fmt_money(session.rate_cents),
+                    session.currency,
+                );
+            }
+        }
+        TimerCmd::Active => {
+            match store
+                .active_timer(user_id)
+                .await
+                .map_err(|e| eyre::eyre!("{e}"))?
+            {
+                Some(s) => {
+                    let elapsed = chrono::Utc::now().signed_duration_since(s.start_time);
+                    println!("Running for {} ({})", fmt_duration(elapsed), s.id);
+                    if !s.description.is_empty() {
+                        println!("  description: {}", s.description);
+                    }
+                    if !s.project_path.is_empty() {
+                        println!("  project:     {}", s.project_path);
+                    }
+                    if !s.task_note_path.is_empty() {
+                        println!("  task:        {}", s.task_note_path);
+                    }
+                }
+                None => println!("No active timer."),
+            }
+        }
+        TimerCmd::Switch {
+            description,
+            project,
+            task_note,
+        } => {
+            let project_path = project_path_for(&vault_root, project);
+            let (closed, started) = store
+                .switch_timer(StartTimerRequest {
+                    user_id,
+                    org_id,
+                    project_id: project,
+                    project_path,
+                    task_note_path: task_note,
+                    description,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("switch: {e}"))?;
+            if let Some(prev) = closed {
+                let elapsed = prev
+                    .end_time
+                    .unwrap_or_else(chrono::Utc::now)
+                    .signed_duration_since(prev.start_time);
+                println!("Stopped {} after {}", prev.id, fmt_duration(elapsed));
+            }
+            println!("Started {} at {}", started.id, started.start_time);
+        }
+        TimerCmd::Log {
+            description,
+            from,
+            to,
+            project,
+            task_note,
+            billable,
+        } => {
+            let project_path = project_path_for(&vault_root, project);
+            let session = store
+                .log_session(LogSessionRequest {
+                    user_id,
+                    org_id,
+                    project_id: project,
+                    project_path,
+                    task_note_path: task_note,
+                    description,
+                    start_time: from,
+                    end_time: to,
+                    billable_override: billable,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("log: {e}"))?;
+            println!("Logged {} ({})", session.id, fmt_duration(to - from));
+        }
+        TimerCmd::List {
+            project,
+            since,
+            until,
+            open,
+            billable,
+        } => {
+            let filter = timer_proto::WorkSessionFilter {
+                user_id: Some(user_id),
+                project_id: project,
+                since: Some(
+                    since.unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::days(7)),
+                ),
+                until,
+                billable,
+                open,
+            };
+            let rows = store
+                .list_sessions(&filter)
+                .await
+                .map_err(|e| eyre::eyre!("list: {e}"))?;
+            if rows.is_empty() {
+                println!("(no sessions)");
+            }
+            for s in rows {
+                let end = s
+                    .end_time
+                    .map_or_else(|| "open".to_string(), |t| t.to_rfc3339());
+                let elapsed = s
+                    .end_time
+                    .unwrap_or_else(chrono::Utc::now)
+                    .signed_duration_since(s.start_time);
+                println!(
+                    "{}  {:>8}  {}  {} {}",
+                    s.start_time.format("%Y-%m-%d %H:%M"),
+                    fmt_duration(elapsed),
+                    if s.billable { "billable" } else { "        " },
+                    s.description,
+                    if end == "open" {
+                        "[OPEN]".to_string()
+                    } else {
+                        String::new()
+                    },
+                );
+            }
+        }
+        TimerCmd::Resolve { project } => {
+            let resolved = store
+                .resolve_rate(user_id, project)
+                .await
+                .map_err(|e| eyre::eyre!("resolve: {e}"))?;
+            println!(
+                "rate: {} {}/h  source: {:?}",
+                fmt_money(resolved.hourly_cents),
+                if resolved.currency.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    resolved.currency
+                },
+                resolved.source,
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Resolve the project markdown path from its frontmatter
+/// id by scanning `Projects/*.md`. `None` project_id → empty.
+fn project_path_for(vault_root: &std::path::Path, project_id: Option<uuid::Uuid>) -> String {
+    let Some(pid) = project_id else {
+        return String::new();
+    };
+    let dir = vault_root.join("Projects");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return String::new();
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(vault_root)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let basename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let Ok(p) = project::parse_str(&rel, basename, &raw) else {
+            continue;
+        };
+        if p.id == pid {
+            return rel;
+        }
+    }
+    String::new()
+}
+
+fn fmt_duration(d: chrono::Duration) -> String {
+    let secs = d.num_seconds().max(0);
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    let s = secs % 60;
+    if h > 0 {
+        format!("{h}h{m:02}m{s:02}s")
+    } else if m > 0 {
+        format!("{m}m{s:02}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
+fn fmt_money(cents: i64) -> String {
+    let neg = cents < 0;
+    let abs = cents.unsigned_abs();
+    let dollars = abs / 100;
+    let frac = abs % 100;
+    format!("{}{dollars}.{frac:02}", if neg { "-" } else { "" })
+}
+
+fn billed_cents(s: &timer_proto::WorkSession, elapsed: chrono::Duration) -> i64 {
+    let secs = elapsed.num_seconds().max(0);
+    // rate_cents is per hour; convert seconds → hours via i128 to dodge overflow.
+    let cents = (secs as i128) * (s.rate_cents as i128) / 3600_i128;
+    cents.try_into().unwrap_or(i64::MAX)
 }
 
 async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
