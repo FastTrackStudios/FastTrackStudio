@@ -3,7 +3,7 @@
 //!
 //! The crate is a *binding library*, not a backend. Backends
 //! (Hermes, Codex monitor, claude CLI bridge) implement
-//! `agent_proto::AgentService` in their own way; this crate
+//! `agent_proto::Agents` in their own way; this crate
 //! supplies the **prompts** they send and the **parsers**
 //! that turn LLM output into [`wiki_proto`] calls.
 //!
@@ -19,7 +19,7 @@
 //!   returns typed values ready to feed back through
 //!   `WikiService`.
 //! - [`bridge`] — orchestration helpers: "run one ingest
-//!   loop", "run one lint pass". They sequence `AgentService`
+//!   loop", "run one lint pass". They sequence `Agents`
 //!   dispatches and `WikiService` writes.
 //! - [`error`] — `AgentWikiError`.
 //!

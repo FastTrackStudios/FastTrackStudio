@@ -3,7 +3,7 @@
 LLM-agent integration. Models projects, sessions, threads,
 messages, tools, approvals, kanban, and the streaming
 `AgentEvent` union over an `#[architect::rpc] trait
-AgentService`. Backends slot in as siblings (Hermes
+Agents`. Backends slot in as siblings (Hermes
 in-process, Codex CLI monitor, Claude CLI bridge, Pi,
 custom). Binding crates layer per-feature prompts +
 parsers on top (`agent-wiki` drives `wiki-proto`; future
@@ -26,7 +26,7 @@ Synthesized from three deep dives:
 | `CliBridge`        | claude CLI      | Spawns CLI per turn; parses stdout         |
 | `Http`             | hosted Hermes / peer Task server | Standard SSE proxy        |
 
-`AgentService` is the same trait for all four; the
+`Agents` is the same trait for all four; the
 implementation varies. UIs and CLIs depend only on the trait.
 
 ## Crate plan
@@ -35,7 +35,7 @@ implementation varies. UIs and CLIs depend only on the trait.
 features/agent/
 ├── agent-proto/   ✅ shipped — wire contract
 ├── agent-wiki/    ✅ shipped — wiki bindings (prompts + parsers)
-├── agent-codex/   🚧 in flight — vendor + skeleton shipped; AgentService impl queued
+├── agent-codex/   🚧 in flight — vendor + skeleton shipped; Agents impl queued
 ├── agent-hermes/  ⏳ future — in-process Hermes backend
 ├── agent-task/    ⏳ future — task/kanban bindings
 ├── agent-cli/     ⏳ future — `task agent ...` CLI subcommands
@@ -53,7 +53,7 @@ Module map (`features/agent/agent-proto/src/`):
 
 | File           | What                                                              |
 |----------------|-------------------------------------------------------------------|
-| `service.rs`   | `AgentService` trait + architect-emitted client.                  |
+| `service.rs`   | `Agents` trait + architect-emitted client.                  |
 | `backend.rs`   | `AgentBackend`, `BackendKind`, `BackendHealth`.                   |
 | `profile.rs`   | `Profile`, `Personality`, `ModelConfig`, `ToolsetConfig`, `McpServerSpec`. |
 | `project.rs`   | `Project`, `GitContext`, `ProjectSettings`.                       |
@@ -69,7 +69,7 @@ Module map (`features/agent/agent-proto/src/`):
 | `paths.rs`     | Disk layout for state-keeping backends.                           |
 | `error.rs`     | `AgentError`.                                                     |
 
-`AgentService` exposes ~50 methods: backend / profile /
+`Agents` exposes ~50 methods: backend / profile /
 project CRUD, session lifecycle + import-from-external,
 turn dispatch + cancel + resume, message + tool + reasoning
 + attachment read, approval + question resolution, full
@@ -159,7 +159,7 @@ External deps pinned: `tokio` (full), `serde`, `serde_json`,
   # → PONG
   ```
 
-#### 2c. ⏳ Full AgentService impl
+#### 2c. ⏳ Full Agents impl
 
 Next commit. Translation layer that turns JSON-RPC messages
 into `agent_proto` shapes:
@@ -283,7 +283,7 @@ defaults.
   trait but the loop semantics aren't pinned down. First
   Hermes integration will likely shape this.
 - **Federation** — peer Task servers exposing
-  `AgentService` over HTTP/WS would let agents collaborate
+  `Agents` over HTTP/WS would let agents collaborate
   across vaults. Out of scope until the wiki feature lands
   federation first; same trait can be reused.
 

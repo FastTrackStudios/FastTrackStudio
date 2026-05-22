@@ -34,6 +34,7 @@ name = "agent-codex"
 version = "0.1.0"
 dependencies = [
  "agent-proto",
+ "architect",
  "chrono",
  "futures",
  "serde",
@@ -44,6 +45,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "uuid",
+ "vox",
 ]
 
 [[package]]
@@ -62,9 +64,15 @@ dependencies = [
 name = "agent-wiki"
 version = "0.1.0"
 dependencies = [
+ "agent-codex",
  "agent-proto",
+ "chrono",
  "facet",
+ "futures",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "wiki-live",
  "wiki-proto",
 ]
 
@@ -11190,6 +11198,7 @@ version = "0.1.0"
 dependencies = [
  "agent-codex",
  "agent-proto",
+ "agent-wiki",
  "chrono",
  "clap",
  "dotenvy",
@@ -11206,6 +11215,7 @@ dependencies = [
  "vault-obsidian",
  "vox",
  "walkdir",
+ "wiki-live",
 ]
 
 [[package]]
@@ -13389,6 +13399,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
+name = "wiki-live"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "walkdir",
+ "wiki-proto",
+]
+
+[[package]]
 name = "wiki-proto"
 version = "0.1.0"
 dependencies = [
@@ -14513,10 +14538,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+
+[[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"

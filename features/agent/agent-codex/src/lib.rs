@@ -2,54 +2,47 @@
 //!
 //! Vendors CodexMonitor's tokio Rust control plane for
 //! `codex app-server` under [`vendor`] (~3100 LOC, mostly
-//! verbatim) and exposes a thin wrapper that implements
-//! `agent_proto::AgentService` on top of it.
+//! verbatim) and exposes a wrapper that implements
+//! `agent_proto::Agents` on top of it.
 //!
-//! ## Current slice (this commit)
+//! ## Surface
 //!
-//! - Vendored modules build clean.
-//! - `EventSink` is implemented over a
-//!   `tokio::sync::broadcast` channel so multiple
-//!   subscribers (UIs, CLIs, the wiki bridge) can tap the
-//!   same Codex event stream.
-//! - `CodexBackend` struct owns the workspace-session
-//!   registry. `AgentService` impl is queued for the next
-//!   commit — the trait surface needs translation from
-//!   Codex's `WorkspaceInfo` / `ThreadSummary` /
-//!   `ConversationItem` shapes into our types.
-//!
-//! ## Roadmap
-//!
-//! 1. (this) — vendor + skeleton builds.
-//! 2. Translate JSON-RPC payloads → `AgentEvent`
-//!    (`message_delta`, `tool_started`, `tool_finished`,
-//!    `approval_requested`, etc.).
-//! 3. Implement read-side `AgentService` methods
-//!    (`list_sessions`, `read_session`, `list_messages`,
-//!    `list_tool_calls`).
-//! 4. Implement `dispatch_turn` over `vendor::app_server::WorkspaceSession::send_request`.
-//! 5. `import_external_session` from on-disk Codex logs
-//!    (separate path; no daemon required).
+//! - `CodexBackend` — top-level handle, cheaply clonable.
+//!   Owns a `BroadcastSink` (vendor `EventSink`), a session
+//!   registry keyed by `session_id`, and per-session
+//!   broadcast channels with translated
+//!   `agent_proto::AgentEvent`s.
+//! - `CodexBackend::subscribe_raw()` — raw event firehose
+//!   for debug / advanced consumers.
+//! - `CodexBackend::chat()` — single-turn convenience used
+//!   by the CLI demo and by `agent-wiki`'s ingest bridge.
+//! - `impl Agents for CodexBackend` — proto-shaped surface.
+//!   Codex-relevant methods (sessions, dispatch_turn,
+//!   subscribe_session) are real; non-Codex methods
+//!   (profiles, kanban, projects, ...) return
+//!   `AgentError::Unsupported`.
 
 #[path = "../vendor/mod.rs"]
 mod vendor;
 
 mod chat;
+mod service;
 mod translate;
 
-pub use chat::{ChatHandle, ChatOpts};
-
+use std::collections::HashMap;
 use std::sync::Arc;
+
 use tokio::sync::{Mutex, broadcast};
 
-// Re-exports of the vendored types our public surface needs.
-// `vendor::app_server::WorkspaceSession` is `pub(crate)` upstream; we surface it
-// through `CodexBackend` methods rather than re-exporting.
+use agent_proto::event::AgentEvent;
+use agent_proto::session::Session;
+
+pub use chat::{ChatHandle, ChatOpts};
 pub use vendor::events::AppServerEvent;
 
 /// Sink that fans `AppServerEvent`s out to a broadcast
-/// channel. Consumers subscribe to a `Receiver<AppServerEvent>`;
-/// the [`CodexBackend`] then translates each event into an
+/// channel. Implements the vendored `EventSink` trait;
+/// `CodexBackend` translates each event into an
 /// `agent_proto::AgentEvent` for the trait's subscription
 /// channels.
 #[derive(Clone)]
@@ -70,56 +63,57 @@ impl BroadcastSink {
 
 impl vendor::events::EventSink for BroadcastSink {
     fn emit_app_server_event(&self, event: AppServerEvent) {
-        // Drop the result — there may be no subscribers yet
-        // and that's fine.
         let _ = self.tx.send(event);
     }
 }
 
-/// Top-level handle to the Codex backend. Owns a registry
-/// of per-workspace [`vendor::app_server::WorkspaceSession`] handles + the
-/// broadcast sink they all push to.
+/// Per-session bookkeeping carried by [`CodexBackend`].
+pub(crate) struct SessionRow {
+    pub(crate) session: Session,
+    /// Broadcast channel of translated `AgentEvent`s for
+    /// this session. Subscribers (UIs, CLIs, agent-wiki
+    /// bridges) hit this; `dispatch_turn` populates it.
+    pub(crate) events_tx: broadcast::Sender<AgentEvent>,
+    /// Accumulated assistant text keyed by message id —
+    /// `list_messages` rebuilds `Message`s from this.
+    pub(crate) accumulated: HashMap<String, String>,
+}
+
+/// Top-level handle to the Codex backend. Clone-friendly:
+/// the inner state lives behind `Arc`, so workers spawned
+/// from trait methods share the same session map.
+#[derive(Clone)]
 pub struct CodexBackend {
-    sink: BroadcastSink,
-    #[allow(dead_code)] // wired by `register` in the next slice
-    sessions: Arc<Mutex<Vec<Arc<vendor::app_server::WorkspaceSession>>>>,
+    inner: Arc<CodexInner>,
+}
+
+pub(crate) struct CodexInner {
+    pub(crate) sink: BroadcastSink,
+    pub(crate) sessions: Mutex<HashMap<String, SessionRow>>,
 }
 
 impl CodexBackend {
     pub fn new() -> Self {
         Self {
-            sink: BroadcastSink::new(1024),
-            sessions: Arc::new(Mutex::new(Vec::new())),
+            inner: Arc::new(CodexInner {
+                sink: BroadcastSink::new(1024),
+                sessions: Mutex::new(HashMap::new()),
+            }),
         }
     }
 
-    /// Subscribe to the raw Codex event stream. Most
-    /// callers will prefer the `agent_proto::AgentService`
-    /// `subscribe_session` surface once it's wired; this is
-    /// the low-level firehose.
+    /// Subscribe to the raw Codex event stream — every
+    /// `AppServerEvent` regardless of workspace. UIs prefer
+    /// `subscribe_session` (in the trait) for filtered
+    /// streams.
     pub fn subscribe_raw(&self) -> broadcast::Receiver<AppServerEvent> {
-        self.sink.subscribe()
+        self.inner.sink.subscribe()
     }
 
-    /// Hand out a clone of the sink so callers can spawn
-    /// workspace sessions with it.
+    /// Clone of the sink so callers can spawn workspace
+    /// sessions with it.
     pub fn sink(&self) -> BroadcastSink {
-        self.sink.clone()
-    }
-
-    /// Track a freshly-spawned vendor `WorkspaceSession`.
-    /// Crate-internal — the public API runs through
-    /// `agent_proto::AgentService` once the wrapper is wired
-    /// (next slice).
-    #[allow(dead_code)]
-    pub(crate) async fn register(&self, session: Arc<vendor::app_server::WorkspaceSession>) {
-        self.sessions.lock().await.push(session);
-    }
-
-    /// Snapshot of the live session registry. Crate-internal.
-    #[allow(dead_code)]
-    pub(crate) async fn sessions(&self) -> Vec<Arc<vendor::app_server::WorkspaceSession>> {
-        self.sessions.lock().await.clone()
+        self.inner.sink.clone()
     }
 }
 

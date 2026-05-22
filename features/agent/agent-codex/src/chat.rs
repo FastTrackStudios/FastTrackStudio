@@ -2,7 +2,7 @@
 //! workspace, sends `thread/start` + `turn/start`, returns a
 //! stream of translated `AgentEvent`s.
 //!
-//! Not the final `AgentService` impl — this is the
+//! Not the final `Agents` impl — this is the
 //! validation surface CLI demos build on. Slice 2c wraps
 //! these primitives behind the trait.
 
