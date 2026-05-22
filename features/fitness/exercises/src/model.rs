@@ -157,6 +157,7 @@ impl Category {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "chest" | "push-chest" => Some(Self::Chest),
@@ -208,6 +209,7 @@ impl Equipment {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "barbell" | "bb" => Some(Self::Barbell),
@@ -241,6 +243,7 @@ impl Mechanics {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "compound" | "multi-joint" => Some(Self::Compound),
@@ -272,6 +275,7 @@ impl Force {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "push" => Some(Self::Push),

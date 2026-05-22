@@ -5,9 +5,9 @@
 //! (`type: exercise`) living under `<vault>/Wiki/Exercises/`
 //! so they ride on the wiki feature for curation +
 //! wikilinks (`[[scapular retraction]]`,
-//! `[[pectoralis-major]]`). Modeled on wger's `Exercise`
-//! + `Category` + `Muscle` + `Equipment` + `ExerciseAlias`
-//! tables, flattened onto one page per exercise.
+//! `[[pectoralis-major]]`). Modeled on wger's tables —
+//! `Exercise`, `Category`, `Muscle`, `Equipment`,
+//! `ExerciseAlias` — flattened onto one page per exercise.
 //!
 //! Surface:
 //! - [`Exercise`] / [`Category`] / [`Equipment`] /
