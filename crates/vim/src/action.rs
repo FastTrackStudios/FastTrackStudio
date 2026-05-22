@@ -95,10 +95,11 @@ pub enum BlockOp {
 /// What the engine emits in response to a key sequence. The host
 /// editor translates each variant to the appropriate effect on
 /// its content + selection state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
 pub enum VimAction {
     /// Engine produced no observable action (mode-only transition,
     /// pending state, etc.). Hosts can ignore.
+    #[default]
     NoOp,
 
     /// Cursor / selection movement.
@@ -185,11 +186,5 @@ impl VimCommand {
             "noh" | "nohlsearch" => Some(Self::NoHighlight),
             _ => None,
         }
-    }
-}
-
-impl Default for VimAction {
-    fn default() -> Self {
-        Self::NoOp
     }
 }

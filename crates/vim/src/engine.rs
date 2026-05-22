@@ -179,7 +179,7 @@ impl VimEngine {
                 } else {
                     1
                 };
-                return std::iter::repeat(action).take(n).collect();
+                return std::iter::repeat_n(action, n).collect();
             }
             // Non-char key cancels the pending operator silently.
             return vec![];
@@ -246,7 +246,7 @@ impl VimEngine {
                             direction: dir,
                             till,
                         });
-                        return std::iter::repeat(action).take(count as usize).collect();
+                        return std::iter::repeat_n(action, count as usize).collect();
                     }
                     return vec![];
                 }

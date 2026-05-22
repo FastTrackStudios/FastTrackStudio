@@ -4645,7 +4645,7 @@ fn parse_state_diagram(input: &str) -> Result<ParseOutput> {
             }
         })
         .collect();
-    for id in fork_ids.into_iter().chain(join_ids.into_iter()) {
+    for id in fork_ids.into_iter().chain(join_ids) {
         if let Some(node) = graph.nodes.get_mut(&id) {
             node.shape = crate::ir::NodeShape::ForkJoin;
             node.label.clear();

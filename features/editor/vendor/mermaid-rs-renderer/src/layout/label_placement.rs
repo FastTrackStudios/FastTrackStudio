@@ -1841,7 +1841,7 @@ fn solve_flowchart_component_assignment(
 
                 let mut assignments = state.assignments.clone();
                 assignments.push((entry_idx, cand_idx));
-                assignments.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+                assignments.sort_unstable_by_key(|a| a.0);
                 let mut rects = state.rects.clone();
                 rects.push(cand.rect);
                 next.push(FlowchartBeamState {
