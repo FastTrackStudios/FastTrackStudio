@@ -8,7 +8,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use vault::VaultPage;
 
-use crate::model::{Ingredient, NestedRecipe, Nutrition, Recipe};
+use crate::model::{Ingredient, NestedRecipe, Nutrition, Recipe, Substitution};
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -135,6 +135,7 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                     qty: None,
                     unit: String::new(),
                     pantry_item_id: None,
+                    substitutes: Vec::new(),
                     note: None,
                     optional: false,
                 });
@@ -156,11 +157,49 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             let optional = m.get("optional").and_then(|v| v.as_bool()).unwrap_or(false);
+            let substitutes = m
+                .get("substitutes")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|sv| {
+                            // String shorthand: a sub can be
+                            // just `"olive oil"`.
+                            if let Some(s) = sv.as_str() {
+                                return Some(Substitution {
+                                    name: s.to_string(),
+                                    pantry_item_id: None,
+                                    ratio: 1.0,
+                                    note: None,
+                                });
+                            }
+                            let sm = sv.as_mapping()?;
+                            let name = sm.get("name").and_then(|v| v.as_str())?.to_string();
+                            let pantry_item_id = sm
+                                .get("pantryItemId")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| uuid::Uuid::parse_str(s).ok());
+                            let ratio = sm.get("ratio").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                            let note = sm
+                                .get("note")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            Some(Substitution {
+                                name,
+                                pantry_item_id,
+                                ratio,
+                                note,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             Some(Ingredient {
                 name,
                 qty,
                 unit,
                 pantry_item_id,
+                substitutes,
                 note,
                 optional,
             })

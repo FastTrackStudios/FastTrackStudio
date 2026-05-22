@@ -156,10 +156,67 @@ pub struct Ingredient {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub note: Option<String>,
 
+    /// Per-recipe substitution candidates. Curator-authored
+    /// (e.g. `buttermilk` recipe ingredient lists "milk +
+    /// lemon juice" as a sub). Fulfillment checks these
+    /// *first*, before global pantry-item subs and the
+    /// substitution registry — recipe-level wins because the
+    /// author's intent ("for this dish, X behaves like Y") is
+    /// the most specific knowledge.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub substitutes: Vec<Substitution>,
+
     /// Skip when scaling pantry deductions or showing the
     /// quick-glance "do I have everything" check.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+}
+
+/// One substitution candidate. Lives in three places (see
+/// `plans/mealplan-grocy-parity.md`):
+/// - [`Ingredient::substitutes`] — recipe-author
+///   intent. Wins.
+/// - `pantry::Substitution` on a [`pantry::PantryItem`] —
+///   global, bidirectional pantry knowledge.
+/// - `mealplan::substitutions::SubstitutionRule` — the
+///   composable knowledge graph.
+///
+/// `ratio` is `units_of_substitute / unit_of_original`:
+/// `1 cup butter` → `Substitution { ratio: 0.75 }` for olive
+/// oil means "use 0.75 cup oil per cup butter".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct Substitution {
+    /// Free-form display name — what the substitute *is*.
+    /// Required even when `pantry_item_id` is set so the
+    /// suggestion reads without a pantry lookup.
+    pub name: String,
+
+    /// Optional explicit pantry-item link for the
+    /// substitute. When set, fulfillment honors it before
+    /// name fuzzy-match — same precedence rule as
+    /// [`Ingredient::pantry_item_id`].
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "pantryItemId"
+    )]
+    pub pantry_item_id: Option<uuid::Uuid>,
+
+    /// `1.0` = same volume / mass; `0.75` = "use 75% as
+    /// much by the same unit"; `2.0` = "use twice as much".
+    /// Multiplied with the original ingredient's qty when
+    /// the sub is applied.
+    #[serde(default = "default_ratio")]
+    pub ratio: f64,
+
+    /// Free-form note — `"adds tangy note"`, `"only works
+    /// in baked goods"`, `"may need extra liquid"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub note: Option<String>,
+}
+
+fn default_ratio() -> f64 {
+    1.0
 }
 
 /// Sub-recipe reference. Pull in `servings` worth of

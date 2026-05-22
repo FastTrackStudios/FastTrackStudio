@@ -28,7 +28,9 @@ pub mod units;
 pub mod write;
 
 pub use lookup::{LookupError, lookup_external};
-pub use model::{DueType, FoodCategory, PantryItem, PantryItemDraft, StockEntry};
+pub use model::{
+    DueType, FoodCategory, PantryItem, PantryItemDraft, StockEntry, SubReason, Substitution,
+};
 pub use parse::{ParseError, looks_like_pantry_item, parse_page};
 pub use scan::{expired, expiring_within, low_stock, scan_vault};
 pub use service::{BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService};

@@ -38,9 +38,13 @@ pub mod scan;
 pub mod service;
 pub mod shopping;
 pub mod store;
+pub mod substitutions;
 pub mod write;
 
-pub use fulfillment::{Fulfillment, Shortage, ShortageReason, check_nested};
+pub use fulfillment::{
+    Fulfillment, Shortage, ShortageReason, SubstitutionSource, SubstitutionSuggestion,
+    check_nested, check_with_subs,
+};
 pub use model::{Meal, PantryDeduction, Slot, Status};
 pub use parse::{ParseError, looks_like_meal, parse_page};
 pub use scan::{meals_between, meals_on, scan_vault};
@@ -50,6 +54,10 @@ pub use shopping::{
     looks_like_shopping_list,
 };
 pub use store::Store;
+pub use substitutions::{
+    Store as SubstitutionStore, SubstitutionError, SubstitutionRule, SubstitutionService,
+    looks_like_substitution_rule,
+};
 pub use write::{WriteError, default_meal_path, serialize_meal, write_meal};
 
 // Re-exports — consumers depend on this crate alone.

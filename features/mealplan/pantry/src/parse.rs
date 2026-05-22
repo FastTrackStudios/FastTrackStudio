@@ -10,7 +10,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use vault::VaultPage;
 
-use crate::model::PantryItem;
+use crate::model::{PantryItem, SubReason, Substitution};
 use cookbook::Nutrition;
 
 #[derive(Debug, Error)]
@@ -94,6 +94,42 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         .and_then(|v| v.as_u64())
         .and_then(|n| u32::try_from(n).ok());
     let due_type = take_str(&map, "dueType").unwrap_or_else(|| "best-before".into());
+    let substitutes = map
+        .get("substitutes")
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|row| {
+                    let m = row.as_mapping()?;
+                    let item_id = m
+                        .get("itemId")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| Uuid::parse_str(s).ok())?;
+                    let ratio = m.get("ratio").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                    let reasons = m
+                        .get("reasons")
+                        .and_then(|v| v.as_sequence())
+                        .map(|s| {
+                            s.iter()
+                                .filter_map(|v| v.as_str())
+                                .filter_map(SubReason::from_str)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let note = m
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    Some(Substitution {
+                        item_id,
+                        ratio,
+                        reasons,
+                        note,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let barcodes = take_string_list(&map, "barcodes");
     let image_url = take_str(&map, "imageUrl");
     let stock_entries = map
@@ -175,6 +211,7 @@ pub fn parse_page(page: &VaultPage) -> Result<PantryItem, ParseError> {
         default_best_before_days_after_freezing,
         default_best_before_days_after_thawing,
         due_type,
+        substitutes,
         stock_entries,
         barcodes,
         image_url,

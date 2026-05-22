@@ -25,6 +25,9 @@ read-the-room reference for what each piece does + why.
 - ✅ Phase 5 — recipe fulfillment
 - ✅ Phase 6 — recipe nestings
 - ✅ Phase 7 — shopping list
+- ✅ Phase 8 — substitutions (3-layer: recipe-ingredient,
+  pantry-item, registry rules; goal-filtered suggestions
+  surfaced on every shortage — never auto-applied)
 
 Follow-up (smaller scope, separate PRs): wire a Dioxus
 route into `task-ui`; CLI commands in `task-cli`; integration
@@ -229,6 +232,36 @@ ingredient lists compose.
 
 Acceptance: a 2-level nested recipe's fulfillment matches
 hand-computed totals.
+
+### Phase 8 — substitutions
+
+**Goal**: when an ingredient is short, surface viable swaps
+ranked by user goals (out-of-stock, lower-calorie, vegan,
+gluten-free, cheaper, …). Three layers, evaluated in
+precedence order; suggest only, never auto-apply.
+
+- **Layer 1** (most specific): `cookbook::Substitution`
+  on `Ingredient::substitutes`. Recipe-author intent for
+  *this* dish. Always visible regardless of goal filter.
+- **Layer 2**: `pantry::Substitution` on
+  `PantryItem::substitutes`. Global pantry knowledge with
+  `Vec<SubReason>` goals. Bidirectional in spirit (you
+  edit it on whichever item is the natural anchor).
+- **Layer 3**: `mealplan::substitutions::SubstitutionRule`
+  pages (`type: substitution`) — composable knowledge
+  graph. The home for cross-cutting / fitness-aware
+  rules. `for_item(from_item_id)` lookup.
+
+Wire-up: `fulfillment::check_with_subs(recipe, pantry,
+rules, goals)` populates `Shortage::suggestions` from all
+three layers; `goals` filters + sorts by match count.
+`SubstitutionSource` enum on each suggestion tells the UI
+which layer it came from.
+
+Acceptance: registry rule "butter → coconut oil
+(Vegan, LowerCalorie)" surfaces when butter is missing;
+goal filter `[HigherProtein]` drops it; recipe-level subs
+stay visible under any goal filter.
 
 ### Phase 7 — shopping list
 

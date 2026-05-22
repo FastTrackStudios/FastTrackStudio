@@ -223,6 +223,16 @@ pub struct PantryItem {
     )]
     pub stock_entries: Vec<StockEntry>,
 
+    /// Global substitution candidates *for this item*. Edit
+    /// "Butter" once and every recipe that calls for butter
+    /// can see the alternative. Fulfillment consults these
+    /// after recipe-level subs and before the
+    /// `mealplan::substitutions` registry. See
+    /// [`Substitution`] for the structure;
+    /// [`SubReason`] for the goal taxonomy.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub substitutes: Vec<Substitution>,
+
     /// All barcodes that resolve to this pantry item. One
     /// physical food often carries N barcodes (single-pack
     /// vs multi-pack, regional variants, etc.) — grocy's
@@ -312,6 +322,7 @@ impl PantryItemDraft {
             default_best_before_days_after_freezing: None,
             default_best_before_days_after_thawing: None,
             due_type: default_due_type(),
+            substitutes: Vec::new(),
             stock_entries: Vec::new(),
             barcodes: vec![self.barcode],
             image_url: self.image_url,
@@ -435,6 +446,111 @@ impl StockEntry {
     }
 }
 
+/// Pantry-level substitution candidate. Lives on
+/// [`PantryItem::substitutes`] — "I can use this instead of
+/// that". Distinct from [`cookbook::Substitution`] because
+/// the *goals* live here (recipe authors don't generally
+/// know whether their swap is also lower-calorie /
+/// vegan-friendly / cheaper).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+pub struct Substitution {
+    /// The substitute pantry item.
+    #[serde(rename = "itemId")]
+    pub item_id: Uuid,
+
+    /// `units_of_substitute / unit_of_original`. `1.0` =
+    /// 1:1; `0.75` = "use 75% as much"; `2.0` = double.
+    #[serde(default = "default_ratio")]
+    pub ratio: f64,
+
+    /// Why this swap is worth suggesting. Multiple reasons
+    /// are common — coconut oil for butter is both
+    /// `Vegan` and `LowerCalorie` if you like.
+    #[serde(default)]
+    pub reasons: Vec<SubReason>,
+
+    /// Optional caveat — `"adds sweetness"`, `"changes
+    /// browning"`, `"may need extra acid"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub note: Option<String>,
+}
+
+fn default_ratio() -> f64 {
+    1.0
+}
+
+/// Why a substitution is worth offering. Shared with
+/// goal-filtering — caller passes `Vec<SubReason>` as their
+/// preferences and matching subs float up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum SubReason {
+    /// The original is out of stock. Always relevant; this
+    /// is the default goal when fulfillment surfaces a
+    /// shortage.
+    OutOfStock,
+    LowerCalorie,
+    LowerFat,
+    LowerCarb,
+    LowerSugar,
+    LowerSodium,
+    HigherProtein,
+    HigherFiber,
+    Vegan,
+    Vegetarian,
+    GlutenFree,
+    DairyFree,
+    NutFree,
+    Cheaper,
+    /// "I just prefer it" — catch-all so personal
+    /// preferences don't have to be shoehorned into a
+    /// health bucket.
+    Preference,
+}
+
+impl SubReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OutOfStock => "out-of-stock",
+            Self::LowerCalorie => "lower-calorie",
+            Self::LowerFat => "lower-fat",
+            Self::LowerCarb => "lower-carb",
+            Self::LowerSugar => "lower-sugar",
+            Self::LowerSodium => "lower-sodium",
+            Self::HigherProtein => "higher-protein",
+            Self::HigherFiber => "higher-fiber",
+            Self::Vegan => "vegan",
+            Self::Vegetarian => "vegetarian",
+            Self::GlutenFree => "gluten-free",
+            Self::DairyFree => "dairy-free",
+            Self::NutFree => "nut-free",
+            Self::Cheaper => "cheaper",
+            Self::Preference => "preference",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "out-of-stock" | "out_of_stock" | "oos" => Some(Self::OutOfStock),
+            "lower-calorie" | "lower-calories" | "lower-cal" => Some(Self::LowerCalorie),
+            "lower-fat" | "low-fat" => Some(Self::LowerFat),
+            "lower-carb" | "low-carb" | "keto" => Some(Self::LowerCarb),
+            "lower-sugar" | "low-sugar" => Some(Self::LowerSugar),
+            "lower-sodium" | "low-sodium" | "low-salt" => Some(Self::LowerSodium),
+            "higher-protein" | "high-protein" => Some(Self::HigherProtein),
+            "higher-fiber" | "high-fiber" => Some(Self::HigherFiber),
+            "vegan" => Some(Self::Vegan),
+            "vegetarian" | "veggie" => Some(Self::Vegetarian),
+            "gluten-free" | "gf" => Some(Self::GlutenFree),
+            "dairy-free" | "df" => Some(Self::DairyFree),
+            "nut-free" => Some(Self::NutFree),
+            "cheaper" | "budget" => Some(Self::Cheaper),
+            "preference" | "pref" => Some(Self::Preference),
+            _ => None,
+        }
+    }
+}
+
 impl PantryItem {
     /// Total `qty` across all batch entries. Falls back to
     /// the legacy page-level [`Self::qty`] when no entries
@@ -512,6 +628,7 @@ impl PantryItem {
             default_best_before_days_after_freezing: None,
             default_best_before_days_after_thawing: None,
             due_type: default_due_type(),
+            substitutes: Vec::new(),
             stock_entries: Vec::new(),
             barcodes: Vec::new(),
             image_url: None,
