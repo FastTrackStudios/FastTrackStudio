@@ -3951,6 +3951,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "email-link"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "email-proto",
+ "email-store",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "email-maildir"
 version = "0.1.0"
 dependencies = [

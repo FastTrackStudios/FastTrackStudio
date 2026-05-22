@@ -114,6 +114,10 @@ email-autoconfig = { path = "features/email/email-autoconfig" }
 # periodic reconciliation loop and broadcasts merged events.
 # Mirrors pimalaya's neverest+mirador split out of himalaya.
 email-sync = { path = "features/email/email-sync" }
+# Cross-entity link layer — connects emails to tasks / projects /
+# notes / people via a many-to-many index. Used by other
+# features to record "this email is about this project."
+email-link = { path = "features/email/email-link" }
 # CodeMirror-style editor (subtree). `editor` is the umbrella
 # crate that re-exports the others — apps consume that.
 editor-state = { path = "features/editor/crates/editor-state" }
