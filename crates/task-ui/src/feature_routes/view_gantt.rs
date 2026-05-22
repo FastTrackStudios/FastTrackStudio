@@ -8,7 +8,7 @@ use chrono::{Duration, TimeZone, Utc};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use uuid::Uuid;
-use view_gantt::{
+use view::gantt::{
     Gantt, GanttColumn, GanttEvent, GanttLink, GanttTask, LinkType, TaskType, store::apply,
 };
 
@@ -20,10 +20,10 @@ pub fn GanttView() -> Element {
     let on_event = EventHandler::new(move |ev: GanttEvent| {
         // Apply mutation to our local signal so the demo behaves the
         // same way a CRDT-backed consumer would, without the writes.
-        let mut state = view_gantt::GanttState {
+        let mut state = view::gantt::GanttState {
             tasks: tasks.read().clone(),
             links: links.read().clone(),
-            ..view_gantt::GanttState::default()
+            ..view::gantt::GanttState::default()
         };
         apply(&mut state, &ev);
         tasks.set(state.tasks);
