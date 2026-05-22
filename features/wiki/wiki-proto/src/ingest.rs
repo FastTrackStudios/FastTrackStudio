@@ -58,7 +58,7 @@ pub struct IngestTask {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
 #[repr(C)]
 pub enum SourceChange {
-    /// New file landed in `Wiki/sources/`.
+    /// New file landed in `Wiki/raw/sources/`.
     Created,
     /// Existing source content changed (sha256 diff).
     Modified,

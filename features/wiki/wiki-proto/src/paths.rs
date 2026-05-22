@@ -7,22 +7,29 @@
 //!
 //! ## On-disk layout
 //!
+//! Mirrors `nashsu/llm_wiki`'s project shape — `Wiki/` is the
+//! entire LLM-Wiki project root, not a subfolder of it. That
+//! makes a Task `Wiki/` directory portable to llm_wiki (and
+//! vice versa) with minimal restructuring.
+//!
 //! ```text
 //! <vault>/Wiki/
-//! ├── schema.md       ← contract / conventions
-//! ├── purpose.md      ← goals / scope / key questions
-//! ├── index.md        ← content catalog (LLM-maintained)
-//! ├── log.md          ← append-only operation timeline
-//! ├── overview.md     ← global synthesis (optional)
-//! ├── sources/        ← imported raw documents (mirror)
-//! ├── media/          ← extracted images, attachments
-//! └── _state/         ← opaque agent state (JSON)
-//!     ├── ingest_queue.json
-//!     ├── review.json
-//!     ├── lint_findings.json
-//!     ├── research_plans.json
-//!     ├── peers.json
-//!     └── snapshot.json     (sha256 of every tracked file)
+//! ├── schema.md         ← contract / conventions (project root)
+//! ├── purpose.md        ← goals / scope / key questions
+//! ├── index.md          ← content catalog (LLM-maintained)
+//! ├── log.md            ← append-only operation timeline
+//! ├── overview.md       ← global synthesis (optional)
+//! ├── raw/             ← immutable input layer
+//! │   └── sources/      ← imported raw documents
+//! ├── media/            ← extracted images, attachments
+//! ├── _state/           ← opaque agent state (JSON)
+//! │   ├── ingest_queue.json
+//! │   ├── review.json
+//! │   ├── lint_findings.json
+//! │   ├── research_plans.json
+//! │   ├── peers.json
+//! │   └── snapshot.json (sha256 of every tracked file)
+//! └── <Type>/<Slug>.md  ← actual pages (Concepts/, Entities/, ...)
 //! ```
 //!
 //! Wiki pages themselves live as plain markdown anywhere under
@@ -49,8 +56,14 @@ pub const LOG_MD: &str = "log.md";
 /// Global synthesis page (optional; relative to `Wiki/`).
 pub const OVERVIEW_MD: &str = "overview.md";
 
-/// Sub-folder for imported raw sources.
-pub const SOURCES_DIR: &str = "sources";
+/// Sub-folder under `Wiki/` for the immutable raw layer.
+/// Matches llm_wiki's `raw/` directory. Anything nested under
+/// here is read-only from the wiki's perspective.
+pub const RAW_DIR: &str = "raw";
+
+/// Sub-folder for imported raw source documents, nested under
+/// [`RAW_DIR`]. Full path: `Wiki/raw/sources/`.
+pub const SOURCES_DIR: &str = "raw/sources";
 
 /// Sub-folder for extracted images + attachments.
 pub const MEDIA_DIR: &str = "media";

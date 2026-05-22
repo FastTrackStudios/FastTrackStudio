@@ -72,11 +72,11 @@ pub enum ResearchStatus {
 pub struct RawSource {
     /// Where the source came from (URL, file path, etc.).
     pub origin: String,
-    /// Filename to use when saving to `Wiki/sources/`. The
+    /// Filename to use when saving to `Wiki/raw/sources/`. The
     /// backend ensures uniqueness.
     pub filename: String,
     /// Source bytes (markdown, HTML, PDF, etc.). The
-    /// backend persists this to `Wiki/sources/<filename>`.
+    /// backend persists this to `Wiki/raw/sources/<filename>`.
     pub bytes: Vec<u8>,
     /// MIME type.
     pub mime: String,

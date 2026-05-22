@@ -40,7 +40,7 @@ pub trait WikiService {
     /// already exist. Writes `schema.md` + `purpose.md` from
     /// [`crate::schema::default_schema_doc`] +
     /// [`crate::schema::default_purpose_doc`], creates empty
-    /// `index.md` + `log.md`, scaffolds `sources/`, `media/`,
+    /// `index.md` + `log.md`, scaffolds `raw/sources/`, `media/`,
     /// and `_state/`. Idempotent: returns
     /// [`WikiError::IllegalState`] only if something exists
     /// but is malformed.
@@ -66,7 +66,7 @@ pub trait WikiService {
 
     // ───────────────────────── Raw layer (immutable sources) ─────────────────────────
 
-    /// Persist `bytes` under `Wiki/sources/<unique-filename>`
+    /// Persist `bytes` under `Wiki/raw/sources/<unique-filename>`
     /// and return the resulting reference. The backend
     /// guarantees uniqueness (sha256 dedup ⇒ same bytes never
     /// stored twice; collision-resolves by suffixing).
@@ -78,7 +78,7 @@ pub trait WikiService {
         source: ImportRawSource,
     ) -> Result<RawSourceRef, WikiError>;
 
-    /// List every entry in `Wiki/sources/` with metadata.
+    /// List every entry in `Wiki/raw/sources/` with metadata.
     fn list_raw_sources(&self, wiki_id: &str) -> Result<Vec<RawSourceRef>, WikiError>;
 
     /// Read raw source bytes by vault-relative path.
@@ -91,7 +91,7 @@ pub trait WikiService {
     /// decides whether the distilled write-up still stands.
     fn delete_raw_source(&self, wiki_id: &str, path: &str) -> Result<Vec<ReviewItem>, WikiError>;
 
-    /// Walk `Wiki/sources/`, diff against the persisted
+    /// Walk `Wiki/raw/sources/`, diff against the persisted
     /// `_state/snapshot.json`, and enqueue ingest tasks for
     /// any Created / Modified / Deleted entries. Returns
     /// the newly-enqueued tasks. Idempotent: re-running with
@@ -195,7 +195,7 @@ pub trait WikiService {
     ) -> Result<Vec<ExtractedImage>, WikiError>;
 
     /// Toggle the backend's source watcher. When enabled, the
-    /// backend listens for file events under `Wiki/sources/`
+    /// backend listens for file events under `Wiki/raw/sources/`
     /// and auto-enqueues ingest tasks. Returns the new state.
     fn set_watch(&self, wiki_id: &str, enabled: bool) -> Result<bool, WikiError>;
 
@@ -270,7 +270,7 @@ pub trait WikiService {
     ) -> Result<(), WikiError>;
 
     /// Submit research results. Backend persists each
-    /// `RawSource` under `Wiki/sources/` and spawns a
+    /// `RawSource` under `Wiki/raw/sources/` and spawns a
     /// corresponding `IngestTask`. Returns the new tasks.
     fn submit_research_result(
         &self,
@@ -285,7 +285,7 @@ pub trait WikiService {
     fn add_peer(&self, wiki_id: &str, peer: PeerWiki) -> Result<(), WikiError>;
 
     /// Remove a peer. Pulled mirror files under
-    /// `Wiki/sources/<peer-id>/` are left in place by default
+    /// `Wiki/raw/sources/<peer-id>/` are left in place by default
     /// (becomes orphan data the next lint pass will surface).
     fn remove_peer(&self, wiki_id: &str, peer_id: &str) -> Result<(), WikiError>;
 

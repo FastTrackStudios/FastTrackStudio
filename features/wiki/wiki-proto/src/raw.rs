@@ -1,11 +1,11 @@
 //! Raw layer — immutable user-imported sources.
 //!
 //! Mirrors `llm_wiki`'s `raw/sources/` split: anything under
-//! `Wiki/sources/` is **immutable from the wiki's perspective**.
+//! `Wiki/raw/sources/` is **immutable from the wiki's perspective**.
 //! The agent reads from it, cites it via the `sources:`
 //! frontmatter field on generated pages, but never rewrites
 //! the file bytes. Backends enforce this on `record_pages` —
-//! drafts targeting paths under `Wiki/sources/` are rejected
+//! drafts targeting paths under `Wiki/raw/sources/` are rejected
 //! with [`crate::error::WikiError::IllegalState`].
 //!
 //! New raw bytes only land via [`crate::service::WikiService::import_raw_source`]
@@ -24,7 +24,7 @@ use facet::Facet;
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 #[repr(C)]
 pub struct ImportRawSource {
-    /// Filename to use under `Wiki/sources/`. Backend
+    /// Filename to use under `Wiki/raw/sources/`. Backend
     /// uniqueness-resolves collisions by suffixing.
     pub filename: String,
     /// MIME type.
@@ -39,13 +39,13 @@ pub struct ImportRawSource {
     pub auto_enqueue: bool,
 }
 
-/// Pointer to one entry in `Wiki/sources/`. Returned by
+/// Pointer to one entry in `Wiki/raw/sources/`. Returned by
 /// [`crate::service::WikiService::list_raw_sources`] and
 /// [`crate::service::WikiService::import_raw_source`].
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 #[repr(C)]
 pub struct RawSourceRef {
-    /// Vault-relative path (e.g. `Wiki/sources/foo.pdf`).
+    /// Vault-relative path (e.g. `Wiki/raw/sources/foo.pdf`).
     pub path: String,
     /// Filename without directory (`foo.pdf`).
     pub filename: String,
