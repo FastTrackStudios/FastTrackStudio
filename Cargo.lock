@@ -12417,8 +12417,23 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "view"
 version = "0.1.0"
 dependencies = [
+ "view-calendar",
  "view-gantt",
  "view-kanban",
+]
+
+[[package]]
+name = "view-calendar"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "fts-ui",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
