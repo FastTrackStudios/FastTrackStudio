@@ -26,6 +26,7 @@
 //!   1 — shared `TimeGridView` component.
 
 pub mod components;
+pub mod layout;
 pub mod store;
 pub mod time;
 pub mod types;

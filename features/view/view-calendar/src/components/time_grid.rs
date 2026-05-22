@@ -1,20 +1,24 @@
 //! Shared time-grid view used by week (`days.len() == 7`) and day
 //! (`days.len() == 1`) variants.
 //!
-//! Layout is hand-rolled in absolute pixels so drop-y math is
-//! direct (no element-size measurement needed). `PX_PER_HOUR` ×
-//! 24 = column height; every minute is `PX_PER_HOUR / 60` px.
+//! Pixel-based vertical layout (48 px/hour) so drop-y math is
+//! direct. Overlap column-splitting comes from
+//! [`crate::layout::day_overlap_layout`]: events that share time
+//! get split into sub-columns. Sweep-to-create on the column
+//! background gives the Google-style click-and-drag event creation.
 
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono::{Datelike, Duration, NaiveDate};
+use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use crate::layout::{TimeBlockPlacement, day_overlap_layout};
 use crate::store::CalendarMutation;
 use crate::time::{day_start_utc, hour_labels};
 use crate::types::{CalendarEvent, EventId};
 
 use super::drag::{DT_MIME, DragKind, use_drag_context};
-use super::event_chip::{ChipShape, EventChip};
+use super::event_chip::EventChip;
 
 const PX_PER_HOUR: i64 = 48;
 const COL_HEIGHT_PX: i64 = PX_PER_HOUR * 24;
@@ -39,7 +43,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
             // Day header strip
             div { class: "grid border-b border-border/40",
                 style: "grid-template-columns: 56px repeat({props.days.len()}, 1fr);",
-                div {} // empty corner above the hour axis
+                div {}
                 for date in props.days.iter() {
                     {
                         let is_today = *date == today;
@@ -68,14 +72,12 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                 div {
                     class: "grid relative",
                     style: "grid-template-columns: 56px repeat({props.days.len()}, 1fr); height: {COL_HEIGHT_PX}px;",
-                    // Hour axis
                     HourAxis {}
-                    // Day columns
                     for (idx, date) in props.days.iter().enumerate() {
                         DayColumn {
                             key: "{date}",
                             date: *date,
-                            events: column_events(&props.events, *date),
+                            placements: day_overlap_layout(*date, &props.events),
                             is_last: idx == props.days.len() - 1,
                             readonly: props.readonly,
                             on_event: props.on_event,
@@ -107,11 +109,33 @@ fn HourAxis() -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct DayColumnProps {
     date: NaiveDate,
-    events: Vec<CalendarEvent>,
+    placements: Vec<TimeBlockPlacement>,
     is_last: bool,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
     on_open_editor: EventHandler<EventId>,
+}
+
+/// Sweep state: a `(start_min, current_min)` range the user is
+/// dragging out with the primary mouse button. While `Some` the
+/// column shows a ghost block; on `mouseup` it commits to a
+/// `Create` mutation. Clamped to a single day — drag past
+/// midnight just sticks at the day edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Sweep {
+    anchor_min: i64,
+    current_min: i64,
+}
+
+impl Sweep {
+    fn range(self) -> (i64, i64) {
+        let a = self.anchor_min.min(self.current_min);
+        let b = self.anchor_min.max(self.current_min);
+        (
+            snap_minutes(a),
+            snap_minutes(b).max(snap_minutes(a) + SNAP_MINUTES),
+        )
+    }
 }
 
 #[component]
@@ -121,6 +145,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
     let on_event = props.on_event;
     let on_open_editor = props.on_open_editor;
     let border_r = if props.is_last { "" } else { "border-r" };
+    let mut sweep: Signal<Option<Sweep>> = use_signal(|| None);
 
     rsx! {
         div {
@@ -133,7 +158,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     style: "top: {h as i64 * PX_PER_HOUR}px;",
                 }
             }
-            // Drop / click-create surface
+            // Drop / sweep surface (catches background interactions).
+            // Sits BELOW the event blocks so chips win the click race.
             div {
                 class: "absolute inset-0",
                 ondragover: move |e: Event<DragData>| {
@@ -153,9 +179,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     let drop_min = snap_minutes(px_to_minutes(y));
                     match ds.kind {
                         DragKind::Move => {
-                            // New start = drop_min minutes into `date`.
-                            let new_start = day_start_utc(date)
-                                + Duration::minutes(drop_min);
+                            let new_start = day_start_utc(date) + Duration::minutes(drop_min);
                             let duration = ds.orig_end - ds.orig_start;
                             on_event.call(CalendarMutation::Reschedule {
                                 id,
@@ -164,13 +188,10 @@ fn DayColumn(props: DayColumnProps) -> Element {
                             });
                         }
                         DragKind::ResizeEnd => {
-                            // End-edge drag: replace `end` only.
-                            // Keep ≥ 15 min duration.
+                            let origin_min_from_day = (ds.orig_start - day_start_utc(date)).num_minutes();
+                            let min_end_min = origin_min_from_day + SNAP_MINUTES;
                             let new_end = day_start_utc(date)
-                                + Duration::minutes(drop_min.max(
-                                    (ds.orig_start.signed_duration_since(day_start_utc(date)))
-                                        .num_minutes() + SNAP_MINUTES,
-                                ));
+                                + Duration::minutes(drop_min.max(min_end_min));
                             on_event.call(CalendarMutation::Reschedule {
                                 id,
                                 start: ds.orig_start,
@@ -179,26 +200,74 @@ fn DayColumn(props: DayColumnProps) -> Element {
                         }
                     }
                 },
-                onclick: move |e: MouseEvent| {
+                // Sweep to create — primary button only. Click
+                // without sweep falls through to the mouseup
+                // branch and produces a 1-hour event at the
+                // clicked slot.
+                onmousedown: move |e: MouseEvent| {
                     if props.readonly { return; }
+                    if e.data().trigger_button() != Some(MouseButton::Primary) { return; }
                     let y = e.data().element_coordinates().y as i64;
-                    let start_min = snap_minutes(px_to_minutes(y));
+                    let anchor = snap_minutes(px_to_minutes(y));
+                    sweep.set(Some(Sweep { anchor_min: anchor, current_min: anchor }));
+                },
+                onmousemove: move |e: MouseEvent| {
+                    if props.readonly { return; }
+                    let Some(mut s) = *sweep.peek() else { return };
+                    let y = e.data().element_coordinates().y as i64;
+                    s.current_min = snap_minutes(px_to_minutes(y));
+                    sweep.set(Some(s));
+                },
+                onmouseup: move |_| {
+                    if props.readonly { return; }
+                    let Some(s) = sweep.take() else { return };
+                    let (start_min, end_min) = s.range();
                     let start = day_start_utc(date) + Duration::minutes(start_min);
-                    let end = start + Duration::hours(1);
+                    let end = day_start_utc(date) + Duration::minutes(end_min);
+                    // If the user just clicked without dragging,
+                    // `end_min` was bumped to `start_min + 15`. We
+                    // upgrade that to a 1-hour default — matches the
+                    // month-view click-create behavior and avoids
+                    // creating a sliver event.
+                    let end = if (end - start).num_minutes() <= SNAP_MINUTES {
+                        start + Duration::hours(1)
+                    } else {
+                        end
+                    };
                     let event = CalendarEvent::new("New event", start, end);
                     on_event.call(CalendarMutation::Create { event });
                 },
+                onmouseleave: move |_| {
+                    // Bail on the sweep if the pointer leaves the
+                    // column — avoids ghost blocks lingering after
+                    // a drag escapes the day.
+                    sweep.set(None);
+                },
             }
-            // Events (above the click-surface so they receive clicks)
-            for ev in props.events.iter() {
+            // Sweep ghost block.
+            if let Some(s) = *sweep.read() {
                 {
-                    let id = ev.id;
-                    let style = block_style(date, ev.start, ev.end);
+                    let (a, b) = s.range();
+                    let top = minutes_to_px(a);
+                    let h = minutes_to_px(b - a).max(2);
+                    rsx! {
+                        div {
+                            class: "absolute left-1 right-1 rounded-sm bg-primary/20 border border-primary/60 pointer-events-none",
+                            style: "top: {top}px; height: {h}px;",
+                        }
+                    }
+                }
+            }
+            // Events on top — clickable above the sweep surface.
+            for placement in props.placements.iter() {
+                {
+                    let id = placement.event.id;
+                    let style = block_style(placement);
+                    let event = placement.event.clone();
                     rsx! {
                         EventChip {
                             key: "{id}",
-                            event: ev.clone(),
-                            shape: ChipShape::Block,
+                            event,
                             position_style: style,
                             readonly: props.readonly,
                             on_click: move |_| on_open_editor.call(id),
@@ -210,30 +279,22 @@ fn DayColumn(props: DayColumnProps) -> Element {
     }
 }
 
-/// Events whose `[start, end)` overlaps `[date 00:00, date+1 00:00)`,
-/// ordered by start.
-fn column_events(events: &[CalendarEvent], date: NaiveDate) -> Vec<CalendarEvent> {
-    let s = day_start_utc(date);
-    let e = s + Duration::days(1);
-    let mut hits: Vec<CalendarEvent> = events
-        .iter()
-        .filter(|ev| ev.end > s && ev.start < e)
-        .cloned()
-        .collect();
-    hits.sort_by_key(|ev| ev.start);
-    hits
-}
-
-fn block_style(day: NaiveDate, start: chrono::DateTime<Utc>, end: chrono::DateTime<Utc>) -> String {
-    let day_start = day_start_utc(day);
-    let day_end = day_start + Duration::days(1);
-    let clipped_start = start.max(day_start);
-    let clipped_end = end.min(day_end);
-    let top_min = (clipped_start - day_start).num_minutes().max(0);
-    let dur_min = (clipped_end - clipped_start).num_minutes().max(15);
-    let top_px = minutes_to_px(top_min);
-    let h_px = minutes_to_px(dur_min);
-    format!("top: {top_px}px; height: {h_px}px;")
+/// Build the CSS `style` string for an event block — vertical
+/// position + height come from the placement's `top_min` /
+/// `height_min`, horizontal sub-column from `column` /
+/// `cluster_size`. Inset by 2px on each side so adjacent columns
+/// have a thin gutter (Google's look).
+fn block_style(p: &TimeBlockPlacement) -> String {
+    let top = minutes_to_px(p.top_min);
+    let h = minutes_to_px(p.height_min);
+    let width_pct = 100.0_f32 / p.cluster_size as f32;
+    let left_pct = p.column as f32 * width_pct;
+    // Inner gutter via percentage subtraction would over-shrink
+    // narrow clusters; instead use calc() so each block loses a
+    // fixed 3px of effective width regardless of column count.
+    format!(
+        "top: {top}px; height: {h}px; left: calc({left_pct:.4}% + 2px); width: calc({width_pct:.4}% - 3px);"
+    )
 }
 
 fn minutes_to_px(min: i64) -> i64 {

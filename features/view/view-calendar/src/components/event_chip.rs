@@ -1,6 +1,8 @@
-//! Draggable event tile, used in both the month grid (as a thin
-//! one-line chip) and the time grid (as an absolutely-positioned
-//! block). Title + optional time label; clicking opens the editor.
+//! Absolutely-positioned event block used in the week/day time grid.
+//!
+//! Month-view chips have their own small renderer because they sit
+//! inside a CSS grid track (no absolute positioning) — see
+//! `month_view::MonthChip`.
 
 use dioxus::prelude::*;
 
@@ -8,22 +10,12 @@ use crate::types::CalendarEvent;
 
 use super::drag::{DT_MIME, DragKind, DragState, use_drag_context};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChipShape {
-    /// One-line chip used in month-view day cells.
-    Bar,
-    /// Filled block sized by `position_in_day`; used in week/day
-    /// time-grid views.
-    Block,
-}
-
 #[derive(Props, Clone, PartialEq)]
 pub struct EventChipProps {
     pub event: CalendarEvent,
-    pub shape: ChipShape,
-    /// Optional `style` string for absolute positioning (week/day
-    /// grid passes `top: %; height: %`). Bar variant ignores this.
-    #[props(default)]
+    /// CSS `style` string handling absolute positioning. The
+    /// time-grid view computes `top: Xpx; height: Ypx; left: Z%;
+    /// width: W%;` and passes it whole.
     pub position_style: String,
     #[props(default = false)]
     pub readonly: bool,
@@ -42,76 +34,41 @@ pub fn EventChip(props: EventChipProps) -> Element {
     let opacity = if is_dragging { "opacity: 0.4;" } else { "" };
 
     let on_click = props.on_click;
+    let bg = format!(
+        "bg-{stem}-500/30 text-{stem}-50 border-l-2 border-{stem}-500 hover:bg-{stem}-500/40"
+    );
+    let style = format!("{}; {opacity}", props.position_style);
+    let time_label = format_time_range(&event);
 
-    match props.shape {
-        ChipShape::Bar => {
-            let bg = format!(
-                "bg-{stem}-500/15 text-{stem}-200 border-l-2 border-{stem}-500 hover:bg-{stem}-500/25"
-            );
-            rsx! {
-                div {
-                    class: "truncate text-[11px] leading-4 px-1.5 py-0.5 rounded-sm cursor-pointer select-none {bg}",
-                    style: "{opacity}",
-                    draggable: !props.readonly,
-                    ondragstart: move |e: Event<DragData>| {
-                        if props.readonly { return; }
-                        let dt = e.data().data_transfer();
-                        let _ = dt.set_data(DT_MIME, &event_id.to_string());
-                        drag.set(Some(DragState {
-                            event: event_id,
-                            kind: DragKind::Move,
-                            orig_start: event.start,
-                            orig_end: event.end,
-                        }));
-                    },
-                    ondragend: move |_| drag.set(None),
-                    onclick: move |e: MouseEvent| {
-                        e.stop_propagation();
-                        on_click.call(());
-                    },
-                    "{event.title}"
-                }
-            }
-        }
-        ChipShape::Block => {
-            let bg = format!(
-                "bg-{stem}-500/30 text-{stem}-50 border-l-2 border-{stem}-500 hover:bg-{stem}-500/40"
-            );
-            let style = format!("{}; {opacity}", props.position_style);
-            let time_label = format_time_range(&event);
-            rsx! {
-                div {
-                    class: "absolute left-1 right-1 rounded-sm px-1.5 py-0.5 cursor-pointer select-none overflow-hidden {bg}",
-                    style: "{style}",
-                    draggable: !props.readonly,
-                    ondragstart: move |e: Event<DragData>| {
-                        if props.readonly { return; }
-                        let dt = e.data().data_transfer();
-                        let _ = dt.set_data(DT_MIME, &event_id.to_string());
-                        drag.set(Some(DragState {
-                            event: event_id,
-                            kind: DragKind::Move,
-                            orig_start: event.start,
-                            orig_end: event.end,
-                        }));
-                    },
-                    ondragend: move |_| drag.set(None),
-                    onclick: move |e: MouseEvent| {
-                        e.stop_propagation();
-                        on_click.call(());
-                    },
-                    div { class: "text-[11px] leading-4 font-medium truncate", "{event.title}" }
-                    div { class: "text-[10px] leading-3 opacity-80 truncate", "{time_label}" }
-                    // Resize handle — bottom edge, 4px tall. Drags
-                    // emit a different DragKind so the time-grid
-                    // can route them to the end timestamp.
-                    if !props.readonly {
-                        ResizeHandle {
-                            event_id,
-                            orig_start: event.start,
-                            orig_end: event.end,
-                        }
-                    }
+    rsx! {
+        div {
+            class: "absolute rounded-sm px-1.5 py-0.5 cursor-pointer select-none overflow-hidden {bg}",
+            style: "{style}",
+            draggable: !props.readonly,
+            ondragstart: move |e: Event<DragData>| {
+                if props.readonly { return; }
+                let dt = e.data().data_transfer();
+                let _ = dt.set_data(DT_MIME, &event_id.to_string());
+                drag.set(Some(DragState {
+                    event: event_id,
+                    kind: DragKind::Move,
+                    orig_start: event.start,
+                    orig_end: event.end,
+                }));
+            },
+            ondragend: move |_| drag.set(None),
+            onclick: move |e: MouseEvent| {
+                e.stop_propagation();
+                on_click.call(());
+            },
+            div { class: "text-[11px] leading-4 font-medium truncate", "{event.title}" }
+            div { class: "text-[10px] leading-3 opacity-80 truncate", "{time_label}" }
+            // Resize handle — bottom edge.
+            if !props.readonly {
+                ResizeHandle {
+                    event_id,
+                    orig_start: event.start,
+                    orig_end: event.end,
                 }
             }
         }

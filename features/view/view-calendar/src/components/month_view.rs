@@ -1,21 +1,29 @@
-//! Month view — 6×7 day grid with horizontal event chips.
+//! Month view — 6 week rows, each laid out as a 7-column grid.
 //!
-//! Cross-day chip spanning (Google's connected pill) is deferred:
-//! v1 renders an event in every day-cell it overlaps as a separate
-//! Bar chip. Click empty space in a cell to create a 1-hour event
-//! starting at 9 AM that day; drop a dragged chip to reschedule
-//! preserving duration.
+//! Multi-day events render as a single connected chip spanning day
+//! columns inside the row (Google Calendar style). Chips that
+//! extend past either week edge square off the cut corner via
+//! `continues_left` / `continues_right` from the layout pass.
+//!
+//! Each week row stacks:
+//! 1. **Day-header strip**: the seven date numbers.
+//! 2. **Chip rows**: zero or more "tracks" of event chips. Each
+//!    track is a CSS grid the same width as the day header so the
+//!    chips align perfectly under the dates.
+//! 3. **Click target**: a single absolutely-positioned layer behind
+//!    the chips that catches clicks → create event, and drops →
+//!    reschedule.
 
 use chrono::{Datelike, NaiveDate};
 use dioxus::prelude::*;
 use uuid::Uuid;
 
+use crate::layout::{MonthChipPlacement, month_week_layout};
 use crate::store::CalendarMutation;
-use crate::time::{day_end_utc, day_start_utc, month_grid, shift_days};
+use crate::time::{day_start_utc, month_grid, shift_days};
 use crate::types::{CalendarEvent, EventId};
 
 use super::drag::{DT_MIME, use_drag_context};
-use super::event_chip::{ChipShape, EventChip};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MonthViewProps {
@@ -38,124 +46,30 @@ pub fn MonthView(props: MonthViewProps) -> Element {
 
     rsx! {
         div { class: "flex flex-col h-full w-full",
-            // Weekday header
+            // Weekday header strip
             div { class: "grid grid-cols-7 border-b border-border/40 text-xs text-muted-foreground",
                 for label in weekday_labels {
                     div { key: "{label}", class: "px-2 py-1 text-center font-medium", "{label}" }
                 }
             }
-            // 6×7 grid
-            div { class: "grid grid-cols-7 grid-rows-6 flex-1 min-h-0",
-                for (row_idx, row) in grid.iter().enumerate() {
-                    for (col_idx, date) in row.iter().enumerate() {
-                        DayCell {
-                            key: "{date}",
-                            date: *date,
-                            is_other_month: date.month() != cur_month,
-                            is_today: *date == today,
-                            is_last_row: row_idx == 5,
-                            is_last_col: col_idx == 6,
-                            events: cell_events(&props.events, *date),
-                            readonly: props.readonly,
-                            on_event: props.on_event,
-                            on_open_editor: props.on_open_editor,
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[derive(Props, Clone, PartialEq)]
-struct DayCellProps {
-    date: NaiveDate,
-    is_other_month: bool,
-    is_today: bool,
-    is_last_row: bool,
-    is_last_col: bool,
-    events: Vec<CalendarEvent>,
-    readonly: bool,
-    on_event: EventHandler<CalendarMutation>,
-    on_open_editor: EventHandler<EventId>,
-}
-
-#[component]
-fn DayCell(props: DayCellProps) -> Element {
-    let ctx = use_drag_context();
-    let date = props.date;
-    let on_event = props.on_event;
-    let on_open_editor = props.on_open_editor;
-
-    let mut bg = if props.is_other_month {
-        "bg-background/40 text-muted-foreground"
-    } else {
-        "bg-background"
-    };
-    if props.is_today {
-        bg = "bg-primary/10";
-    }
-    let border_r = if props.is_last_col { "" } else { "border-r" };
-    let border_b = if props.is_last_row { "" } else { "border-b" };
-
-    rsx! {
-        div {
-            class: "min-h-0 overflow-hidden flex flex-col gap-0.5 p-1 border-border/40 {bg} {border_r} {border_b}",
-            // Drop target: shift dragged event so its `start` lands
-            // on this date (preserving duration).
-            ondragover: move |e: Event<DragData>| {
-                if props.readonly { return; }
-                if ctx.state.peek().is_none() { return; }
-                e.prevent_default();
-            },
-            ondrop: move |e: Event<DragData>| {
-                if props.readonly { return; }
-                e.prevent_default();
-                let dt = e.data().data_transfer();
-                let Ok(id) = dt.get_data(DT_MIME).unwrap_or_default().parse::<Uuid>() else { return };
-                let snapshot = ctx.state.peek().clone();
-                let Some(ds) = snapshot else { return };
-                if ds.event != id { return; }
-                // Compute day delta from the dragged event's
-                // original start to the cell's date.
-                let orig_day = ds.orig_start.date_naive();
-                let delta = (date - orig_day).num_days();
-                let (start, end) = shift_days(ds.orig_start, ds.orig_end, delta);
-                on_event.call(CalendarMutation::Reschedule { id, start, end });
-            },
-            // Click empty area = create. Click on a chip bubbles
-            // up but the chip's `onclick` calls stop_propagation.
-            onclick: move |_| {
-                if props.readonly { return; }
-                let start = day_start_utc(date) + chrono::Duration::hours(9);
-                let end = start + chrono::Duration::hours(1);
-                let event = CalendarEvent::new("New event", start, end);
-                on_event.call(CalendarMutation::Create { event });
-            },
-            // Day number
-            div {
-                class: "flex items-center justify-end px-1",
-                span {
-                    class: if props.is_today {
-                        "text-xs font-semibold bg-primary text-primary-foreground rounded-full w-5 h-5 flex items-center justify-center"
-                    } else {
-                        "text-xs"
-                    },
-                    "{date.day()}"
-                }
-            }
-            // Events
-            div { class: "flex flex-col gap-0.5 overflow-hidden",
-                for ev in props.events.iter() {
+            // 6 week rows
+            div { class: "flex-1 min-h-0 grid grid-rows-6",
+                for row in 0..6u8 {
                     {
-                        let id = ev.id;
+                        let row_days = grid[row as usize];
+                        let row_start = row_days[0];
+                        let chips = month_week_layout(row_start, &props.events);
                         rsx! {
-                            EventChip {
-                                key: "{id}",
-                                event: ev.clone(),
-                                shape: ChipShape::Bar,
+                            WeekRow {
+                                key: "{row_start}",
+                                days: row_days,
+                                cur_month,
+                                today,
+                                chips,
+                                is_last_row: row == 5,
                                 readonly: props.readonly,
-                                on_click: move |_| on_open_editor.call(id),
+                                on_event: props.on_event,
+                                on_open_editor: props.on_open_editor,
                             }
                         }
                     }
@@ -165,17 +79,185 @@ fn DayCell(props: DayCellProps) -> Element {
     }
 }
 
-/// Events overlapping `[date 00:00, date+1 00:00)`, sorted by start
-/// time so the chip stack reads top-to-bottom in chronological
-/// order.
-fn cell_events(events: &[CalendarEvent], date: NaiveDate) -> Vec<CalendarEvent> {
-    let s = day_start_utc(date);
-    let e = day_end_utc(date);
-    let mut hits: Vec<CalendarEvent> = events
-        .iter()
-        .filter(|ev| ev.end > s && ev.start < e)
-        .cloned()
-        .collect();
-    hits.sort_by_key(|ev| ev.start);
-    hits
+#[derive(Props, Clone, PartialEq)]
+struct WeekRowProps {
+    days: [NaiveDate; 7],
+    cur_month: u32,
+    today: NaiveDate,
+    chips: Vec<MonthChipPlacement>,
+    is_last_row: bool,
+    readonly: bool,
+    on_event: EventHandler<CalendarMutation>,
+    on_open_editor: EventHandler<EventId>,
+}
+
+#[component]
+fn WeekRow(props: WeekRowProps) -> Element {
+    let border_b = if props.is_last_row { "" } else { "border-b" };
+    let tracks: u8 = props.chips.iter().map(|c| c.track + 1).max().unwrap_or(0);
+
+    rsx! {
+        div {
+            class: "relative grid grid-cols-7 border-border/40 {border_b}",
+            // Background day cells (numbers + click/drop targets).
+            for (col, date) in props.days.iter().enumerate() {
+                {
+                    let date = *date;
+                    let on_event = props.on_event;
+                    let ctx = use_drag_context();
+                    let mut bg = if date.month() != props.cur_month {
+                        "bg-background/40 text-muted-foreground"
+                    } else {
+                        "bg-background"
+                    };
+                    if date == props.today {
+                        bg = "bg-primary/10";
+                    }
+                    let border_r = if col == 6 { "" } else { "border-r" };
+
+                    rsx! {
+                        div {
+                            key: "{date}",
+                            class: "border-border/40 {bg} {border_r} flex flex-col p-1 min-h-[6rem]",
+                            // Click empty cell → create.
+                            onclick: move |_| {
+                                if props.readonly { return; }
+                                let start = day_start_utc(date) + chrono::Duration::hours(9);
+                                let end = start + chrono::Duration::hours(1);
+                                let event = CalendarEvent::new("New event", start, end);
+                                on_event.call(CalendarMutation::Create { event });
+                            },
+                            // Drop dragged chip → reschedule by day delta.
+                            ondragover: move |e: Event<DragData>| {
+                                if props.readonly { return; }
+                                if ctx.state.peek().is_none() { return; }
+                                e.prevent_default();
+                            },
+                            ondrop: move |e: Event<DragData>| {
+                                if props.readonly { return; }
+                                e.prevent_default();
+                                let dt = e.data().data_transfer();
+                                let Ok(id) = dt.get_data(DT_MIME).unwrap_or_default().parse::<Uuid>() else { return };
+                                let snapshot = ctx.state.peek().clone();
+                                let Some(ds) = snapshot else { return };
+                                if ds.event != id { return; }
+                                let orig_day = ds.orig_start.date_naive();
+                                let delta = (date - orig_day).num_days();
+                                let (start, end) = shift_days(ds.orig_start, ds.orig_end, delta);
+                                on_event.call(CalendarMutation::Reschedule { id, start, end });
+                            },
+                            // Day number
+                            div { class: "flex items-center justify-end px-1",
+                                span {
+                                    class: if date == props.today {
+                                        "text-xs font-semibold bg-primary text-primary-foreground rounded-full w-5 h-5 flex items-center justify-center"
+                                    } else {
+                                        "text-xs"
+                                    },
+                                    "{date.day()}"
+                                }
+                            }
+                            // Reserve vertical space for the track
+                            // chips (overlaid below).
+                            div { class: "flex-1", style: "min-height: {tracks as i32 * 18}px;" }
+                        }
+                    }
+                }
+            }
+            // Chip overlay — absolute layer covering the week row,
+            // sitting above the cells but below the day-number
+            // pills. Uses a 7-col grid so chips line up with cells.
+            div {
+                class: "absolute inset-x-0 top-6 grid grid-cols-7 gap-y-0.5 pointer-events-none px-0.5",
+                for chip in props.chips.iter() {
+                    {
+                        let chip = chip.clone();
+                        let id = chip.event.id;
+                        let on_open_editor = props.on_open_editor;
+                        let on_event = props.on_event;
+                        rsx! {
+                            MonthChip {
+                                key: "{id}-{chip.start_col}",
+                                placement: chip,
+                                readonly: props.readonly,
+                                on_click: move |_| on_open_editor.call(id),
+                                on_event,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct MonthChipProps {
+    placement: MonthChipPlacement,
+    readonly: bool,
+    on_click: EventHandler<()>,
+    on_event: EventHandler<CalendarMutation>,
+}
+
+#[component]
+fn MonthChip(props: MonthChipProps) -> Element {
+    let ctx = use_drag_context();
+    let mut drag = ctx.state;
+    let p = props.placement.clone();
+    let event = p.event.clone();
+    let event_id = event.id;
+    let stem = event.color.stem();
+    let is_dragging = drag.read().is_some_and(|d| d.event == event_id);
+    let opacity = if is_dragging { "opacity: 0.4;" } else { "" };
+
+    let track = p.track;
+    let start_col = p.start_col;
+    let span = p.span;
+    let rounded_l = if p.continues_left {
+        "rounded-l-none"
+    } else {
+        "rounded-l-sm"
+    };
+    let rounded_r = if p.continues_right {
+        "rounded-r-none"
+    } else {
+        "rounded-r-sm"
+    };
+    let bg = format!(
+        "bg-{stem}-500/30 text-{stem}-50 border-l-2 border-{stem}-500 hover:bg-{stem}-500/40"
+    );
+    // CSS grid is 1-indexed.
+    let style = format!(
+        "grid-column: {} / span {}; grid-row: {}; {opacity}",
+        start_col + 1,
+        span,
+        track + 1,
+    );
+
+    let on_click = props.on_click;
+
+    rsx! {
+        div {
+            class: "truncate text-[11px] leading-4 px-1.5 py-0.5 mx-px cursor-pointer select-none pointer-events-auto {bg} {rounded_l} {rounded_r}",
+            style: "{style}",
+            draggable: !props.readonly,
+            ondragstart: move |e: Event<DragData>| {
+                if props.readonly { return; }
+                let dt = e.data().data_transfer();
+                let _ = dt.set_data(DT_MIME, &event_id.to_string());
+                drag.set(Some(super::drag::DragState {
+                    event: event_id,
+                    kind: super::drag::DragKind::Move,
+                    orig_start: event.start,
+                    orig_end: event.end,
+                }));
+            },
+            ondragend: move |_| drag.set(None),
+            onclick: move |e: MouseEvent| {
+                e.stop_propagation();
+                on_click.call(());
+            },
+            "{event.title}"
+        }
+    }
 }
