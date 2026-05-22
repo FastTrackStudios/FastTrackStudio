@@ -1,0 +1,47 @@
+[package]
+name = "editor-outliner"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Logseq-style outliner editor.
+#
+# Layered the same way Logseq's frontend is organized:
+#   - `state`      — top-level signals + contexts (Logseq's
+#                    `frontend.state`)
+#   - `db`         — in-memory page/block store; canonical source
+#                    of truth is the on-disk markdown vault
+#                    (Logseq's `frontend.db.*`)
+#   - `handler`    — business actions: edit / split / indent /
+#                    create-page / etc. (Logseq's
+#                    `frontend.handler.*`)
+#   - `format`     — markdown parse + serialize (Logseq's
+#                    `frontend.format.*`)
+#   - `components` — Dioxus components: shell, sidebar, page
+#                    view, block, editable textarea
+#                    (Logseq's `frontend.components.*`)
+#
+# Files in `~/Task/{pages,journals}/*.md` are the authoritative
+# data; the in-memory store rebuilds from them on launch and on
+# external change. No CRDT layer — sync (federation, real-time
+# collab) lives behind a future feature flag.
+
+[dependencies]
+dioxus = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+uuid = { workspace = true, features = ["v4"] }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+publish-core = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["time", "sync", "rt"] }
+notify = "8"
+notify-debouncer-mini = "0.6"
+rfd = "0.15"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,37 +1,61 @@
 [workspace]
-# Glob-driven membership. Scaffolder writes the dirs, cargo picks
-# them up; this file doesn't need touching when a new feature lands.
+# Vertical-slice reset: tasks + projects remain; auth is provided by architect-auth.
 members = [
     "apps/*",
     "crates/*",
     "features/*/*",
-    "features/*/tests/native",
+# `features/*/tests/native` glob — gone since `features/project/tests/`
+# was deleted alongside the project crates. Re-add if a feature
+# grows native integration tests again.
+#    "features/*/tests/native",
     "xtask",
+    # CodeMirror-style editor — subtree-imported from
+    # github.com/.../Editor. Lives under `features/editor/` so its
+    # internal Cargo.toml + git history stay intact. We re-expose
+    # its crates here so the rest of Task can depend on them.
+    "features/editor/crates/editor-state",
+    "features/editor/crates/editor-syntax",
+    "features/editor/crates/editor-view",
+    "features/editor/crates/editor-vim",
+    "features/editor/crates/editor-typst",
+    "features/editor/crates/editor-mermaid",
+    "features/editor/crates/editor",
+    # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
+    # patched in for wasm32 compat. Lives next to the editor it
+    # supports.
+    "features/editor/vendor/mermaid-rs-renderer",
+    # Editor playground — Dioxus app that dogfoods the editor.
+    # Built with `dx serve --package playground`.
+    "features/editor/examples/playground",
+    # Email feature harness — same pattern as the editor
+    # playground: standalone Dioxus binary that exercises the
+    # email-* crates without pulling in the full task-ui shell.
+    "features/email/examples/email-client",
+    # Parked: legacy Logseq-style shell. Kept buildable so we can
+    # mine pieces (virt-folder, properties pane, tasks-kanban) into
+    # the new editor + vault stack on demand.
 ]
-# Only non-crate directories that `features/*/*` accidentally catches:
-# `features/<name>/spec` (tracey markdown) and `features/<name>/tests`
-# (parent of the `tests/native` crate, which IS picked up by the
-# explicit member pattern above). Two lines per feature until cargo
-# grows glob-exclude support.
 exclude = [
-    "features/agent/spec",      "features/agent/tests",
-    "features/caldav/spec",     "features/caldav/tests",
-    "features/calendar/spec",   "features/calendar/tests",
-    "features/chat/spec",       "features/chat/tests",
-    "features/conference/spec", "features/conference/tests",
-    "features/cookbook/spec",   "features/cookbook/tests",
-    "features/email/spec",      "features/email/tests",
-    "features/finance/spec",    "features/finance/tests",
-    "features/fitness/spec",    "features/fitness/tests",
-    "features/inventory/spec",  "features/inventory/tests",
-    "features/invoice/spec",    "features/invoice/tests",
-    "features/location/spec",   "features/location/tests",
-    "features/person/spec",     "features/person/tests",
-    "features/project/spec",    "features/project/tests",
-    "features/threads/spec",    "features/threads/tests",
-    "features/timer/spec",      "features/timer/tests",
-    "features/knowledge/spec",  "features/knowledge/tests",
-    "features/notifications/spec", "features/notifications/tests",
+    # `features/editor/` keeps its imported `crates/` + `vendor/`
+    # + `examples/` subdirs so the editor's internal layout
+    # stays intact. Each real crate is listed above explicitly;
+    # exclude the intermediate parent dirs from the
+    # `features/*/*` glob so cargo doesn't try to parse them as
+    # manifests.
+    "features/editor/crates",
+    "features/editor/vendor",
+    "features/editor/examples",
+    "features/editor/docs",
+    "features/editor/plans",
+    "features/editor/tests",
+    # The `features/*/*` glob would otherwise try to parse
+    # `features/email/examples/` and `features/email/plans/`
+    # as crate manifests.
+    "features/email/examples",
+    "features/email/plans",
+    # `crates/legacy/` parks older shells we want to keep readable
+    # without forcing them into the workspace member glob.
+    "crates/legacy",
 ]
 resolver = "2"
 
@@ -49,108 +73,98 @@ repository = "https://github.com/Codys-Wright/Task"
 [workspace.dependencies]
 async-trait = "0.1"
 chrono = "0.4"
+keybindings = "0.0.2"
+editor-types = "0.0.2"
+vim = { path = "crates/vim" }
 eyre = "0.6"
 futures = "0.3"
 rrule = "0.11"
 thiserror = "2.0"
 tracing = "0.1"
-threads = { path = "features/threads/threads" }
-threads-proto = { path = "features/threads/threads-proto" }
-threads-crdt = { path = "features/threads/threads-crdt" }
-threads-db = { path = "features/threads/threads-db" }
-chat = { path = "features/chat/chat" }
-chat-proto = { path = "features/chat/chat-proto" }
-chat-crdt = { path = "features/chat/chat-crdt" }
-chat-db = { path = "features/chat/chat-db" }
-conference = { path = "features/conference/conference" }
-conference-proto = { path = "features/conference/conference-proto" }
-conference-crdt = { path = "features/conference/conference-crdt" }
-conference-db = { path = "features/conference/conference-db" }
-person = { path = "features/person/person" }
-person-proto = { path = "features/person/person-proto" }
-person-crdt = { path = "features/person/person-crdt" }
-person-db = { path = "features/person/person-db" }
-location = { path = "features/location/location" }
-location-proto = { path = "features/location/location-proto" }
-location-crdt = { path = "features/location/location-crdt" }
-location-db = { path = "features/location/location-db" }
-project = { path = "features/project/project" }
-project-proto = { path = "features/project/project-proto" }
-project-crdt = { path = "features/project/project-crdt" }
-project-db = { path = "features/project/project-db" }
-timer = { path = "features/timer/timer" }
-timer-proto = { path = "features/timer/timer-proto" }
-timer-crdt = { path = "features/timer/timer-crdt" }
-timer-db = { path = "features/timer/timer-db" }
-invoice = { path = "features/invoice/invoice" }
-invoice-proto = { path = "features/invoice/invoice-proto" }
-invoice-crdt = { path = "features/invoice/invoice-crdt" }
-invoice-db = { path = "features/invoice/invoice-db" }
-finance = { path = "features/finance/finance" }
-finance-proto = { path = "features/finance/finance-proto" }
-finance-crdt = { path = "features/finance/finance-crdt" }
-finance-db = { path = "features/finance/finance-db" }
-inventory = { path = "features/inventory/inventory" }
-inventory-proto = { path = "features/inventory/inventory-proto" }
-inventory-crdt = { path = "features/inventory/inventory-crdt" }
-inventory-db = { path = "features/inventory/inventory-db" }
-cookbook = { path = "features/cookbook/cookbook" }
-cookbook-proto = { path = "features/cookbook/cookbook-proto" }
-cookbook-crdt = { path = "features/cookbook/cookbook-crdt" }
-cookbook-db = { path = "features/cookbook/cookbook-db" }
-fitness = { path = "features/fitness/fitness" }
-fitness-proto = { path = "features/fitness/fitness-proto" }
-fitness-crdt = { path = "features/fitness/fitness-crdt" }
-fitness-db = { path = "features/fitness/fitness-db" }
-calendar = { path = "features/calendar/calendar" }
-calendar-proto = { path = "features/calendar/calendar-proto" }
-calendar-crdt = { path = "features/calendar/calendar-crdt" }
-calendar-db = { path = "features/calendar/calendar-db" }
-email = { path = "features/email/email" }
+# `project` feature crates (project, project-proto, project-crdt,
+# project-db) deleted along with the Loro entity layer. Tasks +
+# projects are now plain markdown pages under the vault. The legacy
+# `project-ui` shell is parked.
+project-ui = { path = "crates/legacy/project-ui" }
+# `knowledge` feature deleted. File-backed `vault` is now the
+# only storage path. Pieces of the old stack survive as legacy
+# parks under `crates/legacy/` (knowledge-ui shell,
+# editor-outliner Logseq port, publish-core static-site engine);
+# kept readable so we can mine them later, not in the workspace
+# member glob.
+knowledge-ui = { path = "crates/legacy/knowledge-ui" }
+publish-core = { path = "crates/legacy/publish-core" }
+editor-outliner = { path = "crates/legacy/editor-outliner" }
+
+vault-obsidian = { path = "features/vault/vault-obsidian" }
+# First-party task feature. Tasks = markdown pages with
+# TaskNotes-shape frontmatter (mirrors callumalpass/tasknotes
+# so existing vaults round-trip without conversion). Lives at
+# `features/task/task/`.
+task = { path = "features/task/task" }
+# File-backed vault layer. Modeled on `vault-obsidian` (clean
+# small modules, native-only `cfg`, walker / watcher / mutate)
+# but adds block-id awareness: a `BlockIndex` maps every
+# `id:: <uuid>` line in the vault to its containing page +
+# anchor offset.
+vault = { path = "features/vault/vault" }
+vault-live = { path = "features/vault/vault-live" }
+vault-proto = { path = "features/vault/vault-proto" }
+# Email feature — wire contract + backends. Same shape as
+# `vault-proto`: one `#[architect::rpc] trait EmailSync` proto
+# crate, sibling backend crates (`email-imap`, `email-jmap`,
+# `email-maildir`, `email-nextcloud`) impl it, and
+# `email-store` caches behind the same surface.
 email-proto = { path = "features/email/email-proto" }
-email-crdt = { path = "features/email/email-crdt" }
-email-db = { path = "features/email/email-db" }
-agent = { path = "features/agent/agent" }
-agent-proto = { path = "features/agent/agent-proto" }
-agent-crdt = { path = "features/agent/agent-crdt" }
-agent-db = { path = "features/agent/agent-db" }
-agent-hermes = { path = "features/agent/agent-hermes" }
-caldav = { path = "features/caldav/caldav" }
-caldav-proto = { path = "features/caldav/caldav-proto" }
-caldav-crdt = { path = "features/caldav/caldav-crdt" }
-caldav-db = { path = "features/caldav/caldav-db" }
-caldav-sync = { path = "features/caldav/caldav-sync" }
-caldav-ui = { path = "features/caldav/caldav-ui" }
-agent-ui = { path = "features/agent/agent-ui" }
-calendar-ui = { path = "features/calendar/calendar-ui" }
-chat-ui = { path = "features/chat/chat-ui" }
-conference-ui = { path = "features/conference/conference-ui" }
-cookbook-ui = { path = "features/cookbook/cookbook-ui" }
-email-ui = { path = "features/email/email-ui" }
-finance-ui = { path = "features/finance/finance-ui" }
-fitness-ui = { path = "features/fitness/fitness-ui" }
-inventory-ui = { path = "features/inventory/inventory-ui" }
-invoice-ui = { path = "features/invoice/invoice-ui" }
-location-ui = { path = "features/location/location-ui" }
-person-ui = { path = "features/person/person-ui" }
-project-ui = { path = "features/project/project-ui" }
-threads-ui = { path = "features/threads/threads-ui" }
-timer-ui = { path = "features/timer/timer-ui" }
-knowledge = { path = "features/knowledge/knowledge" }
-knowledge-proto = { path = "features/knowledge/knowledge-proto" }
-knowledge-crdt = { path = "features/knowledge/knowledge-crdt" }
-knowledge-db = { path = "features/knowledge/knowledge-db" }
-knowledge-ui = { path = "features/knowledge/knowledge-ui" }
-knowledge-sync = { path = "features/knowledge/knowledge-sync" }
-notifications = { path = "features/notifications/notifications" }
-notifications-proto = { path = "features/notifications/notifications-proto" }
-notifications-crdt = { path = "features/notifications/notifications-crdt" }
-notifications-db = { path = "features/notifications/notifications-db" }
-notifications-ui = { path = "features/notifications/notifications-ui" }
+email-imap = { path = "features/email/email-imap" }
+email-smtp = { path = "features/email/email-smtp" }
+email-jmap = { path = "features/email/email-jmap" }
+email-maildir = { path = "features/email/email-maildir" }
+email-nextcloud = { path = "features/email/email-nextcloud" }
+email-store = { path = "features/email/email-store" }
+email-secret = { path = "features/email/email-secret" }
+email-config = { path = "features/email/email-config" }
+email-autoconfig = { path = "features/email/email-autoconfig" }
+# Per-account sync engine — wraps any EmailSync backend in a
+# periodic reconciliation loop and broadcasts merged events.
+# Mirrors pimalaya's neverest+mirador split out of himalaya.
+email-sync = { path = "features/email/email-sync" }
+# Cross-entity link layer — connects emails to tasks / projects /
+# notes / people via a many-to-many index. Used by other
+# features to record "this email is about this project."
+email-link = { path = "features/email/email-link" }
+# CodeMirror-style editor (subtree). `editor` is the umbrella
+# crate that re-exports the others — apps consume that.
+editor-state = { path = "features/editor/crates/editor-state" }
+editor-syntax = { path = "features/editor/crates/editor-syntax" }
+editor-view = { path = "features/editor/crates/editor-view" }
+editor-vim = { path = "features/editor/crates/editor-vim" }
+editor-typst = { path = "features/editor/crates/editor-typst" }
+editor-mermaid = { path = "features/editor/crates/editor-mermaid" }
+editor = { path = "features/editor/crates/editor" }
+
+# Deps the editor's inner crates inherit via `workspace = true`.
+# `serde`, `serde_json` are already declared elsewhere in the
+# workspace deps block — only the editor-specific ones go here.
+ropey = "1.6"
+# Tree-sitter syntax highlighting — same versions as the editor
+# subtree's original workspace, kept default-features-off so we
+# don't drag in everything by default.
+arborium = { version = "2.16.0", default-features = false }
+arborium-theme = "2.16.0"
+arborium-tree-sitter = "2.16.0"
+attachments-proto = { path = "features/attachments/attachments-proto" }
+view = { path = "features/view/view" }
+view-gantt = { path = "features/view/view-gantt" }
+view-kanban = { path = "features/view/view-kanban" }
+view-calendar = { path = "features/view/view-calendar" }
+architect-auth = { path = "../architect-auth/crates/architect-auth" }
 
 # Filesystem walker — used by knowledge-sync to crawl Obsidian vault
 # directories. Server-only dep; never reaches wasm.
 walkdir = "2"
+# Parallel file IO for the vault scanner.
+rayon = "1"
 
 # Fuzzy matcher used by the knowledge live-preview editor pickers
 # (wikilink/blockref/tag/slash-command). Same crate used internally by
@@ -212,6 +226,13 @@ rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624"
 version = "1.12"
 default-features = false
 
+# Loro internals — needed for `EphemeralStore` (awareness/cursor
+# sync) which the public `loro` crate doesn't re-export. Pinned
+# to the same minor as `loro` so the type identities line up.
+[workspace.dependencies.loro-internal]
+version = "1.12"
+default-features = false
+
 # CalDAV/CardDAV/WebDAV-Sync client (RFC 4791 + RFC 6352 + RFC 6578).
 # Picked over `kitchen-fridge` because it actually implements VEVENT
 # (kitchen-fridge's upstream is VTODO-first with VEVENT support
@@ -250,6 +271,9 @@ features = ["lib"]
 version = "0.7.9"
 default-features = false
 
+[workspace.dependencies.dioxus-ssr]
+version = "0.7.9"
+
 # Web-sys / wasm-bindgen — wired only in crates that use them and
 # always behind `#[cfg(target_arch = "wasm32")]` source gates. They
 # do compile on native (stub wrappers in wasm-bindgen-shared) so
@@ -269,6 +293,10 @@ version = "0.3"
 [workspace.dependencies.gloo-timers]
 version = "0.3"
 features = ["futures"]
+
+[workspace.dependencies.indexed_db_futures]
+version = "0.6"
+features = ["serde", "cursors", "indices", "typed-arrays", "async-upgrade", "tx-done", "version-change"]
 
 [workspace.dependencies.futures-channel]
 version = "0.3"
@@ -308,6 +336,11 @@ features = ["full"]
 version = "0.3"
 features = ["env-filter"]
 
+# Used by the editor playground (and any future binary that
+# wants a structured log file alongside stdout).
+[workspace.dependencies.tracing-appender]
+version = "0.2"
+
 [workspace.dependencies.uuid]
 version = "1"
 features = [
@@ -315,9 +348,6 @@ features = [
     "v5",
     "v7",
 ]
-
-[workspace.dependencies.task-core]
-path = "crates/task-core"
 
 [workspace.dependencies.vox]
 # Wasm-clean baseline: just `runtime` (vox-core, gives #[vox::service]
@@ -397,24 +427,6 @@ version = "0.2.0"
 
 [workspace.dependencies.base64]
 version = "0.22"
-
-[workspace.dependencies.better-auth]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
-default-features = false
-
-[workspace.dependencies.better-auth-core]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
-
-[workspace.dependencies.better-auth-api]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
-default-features = false
-
-[workspace.dependencies.better-auth-derive]
-git = "https://github.com/FastTrackStudios/better-auth"
-rev = "e32926ba4a7546f3405b78e5dbb19dbe3a0d2f02"
 
 [workspace.dependencies.cookie]
 version = "0.18"
@@ -522,6 +534,19 @@ strip = "debuginfo"
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
+# Redirect every transitive bearcove/vox reference (architect pulls
+# vox from bearcove; this workspace pulls from Codys-Wright/vox at
+# the same rev). Without this, architect's `axum_ws::serve` builds a
+# Handler bound against bearcove's `vox_types::Handler` and the
+# Dispatchers we instantiate here implement Codys-Wright's — same
+# code, different SourceId, no impl found. Same trick as the moire
+# patch below.
+[patch."https://github.com/bearcove/vox"]
+vox           = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-core      = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-types     = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
 # fork at the same rev as the workspace dep above. Without this,
@@ -562,3 +587,12 @@ rev = "d01afa40d79227a4a2de85b50e76849300890766"
 [patch.crates-io.sea-orm-migration]
 git = "https://github.com/FastTrackStudios/sea-orm"
 rev = "d01afa40d79227a4a2de85b50e76849300890766"
+
+# Vendored fork of `mermaid-rs-renderer` 0.2.2 — the upstream
+# crate calls `std::time::Instant::now()` unconditionally from
+# its layout pipeline, which panics on `wasm32-unknown-unknown`.
+# Our fork swaps that for `web_time::Instant` so editor-mermaid
+# can render diagrams in the browser. Subtree-imported with the
+# editor, lives at `features/editor/vendor/mermaid-rs-renderer`.
+[patch.crates-io.mermaid-rs-renderer]
+path = "features/editor/vendor/mermaid-rs-renderer"

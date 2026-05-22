@@ -1,0 +1,29 @@
+[package]
+name = "view"
+description = "View feature facade. Re-exports the individual view crates (gantt, eventually kanban / calendar / table) behind feature flags. Every consumer outside `features/view/` should depend on this crate — the sibling impl crates are internal."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Pure facade — no source other than `pub use`s in `lib.rs`. All
+# real code lives in the sibling `view-*` crates.
+#
+# Feature gates:
+#   default  — `gantt` + `kanban` + `calendar`. Add table here when
+#              it lands so a plain `view` dep brings the full set.
+#   gantt    — pull in view-gantt (Dioxus gantt chart).
+#   kanban   — pull in view-kanban (Dioxus kanban board).
+#   calendar — pull in view-calendar (Dioxus calendar — month / week / day).
+[dependencies]
+view-gantt = { workspace = true, optional = true }
+view-kanban = { workspace = true, optional = true }
+view-calendar = { workspace = true, optional = true }
+
+[features]
+default = ["gantt", "kanban", "calendar"]
+gantt = ["dep:view-gantt"]
+kanban = ["dep:view-kanban"]
+calendar = ["dep:view-calendar"]

@@ -1,430 +1,227 @@
-//! Task server — Loro sync-relay library + webhook receivers.
+//! `task-server` — minimal vox endpoint.
 //!
-//! Exposed so tests can spin up the server in-process on a random
-//! port, with any `Persistence` impl (e.g. `InMemoryPersistence` for
-//! fast realtime-sync integration tests). The binary at `src/main.rs`
-//! is a thin shell around this.
+//! Surface after the knowledge + project-CRDT rip:
+//! - `/health` — liveness probe.
+//! - `/vox`    — architect/vox WebSocket endpoint hosting three
+//!               services: `AuthService` (architect-auth),
+//!               `AttachmentService` (signed upload/download), and
+//!               `VaultSyncRpc` (file replication backed by
+//!               `vault::Backend`).
+//! - `/blobs/*` — signed-URL endpoint for attachment uploads and
+//!                downloads, mounted via `attachments::routes`.
 //!
-//! WebSocket protocol per `/sync/:doc_id`:
-//!
-//! 1. Server → client (on connect): one binary frame containing
-//!    `doc.export(Snapshot)` — bring the new peer up to date with
-//!    everything the doc has accumulated.
-//! 2. Client → server: binary frames of Loro update bytes (typically
-//!    one per `commit()` on the client doc, from
-//!    `subscribe_local_update`).
-//! 3. Server → other clients: forward each imported update to every
-//!    other socket in the room. We skip echoing back to the
-//!    originator — keeps things tidy even though Loro would handle
-//!    a self-echo gracefully.
-//!
-//! Bytes are bytes. No text frames, no JSON, no control protocol.
-//!
-//! ## Webhook surface
-//!
-//! Mounted alongside the WS relay:
-//!
-//! - `POST /webhooks/github/{repo_path}` — GitHub events, signature
-//!   verified via `X-Hub-Signature-256` against the unsealed
-//!   `GitRepoConnection.webhook_secret_hash`.
-//! - `POST /webhooks/hermes/event` — Hermes dashboard events,
-//!   signature verified via `X-Webhook-Signature` against the
-//!   configured `hermes_webhook_secret`.
-//!
-//! Both routes are *additive*: AppState constructors that pre-date
-//! webhooks (used by the realtime-sync test) leave the optional
-//! fields `None`, and the routes return 401 / 404 cleanly.
+//! The previous CRDT machinery (`DocRegistry`, `OpenDoc`,
+//! `WorkspaceSyncImpl`, `task-db` / `crdt-seaorm` persistence,
+//! `*RepoLoro` dispatchers, capability / share-link / claim
+//! services) was ripped along with the `project-proto` /
+//! `project-crdt` crates. CRDT now lives only at the per-file
+//! editor layer (future); vault is the sole storage path.
 
-use std::collections::HashMap;
+pub mod attachments;
+pub mod capability;
+
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use architect::vox;
+use architect_auth::{
+    ArchitectAuth, AuthServiceDispatcher,
+    db::{AuthSeaOrmStorage, Migrator as AuthMigrator},
+    transport::vox::{AuthServerMiddleware, AuthVoxService},
+};
 use axum::Router;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::State;
+use axum::extract::ws::WebSocketUpgrade;
 use axum::response::IntoResponse;
 use axum::routing::get;
-use crdt::Persistence;
-use eyre::WrapErr;
-use futures::{SinkExt, StreamExt};
-use loro::{ExportMode, LoroDoc};
-use tokio::sync::{Mutex, broadcast};
-use tracing::{error, info, warn};
-use uuid::Uuid;
+use sea_orm::Database;
+use sea_orm_migration::MigratorTrait;
 
-use agent_crdt::{
-    AgentConversationRepoLoro, AgentLogLineRepoLoro, AgentRunRepoLoro, GitRepoConnectionRepoLoro,
-};
-use agent_proto::ChatModelRegistry;
-use agent_proto::integration::{EventSink, EventSinkImpl, IntegrationRegistry, ShutdownSignal};
-use chat_crdt::MessageRepoLoro;
-use crdt::CrdtDoc;
-use project_crdt::TaskRepoLoro;
+use crate::capability::{ServerKeypair, default_keypair_path};
 
-pub mod chat;
-pub mod integration_sink;
-pub mod sealing;
-pub mod webhook_inbox;
-pub mod webhooks;
+#[derive(Clone)]
+pub struct AuthState {
+    pub auth: ArchitectAuth<AuthSeaOrmStorage>,
+}
 
-pub use integration_sink::ServerEventSink;
-pub use sealing::{Sealing, SealingError};
-pub use webhook_inbox::{WebhookInbox, WebhookInboxRow};
+impl AuthState {
+    pub async fn open(db_url: &str, secret: &str) -> eyre::Result<Self> {
+        let db = Database::connect(db_url)
+            .await
+            .map_err(|e| eyre::eyre!("connect auth db `{db_url}`: {e}"))?;
+        AuthMigrator::up(&db, None)
+            .await
+            .map_err(|e| eyre::eyre!("auth migrations: {e}"))?;
+        let storage = AuthSeaOrmStorage::new(db);
+        let auth = ArchitectAuth::builder()
+            .secret(secret)
+            .storage(storage)
+            .build()
+            .map_err(|e| eyre::eyre!("build ArchitectAuth: {e}"))?;
+        Ok(Self { auth })
+    }
+}
 
-// ── Public API ────────────────────────────────────────────────────────
-
-/// Application state — clone-friendly handle to the room registry +
-/// persistence backend + webhook plumbing. Pass to [`router`] to
-/// mount everything.
 #[derive(Clone)]
 pub struct AppState {
-    rooms: Arc<Mutex<HashMap<Uuid, Arc<RoomState>>>>,
-    persistence: Arc<dyn Persistence>,
-
-    // ── Webhook + integration plumbing ───────────────────────────────
-    //
-    // All `Option` / cheap defaults so legacy constructors (used by
-    // the realtime-sync integration test) still work unchanged. The
-    // production main.rs fills these in.
-    pub sealing: Option<Sealing>,
-    pub webhook_inbox: WebhookInbox,
-    pub registry: Arc<IntegrationRegistry>,
-    pub event_sink: Option<EventSink>,
-    pub hermes_webhook_secret: Option<String>,
-
-    pub task_repo: Arc<TaskRepoLoro>,
-    pub agent_run_repo: Arc<AgentRunRepoLoro>,
-    pub agent_log_repo: Arc<AgentLogLineRepoLoro>,
-    pub git_repo_repo: Arc<GitRepoConnectionRepoLoro>,
-
-    // ── AI chat ──────────────────────────────────────────────────────
-    pub message_repo: Arc<MessageRepoLoro>,
-    pub agent_conversation_repo: Arc<AgentConversationRepoLoro>,
-    pub chat_model_registry: Arc<ChatModelRegistry>,
-    pub chat_sessions: Arc<chat::ChatStreamSessions>,
-
-    pub workspace_doc: Arc<CrdtDoc>,
-    pub shutdown: ShutdownSignal,
+    pub auth: AuthState,
+    /// Ed25519 keypair used to sign blob URLs. Loaded from
+    /// `$XDG_DATA_HOME/task-server/server-key.ed25519`,
+    /// generated on first boot. Tests use
+    /// `ServerKeypair::generate_ephemeral()`.
+    pub keypair: ServerKeypair,
+    pub attachments: Arc<attachments::AttachmentServiceImpl>,
+    /// File-replication backend. `vault::Backend` mounted on the
+    /// `VaultSyncRpc` arm. `under_parent` layout: every `vault_id`
+    /// resolves to a subdir of the configured parent (created on
+    /// demand on first write).
+    pub vault_sync: vault::Backend,
 }
 
 impl AppState {
-    /// Default construction — opens the workspace `CrdtDoc` against
-    /// the provided persistence and builds the per-feature repos that
-    /// webhook handlers write into.
-    ///
-    /// **v1 wiring limitation**: webhook writes hit a *separate*
-    /// `LoroDoc` from the per-room sync doc; they share persistence,
-    /// so updates appear to WS clients only after the room
-    /// rehydrates from storage (i.e. after the last peer drops and a
-    /// new one joins). Promoting this to live broadcast is a
-    /// follow-up.
-    pub async fn new<P: Persistence>(persistence: P) -> eyre::Result<Self> {
-        let persistence: Arc<dyn Persistence> = Arc::new(persistence);
-        Self::with_persistence_async(persistence).await
+    /// Build app state with auth opened at the default XDG path
+    /// (`$XDG_DATA_HOME/task-server/auth.sqlite`, fallback
+    /// `~/.local/share/task-server/auth.sqlite`).
+    pub async fn new() -> eyre::Result<Self> {
+        let auth_db_url = format!("sqlite://{}?mode=rwc", default_auth_db_path()?.display());
+        let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
+        let keypair = ServerKeypair::load_or_generate(&default_keypair_path()?)
+            .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
+        Self::new_with_auth(auth, keypair).await
     }
 
-    pub async fn with_persistence_async(persistence: Arc<dyn Persistence>) -> eyre::Result<Self> {
-        let workspace_doc_id = task_db::WORKSPACE_DOC_ID;
-        // Open the workspace doc against the shared persistence.
-        // CrdtDoc::open is server-only (uses tokio::spawn for the
-        // local-update flush), which matches our deployment.
-        let crdt_doc = CrdtDoc::open(workspace_doc_id, ErasedPersistence(persistence.clone()))
-            .await
-            .map_err(|e| eyre::eyre!("open workspace CrdtDoc: {e}"))?;
-        let crdt_doc = Arc::new(crdt_doc);
+    /// Build app state with explicit auth + keypair — tests pass
+    /// in-memory `AuthState` + `ServerKeypair::generate_ephemeral()`
+    /// so they don't touch the user's XDG dir.
+    pub async fn new_with_auth(auth: AuthState, keypair: ServerKeypair) -> eyre::Result<Self> {
+        // Attachments — local blob store under the standard XDG
+        // path; the keypair signs upload/download URLs.
+        let blob_root =
+            attachments::default_blob_root().map_err(|e| eyre::eyre!("blob root: {e}"))?;
+        let object_store: Arc<dyn attachments::ObjectStore> =
+            Arc::new(attachments::LocalFsStore::new(blob_root));
+        let public_base_url = std::env::var("TASK_SERVER_PUBLIC_URL").unwrap_or_default();
+        let attachment_service = Arc::new(attachments::AttachmentServiceImpl::new(
+            keypair.clone(),
+            object_store,
+            public_base_url,
+        ));
 
-        let task_repo = Arc::new(TaskRepoLoro::new(&crdt_doc));
-        let agent_run_repo = Arc::new(AgentRunRepoLoro::new(&crdt_doc));
-        let agent_log_repo = Arc::new(AgentLogLineRepoLoro::new(&crdt_doc));
-        let git_repo_repo = Arc::new(GitRepoConnectionRepoLoro::new(&crdt_doc));
-        let message_repo = Arc::new(MessageRepoLoro::new(&crdt_doc));
-        let agent_conversation_repo = Arc::new(AgentConversationRepoLoro::new(&crdt_doc));
+        // Vault file-replication. Storage root defaults to
+        // `$XDG_DATA_HOME/task-server/vaults`, overridable via
+        // `TASK_SERVER_VAULT_ROOT` for tests / containers.
+        let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs_local_share()
+                    .unwrap_or_else(|| PathBuf::from("./vaults"))
+                    .join("task-server")
+                    .join("vaults")
+            });
+        let vault_sync_state = vault::Backend::under_parent(vault_root)
+            .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
 
         Ok(Self {
-            rooms: Arc::new(Mutex::new(HashMap::new())),
-            persistence,
-            sealing: None,
-            webhook_inbox: WebhookInbox::new(),
-            registry: Arc::new(IntegrationRegistry::new()),
-            event_sink: None,
-            hermes_webhook_secret: None,
-            task_repo,
-            agent_run_repo,
-            agent_log_repo,
-            git_repo_repo,
-            message_repo,
-            agent_conversation_repo,
-            chat_model_registry: Arc::new(ChatModelRegistry::new()),
-            chat_sessions: Arc::new(chat::ChatStreamSessions::new()),
-            workspace_doc: crdt_doc,
-            shutdown: ShutdownSignal::new(),
+            auth,
+            keypair,
+            attachments: attachment_service,
+            vault_sync: vault_sync_state,
         })
     }
+}
 
-    /// Legacy synchronous constructor for tests that don't need the
-    /// webhook surface. Builds a parallel in-memory CrdtDoc for the
-    /// repo handles so the struct is still inhabited; webhooks
-    /// against this state will see an empty repo (which is what
-    /// realtime-sync tests want).
-    pub fn new_sync<P: Persistence>(persistence: P) -> Self {
-        let persistence: Arc<dyn Persistence> = Arc::new(persistence);
-        Self::with_persistence_sync(persistence)
-    }
+/// Dev default — replace via config in a later phase. Length-checked
+/// at build time so this fails loudly if shortened.
+const DEFAULT_AUTH_SECRET: &str = "task-server-auth-dev-secret-32+!";
 
-    /// Build with an already-erased persistence handle. Used by the
-    /// realtime-sync integration test to share one
-    /// `Arc<InMemoryPersistence>` across server + assertion helpers.
-    pub fn with_persistence(persistence: Arc<dyn Persistence>) -> Self {
-        Self::with_persistence_sync(persistence)
-    }
-
-    fn with_persistence_sync(persistence: Arc<dyn Persistence>) -> Self {
-        // Test path: use an ephemeral CrdtDoc — no async needed.
-        let crdt_doc = Arc::new(CrdtDoc::ephemeral());
-        let task_repo = Arc::new(TaskRepoLoro::new(&crdt_doc));
-        let agent_run_repo = Arc::new(AgentRunRepoLoro::new(&crdt_doc));
-        let agent_log_repo = Arc::new(AgentLogLineRepoLoro::new(&crdt_doc));
-        let git_repo_repo = Arc::new(GitRepoConnectionRepoLoro::new(&crdt_doc));
-        let message_repo = Arc::new(MessageRepoLoro::new(&crdt_doc));
-        let agent_conversation_repo = Arc::new(AgentConversationRepoLoro::new(&crdt_doc));
-        Self {
-            rooms: Arc::new(Mutex::new(HashMap::new())),
-            persistence,
-            sealing: None,
-            webhook_inbox: WebhookInbox::new(),
-            registry: Arc::new(IntegrationRegistry::new()),
-            event_sink: None,
-            hermes_webhook_secret: None,
-            task_repo,
-            agent_run_repo,
-            agent_log_repo,
-            git_repo_repo,
-            message_repo,
-            agent_conversation_repo,
-            chat_model_registry: Arc::new(ChatModelRegistry::new()),
-            chat_sessions: Arc::new(chat::ChatStreamSessions::new()),
-            workspace_doc: crdt_doc,
-            shutdown: ShutdownSignal::new(),
+/// Resolve `$XDG_DATA_HOME/task-server/auth.sqlite` with the standard
+/// fallback. Creates parent directories if missing.
+pub fn default_auth_db_path() -> eyre::Result<PathBuf> {
+    let base = match std::env::var("XDG_DATA_HOME") {
+        Ok(v) if !v.is_empty() => PathBuf::from(v),
+        _ => {
+            let home = std::env::var("HOME")
+                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
+            PathBuf::from(home).join(".local").join("share")
         }
-    }
-
-    /// Construct + wire the event sink from the in-state repos. Call
-    /// after registering integration plugins so they share the same
-    /// sink instance.
-    pub fn build_event_sink(&self) -> EventSink {
-        let sink: Arc<dyn EventSinkImpl> = Arc::new(ServerEventSink::new(
-            self.agent_run_repo.clone(),
-            self.agent_log_repo.clone(),
-            self.task_repo.clone(),
-        ));
-        EventSink { inner: sink }
-    }
+    };
+    let dir = base.join("task-server");
+    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("auth.sqlite"))
 }
 
-/// Tiny `Persistence` newtype to coerce `Arc<dyn Persistence>` into a
-/// type that satisfies `CrdtDoc::open`'s `P: Persistence` bound. The
-/// generic bound prevents passing the trait object directly.
-struct ErasedPersistence(Arc<dyn Persistence>);
-
-#[async_trait::async_trait]
-impl Persistence for ErasedPersistence {
-    async fn load_snapshot(&self, doc_id: Uuid) -> Result<Option<Vec<u8>>, crdt::PersistError> {
-        self.0.load_snapshot(doc_id).await
+/// Best-effort `$XDG_DATA_HOME` (falls back to `$HOME/.local/share`).
+/// Skips a `dirs` crate dep — we only use this one path.
+fn dirs_local_share() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
+        return Some(PathBuf::from(xdg));
     }
-    async fn load_updates(&self, doc_id: Uuid) -> Result<Vec<Vec<u8>>, crdt::PersistError> {
-        self.0.load_updates(doc_id).await
-    }
-    async fn append_update(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), crdt::PersistError> {
-        self.0.append_update(doc_id, bytes).await
-    }
-    async fn write_snapshot(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), crdt::PersistError> {
-        self.0.write_snapshot(doc_id, bytes).await
-    }
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".local/share"))
 }
 
-/// Build the axum router. `/health` + `/sync/{doc_id}` +
-/// `/webhooks/github/{repo_path}` + `/webhooks/hermes/event` +
-/// permissive CORS. Mount under any TCP listener with `axum::serve`.
 pub fn router(state: AppState) -> Router {
+    use attachments::routes::AttachmentRouteState;
+
+    // Mount the /blobs/* HTTP routes under their own sub-router
+    // so they pass a small `AttachmentRouteState` sliver and
+    // don't drag the full `AppState` into the attachment
+    // handlers' generic bound.
+    let blob_state = AttachmentRouteState {
+        service: state.attachments.clone(),
+    };
+    let blob_router = attachments::attachment_router().with_state(blob_state);
+
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .route("/sync/{doc_id}", get(ws_handler))
         .route("/vox", get(vox_ws_handler))
-        .nest("/webhooks/github", webhooks::github::router())
-        .nest("/webhooks/hermes", webhooks::hermes::router())
-        .nest("/api/agent-chat", chat::router())
+        .merge(blob_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
 
-/// Mount point for vox RPC over WebSocket. Each incoming connection
-/// gets its own vox session; the acceptor below matches the inbound
-/// `service` name to the appropriate Dispatcher.
-///
-/// MVP scope: the route is live but the per-service dispatchers
-/// aren't yet wired — the acceptor logs the requested service and
-/// returns an empty handler stub. Wire individual services
-/// (`ChatService`, `AgentService`, `NotificationService`) by adding
-/// their Dispatchers in the match arms.
 async fn vox_ws_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
-    ws.on_upgrade(|socket| async move {
-        let acceptor = architect::axum_ws::acceptor_fn(|req, _connection| {
-            tracing::info!(
-                service = %req.service(),
-                "vox session: dispatcher not yet wired"
-            );
-            // Returning Err with an empty list signals "no handler" —
-            // the peer's establish() will surface the failure. Once
-            // ChatServiceDispatcher / AgentServiceDispatcher are
-            // mounted, add match arms here.
-            Err(Vec::new())
-        });
+    ws.on_upgrade(move |socket| async move {
+        let auth = state.auth.auth.clone();
+        let attachment_service = state.attachments.clone();
+        let vault_sync_state = state.vault_sync.clone();
+        let acceptor =
+            architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
+                "AuthService" => {
+                    connection.handle_with(
+                        AuthServiceDispatcher::new(AuthVoxService::new(auth.clone()))
+                            .with_middleware(AuthServerMiddleware),
+                    );
+                    Ok(())
+                }
+                "AttachmentService" => {
+                    use attachments_proto::AttachmentServiceDispatcher;
+                    connection.handle_with(AttachmentServiceDispatcher::new(
+                        (*attachment_service).clone(),
+                    ));
+                    Ok(())
+                }
+                // architect-emitted mount: `serve` wraps the
+                // backend in `VaultSyncRpcDispatcher` and pulls
+                // its `TokioBlockingDispatcher` via
+                // `HasDispatcher`. Wire-level service name from
+                // `vault_proto::descriptor()`.
+                name if name == vault_proto::descriptor().service_name => {
+                    connection.handle_with(vault_proto::serve(vault_sync_state.clone()));
+                    Ok(())
+                }
+                other => {
+                    tracing::info!(
+                        service = %other,
+                        "vox session: unknown service requested"
+                    );
+                    Err(Vec::new())
+                }
+            });
         architect::axum_ws::serve(socket, acceptor).await;
     })
     .into_response()
-}
-
-// ── Internal: rooms ───────────────────────────────────────────────────
-
-/// One per active doc_id. The LoroDoc is the server's authoritative
-/// copy; the broadcast channel fans out every imported update to
-/// every connected peer's outbound write loop. Loro's docs call out
-/// this server-side-import pattern as the canonical relay shape.
-struct RoomState {
-    doc: Mutex<LoroDoc>,
-    tx: broadcast::Sender<RelayMsg>,
-}
-
-#[derive(Clone, Debug)]
-struct RelayMsg {
-    origin: ConnId,
-    bytes: Arc<Vec<u8>>,
-}
-
-type ConnId = u64;
-
-fn next_conn_id() -> ConnId {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static N: AtomicU64 = AtomicU64::new(1);
-    N.fetch_add(1, Ordering::Relaxed)
-}
-
-async fn get_or_create_room(state: &AppState, doc_id: Uuid) -> eyre::Result<Arc<RoomState>> {
-    {
-        let rooms = state.rooms.lock().await;
-        if let Some(r) = rooms.get(&doc_id) {
-            return Ok(r.clone());
-        }
-    }
-
-    let doc = LoroDoc::new();
-    if let Some(snap) = state.persistence.load_snapshot(doc_id).await? {
-        doc.import(&snap)
-            .map_err(|e| eyre::eyre!("import snapshot: {e}"))?;
-        info!(%doc_id, bytes = snap.len(), "rehydrated from snapshot");
-    }
-    let updates = state.persistence.load_updates(doc_id).await?;
-    let update_count = updates.len();
-    for u in updates {
-        doc.import(&u)
-            .map_err(|e| eyre::eyre!("import update: {e}"))?;
-    }
-    if update_count > 0 {
-        info!(%doc_id, n = update_count, "replayed updates");
-    }
-
-    let (tx, _rx) = broadcast::channel(256);
-    let room = Arc::new(RoomState {
-        doc: Mutex::new(doc),
-        tx,
-    });
-
-    let mut rooms = state.rooms.lock().await;
-    if let Some(existing) = rooms.get(&doc_id) {
-        return Ok(existing.clone());
-    }
-    rooms.insert(doc_id, room.clone());
-    Ok(room)
-}
-
-// ── WS handler ────────────────────────────────────────────────────────
-
-async fn ws_handler(
-    Path(doc_id): Path<Uuid>,
-    State(state): State<AppState>,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| async move {
-        if let Err(e) = run_socket(state, doc_id, socket).await {
-            warn!(%doc_id, "socket closed with error: {e:?}");
-        }
-    })
-}
-
-async fn run_socket(state: AppState, doc_id: Uuid, socket: WebSocket) -> eyre::Result<()> {
-    let conn_id = next_conn_id();
-    let room = get_or_create_room(&state, doc_id).await?;
-    let mut rx = room.tx.subscribe();
-    info!(%doc_id, conn_id, "peer joined");
-
-    let (mut ws_out, mut ws_in) = socket.split();
-
-    let snap = {
-        let doc = room.doc.lock().await;
-        doc.export(ExportMode::Snapshot)
-            .map_err(|e| eyre::eyre!("export snapshot: {e}"))?
-    };
-    if let Err(e) = ws_out.send(Message::Binary(snap.into())).await {
-        warn!(%doc_id, conn_id, "send snapshot failed: {e}");
-        return Ok(());
-    }
-
-    let conn_id_for_out = conn_id;
-    let outbound = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if msg.origin == conn_id_for_out {
-                continue;
-            }
-            let bytes: Vec<u8> = (*msg.bytes).clone();
-            if ws_out.send(Message::Binary(bytes.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let inbound = async {
-        while let Some(msg) = ws_in.next().await {
-            let msg = msg.wrap_err("read ws")?;
-            match msg {
-                Message::Binary(bytes) => {
-                    let bytes_vec = bytes.to_vec();
-                    {
-                        let doc = room.doc.lock().await;
-                        if let Err(e) = doc.import(&bytes_vec) {
-                            warn!(%doc_id, conn_id, "import failed: {e}");
-                            continue;
-                        }
-                    }
-                    if let Err(e) = state.persistence.append_update(doc_id, &bytes_vec).await {
-                        error!(%doc_id, conn_id, "persist failed: {e}");
-                    }
-                    let _ = room.tx.send(RelayMsg {
-                        origin: conn_id,
-                        bytes: Arc::new(bytes_vec),
-                    });
-                }
-                Message::Close(_) => break,
-                Message::Ping(_) | Message::Pong(_) | Message::Text(_) => {}
-            }
-        }
-        Ok::<_, eyre::Error>(())
-    };
-
-    let result = inbound.await;
-    outbound.abort();
-    info!(%doc_id, conn_id, "peer left");
-    result
 }

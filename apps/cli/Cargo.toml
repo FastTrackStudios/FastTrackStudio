@@ -1,0 +1,33 @@
+[package]
+name = "task-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "task"
+path = "src/main.rs"
+
+[dependencies]
+vox = { workspace = true, features = ["transport-websocket", "transport-websocket-tls"] }
+tokio = { workspace = true }
+chrono.workspace = true
+eyre.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+# `task-cli vault …` subcommands operate on a filesystem vault
+# via vault-obsidian's parsed helpers (outline / tasks / props /
+# base-query) and vault-live's wire types (refs::Ref, bases::*).
+vault.workspace = true
+vault-live = { workspace = true }
+vault-obsidian = { workspace = true }
+# `task-cli task …` subcommands — first-party task feature.
+task.workspace = true
+walkdir = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+# Pull TASK_SERVER (and friends) from a `.env` file in CWD or any
+# parent dir, so a user can `task list` instead of typing
+# `--server ws://...` every time.
+dotenvy = "0.15"

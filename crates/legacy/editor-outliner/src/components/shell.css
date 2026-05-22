@@ -1,0 +1,241 @@
+/* Editor — minimal Logseq-flavored shell. We rely on the host
+   theme tokens (`--ls-*`) when present, with sensible fallbacks
+   so the crate also works standalone. */
+:root {
+    --ed-bg: var(--ls-primary-background-color, #161a22);
+    --ed-bg-2: var(--ls-secondary-background-color, #1f2530);
+    --ed-fg: var(--ls-primary-text-color, #d3d8e0);
+    --ed-fg-muted: var(--ls-secondary-text-color, #8c93a3);
+    --ed-border: var(--ls-border-color, #2a3140);
+    --ed-accent: var(--ls-active-primary-color, #5b9eb3);
+    --ed-link: var(--ls-link-text-color, #6abad1);
+}
+
+.editor-shell {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 100vh;
+    background: var(--ed-bg);
+    color: var(--ed-fg);
+    font-family: system-ui, sans-serif;
+    font-size: 14px;
+}
+.editor-sidebar {
+    background: var(--ed-bg-2);
+    border-right: 1px solid var(--ed-border);
+    padding: 0.8em 0.4em;
+    overflow-y: auto;
+}
+.editor-sidebar h2 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ed-fg-muted);
+    margin: 0.8em 0.5em 0.4em;
+    font-weight: 600;
+}
+.editor-sidebar .nav-item,
+.editor-sidebar .page-link {
+    display: block;
+    padding: 0.3em 0.6em;
+    border-radius: 4px;
+    color: var(--ed-fg);
+    text-decoration: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.editor-sidebar .nav-item:hover,
+.editor-sidebar .page-link:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.editor-sidebar .nav-item.active,
+.editor-sidebar .page-link.active {
+    background: rgba(91, 158, 179, 0.18);
+    color: var(--ed-link);
+}
+.editor-main {
+    overflow-y: auto;
+}
+.editor-pane {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2em 2em 4em;
+}
+.editor-pane h1 {
+    font-size: 1.7rem;
+    font-weight: 600;
+    margin: 0 0 0.6em;
+}
+
+/* Block list. */
+.editor-block-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1em;
+}
+.editor-block {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4em;
+    padding: 0.15em 0;
+}
+.editor-bullet {
+    flex: none;
+    width: 1em;
+    height: 1.5em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ed-fg-muted);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-bullet::before { content: "•"; }
+.editor-block-body {
+    flex: 1;
+    min-width: 0;
+    line-height: 1.55;
+    cursor: text;
+}
+.editor-block-body.empty {
+    color: var(--ed-fg-muted);
+    font-style: italic;
+}
+.editor-block-children {
+    margin-left: 1.4em;
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
+    padding-left: 0.4em;
+}
+/* Inline render tokens — emitted by format::Inlines. The
+   classes here are intentionally a small set so the dark theme
+   tokens shine through; light theme is a one-variable swap on
+   the host page. */
+.editor-block-body .wikilink {
+    color: var(--ed-link);
+    cursor: pointer;
+}
+.editor-block-body .wikilink-bracket {
+    color: var(--ed-fg-muted);
+    opacity: 0.55;
+}
+.editor-block-body .wikilink-label {
+    color: var(--ed-link);
+    text-decoration: none;
+}
+.editor-block-body .wikilink-label:hover {
+    text-decoration: underline;
+}
+.editor-block-body .blockref {
+    background: rgba(106, 186, 209, 0.12);
+    border-radius: 3px;
+    padding: 0 0.3em;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85em;
+    color: var(--ed-link);
+}
+.editor-block-body .tag {
+    color: var(--ls-tag-text-color, #98c075);
+    cursor: pointer;
+}
+.editor-block-body .tag:hover { text-decoration: underline; }
+.editor-block-body .ext-link {
+    color: var(--ed-link);
+    text-decoration: none;
+}
+.editor-block-body .ext-link:hover { text-decoration: underline; }
+.editor-block-body .inline-code,
+.editor-block-body code {
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--ed-border);
+    border-radius: 3px;
+    padding: 0.05em 0.35em;
+    font-size: 0.9em;
+}
+.editor-block-body strong { font-weight: 600; }
+.editor-block-body em { font-style: italic; }
+.editor-block-body s { opacity: 0.7; }
+.editor-block-body mark {
+    background: var(--ls-page-mark-bg-color, rgba(255, 220, 0, 0.18));
+    color: inherit;
+    padding: 0 0.15em;
+    border-radius: 2px;
+}
+.editor-block-body .inline-image {
+    max-width: 100%;
+    display: block;
+    margin: 0.3em 0;
+    border-radius: 4px;
+}
+.editor-block-body .math.math-inline {
+    font-family: ui-serif, serif;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0 0.25em;
+    border-radius: 3px;
+}
+/* Slash-command popup. Anchored just below the editing
+   textarea via `.editor-edit-wrap` (position: relative). */
+.editor-edit-wrap {
+    position: relative;
+}
+.slash-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.25em;
+    min-width: 280px;
+    max-width: 380px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--ed-bg-2);
+    border: 1px solid var(--ed-border);
+    border-radius: 6px;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    z-index: 60;
+    font-size: 0.9rem;
+}
+.slash-menu .slash-group {
+    padding: 0.35em 0.7em;
+    font-size: 0.7rem;
+    color: var(--ed-fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--ed-border);
+}
+.slash-menu .slash-row {
+    padding: 0.4em 0.7em;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.slash-menu .slash-row:hover,
+.slash-menu .slash-row.selected {
+    background: rgba(91, 158, 179, 0.18);
+}
+.slash-menu .slash-row-label {
+    color: var(--ed-fg);
+    font-weight: 500;
+}
+.slash-menu .slash-row-desc {
+    color: var(--ed-fg-muted);
+    font-size: 0.78rem;
+    margin-top: 0.15em;
+}
+.slash-menu .slash-empty {
+    padding: 0.8em 0.7em;
+    color: var(--ed-fg-muted);
+    font-style: italic;
+}
+.editor-textarea {
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    padding: 0;
+    overflow: hidden;
+    min-height: 1.5em;
+}

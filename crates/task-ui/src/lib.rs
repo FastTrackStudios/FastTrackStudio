@@ -7,11 +7,8 @@
 pub mod app;
 pub mod data;
 pub mod feature_routes;
-pub mod notifications_ctx;
-pub mod sync;
+pub mod server_registry;
 pub mod theming;
-pub mod timer_demo;
-pub mod views;
 pub mod vox_session;
 
 pub use app::App;

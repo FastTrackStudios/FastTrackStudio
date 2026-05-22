@@ -1,0 +1,24 @@
+[package]
+name = "vault-proto"
+description = "Wire contract for the vault feature: `#[architect::rpc] trait VaultSync` (byte-level file replication) plus payload + event types. Implementations live in sibling `vault` (primary block-aware impl), `vault-obsidian` (Obsidian translation layer), and the server's per-vault disk store."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Wasm-clean baseline (just Facet types). Enable the `vox` feature
+# to pull in `#[vox::service]` + `vox-types::Reborrow` impls; the
+# server crate and both transport clients all enable it.
+[dependencies]
+facet = { workspace = true }
+thiserror = { workspace = true }
+architect = { workspace = true }
+
+vox = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+vox = ["dep:vox", "dep:vox-types", "architect/vox"]

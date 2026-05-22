@@ -1,0 +1,79 @@
+[package]
+name = "knowledge-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Dioxus components for the `knowledge` feature.
+#
+# Mirrors the `project-ui` layering — a Live wrapper that subscribes
+# to `WorkspaceSync` on the `vault/org` doc id, plus a dumb view
+# component that takes a snapshot + callbacks.
+#
+# Only the org-vault doc is wired in Phase 5c. Per-project vault docs
+# (`vault/project/<uuid>`) follow when the project routes need them.
+
+[dependencies]
+dioxus = { workspace = true }
+knowledge-proto.workspace = true
+knowledge-crdt.workspace = true
+chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
+uuid = { workspace = true, features = ["v4", "js"] }
+
+fts-ui.workspace = true
+
+# Same transport stack project-ui uses.
+vox = { workspace = true }
+vox-core = { workspace = true }
+vox-websocket = { workspace = true }
+crdt = { workspace = true }
+thiserror = { workspace = true }
+# Used by the desktop persistence loop to call
+# `LoroDoc::export(ExportMode::Snapshot)`.
+loro = "1.12"
+project-proto = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+regex = { workspace = true }
+vim = { workspace = true }
+
+# Shared engine — same parser + render components the static-site
+# generator (`apps/publish`) uses. Provides the Logseq-flavored
+# block model (block-refs / page-embeds / queries / namespaces /
+# task markers / planning timestamps) so both surfaces stay in sync.
+publish-core = { workspace = true }
+
+# Browser-side debounce timer for the awareness publish path —
+# coalesces cursor moves so we don't ship one frame per keystroke.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true }
+# Local-first persistence: store the Loro snapshot + append-only
+# update log in IndexedDB so reload restores the doc instantly,
+# without a server round-trip.
+indexed_db_futures = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+
+# Native (desktop) needs tokio's timer for the sync-retry sleep
+# and persistence work that the browser gets from gloo + the
+# IDB futures crate. `tokio = { workspace = true }` reuses the
+# workspace's existing pin.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["time", "sync"] }
+# Native directory picker for the "Import Logseq graph" button
+# in `logseq_shell`. Wasm targets get the same effect from a
+# file `<input>` chooser (not wired in this slice).
+rfd = "0.15"
+# Watch the vault directory for external edits — `notify` picks
+# up filesystem events, `notify-debouncer-mini` coalesces a burst
+# of writes (e.g. an editor's atomic-save dance) into a single
+# event so we don't re-import 12 times in 200ms.
+notify = "8"
+notify-debouncer-mini = "0.6"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

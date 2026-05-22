@@ -17,70 +17,19 @@ dioxus = { workspace = true, features = ["router"] }
 dioxus-router.workspace = true
 fts-ui = { workspace = true, features = ["router"] }
 
-# Local-first source-of-truth in the browser.
-loro.workspace = true
-architect = { path = "../../../architect/macros/architect" }
-crdt = { path = "../../../architect/libs/crdt" }
-
-# Per-feature trios.
-agent-proto = { workspace = true, features = ["fake"] }
-agent-crdt.workspace = true
-agent-ui.workspace = true
-notifications-proto.workspace = true
-notifications-ui.workspace = true
-caldav-proto = { workspace = true, features = ["fake"] }
-caldav-crdt.workspace = true
-caldav-ui.workspace = true
-calendar-proto = { workspace = true, features = ["fake"] }
-calendar-crdt.workspace = true
-calendar-ui.workspace = true
-chat-proto = { workspace = true, features = ["fake", "vox"] }
-chat-crdt.workspace = true
-chat-ui.workspace = true
-conference-proto = { workspace = true, features = ["fake"] }
-conference-crdt.workspace = true
-conference-ui.workspace = true
-cookbook-proto = { workspace = true, features = ["fake"] }
-cookbook-crdt.workspace = true
-cookbook-ui.workspace = true
-email-proto = { workspace = true, features = ["fake"] }
-email-crdt.workspace = true
-email-ui.workspace = true
-finance-proto = { workspace = true, features = ["fake"] }
-finance-crdt.workspace = true
-finance-ui.workspace = true
-fitness-proto = { workspace = true, features = ["fake"] }
-fitness-crdt.workspace = true
-fitness-ui.workspace = true
-inventory-proto = { workspace = true, features = ["fake"] }
-inventory-crdt.workspace = true
-inventory-ui.workspace = true
-invoice-proto = { workspace = true, features = ["fake"] }
-invoice-crdt.workspace = true
-invoice-ui.workspace = true
-knowledge-proto.workspace = true
-knowledge-crdt.workspace = true
-knowledge-ui.workspace = true
-location-proto = { workspace = true, features = ["fake"] }
-location-crdt.workspace = true
-location-ui.workspace = true
-person-proto = { workspace = true, features = ["fake"] }
-person-crdt.workspace = true
-person-ui.workspace = true
-project-proto = { workspace = true, features = ["fake"] }
-project-crdt.workspace = true
-project-ui.workspace = true
-threads-proto = { workspace = true, features = ["fake"] }
-threads-crdt.workspace = true
-threads-ui.workspace = true
-timer-proto = { workspace = true, features = ["fake"] }
-timer-crdt.workspace = true
-timer-ui.workspace = true
+# Loro + CRDT machinery + project-proto/project-crdt were
+# ripped along with the Loro entity layer. The editor crate now
+# owns any future CRDT integration (per-file collaborative
+# editing); UI routes drive plain components against the
+# file-backed vault.
+editor.workspace = true
+view.workspace = true
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
 fake.workspace = true
 tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
 # Browser glue. Compiles cleanly on native too; the source uses
@@ -100,6 +49,7 @@ web-sys = { workspace = true, features = [
     "Event",
     "CloseEvent",
     "ErrorEvent",
+    "Storage",
     "console",
 ] }
 futures-channel.workspace = true
@@ -109,6 +59,7 @@ futures-util.workspace = true
 # `transport-websocket` is enabled separately via `vox-websocket` so the
 # wasm build sidesteps `vox::highlevel::ws::WsListener` which always
 # wires `tokio::net::TcpListener`.
+vox.workspace = true
 vox-core.workspace = true
 vox-websocket.workspace = true
 

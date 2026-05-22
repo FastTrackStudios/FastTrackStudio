@@ -156,21 +156,42 @@ impl VoxSession {
     }
 }
 
-/// Build the `/vox` WS URL. Hardcoded to `127.0.0.1:9090` to match
-/// `sync::sync_url` — `dx serve` runs on `:8765` but the task-server
-/// (with the actual `/vox` route) listens on `:9090`. The dev shell
-/// doesn't proxy WS routes. Production deployments override via the
-/// reverse proxy and same-origin routing; that swap lives in this fn
-/// when we have a real prod target to point at.
-#[cfg(target_arch = "wasm32")]
-fn vox_url() -> String {
-    "ws://127.0.0.1:9090/vox".to_string()
-}
+/// Build the `/vox` WS URL.
+///
+/// Resolution order (build time, since wasm can't read process env):
+/// 1. `TASK_VOX_URL_WEB` env var if set at compile time — baked into
+///    the wasm bundle. Set this in CI / Nix / wherever you build for
+///    production:
+///
+///        TASK_VOX_URL_WEB=wss://task.example.com/vox dx build --web --release
+///
+/// 2. Falls back to `ws://127.0.0.1:9090/vox` for local dev (matches
+///    `just dev`'s defaults — `dx serve` on :8765, task-server on
+///    :9090, no reverse-proxy in the dev shell).
+pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:9090/vox";
 
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-fn vox_url() -> String {
-    "ws://localhost:9090/vox".to_string()
+/// Resolved at call time so each surface can choose its default.
+///
+/// - **wasm** (browser bundle): the URL is baked in at compile
+///   time via `TASK_VOX_URL_WEB`; falls back to the local-dev
+///   default. Browser builds always try to sync (no server =
+///   visible failure chip).
+/// - **native** (desktop binary): reads `TASK_VOX_URL` from the
+///   process environment at runtime; returns an EMPTY string
+///   when unset so the desktop app starts in offline-only mode
+///   without spamming connection-refused errors. Set
+///   `TASK_VOX_URL=ws://host:9090/vox` to opt into syncing.
+pub fn vox_url() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        option_env!("TASK_VOX_URL_WEB")
+            .unwrap_or(DEFAULT_VOX_URL)
+            .to_string()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var("TASK_VOX_URL").unwrap_or_default()
+    }
 }
 
 /// Spawn the session bootstrap. Publishes lifecycle to the

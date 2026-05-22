@@ -1,0 +1,31 @@
+[package]
+name = "publish-core"
+version.workspace = true
+edition.workspace = true
+
+# Shared parser + Dioxus render components for vault content —
+# Logseq/Obsidian-flavored inline markup (`[[wikilinks]]`,
+# `((block-refs))`, `![[embeds]]`, `{{query #tag}}`, etc.) plus
+# the per-block view-mode rendering.
+#
+# Both `apps/publish` (Quartz-style static site generator) and
+# `features/knowledge/knowledge-ui` (live outliner) consume this
+# crate so the two surfaces share one engine. Resolvers are
+# Dioxus context types so each surface provides its own data
+# source at render time without changing the parser contract.
+
+[dependencies]
+chrono = { workspace = true, features = ["clock", "std"] }
+uuid = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+dioxus = { workspace = true }
+
+# Syntect provides server-side syntax highlighting for code
+# blocks; same dep the publisher had locally before the
+# extraction. `default-fancy` enables the fancy-regex backend
+# for full Sublime grammar support without the bundled themes
+# (we pick one explicitly).
+syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
+
+knowledge-proto = { workspace = true }

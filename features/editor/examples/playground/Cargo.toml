@@ -1,0 +1,42 @@
+[package]
+name = "playground"
+description = "Dioxus dogfooding app for the editor crate. Run with `dx serve --package playground`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+editor = { workspace = true }
+# `launch` brings in the `dioxus::launch` entry point the
+# playground's `main` calls. Task's workspace declares dioxus
+# with `features = ["lib"]` (lib-only) so we add `launch`
+# locally.
+dioxus = { workspace = true, features = ["launch"] }
+tracing = { workspace = true }
+
+# File / stdout logging is desktop-only — wasm can't open files.
+# A future commit can add `tracing-wasm` for the browser path.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+# Vault — native-only. Loaded from `~/Documents/Task/` on
+# desktop launch so the playground can resolve cross-doc refs
+# / embeds against a real filesystem-backed corpus.
+vault = { workspace = true }
+editor-state = { workspace = true }
+
+# Switch platforms with --no-default-features --features web|desktop.
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop"]
+web = ["dioxus/web"]
+
+# wasm-only: web_sys for URL query reading + tracing-wasm so
+# the browser console gets the same structured log stream as the
+# desktop binary.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Location"] }
+tracing-wasm = "0.2"
