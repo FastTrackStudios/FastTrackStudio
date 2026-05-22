@@ -5,6 +5,7 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::fulfillment::Fulfillment;
 use crate::model::{Meal, PantryDeduction};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet, Error)]
@@ -46,4 +47,11 @@ pub trait MealplanService {
 
     /// Mark a meal as `skipped` without touching the pantry.
     fn skip(&self, id: &str) -> Result<Meal, MealplanError>;
+
+    /// "Can I make this recipe right now from what's in the
+    /// pantry?" Pulls the recipe + current pantry snapshot
+    /// and runs [`crate::fulfillment::check`]. Returns the
+    /// fulfillment result including per-ingredient
+    /// shortages.
+    fn can_cook(&self, recipe_id: &str, servings: u32) -> Result<Fulfillment, MealplanError>;
 }

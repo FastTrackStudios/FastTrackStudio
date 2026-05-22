@@ -109,6 +109,7 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                     name: s.to_string(),
                     qty: None,
                     unit: String::new(),
+                    pantry_item_id: None,
                     note: None,
                     optional: false,
                 });
@@ -121,6 +122,10 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
+            let pantry_item_id = m
+                .get("pantryItemId")
+                .and_then(|v| v.as_str())
+                .and_then(|s| uuid::Uuid::parse_str(s).ok());
             let note = m
                 .get("note")
                 .and_then(|v| v.as_str())
@@ -130,6 +135,7 @@ fn parse_ingredients(map: &serde_yaml::Mapping) -> Vec<Ingredient> {
                 name,
                 qty,
                 unit,
+                pantry_item_id,
                 note,
                 optional,
             })

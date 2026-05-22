@@ -5,10 +5,13 @@
 
 use std::sync::{Arc, Mutex};
 
+use cookbook::Store as CookbookStore;
+use cookbook::{self, CookbookService};
 use pantry::{PantryService, Store as PantryStore};
 use uuid::Uuid;
 use vault::Vault;
 
+use crate::fulfillment::{self, Fulfillment};
 use crate::model::{Meal, PantryDeduction};
 use crate::parse::{looks_like_meal, parse_page};
 use crate::scan::scan_vault;
@@ -26,15 +29,21 @@ use crate::write::{default_meal_path, serialize_meal};
 pub struct Store {
     inner: Arc<Mutex<Vault>>,
     pantry: PantryStore,
+    cookbook: CookbookStore,
 }
 
 impl Store {
-    /// Build the mealplan + pantry stores around one shared
-    /// vault mutex.
+    /// Build mealplan + pantry + cookbook stores around one
+    /// shared vault mutex.
     pub fn new(vault: Vault) -> Self {
         let pantry = PantryStore::new(vault);
         let inner = pantry.shared();
-        Self { inner, pantry }
+        let cookbook = CookbookStore::from_shared(inner.clone());
+        Self {
+            inner,
+            pantry,
+            cookbook,
+        }
     }
 
     /// Reuse a vault mutex already in use by another feature
@@ -42,7 +51,12 @@ impl Store {
     /// feature's `Store::shared`.
     pub fn from_shared(inner: Arc<Mutex<Vault>>) -> Self {
         let pantry = PantryStore::from_shared(inner.clone());
-        Self { inner, pantry }
+        let cookbook = CookbookStore::from_shared(inner.clone());
+        Self {
+            inner,
+            pantry,
+            cookbook,
+        }
     }
 
     pub fn shared(&self) -> Arc<Mutex<Vault>> {
@@ -54,6 +68,10 @@ impl Store {
     /// did we eat this week and what's left in the fridge").
     pub fn pantry(&self) -> &PantryStore {
         &self.pantry
+    }
+
+    pub fn cookbook(&self) -> &CookbookStore {
+        &self.cookbook
     }
 }
 
@@ -170,5 +188,17 @@ impl MealplanService for Store {
         let mut meal = self.get(id)?;
         meal.status = crate::model::Status::Skipped.as_str().to_string();
         self.update(meal)
+    }
+
+    fn can_cook(&self, recipe_id: &str, servings: u32) -> Result<Fulfillment, MealplanError> {
+        let recipe = self
+            .cookbook
+            .get(recipe_id)
+            .map_err(|e| MealplanError::NotFound(format!("recipe {recipe_id}: {e}")))?;
+        let pantry_items = self
+            .pantry
+            .list()
+            .map_err(|e| MealplanError::Pantry(e.to_string()))?;
+        Ok(fulfillment::check(&recipe, &pantry_items, servings))
     }
 }

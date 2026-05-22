@@ -20,6 +20,7 @@ architect = { workspace = true }
 vault = { workspace = true }
 cookbook = { workspace = true }
 pantry = { workspace = true }
+inventory = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }

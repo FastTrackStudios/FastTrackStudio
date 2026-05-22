@@ -122,10 +122,23 @@ pub struct Ingredient {
     pub qty: Option<f64>,
 
     /// Free-form unit — `"g"`, `"cup"`, `"tbsp"`, `"clove"`,
-    /// `"pinch"`. Convention only; mealplan uses
-    /// matching-unit deductions.
+    /// `"pinch"`. Recipe fulfillment matches recipe + pantry
+    /// units with conversion via `pantry::units::convert_str`
+    /// when bases align.
     #[serde(default)]
     pub unit: String,
+
+    /// Explicit link to a `pantry::PantryItem` id. When set,
+    /// fulfillment skips name fuzzy-match and goes straight
+    /// to the linked row. Curators set this once when the
+    /// recipe is committed; agents can resolve it via the
+    /// barcode / lookup flow.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "pantryItemId"
+    )]
+    pub pantry_item_id: Option<uuid::Uuid>,
 
     /// Free-form prep note — `"finely diced"`, `"room temp"`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
