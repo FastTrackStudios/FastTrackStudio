@@ -18,6 +18,13 @@ Layout — PARA + Zettelkasten-ish, plain-name folders:
 | `Bases/`    | `.base` view files (YAML query DSL). |
 | `Stubs/`    | Placeholders for not-yet-fleshed notes. |
 | `tasks/`    | Task notes (TaskNotes-shape frontmatter). |
+| `scheduling/` | Day templates, availability schedules, event types, bookings. Parsed by the `scheduling` crate. |
+| `mealplan/` | One markdown file per planned/consumed/skipped meal. |
+| `pantry/` | One markdown file per pantry item (qty, unit, expiry, nutrition). |
+| `locations/` | Reusable locations referenced by event-types / meetings. |
+| `Wiki/raw/sources/` | Immutable raw inputs to LLM-Wiki ingest (markdown + PDFs). |
+| `Wiki/media/` | Extracted/attached images referenced by Wiki pages. |
+| `Wiki/_state/` | Live state for the LLM-Wiki backend (ingest queue, snapshot). |
 
 Each folder contains a folder note (e.g. `Wiki/Wiki.md`) acting
 as the virt-folder parent. Notes carry `folder: "[[Parent]]"` in

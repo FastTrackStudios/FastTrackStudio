@@ -21,6 +21,45 @@
       "last_error": null,
       "enqueued_at": "2026-05-22T07:49:20.427567376Z",
       "updated_at": "2026-05-22T07:50:33.447386531Z"
+    },
+    {
+      "id": "ingest-20260522104100c42f5e5b78902cd3",
+      "source_path": "raw/sources/cst360-church-history-syllabus.pdf",
+      "kind": "created",
+      "status": "pending",
+      "source_sha256": "c42f5e5b78902cd3a0a9e2dc555fc626a01abe6ddd4462b06b2ab6a0759b9248",
+      "analysis": null,
+      "pages_written": [],
+      "retries": 0,
+      "last_error": null,
+      "enqueued_at": "2026-05-22T10:41:00.000000000Z",
+      "updated_at": "2026-05-22T10:41:00.000000000Z"
+    },
+    {
+      "id": "ingest-202605221041007b1b743556",
+      "source_path": "raw/sources/diatonic-chords.pdf",
+      "kind": "created",
+      "status": "pending",
+      "source_sha256": "7b1b7435564c8621d99546d1622807d6a195cde9205add845dd40eb2edc486d9",
+      "analysis": null,
+      "pages_written": [],
+      "retries": 0,
+      "last_error": null,
+      "enqueued_at": "2026-05-22T10:41:00.000000000Z",
+      "updated_at": "2026-05-22T10:41:00.000000000Z"
+    },
+    {
+      "id": "ingest-20260522104100f0ae4e7652",
+      "source_path": "raw/sources/living-faith-james-plummer.pdf",
+      "kind": "created",
+      "status": "analyzing",
+      "source_sha256": "f0ae4e765236c9c7a35365b935c4a79ac1a808ed4dad2106621d00f1eae3d303",
+      "analysis": null,
+      "pages_written": [],
+      "retries": 0,
+      "last_error": null,
+      "enqueued_at": "2026-05-22T10:41:00.000000000Z",
+      "updated_at": "2026-05-22T10:42:30.000000000Z"
     }
   ]
 }

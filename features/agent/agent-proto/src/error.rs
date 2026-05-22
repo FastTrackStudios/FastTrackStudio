@@ -21,11 +21,23 @@ pub enum AgentError {
     #[error("message not found: {0}")]
     MessageNotFound(String),
 
-    #[error("kanban board not found: {0}")]
-    BoardNotFound(String),
+    #[error("queue not found: {0}")]
+    QueueNotFound(String),
 
-    #[error("card not found: {0}")]
-    CardNotFound(String),
+    #[error("agent task not found: {0}")]
+    AgentTaskNotFound(String),
+
+    /// Race on an atomic-claim path (e.g. two workers tried
+    /// to claim the same agent task). Caller should retry or
+    /// pick a different unit of work.
+    #[error("conflict: {0}")]
+    Conflict(String),
+
+    /// Caller passed an invalid argument — e.g. tried to set
+    /// `status = Running` directly instead of going through
+    /// `claim_agent_task`.
+    #[error("invalid: {0}")]
+    Invalid(String),
 
     /// A turn is already in flight on this session — the
     /// caller must wait or cancel.

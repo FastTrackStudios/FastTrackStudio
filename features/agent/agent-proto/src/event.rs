@@ -12,7 +12,8 @@ use chrono::{DateTime, Utc};
 use facet::Facet;
 
 use crate::{
-    approval::Approval, kanban::Card, message::Message, question::QuestionRequest, tool::ToolCall,
+    approval::Approval, message::Message, question::QuestionRequest, tasks::AgentTask,
+    tool::ToolCall,
 };
 
 #[derive(Debug, Clone, PartialEq, Facet)]
@@ -103,9 +104,9 @@ pub enum AgentEvent {
         session_id: String,
         at: DateTime<Utc>,
     },
-    /// A kanban card changed (created, moved, claimed,
-    /// archived). Emitted on board-scoped subscriptions.
-    CardChanged { card: Card },
+    /// An agent task changed (created, moved, claimed,
+    /// archived). Emitted on queue-scoped subscriptions.
+    AgentTaskChanged { task: AgentTask },
     /// Generic resync signal — subscribers re-pull state.
     Resync,
 }
