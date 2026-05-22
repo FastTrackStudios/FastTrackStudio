@@ -183,6 +183,18 @@ locations = { path = "features/locations/locations" }
 # (`type: item`). References locations by `location_id`;
 # rides on top of `vault` like `task` does.
 inventory = { path = "features/inventory/inventory" }
+# `mealplan` slice — vault-superset trio for food/cooking.
+# `cookbook` holds recipe pages (`type: recipe`) under
+# `<vault>/Wiki/Cookbook/` so they ride on the wiki feature
+# for curation + wikilinks. `pantry` rides on `inventory`
+# (`type: item` + `tags: [pantry]`) with food extras (qty /
+# unit / expiry / nutrition). `mealplan` is the facade
+# crate — meal pages on a calendar that reference recipes
+# and deduct from pantry on cook. The (future) `fitness`
+# feature will depend on `mealplan` for nutrition data.
+cookbook = { path = "features/mealplan/cookbook" }
+pantry = { path = "features/mealplan/pantry" }
+mealplan = { path = "features/mealplan/mealplan" }
 view = { path = "features/view/view" }
 view-gantt = { path = "features/view/view-gantt" }
 view-kanban = { path = "features/view/view-kanban" }
