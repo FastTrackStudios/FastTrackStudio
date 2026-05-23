@@ -1,0 +1,19 @@
+[package]
+name = "task-ui"
+description = "Dioxus UI for the `task` feature — list / kanban / quick-add. Dumb components (no fs / no CRDT); consumers feed `TaskInfo` rows in via props and handle `TaskMutation` callbacks. Mirrors the TaskNotes (callumalpass/tasknotes) field shape so wiring to the file-backed `task` crate later is mechanical."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["router"] }
+fts-ui = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std", "wasmbind", "serde"] }
+serde = { workspace = true, features = ["derive"] }
+uuid = { workspace = true, features = ["v4", "js", "serde"] }
+
+[lints]
+workspace = true
