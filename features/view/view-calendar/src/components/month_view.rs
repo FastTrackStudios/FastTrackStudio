@@ -142,12 +142,21 @@ fn WeekRow(props: WeekRowProps) -> Element {
                     if date == props.today {
                         bg = "bg-primary/10";
                     }
+                    // Cyclic overlay — reset weeks + bonus weeks
+                    // get a tint that wins over the in-month
+                    // default but yields to the today highlight.
+                    let kind = crate::cycle_overlay::kind_for_date(date);
+                    let cycle_tint = if date == props.today {
+                        ""
+                    } else {
+                        crate::cycle_overlay::cell_tint_class(kind)
+                    };
                     let border_r = if col == 6 { "" } else { "border-r" };
 
                     rsx! {
                         div {
                             key: "{date}",
-                            class: "border-border/40 {bg} {border_r} flex flex-col p-1 min-h-[6rem] hover:bg-accent/30 transition-colors",
+                            class: "border-border/40 {bg} {cycle_tint} {border_r} flex flex-col p-1 min-h-[6rem] hover:bg-accent/30 transition-colors",
                             // Click empty cell → create.
                             onclick: move |_| {
                                 if props.readonly { return; }
