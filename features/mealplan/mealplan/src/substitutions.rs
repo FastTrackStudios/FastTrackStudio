@@ -30,24 +30,66 @@ use thiserror::Error;
 use uuid::Uuid;
 use vault::{Vault, VaultPage};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// `Vec<SubReason>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct SubReasons(pub Vec<SubReason>);
+
+impl SubReasons {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<SubReason>> for SubReasons {
+    fn from(v: Vec<SubReason>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<SubReason> for SubReasons {
+    fn from_iter<I: IntoIterator<Item = SubReason>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for SubReasons {
+    type Target = Vec<SubReason>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "substitution_rules", repo)]
 pub struct SubstitutionRule {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
     /// Display name — `"Butter → Olive Oil"`. Free-form;
     /// purely for human-readable listings.
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Source pantry item — the ingredient you'd normally
     /// use.
     #[serde(rename = "fromItemId")]
+    #[architect(filterable)]
     pub from_item_id: Uuid,
 
     /// Substitute pantry item — what you'd use instead.
     #[serde(rename = "toItemId")]
+    #[architect(filterable)]
     pub to_item_id: Uuid,
 
     /// `units_of_substitute / unit_of_original`. Same as
@@ -58,12 +100,14 @@ pub struct SubstitutionRule {
 
     /// Why this swap is worth offering. Drives goal-filter.
     #[serde(default)]
-    pub reasons: Vec<SubReason>,
+    #[architect(json)]
+    pub reasons: SubReasons,
 
     /// Tags — `"baking"`, `"dressing-only"`, `"keto"`.
     /// Drives queryable filtering.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "crate::model::StringList::is_empty", default)]
+    #[architect(json)]
+    pub tags: crate::model::StringList,
 
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub note: Option<String>,

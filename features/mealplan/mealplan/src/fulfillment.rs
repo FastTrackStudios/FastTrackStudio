@@ -305,7 +305,7 @@ pub fn check_with_subs(
                     ratio: rule.ratio,
                     need,
                     have,
-                    reasons: rule.reasons.clone(),
+                    reasons: rule.reasons.0.clone(),
                     source: SubstitutionSource::Registry,
                     note: rule.note.clone(),
                 });

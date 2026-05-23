@@ -203,7 +203,7 @@ impl MealplanService for Store {
         }
         let mut meal = self.get(id)?;
         meal.status = crate::model::Status::Cooked.as_str().to_string();
-        meal.pantry_deductions = deductions;
+        meal.pantry_deductions = crate::model::PantryDeductions(deductions);
         self.update(meal)
     }
 
