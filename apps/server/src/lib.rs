@@ -61,96 +61,162 @@ impl AuthState {
     }
 }
 
+/// Per-org server state. One instance per org dir scanned
+/// at boot. Holds every backend the vox dispatcher mounts
+/// for that org (auth, attachments, vault, wiki, agent
+/// tasks, timer, finance).
+///
+/// Shared across orgs (the blob signing keypair, the data
+/// root) lives on the parent [`AppState`].
 #[derive(Clone)]
-pub struct AppState {
+pub struct OrgAppState {
+    /// Org's slug — matches the `<data_root>/orgs/<slug>/`
+    /// dir and the URL prefix the vox handler routes from.
+    pub slug: String,
+    /// Org-scoped architect-auth instance opened against
+    /// this org's `auth.sqlite`.
     pub auth: AuthState,
-    /// Ed25519 keypair used to sign blob URLs. Loaded from
-    /// `$XDG_DATA_HOME/task-server/server-key.ed25519`,
-    /// generated on first boot. Tests use
-    /// `ServerKeypair::generate_ephemeral()`.
-    pub keypair: ServerKeypair,
     pub attachments: Arc<attachments::AttachmentServiceImpl>,
-    /// File-replication backend. `vault::Backend` mounted on the
-    /// `VaultSyncRpc` arm. `under_parent` layout: every `vault_id`
-    /// resolves to a subdir of the configured parent (created on
-    /// demand on first write).
+    /// File-replication backend rooted at this org's
+    /// `vault/` dir.
     pub vault_sync: vault::Backend,
-    /// Wiki feature backend. `under_parent` layout — each
-    /// `wiki_id` maps to `<vault_root>/{wiki_id}/`. Mounted
-    /// on `/vox` as the 13 per-capability traits.
+    /// Wiki feature backend rooted at this org's `vault/`.
     pub wiki: wiki_live::WikiBackend,
-    /// Agent-task queue store. One SQLite DB shared across
-    /// all queues — partitioned by `queue_id` column. Mounted
-    /// on `/vox` as `AgentTaskQueue` (the slim domain trait;
-    /// CRUD is handled by the architect-emitted per-entity
-    /// Repo traits, which we don't currently mount).
     pub agent_tasks: agent_tasks::Store,
-    /// Vault root used by agent-dispatch when folding agent
-    /// task completions back into source task notes. Shared
-    /// with `vault_sync` so the same on-disk layout is used.
     pub agent_dispatch_vault_root: PathBuf,
-    /// Timer store — billable time tracking. SQLite at
-    /// `$XDG_DATA_HOME/task-server/timer.sqlite` (override
-    /// via `TASK_SERVER_TIMER_URL`). Project markdown
-    /// defaults are read from the same vault root as
-    /// `vault_sync`, so the rate cascade resolves on disk.
     pub timer: timer::Store,
-    /// Finance DB connection — SQLite at
-    /// `$XDG_DATA_HOME/task-server/finance.sqlite`. Migrations
-    /// run on boot. Holds the architect-emitted entity
-    /// tables (books, accounts, transactions, parties,
-    /// invoices, payments, expenses, recurring schedules,
-    /// tax rates). Service traits (Ledger / Invoicing) are
-    /// NOT mounted yet — that needs the SeaORM-backed impls
-    /// which land in a follow-up PR.
     pub finance_conn: sea_orm::DatabaseConnection,
 }
 
+/// Top-level server state. Scans `<data_root>/orgs/` at
+/// boot and builds one [`OrgAppState`] per discovered org.
+/// The vox + blob handlers dispatch by slug (URL path).
+///
+/// The Ed25519 blob signing keypair is shared across orgs —
+/// the server-side identity is one keypair per process.
+#[derive(Clone)]
+pub struct AppState {
+    /// Ed25519 keypair used to sign blob URLs. Loaded from
+    /// `<data_root>/server-key.ed25519`, generated on first
+    /// boot. Tests use `ServerKeypair::generate_ephemeral()`.
+    pub keypair: ServerKeypair,
+    /// Slug → per-org state. Built by scanning
+    /// `<data_root>/orgs/` at boot.
+    pub orgs: Arc<std::collections::HashMap<String, OrgAppState>>,
+    /// Source data root. Held for `.well-known/task-server.json`
+    /// discovery, manifest re-scans, and the keypair path.
+    pub data_root: org_proto::DataRoot,
+}
+
 impl AppState {
-    /// Build app state for one org, paths derived from the
-    /// org root under `$TASK_DATA_ROOT` (or the XDG default).
-    /// Server-side multi-org routing is PR 4; for now the
-    /// caller picks one slug at boot.
+    /// Look up an org by slug. Convenience for routes that
+    /// have extracted the slug from the URL path.
+    #[must_use]
+    pub fn org(&self, slug: &str) -> Option<&OrgAppState> {
+        self.orgs.get(slug)
+    }
+
+    /// Slugs of every hosted org, sorted for deterministic
+    /// `.well-known` output.
+    #[must_use]
+    pub fn org_slugs(&self) -> Vec<&str> {
+        let mut slugs: Vec<&str> = self.orgs.keys().map(String::as_str).collect();
+        slugs.sort_unstable();
+        slugs
+    }
+}
+
+impl AppState {
+    /// Boot path: scan `<data_root>/orgs/` and build one
+    /// [`OrgAppState`] per discovered org. Hosts all of them
+    /// at `/org/<slug>/...`. If `slug_filter` is `Some`,
+    /// only that one org is hosted (matches the
+    /// single-org-process pattern earlier PRs used).
     ///
-    /// Resolution: explicit `slug` arg first, else
-    /// `TASK_SERVER_ORG` env, else the same single-org /
-    /// auto-bootstrap-`default` logic the CLI uses.
-    pub async fn new(slug: Option<&str>) -> eyre::Result<Self> {
+    /// Auto-bootstraps `default` when no orgs exist so a
+    /// fresh install boots cleanly.
+    pub async fn new(slug_filter: Option<&str>) -> eyre::Result<Self> {
         let data_root =
             org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
         data_root
             .ensure()
             .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
-        let (org_root, _manifest) = resolve_server_org(&data_root, slug)?;
-        let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
-        let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
         let keypair = ServerKeypair::load_or_generate(&data_root.server_keypair_path())
             .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
-        Self::new_with_auth_and_org(auth, keypair, org_root).await
+
+        let org_roots = pick_server_orgs(&data_root, slug_filter)?;
+        let mut orgs = std::collections::HashMap::new();
+        for org_root in org_roots {
+            let slug = org_root.slug().to_owned();
+            let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
+            let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
+            let org_state = build_org_state(auth, &keypair, org_root).await?;
+            orgs.insert(slug, org_state);
+        }
+
+        Ok(Self {
+            keypair,
+            orgs: Arc::new(orgs),
+            data_root,
+        })
     }
 
-    /// Build app state with explicit auth + keypair, picking
-    /// the org root the same way [`Self::new`] does. Tests
-    /// pass an in-memory `AuthState` + ephemeral keypair so
-    /// they don't touch the user's XDG dir.
+    /// Test helper. Build a one-org `AppState` from an
+    /// explicit auth + keypair (e.g. in-memory `AuthState`
+    /// plus ephemeral keypair). Picks the org root the same
+    /// way [`Self::new`] does.
     pub async fn new_with_auth(auth: AuthState, keypair: ServerKeypair) -> eyre::Result<Self> {
         let data_root =
             org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
         data_root
             .ensure()
             .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
-        let (org_root, _) = resolve_server_org(&data_root, None)?;
-        Self::new_with_auth_and_org(auth, keypair, org_root).await
+        let mut org_roots = pick_server_orgs(&data_root, None)?;
+        let org_root = org_roots
+            .pop()
+            .ok_or_else(|| eyre::eyre!("no org to host"))?;
+        let slug = org_root.slug().to_owned();
+        let org_state = build_org_state(auth, &keypair, org_root).await?;
+        let mut orgs = std::collections::HashMap::new();
+        orgs.insert(slug, org_state);
+        Ok(Self {
+            keypair,
+            orgs: Arc::new(orgs),
+            data_root,
+        })
     }
 
-    /// Inner builder — every code path goes through this so
-    /// path resolution is consistent. Tests can pass a
-    /// tempdir-backed `OrgRoot` directly.
+    /// Test helper: same as `new_with_auth` but takes an
+    /// explicit [`OrgRoot`] (tempdir-backed in tests) instead
+    /// of scanning the data root.
     pub async fn new_with_auth_and_org(
         auth: AuthState,
         keypair: ServerKeypair,
         org_root: org_proto::OrgRoot,
     ) -> eyre::Result<Self> {
+        let data_root =
+            org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+        let slug = org_root.slug().to_owned();
+        let org_state = build_org_state(auth, &keypair, org_root).await?;
+        let mut orgs = std::collections::HashMap::new();
+        orgs.insert(slug, org_state);
+        Ok(Self {
+            keypair,
+            orgs: Arc::new(orgs),
+            data_root,
+        })
+    }
+}
+
+/// Build one [`OrgAppState`] for a single org's
+/// [`OrgRoot`]. Opens every backend the vox dispatcher
+/// will mount.
+async fn build_org_state(
+    auth: AuthState,
+    keypair: &ServerKeypair,
+    org_root: org_proto::OrgRoot,
+) -> eyre::Result<OrgAppState> {
+    {
         // Attachments — local blob store under the standard XDG
         // path; the keypair signs upload/download URLs.
         let blob_root =
@@ -257,9 +323,9 @@ impl AppState {
             }
         }
 
-        Ok(Self {
+        Ok(OrgAppState {
+            slug: org_root.slug().to_owned(),
             auth,
-            keypair,
             attachments: attachment_service,
             vault_sync: vault_sync_state,
             wiki,
@@ -348,42 +414,39 @@ pub fn default_auth_db_path() -> eyre::Result<PathBuf> {
 /// loadable org, use it. If none, auto-bootstrap `default`
 /// so a fresh install boots. If many, refuse — operator
 /// must pick one (PR 4 lifts this and serves all of them).
-fn resolve_server_org(
+/// Pick the [`OrgRoot`]s this server should host.
+///
+/// - `slug_filter = Some` → host exactly that one org
+///   (rejects on missing dir).
+/// - `slug_filter = None` + `$TASK_SERVER_ORG` set → host
+///   just that env-selected org (legacy single-org boot).
+/// - `slug_filter = None`, env unset → host every loadable
+///   org under `<data_root>/orgs/`. Auto-bootstraps
+///   `default` when none exist so a fresh install boots.
+fn pick_server_orgs(
     data_root: &org_proto::DataRoot,
-    cli_slug: Option<&str>,
-) -> eyre::Result<(org_proto::OrgRoot, org_proto::OrgManifest)> {
-    let explicit = cli_slug
+    slug_filter: Option<&str>,
+) -> eyre::Result<Vec<org_proto::OrgRoot>> {
+    let explicit = slug_filter
         .map(str::to_owned)
         .or_else(|| std::env::var("TASK_SERVER_ORG").ok())
         .filter(|s| !s.is_empty());
     if let Some(slug) = explicit {
-        return data_root
+        let (org_root, _) = data_root
             .load_org(&slug)
-            .map_err(|e| eyre::eyre!("load org `{slug}`: {e}"));
+            .map_err(|e| eyre::eyre!("load org `{slug}`: {e}"))?;
+        return Ok(vec![org_root]);
     }
-    let orgs = data_root
+    let scanned = data_root
         .scan_orgs()
         .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
-    match orgs.len() {
-        1 => Ok(orgs.into_iter().next().expect("len 1")),
-        0 => {
-            let org = data_root
-                .init_org("default", "Default", false)
-                .map_err(|e| eyre::eyre!("auto-bootstrap default org: {e}"))?;
-            let manifest = org
-                .manifest()
-                .map_err(|e| eyre::eyre!("load fresh default manifest: {e}"))?;
-            Ok((org, manifest))
-        }
-        _ => {
-            let names: Vec<&str> = orgs.iter().map(|(o, _)| o.slug()).collect();
-            Err(eyre::eyre!(
-                "multiple orgs under {} ({}); set TASK_SERVER_ORG=<slug> until PR 4 lands multi-org routing",
-                data_root.orgs_dir().display(),
-                names.join(", "),
-            ))
-        }
+    if scanned.is_empty() {
+        let org = data_root
+            .init_org("default", "Default", false)
+            .map_err(|e| eyre::eyre!("auto-bootstrap default org: {e}"))?;
+        return Ok(vec![org]);
     }
+    Ok(scanned.into_iter().map(|(org, _)| org).collect())
 }
 
 /// Best-effort `$XDG_DATA_HOME` (falls back to `$HOME/.local/share`).
@@ -399,35 +462,142 @@ fn dirs_local_share() -> Option<PathBuf> {
 
 pub fn router(state: AppState) -> Router {
     use attachments::routes::AttachmentRouteState;
+    use axum::routing::any;
 
-    // Mount the /blobs/* HTTP routes under their own sub-router
-    // so they pass a small `AttachmentRouteState` sliver and
-    // don't drag the full `AppState` into the attachment
-    // handlers' generic bound.
-    let blob_state = AttachmentRouteState {
-        service: state.attachments.clone(),
-    };
-    let blob_router = attachments::attachment_router().with_state(blob_state);
+    // Mount the /blobs/* HTTP routes against the FIRST org's
+    // attachment service. Multi-org blob routing
+    // (`/org/<slug>/blobs/...`) is a follow-up — the existing
+    // path stays for single-org back-compat. When no org is
+    // hosted (test boot path), fall back to a synthetic
+    // empty router so axum doesn't choke.
+    let blob_router = state
+        .orgs
+        .values()
+        .next()
+        .map(|org| {
+            let blob_state = AttachmentRouteState {
+                service: org.attachments.clone(),
+            };
+            attachments::attachment_router().with_state(blob_state)
+        })
+        .unwrap_or_default();
+
+    // Per-org vox at `/org/{slug}/vox`. Also keep `/vox`
+    // and `/health` at the top level for back-compat —
+    // `/vox` dispatches into the first hosted org so
+    // single-org clients keep working without a URL change.
+    let well_known = Router::new()
+        .route("/.well-known/task-server.json", get(well_known_handler))
+        .with_state(state.clone());
+    let per_org = Router::new()
+        .route("/org/{slug}/health", get(per_org_health_handler))
+        .route("/org/{slug}/vox", any(per_org_vox_handler))
+        .with_state(state.clone());
 
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .route("/vox", get(vox_ws_handler))
+        .route("/vox", get(legacy_vox_handler))
+        .merge(well_known)
+        .merge(per_org)
         .merge(blob_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
 
-async fn vox_ws_handler(
+/// `.well-known/task-server.json` — federation discovery.
+/// Lists every org this server hosts plus its routing URL
+/// suffix. Public, no auth required.
+///
+/// Per `plans/federated-task-platform.md`: peers fetch this
+/// to learn what slugs are available on a federation host
+/// before opening a vox connection.
+async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
+    let orgs: Vec<serde_json::Value> = state
+        .org_slugs()
+        .iter()
+        .filter_map(|slug| {
+            let org = state.org(slug)?;
+            // We only have the slug here — the display
+            // name + federation URL live in `org.toml`,
+            // re-loaded for each entry. Cheap (TOML parse
+            // of a tiny file) and avoids holding manifest
+            // copies on every dispatched request.
+            let manifest = state.data_root.org(org.slug.as_str()).manifest().ok()?;
+            Some(serde_json::json!({
+                "slug": org.slug,
+                "display_name": manifest.display_name,
+                "is_home": manifest.is_home,
+                "federation_url": manifest.federation_url,
+                "vox": format!("/org/{}/vox", org.slug),
+                "health": format!("/org/{}/health", org.slug),
+            }))
+        })
+        .collect();
+    axum::Json(serde_json::json!({
+        "version": 1,
+        "orgs": orgs,
+    }))
+}
+
+/// `/org/<slug>/health` — per-org liveness probe. `200 ok`
+/// when the slug is hosted, `404` otherwise.
+async fn per_org_health_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+) -> axum::response::Response {
+    if state.org(&slug).is_some() {
+        axum::response::IntoResponse::into_response("ok")
+    } else {
+        axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::NOT_FOUND,
+            format!("org `{slug}` not hosted"),
+        ))
+    }
+}
+
+/// `/org/<slug>/vox` — per-org vox WebSocket. Looks up the
+/// slug in the AppState's org map; rejects with 404 if the
+/// org isn't hosted.
+async fn per_org_vox_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
+    let Some(org) = state.org(&slug).cloned() else {
+        return axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::NOT_FOUND,
+            format!("org `{slug}` not hosted"),
+        ));
+    };
+    serve_org_vox(org, ws)
+}
+
+/// `/vox` — legacy single-org alias. Dispatches into the
+/// first hosted org so clients written against the
+/// pre-multi-org URL keep working without a redirect.
+/// Returns 503 when no org is hosted (which shouldn't
+/// happen post-boot but is a sane fallback).
+async fn legacy_vox_handler(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
+    let Some(org) = state.orgs.values().next().cloned() else {
+        return axum::response::IntoResponse::into_response((
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "no org hosted on this server",
+        ));
+    };
+    serve_org_vox(org, ws)
+}
+
+fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Response {
     ws.on_upgrade(move |socket| async move {
-        let auth = state.auth.auth.clone();
-        let attachment_service = state.attachments.clone();
-        let vault_sync_state = state.vault_sync.clone();
-        let wiki = state.wiki.clone();
-        let agent_tasks_store = state.agent_tasks.clone();
-        let timer_store = state.timer.clone();
+        let auth = org.auth.auth.clone();
+        let attachment_service = org.attachments.clone();
+        let vault_sync_state = org.vault_sync.clone();
+        let wiki = org.wiki.clone();
+        let agent_tasks_store = org.agent_tasks.clone();
+        let timer_store = org.timer.clone();
         let acceptor =
             architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
                 "AuthService" => {
