@@ -1340,21 +1340,26 @@ fn resolve_server_vox_url(override_url: Option<&str>) -> eyre::Result<String> {
 }
 
 fn normalize_server_vox(raw: &str) -> String {
-    if raw.starts_with("ws://") || raw.starts_with("wss://") {
-        if raw.ends_with("/server/vox") {
-            raw.to_owned()
-        } else {
-            format!("{}/server/vox", raw.trim_end_matches('/'))
-        }
-    } else if raw.starts_with("http://") {
-        let ws = raw.replacen("http://", "ws://", 1);
-        format!("{}/server/vox", ws.trim_end_matches('/'))
-    } else if raw.starts_with("https://") {
-        let ws = raw.replacen("https://", "wss://", 1);
-        format!("{}/server/vox", ws.trim_end_matches('/'))
-    } else {
-        format!("ws://{}/server/vox", raw.trim_end_matches('/'))
+    // Already pointed at the right endpoint.
+    if raw.ends_with("/server/vox") {
+        return raw.to_owned();
     }
+    // Map http(s) → ws(s).
+    let ws: String = if let Some(rest) = raw.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else if let Some(rest) = raw.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if raw.starts_with("ws://") || raw.starts_with("wss://") {
+        raw.to_owned()
+    } else {
+        format!("ws://{raw}")
+    };
+    // Strip legacy `/vox` suffix (the per-org URL hint that
+    // `TASK_VOX_URL` sometimes points at) so we don't end up
+    // with `…/vox/server/vox`. Then attach the canonical
+    // server-mgmt path.
+    let trimmed = ws.trim_end_matches('/').trim_end_matches("/vox");
+    format!("{trimmed}/server/vox")
 }
 
 /// Open `ArchitectAuth` against a specific org's

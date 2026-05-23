@@ -159,15 +159,19 @@ impl VoxSession {
 ///
 /// Resolution order (build time, since wasm can't read process env):
 /// 1. `TASK_VOX_URL_WEB` env var if set at compile time — baked into
-///    the wasm bundle. Set this in CI / Nix / wherever you build for
-///    production:
+///    the wasm bundle. `dx serve` exports `.env` for both build +
+///    runtime, so dropping the var in `.env` is enough for local dev:
+///
+///        TASK_VOX_URL_WEB=ws://127.0.0.1:18080/vox
+///
+///    For production:
 ///
 ///        TASK_VOX_URL_WEB=wss://task.example.com/vox dx build --web --release
 ///
-/// 2. Falls back to `ws://127.0.0.1:9090/vox` for local dev (matches
-///    `just dev`'s defaults — `dx serve` on :8765, task-server on
-///    :9090, no reverse-proxy in the dev shell).
-pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:9090/vox";
+/// 2. Falls back to `ws://127.0.0.1:18080/vox` for local dev (matches
+///    the canonical `task-server` bind — `TASK_SERVER_BIND=127.0.0.1:18080
+///    task-server`, set up during the federation Phase 2 work).
+pub const DEFAULT_VOX_URL: &str = "ws://127.0.0.1:18080/vox";
 
 /// Resolved at call time so each surface can choose its default.
 ///
