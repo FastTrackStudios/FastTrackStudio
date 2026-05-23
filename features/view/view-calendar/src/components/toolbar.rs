@@ -76,15 +76,15 @@ struct ViewSwitchProps {
 fn ViewSwitch(props: ViewSwitchProps) -> Element {
     let opts = [ViewMode::Day, ViewMode::Week, ViewMode::Month];
     rsx! {
-        div { class: "inline-flex rounded-md border border-border/60 overflow-hidden text-xs",
+        div { class: "inline-flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5 text-xs",
             for v in opts.iter() {
                 {
                     let v = *v;
                     let active = v == props.view;
                     let cls = if active {
-                        "bg-accent text-accent-foreground px-2.5 py-1"
+                        "bg-background text-foreground shadow-sm font-medium px-3 py-1 rounded-md transition-all"
                     } else {
-                        "hover:bg-accent/50 text-muted-foreground px-2.5 py-1"
+                        "text-muted-foreground hover:text-foreground px-3 py-1 rounded-md transition-colors"
                     };
                     let key = v.label();
                     rsx! {

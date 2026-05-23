@@ -24,6 +24,7 @@ use crate::time::{day_start_utc, month_grid, shift_days};
 use crate::types::{CalendarEvent, EventId};
 
 use super::drag::{DT_MIME, use_drag_context};
+use super::style::chip_palette;
 
 /// Cap of visible chip tracks per week row before the renderer
 /// folds overflow into a `+N more` link at the bottom of each
@@ -146,7 +147,7 @@ fn WeekRow(props: WeekRowProps) -> Element {
                     rsx! {
                         div {
                             key: "{date}",
-                            class: "border-border/40 {bg} {border_r} flex flex-col p-1 min-h-[6rem]",
+                            class: "border-border/40 {bg} {border_r} flex flex-col p-1 min-h-[6rem] hover:bg-accent/30 transition-colors",
                             // Click empty cell → create.
                             onclick: move |_| {
                                 if props.readonly { return; }
@@ -166,7 +167,7 @@ fn WeekRow(props: WeekRowProps) -> Element {
                                 e.prevent_default();
                                 let dt = e.data().data_transfer();
                                 let Ok(id) = dt.get_data(DT_MIME).unwrap_or_default().parse::<Uuid>() else { return };
-                                let snapshot = *ctx.state.peek();
+                                let snapshot = ctx.state.peek().clone();
                                 let Some(ds) = snapshot else { return };
                                 if ds.event != id { return; }
                                 let orig_day = ds.orig_start.date_naive();
@@ -259,9 +260,9 @@ fn MonthChip(props: MonthChipProps) -> Element {
     let p = props.placement.clone();
     let event = p.event.clone();
     let event_id = event.id;
-    let stem = event.color.stem();
-    let is_dragging = drag.read().is_some_and(|d| d.event == event_id);
-    let opacity = if is_dragging { "opacity: 0.4;" } else { "" };
+    let palette = chip_palette(event.color);
+    let is_dragging = drag.read().as_ref().is_some_and(|d| d.event == event_id);
+    let drag_style = if is_dragging { "opacity: 0.4;" } else { "" };
 
     let track = p.track;
     let start_col = p.start_col;
@@ -269,19 +270,18 @@ fn MonthChip(props: MonthChipProps) -> Element {
     let rounded_l = if p.continues_left {
         "rounded-l-none"
     } else {
-        "rounded-l-sm"
+        "rounded-l-md"
     };
     let rounded_r = if p.continues_right {
         "rounded-r-none"
     } else {
-        "rounded-r-sm"
+        "rounded-r-md"
     };
-    let bg = format!(
-        "bg-{stem}-500/30 text-{stem}-50 border-l-2 border-{stem}-500 hover:bg-{stem}-500/40"
-    );
+    let body = palette.body;
+    let hover = palette.hover;
     // CSS grid is 1-indexed.
     let style = format!(
-        "grid-column: {} / span {}; grid-row: {}; {opacity}",
+        "grid-column: {} / span {}; grid-row: {}; {drag_style}",
         start_col + 1,
         span,
         track + 1,
@@ -291,9 +291,10 @@ fn MonthChip(props: MonthChipProps) -> Element {
 
     rsx! {
         div {
-            class: "truncate text-[11px] leading-4 px-1.5 py-0.5 mx-px cursor-pointer select-none pointer-events-auto {bg} {rounded_l} {rounded_r}",
+            class: "truncate text-[11px] leading-4 font-semibold px-2 py-0.5 mx-px cursor-pointer select-none pointer-events-auto shadow-sm transition-colors {body} {hover} {rounded_l} {rounded_r}",
             style: "{style}",
             draggable: !props.readonly,
+            "data-cal-drag": "true",
             ondragstart: move |e: Event<DragData>| {
                 if props.readonly { return; }
                 let dt = e.data().data_transfer();
@@ -303,6 +304,11 @@ fn MonthChip(props: MonthChipProps) -> Element {
                     kind: super::drag::DragKind::Move,
                     orig_start: event.start,
                     orig_end: event.end,
+                    color: event.color,
+                    title: event.title.clone(),
+                    start_page_x: 0.0,
+                    start_page_y: 0.0,
+                    committed: true,
                 }));
             },
             ondragend: move |_| drag.set(None),

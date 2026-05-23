@@ -40,7 +40,9 @@ pub fn Calendar(props: CalendarProps) -> Element {
 
     use_context_provider(|| DragContext {
         state: Signal::new(None),
+        ghost: Signal::new(None),
     });
+    use_hook(super::drag::install_drag_image_suppressor);
 
     let on_event = props.on_event;
     let events = props.events.clone();
@@ -95,12 +97,44 @@ pub fn Calendar(props: CalendarProps) -> Element {
         }
     };
 
+    // Root-level pointerup commits any drag-in-flight. Per-column
+    // pointermove updates the ghost as the cursor moves; when the
+    // user releases — even outside any column (e.g. past midnight,
+    // off the grid) — this handler reads the last-known ghost and
+    // commits a single `Reschedule`. Avoids the dead-zone bug where
+    // pointerup outside the column never fired.
+    let drag_ctx = super::drag::use_drag_context();
+    let on_event_up = on_event;
+    let on_pointer_up = move |_: Event<PointerData>| {
+        let drag_snap = drag_ctx.state.peek().clone();
+        let Some(ds) = drag_snap else { return };
+        // Click without movement — leave the event alone so the
+        // chip's onclick can open the editor.
+        if !ds.committed {
+            drag_ctx.state.clone().set(None);
+            drag_ctx.ghost.clone().set(None);
+            return;
+        }
+        if let Some(g) = drag_ctx.ghost.peek().clone() {
+            let new_start = day_start_utc(g.date) + chrono::Duration::minutes(g.start_min);
+            let new_end = day_start_utc(g.date) + chrono::Duration::minutes(g.end_min);
+            on_event_up.call(CalendarMutation::Reschedule {
+                id: g.event,
+                start: new_start,
+                end: new_end,
+            });
+        }
+        drag_ctx.state.clone().set(None);
+        drag_ctx.ghost.clone().set(None);
+    };
+
     rsx! {
         div {
             class: "flex flex-col h-full w-full outline-none",
             tabindex: 0,
             autofocus: true,
             onkeydown: on_keydown,
+            onpointerup: on_pointer_up,
             Toolbar {
                 anchor: *anchor.read(),
                 view: *view.read(),

@@ -1,5 +1,5 @@
 [package]
-name = "task-ui"
+name = "ui"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -24,6 +24,7 @@ fts-ui = { workspace = true, features = ["router"] }
 # file-backed vault.
 editor.workspace = true
 view.workspace = true
+view-calendar.workspace = true
 scheduling-proto = { workspace = true, default-features = false }
 scheduling-ui.workspace = true
 

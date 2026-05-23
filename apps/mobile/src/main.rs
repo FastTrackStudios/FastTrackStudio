@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use task_ui::App;
+use ui::App;
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 

@@ -14100,7 +14100,7 @@ name = "task-app-desktop"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "task-ui",
+ "ui",
 ]
 
 [[package]]
@@ -14108,7 +14108,7 @@ name = "task-app-mobile"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "task-ui",
+ "ui",
 ]
 
 [[package]]
@@ -14116,7 +14116,7 @@ name = "task-app-web"
 version = "0.1.0"
 dependencies = [
  "dioxus",
- "task-ui",
+ "ui",
 ]
 
 [[package]]
@@ -14206,34 +14206,6 @@ dependencies = [
  "walkdir",
  "wiki-live",
  "wiki-proto",
-]
-
-[[package]]
-name = "task-ui"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dioxus",
- "dioxus-router",
- "editor",
- "fake",
- "fts-ui",
- "futures-channel",
- "futures-util",
- "js-sys",
- "scheduling-proto",
- "scheduling-ui",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
- "view",
- "vox",
- "vox-core",
- "vox-websocket",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]
@@ -15349,6 +15321,35 @@ name = "ucd-trie"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
+
+[[package]]
+name = "ui"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dioxus",
+ "dioxus-router",
+ "editor",
+ "fake",
+ "fts-ui",
+ "futures-channel",
+ "futures-util",
+ "js-sys",
+ "scheduling-proto",
+ "scheduling-ui",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+ "view",
+ "view-calendar",
+ "vox",
+ "vox-core",
+ "vox-websocket",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
 
 [[package]]
 name = "unarray"
@@ -17743,10 +17744,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+
+[[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"

@@ -10,7 +10,6 @@
 use chrono::{Datelike, Duration, NaiveDate};
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::layout::{TimeBlockPlacement, day_overlap_layout};
 use crate::store::CalendarMutation;
@@ -18,9 +17,10 @@ use crate::time::{day_start_utc, hour_labels};
 use crate::types::{CalendarEvent, EventId};
 
 use super::all_day_strip::AllDayStrip;
-use super::drag::{DT_MIME, DragKind, use_drag_context};
+use super::drag::{DragKind, Ghost, use_drag_context};
 use super::event_chip::EventChip;
 use super::now_line::NowLine;
+use super::style::chip_palette;
 
 const PX_PER_HOUR: i64 = 48;
 const COL_HEIGHT_PX: i64 = PX_PER_HOUR * 24;
@@ -62,16 +62,28 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                         let is_today = *date == today;
                         let day_name = date.format("%a").to_string();
                         let day_num = date.day();
+                        let cell_cls = if is_today {
+                            "flex items-center justify-center gap-2 py-1.5 text-xs bg-primary/[0.04]"
+                        } else {
+                            "flex items-center justify-center gap-2 py-1.5 text-xs"
+                        };
                         rsx! {
                             div {
                                 key: "{date}",
-                                class: "flex items-center justify-center gap-2 py-1 text-xs",
-                                span { class: "text-muted-foreground", "{day_name}" }
+                                class: "{cell_cls}",
                                 span {
                                     class: if is_today {
-                                        "font-semibold bg-primary text-primary-foreground rounded-full w-5 h-5 flex items-center justify-center"
+                                        "text-primary font-semibold uppercase tracking-wider text-[10px]"
                                     } else {
-                                        "font-medium"
+                                        "text-muted-foreground uppercase tracking-wider text-[10px]"
+                                    },
+                                    "{day_name}"
+                                }
+                                span {
+                                    class: if is_today {
+                                        "font-semibold bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm"
+                                    } else {
+                                        "font-medium text-sm"
                                     },
                                     "{day_num}"
                                 }
@@ -174,68 +186,139 @@ impl Sweep {
 
 #[component]
 fn DayColumn(props: DayColumnProps) -> Element {
-    let ctx = use_drag_context();
+    let mut ctx = use_drag_context();
     let date = props.date;
     let on_event = props.on_event;
     let on_open_editor = props.on_open_editor;
+    let today = chrono::Local::now().date_naive();
+    let is_today = date == today;
     let border_r = if props.is_last { "" } else { "border-r" };
+    let column_bg = if is_today { "bg-primary/[0.04]" } else { "" };
     let mut sweep: Signal<Option<Sweep>> = use_signal(|| None);
 
     rsx! {
         div {
-            class: "relative border-border/40 {border_r}",
-            // Hour grid lines (decorative)
+            class: "relative border-border/40 {border_r} {column_bg}",
+            // Hour grid lines (solid).
             for h in 1..24u32 {
                 div {
                     key: "h-{h}",
-                    class: "absolute left-0 right-0 border-t border-border/20 pointer-events-none",
+                    class: "absolute left-0 right-0 border-t border-border/30 pointer-events-none",
                     style: "top: {h as i64 * PX_PER_HOUR}px;",
                 }
             }
-            // Drop / sweep surface (catches background interactions).
-            // Sits BELOW the event blocks so chips win the click race.
+            // Half-hour grid lines (dashed, very faint) — improves
+            // legibility for 30/15-minute events.
+            for h in 0..24u32 {
+                div {
+                    key: "h2-{h}",
+                    class: "absolute left-0 right-0 border-t border-dashed border-border/15 pointer-events-none",
+                    style: "top: {h as i64 * PX_PER_HOUR + PX_PER_HOUR / 2}px;",
+                }
+            }
+            // Background surface — captures all pointer-based input
+            // for this column (drag-tracking + sweep-to-create).
+            // Sits BELOW the event blocks so chips win the initial
+            // pointerdown; the chip body sets `pointer-events: none`
+            // while it is being dragged so subsequent pointermoves
+            // fall through to this surface as the user drags
+            // across.
             div {
                 class: "absolute inset-0",
-                ondragover: move |e: Event<DragData>| {
+                style: "touch-action: none;",
+                // Snap-preview during an active drag. The drag isn't
+                // "committed" until the pointer has moved past the
+                // threshold — a pure click leaves DragState in place
+                // but never updates the ghost, so onclick on the
+                // chip wins.
+                onpointermove: move |e: Event<PointerData>| {
                     if props.readonly { return; }
-                    if ctx.state.peek().is_none() { return; }
-                    e.prevent_default();
-                },
-                ondrop: move |e: Event<DragData>| {
-                    if props.readonly { return; }
-                    e.prevent_default();
-                    let dt = e.data().data_transfer();
-                    let Ok(id) = dt.get_data(DT_MIME).unwrap_or_default().parse::<Uuid>() else { return };
-                    let snapshot = *ctx.state.peek();
-                    let Some(ds) = snapshot else { return };
-                    if ds.event != id { return; }
-                    let y = e.data().element_coordinates().y as i64;
-                    let drop_min = snap_minutes(px_to_minutes(y));
-                    match ds.kind {
-                        DragKind::Move => {
-                            let new_start = day_start_utc(date) + Duration::minutes(drop_min);
-                            let duration = ds.orig_end - ds.orig_start;
-                            on_event.call(CalendarMutation::Reschedule {
-                                id,
-                                start: new_start,
-                                end: new_start + duration,
-                            });
+                    let snapshot = ctx.state.peek().clone();
+                    let Some(mut ds) = snapshot else { return };
+                    if !ds.committed {
+                        let p = e.data().page_coordinates();
+                        let dx = (p.x - ds.start_page_x).abs();
+                        let dy = (p.y - ds.start_page_y).abs();
+                        if dx < super::drag::DRAG_THRESHOLD_PX as f64
+                            && dy < super::drag::DRAG_THRESHOLD_PX as f64
+                        {
+                            return;
                         }
-                        DragKind::ResizeEnd => {
-                            let origin_min_from_day = (ds.orig_start - day_start_utc(date)).num_minutes();
-                            let min_end_min = origin_min_from_day + SNAP_MINUTES;
-                            let new_end = day_start_utc(date)
-                                + Duration::minutes(drop_min.max(min_end_min));
-                            on_event.call(CalendarMutation::Reschedule {
-                                id,
-                                start: ds.orig_start,
-                                end: new_end,
-                            });
-                        }
+                        ds.committed = true;
+                        ctx.state.set(Some(ds.clone()));
                     }
+                    let y = e.data().element_coordinates().y as i64;
+                    let snap_min = snap_minutes(px_to_minutes(y));
+                    let (start_min, end_min) = ghost_range(ds.kind, ds.orig_start, ds.orig_end, snap_min, date);
+                    ctx.ghost.set(Some(Ghost {
+                        event: ds.event,
+                        date,
+                        start_min,
+                        end_min,
+                        color: ds.color,
+                        title: ds.title.clone(),
+                    }));
+                },
+                // Commit on pointerup. Either commits the drag or
+                // commits a sweep-to-create — whichever is active.
+                onpointerup: move |e: Event<PointerData>| {
+                    if props.readonly { return; }
+                    let drag_snapshot = ctx.state.peek().clone();
+                    if let Some(ds) = drag_snapshot {
+                        let y = e.data().element_coordinates().y as i64;
+                        let drop_min = snap_minutes(px_to_minutes(y));
+                        match ds.kind {
+                            DragKind::Move => {
+                                let new_start = day_start_utc(date) + Duration::minutes(drop_min);
+                                let duration = ds.orig_end - ds.orig_start;
+                                on_event.call(CalendarMutation::Reschedule {
+                                    id: ds.event,
+                                    start: new_start,
+                                    end: new_start + duration,
+                                });
+                            }
+                            DragKind::ResizeEnd => {
+                                let origin_min_from_day = (ds.orig_start - day_start_utc(date)).num_minutes();
+                                let min_end_min = origin_min_from_day + SNAP_MINUTES;
+                                let new_end = day_start_utc(date)
+                                    + Duration::minutes(drop_min.max(min_end_min));
+                                on_event.call(CalendarMutation::Reschedule {
+                                    id: ds.event,
+                                    start: ds.orig_start,
+                                    end: new_end,
+                                });
+                            }
+                            DragKind::ResizeStart => {
+                                let origin_end_min_from_day = (ds.orig_end - day_start_utc(date)).num_minutes();
+                                let max_start_min = origin_end_min_from_day - SNAP_MINUTES;
+                                let new_start = day_start_utc(date)
+                                    + Duration::minutes(drop_min.min(max_start_min));
+                                on_event.call(CalendarMutation::Reschedule {
+                                    id: ds.event,
+                                    start: new_start,
+                                    end: ds.orig_end,
+                                });
+                            }
+                        }
+                        ctx.state.set(None);
+                        ctx.ghost.set(None);
+                        return;
+                    }
+                    // No drag in flight — commit sweep-to-create.
+                    let Some(s) = sweep.take() else { return };
+                    let (start_min, end_min) = s.range();
+                    let start = day_start_utc(date) + Duration::minutes(start_min);
+                    let end = day_start_utc(date) + Duration::minutes(end_min);
+                    let end = if (end - start).num_minutes() <= SNAP_MINUTES {
+                        start + Duration::hours(1)
+                    } else {
+                        end
+                    };
+                    let event = CalendarEvent::new("New event", start, end);
+                    on_event.call(CalendarMutation::Create { event });
                 },
                 // Sweep to create — primary button only. Click
-                // without sweep falls through to the mouseup
+                // without sweep falls through to the pointerup
                 // branch and produces a 1-hour event at the
                 // clicked slot.
                 onmousedown: move |e: MouseEvent| {
@@ -252,29 +335,12 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     s.current_min = snap_minutes(px_to_minutes(y));
                     sweep.set(Some(s));
                 },
-                onmouseup: move |_| {
-                    if props.readonly { return; }
-                    let Some(s) = sweep.take() else { return };
-                    let (start_min, end_min) = s.range();
-                    let start = day_start_utc(date) + Duration::minutes(start_min);
-                    let end = day_start_utc(date) + Duration::minutes(end_min);
-                    // If the user just clicked without dragging,
-                    // `end_min` was bumped to `start_min + 15`. We
-                    // upgrade that to a 1-hour default — matches the
-                    // month-view click-create behavior and avoids
-                    // creating a sliver event.
-                    let end = if (end - start).num_minutes() <= SNAP_MINUTES {
-                        start + Duration::hours(1)
-                    } else {
-                        end
-                    };
-                    let event = CalendarEvent::new("New event", start, end);
-                    on_event.call(CalendarMutation::Create { event });
-                },
                 onmouseleave: move |_| {
                     // Bail on the sweep if the pointer leaves the
                     // column — avoids ghost blocks lingering after
-                    // a drag escapes the day.
+                    // a drag escapes the day. Drag-state survives
+                    // because it belongs to DragContext, not the
+                    // column's local sweep.
                     sweep.set(None);
                 },
             }
@@ -309,6 +375,78 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     }
                 }
             }
+            // Snapped ghost — only renders when this column is the
+            // current drop target.
+            if let Some(g) = ctx.ghost.read().clone() {
+                if g.date == date {
+                    {
+                        let palette = chip_palette(g.color);
+                        let top = minutes_to_px(g.start_min);
+                        let h = minutes_to_px(g.end_min - g.start_min).max(8);
+                        let label = format_ghost_label(g.start_min, g.end_min);
+                        let body = palette.body;
+                        rsx! {
+                            div {
+                                class: "absolute left-1 right-1 rounded-md pointer-events-none z-30 shadow-lg ring-2 ring-white/30 px-2 py-1 overflow-hidden {body}",
+                                style: "top: {top}px; height: {h}px;",
+                                div { class: "text-[11px] leading-4 font-semibold truncate", "{g.title}" }
+                                div { class: "text-[10px] leading-3 opacity-90 truncate", "{label}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn format_ghost_label(start_min: i64, end_min: i64) -> String {
+    fn fmt(min: i64) -> String {
+        let h = (min / 60).rem_euclid(24);
+        let m = min.rem_euclid(60);
+        let (h12, suf) = if h == 0 {
+            (12, "AM")
+        } else if h < 12 {
+            (h, "AM")
+        } else if h == 12 {
+            (12, "PM")
+        } else {
+            (h - 12, "PM")
+        };
+        if m == 0 {
+            format!("{h12}{suf}")
+        } else {
+            format!("{h12}:{m:02}{suf}")
+        }
+    }
+    format!("{} – {}", fmt(start_min), fmt(end_min))
+}
+
+/// Compute snapped `(start_min, end_min)` for a ghost preview given
+/// the current drag kind and where the cursor is pointing
+/// (`snap_min` is already 15-min snapped). For Move the drop point
+/// becomes the new start; for resize the dragged edge moves and the
+/// other edge stays put — clamped so the event keeps at least one
+/// snap interval of length.
+fn ghost_range(
+    kind: DragKind,
+    orig_start: chrono::DateTime<chrono::Utc>,
+    orig_end: chrono::DateTime<chrono::Utc>,
+    snap_min: i64,
+    target_date: NaiveDate,
+) -> (i64, i64) {
+    let orig_start_min_from_day = (orig_start - day_start_utc(target_date)).num_minutes();
+    let orig_end_min_from_day = (orig_end - day_start_utc(target_date)).num_minutes();
+    let duration = (orig_end - orig_start).num_minutes();
+    match kind {
+        DragKind::Move => (snap_min, snap_min + duration),
+        DragKind::ResizeEnd => {
+            let min_end = orig_start_min_from_day + SNAP_MINUTES;
+            (orig_start_min_from_day, snap_min.max(min_end))
+        }
+        DragKind::ResizeStart => {
+            let max_start = orig_end_min_from_day - SNAP_MINUTES;
+            (snap_min.min(max_start), orig_end_min_from_day)
         }
     }
 }
