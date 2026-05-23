@@ -16,11 +16,15 @@
 //!     └── ...
 //! ```
 //!
-//! Phase 1 wires these resolvers but doesn't yet move
-//! existing data — the server + CLI keep working against
-//! their current `$XDG_DATA_HOME/task-server/*.sqlite` paths
-//! until PR 2 migrates them through `OrgRoot`. See
-//! `plans/federated-task-platform.md` Phase 1.
+//! Default data root is `$HOME/.task/` (override with
+//! `TASK_DATA_ROOT`). Per-org databases live under
+//! `<data_root>/orgs/<slug>/{auth,timer,finance}.sqlite`.
+//! Client-side vault checkouts default to
+//! `$HOME/Documents/Task/` ([`default_client_vault_root`]) so
+//! a thin client can mount a slice of content separately from
+//! the server's full state tree. See
+//! `plans/federated-task-platform.md` for the full federation
+//! model.
 
 use std::path::{Path, PathBuf};
 
@@ -67,28 +71,25 @@ impl DataRoot {
     }
 
     /// Resolve the canonical default:
-    /// `$TASK_DATA_ROOT` → `$XDG_DATA_HOME/task-server` →
-    /// `$HOME/.local/share/task-server`. Picks an env-var
+    /// `$TASK_DATA_ROOT` → `$HOME/.task`. Picks an env-var
     /// override path first so tests (and per-org server
     /// instances) can point at temp dirs.
+    ///
+    /// `~/.task/` keeps the server-side state (orgs, identity,
+    /// timer/finance DBs, blob attachments) together under one
+    /// hidden dir. Client-side vault checkouts live separately
+    /// — see [`default_client_vault_root`] — so a thin client
+    /// can hold just the slice of content it cares about
+    /// without dragging the full server data root along.
     pub fn from_env() -> Result<Self, RootError> {
         if let Ok(explicit) = std::env::var("TASK_DATA_ROOT") {
             if !explicit.is_empty() {
                 return Ok(Self::new(PathBuf::from(explicit)));
             }
         }
-        let base = match std::env::var("XDG_DATA_HOME") {
-            Ok(v) if !v.is_empty() => PathBuf::from(v),
-            _ => {
-                let home = std::env::var("HOME").map_err(|_| {
-                    RootError::Resolve(
-                        "neither TASK_DATA_ROOT, XDG_DATA_HOME nor HOME is set".into(),
-                    )
-                })?;
-                PathBuf::from(home).join(".local").join("share")
-            }
-        };
-        Ok(Self::new(base.join("task-server")))
+        let home = std::env::var("HOME")
+            .map_err(|_| RootError::Resolve("neither TASK_DATA_ROOT nor HOME is set".into()))?;
+        Ok(Self::new(PathBuf::from(home).join(".task")))
     }
 
     /// Path to the root itself (`<data_root>`).
@@ -268,6 +269,27 @@ impl OrgRoot {
     pub fn manifest(&self) -> Result<OrgManifest, ParseError> {
         OrgManifest::load_from_dir(&self.path)
     }
+}
+
+/// Default client-side vault root:
+/// `$TASK_VAULT_ROOT` → `$HOME/Documents/Task`.
+///
+/// The client checkout is intentionally separate from the
+/// server data root ([`DataRoot`]) so a thin client (laptop,
+/// phone) can mount a small slice of content under a
+/// user-visible folder without holding the full
+/// `<data_root>/orgs/<slug>/vault` tree the server keeps.
+/// Per-machine [`mount-proto::MountRegistry`] entries point
+/// at sub-paths under this root by default.
+pub fn default_client_vault_root() -> Result<PathBuf, RootError> {
+    if let Ok(explicit) = std::env::var("TASK_VAULT_ROOT") {
+        if !explicit.is_empty() {
+            return Ok(PathBuf::from(explicit));
+        }
+    }
+    let home = std::env::var("HOME")
+        .map_err(|_| RootError::Resolve("neither TASK_VAULT_ROOT nor HOME is set".into()))?;
+    Ok(PathBuf::from(home).join("Documents").join("Task"))
 }
 
 /// Slug rules: lowercase ASCII, digits, `-`. Non-empty,

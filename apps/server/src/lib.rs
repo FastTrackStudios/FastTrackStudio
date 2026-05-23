@@ -263,7 +263,7 @@ async fn build_org_state(
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
 
         // Timer store. SQLite at
-        // `$XDG_DATA_HOME/task-server/timer.sqlite`
+        // `<data_root>/orgs/<slug>/timer.sqlite`
         // (override via `TASK_SERVER_TIMER_URL`). Project
         // defaults are resolved off the same vault root the
         // rest of the server uses — the rate cascade calls
@@ -283,7 +283,7 @@ async fn build_org_state(
         let timer = timer::Store::new(timer_conn, timer_defaults);
 
         // Finance store. SQLite at
-        // `$XDG_DATA_HOME/task-server/finance.sqlite`
+        // `<data_root>/orgs/<slug>/finance.sqlite`
         // (override via `TASK_SERVER_FINANCE_URL`). Services
         // (Invoicing / Ledger) are not mounted yet — only
         // the migrated DB connection is exposed; the
@@ -337,75 +337,9 @@ async fn build_org_state(
     }
 }
 
-/// Resolve `$XDG_DATA_HOME/task-server/finance.sqlite`. Mirror
-/// of [`default_agent_tasks_db_path`] / [`default_timer_db_path`].
-pub fn default_finance_db_path() -> eyre::Result<PathBuf> {
-    let base = match std::env::var("XDG_DATA_HOME") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => {
-            let home = std::env::var("HOME")
-                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
-            PathBuf::from(home).join(".local").join("share")
-        }
-    };
-    let dir = base.join("task-server");
-    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
-    Ok(dir.join("finance.sqlite"))
-}
-
-/// Resolve `$XDG_DATA_HOME/task-server/timer.sqlite`. Mirror
-/// of [`default_agent_tasks_db_path`]; kept separate so the
-/// DBs can be swapped/backed up independently.
-pub fn default_timer_db_path() -> eyre::Result<PathBuf> {
-    let base = match std::env::var("XDG_DATA_HOME") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => {
-            let home = std::env::var("HOME")
-                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
-            PathBuf::from(home).join(".local").join("share")
-        }
-    };
-    let dir = base.join("task-server");
-    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
-    Ok(dir.join("timer.sqlite"))
-}
-
-/// Resolve `$XDG_DATA_HOME/task-server/agent-tasks.sqlite`.
-/// Mirror of [`default_auth_db_path`]; kept separate so the
-/// two DBs can be swapped/backed up independently.
-pub fn default_agent_tasks_db_path() -> eyre::Result<PathBuf> {
-    let base = match std::env::var("XDG_DATA_HOME") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => {
-            let home = std::env::var("HOME")
-                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
-            PathBuf::from(home).join(".local").join("share")
-        }
-    };
-    let dir = base.join("task-server");
-    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
-    Ok(dir.join("agent-tasks.sqlite"))
-}
-
 /// Dev default — replace via config in a later phase. Length-checked
 /// at build time so this fails loudly if shortened.
 const DEFAULT_AUTH_SECRET: &str = "task-server-auth-dev-secret-32+!";
-
-/// Resolve `$XDG_DATA_HOME/task-server/auth.sqlite` with the standard
-/// fallback. Creates parent directories if missing.
-pub fn default_auth_db_path() -> eyre::Result<PathBuf> {
-    let base = match std::env::var("XDG_DATA_HOME") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => {
-            let home = std::env::var("HOME")
-                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
-            PathBuf::from(home).join(".local").join("share")
-        }
-    };
-    let dir = base.join("task-server");
-    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
-    Ok(dir.join("auth.sqlite"))
-}
 
 /// Pick the org root this server should serve.
 ///
@@ -447,17 +381,6 @@ fn pick_server_orgs(
         return Ok(vec![org]);
     }
     Ok(scanned.into_iter().map(|(org, _)| org).collect())
-}
-
-/// Best-effort `$XDG_DATA_HOME` (falls back to `$HOME/.local/share`).
-/// Skips a `dirs` crate dep — we only use this one path.
-#[allow(dead_code)]
-fn dirs_local_share() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
-        return Some(PathBuf::from(xdg));
-    }
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".local/share"))
 }
 
 pub fn router(state: AppState) -> Router {

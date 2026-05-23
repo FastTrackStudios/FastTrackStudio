@@ -16,4 +16,4 @@ pub mod manifest;
 pub mod root;
 
 pub use manifest::{OrgManifest, ParseError};
-pub use root::{DataRoot, OrgRoot, RootError};
+pub use root::{DataRoot, OrgRoot, RootError, default_client_vault_root};
