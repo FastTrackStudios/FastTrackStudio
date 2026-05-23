@@ -155,6 +155,110 @@ enum ProjectCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Create a new project. Title is the only required
+    /// argument; sensible defaults fill the rest. The backend
+    /// chooses a `Projects/<slug>.md` path unless `--path`
+    /// overrides it.
+    Create {
+        title: String,
+        /// Vault-relative path. Default: `Projects/<slug>.md`.
+        #[arg(long)]
+        path: Option<String>,
+        /// Parent project id OR vault-relative path. Resolved
+        /// against `list()` before the create call so paths
+        /// work too.
+        #[arg(long)]
+        parent: Option<String>,
+        /// One of `active|on_hold|done|cancelled`. Default
+        /// `active`.
+        #[arg(long)]
+        status: Option<String>,
+        /// `p0..p4` / `urgent|high|normal|low|lowest`. Default
+        /// `normal`.
+        #[arg(long)]
+        priority: Option<String>,
+        /// Comma-separated tag list.
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        /// Body / details (markdown). Reads stdin when `-`.
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the project status. Convenience over `update`.
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set the project priority. Convenience over `update`.
+    SetPriority {
+        target: String,
+        priority: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear the project parent. Pass `none` / `null`
+    /// to unparent.
+    SetParent {
+        target: String,
+        /// `none`, `null`, a project UUID, or a vault-relative
+        /// path.
+        parent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark the project archived (kept on disk; timer refuses
+    /// new sessions against it).
+    Archive {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Reverse of `archive`.
+    Unarchive {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Move the backing markdown file. Preserves `id` so
+    /// downstream FKs (timer rows, links) survive.
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete the project. Refuses if any other project lists
+    /// it as parent — reparent or delete children first.
+    Delete {
+        target: String,
+        /// Skip the y/N prompt.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -184,6 +288,94 @@ enum GoalCmd {
         server: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Create a new goal. Title is the only required arg.
+    Create {
+        title: String,
+        /// `lifetime|yearly|quarterly|cycle|weekly`. Default
+        /// `lifetime` for top-level, `cycle` when `--cycle`
+        /// (or `--cycle-current`) is set, else `lifetime`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Status slug. Default `aspiration`.
+        #[arg(long)]
+        status: Option<String>,
+        /// Vault-relative path. Default `Goals/<slug>.md`.
+        #[arg(long)]
+        path: Option<String>,
+        /// Parent goal id or path.
+        #[arg(long)]
+        parent: Option<String>,
+        /// ISO date `YYYY-MM-DD`. Required for `yearly` goals
+        /// by convention but not enforced.
+        #[arg(long)]
+        target_date: Option<String>,
+        /// Cycle UUID. Mutually exclusive with
+        /// `--cycle-current`.
+        #[arg(long)]
+        cycle: Option<String>,
+        /// Anchor to today's cycle.
+        #[arg(long)]
+        cycle_current: bool,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the goal status.
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear the parent goal (`none` clears).
+    SetParent {
+        target: String,
+        parent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Anchor a goal to a specific cycle (by UUID, by
+    /// `YYYY:Qn:Cm`, or `current` for today's cycle). Pass
+    /// `none` / `null` to clear.
+    SetCycle {
+        target: String,
+        cycle: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Move the backing markdown file. `id` is preserved.
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete the goal. Refuses if any other goal lists it as
+    /// parent.
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
     },
 }
 
@@ -1198,8 +1390,218 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 println!("\n{}", p.details);
             }
         }
+        ProjectCmd::Create {
+            title,
+            path,
+            parent,
+            status,
+            priority,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+
+            let parent_id = match parent {
+                None => None,
+                Some(s) => Some(resolve_project_target(&client, &s).await?.id),
+            };
+            let details = resolve_body(details)?;
+            let new_project = project::ProjectInfo {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                status: status.unwrap_or_else(|| "active".into()),
+                priority: priority.unwrap_or_else(|| "normal".into()),
+                lead: String::new(),
+                tags: project::model::Tags(tags),
+                parent_id,
+                same_as: None,
+                details,
+                client_id: None,
+                billable_default: false,
+                currency: String::new(),
+                default_rate_cents: 0,
+                estimated_seconds: 0,
+                agent_profile: String::new(),
+                color: String::new(),
+                archived: false,
+                date_created: None,
+                date_modified: None,
+            };
+            let created = client
+                .create(new_project)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        ProjectCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.status = status).await?;
+        }
+        ProjectCmd::SetPriority {
+            target,
+            priority,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.priority = priority).await?;
+        }
+        ProjectCmd::SetParent {
+            target,
+            parent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let client = connect_project_client(&url).await?;
+            let new_parent = if matches!(parent.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(resolve_project_target(&client, &parent).await?.id)
+            };
+            mutate_project(target, org, server, |p| p.parent_id = new_parent).await?;
+        }
+        ProjectCmd::Archive {
+            target,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.archived = true).await?;
+        }
+        ProjectCmd::Unarchive {
+            target,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.archived = false).await?;
+        }
+        ProjectCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            let renamed = client
+                .rename(p.id, new_path.clone())
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        ProjectCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", p.title, p.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(p.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", p.path);
+        }
     }
     Ok(())
+}
+
+async fn connect_project_client(url: &str) -> eyre::Result<project::ProjectServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_project_target(
+    client: &project::ProjectServiceClient,
+    target: &str,
+) -> eyre::Result<project::ProjectInfo> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_project<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut project::ProjectInfo),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_project_client(&url).await?;
+    let mut p = resolve_project_target(&client, &target).await?;
+    apply(&mut p);
+    let updated = client
+        .update(p)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+fn resolve_body(arg: Option<String>) -> eyre::Result<String> {
+    use std::io::Read;
+    match arg {
+        None => Ok(String::new()),
+        Some(s) if s == "-" => {
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            Ok(buf)
+        }
+        Some(s) => Ok(s),
+    }
+}
+
+fn confirm(prompt: &str) -> eyre::Result<bool> {
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout();
+    write!(out, "{prompt} [y/N] ")?;
+    out.flush()?;
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line)?;
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
 }
 
 fn print_project_row(p: &project::ProjectInfo, indent: usize) {
@@ -1345,8 +1747,259 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
                 println!("\n{}", g.details);
             }
         }
+        GoalCmd::Create {
+            title,
+            kind,
+            status,
+            path,
+            parent,
+            target_date,
+            cycle,
+            cycle_current,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_goal_client(&url).await?;
+
+            let parent_id = match parent {
+                None => None,
+                Some(s) => Some(resolve_goal_target(&client, &s).await?.id),
+            };
+            let cycle_id = resolve_cycle_arg(cycle, cycle_current)?;
+            let kind_str = kind.unwrap_or_else(|| {
+                if cycle_id.is_some() {
+                    "cycle".into()
+                } else {
+                    "lifetime".into()
+                }
+            });
+            let target_date = match target_date {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--target-date: {e}"))?,
+                ),
+            };
+            let details = resolve_body(details)?;
+            let new_goal = goal::Goal {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                kind: kind_str,
+                status: status.unwrap_or_else(|| "aspiration".into()),
+                parent_id,
+                target_date,
+                cycle_id,
+                tags: goal::Tags(tags),
+                date_created: None,
+                date_modified: None,
+                details,
+            };
+            let created = client
+                .create(new_goal)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        GoalCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => {
+            mutate_goal(target, org, server, |g| g.status = status).await?;
+        }
+        GoalCmd::SetParent {
+            target,
+            parent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let client = connect_goal_client(&url).await?;
+            let new_parent = if matches!(parent.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(resolve_goal_target(&client, &parent).await?.id)
+            };
+            mutate_goal(target, org, server, |g| g.parent_id = new_parent).await?;
+        }
+        GoalCmd::SetCycle {
+            target,
+            cycle,
+            org,
+            server,
+        } => {
+            let is_current = cycle == "current";
+            let arg = if is_current { None } else { Some(cycle) };
+            let new_cycle = resolve_cycle_arg(arg, is_current)?;
+            mutate_goal(target, org, server, |g| g.cycle_id = new_cycle).await?;
+        }
+        GoalCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_goal_client(&url).await?;
+            let g = resolve_goal_target(&client, &target).await?;
+            let renamed = client
+                .rename(g.id, new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        GoalCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_goal_client(&url).await?;
+            let g = resolve_goal_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", g.title, g.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(g.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", g.path);
+        }
     }
     Ok(())
+}
+
+async fn connect_goal_client(url: &str) -> eyre::Result<goal::GoalServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_goal_target(
+    client: &goal::GoalServiceClient,
+    target: &str,
+) -> eyre::Result<goal::Goal> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_goal<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut goal::Goal),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_goal_client(&url).await?;
+    let mut g = resolve_goal_target(&client, &target).await?;
+    apply(&mut g);
+    let updated = client
+        .update(g)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+/// Resolve a `--cycle` flag / argument into a concrete cycle
+/// UUID. Accepts:
+/// - a literal UUID
+/// - `YYYY:Qn:Cm` (e.g. `2026:Q3:C1`)
+/// - the cycle-current shortcut (when `current = true` or arg
+///   is `current`)
+/// - `none` / `null` / "" → clear
+fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<uuid::Uuid>> {
+    use chrono::{Datelike, Local, Weekday};
+    use cycle::FirstWeekRule;
+
+    if current {
+        let today = Local::now().date_naive();
+        return Ok(cycle::cycle_for_date(
+            today,
+            Weekday::Mon,
+            FirstWeekRule::AtLeastFourDaysInYear,
+        )
+        .map(|c| c.id));
+    }
+    let Some(s) = arg else {
+        return Ok(None);
+    };
+    if matches!(s.as_str(), "none" | "null" | "") {
+        return Ok(None);
+    }
+    if let Ok(id) = uuid::Uuid::parse_str(&s) {
+        return Ok(Some(id));
+    }
+    // Parse `YYYY:Qn:Cm`.
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() == 3 {
+        let year = parts[0].parse::<i32>().ok();
+        let q = parts[1]
+            .strip_prefix('Q')
+            .and_then(|n| n.parse::<u8>().ok());
+        let ord = parts[2]
+            .strip_prefix('C')
+            .and_then(|n| n.parse::<u8>().ok());
+        if let (Some(year), Some(q), Some(ord)) = (year, q, ord) {
+            let base = Local::now().date_naive().year();
+            for off in [-1_i32, 0, 1, 2] {
+                let qs = cycle::generate_year(
+                    base + off,
+                    Weekday::Mon,
+                    FirstWeekRule::AtLeastFourDaysInYear,
+                );
+                for qq in qs {
+                    if qq.year == year && qq.ordinal == q {
+                        for c in qq.cycles.iter() {
+                            if c.ordinal == ord {
+                                return Ok(Some(c.id));
+                            }
+                        }
+                    }
+                }
+            }
+            return Err(eyre::eyre!(
+                "cycle `{s}` not found in surrounding years ({}..={})",
+                base - 1,
+                base + 2
+            ));
+        }
+    }
+    Err(eyre::eyre!(
+        "--cycle: expected UUID, `YYYY:Qn:Cm`, `current`, or `none` (got `{s}`)"
+    ))
 }
 
 fn print_goal_row(g: &goal::Goal, indent: usize, cycle: Option<String>) {

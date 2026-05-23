@@ -34,7 +34,20 @@ pub fn serialize_project(project: &ProjectInfo) -> Result<String, WriteError> {
     if p.id.is_nil() {
         p.id = Uuid::new_v4();
     }
-    let yaml = serde_yaml::to_string(&p).map_err(|e| WriteError::Yaml(e.to_string()))?;
+    // `type: project` is the scanner's discriminator. Emit it
+    // first so a fresh `task project create` round-trips
+    // through `looks_like_project` without needing a `project`
+    // tag. Mirrors `goal::serialize_goal`.
+    let mut wrapper = serde_yaml::Mapping::new();
+    wrapper.insert("type".into(), "project".into());
+    let body_yaml = serde_yaml::to_value(&p).map_err(|e| WriteError::Yaml(e.to_string()))?;
+    if let serde_yaml::Value::Mapping(m) = body_yaml {
+        for (k, v) in m {
+            wrapper.insert(k, v);
+        }
+    }
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
+        .map_err(|e| WriteError::Yaml(e.to_string()))?;
     let body = if p.details.is_empty() {
         String::new()
     } else if p.details.starts_with('\n') {
