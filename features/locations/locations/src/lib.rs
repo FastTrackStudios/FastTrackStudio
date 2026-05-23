@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `locations` — typed view of place pages in a `vault::Vault`.
 //!
 //! Locations are markdown files with YAML frontmatter

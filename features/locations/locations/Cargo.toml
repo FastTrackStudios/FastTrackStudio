@@ -1,6 +1,6 @@
 [package]
 name = "locations"
-description = "Locations feature — typed view of place pages in a `vault::Vault`. Locations are markdown files with YAML frontmatter (`type: location`) describing a studio, room, storage spot, or venue. Provides parse / serialize / scan over the vault, plus an `#[architect::rpc] trait LocationsService` so agents reach the same surface over vox."
+description = "Locations feature. `Location` is an `architect::Entity` — markdown frontmatter stays the source of truth; SeaORM Model emitted under `--features server`. Other features (notably `inventory`) reference locations by `id`."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
@@ -21,13 +22,15 @@ vault = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
+fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
 
 [features]
 default = ["vox"]
-# Pull architect's vox emission for `LocationsService` so the
-# generated client + dispatcher + service bridge are available
-# for agent integrations. Native impls compile fine without it.
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
 
 [dev-dependencies]
 tempfile = "3"
