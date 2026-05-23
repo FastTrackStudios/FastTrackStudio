@@ -147,14 +147,39 @@ enum MountCmd {
 
 #[derive(Subcommand)]
 enum OrgCmd {
-    /// Scaffold a new org under `<data-root>/orgs/<slug>/`.
-    /// Writes `org.toml` + creates `vault/` and `attachments/`
-    /// subdirs. Idempotency: refuses to overwrite an existing
-    /// org dir (federation-breaking change a human should
-    /// confirm). Use `--home` to mark this as your identity
-    /// anchor (only one home per data root in practice).
+    /// Ask the server to scaffold a new org. Connects to
+    /// `<server>/server/vox` (`task-server` exposes the
+    /// `OrgManagementService` RPC there) and the server
+    /// writes the `<data_root>/orgs/<slug>/` dir + opens its
+    /// per-org SQLite DBs + hot-adds it to the live
+    /// dispatcher. No filesystem mutation runs on the client.
+    ///
+    /// Authorization: when the server has no orgs hosted yet
+    /// it's in bootstrap mode and accepts this call
+    /// unauthenticated. Otherwise the active session token
+    /// must be a valid session against the server's home org.
+    Create {
+        /// `[a-z0-9-]`, 1-64 chars, no leading/trailing `-`.
+        slug: String,
+        /// Human-facing display name. Free-form UTF-8.
+        #[arg(long)]
+        name: String,
+        /// Mark this org as the identity anchor (home).
+        /// Only one home per server is allowed.
+        #[arg(long)]
+        home: bool,
+        /// Server URL. Defaults to the active session's home
+        /// server URL when set, else `http://127.0.0.1:18080`.
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Local fallback: scaffold an org by writing directly to
+    /// `<data-root>/orgs/<slug>/`. Bypasses the server — only
+    /// useful when administering the server's filesystem
+    /// out-of-band (recovery, migration). Prefer
+    /// `task org create` for normal seeding.
     Init {
-        /// `[a-z0-9-]`, 1–64 chars, no leading/trailing `-`.
+        /// `[a-z0-9-]`, 1-64 chars, no leading/trailing `-`.
         slug: String,
         /// Human-facing display name. Free-form UTF-8.
         #[arg(long)]
@@ -163,9 +188,13 @@ enum OrgCmd {
         #[arg(long)]
         home: bool,
     },
-    /// List every org dir under `<data-root>/orgs/` that has
-    /// a loadable `org.toml`. Skips partial scaffolds.
-    List,
+    /// Ask the server to list its hosted orgs (the wire
+    /// equivalent of `/.well-known/task-server.json`).
+    /// Defaults to the active session's home server URL.
+    List {
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -861,7 +890,7 @@ async fn main() -> eyre::Result<()> {
             return run_auth(cmd, cli.org.as_deref()).await;
         }
         Commands::Org(cmd) => {
-            return run_org(cmd);
+            return Box::pin(run_org(cmd)).await;
         }
         Commands::Mount(cmd) => {
             return run_mount(cmd);
@@ -934,20 +963,53 @@ fn run_mount(cmd: MountCmd) -> eyre::Result<()> {
     Ok(())
 }
 
-fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
-    let root =
-        org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
-    root.ensure()
-        .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+async fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
     match cmd {
+        OrgCmd::Create {
+            slug,
+            name,
+            home,
+            server,
+        } => {
+            let url = resolve_server_vox_url(server.as_deref())?;
+            let token = session_store::load()?
+                .and_then(|s| s.servers.get(&s.active).map(|e| e.token.clone()))
+                .unwrap_or_default();
+            let client: org_proto::OrgManagementServiceClient =
+                Box::pin(vox::connect(&url).establish())
+                    .await
+                    .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let manifest = client
+                .create_org(org_proto::CreateOrgRequest {
+                    session_token: token,
+                    slug: slug.clone(),
+                    display_name: name,
+                    is_home: home,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create_org: {e:?}"))?;
+            println!("Server created org `{slug}`");
+            println!("  id:         {}", manifest.id);
+            println!("  name:       {}", manifest.display_name);
+            println!("  is_home:    {}", manifest.is_home);
+            println!("  server vox: {url}");
+        }
         OrgCmd::Init { slug, name, home } => {
+            let root = org_proto::DataRoot::from_env()
+                .map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
+            root.ensure()
+                .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
             let org = root
                 .init_org(&slug, &name, home)
                 .map_err(|e| eyre::eyre!("init org: {e}"))?;
             let manifest = org
                 .manifest()
                 .map_err(|e| eyre::eyre!("load fresh manifest: {e}"))?;
-            println!("Initialized org `{}` at {}", slug, org.path().display());
+            println!(
+                "Initialized org `{}` at {} (LOCAL — bypassing server)",
+                slug,
+                org.path().display()
+            );
             println!("  id:         {}", manifest.id);
             println!("  name:       {}", manifest.display_name);
             println!("  is_home:    {}", manifest.is_home);
@@ -955,18 +1017,25 @@ fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
             println!("  auth.db:    {}", org.auth_db().display());
             println!("  timer.db:   {}", org.timer_db().display());
             println!("  finance.db: {}", org.finance_db().display());
+            println!("\nNote: prefer `task org create` so the server is the source of truth.");
         }
-        OrgCmd::List => {
-            let orgs = root
-                .scan_orgs()
-                .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+        OrgCmd::List { server } => {
+            let url = resolve_server_vox_url(server.as_deref())?;
+            let client: org_proto::OrgManagementServiceClient =
+                Box::pin(vox::connect(&url).establish())
+                    .await
+                    .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let orgs = client
+                .list_orgs()
+                .await
+                .map_err(|e| eyre::eyre!("list_orgs: {e:?}"))?;
             if orgs.is_empty() {
-                println!("(no orgs under {})", root.orgs_dir().display());
+                println!("(server has no orgs hosted at {url})");
                 return Ok(());
             }
-            for (org, m) in orgs {
+            for m in orgs {
                 let badge = if m.is_home { " [home]" } else { "" };
-                println!("{}{}  {}  ({})", org.slug(), badge, m.display_name, m.id);
+                println!("{}{}  {}  ({})", m.slug, badge, m.display_name, m.id);
                 if !m.federation_url.is_empty() {
                     println!("    federation: {}", m.federation_url);
                 }
@@ -974,6 +1043,40 @@ fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Resolve the server-management vox URL:
+/// - explicit `--server <ws://...>` flag wins
+/// - else honor `TASK_SERVER_VOX_URL`
+/// - else fall back to `ws://127.0.0.1:18080/server/vox`
+fn resolve_server_vox_url(override_url: Option<&str>) -> eyre::Result<String> {
+    if let Some(u) = override_url {
+        return Ok(normalize_server_vox(u));
+    }
+    if let Ok(env) = std::env::var("TASK_SERVER_VOX_URL") {
+        if !env.is_empty() {
+            return Ok(normalize_server_vox(&env));
+        }
+    }
+    Ok("ws://127.0.0.1:18080/server/vox".into())
+}
+
+fn normalize_server_vox(raw: &str) -> String {
+    if raw.starts_with("ws://") || raw.starts_with("wss://") {
+        if raw.ends_with("/server/vox") {
+            raw.to_owned()
+        } else {
+            format!("{}/server/vox", raw.trim_end_matches('/'))
+        }
+    } else if raw.starts_with("http://") {
+        let ws = raw.replacen("http://", "ws://", 1);
+        format!("{}/server/vox", ws.trim_end_matches('/'))
+    } else if raw.starts_with("https://") {
+        let ws = raw.replacen("https://", "wss://", 1);
+        format!("{}/server/vox", ws.trim_end_matches('/'))
+    } else {
+        format!("ws://{}/server/vox", raw.trim_end_matches('/'))
+    }
 }
 
 /// Open `ArchitectAuth` against a specific org's

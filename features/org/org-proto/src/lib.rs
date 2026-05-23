@@ -14,6 +14,18 @@
 
 pub mod manifest;
 pub mod root;
+pub mod service;
 
 pub use manifest::{OrgManifest, ParseError};
 pub use root::{DataRoot, OrgRoot, RootError, default_client_vault_root};
+pub use service::{
+    CreateOrgRequest, OrgManagementError, OrgManagementService, OrgManagementServiceRpc,
+};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    OrgManagementServiceClient, OrgManagementServiceRpcDispatcher as OrgManagementDispatcher,
+    Service as OrgManagementServiceBridge, layer as org_management_layer,
+    org_management_service_rpc_service_descriptor as org_management_descriptor,
+    serve as serve_org_management,
+};

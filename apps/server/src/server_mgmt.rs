@@ -1,0 +1,152 @@
+//! `OrgManagementService` server-side impl.
+//!
+//! Mounted at `/server/vox` (one endpoint per task-server
+//! process, not per-org). Handles `create_org` calls: writes a
+//! fresh `<data_root>/orgs/<slug>/` dir on disk, opens its
+//! per-org SQLite DBs + runs their migrations, then hot-adds
+//! the resulting [`crate::OrgAppState`] to [`AppState::orgs`]
+//! so the next `/org/<slug>/...` request routes to it without
+//! a server restart.
+//!
+//! ## Authorization
+//!
+//! - **Bootstrap mode** (no orgs hosted yet): unauthenticated
+//!   `create_org` is allowed. The first claimed slot is
+//!   typically the user's home org.
+//! - **Normal mode**: `session_token` must validate against
+//!   the home org's `auth.sqlite` via
+//!   `ArchitectAuth::current_session`.
+
+use std::sync::Arc;
+
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
+use org_proto::{CreateOrgRequest, OrgManagementError, OrgManagementService, OrgManifest, OrgRoot};
+
+use crate::{AppState, AuthState, DEFAULT_AUTH_SECRET, build_org_state};
+
+/// Backend that knows how to scaffold + register orgs against
+/// a live [`AppState`]. Holds an `Arc<AppState>` so mutations
+/// to the orgs map land on the same lock the request handlers
+/// read from.
+#[derive(Clone)]
+pub struct OrgManagementImpl {
+    state: Arc<AppState>,
+}
+
+impl OrgManagementImpl {
+    #[must_use]
+    pub fn new(state: AppState) -> Self {
+        Self {
+            state: Arc::new(state),
+        }
+    }
+}
+
+impl HasDispatcher for OrgManagementImpl {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
+    }
+}
+
+impl OrgManagementService for OrgManagementImpl {
+    fn create_org(&self, req: CreateOrgRequest) -> Result<OrgManifest, OrgManagementError> {
+        // Authorization. Bootstrap path is permissive; normal
+        // mode requires a valid session token against the
+        // home org's auth.sqlite.
+        if !self.state.is_bootstrap() {
+            let home_slug = self.state.home_slug().ok_or_else(|| {
+                OrgManagementError::Unauthorized(
+                    "server has orgs but no home org — cannot validate".into(),
+                )
+            })?;
+            if req.session_token.is_empty() {
+                return Err(OrgManagementError::Unauthorized(
+                    "missing session token (bootstrap mode is over — sign in to the home org)"
+                        .into(),
+                ));
+            }
+            let home = self.state.org(&home_slug).ok_or_else(|| {
+                OrgManagementError::Unauthorized(format!(
+                    "home org `{home_slug}` not in live dispatcher"
+                ))
+            })?;
+            let token = req.session_token.clone();
+            let session_check = tokio::runtime::Handle::current().block_on(async move {
+                home.auth
+                    .auth
+                    .current_session(architect_auth::commands::CurrentSession { token })
+                    .await
+            });
+            session_check.map_err(|e| {
+                OrgManagementError::Unauthorized(format!("invalid session token: {e}"))
+            })?;
+        }
+
+        // Enforce single-home invariant up front so we don't
+        // half-create + leave a partial org on disk.
+        if req.is_home && self.state.home_slug().is_some() {
+            return Err(OrgManagementError::HomeExists(
+                self.state.home_slug().unwrap_or_default(),
+            ));
+        }
+
+        // Scaffold the dir + write the manifest. `init_org`
+        // validates the slug and refuses to overwrite an
+        // existing org dir.
+        let org_root: OrgRoot = self
+            .state
+            .data_root
+            .init_org(&req.slug, &req.display_name, req.is_home)
+            .map_err(|e| match e {
+                org_proto::RootError::InvalidSlug { reason, .. } => {
+                    OrgManagementError::InvalidSlug(reason.to_string())
+                }
+                org_proto::RootError::AlreadyExists { slug, .. } => {
+                    OrgManagementError::AlreadyExists(slug)
+                }
+                other => OrgManagementError::Io(other.to_string()),
+            })?;
+
+        // Open + migrate the org's auth.sqlite. The keypair
+        // mirrors the parent AppState — blob signing stays
+        // consistent across orgs.
+        let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
+        let keypair = self.state.keypair.clone();
+        let slug = org_root.slug().to_owned();
+        let built = tokio::runtime::Handle::current().block_on(async move {
+            let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET)
+                .await
+                .map_err(|e| OrgManagementError::Internal(format!("open auth: {e}")))?;
+            build_org_state(auth, &keypair, org_root)
+                .await
+                .map_err(|e| OrgManagementError::Internal(format!("build org: {e}")))
+        })?;
+
+        self.state
+            .insert_org(slug.clone(), built)
+            .map_err(|e| OrgManagementError::Internal(e.into()))?;
+
+        let manifest = self
+            .state
+            .data_root
+            .org(&slug)
+            .manifest()
+            .map_err(|e| OrgManagementError::Io(format!("reload manifest: {e}")))?;
+        Ok(manifest)
+    }
+
+    fn list_orgs(&self) -> Result<Vec<OrgManifest>, OrgManagementError> {
+        let slugs = self.state.org_slugs();
+        let mut out = Vec::with_capacity(slugs.len());
+        for slug in slugs {
+            let manifest =
+                self.state.data_root.org(&slug).manifest().map_err(|e| {
+                    OrgManagementError::Io(format!("load manifest for `{slug}`: {e}"))
+                })?;
+            out.push(manifest);
+        }
+        Ok(out)
+    }
+}
