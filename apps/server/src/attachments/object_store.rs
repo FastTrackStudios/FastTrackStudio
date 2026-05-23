@@ -89,18 +89,12 @@ impl ObjectStore for LocalFsStore {
     }
 }
 
-/// Resolve `$XDG_DATA_HOME/task-server/blobs` with the standard
-/// fallback. Created at first call.
+/// Resolve `<data_root>/blobs` with the standard fallback
+/// (data root resolves via [`org_proto::DataRoot::from_env`]
+/// — typically `$HOME/.task/`). Created at first call.
 pub fn default_blob_root() -> eyre::Result<PathBuf> {
-    let base = match std::env::var("XDG_DATA_HOME") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => {
-            let home = std::env::var("HOME")
-                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
-            PathBuf::from(home).join(".local").join("share")
-        }
-    };
-    let dir = base.join("task-server").join("blobs");
+    let root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    let dir = root.path().join("blobs");
     std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
     Ok(dir)
 }

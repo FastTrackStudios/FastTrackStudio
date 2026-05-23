@@ -92,15 +92,8 @@ impl ServerKeypair {
 }
 
 pub fn default_keypair_path() -> eyre::Result<PathBuf> {
-    let base = match std::env::var("XDG_DATA_HOME") {
-        Ok(v) if !v.is_empty() => PathBuf::from(v),
-        _ => {
-            let home = std::env::var("HOME")
-                .map_err(|_| eyre::eyre!("neither XDG_DATA_HOME nor HOME is set"))?;
-            PathBuf::from(home).join(".local").join("share")
-        }
-    };
-    let dir = base.join("task-server");
-    std::fs::create_dir_all(&dir).map_err(|e| eyre::eyre!("create {}: {e}", dir.display()))?;
-    Ok(dir.join("server-key.ed25519"))
+    let root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+    std::fs::create_dir_all(root.path())
+        .map_err(|e| eyre::eyre!("create {}: {e}", root.path().display()))?;
+    Ok(root.server_keypair_path())
 }
