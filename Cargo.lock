@@ -9650,6 +9650,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "mount"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mount-proto",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
+name = "mount-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "muda"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14136,6 +14165,7 @@ dependencies = [
  "finance-db",
  "finance-proto",
  "futures",
+ "mount",
  "org-proto",
  "project",
  "sea-orm",

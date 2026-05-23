@@ -317,6 +317,13 @@ finance-ui = { path = "features/finance/finance-ui" }
 vault = { path = "features/vault/vault" }
 vault-live = { path = "features/vault/vault-live" }
 vault-proto = { path = "features/vault/vault-proto" }
+# Mount feature — per-machine project content registry.
+# `mount-proto` ships the `Mount` entity + `ContentBackend`
+# trait; `mount` provides the canonical `Filesystem` impl +
+# `~/.config/task/mounts.toml` registry. See
+# `plans/federated-task-platform.md` Phase 2.
+mount-proto = { path = "features/mount/mount-proto" }
+mount = { path = "features/mount/mount" }
 # Email feature — wire contract + backends. Same shape as
 # `vault-proto`: one `#[architect::rpc] trait EmailSync` proto
 # crate, sibling backend crates (`email-imap`, `email-jmap`,
