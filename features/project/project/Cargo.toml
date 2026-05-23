@@ -24,19 +24,21 @@ vault.workspace = true
 # Gated so wasm clients never pull SeaORM.
 sea-orm = { workspace = true, optional = true }
 
+# vox for the auto-generated `ProjectServiceClient` +
+# server bridge. Opt-in so the wire/file-format path
+# (`ProjectInfo`-only consumers) doesn't pull the
+# WebSocket runtime.
+vox = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
+
 fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
 
 [features]
 default = []
-# `vox` is intentionally NOT exposed. architect's derive
-# emits `#[cfg(feature = "vox")]` references to the vox
-# crate; project is a wire/file format (not a service
-# trait), so enabling vox would force a vox dep we don't
-# need. The `unexpected_cfgs` warning architect emits is
-# harmless since the gated code never compiles.
+vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
 fake = ["dep:fake", "architect/fake"]
-full = ["server", "fake"]
+full = ["vox", "server", "fake"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -30,8 +30,26 @@
 
 mod model;
 mod parse;
+mod service;
+
+// FS-dependent modules — wasm UI imports the wire types + RPC
+// client only, not the backend.
+#[cfg(not(target_arch = "wasm32"))]
+mod backend;
+#[cfg(not(target_arch = "wasm32"))]
 mod write;
 
 pub use model::{Goal, Kind, Status, Tags};
 pub use parse::{ParseError, looks_like_goal, parse_goal, parse_page};
+pub use service::{GoalError, GoalService, GoalServiceRpc};
+#[cfg(feature = "vox")]
+pub use service::{
+    GoalServiceClient, GoalServiceRpcDispatcher as GoalDispatcher, Service as GoalServiceBridge,
+    goal_service_rpc_service_descriptor as goal_service_descriptor, layer as goal_service_layer,
+    serve as serve_goal_service,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::GoalBackend;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write::{WriteError, default_goal_path, serialize_goal, write_goal};

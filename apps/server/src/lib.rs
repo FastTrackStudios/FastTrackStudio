@@ -83,6 +83,10 @@ pub struct OrgAppState {
     pub vault_sync: vault::Backend,
     /// Wiki feature backend rooted at this org's `vault/`.
     pub wiki: wiki_live::WikiBackend,
+    /// Project list / get backend — walks `vault/Projects/*.md`.
+    pub projects: project::ProjectBackend,
+    /// Goal list / get backend — walks `vault/Goals/**/*.md`.
+    pub goals: goal::GoalBackend,
     pub agent_tasks: agent_tasks::Store,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
@@ -381,12 +385,20 @@ pub(crate) async fn build_org_state(
             }
         }
 
+        // Project + Goal readers. Both walk
+        // `<org>/vault/` on each call; cheap-clone PathBuf
+        // wrappers, no shared mutable state.
+        let projects = project::ProjectBackend::new(vault_root.clone());
+        let goals = goal::GoalBackend::new(vault_root.clone());
+
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
             auth,
             attachments: attachment_service,
             vault_sync: vault_sync_state,
             wiki,
+            projects,
+            goals,
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
             timer,
@@ -623,6 +635,8 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
         let attachment_service = org.attachments.clone();
         let vault_sync_state = org.vault_sync.clone();
         let wiki = org.wiki.clone();
+        let projects_backend = org.projects.clone();
+        let goals_backend = org.goals.clone();
         let agent_tasks_store = org.agent_tasks.clone();
         let timer_store = org.timer.clone();
         let acceptor =
@@ -737,6 +751,20 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
                         .service_name =>
                 {
                     connection.handle_with(wiki_proto::service::multimodal::serve(wiki.clone()));
+                    Ok(())
+                }
+                // Project + Goal services — file-backed
+                // readers that walk the org's vault on each
+                // request. UI surfaces consume the
+                // architect-generated `ProjectServiceClient`
+                // and `GoalServiceClient`.
+                name if name == project::project_service_descriptor().service_name => {
+                    connection
+                        .handle_with(project::serve_project_service(projects_backend.clone()));
+                    Ok(())
+                }
+                name if name == goal::goal_service_descriptor().service_name => {
+                    connection.handle_with(goal::serve_goal_service(goals_backend.clone()));
                     Ok(())
                 }
                 other => {

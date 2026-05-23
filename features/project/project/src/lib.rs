@@ -37,14 +37,34 @@
 //! - [`looks_like_project`] — discriminator used by the
 //!   scanner.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 pub mod model;
 pub mod parse;
+pub mod service;
+
+// FS-dependent modules (vault::Vault, std::fs walks). The
+// wasm-targeted UI imports the wire types + RPC client only,
+// not these.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod backend;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod scan;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod write;
 
 pub use model::{ProjectInfo, Status};
 pub use parse::{ParseError, looks_like_project, parse_page, parse_str};
+pub use service::{ProjectError, ProjectService, ProjectServiceRpc};
+#[cfg(feature = "vox")]
+pub use service::{
+    ProjectServiceClient, ProjectServiceRpcDispatcher as ProjectDispatcher,
+    Service as ProjectServiceBridge, layer as project_service_layer,
+    project_service_rpc_service_descriptor as project_service_descriptor,
+    serve as serve_project_service,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::ProjectBackend;
+#[cfg(not(target_arch = "wasm32"))]
 pub use scan::scan_vault;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write::{WriteError, serialize_project, write_project};
