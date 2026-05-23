@@ -160,10 +160,24 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let mut parsed: Vec<ParsedField> = Vec::with_capacity(named.len());
     for f in named.iter() {
         let attrs = parse_field_attrs(f)?;
+        // Pass-through attrs end up on the emitted `Create`
+        // struct (whose only derive is `Facet` + optional
+        // `Dummy`). Strip helper attributes whose owning
+        // derive ISN'T applied to `Create` — otherwise rustc
+        // errors "cannot find attribute `serde` in this scope"
+        // because the attribute has no claimant on the Create
+        // struct. `#[serde(...)]` is the common case (entities
+        // that double as a markdown/JSON wire format on the
+        // ORIGINAL struct don't want their field-level serde
+        // attrs leaked onto the synthetic Create).
         let forward_attrs: Vec<syn::Attribute> = f
             .attrs
             .iter()
-            .filter(|a| !a.path().is_ident("architect"))
+            .filter(|a| {
+                !a.path().is_ident("architect")
+                    && !a.path().is_ident("serde")
+                    && !a.path().is_ident("schemars")
+            })
             .cloned()
             .collect();
         parsed.push(ParsedField {
