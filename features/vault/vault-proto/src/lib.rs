@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `vault-proto` — wire contract for the vault-sync
 //! feature.
 //!
