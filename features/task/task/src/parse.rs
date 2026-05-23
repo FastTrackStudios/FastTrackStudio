@@ -143,24 +143,38 @@ fn parse_page_impl(page: &ParsePageRef<'_>) -> Result<TaskInfo, ParseError> {
     let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
+    // Backfill id when the frontmatter lacks one: a
+    // deterministic namespace uuid from the path so the same
+    // file resolves to the same id across machines until the
+    // next save writes it to disk.
+    let id = take_str(&map, "id")
+        .and_then(|s| uuid::Uuid::parse_str(&s).ok())
+        .unwrap_or_else(|| {
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, page.rel_path.as_bytes())
+        });
+
     Ok(TaskInfo {
+        id,
         path: page.rel_path.to_string(),
         title,
         status,
         priority,
         due,
         scheduled,
-        tags,
-        contexts,
-        projects,
+        tags: crate::model::StringList(tags),
+        contexts: crate::model::StringList(contexts),
+        projects: crate::model::StringList(projects),
         time_estimate,
-        time_entries,
+        time_entries: crate::model::TimeEntries(time_entries),
         recurrence,
         recurrence_anchor,
-        complete_instances,
+        complete_instances: crate::model::StringList(complete_instances),
         completed_date,
         agent_profile: take_str(&map, "agentProfile").unwrap_or_default(),
-        dispatched_agent_tasks: take_string_list(&map, "dispatchedAgentTasks"),
+        dispatched_agent_tasks: crate::model::StringList(take_string_list(
+            &map,
+            "dispatchedAgentTasks",
+        )),
         date_created,
         date_modified,
         details: body.to_string(),

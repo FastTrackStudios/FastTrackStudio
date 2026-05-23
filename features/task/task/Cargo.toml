@@ -1,6 +1,6 @@
 [package]
 name = "task"
-description = "First-party task feature for Task: TaskInfo schema, frontmatter parser/writer, NLP capture. Tasks are markdown pages in a `vault::Vault` with YAML frontmatter; the schema mirrors callumalpass/tasknotes so existing Obsidian TaskNotes vaults round-trip without conversion."
+description = "First-party task feature for Task. `TaskInfo` is an `architect::Entity` — markdown frontmatter at `tasks/<slug>.md` is the source of truth today (TaskNotes-shape so Obsidian vaults round-trip); SeaORM Model emitted under `--features server`. Parser backfills `id: Uuid` for legacy task pages that don't have one yet."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+architect = { workspace = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -17,10 +18,17 @@ indexmap = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# `task::open_vault` returns a `vault::Vault`; the scanner walks
-# its pages looking for the task discriminator (`tags: [..., task]`
-# or `type: task`).
+uuid = { workspace = true, features = ["v4", "serde"] }
 vault.workspace = true
+
+sea-orm = { workspace = true, optional = true }
+fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
+
+[features]
+default = []
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["server", "fake"]
 
 [dev-dependencies]
 tempfile = "3"
