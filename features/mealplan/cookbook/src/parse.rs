@@ -233,7 +233,7 @@ Cook the @pasta{400%g}.
         assert_eq!(r.servings, Some(4));
         assert_eq!(r.prep_minutes, Some(5));
         assert_eq!(r.cook_minutes, Some(15));
-        assert_eq!(r.tags, vec!["weeknight", "pasta"]);
+        assert_eq!(r.tags.0, vec!["weeknight", "pasta"]);
     }
 
     #[test]

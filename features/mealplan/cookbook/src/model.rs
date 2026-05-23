@@ -11,17 +11,90 @@ use chrono::{DateTime, Utc};
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 
+/// `Vec<String>` newtype — JSON column. Steps / cookware /
+/// nested_recipes / tags all share this shape.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+impl StringList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for StringList {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for StringList {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StringList {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// `Vec<Ingredient>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct Ingredients(pub Vec<Ingredient>);
+
+impl Ingredients {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<Ingredient>> for Ingredients {
+    fn from(v: Vec<Ingredient>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<Ingredient> for Ingredients {
+    fn from_iter<I: IntoIterator<Item = Ingredient>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for Ingredients {
+    type Target = Vec<Ingredient>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Wire shape for a parsed `.cook` file. The original source is
 /// preserved verbatim in `source` so editors can round-trip
 /// without re-rendering through the cooklang printer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "recipes", repo)]
 pub struct Recipe {
     /// Vault-relative, forward-slash separated, e.g.
-    /// `Cookbook/Truffle Pasta.cook`. Identity.
+    /// `Cookbook/Truffle Pasta.cook`. Identity — primary key.
+    #[architect(primary_key, auto_increment = false)]
     pub path: String,
 
     /// Display title. Pulled from `>> title:` metadata, or
     /// falls back to the filename stem.
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// `>> description:` from metadata.
@@ -31,10 +104,12 @@ pub struct Recipe {
     /// `>> course:` from metadata. Free-form; canonical set in
     /// [`Course`].
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(filterable)]
     pub course: Option<String>,
 
     /// `>> cuisine:` from metadata.
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(filterable)]
     pub cuisine: Option<String>,
 
     /// `>> prep time:` in whole minutes, when parseable.
@@ -60,29 +135,34 @@ pub struct Recipe {
 
     /// Ingredients extracted from `@name{qty%unit}` lines, in
     /// document order. Names are wikilink targets.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub ingredients: Vec<Ingredient>,
+    #[serde(skip_serializing_if = "Ingredients::is_empty", default)]
+    #[architect(json)]
+    pub ingredients: Ingredients,
 
     /// Rendered step text in document order. Plain string per
     /// step. Authoring goes through [`Recipe::source`].
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub steps: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub steps: StringList,
 
     /// Cookware names from `#pan{}`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub cookware: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub cookware: StringList,
 
     /// Sub-recipe references — paths from `@@./path/recipe{}`.
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "StringList::is_empty",
         default,
         rename = "nestedRecipes"
     )]
-    pub nested_recipes: Vec<String>,
+    #[architect(json)]
+    pub nested_recipes: StringList,
 
     /// `>> tags:` (comma-separated in the metadata block).
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub tags: StringList,
 
     /// `>> source:` — URL, citation, or wikilink.
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "sourceUrl")]
@@ -103,7 +183,9 @@ pub struct Recipe {
 
 /// One ingredient line. `qty` is the numeric quantity for math;
 /// `qty_display` keeps the original display form (ranges,
-/// fractions, text).
+/// fractions, text). Held inline as JSON inside
+/// [`Recipe::ingredients`].
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Ingredient {
     /// Cooklang ingredient name. Wikilink target.
@@ -153,8 +235,11 @@ pub struct Ingredient {
 /// recipe using `@flour{...}` can be aggregated at mealprep
 /// time). Kept in this crate as the shared nutrition shape —
 /// consumers (`pantry`, `intake`, `fitness`) all reference
-/// `cookbook::Nutrition`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Facet)]
+/// `cookbook::Nutrition`. Derives `architect::JsonField` so
+/// downstream crates can use it as a `#[architect(json)]`
+/// column directly (no DailyTarget-style wrapper needed).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
 pub struct Nutrition {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub calories: Option<f64>,

@@ -1,6 +1,6 @@
 [package]
 name = "cookbook"
-description = "Cookbook feature — cooklang-native recipe storage. Recipes are `.cook` files under `<vault>/Cookbook/` parsed by the `cooklang` crate. One file per recipe; no sidecar; identity = vault-relative path. Ingredient names ARE wikilink targets — the wiki layer resolves `@flour` to a `[[flour]]` page (e.g. a pantry item or concept page) so the recipe knows nothing about pantry IDs. Mealprep matches at runtime by name. Provides parse / scan / write plus a `#[architect::rpc] trait CookbookService`."
+description = "Cookbook feature — cooklang-native recipe storage. `Recipe` is an `architect::Entity` (String PK on vault-relative `path`). `Ingredient` + `Nutrition` are JsonField value types so they survive both YAML/serde and SeaORM. Recipes are `.cook` files under `<vault>/Cookbook/` parsed by the `cooklang` crate; ingredient names ARE wikilink targets so the recipe knows nothing about pantry IDs."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
@@ -21,10 +22,15 @@ walkdir = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
+fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
 
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
 
 [[bin]]
 name = "migrate-md-to-cook"
