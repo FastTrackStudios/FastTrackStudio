@@ -341,6 +341,10 @@ pub struct Track {
     /// `u32::MAX` when the track could not be matched to a `0x251a` entry, so
     /// unmatched tracks sink to the bottom while keeping their relative order.
     pub display_order: u32,
+    /// Free-text track comment from PT's comment field, decoded from the
+    /// per-track `0x261c > 0x200b > 0x200a > 0x2015` block (e.g. "Demo Vox
+    /// STEM STRETCHED to 92 BPM", "U-47"). Empty when the track has no comment.
+    pub comment: String,
 }
 
 /// A single breakpoint in a volume-automation envelope.

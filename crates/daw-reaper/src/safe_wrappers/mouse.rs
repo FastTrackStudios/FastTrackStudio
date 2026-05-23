@@ -201,19 +201,48 @@ impl MouseSnapshot {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/// REAPER's arrange-view child window carries the well-known dialog
+/// control ID `0x3E8` ("trackview") under the main HWND. This matches
+/// SWS's `GetArrangeWnd()` helper (see SWS `BR_Util.cpp`). The SDK
+/// exposes no typed accessor for the arrange HWND, so the control ID
+/// is the canonical way to find it across REAPER versions / platforms.
+const ARRANGE_DLG_CTL_ID: i32 = 0x3E8;
+
+fn arrange_hwnd(main_hwnd: raw::HWND) -> Option<raw::HWND> {
+    let hwnd = unsafe { Swell::get().GetDlgItem(main_hwnd, ARRANGE_DLG_CTL_ID) };
+    if hwnd.is_null() { None } else { Some(hwnd) }
+}
+
 fn project_pos_for_arrange(
     low: &reaper_low::Reaper,
     main_hwnd: raw::HWND,
     screen_pos: raw::POINT,
 ) -> Option<f64> {
+    // Use the arrange CHILD window (not main) for client-coord
+    // conversion — main's x=0 is the left edge of the whole REAPER
+    // window (before the TCP), arrange's x=0 is the actual track-view
+    // origin. Mixing them up caused our previous offset bug.
+    let arrange = arrange_hwnd(main_hwnd)?;
+
+    let mut win_rect = raw::RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe { Swell::get().GetWindowRect(arrange, &mut win_rect) };
+
+    // Ask REAPER for the time range visible at the arrange's actual
+    // screen-x extent, the way SWS does it. Passing 0,0 here returned
+    // values that didn't anchor to the arrange's true left edge.
     let mut start_time: f64 = 0.0;
     let mut end_time: f64 = 0.0;
     unsafe {
         low.GetSet_ArrangeView2(
             std::ptr::null_mut(),
             false,
-            0,
-            0,
+            win_rect.left,
+            win_rect.right,
             &mut start_time,
             &mut end_time,
         );
@@ -222,8 +251,9 @@ fn project_pos_for_arrange(
     if h_zoom <= 0.0 {
         return None;
     }
+
     let mut pt = screen_pos;
-    unsafe { Swell::get().ScreenToClient(main_hwnd, &mut pt) };
+    unsafe { Swell::get().ScreenToClient(arrange, &mut pt) };
     let pos = start_time + (pt.x as f64) / h_zoom;
     if pos < -10.0 {
         None

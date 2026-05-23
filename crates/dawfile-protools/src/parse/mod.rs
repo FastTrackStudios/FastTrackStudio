@@ -367,6 +367,97 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
+    // Step 12a3: Decode per-track comments from the 0x2015 block.
+    //
+    // PT stores one 0x2015 comment block per track, nested as
+    // `0x261c > 0x200b > 0x200a > 0x2015`. Inside it the comment is a
+    // length-prefixed string that follows a fixed marker:
+    //   `37 20 00 00 01 00 00 00 00 <id:u16> <len:u32> <bytes>`
+    // An empty comment yields only the `37 20` block-type bytes ("7 "), which
+    // the anchor below skips.
+    //
+    // The 0x2015 blocks appear in document order, 1:1 with the 0x2519/0x251a
+    // track list — i.e. block N belongs to the track at `display_order == N`.
+    // We assign by that index rather than resolving the track name from a
+    // nearby 0x2619, because the name block isn't reliably reachable for every
+    // track (master/click/divider containers nest it differently).
+    {
+        let data = cursor.data();
+
+        // Collect 0x2015 blocks (no ContentType variant; match the raw type).
+        fn collect_2015<'a>(blocks: &'a [Block], out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == 0x2015 {
+                    out.push(b);
+                }
+                collect_2015(&b.children, out);
+            }
+        }
+
+        // Extract the comment string from a 0x2015 block. The comment lives in
+        // a `0x2037` (`37 20`) sub-block with this layout (offsets from the
+        // `37 20`):
+        //   +0  `37 20`  type
+        //   +2  7 flag bytes (vary per track — do NOT match on these)
+        //   +9  id        u16 (hi byte 0)
+        //   +11 len       u32
+        //   +15 string    `len` bytes
+        // A track with no comment has `len == 0`, which we skip.
+        const ANCHOR: &[u8] = &[0x37, 0x20];
+        // True end of a block including all nested children (block_size only
+        // covers this block's own payload, not the descendants beneath it).
+        fn block_end(b: &Block) -> usize {
+            let own = b.offset + b.block_size as usize;
+            b.children
+                .iter()
+                .map(block_end)
+                .max()
+                .unwrap_or(own)
+                .max(own)
+        }
+        fn extract_comment(b: &Block, data: &[u8]) -> Option<String> {
+            let lo = b.offset;
+            let hi = (block_end(b) + 16).min(data.len());
+            let mut p = lo;
+            while p + 15 <= hi {
+                // Anchor on the `37 20` sub-block type, with the id high byte
+                // (+10) zero as a cheap guard against stray `37 20` bytes.
+                if &data[p..p + ANCHOR.len()] == ANCHOR && data[p + 10] == 0x00 {
+                    let lp = p + 11;
+                    let len = u32::from_le_bytes(data[lp..lp + 4].try_into().unwrap()) as usize;
+                    if (1..=512).contains(&len) && lp + 4 + len <= hi {
+                        let cand = &data[lp + 4..lp + 4 + len];
+                        if cand.iter().all(|&c| (0x20..0x7f).contains(&c)) {
+                            return Some(String::from_utf8_lossy(cand).to_string());
+                        }
+                    }
+                }
+                p += 1;
+            }
+            None
+        }
+
+        let mut comment_blocks = Vec::new();
+        collect_2015(&blocks, &mut comment_blocks);
+        let comments: Vec<Option<String>> = comment_blocks
+            .iter()
+            .map(|cb| extract_comment(cb, data))
+            .collect();
+
+        let mut assign = |t: &mut crate::types::Track| {
+            let idx = t.display_order as usize;
+            if let Some(Some(c)) = comments.get(idx) {
+                t.comment = c.clone();
+            }
+        };
+        for t in audio_tracks.iter_mut() {
+            assign(t);
+        }
+        for t in midi_tracks.iter_mut() {
+            assign(t);
+        }
+    }
+
     // Step 12b: Decode per-track output routing from 0x260e blocks.
     //
     // Each `0x260d` per-track wrapper holds exactly one `0x260e` routing

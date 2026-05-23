@@ -386,6 +386,7 @@ fn parse_midi_tracks(
             mute_automation: Vec::new(),
             is_folder: false,
             display_order: u32::MAX,
+            comment: String::new(),
         });
     }
 

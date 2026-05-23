@@ -153,6 +153,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     mute_automation: Vec::new(),
                     is_folder: false,
                     display_order: u32::MAX,
+                    comment: String::new(),
                 },
                 channel_pos: ch,
             });

@@ -660,6 +660,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         ends
     };
 
+    // PT track comments are emitted as SWS/S&M Track Notes (a project-level
+    // <EXTENSIONS> block keyed by track GUID), matching the official converter.
+    // Collected here and appended after the project is serialized.
+    let mut track_notes: Vec<(String, String)> = Vec::new();
+
     for (plan_idx, e) in emit.iter().enumerate() {
         let end_levels = folder_end_levels[plan_idx];
         match e.src {
@@ -672,6 +677,9 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 let display_name = track.name.clone();
                 let is_folder_start = track.is_folder;
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
+                if !track.comment.is_empty() {
+                    track_notes.push((track_guid.clone(), track.comment.clone()));
+                }
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
                         .guid(&track_guid)
@@ -855,6 +863,9 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 let display_name = track.name.clone();
                 let is_folder_start = track.is_folder;
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
+                if !track.comment.is_empty() {
+                    track_notes.push((track_guid.clone(), track.comment.clone()));
+                }
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
                         .guid(&track_guid)
@@ -952,7 +963,31 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     }
 
     let project = builder.build();
-    Ok(project.to_rpp_string())
+    let mut rpp = project.to_rpp_string();
+
+    // Append the track comments as an <EXTENSIONS> block of <S&M_TRACKNOTES>
+    // entries (the SWS Track Notes format the official converter uses),
+    // inserted as the last child before the project's closing `>`. Each note
+    // is keyed by the track's GUID; comment lines are emitted verbatim with a
+    // leading `|`.
+    if !track_notes.is_empty() {
+        let mut ext = String::from("  <EXTENSIONS\n");
+        for (guid, comment) in &track_notes {
+            ext.push_str(&format!("    <S&M_TRACKNOTES {guid}\n"));
+            for line in comment.split('\n') {
+                ext.push_str(&format!("      |{line}\n"));
+            }
+            ext.push_str("    >\n");
+        }
+        ext.push_str("  >\n");
+        if let Some(pos) = rpp.rfind("\n>") {
+            rpp.insert_str(pos + 1, &ext);
+        } else {
+            rpp.push_str(&ext);
+        }
+    }
+
+    Ok(rpp)
 }
 
 // ============================================================================
