@@ -1,3 +1,10 @@
+// architect's `Entity` derive emits cfg-gated blocks the
+// host crate doesn't always re-export (`server-seaorm`,
+// other internal markers). Allow at crate scope to keep
+// the migration uniform with other architect-derived
+// features.
+#![allow(unexpected_cfgs)]
+
 //! `body` — body-metric time series in a `vault::Vault`.
 //!
 //! One page per metric
