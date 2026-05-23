@@ -117,7 +117,7 @@ fn parse_array(value: Option<&str>) -> Vec<String> {
 /// Pull every `[[Target]]` reference out of the body.
 /// Normalizes section refs (`[[Foo#Bar]]` → `"Foo"`) and
 /// alias labels (`[[Foo|alias]]` → `"Foo"`).
-fn extract_wikilinks(body: &str) -> HashSet<String> {
+pub fn extract_wikilinks(body: &str) -> HashSet<String> {
     let mut out = HashSet::new();
     let bytes = body.as_bytes();
     let mut i = 0;

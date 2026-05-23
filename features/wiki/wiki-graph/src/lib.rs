@@ -37,7 +37,10 @@ mod louvain;
 mod parse;
 mod scan;
 mod scoring;
+mod tier_lint;
 
 pub use build::{build_clusters, build_graph};
 pub use gaps::find_gaps;
+pub use parse::extract_wikilinks;
 pub use scan::ScanError;
+pub use tier_lint::{Tier, TierViolation, lint_org_tree};
