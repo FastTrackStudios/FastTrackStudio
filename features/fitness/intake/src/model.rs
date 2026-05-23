@@ -7,33 +7,144 @@ use mealplan::cookbook::Nutrition;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// `Vec<String>` newtype — JSON column under SeaORM.
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct Tags(pub Vec<String>);
+
+impl Tags {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for Tags {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for Tags {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for Tags {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// `Option<Nutrition>` newtype — JSON column. Wraps the
+/// upstream `mealplan::cookbook::Nutrition` (which isn't yet
+/// `architect::JsonField`-derived) so this entity stays
+/// DB-mountable. Promote to a direct `#[architect(json)]`
+/// on `Nutrition` once `cookbook` lands its own migration.
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct DailyTarget(pub Option<Nutrition>);
+
+impl DailyTarget {
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+}
+
+impl From<Option<Nutrition>> for DailyTarget {
+    fn from(n: Option<Nutrition>) -> Self {
+        Self(n)
+    }
+}
+
+impl std::ops::Deref for DailyTarget {
+    type Target = Option<Nutrition>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// `Vec<IntakeEntry>` newtype — JSON column. Entries live
+/// inline in the day's log.
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct Entries(pub Vec<IntakeEntry>);
+
+impl Entries {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<IntakeEntry>> for Entries {
+    fn from(v: Vec<IntakeEntry>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<IntakeEntry> for Entries {
+    fn from_iter<I: IntoIterator<Item = IntakeEntry>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for Entries {
+    type Target = Vec<IntakeEntry>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Entries {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "intake_logs", repo)]
 pub struct IntakeLog {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
     /// Display label — defaults to `"Intake <date>"` when
     /// auto-created via `log_*` shortcuts.
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
+    #[architect(filterable, sortable)]
     pub date: NaiveDate,
 
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub entries: Vec<IntakeEntry>,
+    #[serde(skip_serializing_if = "Entries::is_empty", default)]
+    #[architect(json)]
+    pub entries: Entries,
 
     /// Daily targets — when set, callers can show
     /// progress bars without storing the goal twice. All
     /// fields optional so partial targets ("I track
     /// protein, not calories") work.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub target: Option<Nutrition>,
+    #[serde(skip_serializing_if = "DailyTarget::is_none", default)]
+    #[architect(json)]
+    pub target: DailyTarget,
 
     /// Free-form tags — `"cut"`, `"bulk"`, `"travel-day"`,
     /// `"reset"`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Tags::is_empty", default)]
+    #[architect(json)]
+    pub tags: Tags,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -54,7 +165,10 @@ pub struct IntakeLog {
     pub details: String,
 }
 
-/// One consumed item.
+/// One consumed item. Held inline inside [`IntakeLog::entries`]
+/// as JSON; promotes to its own entity once entry-level
+/// queries (e.g. "all banana intakes this month") become
+/// hot enough to warrant a separate table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct IntakeEntry {
     pub id: Uuid,
@@ -123,7 +237,7 @@ impl IntakeLog {
     pub fn total(&self) -> Option<Nutrition> {
         let mut acc = Nutrition::default();
         let mut any = false;
-        for entry in &self.entries {
+        for entry in self.entries.iter() {
             let Some(n) = &entry.nutrition else {
                 continue;
             };
