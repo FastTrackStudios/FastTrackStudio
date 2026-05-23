@@ -11,6 +11,11 @@ use crate::walker::{VaultEntry, VaultEntryKind, walk_vault};
 /// One `.md` file from the vault, loaded into memory. Raw bytes
 /// are preserved verbatim — block / heading / link indexes are
 /// computed lazily on top.
+///
+/// This is the richer in-memory shape (carries `SystemTime`).
+/// The wasm-clean wire shape is [`vault_proto::VaultPage`]; use
+/// [`VaultPage::to_proto`] when handing a page to a parser that
+/// also has to compile on wasm.
 #[derive(Clone, Debug)]
 pub struct VaultPage {
     /// Vault-relative, forward-slash separated, e.g.
@@ -27,6 +32,27 @@ pub struct VaultPage {
     /// `mtime` snapshot. The watcher uses it to detect external
     /// edits on reload.
     pub mtime: SystemTime,
+}
+
+impl VaultPage {
+    /// Convert to the transport-shaped `vault_proto::VaultPage`.
+    /// `SystemTime` → Unix milliseconds (`0` on conversion error
+    /// — same convention the sync manifest uses).
+    #[must_use]
+    pub fn to_proto(&self) -> vault_proto::VaultPage {
+        let mtime_ms = self
+            .mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+            .unwrap_or(0);
+        vault_proto::VaultPage {
+            rel_path: self.rel_path.clone(),
+            basename: self.basename.clone(),
+            folder: self.folder.clone(),
+            raw: self.raw.clone(),
+            mtime_ms,
+        }
+    }
 }
 
 /// One `.base` file (Obsidian Bases). The vault loads + holds

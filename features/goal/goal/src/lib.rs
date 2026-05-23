@@ -32,8 +32,8 @@ mod model;
 mod parse;
 mod service;
 
-// FS-dependent modules — wasm UI imports the wire types + RPC
-// client only, not the backend.
+// `backend` + `write` touch `vault::Vault` / `std::fs`. Wasm
+// UI consumes wire types + parser + RPC client.
 #[cfg(not(target_arch = "wasm32"))]
 mod backend;
 #[cfg(not(target_arch = "wasm32"))]

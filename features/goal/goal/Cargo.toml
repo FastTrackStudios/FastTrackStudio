@@ -18,7 +18,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
-vault = { workspace = true }
+# Wasm-clean wire shape for `VaultPage`.
+vault-proto = { workspace = true, default-features = false }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -31,6 +32,12 @@ vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
 fake = ["dep:fake", "architect/fake"]
 full = ["vox", "server", "fake"]
+
+# `vault::Vault` is server-only. Wasm UI consumers get only
+# wire types + RPC client; parser / backend / writer all
+# gate on non-wasm.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+vault = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

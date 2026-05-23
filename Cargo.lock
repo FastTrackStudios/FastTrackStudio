@@ -6288,6 +6288,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault",
+ "vault-proto",
  "vox",
  "vox-types",
 ]
@@ -11402,6 +11403,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vault",
+ "vault-proto",
  "vox",
  "vox-types",
 ]
@@ -15420,7 +15422,9 @@ dependencies = [
  "fts-ui",
  "futures-channel",
  "futures-util",
+ "goal",
  "js-sys",
+ "project",
  "scheduling-proto",
  "scheduling-ui",
  "serde",

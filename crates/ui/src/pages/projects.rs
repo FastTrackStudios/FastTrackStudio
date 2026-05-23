@@ -1,116 +1,31 @@
 //! `/projects` — card-grid project browser.
 //!
-//! Renders every project the active org owns as a card with
-//! title, status badge, priority chip, and tag chips.
-//! Subprojects nest inside their parent's card as a compact
-//! list with a status badge each.
+//! Fetches `Vec<ProjectInfo>` from the active org's
+//! `/org/<slug>/vox` endpoint via the architect-generated
+//! `ProjectServiceClient`. Subprojects nest inside their
+//! parent card as a compact list.
 //!
-//! Wired against a hardcoded in-page fixture matching the
-//! codywright vault as seeded. Replace the fixture with a
-//! vox-backed loader (`/org/<slug>/vox` → project list) when
-//! the project RPC lands; the component's data shape is
-//! storage-agnostic.
+//! Loading + error states are rendered inline. When no
+//! server is reachable, falls back to an empty grid with
+//! a hint so dev/offline mode still looks like the route.
 
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
+use project::ProjectInfo;
+#[cfg(target_arch = "wasm32")]
+use project::ProjectServiceClient;
 
-/// Trimmed view of `project::ProjectInfo` — only the fields
-/// the card needs. Replaces the full entity until we wire the
-/// remote loader through vox.
-#[derive(Clone, PartialEq)]
-struct ProjectCard {
-    title: &'static str,
-    /// `active` / `on-hold` / `done` / `cancelled`.
-    status: &'static str,
-    /// `p0`..`p4` / `urgent` / `high` / `normal` / `low`.
-    priority: &'static str,
-    /// Parent project title for sub-projects; `None` for
-    /// top-level.
-    parent: Option<&'static str>,
-    tags: &'static [&'static str],
-    summary: &'static str,
-}
-
-const PROJECTS: &[ProjectCard] = &[
-    ProjectCard {
-        title: "Health",
-        status: "active",
-        priority: "high",
-        parent: None,
-        tags: &["health", "ongoing", "parent"],
-        summary: "Umbrella for body, energy, and recovery. Decomposes into Fitness, Nutrition, Sleep Tracking.",
-    },
-    ProjectCard {
-        title: "Fitness",
-        status: "active",
-        priority: "normal",
-        parent: Some("Health"),
-        tags: &["fitness", "health"],
-        summary: "Workout routines, gym sessions, body metrics.",
-    },
-    ProjectCard {
-        title: "Nutrition",
-        status: "active",
-        priority: "normal",
-        parent: Some("Health"),
-        tags: &["nutrition", "calorie-intake", "health"],
-        summary: "Daily calorie + macro tracking, supplement log.",
-    },
-    ProjectCard {
-        title: "Sleep Tracking",
-        status: "active",
-        priority: "normal",
-        parent: Some("Health"),
-        tags: &["sleep", "recovery", "health"],
-        summary: "Nightly sleep duration + quality. Targets 7.5h from Daily Plan.",
-    },
-    ProjectCard {
-        title: "Mealplan",
-        status: "active",
-        priority: "normal",
-        parent: None,
-        tags: &["mealplan", "personal"],
-        summary: "Personal meal-planning. Recipes from the Cookbook wiki.",
-    },
-    ProjectCard {
-        title: "Scheduling",
-        status: "active",
-        priority: "normal",
-        parent: None,
-        tags: &["scheduling"],
-        summary: "Day templates + event types + availability schedules.",
-    },
-    ProjectCard {
-        title: "Inbox Zero",
-        status: "active",
-        priority: "high",
-        parent: None,
-        tags: &["inbox", "processing", "ongoing"],
-        summary: "End every day with Inbox empty — fleeting notes processed or promoted.",
-    },
-    ProjectCard {
-        title: "The Temporal Contract",
-        status: "active",
-        priority: "normal",
-        parent: None,
-        tags: &["self-awareness", "time-tracking", "meta"],
-        summary: "Fidelity log of how well I actually adhere to the Daily Plan time blocks.",
-    },
-    ProjectCard {
-        title: "Bible Study",
-        status: "active",
-        priority: "high",
-        parent: None,
-        tags: &["bible", "spiritual", "study", "ongoing"],
-        summary: "Reading plan + passage notes. Anchored on the 6:30 AM spiritual block.",
-    },
-];
+use crate::vox_session::vox_url;
 
 #[component]
 pub fn ProjectsView() -> Element {
-    let top_level: Vec<&ProjectCard> = PROJECTS.iter().filter(|p| p.parent.is_none()).collect();
-    let total = PROJECTS.len();
-    let top_count = top_level.len();
+    let projects = use_resource(|| async move { fetch_projects().await });
+
+    let view = match &*projects.read_unchecked() {
+        Some(Ok(rows)) => render_loaded(rows),
+        Some(Err(e)) => render_error(e),
+        None => render_loading(),
+    };
 
     rsx! {
         div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-6 lg:p-10",
@@ -119,23 +34,63 @@ pub fn ProjectsView() -> Element {
                     Heading { level: HeadingLevel::H1, "Projects" }
                     Text {
                         variant: TextVariant::Muted,
-                        "{top_count} top-level · {total} total. Subprojects nest under their parent."
+                        "Live from `/org/<slug>/vox` via `ProjectServiceClient`."
                     }
                 }
             }
+            {view}
+        }
+    }
+}
+
+fn render_loading() -> Element {
+    rsx! {
+        Text { variant: TextVariant::Muted, "Loading projects…" }
+    }
+}
+
+fn render_error(err: &str) -> Element {
+    rsx! {
+        div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+            "Couldn't reach the project service: {err}"
+        }
+    }
+}
+
+fn render_loaded(rows: &[ProjectInfo]) -> Element {
+    let top: Vec<&ProjectInfo> = rows.iter().filter(|p| p.parent_id.is_none()).collect();
+    let total = rows.len();
+    let top_count = top.len();
+
+    if rows.is_empty() {
+        return rsx! {
+            Text {
+                variant: TextVariant::Muted,
+                "No projects found. Seed a `type: project` page under `vault/Projects/`."
+            }
+        };
+    }
+
+    rsx! {
+        div { class: "flex flex-col gap-4",
+            Text {
+                variant: TextVariant::Muted,
+                class: "text-xs",
+                "{top_count} top-level · {total} total"
+            }
             div { class: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4",
-                for parent in top_level.iter() {
+                for parent in top.iter() {
                     {
-                        let parent = *parent;
-                        let kids: Vec<ProjectCard> = PROJECTS
+                        let parent: ProjectInfo = (*parent).clone();
+                        let kids: Vec<ProjectInfo> = rows
                             .iter()
-                            .filter(|p| p.parent == Some(parent.title))
+                            .filter(|p| p.parent_id == Some(parent.id))
                             .cloned()
                             .collect();
                         rsx! {
                             ProjectCardView {
-                                key: "{parent.title}",
-                                p: parent.clone(),
+                                key: "{parent.id}",
+                                p: parent,
                                 subprojects: kids,
                             }
                         }
@@ -148,30 +103,38 @@ pub fn ProjectsView() -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct ProjectCardProps {
-    p: ProjectCard,
-    subprojects: Vec<ProjectCard>,
+    p: ProjectInfo,
+    subprojects: Vec<ProjectInfo>,
 }
 
 #[component]
 fn ProjectCardView(props: ProjectCardProps) -> Element {
     let p = &props.p;
     let kids = props.subprojects.clone();
+    let title = p.title.clone();
+    let status = p.status.clone();
+    let priority = p.priority.clone();
+    let tags: Vec<String> = p.tags.0.clone();
+    let summary = first_line(&p.details);
+
     rsx! {
         Card {
             CardHeader {
                 div { class: "flex items-start justify-between gap-2",
-                    CardTitle { "{p.title}" }
+                    CardTitle { "{title}" }
                     StatusBadge {
-                        variant: status_variant(p.status),
-                        label: p.status.to_string(),
+                        variant: status_variant(&status),
+                        label: status.clone(),
                     }
                 }
-                CardDescription { "{p.summary}" }
+                if let Some(s) = summary {
+                    CardDescription { "{s}" }
+                }
             }
             CardContent {
                 div { class: "flex flex-wrap items-center gap-1.5 text-xs",
-                    PriorityChip { priority: p.priority }
-                    for tag in p.tags.iter() {
+                    PriorityChip { priority: priority.clone() }
+                    for tag in tags.iter() {
                         Badge {
                             variant: BadgeVariant::Secondary,
                             "{tag}"
@@ -186,13 +149,19 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                             "Subprojects",
                         }
                         for kid in kids.iter() {
-                            div {
-                                key: "{kid.title}",
-                                class: "flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm",
-                                span { class: "font-medium", "{kid.title}" }
-                                StatusBadge {
-                                    variant: status_variant(kid.status),
-                                    label: kid.status.to_string(),
+                            {
+                                let kid_title = kid.title.clone();
+                                let kid_status = kid.status.clone();
+                                rsx! {
+                                    div {
+                                        key: "{kid.id}",
+                                        class: "flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm",
+                                        span { class: "font-medium", "{kid_title}" }
+                                        StatusBadge {
+                                            variant: status_variant(&kid_status),
+                                            label: kid_status,
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -205,12 +174,12 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct PriorityChipProps {
-    priority: &'static str,
+    priority: String,
 }
 
 #[component]
 fn PriorityChip(props: PriorityChipProps) -> Element {
-    let cls = match props.priority {
+    let cls = match props.priority.as_str() {
         "high" | "urgent" | "p0" | "p1" => {
             "rounded-full px-2 py-0.5 bg-destructive/15 text-destructive font-medium"
         }
@@ -223,9 +192,6 @@ fn PriorityChip(props: PriorityChipProps) -> Element {
     }
 }
 
-/// Map a status string to the canonical `StatusBadgeVariant`.
-/// `active` → Success, `on-hold` / `paused` → Warning,
-/// `cancelled` / `blocked` → Danger, anything else → Neutral.
 fn status_variant(status: &str) -> StatusBadgeVariant {
     match status {
         "active" => StatusBadgeVariant::Success,
@@ -233,4 +199,59 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
         "cancelled" | "blocked" => StatusBadgeVariant::Danger,
         _ => StatusBadgeVariant::Neutral,
     }
+}
+
+/// First non-empty line of the details body, trimmed. The
+/// project parser preserves the whole markdown body in
+/// `details`; we just want the first paragraph for a card
+/// summary.
+fn first_line(body: &str) -> Option<String> {
+    body.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("---"))
+        .map(std::string::ToString::to_string)
+}
+
+/// Fetch the active org's project list via the architect-
+/// generated `ProjectServiceClient`. Returns `Err` strings
+/// for the page to render; no `tracing` here so the wasm
+/// console stays clean unless something genuinely surprises.
+async fn fetch_projects() -> Result<Vec<ProjectInfo>, String> {
+    let url = build_org_vox_url();
+    if url.is_empty() {
+        return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        use vox_core::acceptor_on;
+        let link = vox_websocket::WsLink::connect(&url)
+            .await
+            .map_err(|e| format!("ws connect: {e:?}"))?;
+        let client: ProjectServiceClient = acceptor_on(link)
+            .on_connection(())
+            .establish::<ProjectServiceClient>()
+            .await
+            .map_err(|e| format!("establish: {e:?}"))?;
+        client.list().await.map_err(|e| format!("list: {e:?}"))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err("native client not wired yet".to_owned())
+    }
+}
+
+/// Build the per-org vox URL from the base. The base may
+/// already include `/vox` (legacy single-org default); strip
+/// the suffix and retarget at `/org/codywright/vox` for now.
+/// Multi-org switcher lands when the org-context signal does.
+fn build_org_vox_url() -> String {
+    let base = vox_url();
+    if base.is_empty() {
+        return String::new();
+    }
+    let trimmed = base
+        .trim_end_matches("/vox")
+        .trim_end_matches('/')
+        .to_string();
+    format!("{trimmed}/org/codywright/vox")
 }

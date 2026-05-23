@@ -1,179 +1,41 @@
 //! `/goals` — goal hierarchy + cycle anchoring.
 //!
-//! Renders Cody's lifetime / yearly / cycle goal tree as a
-//! grouped list. Each goal carries:
-//!
-//! - status badge (aspiration / active / paused / achieved / abandoned)
-//! - `kind` chip (lifetime / yearly / quarterly / cycle / weekly)
-//! - cycle pill (when `cycle_id` resolves — `2026 Q3 C1` etc.)
-//! - parent breadcrumb so the decomposition is visible
-//!
-//! Cycle resolution uses the `cycle` crate's pure-function
-//! generator — same deterministic UUIDv5s as the seeded
-//! goal markdown. No data fetch yet; replace the in-page
-//! fixture with a vox-backed loader when the goal RPC
-//! lands.
+//! Fetches `Vec<Goal>` from the active org's
+//! `/org/<slug>/vox` endpoint via the architect-generated
+//! `GoalServiceClient`. Cycle pills resolve `cycle_id` ⇒
+//! `(year, quarter, ordinal)` via the local pure-function
+//! generator (deterministic UUIDv5 means the wasm side
+//! agrees with the server's seeded files).
 
 use chrono::Weekday;
-use cycle::FirstWeekRule;
+use cycle::{FirstWeekRule, generate_year};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
+use goal::Goal;
+#[cfg(target_arch = "wasm32")]
+use goal::GoalServiceClient;
+use uuid::Uuid;
 
-#[derive(Clone, PartialEq)]
-struct GoalCard {
-    title: &'static str,
-    kind: &'static str,
-    status: &'static str,
-    parent: Option<&'static str>,
-    /// Pre-computed `(year, quarter, ordinal)` triple when the
-    /// goal anchors to a cycle. `None` for non-cycle goals.
-    cycle: Option<(i32, u8, u8)>,
-    target_date: Option<&'static str>,
-    summary: &'static str,
-}
-
-const GOALS: &[GoalCard] = &[
-    // ── BUY A CAR ────────────────────────────────────────
-    GoalCard {
-        title: "Buy a Car",
-        kind: "yearly",
-        status: "aspiration",
-        parent: None,
-        cycle: None,
-        target_date: Some("2027-01-01"),
-        summary: "Replace the current vehicle by start of 2027.",
-    },
-    GoalCard {
-        title: "Buy a Car — 2026",
-        kind: "yearly",
-        status: "active",
-        parent: Some("Buy a Car"),
-        cycle: None,
-        target_date: Some("2026-12-31"),
-        summary: "2026 track. Decomposes into down payment + research + close.",
-    },
-    GoalCard {
-        title: "Down payment saved",
-        kind: "yearly",
-        status: "active",
-        parent: Some("Buy a Car — 2026"),
-        cycle: None,
-        target_date: Some("2026-09-30"),
-        summary: "Cash in place by end of Q3 so Q4 is negotiation, not scrambling.",
-    },
-    GoalCard {
-        title: "Research + shortlist models",
-        kind: "cycle",
-        status: "aspiration",
-        parent: Some("Buy a Car — 2026"),
-        cycle: Some((2026, 3, 1)),
-        target_date: Some("2026-07-26"),
-        summary: "Test-drive, read reviews, narrow to 3 contenders.",
-    },
-    GoalCard {
-        title: "Negotiate + close",
-        kind: "cycle",
-        status: "aspiration",
-        parent: Some("Buy a Car — 2026"),
-        cycle: Some((2026, 4, 2)),
-        target_date: Some("2026-11-22"),
-        summary: "Pick the dealer, negotiate, sign.",
-    },
-    // ── BUY A HOUSE ──────────────────────────────────────
-    GoalCard {
-        title: "Buy a House",
-        kind: "lifetime",
-        status: "aspiration",
-        parent: None,
-        cycle: None,
-        target_date: None,
-        summary: "Own a place rather than rent. Multi-year savings horizon.",
-    },
-    GoalCard {
-        title: "Buy a House — 2026",
-        kind: "yearly",
-        status: "active",
-        parent: Some("Buy a House"),
-        cycle: None,
-        target_date: Some("2026-12-31"),
-        summary: "Foundation year — credit + savings + market scan. No purchase yet.",
-    },
-    GoalCard {
-        title: "Credit readiness check",
-        kind: "cycle",
-        status: "aspiration",
-        parent: Some("Buy a House — 2026"),
-        cycle: Some((2026, 3, 2)),
-        target_date: Some("2026-08-23"),
-        summary: "Pull score, clean up, set up monitoring. Floor ≥ 720.",
-    },
-    GoalCard {
-        title: "10% of down payment saved",
-        kind: "yearly",
-        status: "active",
-        parent: Some("Buy a House — 2026"),
-        cycle: None,
-        target_date: Some("2026-12-31"),
-        summary: "~0.83% per cycle. Reviewed monthly via finance review.",
-    },
-    GoalCard {
-        title: "Market scan — first pass",
-        kind: "cycle",
-        status: "aspiration",
-        parent: Some("Buy a House — 2026"),
-        cycle: Some((2026, 4, 1)),
-        target_date: Some("2026-10-25"),
-        summary: "3 target neighborhoods, comps, price-floor/ceiling model.",
-    },
-    // ── GET MARRIED ──────────────────────────────────────
-    GoalCard {
-        title: "Get Married",
-        kind: "lifetime",
-        status: "aspiration",
-        parent: None,
-        cycle: None,
-        target_date: None,
-        summary: "Marry the right person. Shape daily decisions, no deadline.",
-    },
-    GoalCard {
-        title: "Marriage readiness — 2026",
-        kind: "yearly",
-        status: "active",
-        parent: Some("Get Married"),
-        cycle: None,
-        target_date: Some("2026-12-31"),
-        summary: "Character + faith + financial readiness for 2026.",
-    },
-    GoalCard {
-        title: "Character + faith — ongoing",
-        kind: "lifetime",
-        status: "active",
-        parent: Some("Marriage readiness — 2026"),
-        cycle: None,
-        target_date: None,
-        summary: "Daily spiritual time block + Bible Study project compound over years.",
-    },
-    GoalCard {
-        title: "Financial readiness",
-        kind: "yearly",
-        status: "active",
-        parent: Some("Marriage readiness — 2026"),
-        cycle: None,
-        target_date: Some("2026-12-31"),
-        summary: "6-month emergency fund, no consumer debt, joint-finances-ready.",
-    },
-];
+use crate::vox_session::vox_url;
 
 #[component]
 pub fn GoalsView() -> Element {
-    let lifetime_roots: Vec<&GoalCard> = GOALS.iter().filter(|g| g.parent.is_none()).collect();
-    let total = GOALS.len();
-    let cycle_anchored = GOALS.iter().filter(|g| g.cycle.is_some()).count();
+    let goals = use_resource(|| async move { fetch_goals().await });
 
     // Current cycle highlight — drives the "you're here" pill.
     let today = chrono::Local::now().date_naive();
     let now_cycle =
         cycle::cycle_for_date(today, Weekday::Mon, FirstWeekRule::AtLeastFourDaysInYear);
+
+    let body = match &*goals.read_unchecked() {
+        Some(Ok(rows)) => render_loaded(rows, now_cycle.clone()),
+        Some(Err(e)) => rsx! {
+            div { class: "rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm",
+                "Couldn't reach the goal service: {e}"
+            }
+        },
+        None => rsx! { Text { variant: TextVariant::Muted, "Loading goals…" } },
+    };
 
     rsx! {
         div { class: "mx-auto w-full max-w-5xl flex flex-col gap-6 p-6 lg:p-10",
@@ -182,7 +44,7 @@ pub fn GoalsView() -> Element {
                     Heading { level: HeadingLevel::H1, "Goals" }
                     Text {
                         variant: TextVariant::Muted,
-                        "{total} goals · {cycle_anchored} anchored to a 2026 cycle. Lifetime aspirations decompose into yearly tracks and cycle-scoped milestones."
+                        "Live from `/org/<slug>/vox` via `GoalServiceClient`."
                     }
                 }
                 if let Some(c) = now_cycle.clone() {
@@ -197,13 +59,40 @@ pub fn GoalsView() -> Element {
                     }
                 }
             }
+            {body}
+        }
+    }
+}
+
+fn render_loaded(rows: &[Goal], now_cycle: Option<cycle::Cycle>) -> Element {
+    if rows.is_empty() {
+        return rsx! {
+            Text {
+                variant: TextVariant::Muted,
+                "No goals found. Seed a `type: goal` page under `vault/Goals/`."
+            }
+        };
+    }
+    let lifetime_roots: Vec<&Goal> = rows.iter().filter(|g| g.parent_id.is_none()).collect();
+    let total = rows.len();
+    let cycle_anchored = rows.iter().filter(|g| g.cycle_id.is_some()).count();
+    let all_rows: Vec<Goal> = rows.to_vec();
+
+    rsx! {
+        div { class: "flex flex-col gap-4",
+            Text {
+                variant: TextVariant::Muted,
+                class: "text-xs",
+                "{total} goals · {cycle_anchored} anchored to a cycle"
+            }
             for root in lifetime_roots.iter() {
                 {
-                    let root = *root;
+                    let root: Goal = (*root).clone();
                     rsx! {
                         GoalBranch {
-                            key: "{root.title}",
-                            g: root.clone(),
+                            key: "{root.id}",
+                            g: root,
+                            all_goals: all_rows.clone(),
                             now_cycle: now_cycle.clone(),
                         }
                     }
@@ -215,34 +104,42 @@ pub fn GoalsView() -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct GoalBranchProps {
-    g: GoalCard,
+    g: Goal,
+    all_goals: Vec<Goal>,
     now_cycle: Option<cycle::Cycle>,
 }
 
 #[component]
 fn GoalBranch(props: GoalBranchProps) -> Element {
     let g = props.g.clone();
-    // Walk all descendants of `g` (one level for the
-    // existing data; recursive logic ready for deeper trees).
-    let descendants: Vec<GoalCard> = collect_descendants(g.title);
+    let descendants: Vec<Goal> = collect_descendants(g.id, &props.all_goals);
     let now = props.now_cycle.clone();
+    let all = props.all_goals.clone();
+    let title = g.title.clone();
+    let kind = g.kind.clone();
+    let status = g.status.clone();
+    let summary = first_line(&g.details);
+    let target = g.target_date.map(|d| d.to_string());
+
     rsx! {
         Card {
             CardHeader {
                 div { class: "flex items-start justify-between gap-2 flex-wrap",
-                    CardTitle { "{g.title}" }
+                    CardTitle { "{title}" }
                     div { class: "flex items-center gap-1.5",
-                        KindChip { kind: g.kind }
+                        KindChip { kind: kind.clone() }
                         StatusBadge {
-                            variant: status_variant(g.status),
-                            label: g.status.to_string(),
+                            variant: status_variant(&status),
+                            label: status.clone(),
                         }
                     }
                 }
-                CardDescription { "{g.summary}" }
+                if let Some(s) = summary {
+                    CardDescription { "{s}" }
+                }
             }
             CardContent {
-                if let Some(td) = g.target_date {
+                if let Some(td) = target {
                     Text { variant: TextVariant::Muted, class: "text-xs",
                         "Target: {td}"
                     }
@@ -250,10 +147,16 @@ fn GoalBranch(props: GoalBranchProps) -> Element {
                 if !descendants.is_empty() {
                     div { class: "mt-3 flex flex-col gap-1.5",
                         for d in descendants.iter() {
-                            GoalRow {
-                                key: "{d.title}",
-                                g: d.clone(),
-                                now_cycle: now.clone(),
+                            {
+                                let d_clone: Goal = d.clone();
+                                rsx! {
+                                    GoalRow {
+                                        key: "{d_clone.id}",
+                                        g: d_clone,
+                                        all_goals: all.clone(),
+                                        now_cycle: now.clone(),
+                                    }
+                                }
                             }
                         }
                     }
@@ -265,32 +168,38 @@ fn GoalBranch(props: GoalBranchProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct GoalRowProps {
-    g: GoalCard,
+    g: Goal,
+    all_goals: Vec<Goal>,
     now_cycle: Option<cycle::Cycle>,
 }
 
 #[component]
 fn GoalRow(props: GoalRowProps) -> Element {
     let g = props.g.clone();
-    // Indent based on depth — count parent chain length.
-    let depth = depth_of(g.title);
+    let depth = depth_of(g.id, &props.all_goals);
     let indent_px = (depth as u32) * 16;
+    let cycle_label = cycle_label_for(&g);
     let is_current_cycle = matches!(
-        (g.cycle, &props.now_cycle),
-        (Some((y, q, o)), Some(c)) if y == c.year && q == c.quarter && o == c.ordinal
+        (&cycle_label, &props.now_cycle),
+        (Some((y, q, o)), Some(c)) if *y == c.year && *q == c.quarter && *o == c.ordinal
     );
     let row_cls = if is_current_cycle {
         "flex items-center justify-between gap-2 rounded-md border border-primary/40 bg-primary/[0.04] px-3 py-2 text-sm"
     } else {
         "flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm"
     };
+    let title = g.title.clone();
+    let kind = g.kind.clone();
+    let status = g.status.clone();
+    let target = g.target_date.map(|d| d.to_string());
+
     rsx! {
         div {
             class: "{row_cls}",
             style: "margin-left: {indent_px}px;",
             div { class: "flex flex-col min-w-0 gap-0.5",
-                span { class: "font-medium truncate", "{g.title}" }
-                if let Some((y, q, o)) = g.cycle {
+                span { class: "font-medium truncate", "{title}" }
+                if let Some((y, q, o)) = cycle_label {
                     span {
                         class: if is_current_cycle {
                             "text-xs text-primary font-medium tabular-nums"
@@ -300,17 +209,17 @@ fn GoalRow(props: GoalRowProps) -> Element {
                         "{y} Q{q} C{o}"
                         if is_current_cycle { " · current cycle" }
                     }
-                } else if let Some(td) = g.target_date {
+                } else if let Some(td) = target {
                     span { class: "text-xs text-muted-foreground tabular-nums",
                         "target {td}"
                     }
                 }
             }
             div { class: "flex items-center gap-1.5 shrink-0",
-                KindChip { kind: g.kind }
+                KindChip { kind: kind.clone() }
                 StatusBadge {
-                    variant: status_variant(g.status),
-                    label: g.status.to_string(),
+                    variant: status_variant(&status),
+                    label: status.clone(),
                 }
             }
         }
@@ -319,12 +228,12 @@ fn GoalRow(props: GoalRowProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct KindChipProps {
-    kind: &'static str,
+    kind: String,
 }
 
 #[component]
 fn KindChip(props: KindChipProps) -> Element {
-    let cls = match props.kind {
+    let cls = match props.kind.as_str() {
         "lifetime" => "rounded-full px-2 py-0.5 bg-accent/30 text-accent-foreground text-[11px]",
         "yearly" => "rounded-full px-2 py-0.5 bg-primary/10 text-primary text-[11px]",
         "quarterly" => "rounded-full px-2 py-0.5 bg-muted/60 text-muted-foreground text-[11px]",
@@ -332,32 +241,26 @@ fn KindChip(props: KindChipProps) -> Element {
         _ => "rounded-full px-2 py-0.5 bg-muted/40 text-muted-foreground text-[11px]",
     };
     let label = props.kind;
-    rsx! {
-        span { class: "{cls}", "{label}" }
-    }
+    rsx! { span { class: "{cls}", "{label}" } }
 }
 
-fn collect_descendants(parent_title: &str) -> Vec<GoalCard> {
-    let mut out: Vec<GoalCard> = Vec::new();
-    let direct: Vec<&GoalCard> = GOALS
-        .iter()
-        .filter(|g| g.parent == Some(parent_title))
-        .collect();
-    for d in direct {
-        out.push(d.clone());
-        out.extend(collect_descendants(d.title));
+fn collect_descendants(parent_id: Uuid, all: &[Goal]) -> Vec<Goal> {
+    let mut out: Vec<Goal> = Vec::new();
+    for g in all.iter().filter(|g| g.parent_id == Some(parent_id)) {
+        out.push(g.clone());
+        out.extend(collect_descendants(g.id, all));
     }
     out
 }
 
-fn depth_of(title: &str) -> usize {
+fn depth_of(id: Uuid, all: &[Goal]) -> usize {
     let mut depth = 0usize;
-    let mut current = title;
+    let mut current = id;
     loop {
-        let Some(g) = GOALS.iter().find(|g| g.title == current) else {
+        let Some(g) = all.iter().find(|g| g.id == current) else {
             break;
         };
-        match g.parent {
+        match g.parent_id {
             Some(p) => {
                 depth += 1;
                 current = p;
@@ -375,4 +278,70 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
         "abandoned" | "cancelled" => StatusBadgeVariant::Danger,
         _ => StatusBadgeVariant::Neutral,
     }
+}
+
+/// Resolve a goal's `cycle_id` (or `target_date`) to a
+/// `(year, quarter, ordinal)` triple by scanning the
+/// generator's deterministic UUIDv5 ids. We walk a window
+/// of nearby years to cover dates straddling the cyclic
+/// new year.
+fn cycle_label_for(g: &Goal) -> Option<(i32, u8, u8)> {
+    use chrono::Datelike;
+    let id = g.cycle_id?;
+    let base = chrono::Local::now().date_naive().year();
+    for year_offset in [-1, 0, 1, 2] {
+        let qs = generate_year(
+            base + year_offset,
+            Weekday::Mon,
+            FirstWeekRule::AtLeastFourDaysInYear,
+        );
+        for q in qs {
+            for c in q.cycles.iter() {
+                if c.id == id {
+                    return Some((c.year, c.quarter, c.ordinal));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn first_line(body: &str) -> Option<String> {
+    body.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("---"))
+        .map(std::string::ToString::to_string)
+}
+
+async fn fetch_goals() -> Result<Vec<Goal>, String> {
+    let url = build_org_vox_url();
+    if url.is_empty() {
+        return Err("no vox URL configured".to_owned());
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        use vox_core::acceptor_on;
+        let link = vox_websocket::WsLink::connect(&url)
+            .await
+            .map_err(|e| format!("ws connect: {e:?}"))?;
+        let client: GoalServiceClient = acceptor_on(link)
+            .on_connection(())
+            .establish::<GoalServiceClient>()
+            .await
+            .map_err(|e| format!("establish: {e:?}"))?;
+        client.list().await.map_err(|e| format!("list: {e:?}"))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Err("native client not wired yet".to_owned())
+    }
+}
+
+fn build_org_vox_url() -> String {
+    let base = vox_url();
+    if base.is_empty() {
+        return String::new();
+    }
+    let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
+    format!("{trimmed}/org/codywright/vox")
 }
