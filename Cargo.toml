@@ -324,6 +324,11 @@ vault-proto = { path = "features/vault/vault-proto" }
 # `plans/federated-task-platform.md` Phase 2.
 mount-proto = { path = "features/mount/mount-proto" }
 mount = { path = "features/mount/mount" }
+# Goal feature — long-term aspirations + their decomposition.
+# Distinct from `project::ProjectInfo` because goals carry a
+# `target_date` and a cyclic-calendar `kind`. See
+# `plans/cyclic-life-calendar.md`.
+goal = { path = "features/goal/goal" }
 # Email feature — wire contract + backends. Same shape as
 # `vault-proto`: one `#[architect::rpc] trait EmailSync` proto
 # crate, sibling backend crates (`email-imap`, `email-jmap`,
