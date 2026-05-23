@@ -44,7 +44,7 @@ Current vault layout:
 After migration:
 
 ```
-<vault>/Cookbook/                  # NEW root; sibling to Wiki/
+<vault>/Wiki/Cookbook/             # recipes are wiki pages in cooklang form
 ├── config/
 │   └── aisle.conf                 # cooklang aisle groupings (shopping-list section assignment)
 ├── <slug>.cook                    # canonical recipe — pure cooklang. The whole recipe.
@@ -53,6 +53,10 @@ After migration:
 └── Plans/
     └── 2026-W21.menu              # cookcli `.menu` format for weekly plans (later)
 ```
+
+The cookbook is **part of the wiki**, not a sibling. Recipes
+co-locate with the entity / concept pages they reference so
+ingredient wikilinks resolve in the same namespace.
 
 **One file per recipe. No sidecar.** The `.cook` file is portable to any cooklang tool (cookcli, Obsidian plugin, VSCode, HomeAssistant, etc.) without our metadata polluting it.
 

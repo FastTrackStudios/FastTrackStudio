@@ -1,5 +1,5 @@
 //! Convert legacy `Wiki/Cookbook/*.md` recipes to
-//! cooklang `Cookbook/*.cook` files.
+//! cooklang `Wiki/Cookbook/*.cook` files.
 //!
 //! Usage:
 //!
@@ -7,9 +7,10 @@
 //! migrate-md-to-cook <vault_root> [--dry-run]
 //! ```
 //!
-//! Idempotent. Reads from `<vault_root>/Wiki/Cookbook/*.md`,
-//! writes to `<vault_root>/Cookbook/<slug>.cook`. Leaves
-//! originals in place — delete after manual review.
+//! Idempotent. Reads `<vault_root>/Wiki/Cookbook/*.md`,
+//! writes `<vault_root>/Wiki/Cookbook/<slug>.cook` alongside
+//! them. Leaves originals in place — delete after manual
+//! review.
 //!
 //! Mapping:
 //! - YAML frontmatter scalars → cooklang metadata block
@@ -43,7 +44,7 @@ fn main() {
     }
 
     let src_dir = root.join("Wiki").join("Cookbook");
-    let dst_dir = root.join("Cookbook");
+    let dst_dir = src_dir.clone();
     if !src_dir.exists() {
         eprintln!("no Wiki/Cookbook/ at {vault_root}; nothing to migrate");
         return;

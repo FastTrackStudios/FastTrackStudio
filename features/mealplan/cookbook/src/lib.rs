@@ -4,7 +4,7 @@
 
 //! `cookbook` — cooklang-native recipe storage.
 //!
-//! Recipes are `.cook` files under `<vault>/Cookbook/` parsed
+//! Recipes are `.cook` files under `<vault>/Wiki/Cookbook/` parsed
 //! by the [`cooklang`](https://cooklang.org) crate. One file
 //! per recipe, no sidecar; identity is the vault-relative path.
 //!

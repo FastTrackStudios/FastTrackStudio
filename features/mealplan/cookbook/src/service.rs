@@ -27,7 +27,7 @@ pub enum CookbookError {
 
 #[architect::rpc]
 pub trait CookbookService {
-    /// Every `.cook` file currently under `<vault>/Cookbook/`.
+    /// Every `.cook` file currently under `<vault>/Wiki/Cookbook/`.
     fn list(&self) -> Result<Vec<Recipe>, CookbookError>;
 
     /// One recipe by vault-relative path.

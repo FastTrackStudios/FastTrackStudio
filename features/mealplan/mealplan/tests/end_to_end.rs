@@ -28,7 +28,7 @@ use vault::Vault;
 
 fn fresh_vault(root: &Path) -> Vault {
     std::fs::create_dir_all(root.join("Operations/Inventory/Pantry")).unwrap();
-    std::fs::create_dir_all(root.join("Cookbook")).unwrap();
+    std::fs::create_dir_all(root.join("Wiki/Cookbook")).unwrap();
     std::fs::create_dir_all(root.join("Projects/Mealplan/meals")).unwrap();
     std::fs::create_dir_all(root.join("shopping")).unwrap();
     std::fs::create_dir_all(root.join("substitutions")).unwrap();
@@ -161,7 +161,7 @@ Bring a pot of water to a boil and cook @pasta{200%g} until al dente.
 Meanwhile, warm @olive oil{30%ml} in a pan.
 Toss with @butter{20%g} and shaved @truffles{5%g}.
 ";
-    let recipe_path = "Cookbook/Truffle Pasta.cook";
+    let recipe_path = "Wiki/Cookbook/Truffle Pasta.cook";
     let mut draft = Recipe {
         path: recipe_path.into(),
         name: "Truffle Pasta".into(),

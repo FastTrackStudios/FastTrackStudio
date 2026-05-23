@@ -22,7 +22,7 @@ pub enum WriteError {
     BadPath(String),
 }
 
-/// Default layout: `Cookbook/<slug>.cook`. Override `folder`
+/// Default layout: `Wiki/Cookbook/<slug>.cook`. Override `folder`
 /// for sub-folders under the cookbook root.
 #[must_use]
 pub fn default_recipe_path(name: &str, folder: Option<&str>) -> String {
