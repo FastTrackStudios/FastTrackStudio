@@ -36,7 +36,7 @@ use axum::routing::get;
 use sea_orm::Database;
 use sea_orm_migration::MigratorTrait;
 
-use crate::capability::{ServerKeypair, default_keypair_path};
+use crate::capability::ServerKeypair;
 
 #[derive(Clone)]
 pub struct AuthState {
@@ -107,21 +107,50 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Build app state with auth opened at the default XDG path
-    /// (`$XDG_DATA_HOME/task-server/auth.sqlite`, fallback
-    /// `~/.local/share/task-server/auth.sqlite`).
-    pub async fn new() -> eyre::Result<Self> {
-        let auth_db_url = format!("sqlite://{}?mode=rwc", default_auth_db_path()?.display());
+    /// Build app state for one org, paths derived from the
+    /// org root under `$TASK_DATA_ROOT` (or the XDG default).
+    /// Server-side multi-org routing is PR 4; for now the
+    /// caller picks one slug at boot.
+    ///
+    /// Resolution: explicit `slug` arg first, else
+    /// `TASK_SERVER_ORG` env, else the same single-org /
+    /// auto-bootstrap-`default` logic the CLI uses.
+    pub async fn new(slug: Option<&str>) -> eyre::Result<Self> {
+        let data_root =
+            org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+        data_root
+            .ensure()
+            .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+        let (org_root, _manifest) = resolve_server_org(&data_root, slug)?;
+        let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
         let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
-        let keypair = ServerKeypair::load_or_generate(&default_keypair_path()?)
+        let keypair = ServerKeypair::load_or_generate(&data_root.server_keypair_path())
             .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
-        Self::new_with_auth(auth, keypair).await
+        Self::new_with_auth_and_org(auth, keypair, org_root).await
     }
 
-    /// Build app state with explicit auth + keypair — tests pass
-    /// in-memory `AuthState` + `ServerKeypair::generate_ephemeral()`
-    /// so they don't touch the user's XDG dir.
+    /// Build app state with explicit auth + keypair, picking
+    /// the org root the same way [`Self::new`] does. Tests
+    /// pass an in-memory `AuthState` + ephemeral keypair so
+    /// they don't touch the user's XDG dir.
     pub async fn new_with_auth(auth: AuthState, keypair: ServerKeypair) -> eyre::Result<Self> {
+        let data_root =
+            org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+        data_root
+            .ensure()
+            .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+        let (org_root, _) = resolve_server_org(&data_root, None)?;
+        Self::new_with_auth_and_org(auth, keypair, org_root).await
+    }
+
+    /// Inner builder — every code path goes through this so
+    /// path resolution is consistent. Tests can pass a
+    /// tempdir-backed `OrgRoot` directly.
+    pub async fn new_with_auth_and_org(
+        auth: AuthState,
+        keypair: ServerKeypair,
+        org_root: org_proto::OrgRoot,
+    ) -> eyre::Result<Self> {
         // Attachments — local blob store under the standard XDG
         // path; the keypair signs upload/download URLs.
         let blob_root =
@@ -135,32 +164,28 @@ impl AppState {
             public_base_url,
         ));
 
-        // Vault file-replication. Storage root defaults to
-        // `$XDG_DATA_HOME/task-server/vaults`, overridable via
-        // `TASK_SERVER_VAULT_ROOT` for tests / containers.
-        let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT").map_or_else(
-            |_| {
-                dirs_local_share()
-                    .unwrap_or_else(|| PathBuf::from("./vaults"))
-                    .join("task-server")
-                    .join("vaults")
-            },
-            PathBuf::from,
-        );
+        // Vault file-replication. Org-scoped: each org's
+        // vault lives under `<data_root>/orgs/<slug>/vault/`.
+        // `TASK_SERVER_VAULT_ROOT` still wins as a hard
+        // override (for tests / containers that want a
+        // flat parent dir).
+        let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
+            .map_or_else(|_| org_root.vault_dir(), PathBuf::from);
         let vault_sync_state = vault::Backend::under_parent(vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
         let wiki = wiki_live::WikiBackend::under_parent(vault_root.clone())
             .map_err(|e| eyre::eyre!("wiki backend: {e}"))?;
 
-        // Agent-task queue store. SQLite at
-        // `$XDG_DATA_HOME/task-server/agent-tasks.sqlite`
-        // (override via `TASK_SERVER_AGENT_TASKS_URL`); shared
-        // across queues, partitioned by `queue_id`.
+        // Agent-task queue. SQLite under the org root
+        // (override via `TASK_SERVER_AGENT_TASKS_URL`).
+        // `OrgRoot` doesn't yet have an `agent_tasks_db()`
+        // helper — we co-locate it alongside the other org
+        // dbs by hand for now. PR 4 promotes this to a
+        // first-class resolver.
         let agent_tasks_url = std::env::var("TASK_SERVER_AGENT_TASKS_URL").unwrap_or_else(|_| {
             format!(
                 "sqlite://{}?mode=rwc",
-                default_agent_tasks_db_path()
-                    .map_or_else(|_| ":memory:".into(), |p| p.display().to_string())
+                org_root.path().join("agent-tasks.sqlite").display()
             )
         });
         let agent_tasks_conn = Database::connect(&agent_tasks_url)
@@ -178,13 +203,8 @@ impl AppState {
         // rest of the server uses — the rate cascade calls
         // `VaultProjectDefaults::lookup` to read each
         // session's project markdown on close.
-        let timer_url = std::env::var("TASK_SERVER_TIMER_URL").unwrap_or_else(|_| {
-            format!(
-                "sqlite://{}?mode=rwc",
-                default_timer_db_path()
-                    .map_or_else(|_| ":memory:".into(), |p| p.display().to_string())
-            )
-        });
+        let timer_url = std::env::var("TASK_SERVER_TIMER_URL")
+            .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.timer_db().display()));
         let timer_conn = Database::connect(&timer_url)
             .await
             .map_err(|e| eyre::eyre!("connect timer db `{timer_url}`: {e}"))?;
@@ -203,13 +223,8 @@ impl AppState {
         // the migrated DB connection is exposed; the
         // task-cli `finance invoice` flow writes against it
         // when that feature lands.
-        let finance_url = std::env::var("TASK_SERVER_FINANCE_URL").unwrap_or_else(|_| {
-            format!(
-                "sqlite://{}?mode=rwc",
-                default_finance_db_path()
-                    .map_or_else(|_| ":memory:".into(), |p| p.display().to_string())
-            )
-        });
+        let finance_url = std::env::var("TASK_SERVER_FINANCE_URL")
+            .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.finance_db().display()));
         let finance_conn = Database::connect(&finance_url)
             .await
             .map_err(|e| eyre::eyre!("connect finance db `{finance_url}`: {e}"))?;
@@ -326,8 +341,54 @@ pub fn default_auth_db_path() -> eyre::Result<PathBuf> {
     Ok(dir.join("auth.sqlite"))
 }
 
+/// Pick the org root this server should serve.
+///
+/// Order: explicit `slug` arg → `TASK_SERVER_ORG` env →
+/// scan-and-disambiguate. If `<data_root>/orgs/` has one
+/// loadable org, use it. If none, auto-bootstrap `default`
+/// so a fresh install boots. If many, refuse — operator
+/// must pick one (PR 4 lifts this and serves all of them).
+fn resolve_server_org(
+    data_root: &org_proto::DataRoot,
+    cli_slug: Option<&str>,
+) -> eyre::Result<(org_proto::OrgRoot, org_proto::OrgManifest)> {
+    let explicit = cli_slug
+        .map(str::to_owned)
+        .or_else(|| std::env::var("TASK_SERVER_ORG").ok())
+        .filter(|s| !s.is_empty());
+    if let Some(slug) = explicit {
+        return data_root
+            .load_org(&slug)
+            .map_err(|e| eyre::eyre!("load org `{slug}`: {e}"));
+    }
+    let orgs = data_root
+        .scan_orgs()
+        .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+    match orgs.len() {
+        1 => Ok(orgs.into_iter().next().expect("len 1")),
+        0 => {
+            let org = data_root
+                .init_org("default", "Default", false)
+                .map_err(|e| eyre::eyre!("auto-bootstrap default org: {e}"))?;
+            let manifest = org
+                .manifest()
+                .map_err(|e| eyre::eyre!("load fresh default manifest: {e}"))?;
+            Ok((org, manifest))
+        }
+        _ => {
+            let names: Vec<&str> = orgs.iter().map(|(o, _)| o.slug()).collect();
+            Err(eyre::eyre!(
+                "multiple orgs under {} ({}); set TASK_SERVER_ORG=<slug> until PR 4 lands multi-org routing",
+                data_root.orgs_dir().display(),
+                names.join(", "),
+            ))
+        }
+    }
+}
+
 /// Best-effort `$XDG_DATA_HOME` (falls back to `$HOME/.local/share`).
 /// Skips a `dirs` crate dep — we only use this one path.
+#[allow(dead_code)]
 fn dirs_local_share() -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
         return Some(PathBuf::from(xdg));
