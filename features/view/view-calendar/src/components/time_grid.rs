@@ -62,11 +62,15 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                         let is_today = *date == today;
                         let day_name = date.format("%a").to_string();
                         let day_num = date.day();
-                        let cell_cls = if is_today {
-                            "flex items-center justify-center gap-2 py-1.5 text-xs bg-primary/[0.04]"
+                        let header_cycle_kind = crate::cycle_overlay::kind_for_date(*date);
+                        let header_tint = if is_today {
+                            "bg-primary/[0.04]"
                         } else {
-                            "flex items-center justify-center gap-2 py-1.5 text-xs"
+                            crate::cycle_overlay::cell_tint_class(header_cycle_kind)
                         };
+                        let cell_cls = format!(
+                            "flex items-center justify-center gap-2 py-1.5 text-xs {header_tint}"
+                        );
                         rsx! {
                             div {
                                 key: "{date}",
@@ -193,7 +197,14 @@ fn DayColumn(props: DayColumnProps) -> Element {
     let today = chrono::Local::now().date_naive();
     let is_today = date == today;
     let border_r = if props.is_last { "" } else { "border-r" };
-    let column_bg = if is_today { "bg-primary/[0.04]" } else { "" };
+    // Cyclic overlay — reset / bonus weeks paint the column.
+    // Today's primary tint wins over the cycle tint.
+    let cycle_kind = crate::cycle_overlay::kind_for_date(date);
+    let column_bg = if is_today {
+        "bg-primary/[0.04]"
+    } else {
+        crate::cycle_overlay::cell_tint_class(cycle_kind)
+    };
     let mut sweep: Signal<Option<Sweep>> = use_signal(|| None);
 
     rsx! {
