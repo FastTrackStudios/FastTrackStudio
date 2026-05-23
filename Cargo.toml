@@ -271,6 +271,7 @@ agent-dispatch = { path = "features/agent/agent-dispatch" }
 # so existing vaults round-trip without conversion). Lives at
 # `features/task/task/`.
 task = { path = "features/task/task" }
+task-ui = { path = "features/task/task-ui" }
 # First-party project feature. Projects = markdown pages under
 # `Projects/*.md` with frontmatter carrying the stable `id:`,
 # billing knobs (client, currency, default rate), and agent
