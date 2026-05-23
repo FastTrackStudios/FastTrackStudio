@@ -318,6 +318,11 @@ finance-ui = { path = "features/finance/finance-ui" }
 vault = { path = "features/vault/vault" }
 vault-live = { path = "features/vault/vault-live" }
 vault-proto = { path = "features/vault/vault-proto" }
+# Pull/push/sync orchestration on top of `vault_proto::VaultSync`.
+# Inspired by `cooklang/cooklang-sync`'s indexer + syncer split
+# (without content-defined chunking — full-file transfer is the
+# simpler starting point for markdown-heavy vaults).
+vault-sync-client = { path = "features/vault/vault-sync-client" }
 # Mount feature — per-machine project content registry.
 # `mount-proto` ships the `Mount` entity + `ContentBackend`
 # trait; `mount` provides the canonical `Filesystem` impl +

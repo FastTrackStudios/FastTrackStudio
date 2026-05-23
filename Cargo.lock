@@ -14221,6 +14221,8 @@ dependencies = [
  "vault",
  "vault-live",
  "vault-obsidian",
+ "vault-proto",
+ "vault-sync-client",
  "vox",
  "walkdir",
  "wiki-graph",
@@ -15881,6 +15883,20 @@ dependencies = [
  "thiserror 2.0.18",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "vault-sync-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "vault-proto",
+ "walkdir",
 ]
 
 [[package]]

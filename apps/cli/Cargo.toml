@@ -20,6 +20,7 @@ uuid.workspace = true
 # via vault-obsidian's parsed helpers (outline / tasks / props /
 # base-query) and vault-live's wire types (refs::Ref, bases::*).
 vault.workspace = true
+vault-proto.workspace = true
 vault-live = { workspace = true }
 vault-obsidian = { workspace = true }
 # `task-cli task …` subcommands — first-party task feature.
@@ -63,6 +64,8 @@ mount = { workspace = true }
 # Cyclic life-calendar — `task cycle current|list` reads
 # from the pure-function generator.
 cycle = { workspace = true }
+# Sync orchestrator on top of `vault_proto::VaultSync`.
+vault-sync-client = { workspace = true }
 # Finance — reports + invoice build. CLI shells out to the
 # `task-pdf-render` binary (libs/pdf) for the actual PDF
 # render; pulling fulgur into the CLI's compile graph hits a
