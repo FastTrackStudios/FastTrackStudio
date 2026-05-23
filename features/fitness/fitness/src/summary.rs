@@ -74,7 +74,7 @@ pub fn compute_daily_summary(
     weight_metric: Option<&body::BodyMetric>,
 ) -> DailySummary {
     let (intake_total, target) = intake
-        .map(|i| (i.total(), i.target.clone()))
+        .map(|i| (i.total(), i.target.0.clone()))
         .unwrap_or((None, None));
 
     let today_sessions: Vec<&workouts::WorkoutSession> =

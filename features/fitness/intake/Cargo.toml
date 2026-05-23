@@ -1,6 +1,6 @@
 [package]
 name = "intake"
-description = "Daily food-intake log feature. One page per day (`type: intake-log`) listing what you ate, with nutrition resolved from `mealplan` (Recipe nutrition / PantryItem nutrition_per_unit) or hand-entered. Sum across the day = your calorie + macro totals; the fitness facade combines that with workout + body metrics."
+description = "Daily food-intake log feature. `IntakeLog` is an `architect::Entity` — one page per day (`type: intake-log`) listing what you ate, with nutrition resolved from `mealplan` (Recipe.nutrition / PantryItem.nutrition_per_unit) or hand-entered. Markdown frontmatter stays the source of truth; `--features server` emits the SeaORM Model. Sum across the day = calorie + macro totals; the fitness facade combines that with workout + body metrics."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
@@ -18,14 +19,11 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 architect = { workspace = true }
 vault = { workspace = true }
-# `mealplan` re-exports `cookbook` + `pantry` so we depend
-# on just the facade; intake resolves nutrition through
-# `cookbook::Recipe.nutrition` and
-# `pantry::PantryItem.nutrition_per_unit`.
 mealplan = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
 
 [features]
 default = ["vox"]
@@ -35,6 +33,13 @@ vox = [
     "architect/vox",
     "mealplan/vox",
 ]
+server = ["architect/server-seaorm", "dep:sea-orm"]
+# `fake` feature intentionally omitted until
+# `mealplan::cookbook::Nutrition` gains a `Dummy` impl —
+# without it the synthetic `IntakeLogCreate` can't derive
+# Dummy here. Architect's fake emissions are gated on this
+# feature; skipping it keeps `--all-features` building.
+full = ["vox", "server"]
 
 [dev-dependencies]
 tempfile = "3"

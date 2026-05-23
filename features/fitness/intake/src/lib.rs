@@ -1,3 +1,8 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope to keep migration uniform with other
+// architect-derived features.
+#![allow(unexpected_cfgs)]
+
 //! `intake` — daily food intake log. One page per day
 //! (`type: intake-log`, default path
 //! `intake/<YYYY-MM-DD>.md`) listing what you ate.
