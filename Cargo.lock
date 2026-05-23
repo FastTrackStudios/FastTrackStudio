@@ -14208,6 +14208,7 @@ dependencies = [
  "finance-db",
  "finance-proto",
  "futures",
+ "goal",
  "mount",
  "org-proto",
  "project",

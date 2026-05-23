@@ -116,6 +116,75 @@ enum Commands {
     /// `plans/cyclic-life-calendar.md`.
     #[command(subcommand)]
     Cycle(CycleCmd),
+    /// Projects served by the active org. Talks to
+    /// `/org/<slug>/vox` via the architect-generated
+    /// `ProjectServiceClient`.
+    #[command(subcommand)]
+    Project(ProjectCmd),
+    /// Goals (with cycle anchoring) served by the active
+    /// org. Talks to `/org/<slug>/vox` via the architect-
+    /// generated `GoalServiceClient`.
+    #[command(subcommand)]
+    Goal(GoalCmd),
+}
+
+#[derive(Subcommand)]
+enum ProjectCmd {
+    /// List every project the active org's vault carries.
+    /// Output: one row per project with status + parent
+    /// breadcrumb. Pass `--json` for machine-readable output.
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit JSON instead of the human-readable table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch one project by id or by vault-relative path.
+    /// Prints title + status + tags + the full details body.
+    Get {
+        /// Project UUID OR vault-relative path
+        /// (`Projects/Health/Fitness/Fitness.md`).
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum GoalCmd {
+    /// List every goal the active org's vault carries.
+    /// Output groups by lifetime root, shows the kind chip
+    /// (lifetime / yearly / cycle / …) and cycle anchor when
+    /// present.
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Only goals scoped to the current cycle (per
+        /// `cycle::cycle_for_date(today)`).
+        #[arg(long)]
+        current_cycle: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch one goal by id or by vault-relative path.
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1011,8 +1080,286 @@ async fn main() -> eyre::Result<()> {
         Commands::Cycle(cmd) => {
             return run_cycle(cmd);
         }
+        Commands::Project(cmd) => {
+            return Box::pin(run_project(cmd)).await;
+        }
+        Commands::Goal(cmd) => {
+            return Box::pin(run_goal(cmd)).await;
+        }
     }
     Ok(())
+}
+
+/// Resolve the per-org vox URL from CLI flags + env.
+/// Mirror of the helper inside `run_vault_sync`, lifted out
+/// because project + goal share the same routing surface.
+fn resolve_org_vox_url(server: Option<String>, org_slug: &str) -> String {
+    let base = server.unwrap_or_else(|| {
+        std::env::var("TASK_VOX_URL").unwrap_or_else(|_| "ws://127.0.0.1:18080".to_owned())
+    });
+    let stripped = base.trim_end_matches("/vox").trim_end_matches('/');
+    format!("{stripped}/org/{org_slug}/vox")
+}
+
+/// Resolve the active org slug from `--org` flag or the
+/// stored session. Returns a friendly error if neither
+/// resolves.
+fn resolve_active_org(override_slug: Option<String>) -> eyre::Result<String> {
+    if let Some(s) = override_slug {
+        return Ok(s);
+    }
+    session_store::load()?
+        .map(|s| s.active)
+        .ok_or_else(|| eyre::eyre!("no active org — pass --org or sign in first"))
+}
+
+async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
+    use project::ProjectServiceClient;
+
+    match cmd {
+        ProjectCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: ProjectServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            // Group by parent for human readability: roots
+            // first, then each root's subprojects indented.
+            let total = rows.len();
+            let roots: Vec<&project::ProjectInfo> =
+                rows.iter().filter(|p| p.parent_id.is_none()).collect();
+            println!("{} projects ({} top-level)\n", total, roots.len());
+            for root in roots {
+                print_project_row(root, 0);
+                let kids: Vec<&project::ProjectInfo> = rows
+                    .iter()
+                    .filter(|p| p.parent_id == Some(root.id))
+                    .collect();
+                for k in kids {
+                    print_project_row(k, 2);
+                }
+            }
+        }
+        ProjectCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: ProjectServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let p = if let Ok(id) = uuid::Uuid::parse_str(&target) {
+                client
+                    .get(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
+            } else {
+                client
+                    .get_by_path(target.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
+            };
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&p).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            println!("{} [{}]\n", p.title, p.status);
+            println!("  id:       {}", p.id);
+            println!("  path:     {}", p.path);
+            println!("  priority: {}", p.priority);
+            if let Some(parent) = p.parent_id {
+                println!("  parent:   {parent}");
+            }
+            if !p.tags.0.is_empty() {
+                println!("  tags:     {}", p.tags.0.join(", "));
+            }
+            if !p.details.is_empty() {
+                println!("\n{}", p.details);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_project_row(p: &project::ProjectInfo, indent: usize) {
+    let pad = " ".repeat(indent);
+    let tags = if p.tags.0.is_empty() {
+        String::new()
+    } else {
+        format!("  [{}]", p.tags.0.join(", "))
+    };
+    println!(
+        "{pad}{:<28}  {:<10}  {:<8}{tags}",
+        p.title, p.status, p.priority
+    );
+}
+
+async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
+    use chrono::Weekday;
+    use cycle::FirstWeekRule;
+    use goal::GoalServiceClient;
+
+    match cmd {
+        GoalCmd::List {
+            org,
+            server,
+            current_cycle,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: GoalServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let mut rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            if current_cycle {
+                let today = chrono::Local::now().date_naive();
+                let now = cycle::cycle_for_date(
+                    today,
+                    Weekday::Mon,
+                    FirstWeekRule::AtLeastFourDaysInYear,
+                );
+                if let Some(c) = now {
+                    rows.retain(|g| g.cycle_id == Some(c.id));
+                } else {
+                    println!("today is between cycles — nothing to show");
+                    return Ok(());
+                }
+            }
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            // Resolve cycle id → label once, reused across rows.
+            let cycle_label = |g: &goal::Goal| -> Option<String> {
+                use chrono::Datelike;
+                let id = g.cycle_id?;
+                let base = chrono::Local::now().date_naive().year();
+                for off in [-1, 0, 1, 2] {
+                    let qs = cycle::generate_year(
+                        base + off,
+                        Weekday::Mon,
+                        FirstWeekRule::AtLeastFourDaysInYear,
+                    );
+                    for q in qs {
+                        for c in q.cycles.iter() {
+                            if c.id == id {
+                                return Some(format!("{} Q{} C{}", c.year, c.quarter, c.ordinal));
+                            }
+                        }
+                    }
+                }
+                None
+            };
+
+            println!("{} goals\n", rows.len());
+            let roots: Vec<&goal::Goal> = rows.iter().filter(|g| g.parent_id.is_none()).collect();
+            for root in roots {
+                print_goal_row(root, 0, cycle_label(root));
+                for kid in rows.iter().filter(|g| g.parent_id == Some(root.id)) {
+                    print_goal_row(kid, 2, cycle_label(kid));
+                    for gc in rows.iter().filter(|g| g.parent_id == Some(kid.id)) {
+                        print_goal_row(gc, 4, cycle_label(gc));
+                    }
+                }
+            }
+        }
+        GoalCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: GoalServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let g = if let Ok(id) = uuid::Uuid::parse_str(&target) {
+                client
+                    .get(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
+            } else {
+                client
+                    .get_by_path(target.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
+            };
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&g).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            println!("{} [{}]\n", g.title, g.status);
+            println!("  id:       {}", g.id);
+            println!("  path:     {}", g.path);
+            println!("  kind:     {}", g.kind);
+            if let Some(parent) = g.parent_id {
+                println!("  parent:   {parent}");
+            }
+            if let Some(td) = g.target_date {
+                println!("  target:   {td}");
+            }
+            if let Some(cid) = g.cycle_id {
+                println!("  cycle:    {cid}");
+            }
+            if !g.tags.0.is_empty() {
+                println!("  tags:     {}", g.tags.0.join(", "));
+            }
+            if !g.details.is_empty() {
+                println!("\n{}", g.details);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_goal_row(g: &goal::Goal, indent: usize, cycle: Option<String>) {
+    let pad = " ".repeat(indent);
+    let cycle_str = cycle.map(|c| format!("  @{c}")).unwrap_or_default();
+    let target = g
+        .target_date
+        .map(|d| format!("  (target {d})"))
+        .unwrap_or_default();
+    println!(
+        "{pad}{:<32}  {:<10}  {:<10}{cycle_str}{target}",
+        g.title, g.kind, g.status
+    );
 }
 
 fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {

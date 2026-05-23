@@ -51,8 +51,12 @@ sea-orm-migration = { workspace = true }
 architect-auth = { workspace = true, features = ["full"] }
 sha2 = "0.10"
 base64 = { workspace = true }
-# Project lookup for timer's project-defaults resolver.
-project = { workspace = true }
+# Project lookup for timer's project-defaults resolver +
+# `task project list|get` via `ProjectServiceClient`.
+project = { workspace = true, features = ["vox"] }
+# `task goal list|get` via `GoalServiceClient` + cycle id
+# resolution against the local generator.
+goal = { workspace = true, features = ["vox"] }
 # Org-root layout (Phase 1 of plans/federated-task-platform.md).
 # Owns `task org init|list` + the `DataRoot` / `OrgRoot` path
 # resolvers. Existing auth/timer/finance paths keep working at
