@@ -17,6 +17,7 @@
 //! 2. `TASK_VOX_URL` env var (loaded from `.env` if present).
 //! 3. `ws://127.0.0.1:9090/vox` default.
 
+mod org_ctx;
 mod session_store;
 mod shared;
 
@@ -44,6 +45,13 @@ struct Cli {
     /// Organization id to route remote vox requests.
     #[arg(long, env = "TASK_ORGANIZATION_ID", global = true)]
     organization_id: Option<String>,
+
+    /// Override the active org for this invocation only.
+    /// Slug must match a dir under `<data_root>/orgs/`.
+    /// Precedence: this flag > `session.json` active >
+    /// single-org disambiguation > auto-bootstrap `default`.
+    #[arg(long, global = true)]
+    org: Option<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -783,13 +791,13 @@ async fn main() -> eyre::Result<()> {
             return run_wiki(cmd).await;
         }
         Commands::Timer(cmd) => {
-            return run_timer(cmd).await;
+            return run_timer(cmd, cli.org.as_deref()).await;
         }
         Commands::Finance(cmd) => {
-            return run_finance(cmd).await;
+            return run_finance(cmd, cli.org.as_deref()).await;
         }
         Commands::Auth(cmd) => {
-            return run_auth(cmd).await;
+            return run_auth(cmd, cli.org.as_deref()).await;
         }
         Commands::Org(cmd) => {
             return run_org(cmd);
@@ -840,16 +848,18 @@ fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
     Ok(())
 }
 
-/// Open `ArchitectAuth` against the local `auth.sqlite` —
-/// same DB the server uses. CLI ↔ server interop hinges on
-/// matching `default_auth_db_path()` + `DEFAULT_AUTH_SECRET`.
-async fn open_local_auth()
--> eyre::Result<architect_auth::ArchitectAuth<architect_auth::db::AuthSeaOrmStorage>> {
+/// Open `ArchitectAuth` against a specific org's
+/// `auth.sqlite` — same DB the server uses for that org.
+/// CLI ↔ server interop hinges on matching the
+/// `<data_root>/orgs/<slug>/auth.sqlite` resolver plus
+/// `DEFAULT_AUTH_SECRET`.
+async fn open_local_auth(
+    auth_db_path: &std::path::Path,
+) -> eyre::Result<architect_auth::ArchitectAuth<architect_auth::db::AuthSeaOrmStorage>> {
     use architect_auth::db::{AuthSeaOrmStorage, Migrator as AuthMigrator};
     use sea_orm::Database;
     use sea_orm_migration::MigratorTrait;
-    let path = session_store::default_auth_db_path()?;
-    let db_url = format!("sqlite://{}?mode=rwc", path.display());
+    let db_url = format!("sqlite://{}?mode=rwc", auth_db_path.display());
     let db = Database::connect(&db_url)
         .await
         .map_err(|e| eyre::eyre!("connect auth db `{db_url}`: {e}"))?;
@@ -864,12 +874,14 @@ async fn open_local_auth()
         .map_err(|e| eyre::eyre!("build ArchitectAuth: {e}"))
 }
 
-async fn run_auth(cmd: AuthCmd) -> eyre::Result<()> {
+async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> {
     use architect_auth::commands::{CurrentSession, SignOut};
     use architect_auth::proto::SignInEmailPassword;
+    let ctx = org_ctx::resolve_active(org_override)?;
+    let auth_db_path = ctx.root.auth_db();
     match cmd {
         AuthCmd::Login { email, password } => {
-            let auth = open_local_auth().await?;
+            let auth = open_local_auth(&auth_db_path).await?;
             let bundle = auth
                 .sign_in_email_password(SignInEmailPassword {
                     email: email.clone(),
@@ -879,95 +891,146 @@ async fn run_auth(cmd: AuthCmd) -> eyre::Result<()> {
                 })
                 .await
                 .map_err(|e| eyre::eyre!("sign in: {e}"))?;
-            let sess = session_store::CliSession {
-                token: bundle.token.clone(),
-                user_id: bundle.user.id,
-                email: bundle.user.email.clone().unwrap_or_else(|| email.clone()),
-                org_id: bundle.session.active_organization_id,
-            };
+            let resolved_email = bundle.user.email.clone().unwrap_or_else(|| email.clone());
+            // Multi-server session shape: insert/update the
+            // entry under this org's slug and set it active.
+            // `home` defaults to the first server signed into
+            // (the personal-org-as-home pattern).
+            let mut sess = session_store::load()?.unwrap_or_else(|| session_store::CliSession {
+                home: ctx.root.slug().to_owned(),
+                active: ctx.root.slug().to_owned(),
+                servers: std::collections::BTreeMap::new(),
+            });
+            sess.active = ctx.root.slug().to_owned();
+            if sess.home.is_empty() {
+                sess.home = ctx.root.slug().to_owned();
+            }
+            sess.servers.insert(
+                ctx.root.slug().to_owned(),
+                session_store::ServerEntry {
+                    url: "local".into(),
+                    user_id: bundle.user.id,
+                    email: resolved_email.clone(),
+                    token: bundle.token.clone(),
+                },
+            );
             session_store::save(&sess)?;
-            println!("Signed in as {} ({})", sess.email, sess.user_id);
-            match sess.org_id {
-                Some(org) => println!("Active org: {org}"),
-                None => println!("No active org — pick one with `task auth org use <id>`."),
+            println!(
+                "Signed in as {} ({}) on org `{}`",
+                resolved_email,
+                bundle.user.id,
+                ctx.root.slug(),
+            );
+            if let Some(member_org) = bundle.session.active_organization_id {
+                println!("Architect-auth active membership: {member_org}");
             }
         }
         AuthCmd::Whoami => match session_store::load()? {
             Some(s) => {
-                println!("email:   {}", s.email);
-                println!("user_id: {}", s.user_id);
-                match s.org_id {
-                    Some(org) => println!("org_id:  {org}"),
-                    None => println!("org_id:  (none — `task auth org use <id>`)"),
-                }
                 println!(
-                    "token:   <stored in {}>",
-                    session_store::session_path()?.display()
+                    "home:   {}",
+                    if s.home.is_empty() {
+                        "(none)"
+                    } else {
+                        s.home.as_str()
+                    }
                 );
+                println!("active: {}", s.active);
+                for (slug, entry) in &s.servers {
+                    let marker = if *slug == s.active { "*" } else { " " };
+                    println!(
+                        "{marker} {slug:<20}  {}  {}  url={}",
+                        entry.email, entry.user_id, entry.url
+                    );
+                }
+                println!("session: {}", session_store::session_path()?.display());
             }
             None => {
                 println!("Not signed in. Run `task auth login --email … --password …`.");
             }
         },
         AuthCmd::Logout => {
-            if let Some(s) = session_store::load()? {
-                let auth = open_local_auth().await?;
-                if let Err(e) = auth.sign_out(SignOut { token: s.token }).await {
-                    eprintln!("warning: server-side sign out failed: {e}");
+            if let Some(mut sess) = session_store::load()? {
+                // Sign out only the active org's session
+                // server-side. Other servers stay linked.
+                if let Some(entry) = sess.servers.remove(&sess.active) {
+                    let auth = open_local_auth(&auth_db_path).await?;
+                    if let Err(e) = auth.sign_out(SignOut { token: entry.token }).await {
+                        eprintln!("warning: server-side sign out failed: {e}");
+                    }
+                }
+                // If no servers left, clear the file entirely;
+                // else write the shrunken session back.
+                if sess.servers.is_empty() {
+                    session_store::clear()?;
+                } else {
+                    // Active falls back to home if home is
+                    // still present, otherwise pick the first
+                    // remaining server.
+                    if !sess.servers.contains_key(&sess.active) {
+                        sess.active = if sess.servers.contains_key(&sess.home) {
+                            sess.home.clone()
+                        } else {
+                            sess.servers.keys().next().cloned().unwrap_or_default()
+                        };
+                    }
+                    session_store::save(&sess)?;
                 }
             }
-            session_store::clear()?;
-            println!("Signed out.");
+            println!("Signed out of `{}`.", ctx.root.slug());
         }
         AuthCmd::Org(AuthOrgCmd::List) => {
             let Some(sess) = session_store::load()? else {
                 return Err(eyre::eyre!("not signed in — run `task auth login` first"));
             };
-            let auth = open_local_auth().await?;
-            // Verify session still valid + refresh `user_id`.
+            let Some(active_entry) = sess.active_server() else {
+                return Err(eyre::eyre!(
+                    "no active server entry in session — run `task auth login --org {} …` first",
+                    ctx.root.slug()
+                ));
+            };
+            let auth = open_local_auth(&auth_db_path).await?;
+            // Verify session still valid + refresh user_id.
             let bundle = auth
-                .current_session(CurrentSession { token: sess.token })
+                .current_session(CurrentSession {
+                    token: active_entry.token.clone(),
+                })
                 .await
                 .map_err(|e| eyre::eyre!("session: {e}"))?;
-            let memberships = list_user_memberships(bundle.user.id).await?;
+            let memberships = list_user_memberships(bundle.user.id, &auth_db_path).await?;
             if memberships.is_empty() {
                 println!("(no org memberships)");
             }
             for (member, org) in memberships {
-                let marker = if Some(member.organization_id) == sess.org_id {
-                    " *"
-                } else {
-                    "  "
-                };
                 println!(
-                    "{marker} {}  {}  ({})",
+                    "  {}  {}  ({})",
                     member.organization_id, org.name, member.role
                 );
             }
         }
         AuthCmd::Org(AuthOrgCmd::Use { org_id }) => {
-            let Some(mut sess) = session_store::load()? else {
+            let Some(sess) = session_store::load()? else {
                 return Err(eyre::eyre!("not signed in — run `task auth login` first"));
             };
+            let Some(active_entry) = sess.active_server() else {
+                return Err(eyre::eyre!("no active server in session"));
+            };
             // Membership check.
-            let memberships = list_user_memberships(sess.user_id).await?;
+            let memberships = list_user_memberships(active_entry.user_id, &auth_db_path).await?;
             if !memberships.iter().any(|(m, _)| m.organization_id == org_id) {
                 return Err(eyre::eyre!("user is not a member of org {org_id}"));
             }
-            update_session_active_org(&sess.token, Some(org_id)).await?;
-            sess.org_id = Some(org_id);
-            session_store::save(&sess)?;
-            println!("Active org set to {org_id}");
+            update_session_active_org(&active_entry.token, Some(org_id), &auth_db_path).await?;
+            println!("Architect-auth active membership set to {org_id}");
         }
     }
     Ok(())
 }
 
-async fn open_auth_db() -> eyre::Result<sea_orm::DatabaseConnection> {
+async fn open_auth_db(auth_db_path: &std::path::Path) -> eyre::Result<sea_orm::DatabaseConnection> {
     use sea_orm::Database;
     use sea_orm_migration::MigratorTrait;
-    let path = session_store::default_auth_db_path()?;
-    let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
+    let db = Database::connect(format!("sqlite://{}?mode=rwc", auth_db_path.display()))
         .await
         .map_err(|e| eyre::eyre!("connect auth db: {e}"))?;
     architect_auth::db::Migrator::up(&db, None)
@@ -978,6 +1041,7 @@ async fn open_auth_db() -> eyre::Result<sea_orm::DatabaseConnection> {
 
 async fn list_user_memberships(
     user_id: uuid::Uuid,
+    auth_db_path: &std::path::Path,
 ) -> eyre::Result<
     Vec<(
         architect_auth::db::AuthMemberModel,
@@ -986,7 +1050,7 @@ async fn list_user_memberships(
 > {
     use architect_auth::db::{AuthMemberColumn, AuthMemberEntity, AuthOrganizationEntity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-    let db = open_auth_db().await?;
+    let db = open_auth_db(auth_db_path).await?;
     let members = AuthMemberEntity::find()
         .filter(AuthMemberColumn::UserId.eq(user_id))
         .all(&db)
@@ -1006,11 +1070,15 @@ async fn list_user_memberships(
     Ok(out)
 }
 
-async fn update_session_active_org(token: &str, org_id: Option<uuid::Uuid>) -> eyre::Result<()> {
+async fn update_session_active_org(
+    token: &str,
+    org_id: Option<uuid::Uuid>,
+    auth_db_path: &std::path::Path,
+) -> eyre::Result<()> {
     use architect_auth::db::{AuthSessionActiveModel, AuthSessionColumn, AuthSessionEntity};
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
     let token_hash = hash_session_token(session_store::DEFAULT_AUTH_SECRET, token);
-    let db = open_auth_db().await?;
+    let db = open_auth_db(auth_db_path).await?;
     let row = AuthSessionEntity::find()
         .filter(AuthSessionColumn::TokenHash.eq(token_hash))
         .one(&db)
@@ -1043,26 +1111,16 @@ fn hash_session_token(secret: &str, token: &str) -> String {
     URL_SAFE_NO_PAD.encode(h.finalize())
 }
 
-async fn run_finance(cmd: FinanceCmd) -> eyre::Result<()> {
+async fn run_finance(cmd: FinanceCmd, org_override: Option<&str>) -> eyre::Result<()> {
     use sea_orm::Database;
     use sea_orm_migration::MigratorTrait;
 
-    let db_url = std::env::var("TASK_TIMER_DB").unwrap_or_else(|_| {
-        let base = std::env::var("XDG_DATA_HOME")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .map(std::path::PathBuf::from)
-                    .map(|p| p.join(".local/share"))
-            })
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let dir = base.join("task");
-        let _ = std::fs::create_dir_all(&dir);
-        format!("sqlite://{}?mode=rwc", dir.join("timer.sqlite").display())
-    });
+    let ctx = org_ctx::resolve_active(org_override)?;
+    // `TASK_TIMER_DB` still wins as a hard override (lets a
+    // fixture point at a fresh sqlite); else use the org's
+    // resolver.
+    let db_url = std::env::var("TASK_TIMER_DB")
+        .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
     let timer_conn = Database::connect(&db_url)
         .await
         .map_err(|e| eyre::eyre!("connect timer db `{db_url}`: {e}"))?;
@@ -1350,7 +1408,7 @@ fn render_invoice_markdown(
     out
 }
 
-async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
+async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()> {
     use sea_orm::Database;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
     use sea_orm_migration::MigratorTrait;
@@ -1359,43 +1417,20 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
     use timer::store::{Store, VaultProjectDefaults};
     use timer_proto::service::{LogSessionRequest, StartTimerRequest, TimerService};
 
-    // Layout — single-user CLI mode:
-    // - DB at $XDG_DATA_HOME/task/timer.sqlite (override via
-    //   `TASK_TIMER_DB`).
-    // - Vault root at `TASK_VAULT_ROOT` (defaults to
-    //   `./examples/vault` so the rate-cascade lookup
-    //   works against the demo vault out of the box).
-    // - User + org ids from `TASK_USER_ID` / `TASK_ORG_ID`
-    //   env, falling back to nil-uuid so a fresh setup
-    //   "just works" before auth is wired in.
-    let db_url = std::env::var("TASK_TIMER_DB").unwrap_or_else(|_| {
-        let base = std::env::var("XDG_DATA_HOME")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .map(std::path::PathBuf::from)
-                    .map(|p| p.join(".local/share"))
-            })
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let dir = base.join("task");
-        let _ = std::fs::create_dir_all(&dir);
-        format!("sqlite://{}?mode=rwc", dir.join("timer.sqlite").display())
-    });
-    let vault_root = std::env::var("TASK_VAULT_ROOT").map_or_else(
-        |_| std::path::PathBuf::from("examples/vault"),
-        std::path::PathBuf::from,
-    );
-    // ID resolution order (first match wins):
-    //   1. `task auth login`-issued session.json
-    //   2. `TASK_USER_ID` / `TASK_ORG_ID` env vars
-    //   3. fixed dev nil-uuids — only useful for fresh setups
-    //      before architect-auth is wired
+    // OrgRoot-driven path resolution. `TASK_TIMER_DB` /
+    // `TASK_VAULT_ROOT` still win as hard overrides for
+    // test fixtures. User/org ids come from the active
+    // server entry in `session.json`; falls back to env vars
+    // and finally dev nil-uuids for fresh setups.
+    let ctx = org_ctx::resolve_active(org_override)?;
+    let db_url = std::env::var("TASK_TIMER_DB")
+        .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", ctx.root.timer_db().display()));
+    let vault_root = std::env::var("TASK_VAULT_ROOT")
+        .map_or_else(|_| ctx.root.vault_dir(), std::path::PathBuf::from);
     let stored_session = session_store::load().ok().flatten();
-    let session_user_id = stored_session.as_ref().map(|s| s.user_id);
-    let session_org_id = stored_session.as_ref().and_then(|s| s.org_id);
+    let session_user_id = stored_session
+        .as_ref()
+        .and_then(|s| s.active_server().map(|e| e.user_id));
     let user_id = session_user_id
         .or_else(|| {
             std::env::var("TASK_USER_ID")
@@ -1403,12 +1438,14 @@ async fn run_timer(cmd: TimerCmd) -> eyre::Result<()> {
                 .and_then(|s| s.parse::<uuid::Uuid>().ok())
         })
         .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
-    let org_id = session_org_id
-        .or_else(|| {
-            std::env::var("TASK_ORG_ID")
-                .ok()
-                .and_then(|s| s.parse::<uuid::Uuid>().ok())
-        })
+    // `org_id` here is the architect-auth org membership id
+    // (different from the on-disk org slug). Not currently
+    // surfaced in the multi-server session shape; only an
+    // env-var override is honored. Phase 3 federation can
+    // promote this onto `ServerEntry`.
+    let org_id = std::env::var("TASK_ORG_ID")
+        .ok()
+        .and_then(|s| s.parse::<uuid::Uuid>().ok())
         .unwrap_or_else(|| uuid::Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap());
 
     let conn = Database::connect(&db_url)
