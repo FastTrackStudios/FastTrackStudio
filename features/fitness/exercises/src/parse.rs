@@ -60,22 +60,23 @@ pub fn parse_page(page: &VaultPage) -> Result<Exercise, ParseError> {
     let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
+    use crate::model::StringList;
     Ok(Exercise {
         path: page.rel_path.clone(),
         id,
         name,
-        aliases,
+        aliases: StringList(aliases),
         description,
         category,
-        primary_muscles,
-        secondary_muscles,
-        equipment,
+        primary_muscles: StringList(primary_muscles),
+        secondary_muscles: StringList(secondary_muscles),
+        equipment: StringList(equipment),
         mechanics,
         force,
-        instructions,
+        instructions: StringList(instructions),
         video_url,
         image_url,
-        tags,
+        tags: StringList(tags),
         date_created,
         date_modified,
         details: body.to_string(),

@@ -1,6 +1,6 @@
 [package]
 name = "exercises"
-description = "Exercise catalog feature — typed view of exercise pages in a `vault::Vault`. Exercises are markdown files with YAML frontmatter (`type: exercise`) under `<vault>/Wiki/Exercises/` so they ride on the wiki feature for curation + wikilinks (`[[chest press]]` resolves into a concept page, `[[pectoralis-major]]` into an anatomy page). Modeled on wger's Exercise + Category + Muscle + Equipment tables, flattened onto one page-per-exercise."
+description = "Exercise catalog feature. `Exercise` is an `architect::Entity` — the markdown frontmatter under `<vault>/Wiki/Exercises/<slug>.md` is the source of truth today, but the same schema mounts to SQLite under `--features server` without rewrite. Modeled on wger's Exercise + Category + Muscle + Equipment tables, flattened onto one page-per-exercise; wikilinks (`[[pectoralis-major]]`) ride on the wiki feature for cross-page navigation."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
@@ -21,10 +22,15 @@ vault = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
+fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
 
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
 
 [dev-dependencies]
 tempfile = "3"
