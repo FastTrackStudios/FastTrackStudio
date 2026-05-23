@@ -142,7 +142,7 @@ pub struct TrackEntry {
 }
 
 /// Reference track structure within a song.
-#[derive(Clone, Debug, PartialEq, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct ReferenceStructure {
     /// Identity of the Reference folder itself.
     pub folder_identity: Option<TrackIdentity>,
@@ -152,17 +152,6 @@ pub struct ReferenceStructure {
     pub stem_split_folder_identity: Option<TrackIdentity>,
     /// Individual stem tracks.
     pub stems: Vec<TrackEntry>,
-}
-
-impl Default for ReferenceStructure {
-    fn default() -> Self {
-        Self {
-            folder_identity: None,
-            mix_identity: None,
-            stem_split_folder_identity: None,
-            stems: vec![],
-        }
-    }
 }
 
 // ─── Setlist Track Structure ─────────────────────────────────

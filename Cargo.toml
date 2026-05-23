@@ -33,15 +33,22 @@ session-ui = { path = "crates/session-ui", default-features = false }
 # only needed by the in-process REAPER extension binary in this repo.
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-synchronization = { path = "../daw/crates/daw-synchronization" }
 
 # ── Testing (from daw repo) ─────────────────────────────────────────
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 
-# ── Vox service framework (fork with wasm32 fix) ─────────────────────
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+# ── Vox service framework ────────────────────────────────────────────
+# Aligned with daw + architect on bearcove upstream so the FTS workspace
+# resolves a single vox copy across all sibling repos.
+vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-websocket = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+
+# ── Architect service framework ─────────────────────────────────────
+architect = { path = "../../architect/macros/architect" }
 
 # ── Facet reflection ────────────────────────────────────────────────
 facet = { version = "0.46" }
@@ -49,6 +56,9 @@ facet = { version = "0.46" }
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
 keyflow-daw-analysis = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
+
+# ── Dynamic session templates ───────────────────────────────────────
+dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
 
 # ── Actions / Input (sibling repo) ──────────────────────────────────
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
@@ -91,7 +101,10 @@ eyre = "0.6"
 #
 [patch."https://github.com/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-control = { path = "../daw/crates/daw-control" }
 daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
+daw-reaper = { path = "../daw/crates/daw-reaper" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 fts-devtools = { path = "../daw/crates/fts-devtools" }
 reaper-test = { path = "../daw/crates/reaper-test" }
@@ -117,18 +130,9 @@ actions-proto = { path = "../input_actions/crates/actions-proto" }
 # [patch."https://github.com/FastTrackStudios/fts-utils.git"]
 # utils = { path = "../fts-utils" }
 #
-# Redirect transitive deps on upstream vox to our fork (wasm32 fix)
-[patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+# Vox pins live in `[workspace.dependencies]` above — no transitive-dep
+# redirection needed now that session, keyflow, daw, and architect all
+# resolve to the same bearcove rev.
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,

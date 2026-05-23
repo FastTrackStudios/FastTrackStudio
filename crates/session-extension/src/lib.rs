@@ -9,9 +9,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
 
-use daw::RxExt;
 use daw::module;
-use daw::service::ActionEvent;
+use daw::service::ExtState;
 use daw_extension_runtime::ExtensionRuntime;
 use fragile::Fragile;
 use reaper_low::PluginContext;
@@ -33,9 +32,9 @@ struct TestExtension {
 impl TestExtension {
     fn new(context: PluginContext) -> eyre::Result<Self> {
         let runtime = ExtensionRuntime::new(context)?;
-        let daw = runtime.build_daw()?;
+        let _daw = runtime.build_daw()?;
 
-        let modules = vec![session::daw_module::module()];
+        let modules = vec![session::daw_module::module_with_daw(daw_reaper::Reaper)];
         let module_ctx = runtime.module_context();
         module::init_all(&modules, &module_ctx);
         let action_defs = module::collect_actions(&modules);
@@ -46,46 +45,43 @@ impl TestExtension {
         }
 
         let (action_tx, action_rx) = crossbeam_channel::unbounded();
-        runtime.spawn(async move {
-            let registry = daw.action_registry();
+        for (command_id, display_name, _, show_in_menu, toggleable) in action_defs {
+            let cmd_id = daw_reaper::action_registry::register_action_main_thread(
+                &command_id,
+                &display_name,
+                show_in_menu,
+                toggleable,
+            );
 
-            for (command_id, display_name, _, show_in_menu, toggleable) in action_defs {
-                let result = match (show_in_menu, toggleable) {
-                    (true, true) => registry.register_toggle_in_menu(&command_id, &display_name).await,
-                    (true, false) => registry.register_in_menu(&command_id, &display_name).await,
-                    (false, true) => registry.register_toggle(&command_id, &display_name).await,
-                    (false, false) => registry.register(&command_id, &display_name).await,
-                };
-
-                match result {
-                    Ok(cmd_id) if cmd_id > 0 => {
-                        info!(command_id = %command_id, cmd_id, "session test action registered");
-                    }
-                    Ok(_) => warn!(command_id = %command_id, "session test action registration returned 0"),
-                    Err(e) => warn!(command_id = %command_id, "session test action registration failed: {e}"),
-                }
+            if cmd_id > 0 {
+                info!(command_id = %command_id, cmd_id, "session test action registered");
+            } else {
+                warn!(command_id = %command_id, "session test action registration returned 0");
             }
+        }
 
-            let _ = daw
-                .ext_state()
-                .set("FTS_SESSION_EXT", "status", "ready", false)
-                .await;
-            let _ = daw
-                .ext_state()
-                .set("FTS_SESSION_EXT", "pid", &std::process::id().to_string(), false)
-                .await;
+        let _ = ExtState::set(
+            &daw_reaper::Reaper,
+            "FTS_SESSION_EXT",
+            "status",
+            "ready",
+            false,
+        );
+        let _ = ExtState::set(
+            &daw_reaper::Reaper,
+            "FTS_SESSION_EXT",
+            "pid",
+            &std::process::id().to_string(),
+            false,
+        );
 
-            let Ok(mut events) = registry.subscribe_actions().await else {
-                warn!("session test extension failed to subscribe to action events");
-                return;
-            };
-
+        runtime.spawn(async move {
+            let mut events = daw_reaper::action_registry::subscribe_action_broadcasts();
             loop {
-                match events.next_owned().await {
-                    Ok(Some(ActionEvent::Triggered { command_name })) => {
+                match events.recv().await {
+                    Ok(command_name) => {
                         let _ = action_tx.send(command_name);
                     }
-                    Ok(None) => break, // channel closed by host
                     Err(e) => {
                         warn!("session test extension action stream error: {e}");
                         break;

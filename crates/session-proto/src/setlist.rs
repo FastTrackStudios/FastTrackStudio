@@ -56,7 +56,7 @@ pub enum QueuedTarget {
 ///
 /// A setlist is an ordered collection of songs, typically built from
 /// multiple DAW projects or from sections within a single project.
-#[derive(Clone, Debug, PartialEq, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct Setlist {
     /// Unique identifier
     pub id: Option<String>,
@@ -66,17 +66,6 @@ pub struct Setlist {
     pub advance_mode: AdvanceMode,
     /// Songs in the setlist (in order)
     pub songs: Vec<Song>,
-}
-
-impl Default for Setlist {
-    fn default() -> Self {
-        Self {
-            id: None,
-            name: String::new(),
-            advance_mode: AdvanceMode::default(),
-            songs: Vec::new(),
-        }
-    }
 }
 
 impl Setlist {

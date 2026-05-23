@@ -4,7 +4,7 @@
 //! into semantic categories. The lanes are split into two groups:
 //!
 //! **Core lanes** (always present):
-//! - SONG, SECTIONS, MARKS, START/END, KEY, MODE, CHORDS, NOTES
+//! - SONG, SECTIONS, MARKS, KEY
 //!
 //! **Instrument note lanes** (created on demand per instrument):
 //! - Drums, Bass, Guitar, Guitar 2, Keys, Keys 2, Lead, BGVs, etc.
@@ -25,16 +25,8 @@ pub enum CoreLane {
     Sections = 1,
     /// Structural/general markers: Count-In, cues.
     Marks = 2,
-    /// Render/release bounds: =START, =END, PREROLL.
-    StartEnd = 3,
     /// Key signature markers (e.g., "Eb", "F#m").
-    Key = 4,
-    /// Mode/scale markers (e.g., "Dorian", "Mixolydian").
-    Mode = 5,
-    /// Chord markers (e.g., "Cm", "Ab", "Eb7").
-    Chords = 6,
-    /// General notes (instrument-agnostic).
-    Notes = 7,
+    Key = 3,
 }
 
 impl CoreLane {
@@ -44,11 +36,7 @@ impl CoreLane {
             CoreLane::Song,
             CoreLane::Sections,
             CoreLane::Marks,
-            CoreLane::StartEnd,
             CoreLane::Key,
-            CoreLane::Mode,
-            CoreLane::Chords,
-            CoreLane::Notes,
         ]
     }
 
@@ -63,11 +51,7 @@ impl CoreLane {
             Self::Song => "SONG",
             Self::Sections => "SECTIONS",
             Self::Marks => "MARKS",
-            Self::StartEnd => "START/END",
             Self::Key => "KEY",
-            Self::Mode => "MODE",
-            Self::Chords => "CHORDS",
-            Self::Notes => "NOTES",
         }
     }
 
@@ -85,7 +69,7 @@ impl CoreLane {
 
     /// Number of core lanes.
     pub const fn count() -> u32 {
-        8
+        4
     }
 
     pub fn from_index(index: u32) -> Option<Self> {
@@ -211,17 +195,9 @@ pub fn classify_marker_lane(name: &str) -> FtsLane {
 
         // MARKS lane: structural cues
         "COUNT-IN" | "COUNT IN" | "COUNTIN" => FtsLane::Core(CoreLane::Marks),
-        // START/END lane: render bounds
-        "=START" | "=END" | "PREROLL" | "=PREROLL" => FtsLane::Core(CoreLane::StartEnd),
-        _ => {
-            // Markers starting with "=" are bounds
-            if trimmed.starts_with('=') {
-                FtsLane::Core(CoreLane::StartEnd)
-            } else {
-                // Default: general NOTES lane for unclassified markers
-                FtsLane::Core(CoreLane::Notes)
-            }
-        }
+        // MARKS lane: render/release bounds
+        "=START" | "=END" | "PREROLL" | "=PREROLL" => FtsLane::Core(CoreLane::Marks),
+        _ => FtsLane::Core(CoreLane::Marks),
     }
 }
 
@@ -283,18 +259,18 @@ mod tests {
 
     #[test]
     fn instrument_lanes_start_after_core() {
-        assert_eq!(InstrumentLane::Drums.lane_index(), 9);
-        assert_eq!(InstrumentLane::Bass.lane_index(), 10);
-        assert_eq!(InstrumentLane::Guitar.lane_index(), 11);
-        assert_eq!(InstrumentLane::BGVs.lane_index(), 16);
+        assert_eq!(InstrumentLane::Drums.lane_index(), 5);
+        assert_eq!(InstrumentLane::Bass.lane_index(), 6);
+        assert_eq!(InstrumentLane::Guitar.lane_index(), 7);
+        assert_eq!(InstrumentLane::BGVs.lane_index(), 12);
     }
 
     #[test]
     fn fts_lane_unified_index() {
         assert_eq!(FtsLane::Core(CoreLane::Song).lane_index(), 1);
         assert_eq!(FtsLane::Core(CoreLane::Sections).lane_index(), 2);
-        assert_eq!(FtsLane::Core(CoreLane::Notes).lane_index(), 8);
-        assert_eq!(FtsLane::Instrument(InstrumentLane::Drums).lane_index(), 9);
+        assert_eq!(FtsLane::Core(CoreLane::Marks).lane_index(), 3);
+        assert_eq!(FtsLane::Instrument(InstrumentLane::Drums).lane_index(), 5);
     }
 
     #[test]
@@ -317,15 +293,12 @@ mod tests {
     fn classify_bound_markers() {
         assert_eq!(
             classify_marker_lane("=START"),
-            FtsLane::Core(CoreLane::StartEnd)
+            FtsLane::Core(CoreLane::Marks)
         );
-        assert_eq!(
-            classify_marker_lane("=END"),
-            FtsLane::Core(CoreLane::StartEnd)
-        );
+        assert_eq!(classify_marker_lane("=END"), FtsLane::Core(CoreLane::Marks));
         assert_eq!(
             classify_marker_lane("PREROLL"),
-            FtsLane::Core(CoreLane::StartEnd)
+            FtsLane::Core(CoreLane::Marks)
         );
     }
 
@@ -351,28 +324,20 @@ mod tests {
         // RULERLANE 1 4 SONG 0 -1
         // RULERLANE 2 8 SECTIONS 0 -1
         // RULERLANE 3 0 MARKS 0 -1
-        // RULERLANE 4 0 START/END 0 -1
-        // RULERLANE 5 0 KEY 0 -1
-        // RULERLANE 6 0 MODE 0 -1
-        // RULERLANE 7 0 CHORDS 0 -1
-        // RULERLANE 8 0 NOTES 0 -1
-        // RULERLANE 9 0 Drums 0 -1
+        // RULERLANE 4 0 KEY 0 -1
+        // RULERLANE 5 0 Drums 0 -1
         // ...
         assert_eq!(CoreLane::Song.lane_index(), 1);
         assert_eq!(CoreLane::Sections.lane_index(), 2);
         assert_eq!(CoreLane::Marks.lane_index(), 3);
-        assert_eq!(CoreLane::StartEnd.lane_index(), 4);
-        assert_eq!(CoreLane::Key.lane_index(), 5);
-        assert_eq!(CoreLane::Mode.lane_index(), 6);
-        assert_eq!(CoreLane::Chords.lane_index(), 7);
-        assert_eq!(CoreLane::Notes.lane_index(), 8);
-        assert_eq!(InstrumentLane::Drums.lane_index(), 9);
-        assert_eq!(InstrumentLane::Bass.lane_index(), 10);
-        assert_eq!(InstrumentLane::Guitar.lane_index(), 11);
-        assert_eq!(InstrumentLane::Guitar2.lane_index(), 12);
-        assert_eq!(InstrumentLane::Keys.lane_index(), 13);
-        assert_eq!(InstrumentLane::Keys2.lane_index(), 14);
-        assert_eq!(InstrumentLane::Lead.lane_index(), 15);
-        assert_eq!(InstrumentLane::BGVs.lane_index(), 16);
+        assert_eq!(CoreLane::Key.lane_index(), 4);
+        assert_eq!(InstrumentLane::Drums.lane_index(), 5);
+        assert_eq!(InstrumentLane::Bass.lane_index(), 6);
+        assert_eq!(InstrumentLane::Guitar.lane_index(), 7);
+        assert_eq!(InstrumentLane::Guitar2.lane_index(), 8);
+        assert_eq!(InstrumentLane::Keys.lane_index(), 9);
+        assert_eq!(InstrumentLane::Keys2.lane_index(), 10);
+        assert_eq!(InstrumentLane::Lead.lane_index(), 11);
+        assert_eq!(InstrumentLane::BGVs.lane_index(), 12);
     }
 }

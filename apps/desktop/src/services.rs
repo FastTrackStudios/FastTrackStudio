@@ -7,11 +7,11 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use daw::rpc::{Caller, Daw};
-use daw::sync::LocalCaller;
+use daw_reaper::{LocalCaller, Reaper};
 use eyre::{Result, bail};
 use session::{
-    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher,
-    SongServiceImpl, setlist_service_service_descriptor, song_service_service_descriptor,
+    SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
+    serve_setlist_service, setlist_service_service_descriptor, song_service_service_descriptor,
 };
 use session_ui::Session;
 
@@ -27,13 +27,13 @@ const SOCKET_SUFFIX: &str = ".sock";
 /// The gateway serves the web app and accepts WebSocket RPC connections
 /// regardless of whether REAPER is connected.
 pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
-    let setlist = SetlistServiceImpl::new();
+    let setlist = SetlistServiceImpl::with_daw(Reaper);
     let song = SongServiceImpl::new();
 
     let handler = gateway::RoutedHandler::new()
         .with(
             &setlist_service_service_descriptor(),
-            SetlistServiceDispatcher::new(setlist),
+            serve_setlist_service(setlist),
         )
         .with(
             &song_service_service_descriptor(),
@@ -72,9 +72,9 @@ pub async fn connect_to_reaper() -> Result<()> {
     Daw::init(caller)?;
     tracing::info!("DAW initialized");
 
-    let setlist = SetlistServiceImpl::new();
+    let setlist = SetlistServiceImpl::with_daw(Reaper);
 
-    let local = LocalCaller::new(SetlistServiceDispatcher::new(setlist)).await?;
+    let local = LocalCaller::new(serve_setlist_service(setlist)).await?;
     let client = SetlistServiceClient::new(local.caller());
 
     // Build setlist from whatever's open in REAPER
