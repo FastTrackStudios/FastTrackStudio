@@ -17,23 +17,66 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// Shared `Vec<String>` newtype — JSON column under the
+/// SeaORM emission. Used for `aliases`, `primary_muscles`,
+/// `secondary_muscles`, `equipment`, `instructions`, `tags`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+impl StringList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for StringList {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for StringList {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StringList {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "exercises", repo)]
 pub struct Exercise {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
     /// Canonical display name — `"Bench Press"`, `"Romanian
     /// Deadlift"`. Falls back to filename basename when
     /// missing.
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Other names this exercise goes by — `"BB Bench"`,
     /// `"Flat Barbell Bench"`. Searches + recipe-style
     /// pantry-match fuzz hits these too.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub aliases: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub aliases: StringList,
 
     /// One-line summary for index views.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -43,6 +86,7 @@ pub struct Exercise {
     /// `"shoulders"`, `"arms"`, `"core"`, `"cardio"`,
     /// `"mobility"`. Canonical set in [`Category`].
     #[serde(default = "default_category")]
+    #[architect(filterable)]
     pub category: String,
 
     /// Primary muscles trained. Convention: wikilink the
@@ -50,26 +94,29 @@ pub struct Exercise {
     /// (`"[[pectoralis-major]]"`, `"[[triceps-brachii]]"`);
     /// raw strings are fine.
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "StringList::is_empty",
         default,
         rename = "primaryMuscles"
     )]
-    pub primary_muscles: Vec<String>,
+    #[architect(json)]
+    pub primary_muscles: StringList,
 
     /// Synergist + stabilizer muscles.
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "StringList::is_empty",
         default,
         rename = "secondaryMuscles"
     )]
-    pub secondary_muscles: Vec<String>,
+    #[architect(json)]
+    pub secondary_muscles: StringList,
 
     /// Equipment required — `"barbell"`, `"dumbbell"`,
     /// `"cable"`, `"machine"`, `"bodyweight"`, `"band"`,
     /// `"kettlebell"`. Multiple entries fine. Canonical set
     /// in [`Equipment`].
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub equipment: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub equipment: StringList,
 
     /// `"compound"` (multi-joint — squat, bench, row) or
     /// `"isolation"` (single-joint — curl, leg extension).
@@ -84,8 +131,9 @@ pub struct Exercise {
 
     /// Ordered technique cues. Each step is a markdown
     /// string; embed wikilinks freely.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub instructions: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub instructions: StringList,
 
     /// Optional video — URL or vault-relative path.
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "videoUrl")]
@@ -97,8 +145,9 @@ pub struct Exercise {
 
     /// Free-form tags — `"warmup"`, `"main-lift"`,
     /// `"accessory"`, `"hypertrophy"`. Drives queries.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub tags: StringList,
 
     #[serde(
         skip_serializing_if = "Option::is_none",

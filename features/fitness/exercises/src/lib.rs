@@ -1,3 +1,8 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope to keep migration uniform with other
+// architect-derived features.
+#![allow(unexpected_cfgs)]
+
 //! `exercises` — typed view of exercise-catalog pages in
 //! a `vault::Vault`.
 //!
