@@ -291,7 +291,15 @@ pub(crate) async fn build_org_state(
         // flat parent dir).
         let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
             .map_or_else(|_| org_root.vault_dir(), PathBuf::from);
-        let vault_sync_state = vault::Backend::under_parent(vault_root.clone())
+        // `single("default", vault_root)` — one vault per org,
+        // and `vault_id = "default"` resolves *to the org's vault
+        // root directly*. Earlier we used `under_parent`, which
+        // routed writes into `vault_root/default/…` — and every
+        // `ProjectBackend` / `GoalBackend` scan then saw each
+        // file twice (once at the real path, once under the
+        // ghost `default/` subdir). Same `wiki_id = "default"`
+        // convention the wiki backend already uses on line 304.
+        let vault_sync_state = vault::Backend::single("default", vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
         // Wiki rooted at `<org>/wiki/Knowledge/` (the curated
         // tier). `LLM/` scratch is a sibling subtree the
