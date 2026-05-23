@@ -14,15 +14,117 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// `Vec<String>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct Tags(pub Vec<String>);
+
+impl Tags {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for Tags {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for Tags {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for Tags {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// `Vec<RoutineDay>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct RoutineDays(pub Vec<RoutineDay>);
+
+impl RoutineDays {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<RoutineDay>> for RoutineDays {
+    fn from(v: Vec<RoutineDay>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for RoutineDays {
+    type Target = Vec<RoutineDay>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// `Vec<LoggedSet>` newtype — JSON column. Logged sets live
+/// inline in the session row; if per-set queries get hot,
+/// promote `LoggedSet` to its own table.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct LoggedSets(pub Vec<LoggedSet>);
+
+impl LoggedSets {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<LoggedSet>> for LoggedSets {
+    fn from(v: Vec<LoggedSet>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for LoggedSets {
+    type Target = Vec<LoggedSet>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for LoggedSets {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 // ── Routine (programmed template) ─────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "routines", repo)]
 pub struct Routine {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -31,13 +133,15 @@ pub struct Routine {
     /// Days in the rotation. A routine with one entry is a
     /// full-body program; one with three is a typical
     /// push/pull/legs split.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub days: Vec<RoutineDay>,
+    #[serde(skip_serializing_if = "RoutineDays::is_empty", default)]
+    #[architect(json)]
+    pub days: RoutineDays,
 
     /// Free-form tags — `"strength"`, `"hypertrophy"`,
     /// `"in-season"`, `"deload"`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Tags::is_empty", default)]
+    #[architect(json)]
+    pub tags: Tags,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -57,6 +161,7 @@ pub struct Routine {
     pub details: String,
 }
 
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct RoutineDay {
     /// Display label — `"Push Day"`, `"Day A"`,
@@ -77,6 +182,7 @@ pub struct RoutineDay {
 /// supersetted exercises). Mirrors wger's `Slot` +
 /// `SlotEntry` collapsed into one row when the slot only
 /// holds one exercise (the common case).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct RoutineSlot {
     /// Exercise from the `exercises` catalog. Cached
@@ -125,27 +231,34 @@ pub struct RoutineSlot {
 
 // ── WorkoutSession (one performance) ──────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "workout_sessions", repo)]
 pub struct WorkoutSession {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
     /// Display label. Falls back to `"<routine name> —
     /// <day>"` or just the date when neither is known.
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Calendar date the workout was performed on. Stored
     /// as a date rather than full timestamp so weekly /
     /// monthly views read cleanly; per-set `started_at` /
     /// `ended_at` live on the session if needed.
+    #[architect(filterable, sortable)]
     pub date: NaiveDate,
 
     /// Optional routine this session was performed against.
     /// `None` for ad-hoc workouts — just a list of logged
     /// sets, no template.
     #[serde(skip_serializing_if = "Option::is_none", default, rename = "routineId")]
+    #[architect(filterable)]
     pub routine_id: Option<Uuid>,
 
     /// Which day from the routine — `"Push Day"`. Free-form
@@ -156,13 +269,19 @@ pub struct WorkoutSession {
     /// Actuals: every set performed in this session. Flat
     /// list — `LoggedSet::order` keeps sequence; multiple
     /// sets of the same exercise are sequential rows.
-    #[serde(skip_serializing_if = "Vec::is_empty", default, rename = "loggedSets")]
-    pub logged_sets: Vec<LoggedSet>,
+    #[serde(
+        skip_serializing_if = "LoggedSets::is_empty",
+        default,
+        rename = "loggedSets"
+    )]
+    #[architect(json)]
+    pub logged_sets: LoggedSets,
 
     /// Free-form status. Canonical set in [`SessionStatus`]
     /// (`planned` / `in-progress` / `completed` /
     /// `skipped`).
     #[serde(default = "default_status")]
+    #[architect(filterable)]
     pub status: String,
 
     /// Total session duration in minutes. Optional —
@@ -176,8 +295,9 @@ pub struct WorkoutSession {
 
     /// Tags — `"home-gym"`, `"travel"`, `"PR-day"`,
     /// `"deload"`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Tags::is_empty", default)]
+    #[architect(json)]
+    pub tags: Tags,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -204,7 +324,10 @@ fn default_status() -> String {
 }
 
 /// One actual set performed. The level wger calls
-/// `WorkoutLog`.
+/// `WorkoutLog`. Held inline inside
+/// [`WorkoutSession::logged_sets`] as JSON; promotes to its
+/// own entity once per-set queries get hot.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct LoggedSet {
     /// Stable id so a UI can edit individual rows without
