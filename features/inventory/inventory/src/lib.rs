@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `inventory` — typed view of gear/equipment pages in a
 //! `vault::Vault`.
 //!

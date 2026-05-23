@@ -590,8 +590,8 @@ impl PantryItem {
             serial: None,
             purchase_date: None,
             value: None,
-            tasks: Vec::new(),
-            tags: self.tags.clone(),
+            tasks: inventory::model::StringList::default(),
+            tags: inventory::model::StringList(self.tags.clone()),
             date_created: self.date_created,
             date_modified: self.date_modified,
             details: self.details.clone(),
@@ -603,7 +603,7 @@ impl PantryItem {
     /// before persisting via [`crate::Store::create`].
     #[must_use]
     pub fn from_item(item: Item) -> Self {
-        let mut tags = item.tags.clone();
+        let mut tags = item.tags.0.clone();
         if !tags.iter().any(|t| t == "pantry") {
             tags.push("pantry".to_string());
         }

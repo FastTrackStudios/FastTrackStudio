@@ -17,36 +17,81 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// Shared `Vec<String>` newtype — JSON column under SeaORM.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+impl StringList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for StringList {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for StringList {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StringList {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "items", repo)]
 pub struct Item {
     /// Vault-relative path of the markdown file backing this
-    /// item. Populated by the scanner; not serialized.
+    /// item. Populated by the scanner; not serialized into
+    /// frontmatter; stored as a DB column under server.
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
     /// Stable identifier — survives renames + moves.
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Free-form category — `"guitar"`, `"amp"`, `"mic"`,
     /// `"cable"`, `"outboard"`, `"computer"`. Convention only;
     /// nothing enforces a fixed set.
     #[serde(default)]
+    #[architect(filterable)]
     pub category: String,
 
     /// Where the item physically lives. Points at a `Location`
     /// id (see the `locations` crate). `None` for un-located
     /// items (e.g. "still in shipping").
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(filterable)]
     pub location_id: Option<Uuid>,
 
     /// Free-form condition; canonical set in [`Condition`].
     #[serde(default = "default_condition")]
+    #[architect(filterable)]
     pub condition: String,
 
     /// Free-form lifecycle status; canonical set in [`Status`].
     #[serde(default = "default_status")]
+    #[architect(filterable)]
     pub status: String,
 
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -77,13 +122,15 @@ pub struct Item {
     /// Stored as vault-relative paths (`Task/restring-strat.md`)
     /// or wikilinks (`"[[Restring Strat]]"`); the `task` crate's
     /// scanner resolves them.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tasks: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub tasks: StringList,
 
     /// Free-form tags — `"primary"`, `"backup"`, `"vintage"`,
     /// `"rental"`. Drives queries; everything else is freeform.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub tags: StringList,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
