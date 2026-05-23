@@ -19,27 +19,64 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// `Vec<String>` newtype — JSON column under SeaORM.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct Tags(pub Vec<String>);
+
+impl Tags {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for Tags {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for Tags {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for Tags {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "locations", repo)]
 pub struct Location {
-    /// Vault-relative path of the markdown file backing this
-    /// location (e.g. `locations/home-studio.md`). Populated by
-    /// the scanner; not serialized into frontmatter.
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
-    /// Stable identifier — survives renames + moves. Generated
-    /// at create-time; persisted in frontmatter.
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Free-form. Canonical set in [`Kind`].
     #[serde(default = "default_kind")]
+    #[architect(filterable)]
     pub kind: String,
 
     /// Parent location, if this is nested inside another (e.g.
     /// "Control Room" inside "Home Studio"). `None` for top-level.
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(filterable)]
     pub parent_id: Option<Uuid>,
 
     /// Optional postal address (used by venue/studio kinds).
@@ -47,8 +84,9 @@ pub struct Location {
     pub address: Option<String>,
 
     /// Free-form tags — `"primary"`, `"rental"`, `"climate-controlled"`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Tags::is_empty", default)]
+    #[architect(json)]
+    pub tags: Tags,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
