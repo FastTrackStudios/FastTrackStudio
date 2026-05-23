@@ -35,7 +35,7 @@ async fn boot_server() -> eyre::Result<(String, tempfile::TempDir)> {
     unsafe {
         std::env::set_var("TASK_SERVER_VAULT_ROOT", tmp.path());
     }
-    let state = AppState::new().await?;
+    let state = AppState::new(None).await?;
     drop(guard);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();

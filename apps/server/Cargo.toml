@@ -45,6 +45,10 @@ agent-tasks = { workspace = true }
 agent-dispatch = { workspace = true }
 task = { workspace = true }
 project = { workspace = true }
+# Org-root layout: this server picks one org's dir at boot
+# and routes all its sqlites + vault through OrgRoot. PR 4
+# will scan + serve every org under <data_root>/orgs/.
+org-proto = { workspace = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
 # Finance: SQLite + migrations only at this slice; service
