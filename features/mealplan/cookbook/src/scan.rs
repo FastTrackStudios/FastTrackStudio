@@ -1,9 +1,10 @@
 //! Walk a vault root for `.cook` files and parse them.
 //!
-//! The cookbook lives under `<vault>/Cookbook/` by convention.
-//! This module knows nothing about `vault::Vault` — it walks
-//! the filesystem directly with `walkdir`. Recipes are NOT
-//! markdown pages; the vault's page index doesn't see them.
+//! The cookbook lives under `<vault>/Wiki/Cookbook/` — recipes
+//! are wiki pages in cooklang form, not a sibling top-level
+//! tree. This module knows nothing about `vault::Vault`; it
+//! walks the filesystem directly with `walkdir`. Recipes are
+//! NOT markdown pages; the vault's page index doesn't see them.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -15,11 +16,14 @@ use crate::model::Recipe;
 use crate::parse::parse_cook_at;
 
 /// Default cookbook sub-directory inside the vault root.
-pub const COOKBOOK_DIR: &str = "Cookbook";
+/// Recipes live alongside other wiki content so wikilinks to
+/// ingredient pages (`[[saute]]`, `[[mise en place]]`) resolve
+/// in the same namespace.
+pub const COOKBOOK_DIR: &str = "Wiki/Cookbook";
 
-/// Walk `<vault_root>/Cookbook/` and parse every `.cook` file
-/// into a [`Recipe`]. Files that fail to parse are skipped
-/// with a warning.
+/// Walk `<vault_root>/Wiki/Cookbook/` and parse every `.cook`
+/// file into a [`Recipe`]. Files that fail to parse are
+/// skipped with a warning.
 #[must_use]
 pub fn scan_cookbook(vault_root: &Path) -> Vec<Recipe> {
     scan_cookbook_at(vault_root, COOKBOOK_DIR)
@@ -69,9 +73,9 @@ pub fn scan_cookbook_at(vault_root: &Path, sub_dir: &str) -> Vec<Recipe> {
 /// Discover step + title images for a recipe, following the
 /// cooklang/cooklang-find convention:
 ///
-/// - `Cookbook/Pasta.jpg` — title image.
-/// - `Cookbook/Pasta.0.jpg` — step 0 image.
-/// - `Cookbook/Pasta.3.jpg` — step 3 image.
+/// - `Wiki/Cookbook/Pasta.jpg` — title image.
+/// - `Wiki/Cookbook/Pasta.0.jpg` — step 0 image.
+/// - `Wiki/Cookbook/Pasta.3.jpg` — step 3 image.
 ///
 /// Returns vault-relative paths (forward-slash separated)
 /// suitable for embedding in UI surfaces.
