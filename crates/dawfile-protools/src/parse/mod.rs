@@ -300,6 +300,73 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
+    // Step 12a2: Assign PT display order from the 0x251a track list.
+    //
+    // The 0x2519/0x251a list enumerates EVERY track (audio, MIDI, master,
+    // folder/divider) in PT's on-screen Edit-window order. That order is what
+    // the user sees and what the official converter preserves — unlike the
+    // channel-map `index`, which is internal voice assignment and buries
+    // Master/Click/Shake at the bottom. We build a `name → sequence` map from
+    // the first occurrence of each name, then stamp every parsed track with
+    // its position so the emitter can sort audio + MIDI into one merged order.
+    {
+        let data = cursor.data();
+        let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
+            .into_iter()
+            .next();
+        let mut order_by_name: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        if let Some(list) = track_list {
+            let mut seq = 0u32;
+            for child in list.find_children(ContentType::MidiTrackInfo) {
+                let name_off = child.offset + 4;
+                if name_off + 4 > data.len() {
+                    continue;
+                }
+                let (name, _) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() {
+                    continue;
+                }
+                // First occurrence wins (the active entry); later duplicates
+                // are alternate-playlist or the 2× tail copy — ignore them.
+                let full = order_by_name.entry(name.clone()).or_insert(seq);
+                if *full != seq {
+                    // Name already seen earlier; don't advance the counter.
+                    continue;
+                }
+                // Also index by the suffix-stripped base name so audio tracks
+                // (which store "ClickPrint", not "ClickPrint.01") can match.
+                order_by_name
+                    .entry(strip_playlist_suffix(&name).to_string())
+                    .or_insert(seq);
+                seq += 1;
+            }
+        }
+        let order_lookup = |name: &str| -> Option<u32> {
+            if let Some(o) = order_by_name.get(name) {
+                return Some(*o);
+            }
+            order_by_name
+                .get(strip_playlist_suffix(name))
+                .copied()
+                .or_else(|| {
+                    [".01", ".02", ".03", ".04", ".05"]
+                        .iter()
+                        .find_map(|s| order_by_name.get(&format!("{name}{s}")).copied())
+                })
+        };
+        for t in audio_tracks.iter_mut() {
+            if let Some(o) = order_lookup(&t.name) {
+                t.display_order = o;
+            }
+        }
+        for t in midi_tracks.iter_mut() {
+            if let Some(o) = order_lookup(&t.name) {
+                t.display_order = o;
+            }
+        }
+    }
+
     // Step 12b: Decode per-track output routing from 0x260e blocks.
     //
     // Each `0x260d` per-track wrapper holds exactly one `0x260e` routing

@@ -282,7 +282,37 @@ fn parse_midi_regions(
     regions
 }
 
-/// Parse MIDI tracks and assign regions.
+/// Strip a region name's trailing `-NN` placement suffix to recover its
+/// playlist name. PT names MIDI regions `"<playlist>-<NN>"`, so
+/// `"Inst 1.02-01"` → `"Inst 1.02"` and `"MIDI 1-01"` → `"MIDI 1"`. The
+/// playlist name (WITH any `.01`/`.dup1` suffix) is exactly the active track's
+/// name in the 0x251a list, so it's what we match tracks against.
+fn region_playlist_name(region_name: &str) -> &str {
+    if let Some(idx) = region_name.rfind('-') {
+        let suffix = &region_name[idx + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return &region_name[..idx];
+        }
+    }
+    region_name
+}
+
+/// Parse the non-audio tracks (MIDI / instrument / master / click / folder
+/// dividers) from the 0x2519 track list and assign each its ACTIVE-playlist
+/// regions.
+///
+/// The 0x2519 list enumerates EVERY track in the session. Audio tracks are
+/// parsed separately from 0x1015 and dropped from this set by the caller (by
+/// name); what remains is the non-audio tracks PT shows in the Edit window —
+/// master, click, dividers and instrument/MIDI tracks — all of which must be
+/// emitted to match the source layout even when they hold no regions.
+///
+/// Regions are matched to tracks BY NAME (not the old positional 0x1058 walk,
+/// which scattered every region onto the wrong track): a region
+/// `"Inst 1.02-01"` belongs to the track named `"Inst 1.02"`. Regions whose
+/// playlist is an inactive alternate (e.g. `"Inst 1.01-*"` when `.02` is the
+/// active track) match no track name and are left out, mirroring the audio
+/// active/alternate-playlist model.
 fn parse_midi_tracks(
     blocks: &[Block],
     cursor: &Cursor<'_>,
@@ -291,7 +321,7 @@ fn parse_midi_tracks(
     tempo_segments: &[TempoSegment],
     target_sample_rate: u32,
 ) -> Vec<Track> {
-    let _ = rate_factor;
+    let _ = (rate_factor, tempo_segments, target_sample_rate);
     let mut tracks = Vec::new();
 
     // Parse track definitions from 0x2519
@@ -300,14 +330,41 @@ fn parse_midi_tracks(
         None => return tracks,
     };
 
+    let data = cursor.data();
+    let mut seen = std::collections::HashSet::new();
     for child in track_list.find_children(ContentType::MidiTrackInfo) {
-        let data = cursor.data();
         let name_offset = child.offset + 4;
         if name_offset + 4 >= data.len() {
             continue;
         }
 
         let (name, _str_consumed) = cursor.length_prefixed_string(name_offset);
+        if name.is_empty() {
+            continue;
+        }
+        // 0x2519 may carry a 2× tail copy of the whole list (and interleaved
+        // alternates in converter-authored PTX); keep the first occurrence of
+        // each name only.
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+
+        // Active-playlist regions: those whose playlist part equals this
+        // track's name. `region_index` is the array position so the emitter
+        // can index `session.midi_regions` directly; `start_pos` comes from
+        // the region's own decoded timeline position.
+        let track_regions: Vec<TrackRegion> = regions
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| region_playlist_name(&r.name) == name)
+            .map(|(ri, r)| TrackRegion {
+                region_index: ri as u16,
+                start_pos: r.start_pos,
+                clip_flag_53: false,
+                clip_muted: false,
+                clip_color: None,
+            })
+            .collect();
 
         tracks.push(Track {
             name,
@@ -315,7 +372,7 @@ fn parse_midi_tracks(
             index: tracks.len() as u16,
             playlist_name: String::new(),
             fades: Vec::new(),
-            regions: Vec::new(),
+            regions: track_regions,
             volume_centibel: 0,
             mute: false,
             solo: false,
@@ -328,59 +385,9 @@ fn parse_midi_tracks(
             volume_automation: Vec::new(),
             mute_automation: Vec::new(),
             is_folder: false,
+            display_order: u32::MAX,
         });
     }
-
-    // Assign regions to tracks from 0x1058
-    let map_block = match find_block_recursive(blocks, ContentType::MidiRegionTrackMap) {
-        Some(b) => b,
-        None => return tracks,
-    };
-
-    let sub_entries = map_block.find_all(ContentType::AudioRegionTrackSubEntryNew);
-    let mut track_idx = 0;
-
-    for entry in sub_entries {
-        let data = cursor.data();
-        let raw_offset = entry.offset + 4;
-        if raw_offset + 4 > data.len() {
-            continue;
-        }
-
-        let raw_index = cursor.u32_at(raw_offset) as u16;
-
-        if raw_index == NO_REGION {
-            track_idx += 1;
-            continue;
-        }
-
-        // Read start position (u40 at offset + 9), stored as PT ticks (absolute,
-        // referenced from ZERO_TICKS). Convert to samples via the tempo map so
-        // it matches the units used by audio regions.
-        let start_offset = entry.offset + 9;
-        let start = if start_offset + 5 <= data.len() {
-            let raw_start = cursor.u40_le(start_offset);
-            let relative_ticks = raw_start.abs_diff(ZERO_TICKS);
-            tick_to_sample(relative_ticks, tempo_segments, target_sample_rate)
-        } else {
-            0
-        };
-
-        if track_idx < tracks.len() {
-            tracks[track_idx].regions.push(TrackRegion {
-                region_index: raw_index,
-                start_pos: start,
-                clip_flag_53: false,
-                clip_muted: false,
-                clip_color: None,
-            });
-        }
-
-        track_idx += 1;
-    }
-
-    // Remove tracks with no regions
-    tracks.retain(|t| !t.regions.is_empty());
 
     tracks
 }

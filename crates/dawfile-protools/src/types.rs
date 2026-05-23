@@ -331,6 +331,16 @@ pub struct Track {
     /// We surface the raw byte until a `folder-nesting.ptx` ground-truth
     /// fixture lets us disambiguate `is_folder` vs `is_grouped_child`.
     pub is_folder: bool,
+    /// Zero-based position of this track in PT's on-screen track order,
+    /// taken from the `0x2519`/`0x251a` track list (which interleaves audio,
+    /// MIDI, master and folder/divider tracks in Edit-window order).
+    ///
+    /// This is PT's canonical display order — NOT the channel-map `index`
+    /// (internal voice assignment) which scrambles the layout. Consumers
+    /// should emit tracks sorted by this value to match the source session.
+    /// `u32::MAX` when the track could not be matched to a `0x251a` entry, so
+    /// unmatched tracks sink to the bottom while keeping their relative order.
+    pub display_order: u32,
 }
 
 /// A single breakpoint in a volume-automation envelope.

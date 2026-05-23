@@ -20,6 +20,7 @@ pub mod fx;
 pub mod item;
 pub mod markers;
 pub mod midi;
+pub mod mouse;
 pub mod peak;
 pub mod routing;
 pub mod ruler_lanes;
