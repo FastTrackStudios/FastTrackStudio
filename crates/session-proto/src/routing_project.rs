@@ -131,17 +131,10 @@ impl RoutingGroup {
 ///
 /// REAPER's loopback channels start at a hardware-dependent offset.
 /// `base_pair` is the 0-based index of the first loopback stereo pair.
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, Default, Facet)]
 pub struct LoopbackConfig {
     /// 0-based index of the first loopback stereo pair in the audio device.
     pub base_pair: u32,
-}
-
-impl Default for LoopbackConfig {
-    fn default() -> Self {
-        // Default: loopback pairs start at pair 0
-        Self { base_pair: 0 }
-    }
 }
 
 impl LoopbackConfig {
