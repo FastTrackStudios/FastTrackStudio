@@ -12522,6 +12522,10 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "vox",
  "vox-types",

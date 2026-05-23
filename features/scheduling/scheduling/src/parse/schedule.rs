@@ -28,7 +28,7 @@ pub fn parse_schedule(
         path: path.to_string(),
         name,
         timezone,
-        rules,
+        rules: rules.into(),
     })
 }
 
@@ -63,7 +63,7 @@ fn parse_rule(raw: &serde_yaml::Value) -> Result<AvailabilityRule, ParseError> {
             field: "rules[].end",
         })?;
     Ok(AvailabilityRule {
-        days,
+        days: days.into(),
         start: parse_time(start)?,
         end: parse_time(end)?,
     })

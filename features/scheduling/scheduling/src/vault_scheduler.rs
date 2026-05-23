@@ -440,10 +440,11 @@ mod tests {
             name: "WH".into(),
             timezone: None,
             rules: vec![AvailabilityRule {
-                days: vec![Weekday::Mon],
+                days: vec![Weekday::Mon].into(),
                 start: TimeOfDay::new(9, 0),
                 end: TimeOfDay::new(10, 0),
-            }],
+            }]
+            .into(),
         };
         sched.upsert_schedule(&schedule).unwrap();
         let et = EventType {

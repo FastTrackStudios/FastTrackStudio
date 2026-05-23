@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! Wire contract for the scheduling feature.
 //!
 //! Two distinct surfaces share this proto:
