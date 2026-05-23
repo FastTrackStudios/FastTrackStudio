@@ -57,7 +57,7 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
     let mut seen: std::collections::HashSet<(String, WikiEdgeKind)> =
         std::collections::HashSet::new();
 
-    for ing in &recipe.ingredients {
+    for ing in recipe.ingredients.iter() {
         if ing.is_recipe_ref {
             // Recipe refs are handled below from
             // `nested_recipes` to keep `target` as the path.
@@ -73,7 +73,7 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
         }
     }
 
-    for cw in &recipe.cookware {
+    for cw in recipe.cookware.iter() {
         let key = (cw.to_ascii_lowercase(), WikiEdgeKind::Cookware);
         if seen.insert(key) {
             out.push(WikiEdge {
@@ -84,7 +84,7 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
         }
     }
 
-    for path in &recipe.nested_recipes {
+    for path in recipe.nested_recipes.iter() {
         out.push(WikiEdge {
             source: recipe.path.clone(),
             target: path.clone(),
@@ -96,7 +96,7 @@ pub fn recipe_wiki_edges(recipe: &Recipe) -> Vec<WikiEdge> {
     // these through as plain text, so we scan the rendered
     // step strings plus the raw source as a fallback (covers
     // links sitting in metadata values or text-only sections).
-    for step in &recipe.steps {
+    for step in recipe.steps.iter() {
         for target in scan_wikilinks(step) {
             let key = (target.to_ascii_lowercase(), WikiEdgeKind::Concept);
             if seen.insert(key) {

@@ -190,7 +190,7 @@ pub fn check_nested(
     fold_same_ingredient(&mut flat);
 
     let synthetic = Recipe {
-        ingredients: flat,
+        ingredients: cookbook::Ingredients(flat),
         servings: Some(1),
         ..recipe.clone()
     };
@@ -218,7 +218,7 @@ fn flatten(
         })
         .collect();
 
-    for nested_path in &recipe.nested_recipes {
+    for nested_path in recipe.nested_recipes.iter() {
         if let Some(child) = index.get(nested_path.as_str()) {
             let base = f64::from(child.servings.unwrap_or(1).max(1));
             let child_scale = scale / base;
@@ -417,11 +417,11 @@ mod tests {
             prep_minutes: None,
             cook_minutes: None,
             servings: Some(servings),
-            ingredients: ings,
-            steps: Vec::new(),
-            cookware: Vec::new(),
-            nested_recipes: Vec::new(),
-            tags: Vec::new(),
+            ingredients: cookbook::Ingredients(ings),
+            steps: cookbook::StringList::default(),
+            cookware: cookbook::StringList::default(),
+            nested_recipes: cookbook::StringList::default(),
+            tags: cookbook::StringList::default(),
             source_url: None,
             date_modified: None,
             source: String::new(),
@@ -490,7 +490,7 @@ mod tests {
         dough.name = "Pizza Dough".into();
         let mut pizza = recipe_with("Cookbook/Pizza.cook", vec![ing("Flour", 100.0, "g")], 1);
         pizza.name = "Pizza".into();
-        pizza.nested_recipes = vec!["Cookbook/Dough.cook".into()];
+        pizza.nested_recipes = cookbook::StringList(vec!["Cookbook/Dough.cook".into()]);
         let s = vec![pantry_row("Flour", 250.0, "g")];
         let f = check_nested(&pizza, &[pizza.clone(), dough], &s, 1);
         assert!(!f.can_cook);
@@ -501,8 +501,8 @@ mod tests {
     fn cycle_guard() {
         let mut a = recipe_with("Cookbook/A.cook", vec![ing("X", 1.0, "g")], 1);
         let mut b = recipe_with("Cookbook/B.cook", vec![ing("Y", 1.0, "g")], 1);
-        a.nested_recipes = vec!["Cookbook/B.cook".into()];
-        b.nested_recipes = vec!["Cookbook/A.cook".into()];
+        a.nested_recipes = cookbook::StringList(vec!["Cookbook/B.cook".into()]);
+        b.nested_recipes = cookbook::StringList(vec!["Cookbook/A.cook".into()]);
         let s = vec![pantry_row("X", 10.0, "g"), pantry_row("Y", 10.0, "g")];
         assert!(check_nested(&a, &[a.clone(), b.clone()], &s, 1).can_cook);
     }

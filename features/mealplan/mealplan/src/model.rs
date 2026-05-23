@@ -136,7 +136,7 @@ impl Meal {
             };
             let base = recipe.servings.filter(|s| *s > 0).unwrap_or(1);
             let scale = f64::from(self.servings) / f64::from(base);
-            for ing in &recipe.ingredients {
+            for ing in recipe.ingredients.iter() {
                 let Some(qty) = ing.qty else {
                     continue;
                 };
