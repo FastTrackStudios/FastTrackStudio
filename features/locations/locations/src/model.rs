@@ -88,6 +88,23 @@ pub struct Location {
     #[architect(json)]
     pub tags: Tags,
 
+    /// Federation pointer — `Some("@codywright/home-studio")`
+    /// means this row is a *reference* to the canonical
+    /// location owned by another org, not an independent
+    /// place. Resolver follows the link for full details
+    /// (address, parent, photos). `None` for locally-owned
+    /// rows.
+    ///
+    /// By convention the same value is also dropped into
+    /// [`details`] as a `[[@org/slug]]` wikilink so the page
+    /// stays readable in vanilla Obsidian.
+    ///
+    /// See `plans/federated-task-platform.md` § federated
+    /// wiki resolution for the `@org/slug` syntax.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "sameAs")]
+    #[architect(filterable)]
+    pub same_as: Option<String>,
+
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,

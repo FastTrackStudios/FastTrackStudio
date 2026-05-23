@@ -54,6 +54,14 @@ pub fn parse_page(page: &VaultPage) -> Result<Location, ParseError> {
         .into_iter()
         .filter(|t| t != "location")
         .collect();
+    // Accept both `sameAs` (serde rename, JSON-friendly) and
+    // `same_as` (snake_case) so hand-written frontmatter
+    // doesn't fail silently. Empty string is treated as
+    // `None` — federation pointers are present-or-absent,
+    // not nullable.
+    let same_as = take_str(&map, "sameAs")
+        .or_else(|| take_str(&map, "same_as"))
+        .filter(|s| !s.is_empty());
     let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 
@@ -65,6 +73,7 @@ pub fn parse_page(page: &VaultPage) -> Result<Location, ParseError> {
         parent_id,
         address,
         tags,
+        same_as,
         date_created,
         date_modified,
         details: body.to_string(),
