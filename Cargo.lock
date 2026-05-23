@@ -11300,8 +11300,11 @@ dependencies = [
 name = "project"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "facet",
+ "fake",
+ "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -17696,10 +17699,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
-
-[[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"

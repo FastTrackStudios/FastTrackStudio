@@ -1,3 +1,10 @@
+// architect's `Entity` derive emits a `#[cfg(feature = "vox")]`
+// block; we don't expose a vox feature here (project is a
+// wire/file format, not a service trait) so the gated code
+// never compiles, but rustc still flags the cfg as unknown.
+// Allow at crate scope until architect grows opt-out support.
+#![allow(unexpected_cfgs)]
+
 //! `project` — first-party project feature.
 //!
 //! Projects are plain markdown pages living under
