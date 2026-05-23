@@ -10,31 +10,37 @@
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
-#[repr(C)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
+#[architect(table_name = "wiki_peers", repo)]
 pub struct PeerWiki {
     /// Stable id chosen by the curator (e.g. `"alice-pkm"`).
     /// Becomes the `Wiki/raw/sources/<peer-id>/` directory name
     /// + the prefix in federated wikilinks (`[[alice:Page]]`).
+    #[architect(primary_key, auto_increment = false)]
     pub id: String,
     /// URL to the peer's wiki-proto endpoint
     /// (`https://alice.example/api/v1/wiki` or
     /// `task://<peer-id>` for in-fleet peers).
+    #[architect(filterable)]
     pub url: String,
     /// Curator-facing label.
+    #[architect(filterable, sortable)]
     pub label: String,
     /// Auth token sent in `Authorization: Bearer ...`. Empty
     /// for public peers.
     pub auth_token: String,
     /// Last successful pull. Used as the `since` cursor for
     /// incremental sync.
+    #[architect(filterable, sortable)]
     pub last_pulled_at: Option<DateTime<Utc>>,
 }
 
 /// Result of a single pull. Backends fan these out into
 /// per-page [`crate::ingest::IngestTask`] entries.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PeerPullResult {
     pub peer_id: String,
@@ -51,7 +57,7 @@ pub struct PeerPullResult {
     pub divergences: Vec<PeerPagePtr>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PeerPagePtr {
     /// Peer-relative path.
@@ -67,7 +73,7 @@ pub struct PeerPagePtr {
 /// Reference to a single page that resolved via a peer
 /// wikilink. Returned by
 /// [`crate::service::WikiService::resolve_cross_wiki_link`].
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct CrossWikiPageRef {
     pub peer_id: String,
