@@ -180,6 +180,28 @@ enum AuthCmd {
         #[arg(long)]
         password: String,
     },
+    /// Create a new email/password user in the active org's
+    /// `auth.sqlite` and persist the resulting session. The
+    /// first user signed up in a fresh org is its de-facto
+    /// owner — architect-auth has no separate ownership
+    /// concept yet. Use `--org <slug>` to target a specific
+    /// on-disk org without `task auth org use` first.
+    Signup {
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        password: String,
+        /// Optional username — needed if you want
+        /// `SignInUsername` to work later. Free-form, but the
+        /// architect-auth username uniqueness constraint
+        /// applies per `auth.sqlite`.
+        #[arg(long)]
+        username: Option<String>,
+        /// Optional display name. Falls back to the email
+        /// localpart in the UI when empty.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Print the active session (email, user id, org id).
     Whoami,
     /// Invalidate the active session server-side AND remove
@@ -981,11 +1003,69 @@ async fn open_local_auth(
 }
 
 async fn run_auth(cmd: AuthCmd, org_override: Option<&str>) -> eyre::Result<()> {
+    use architect_auth::commands::CreateEmailPasswordUser;
     use architect_auth::commands::{CurrentSession, SignOut};
     use architect_auth::proto::SignInEmailPassword;
     let ctx = org_ctx::resolve_active(org_override)?;
     let auth_db_path = ctx.root.auth_db();
     match cmd {
+        AuthCmd::Signup {
+            email,
+            password,
+            username,
+            name,
+        } => {
+            let auth = open_local_auth(&auth_db_path).await?;
+            let bundle = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: email.clone(),
+                    password,
+                    name: name.clone(),
+                    username: username.clone(),
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: Some("task-cli".into()),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("create user: {e}"))?;
+            let resolved_email = bundle.user.email.clone().unwrap_or_else(|| email.clone());
+            // Persist session under this org's slug — same
+            // shape as `Login` so subsequent commands work
+            // without a follow-up `task auth login`.
+            let mut sess = session_store::load()?.unwrap_or_else(|| session_store::CliSession {
+                home: ctx.root.slug().to_owned(),
+                active: ctx.root.slug().to_owned(),
+                servers: std::collections::BTreeMap::new(),
+            });
+            sess.active = ctx.root.slug().to_owned();
+            if sess.home.is_empty() {
+                sess.home = ctx.root.slug().to_owned();
+            }
+            sess.servers.insert(
+                ctx.root.slug().to_owned(),
+                session_store::ServerEntry {
+                    url: "local".into(),
+                    user_id: bundle.user.id,
+                    email: resolved_email.clone(),
+                    token: bundle.token.clone(),
+                },
+            );
+            session_store::save(&sess)?;
+            println!(
+                "Created user {} ({}) in org `{}`",
+                resolved_email,
+                bundle.user.id,
+                ctx.root.slug(),
+            );
+            if let Some(u) = username {
+                println!("  username: {u}");
+            }
+            if let Some(n) = name {
+                println!("  name:     {n}");
+            }
+            println!("  auth db:  {}", auth_db_path.display());
+        }
         AuthCmd::Login { email, password } => {
             let auth = open_local_auth(&auth_db_path).await?;
             let bundle = auth
