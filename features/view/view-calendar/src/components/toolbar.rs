@@ -1,7 +1,8 @@
 //! Top toolbar — prev/next/today buttons, current range label,
 //! view-mode switch (Month/Week/Day), and a new-event button.
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{Datelike, NaiveDate, Weekday};
+use cycle::{FirstWeekRule, cycle_for_date, generate_year};
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::{ChevronLeft, ChevronRight, Plus};
 use fts_ui::prelude::*;
@@ -25,6 +26,7 @@ pub struct ToolbarProps {
 #[component]
 pub fn Toolbar(props: ToolbarProps) -> Element {
     let label = range_label(props.anchor, props.view);
+    let cycle_label = cycle_label(props.anchor);
 
     rsx! {
         div { class: "flex items-center gap-2 px-3 py-2 border-b border-border/40",
@@ -48,7 +50,15 @@ pub fn Toolbar(props: ToolbarProps) -> Element {
                     ChevronRight { size: 16 }
                 }
             }
-            Heading { level: HeadingLevel::H2, class: "text-base font-medium px-2", "{label}" }
+            div { class: "flex flex-col px-2 leading-tight",
+                Heading { level: HeadingLevel::H2, class: "text-base font-medium", "{label}" }
+                if let Some(cl) = cycle_label.clone() {
+                    span {
+                        class: "text-xs text-muted-foreground tabular-nums",
+                        "{cl}"
+                    }
+                }
+            }
             Spacer {}
             ViewSwitch {
                 view: props.view,
@@ -100,6 +110,40 @@ fn ViewSwitch(props: ViewSwitchProps) -> Element {
             }
         }
     }
+}
+
+/// Cycle position for the anchor date — `"2026 Q2 C2 · W4"`
+/// for mid-cycle, `"2026 Q2 reset week"` during a reset, or
+/// `"2026 bonus week"` for the cyclic-leap bonus. `None` when
+/// the date falls outside any generated calendar (shouldn't
+/// happen in practice; defensive).
+///
+/// Hardcoded Monday-start + ≥4-day rule for now. When user
+/// preferences land, route those in via props instead.
+fn cycle_label(anchor: NaiveDate) -> Option<String> {
+    let rule = FirstWeekRule::AtLeastFourDaysInYear;
+    if let Some(c) = cycle_for_date(anchor, Weekday::Mon, rule) {
+        let week_in_cycle = ((anchor - c.start_date).num_days() / 7) as u8 + 1;
+        return Some(format!(
+            "{} Q{} C{} · W{}/4",
+            c.year, c.quarter, c.ordinal, week_in_cycle,
+        ));
+    }
+    // Between cycles → reset or bonus week. Walk the year's
+    // quarters to find which.
+    for cyclic_year in [anchor.year() - 1, anchor.year(), anchor.year() + 1] {
+        for q in generate_year(cyclic_year, Weekday::Mon, rule) {
+            if anchor >= q.reset_week_start && anchor <= q.reset_week_end {
+                return Some(format!("{} Q{} · reset week", q.year, q.ordinal));
+            }
+            if let (Some(s), Some(e)) = (q.bonus_week_start, q.bonus_week_end) {
+                if anchor >= s && anchor <= e {
+                    return Some(format!("{} bonus · week zero for {}", q.year, q.year + 1));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Header label for the current range:

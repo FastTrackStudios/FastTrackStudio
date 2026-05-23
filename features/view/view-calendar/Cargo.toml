@@ -23,6 +23,11 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 rrule = { workspace = true }
+# Cyclic life-calendar — pure-function date generator powers
+# the cycle overlay (toolbar label, reset-week background).
+# `default-features = false` skips vox so the calendar stays
+# wasm-clean.
+cycle = { workspace = true, default-features = false }
 
 fts-ui.workspace = true
 
