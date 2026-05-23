@@ -89,6 +89,36 @@ enum Commands {
     /// session file consumed by `timer` / `finance`.
     #[command(subcommand)]
     Auth(AuthCmd),
+    /// Federated org-root layout — scaffold, list, and (later)
+    /// export/claim on-disk org directories under the data
+    /// root. Distinct from `auth org`, which is about
+    /// membership in architect-auth orgs. See
+    /// `plans/federated-task-platform.md` Phase 1.
+    #[command(subcommand)]
+    Org(OrgCmd),
+}
+
+#[derive(Subcommand)]
+enum OrgCmd {
+    /// Scaffold a new org under `<data-root>/orgs/<slug>/`.
+    /// Writes `org.toml` + creates `vault/` and `attachments/`
+    /// subdirs. Idempotency: refuses to overwrite an existing
+    /// org dir (federation-breaking change a human should
+    /// confirm). Use `--home` to mark this as your identity
+    /// anchor (only one home per data root in practice).
+    Init {
+        /// `[a-z0-9-]`, 1–64 chars, no leading/trailing `-`.
+        slug: String,
+        /// Human-facing display name. Free-form UTF-8.
+        #[arg(long)]
+        name: String,
+        /// Mark this org as the identity anchor (home).
+        #[arg(long)]
+        home: bool,
+    },
+    /// List every org dir under `<data-root>/orgs/` that has
+    /// a loadable `org.toml`. Skips partial scaffolds.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -760,6 +790,51 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Auth(cmd) => {
             return run_auth(cmd).await;
+        }
+        Commands::Org(cmd) => {
+            return run_org(cmd);
+        }
+    }
+    Ok(())
+}
+
+fn run_org(cmd: OrgCmd) -> eyre::Result<()> {
+    let root =
+        org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("resolve data root: {e}"))?;
+    root.ensure()
+        .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+    match cmd {
+        OrgCmd::Init { slug, name, home } => {
+            let org = root
+                .init_org(&slug, &name, home)
+                .map_err(|e| eyre::eyre!("init org: {e}"))?;
+            let manifest = org
+                .manifest()
+                .map_err(|e| eyre::eyre!("load fresh manifest: {e}"))?;
+            println!("Initialized org `{}` at {}", slug, org.path().display());
+            println!("  id:         {}", manifest.id);
+            println!("  name:       {}", manifest.display_name);
+            println!("  is_home:    {}", manifest.is_home);
+            println!("  vault:      {}", org.vault_dir().display());
+            println!("  auth.db:    {}", org.auth_db().display());
+            println!("  timer.db:   {}", org.timer_db().display());
+            println!("  finance.db: {}", org.finance_db().display());
+        }
+        OrgCmd::List => {
+            let orgs = root
+                .scan_orgs()
+                .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
+            if orgs.is_empty() {
+                println!("(no orgs under {})", root.orgs_dir().display());
+                return Ok(());
+            }
+            for (org, m) in orgs {
+                let badge = if m.is_home { " [home]" } else { "" };
+                println!("{}{}  {}  ({})", org.slug(), badge, m.display_name, m.id);
+                if !m.federation_url.is_empty() {
+                    println!("    federation: {}", m.federation_url);
+                }
+            }
         }
     }
     Ok(())

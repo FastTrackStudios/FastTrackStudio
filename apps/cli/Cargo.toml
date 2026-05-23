@@ -52,6 +52,11 @@ sha2 = "0.10"
 base64 = { workspace = true }
 # Project lookup for timer's project-defaults resolver.
 project = { workspace = true }
+# Org-root layout (Phase 1 of plans/federated-task-platform.md).
+# Owns `task org init|list` + the `DataRoot` / `OrgRoot` path
+# resolvers. Existing auth/timer/finance paths keep working at
+# their XDG locations until PR 2 migrates them through OrgRoot.
+org-proto = { workspace = true }
 # Finance — reports + invoice build. CLI shells out to the
 # `task-pdf-render` binary (libs/pdf) for the actual PDF
 # render; pulling fulgur into the CLI's compile graph hits a

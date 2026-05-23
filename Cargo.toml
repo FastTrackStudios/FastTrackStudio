@@ -278,6 +278,7 @@ task = { path = "features/task/task" }
 # `timer` and `finances` crates FK against the frontmatter
 # `id:` UUID, not the file path.
 project = { path = "features/project/project" }
+org-proto = { path = "features/org/org-proto" }
 # Timer feature — billable time tracking modeled on SolidTime.
 # `timer-proto` is the wire contract (Client / WorkSession /
 # Tag / Rate entities, `TimerService` slim trait for active-
