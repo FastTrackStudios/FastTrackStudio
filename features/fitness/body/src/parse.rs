@@ -50,7 +50,7 @@ pub fn parse_page(page: &VaultPage) -> Result<BodyMetric, ParseError> {
         .into_iter()
         .filter(|t| t != "body-metric")
         .collect();
-    let entries = parse_entries(&map);
+    let entries = crate::model::Entries(parse_entries(&map));
     let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
 

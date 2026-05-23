@@ -1,6 +1,6 @@
 [package]
 name = "body"
-description = "Body metrics feature — weight, bodyfat, waist, biceps, anything tracked as (date, value, unit). One page per metric (e.g. `body/weight.md`) containing the entry log; readers chart, callers append. Modeled on wger's `Measurement` + `Category` tables, flattened so one page = one metric's full history."
+description = "Body metrics feature — weight, bodyfat, waist, biceps, anything tracked as (date, value, unit). One page per metric (e.g. `body/weight.md`) containing the entry log; readers chart, callers append. `BodyMetric` is an `architect::Entity` so the same schema mounts to SQLite under the `server` feature; nested `BodyEntry` rows go through `architect::JsonField` for the in-row time series. Modeled on wger's `Measurement` + `Category` tables, flattened so one page = one metric's full history."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
@@ -21,10 +22,21 @@ vault = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+# Server-only SeaORM emissions from the architect derive.
+# Gated so the wasm UI never pulls SeaORM.
+sea-orm = { workspace = true, optional = true }
+
+# Test-data generation. Adds `Dummy` derives to the wire +
+# emitted structs when the `fake` feature is on. Mirrors the
+# established proto-crate pattern.
+fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
 
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
 
 [dev-dependencies]
 tempfile = "3"
