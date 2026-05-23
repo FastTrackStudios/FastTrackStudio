@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use thiserror::Error;
 use uuid::Uuid;
-use vault::VaultPage;
+use vault_proto::VaultPage;
 
 use crate::model::ProjectInfo;
 

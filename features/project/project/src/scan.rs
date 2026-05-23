@@ -25,10 +25,11 @@ pub enum ScanError {
 pub fn scan_vault(vault: &Vault) -> Result<Vec<ProjectInfo>, ScanError> {
     let mut out = Vec::new();
     for page in &vault.pages {
-        if !looks_like_project(page) {
+        let proto = page.to_proto();
+        if !looks_like_project(&proto) {
             continue;
         }
-        match parse_page(page) {
+        match parse_page(&proto) {
             Ok(mut p) => {
                 if p.id.is_nil() {
                     p.id = Uuid::new_v4();

@@ -32,6 +32,12 @@ scheduling-ui.workspace = true
 # generator to resolve `cycle_id` references to displayable
 # year/quarter/ordinal labels.
 cycle = { workspace = true, default-features = false }
+# Architect-generated vox clients for project + goal. The
+# workspace pins vox to `default-features = false,
+# features = ["runtime"]` which is wasm-clean (no tcp /
+# tokio[net]). Pattern lifted from `vox/rust/wasm-browser-tests`.
+project = { workspace = true, features = ["vox"] }
+goal = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
