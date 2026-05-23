@@ -196,7 +196,7 @@ impl Catalog for WikiBackend {
             op,
             title: entry.title,
             body: entry.body,
-            pages_touched: entry.pages_touched,
+            pages_touched: entry.pages_touched.0,
         })
         .map_err(map_err)
     }

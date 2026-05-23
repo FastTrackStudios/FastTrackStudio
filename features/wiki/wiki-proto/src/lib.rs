@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `wiki-proto` — wire contract for the `wiki/` feature.
 //!
 //! Task's port of Karpathy's LLM-Wiki pattern (see

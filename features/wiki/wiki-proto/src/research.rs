@@ -6,38 +6,91 @@
 
 use chrono::{DateTime, Utc};
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Facet)]
-#[repr(C)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
+#[architect(table_name = "wiki_research_plans", repo)]
 pub struct ResearchPlan {
+    #[architect(primary_key, auto_increment = false)]
     pub id: String,
     /// What this plan targets. Either a knowledge-graph gap
     /// id, a lint finding id, or a review item id — backend
     /// disambiguates via `source_kind`.
+    #[architect(json)]
     pub source_kind: ResearchSourceKind,
+    #[architect(filterable)]
     pub source_id: String,
     /// Curator-facing topic statement. Editable before the
     /// plan executes.
+    #[architect(filterable, fulltext)]
     pub topic: String,
     /// Search queries to run. Multi-query so the LLM can
     /// triangulate.
-    pub queries: Vec<ResearchQuery>,
+    #[architect(json)]
+    pub queries: ResearchQueryList,
+    #[architect(filterable, sortable)]
     pub created_at: DateTime<Utc>,
+    #[architect(json, filterable)]
     pub status: ResearchStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Copy, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
 #[repr(C)]
 pub enum ResearchSourceKind {
     KnowledgeGap,
     LintFinding,
     ReviewItem,
     /// Curator opened a free-form research session.
+    #[default]
     Manual,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
-#[repr(C)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct ResearchQueryList(pub Vec<ResearchQuery>);
+
+impl ResearchQueryList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<ResearchQuery>> for ResearchQueryList {
+    fn from(v: Vec<ResearchQuery>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<ResearchQuery> for ResearchQueryList {
+    fn from_iter<I: IntoIterator<Item = ResearchQuery>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for ResearchQueryList {
+    type Target = Vec<ResearchQuery>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for ResearchQueryList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 pub struct ResearchQuery {
     /// Search engine to use (`"tavily"`, `"serpapi"`,
     /// `"searxng"`, `"manual"`).
@@ -48,10 +101,14 @@ pub struct ResearchQuery {
     pub limit: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Copy, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
 #[repr(C)]
 pub enum ResearchStatus {
     /// Plan generated but not yet started.
+    #[default]
     Proposed,
     /// Agent is running queries.
     Running,
@@ -67,7 +124,7 @@ pub enum ResearchStatus {
 /// One result returned from a research query. Submitting a
 /// batch of these spawns an [`crate::ingest::IngestTask`] per
 /// row.
-#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 #[repr(C)]
 pub struct RawSource {
     /// Where the source came from (URL, file path, etc.).
