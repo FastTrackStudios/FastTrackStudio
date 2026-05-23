@@ -4038,6 +4038,7 @@ dependencies = [
  "fragile",
  "fts-launcher",
  "fts-ui",
+ "reaper-config",
  "reaper-high",
  "reaper-input",
  "reaper-low",
@@ -4109,6 +4110,7 @@ dependencies = [
  "linkme",
  "lucide-dioxus",
  "nucleo-matcher",
+ "palette",
  "time",
  "tracing",
  "tw_merge",
@@ -13322,14 +13324,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "session-ui"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
 name = "anyrender_svg"
 version = "0.6.3"
 source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
@@ -13444,3 +13438,11 @@ source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b
 [[patch.unused]]
 name = "blitz"
 version = "0.3.0-alpha.2"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
+name = "session-ui"
+version = "0.1.0"

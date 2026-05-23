@@ -9,23 +9,37 @@ profile        := "debug"
 input_dir      := justfile_directory() / "../input"
 launcher_dir   := justfile_directory() / "../fts-launcher"
 
-# Comma-separated cargo features for fts-extensions. Override per-invocation:
-#   just features=mod-input,ui-dock install-release
+# Extra cargo features to enable on top of defaults. Override per-invocation:
+#   just features=ui-dock install-release          # defaults + ui-dock
+#   just features=mod-launcher,ui-dock install-release
+# For minimal builds during bisection, use:
+#   just features=mod-input release-minimal       # only mod-input, no defaults
 # Available: mod-launcher, mod-session, mod-sync, mod-input, ui-dock,
 #            poll-broadcast, host-hooks
 features := ""
 
 # Build the extension
 build *args:
-    cargo build -p fts-extensions --no-default-features --features "{{features}}" {{args}}
+    cargo build -p fts-extensions --features "{{features}}" {{args}}
 
-# Build in release mode
+# Build in release mode (defaults + extras from `features`)
 release:
+    cargo build -p fts-extensions --release --features "{{features}}"
+
+# Build in release mode with NO default features (bisection mode)
+release-minimal:
     cargo build -p fts-extensions --release --no-default-features --features "{{features}}"
+
+# Symlink the bisection build into REAPER's UserPlugins
+install-release-minimal: release-minimal install-config
+    mkdir -p {{reaper_plugins}}
+    ln -sf "{{justfile_directory()}}/target/release/lib{{lib_name}}.so" "{{reaper_plugins}}/{{lib_name}}.so"
+    @echo "Symlinked -> {{reaper_plugins}}/{{lib_name}}.so"
+    @echo "Features (no defaults): {{features}}"
 
 # Build and check
 check:
-    cargo check -p fts-extensions --no-default-features --features "{{features}}"
+    cargo check -p fts-extensions --features "{{features}}"
 
 # Symlink the built extension into REAPER's UserPlugins
 install: build install-config

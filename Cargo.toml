@@ -37,6 +37,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", rev = "273dbaa1ef5e4dfac9cd35988e13d2b4b954ab6e" }
+# `reaper-config` from reaper-file gives us the typed parser/serializer
+# for `reaper-menu.ini` so we can rename floating toolbars per session
+# mode at extension startup.
+reaper-config = { path = "../reaper-file/crates/reaper-config" }
 
 # ── Local development patches ─────────────────────────────────────────────
 # Keep these active when working from the FastTrackStudio sibling checkout.

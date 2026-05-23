@@ -77,6 +77,10 @@ mod continuous_action;
 mod error;
 mod item_actions;
 mod menu;
+#[cfg(feature = "mod-session")]
+mod mode_selector;
+#[cfg(feature = "mod-session")]
+mod mode_toolbars;
 mod reaper_utils;
 mod tempo;
 #[cfg(feature = "ui-dock")]
@@ -381,6 +385,22 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         Err(_) => tracing::debug!("REAPER high-level API already loaded"),
     }
 
+    // Seed the mode toolbar names in `reaper-menu.ini` so REAPER's
+    // toolbar list shows `Organize 1`, `Write 1`, etc. on next launch.
+    // Best-effort: a failure here just logs and continues.
+    #[cfg(feature = "mod-session")]
+    {
+        let resource = HighReaper::get().resource_path();
+        match mode_toolbars::rename_for_modes(resource.as_std_path()) {
+            Ok(true) => info!(
+                resource = %resource,
+                "Mode toolbars renamed in reaper-menu.ini (restart REAPER to see them)"
+            ),
+            Ok(false) => tracing::debug!("Mode toolbars already named correctly"),
+            Err(e) => warn!("Failed to rename mode toolbars: {e}"),
+        }
+    }
+
     let tokio_runtime = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -417,7 +437,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "mod-launcher")]
         fts_launcher::daw_module::module(),
         #[cfg(feature = "mod-session")]
-        session::daw_module::module(),
+        session::daw_module::module_with_daw(daw_reaper::Reaper),
         #[cfg(feature = "mod-sync")]
         daw_synchronization::daw_module::module(),
         #[cfg(feature = "mod-input")]

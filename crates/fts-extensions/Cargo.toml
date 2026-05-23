@@ -10,11 +10,21 @@ name = "reaper_fts_extensions"
 path = "src/lib.rs"
 
 [features]
-# All subsystems off by default. Bisect by enabling one at a time.
-default = []
+# Subsystems confirmed good through bisection. Add more as they're verified.
+default = [
+    "host-hooks",
+    "mod-session",
+    "mod-input",
+    "mod-launcher",
+    "poll-broadcast",
+    "ui-dock",
+]
 
-# Modules — each implements daw::DawModule
-mod-launcher = ["dep:fts-launcher"]
+# Modules — each implements daw::DawModule.
+# `mod-launcher` requires `ui-dock` because its actions toggle a Dioxus
+# panel via `daw::ui::dock::toggle_panel`, which is a no-op unless the
+# host has called `init_dock`/`init_service` at startup.
+mod-launcher = ["dep:fts-launcher", "ui-dock"]
 mod-session = ["dep:session"]
 mod-sync = ["dep:daw-synchronization"]
 mod-input = ["dep:reaper-input"]
@@ -50,6 +60,10 @@ daw-synchronization = { workspace = true, optional = true }
 daw = { workspace = true, features = ["reaper"] }
 daw-reaper.workspace = true
 daw-extension-runtime = { workspace = true }
+
+# Typed parser/serializer for `reaper-menu.ini`. Used by `mode_toolbars`
+# to rename floating toolbars 1..24 to `<Mode> <slot>` at startup.
+reaper-config = { workspace = true }
 
 # FTS design system (shadcn-ui clone for Dioxus)
 fts-ui = { workspace = true }

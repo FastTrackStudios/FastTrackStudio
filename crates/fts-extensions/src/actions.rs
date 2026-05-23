@@ -179,6 +179,49 @@ pub fn build_action_defs() -> ActionDefs {
             || item_actions::split_items_with_crossfade_left(),
         ),
         toggle_menu_action("FTS_TEST_TOGGLE", "Test Toggle", toggle_test_toggle_handler),
+        // ── Modes ────────────────────────────────────────────────────────────
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_SELECTOR",
+            "Mode Selector",
+            crate::mode_selector::show_mode_menu,
+        ),
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_DEBUG_WINDOW_TITLES",
+            "Mode: Debug Top-Level Window Titles",
+            daw_reaper::window_manager::debug_dump_top_level_windows,
+        ),
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_DEBUG_TOOLBAR_STATES",
+            "Mode: Debug Toolbar States",
+            daw_reaper::window_manager::debug_dump_toolbar_states,
+        ),
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_DEBUG_TOOLBAR_COMMAND_IDS",
+            "Mode: Debug Toolbar Command IDs",
+            daw_reaper::window_manager::debug_log_toolbar_command_names,
+        ),
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_DEBUG_DOCKER_POSITIONS",
+            "Mode: Debug Docker Positions",
+            daw_reaper::window_manager::debug_dump_docker_positions,
+        ),
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_DEBUG_TOOLBAR_ATTACHMENTS",
+            "Mode: Debug Toolbar Attachments",
+            daw_reaper::window_manager::debug_dump_mode_toolbar_attachments,
+        ),
+        #[cfg(feature = "mod-session")]
+        menu_action(
+            "FTS_MODE_OPEN_ALL_TOOLBARS",
+            "Mode: Open All Toolbars",
+            daw_reaper::window_manager::open_all_mode_toolbars,
+        ),
         // ── Info ─────────────────────────────────────────────────────────────
         menu_action("FTS_INFO", "FastTrackStudio Info", || {
             let version = env!("CARGO_PKG_VERSION");
