@@ -73,6 +73,11 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
     let priority = take_str(&map, "priority").unwrap_or_else(|| "normal".into());
     let lead = take_str(&map, "lead").unwrap_or_default();
     let tags = take_string_list(&map, "tags");
+    // Federation pointer — accept both serde-renamed `sameAs`
+    // and snake_case for hand-written frontmatter.
+    let same_as = take_str(&map, "sameAs")
+        .or_else(|| take_str(&map, "same_as"))
+        .filter(|s| !s.is_empty());
     let client_id = take_str(&map, "clientId").and_then(|s| Uuid::from_str(&s).ok());
     let billable_default = take_bool(&map, "billableDefault").unwrap_or(false);
     let currency = take_str(&map, "currency").unwrap_or_default();
@@ -99,6 +104,7 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         priority,
         lead,
         tags: crate::model::Tags(tags),
+        same_as,
         details: body.to_string(),
         client_id,
         billable_default,

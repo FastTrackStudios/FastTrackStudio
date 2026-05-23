@@ -94,6 +94,22 @@ pub struct ProjectInfo {
     #[architect(json)]
     pub tags: Tags,
 
+    /// Federation pointer — `Some("@tombrooksmusic/png-worship-collective-album")`
+    /// means this row is a *reference* to the canonical
+    /// project owned by another org (e.g. a collaboration
+    /// where one org leads and others participate). The
+    /// resolver follows the link for full details.
+    /// `None` for locally-owned projects.
+    ///
+    /// Mirror the same value in the body as a `[[@org/slug]]`
+    /// wikilink so the page reads correctly in vanilla
+    /// Obsidian. See `plans/federated-task-platform.md`
+    /// § federated wiki resolution for the `@org/slug`
+    /// syntax.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "sameAs")]
+    #[architect(filterable)]
+    pub same_as: Option<String>,
+
     /// Free-text description / body. Same convention as
     /// `task::TaskInfo::details`: everything after the
     /// frontmatter close fence lives here. Persisted in the

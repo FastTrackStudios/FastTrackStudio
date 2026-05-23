@@ -374,6 +374,18 @@ enum WikiCmd {
         #[arg(short, long, default_value = "examples/vault")]
         vault: std::path::PathBuf,
     },
+    /// Layered-access wikilink lint. Scans
+    /// `<org_root>/wiki/Knowledge/` + `wiki/LLM/` for
+    /// wikilinks that escape their tier (Knowledge linking
+    /// out, LLM linking into vault). Pure walk, no LLM.
+    /// Exit code is non-zero when violations are present
+    /// so the command works in pre-commit / CI.
+    LintTiers {
+        /// `<data_root>/orgs/<slug>/`. Defaults to the
+        /// active session's org root.
+        #[arg(long)]
+        org_root: Option<std::path::PathBuf>,
+    },
     /// Detect duplicate pages via the LLM. Prints groups;
     /// pass `--merge <slug-csv>` to merge one (writes via
     /// `record_pages`).
@@ -2484,6 +2496,36 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                 }
             }
             Ok(())
+        }
+        WikiCmd::LintTiers { org_root } => {
+            let org_root = if let Some(p) = org_root {
+                p
+            } else {
+                let ctx = org_ctx::resolve_active(None)?;
+                ctx.root.path().to_path_buf()
+            };
+            let violations = wiki_graph::lint_org_tree(&org_root);
+            if violations.is_empty() {
+                println!("OK — no tier violations in {}", org_root.display());
+                return Ok(());
+            }
+            println!(
+                "{} violation{} in {}\n",
+                violations.len(),
+                if violations.len() == 1 { "" } else { "s" },
+                org_root.display(),
+            );
+            for v in &violations {
+                println!(
+                    "  {} ({}) → [[{}]] resolves to {} ({})",
+                    v.source.display(),
+                    v.source_tier.as_str(),
+                    v.target_link,
+                    v.resolved.display(),
+                    v.resolved_tier.as_str(),
+                );
+            }
+            std::process::exit(1);
         }
         WikiCmd::Dedup {
             vault,
