@@ -58,7 +58,7 @@ pub fn expiring_within(
         .unwrap_or(NaiveDate::MAX);
     let mut out = Vec::new();
     for item in scan_vault(vault) {
-        for entry in &item.stock_entries {
+        for entry in item.stock_entries.iter() {
             if let Some(bb) = entry.best_before {
                 if bb >= today && bb < horizon {
                     out.push((item.clone(), entry.clone()));

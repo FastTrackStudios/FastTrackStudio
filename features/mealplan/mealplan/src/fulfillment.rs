@@ -270,7 +270,7 @@ pub fn check_with_subs(
             continue;
         };
 
-        for sub in &primary.substitutes {
+        for sub in primary.substitutes.iter() {
             if let Some(target) = pantry_by_id.get(&sub.item_id) {
                 let need = short.need * sub.ratio;
                 let have = pantry::convert_str(

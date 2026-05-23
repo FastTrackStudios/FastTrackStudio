@@ -73,7 +73,7 @@ fn full_grocery_to_meal_loop() {
 
     // ── 1. Pantry items + stock ──
     let mut pasta = item("Pasta", "g");
-    pasta.barcodes = vec!["8001234567890".into()];
+    pasta.barcodes = pantry::model::StringList(vec!["8001234567890".into()]);
     pasta.nutrition_per_unit = Some(Nutrition {
         calories: Some(371.0),
         protein_g: Some(13.0),

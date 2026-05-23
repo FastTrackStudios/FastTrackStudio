@@ -25,39 +25,163 @@ use inventory::Item;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// `Vec<String>` newtype — JSON column. Used for `tags` and
+/// `barcodes`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+impl StringList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for StringList {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for StringList {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StringList {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for StringList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// `Vec<StockEntry>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StockEntries(pub Vec<StockEntry>);
+
+impl StockEntries {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<StockEntry>> for StockEntries {
+    fn from(v: Vec<StockEntry>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<StockEntry> for StockEntries {
+    fn from_iter<I: IntoIterator<Item = StockEntry>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StockEntries {
+    type Target = Vec<StockEntry>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for StockEntries {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// `Vec<Substitution>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct Substitutions(pub Vec<Substitution>);
+
+impl Substitutions {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<Substitution>> for Substitutions {
+    fn from(v: Vec<Substitution>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<Substitution> for Substitutions {
+    fn from_iter<I: IntoIterator<Item = Substitution>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for Substitutions {
+    type Target = Vec<Substitution>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "pantry_items", repo)]
 pub struct PantryItem {
     // ── Identity + locator (mirrors inventory::Item so a
     // pantry page round-trips through inventory's scanner) ──
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Free-form. Pantry pages set this to `"food"` by
     /// convention — finer-grained food taxonomy lives in
     /// [`Self::food_category`].
     #[serde(default = "default_category")]
+    #[architect(filterable)]
     pub category: String,
 
     /// Where the item physically lives — `locations::Location`
     /// id. Pantry items typically point at a "Kitchen Pantry"
     /// or "Fridge" sub-location.
     #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(filterable)]
     pub location_id: Option<Uuid>,
 
     #[serde(default = "default_condition")]
+    #[architect(filterable)]
     pub condition: String,
 
     #[serde(default = "default_status")]
+    #[architect(filterable)]
     pub status: String,
 
     /// Inventory tags. Always contains `"pantry"` for pages
     /// owned by this crate; round-trip preserves the rest.
     #[serde(default)]
-    pub tags: Vec<String>,
+    #[architect(json)]
+    pub tags: StringList,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -140,12 +264,14 @@ pub struct PantryItem {
 
     /// Nutrition per 1 [`Self::nutrition_unit`] (defaults to
     /// `unit` when unset). Recipe scaling + (future) fitness
-    /// calorie logs read this.
+    /// calorie logs read this. Stored as JSON via
+    /// `cookbook::Nutrition`'s `JsonField` derive.
     #[serde(
         skip_serializing_if = "Option::is_none",
         default,
         rename = "nutritionPerUnit"
     )]
+    #[architect(json)]
     pub nutrition_per_unit: Option<Nutrition>,
 
     #[serde(
@@ -217,11 +343,12 @@ pub struct PantryItem {
     /// is otherwise treated as a derived sum (see
     /// [`Self::stock_total`]).
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "StockEntries::is_empty",
         default,
         rename = "stockEntries"
     )]
-    pub stock_entries: Vec<StockEntry>,
+    #[architect(json)]
+    pub stock_entries: StockEntries,
 
     /// Global substitution candidates *for this item*. Edit
     /// "Butter" once and every recipe that calls for butter
@@ -230,8 +357,9 @@ pub struct PantryItem {
     /// `mealplan::substitutions` registry. See
     /// [`Substitution`] for the structure;
     /// [`SubReason`] for the goal taxonomy.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub substitutes: Vec<Substitution>,
+    #[serde(skip_serializing_if = "Substitutions::is_empty", default)]
+    #[architect(json)]
+    pub substitutes: Substitutions,
 
     /// All barcodes that resolve to this pantry item. One
     /// physical food often carries N barcodes (single-pack
@@ -240,8 +368,9 @@ pub struct PantryItem {
     /// any of these via [`crate::lookup`] or
     /// [`crate::PantryService::find_by_barcode`] resolves
     /// to the same row.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub barcodes: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub barcodes: StringList,
 
     /// Optional product picture — typically populated from
     /// the `OpenFoodFacts` lookup. URL or vault-relative
@@ -303,7 +432,7 @@ impl PantryItemDraft {
             location_id,
             condition: default_condition(),
             status: default_status(),
-            tags: vec!["item".into(), "pantry".into()],
+            tags: StringList(vec!["item".into(), "pantry".into()]),
             date_created: None,
             date_modified: None,
             food_category: self.food_category,
@@ -323,9 +452,9 @@ impl PantryItemDraft {
             default_best_before_days_after_freezing: None,
             default_best_before_days_after_thawing: None,
             due_type: default_due_type(),
-            substitutes: Vec::new(),
-            stock_entries: Vec::new(),
-            barcodes: vec![self.barcode],
+            substitutes: Substitutions::default(),
+            stock_entries: StockEntries::default(),
+            barcodes: StringList(vec![self.barcode]),
             image_url: self.image_url,
             details: String::new(),
         }
@@ -389,6 +518,7 @@ impl DueType {
 /// consume across entries powers shelf-life-aware
 /// deductions; transferring between locations swaps the
 /// `location_id` without splitting the row.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct StockEntry {
     /// Stable batch id. Survives splits / merges.
@@ -457,6 +587,7 @@ impl StockEntry {
 /// the *goals* live here (recipe authors don't generally
 /// know whether their swap is also lower-calorie /
 /// vegan-friendly / cheaper).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct Substitution {
     /// The substitute pantry item.
@@ -487,6 +618,7 @@ fn default_ratio() -> f64 {
 /// Why a substitution is worth offering. Shared with
 /// goal-filtering — caller passes `Vec<SubReason>` as their
 /// preferences and matching subs float up.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Facet)]
 #[repr(u8)]
 pub enum SubReason {
@@ -591,7 +723,7 @@ impl PantryItem {
             purchase_date: None,
             value: None,
             tasks: inventory::model::StringList::default(),
-            tags: inventory::model::StringList(self.tags.clone()),
+            tags: inventory::model::StringList(self.tags.0.clone()),
             date_created: self.date_created,
             date_modified: self.date_modified,
             details: self.details.clone(),
@@ -619,7 +751,7 @@ impl PantryItem {
             location_id: item.location_id,
             condition: item.condition,
             status: item.status,
-            tags,
+            tags: StringList(tags),
             date_created: item.date_created,
             date_modified: item.date_modified,
             food_category: String::new(),
@@ -639,9 +771,9 @@ impl PantryItem {
             default_best_before_days_after_freezing: None,
             default_best_before_days_after_thawing: None,
             due_type: default_due_type(),
-            substitutes: Vec::new(),
-            stock_entries: Vec::new(),
-            barcodes: Vec::new(),
+            substitutes: Substitutions::default(),
+            stock_entries: StockEntries::default(),
+            barcodes: StringList::default(),
             image_url: None,
             details: item.details,
         }
