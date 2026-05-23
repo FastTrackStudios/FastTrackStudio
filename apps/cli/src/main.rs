@@ -729,6 +729,60 @@ enum VaultCmd {
         from: String,
         to: String,
     },
+    /// Sync a local vault directory against the active org's
+    /// vault on the server. Pulls remote-only files, pushes
+    /// local-only files, and resolves conflicts via
+    /// newer-mtime-wins. See `features/vault/vault-sync-client/`
+    /// for the orchestrator.
+    Sync {
+        /// Local vault root. Defaults to the active org's
+        /// `vault/` dir under the data root.
+        #[arg(long)]
+        local: Option<std::path::PathBuf>,
+        /// Server URL. Falls back to `ws://127.0.0.1:18080`.
+        #[arg(long)]
+        server: Option<String>,
+        /// Org slug to sync against. Defaults to the active
+        /// org from the session.
+        #[arg(long)]
+        org: Option<String>,
+        /// Remote vault id under that org. Server-side currently
+        /// runs one vault per org keyed by `"default"`.
+        #[arg(long, default_value = "default")]
+        vault_id: String,
+        /// Show the plan but don't apply it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// One-way pull — download every server-only file. Local
+    /// files that already match the server are skipped; local
+    /// files not on the server are left in place.
+    Pull {
+        #[arg(long)]
+        local: Option<std::path::PathBuf>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long, default_value = "default")]
+        vault_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// One-way push — upload every local-only file. Remote
+    /// files not present locally are left alone (no delete).
+    Push {
+        #[arg(long)]
+        local: Option<std::path::PathBuf>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long, default_value = "default")]
+        vault_id: String,
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -920,9 +974,16 @@ async fn main() -> eyre::Result<()> {
                 RemoteVoxConfig::from_args(cli.server, cli.session_token, cli.organization_id)?;
             println!("Vox endpoint: {}", remote.display_url);
         }
-        Commands::Vault { cmd } => {
-            return run_vault(cmd);
-        }
+        Commands::Vault { cmd } => match cmd {
+            // Sync ops touch vox and need async; everything
+            // else stays in the sync path.
+            VaultCmd::Sync { .. } | VaultCmd::Pull { .. } | VaultCmd::Push { .. } => {
+                return Box::pin(run_vault_sync(cmd)).await;
+            }
+            other => {
+                return run_vault(other);
+            }
+        },
         Commands::Task(cmd) => {
             return run_task(cmd);
         }
@@ -3353,7 +3414,232 @@ fn run_vault(cmd: VaultCmd) -> eyre::Result<()> {
             vault_obsidian::move_page(&mut v, &from, &to, &guard)
                 .map_err(|e| eyre::eyre!("move: {e}"))?;
         }
+        VaultCmd::Sync { .. } | VaultCmd::Pull { .. } | VaultCmd::Push { .. } => {
+            // Routed to `run_vault_sync` from the async
+            // dispatch above. Should never hit this arm.
+            unreachable!("sync ops routed through run_vault_sync");
+        }
     }
+    Ok(())
+}
+
+/// Async vault sync handler — talks to `/org/<slug>/vox` and
+/// applies pull/push/sync ops via the architect-generated
+/// `VaultSyncClient`. Logic lives in `vault_sync_client`; this
+/// wrapper handles the I/O + the CLI's flag plumbing.
+async fn run_vault_sync(cmd: VaultCmd) -> eyre::Result<()> {
+    use vault_proto::{IfMatch, VaultSyncClient};
+    use vault_sync_client::{LocalEntry, Side, SyncOp, SyncSummary, index_local, plan_sync};
+
+    enum Mode {
+        Sync,
+        Pull,
+        Push,
+    }
+
+    let (mode, local, server, org_slug, vault_id, dry_run) = match cmd {
+        VaultCmd::Sync {
+            local,
+            server,
+            org,
+            vault_id,
+            dry_run,
+        } => (Mode::Sync, local, server, org, vault_id, dry_run),
+        VaultCmd::Pull {
+            local,
+            server,
+            org,
+            vault_id,
+            dry_run,
+        } => (Mode::Pull, local, server, org, vault_id, dry_run),
+        VaultCmd::Push {
+            local,
+            server,
+            org,
+            vault_id,
+            dry_run,
+        } => (Mode::Push, local, server, org, vault_id, dry_run),
+        _ => unreachable!("only sync ops reach this handler"),
+    };
+
+    // Resolve the org slug (active session if not overridden).
+    let org_slug = match org_slug {
+        Some(s) => s,
+        None => session_store::load()?
+            .map(|s| s.active)
+            .ok_or_else(|| eyre::eyre!("no active org — pass --org or sign in first"))?,
+    };
+
+    // Resolve local vault root (org's `vault/` dir if not overridden).
+    let local_root = if let Some(p) = local {
+        p
+    } else {
+        let root = org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+        root.org(&org_slug).vault_dir()
+    };
+
+    // Resolve the per-org vox URL.
+    let base = server.unwrap_or_else(|| "ws://127.0.0.1:18080".to_owned());
+    let url = if base.ends_with("/vox") {
+        base
+    } else {
+        let stripped = base.trim_end_matches('/');
+        format!("{stripped}/org/{org_slug}/vox")
+    };
+
+    println!("Local:  {}", local_root.display());
+    println!("Server: {url}");
+    println!("Vault:  {vault_id}\n");
+
+    let client: VaultSyncClient = Box::pin(vox::connect(&url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+
+    // Index local + fetch remote manifest in parallel-ish (the
+    // local walk is sync, but cheap; do it before the network
+    // round-trip).
+    let local_entries: Vec<LocalEntry> =
+        index_local(&local_root).map_err(|e| eyre::eyre!("index local: {e}"))?;
+    let remote_manifest = client
+        .manifest(vault_id.clone())
+        .await
+        .map_err(|e| eyre::eyre!("fetch manifest: {e:?}"))?;
+
+    println!(
+        "indexed: local={} remote={}",
+        local_entries.len(),
+        remote_manifest.files.len()
+    );
+
+    // Plan, then filter by mode.
+    let plan = plan_sync(&local_entries, &remote_manifest);
+    let plan: Vec<SyncOp> = plan
+        .into_iter()
+        .filter(|op| {
+            matches!(
+                (op, &mode),
+                (SyncOp::InSync { .. }, _)
+                    | (SyncOp::Pull { .. }, Mode::Sync | Mode::Pull)
+                    | (SyncOp::Push { .. }, Mode::Sync | Mode::Push)
+                    | (SyncOp::Conflict { .. }, Mode::Sync)
+            )
+        })
+        .collect();
+
+    let mut summary = SyncSummary::default();
+    for op in &plan {
+        summary.record(op);
+    }
+
+    println!(
+        "plan: {} push · {} pull · {} in-sync · {} conflicts (local/remote: {}/{})\n",
+        summary.pushed,
+        summary.pulled,
+        summary.in_sync,
+        summary.conflicts_local_won + summary.conflicts_remote_won,
+        summary.conflicts_local_won,
+        summary.conflicts_remote_won,
+    );
+
+    if dry_run {
+        for op in &plan {
+            describe_op(op);
+        }
+        return Ok(());
+    }
+
+    // Apply.
+    for op in &plan {
+        match op {
+            SyncOp::InSync { .. } => {}
+            SyncOp::Pull { path, .. } => {
+                let bytes = client
+                    .get_file(vault_id.clone(), path.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("get_file {path}: {e:?}"))?;
+                write_local(&local_root, path, &bytes.0)?;
+                println!("PULL  {path}");
+            }
+            SyncOp::Push { path, .. } => {
+                let abs = local_root.join(path);
+                let bytes =
+                    std::fs::read(&abs).map_err(|e| eyre::eyre!("read {}: {e}", abs.display()))?;
+                client
+                    .put_file(vault_id.clone(), path.clone(), bytes, IfMatch::CreateOnly)
+                    .await
+                    .map_err(|e| eyre::eyre!("put_file {path}: {e:?}"))?;
+                println!("PUSH  {path}");
+            }
+            SyncOp::Conflict {
+                path,
+                remote_sha,
+                winning_side,
+                ..
+            } => match winning_side {
+                Side::Local => {
+                    let abs = local_root.join(path);
+                    let bytes = std::fs::read(&abs)
+                        .map_err(|e| eyre::eyre!("read {}: {e}", abs.display()))?;
+                    client
+                        .put_file(
+                            vault_id.clone(),
+                            path.clone(),
+                            bytes,
+                            IfMatch::Sha(remote_sha.clone()),
+                        )
+                        .await
+                        .map_err(|e| eyre::eyre!("put_file (conflict) {path}: {e:?}"))?;
+                    println!("PUSH! {path}  (conflict: local won)");
+                }
+                Side::Remote => {
+                    let bytes = client
+                        .get_file(vault_id.clone(), path.clone())
+                        .await
+                        .map_err(|e| eyre::eyre!("get_file (conflict) {path}: {e:?}"))?;
+                    write_local(&local_root, path, &bytes.0)?;
+                    println!("PULL! {path}  (conflict: remote won)");
+                }
+            },
+        }
+    }
+
+    println!(
+        "\ndone: {} pushed · {} pulled · {} in-sync",
+        summary.pushed + summary.conflicts_local_won,
+        summary.pulled + summary.conflicts_remote_won,
+        summary.in_sync,
+    );
+    Ok(())
+}
+
+fn describe_op(op: &vault_sync_client::SyncOp) {
+    use vault_sync_client::{Side, SyncOp};
+    match op {
+        SyncOp::InSync { path } => println!("OK    {path}"),
+        SyncOp::Pull { path, .. } => println!("PULL  {path}"),
+        SyncOp::Push { path, .. } => println!("PUSH  {path}"),
+        SyncOp::Conflict {
+            path, winning_side, ..
+        } => {
+            let side = match winning_side {
+                Side::Local => "local",
+                Side::Remote => "remote",
+            };
+            println!("CONF  {path}  (winner: {side})");
+        }
+    }
+}
+
+fn write_local(local_root: &std::path::Path, path: &str, bytes: &[u8]) -> eyre::Result<()> {
+    if path.split(['/', '\\']).any(|seg| seg == "..") {
+        return Err(eyre::eyre!("refused path with `..`: {path}"));
+    }
+    let abs = local_root.join(path);
+    if let Some(parent) = abs.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| eyre::eyre!("mkdir {}: {e}", parent.display()))?;
+    }
+    std::fs::write(&abs, bytes).map_err(|e| eyre::eyre!("write {}: {e}", abs.display()))?;
     Ok(())
 }
 
