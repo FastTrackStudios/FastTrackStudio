@@ -1,14 +1,15 @@
 //! `WikiLive` — the file-backed wiki handle.
 //!
-//! Single struct anchored at the **vault root**
-//! (`<vault>/`). All operations route through helper
-//! modules so the handle stays small. Concurrency: each
-//! mutating method acquires a per-vault file lock by
-//! convention (atomic temp+rename writes), so multiple
-//! handles can coexist safely. No in-memory mutex.
+//! Single struct anchored at the **wiki root** (typically
+//! `<data_root>/orgs/<slug>/wiki/Knowledge/`). All operations
+//! route through helper modules so the handle stays small.
+//! Concurrency: each mutating method acquires a per-vault
+//! file lock by convention (atomic temp+rename writes), so
+//! multiple handles can coexist safely. No in-memory mutex.
 
 use std::path::{Path, PathBuf};
 
+#[allow(unused_imports)]
 use wiki_proto::paths;
 
 use crate::error::WikiLiveError;
@@ -17,29 +18,31 @@ use crate::error::WikiLiveError;
 /// a `PathBuf`).
 #[derive(Debug, Clone)]
 pub struct WikiLive {
-    vault_root: PathBuf,
+    root: PathBuf,
 }
 
 impl WikiLive {
-    /// Open an existing wiki at `<vault_root>/Wiki/`. Does
-    /// not validate structure — call [`Self::bootstrap`]
-    /// or [`Self::is_bootstrapped`] if you need that.
-    pub fn open(vault_root: impl Into<PathBuf>) -> Self {
-        Self {
-            vault_root: vault_root.into(),
-        }
+    /// Open an existing wiki rooted at `root`. Does not
+    /// validate structure — call [`Self::bootstrap`] or
+    /// [`Self::is_bootstrapped`] if you need that.
+    pub fn open(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
     }
 
-    /// Vault root path.
-    #[must_use]
-    pub fn vault_root(&self) -> &Path {
-        &self.vault_root
-    }
-
-    /// `<vault_root>/Wiki/`.
+    /// Wiki root path. Identical to what was passed to
+    /// [`Self::open`].
     #[must_use]
     pub fn wiki_root(&self) -> PathBuf {
-        self.vault_root.join(paths::WIKI_ROOT)
+        self.root.clone()
+    }
+
+    /// Backwards-compat alias for [`Self::wiki_root`]. Kept
+    /// because a handful of older call sites still ask for
+    /// the "vault root" of a wiki; the two are the same now
+    /// that the wiki is its own tree, not a vault subfolder.
+    #[must_use]
+    pub fn vault_root(&self) -> &Path {
+        &self.root
     }
 
     /// Resolve a path relative to the wiki root, rejecting

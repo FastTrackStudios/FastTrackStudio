@@ -1,7 +1,8 @@
 //! `Recipe` — a cooklang `.cook` file as a typed wire value.
 //!
-//! Identity is the vault-relative `path`
-//! (`Wiki/Cookbook/<slug>.cook`).
+//! Identity is the wiki-relative `path`
+//! (`Cookbook/<slug>.cook`, joined with the wiki root the
+//! caller provides — typically `<org>/wiki/Knowledge/`).
 //! The recipe knows nothing about pantry IDs, our nutrition
 //! database, or substitutions — those layers join by **ingredient
 //! name** at mealprep time. The file is pure cooklang and
@@ -89,7 +90,8 @@ impl std::ops::Deref for Ingredients {
 #[architect(table_name = "recipes", repo)]
 pub struct Recipe {
     /// Vault-relative, forward-slash separated, e.g.
-    /// `Wiki/Cookbook/Truffle Pasta.cook`. Identity — primary key.
+    /// `Cookbook/Truffle Pasta.cook` (wiki-relative).
+    /// Identity — primary key.
     #[architect(primary_key, auto_increment = false)]
     pub path: String,
 

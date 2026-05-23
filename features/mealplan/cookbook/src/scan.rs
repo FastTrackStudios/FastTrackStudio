@@ -1,10 +1,11 @@
-//! Walk a vault root for `.cook` files and parse them.
+//! Walk a wiki root for `.cook` files and parse them.
 //!
-//! The cookbook lives under `<vault>/Wiki/Cookbook/` — recipes
-//! are wiki pages in cooklang form, not a sibling top-level
-//! tree. This module knows nothing about `vault::Vault`; it
-//! walks the filesystem directly with `walkdir`. Recipes are
-//! NOT markdown pages; the vault's page index doesn't see them.
+//! The cookbook is a wiki sub-tree: `<wiki>/Cookbook/`. The
+//! wiki itself lives at `<org>/wiki/Knowledge/` server-side
+//! (see `OrgRoot::wiki_knowledge_dir`), so recipes end up at
+//! `<org>/wiki/Knowledge/Cookbook/<slug>.cook`. This module
+//! knows nothing about `vault::Vault` or `OrgRoot`; it walks
+//! the filesystem directly with `walkdir`.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -15,24 +16,25 @@ use walkdir::WalkDir;
 use crate::model::Recipe;
 use crate::parse::parse_cook_at;
 
-/// Default cookbook sub-directory inside the vault root.
+/// Default cookbook sub-directory inside the wiki root.
 /// Recipes live alongside other wiki content so wikilinks to
 /// ingredient pages (`[[saute]]`, `[[mise en place]]`) resolve
 /// in the same namespace.
-pub const COOKBOOK_DIR: &str = "Wiki/Cookbook";
+pub const COOKBOOK_DIR: &str = "Cookbook";
 
-/// Walk `<vault_root>/Wiki/Cookbook/` and parse every `.cook`
-/// file into a [`Recipe`]. Files that fail to parse are
-/// skipped with a warning.
+/// Walk `<wiki_root>/Cookbook/` and parse every `.cook` file
+/// into a [`Recipe`]. Files that fail to parse are skipped
+/// with a warning.
 #[must_use]
-pub fn scan_cookbook(vault_root: &Path) -> Vec<Recipe> {
-    scan_cookbook_at(vault_root, COOKBOOK_DIR)
+pub fn scan_cookbook(wiki_root: &Path) -> Vec<Recipe> {
+    scan_cookbook_at(wiki_root, COOKBOOK_DIR)
 }
 
-/// Like [`scan_cookbook`] but scans a custom sub-directory.
+/// Like [`scan_cookbook`] but scans a custom sub-directory
+/// relative to the wiki root.
 #[must_use]
-pub fn scan_cookbook_at(vault_root: &Path, sub_dir: &str) -> Vec<Recipe> {
-    let root = vault_root.join(sub_dir);
+pub fn scan_cookbook_at(wiki_root: &Path, sub_dir: &str) -> Vec<Recipe> {
+    let root = wiki_root.join(sub_dir);
     if !root.exists() {
         return Vec::new();
     }
@@ -48,7 +50,7 @@ pub fn scan_cookbook_at(vault_root: &Path, sub_dir: &str) -> Vec<Recipe> {
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("cook"))
         })
     {
-        let Ok(rel) = entry.path().strip_prefix(vault_root) else {
+        let Ok(rel) = entry.path().strip_prefix(wiki_root) else {
             continue;
         };
         let rel_str = rel.to_string_lossy().replace('\\', "/");
@@ -73,14 +75,14 @@ pub fn scan_cookbook_at(vault_root: &Path, sub_dir: &str) -> Vec<Recipe> {
 /// Discover step + title images for a recipe, following the
 /// cooklang/cooklang-find convention:
 ///
-/// - `Wiki/Cookbook/Pasta.jpg` — title image.
-/// - `Wiki/Cookbook/Pasta.0.jpg` — step 0 image.
-/// - `Wiki/Cookbook/Pasta.3.jpg` — step 3 image.
+/// - `Cookbook/Pasta.jpg` — title image (next to the recipe).
+/// - `Cookbook/Pasta.0.jpg` — step 0 image.
+/// - `Cookbook/Pasta.3.jpg` — step 3 image.
 ///
-/// Returns vault-relative paths (forward-slash separated)
+/// Returns wiki-relative paths (forward-slash separated)
 /// suitable for embedding in UI surfaces.
 #[must_use]
-pub fn image_paths_for(vault_root: &Path, recipe_path: &str) -> Vec<RecipeImage> {
+pub fn image_paths_for(wiki_root: &Path, recipe_path: &str) -> Vec<RecipeImage> {
     let Some(stem) = std::path::Path::new(recipe_path)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -90,7 +92,7 @@ pub fn image_paths_for(vault_root: &Path, recipe_path: &str) -> Vec<RecipeImage>
     let parent = std::path::Path::new(recipe_path)
         .parent()
         .map_or_else(PathBuf::new, std::path::Path::to_path_buf);
-    let abs_parent = vault_root.join(&parent);
+    let abs_parent = wiki_root.join(&parent);
     if !abs_parent.exists() {
         return Vec::new();
     }
@@ -116,13 +118,13 @@ pub fn image_paths_for(vault_root: &Path, recipe_path: &str) -> Vec<RecipeImage>
         // file_stem like "Pasta" → title; "Pasta.3" → step 3.
         if file_stem == stem {
             out.push(RecipeImage {
-                path: rel_from(vault_root, entry.path()),
+                path: rel_from(wiki_root, entry.path()),
                 step_index: None,
             });
         } else if let Some(rest) = file_stem.strip_prefix(&format!("{stem}.")) {
             if let Ok(idx) = rest.parse::<usize>() {
                 out.push(RecipeImage {
-                    path: rel_from(vault_root, entry.path()),
+                    path: rel_from(wiki_root, entry.path()),
                     step_index: Some(idx),
                 });
             }

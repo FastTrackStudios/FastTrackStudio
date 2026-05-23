@@ -1,16 +1,18 @@
-//! Convert legacy `Wiki/Cookbook/*.md` recipes to
-//! cooklang `Wiki/Cookbook/*.cook` files.
+//! Convert legacy `Cookbook/*.md` recipes to cooklang
+//! `Cookbook/*.cook` files.
 //!
 //! Usage:
 //!
 //! ```text
-//! migrate-md-to-cook <vault_root> [--dry-run]
+//! migrate-md-to-cook <wiki_root> [--dry-run]
 //! ```
 //!
-//! Idempotent. Reads `<vault_root>/Wiki/Cookbook/*.md`,
-//! writes `<vault_root>/Wiki/Cookbook/<slug>.cook` alongside
-//! them. Leaves originals in place — delete after manual
-//! review.
+//! `<wiki_root>` is typically `<org>/wiki/Knowledge/` — i.e.
+//! the directory that *contains* the `Cookbook/` subdir.
+//!
+//! Idempotent. Reads `<wiki_root>/Cookbook/*.md`, writes
+//! `<wiki_root>/Cookbook/<slug>.cook` alongside them. Leaves
+//! originals in place — delete after manual review.
 //!
 //! Mapping:
 //! - YAML frontmatter scalars → cooklang metadata block
@@ -32,21 +34,21 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let vault_root = args.next().unwrap_or_else(|| {
-        eprintln!("usage: migrate-md-to-cook <vault_root> [--dry-run]");
+    let wiki_root = args.next().unwrap_or_else(|| {
+        eprintln!("usage: migrate-md-to-cook <wiki_root> [--dry-run]");
         std::process::exit(2);
     });
     let dry_run = args.any(|a| a == "--dry-run");
-    let root = PathBuf::from(&vault_root);
+    let root = PathBuf::from(&wiki_root);
     if !root.is_dir() {
-        eprintln!("not a directory: {vault_root}");
+        eprintln!("not a directory: {wiki_root}");
         std::process::exit(2);
     }
 
-    let src_dir = root.join("Wiki").join("Cookbook");
+    let src_dir = root.join("Cookbook");
     let dst_dir = src_dir.clone();
     if !src_dir.exists() {
-        eprintln!("no Wiki/Cookbook/ at {vault_root}; nothing to migrate");
+        eprintln!("no Cookbook/ at {wiki_root}; nothing to migrate");
         return;
     }
     if !dry_run {

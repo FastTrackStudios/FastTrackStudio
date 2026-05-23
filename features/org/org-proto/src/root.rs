@@ -10,7 +10,12 @@
 //!     │   ├── identity.sqlite         # only when `is_home = true`
 //!     │   ├── timer.sqlite
 //!     │   ├── finance.sqlite
-//!     │   ├── vault/
+//!     │   ├── vault/                  # personal: Journal/, Projects/, Operations/, …
+//!     │   ├── wiki/                   # knowledge + LLM scratch
+//!     │   │   ├── Knowledge/          # curated wiki (schema/log/concepts/Cookbook/…)
+//!     │   │   └── LLM/                # loose LLM-owned space
+//!     │   │       ├── Memories/
+//!     │   │       └── Journals/
 //!     │   └── attachments/
 //!     ├── fasttrackstudios/
 //!     └── ...
@@ -161,7 +166,16 @@ impl DataRoot {
         // Sub-dirs the downstream features will use. Created
         // up-front so a fresh `OrgRoot` is immediately usable
         // — no "first write creates the dir" surprises.
-        for sub in ["vault", "attachments"] {
+        // `vault/` is personal; `wiki/Knowledge/` is curated
+        // (LLM-Wiki shape); `wiki/LLM/` is loose scratch the
+        // agents own (memories, journals, run logs).
+        for sub in [
+            "vault",
+            "attachments",
+            "wiki/Knowledge",
+            "wiki/LLM/Memories",
+            "wiki/LLM/Journals",
+        ] {
             let p = org.path().join(sub);
             std::fs::create_dir_all(&p).map_err(|source| RootError::Create {
                 path: p.display().to_string(),
@@ -259,6 +273,54 @@ impl OrgRoot {
     #[must_use]
     pub fn vault_dir(&self) -> PathBuf {
         self.path.join("vault")
+    }
+
+    /// `<org>/wiki/` — sibling of `vault/`. The wiki is its
+    /// own tree so highly-curated knowledge (Knowledge/) and
+    /// loose LLM scratch space (LLM/) don't pollute the
+    /// vault's user-facing files.
+    ///
+    /// **Layered access rule** (enforced by convention; lint
+    /// is a future follow-up):
+    ///
+    /// - `vault/`     ← can link → `wiki/Knowledge/`, `wiki/LLM/`
+    /// - `wiki/LLM/`  ← can link → `wiki/Knowledge/`
+    /// - `wiki/Knowledge/` ← stays self-contained; no
+    ///   outbound links to `vault/` or `wiki/LLM/`. It's the
+    ///   curated, generalizable tier (even if the knowledge
+    ///   itself is private).
+    ///
+    /// One-directional dependency keeps Knowledge clean —
+    /// you can rebuild the whole vault and the wiki/LLM
+    /// scratch from scratch without re-curating Knowledge.
+    #[must_use]
+    pub fn wiki_dir(&self) -> PathBuf {
+        self.path.join("wiki")
+    }
+
+    /// `<org>/wiki/Knowledge/` — the curated knowledge base.
+    /// Mirrors the LLM-Wiki project layout (`schema.md`,
+    /// `purpose.md`, `log.md`, `concepts/`, `entities/`,
+    /// `Cookbook/`, …). This is what the structured wiki
+    /// backend (`wiki-live::WikiLive`) is rooted at.
+    ///
+    /// By convention, Knowledge stays self-contained — no
+    /// outbound `[[…]]` links to anything outside itself. The
+    /// other tiers (vault, LLM scratch) link IN to Knowledge,
+    /// never the other way.
+    #[must_use]
+    pub fn wiki_knowledge_dir(&self) -> PathBuf {
+        self.wiki_dir().join("Knowledge")
+    }
+
+    /// `<org>/wiki/LLM/` — LLM scratch space (memories,
+    /// journals, agent logs). No enforced schema; tools write
+    /// here freely without spilling into curated `Knowledge/`.
+    /// LLM/ pages MAY link into `wiki/Knowledge/`; Knowledge
+    /// never links back.
+    #[must_use]
+    pub fn wiki_llm_dir(&self) -> PathBuf {
+        self.wiki_dir().join("LLM")
     }
 
     #[must_use]

@@ -443,14 +443,14 @@ mod tests {
 
     #[test]
     fn can_cook_when_stock_sufficient() {
-        let r = recipe_with("Wiki/Cookbook/X.cook", vec![ing("Pasta", 200.0, "g")], 2);
+        let r = recipe_with("Cookbook/X.cook", vec![ing("Pasta", 200.0, "g")], 2);
         let s = vec![pantry_row("Pasta", 500.0, "g")];
         assert!(check(&r, &s, 2).can_cook);
     }
 
     #[test]
     fn scales_with_servings() {
-        let r = recipe_with("Wiki/Cookbook/X.cook", vec![ing("Pasta", 200.0, "g")], 2);
+        let r = recipe_with("Cookbook/X.cook", vec![ing("Pasta", 200.0, "g")], 2);
         let s = vec![pantry_row("Pasta", 300.0, "g")];
         let f = check(&r, &s, 4);
         assert!(!f.can_cook);
@@ -462,18 +462,14 @@ mod tests {
 
     #[test]
     fn cross_unit_with_conversion() {
-        let r = recipe_with(
-            "Wiki/Cookbook/X.cook",
-            vec![ing("Olive Oil", 30.0, "ml")],
-            1,
-        );
+        let r = recipe_with("Cookbook/X.cook", vec![ing("Olive Oil", 30.0, "ml")], 1);
         let s = vec![pantry_row("Olive Oil", 1.0, "l")];
         assert!(check(&r, &s, 1).can_cook);
     }
 
     #[test]
     fn missing_item_surfaces() {
-        let r = recipe_with("Wiki/Cookbook/X.cook", vec![ing("Truffles", 5.0, "g")], 1);
+        let r = recipe_with("Cookbook/X.cook", vec![ing("Truffles", 5.0, "g")], 1);
         let s = vec![pantry_row("Pasta", 500.0, "g")];
         let f = check(&r, &s, 1);
         assert!(matches!(f.missing[0].reason, ShortageReason::NotInPantry));
@@ -483,30 +479,18 @@ mod tests {
     fn optional_ingredient_doesnt_block() {
         let mut opt = ing("Truffles", 5.0, "g");
         opt.optional = true;
-        let r = recipe_with(
-            "Wiki/Cookbook/X.cook",
-            vec![ing("Pasta", 100.0, "g"), opt],
-            1,
-        );
+        let r = recipe_with("Cookbook/X.cook", vec![ing("Pasta", 100.0, "g"), opt], 1);
         let s = vec![pantry_row("Pasta", 500.0, "g")];
         assert!(check(&r, &s, 1).can_cook);
     }
 
     #[test]
     fn nested_recipe_aggregates_ingredients() {
-        let mut dough = recipe_with(
-            "Wiki/Cookbook/Dough.cook",
-            vec![ing("Flour", 200.0, "g")],
-            1,
-        );
+        let mut dough = recipe_with("Cookbook/Dough.cook", vec![ing("Flour", 200.0, "g")], 1);
         dough.name = "Pizza Dough".into();
-        let mut pizza = recipe_with(
-            "Wiki/Cookbook/Pizza.cook",
-            vec![ing("Flour", 100.0, "g")],
-            1,
-        );
+        let mut pizza = recipe_with("Cookbook/Pizza.cook", vec![ing("Flour", 100.0, "g")], 1);
         pizza.name = "Pizza".into();
-        pizza.nested_recipes = cookbook::StringList(vec!["Wiki/Cookbook/Dough.cook".into()]);
+        pizza.nested_recipes = cookbook::StringList(vec!["Cookbook/Dough.cook".into()]);
         let s = vec![pantry_row("Flour", 250.0, "g")];
         let f = check_nested(&pizza, &[pizza.clone(), dough], &s, 1);
         assert!(!f.can_cook);
@@ -515,10 +499,10 @@ mod tests {
 
     #[test]
     fn cycle_guard() {
-        let mut a = recipe_with("Wiki/Cookbook/A.cook", vec![ing("X", 1.0, "g")], 1);
-        let mut b = recipe_with("Wiki/Cookbook/B.cook", vec![ing("Y", 1.0, "g")], 1);
-        a.nested_recipes = cookbook::StringList(vec!["Wiki/Cookbook/B.cook".into()]);
-        b.nested_recipes = cookbook::StringList(vec!["Wiki/Cookbook/A.cook".into()]);
+        let mut a = recipe_with("Cookbook/A.cook", vec![ing("X", 1.0, "g")], 1);
+        let mut b = recipe_with("Cookbook/B.cook", vec![ing("Y", 1.0, "g")], 1);
+        a.nested_recipes = cookbook::StringList(vec!["Cookbook/B.cook".into()]);
+        b.nested_recipes = cookbook::StringList(vec!["Cookbook/A.cook".into()]);
         let s = vec![pantry_row("X", 10.0, "g"), pantry_row("Y", 10.0, "g")];
         assert!(check_nested(&a, &[a.clone(), b.clone()], &s, 1).can_cook);
     }
