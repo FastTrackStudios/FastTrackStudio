@@ -28,6 +28,10 @@ view-calendar.workspace = true
 task-ui.workspace = true
 scheduling-proto = { workspace = true, default-features = false }
 scheduling-ui.workspace = true
+# Cyclic life-calendar — Goals view uses the pure-function
+# generator to resolve `cycle_id` references to displayable
+# year/quarter/ordinal labels.
+cycle = { workspace = true, default-features = false }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }
