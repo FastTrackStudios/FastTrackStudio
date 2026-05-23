@@ -98,7 +98,7 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         status,
         priority,
         lead,
-        tags,
+        tags: crate::model::Tags(tags),
         details: body.to_string(),
         client_id,
         billable_default,

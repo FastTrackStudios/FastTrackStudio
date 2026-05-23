@@ -11300,8 +11300,11 @@ dependencies = [
 name = "project"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "chrono",
  "facet",
+ "fake",
+ "sea-orm",
  "serde",
  "serde_json",
  "serde_yaml",

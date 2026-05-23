@@ -1,6 +1,6 @@
 [package]
 name = "project"
-description = "First-party project feature for Task: `ProjectInfo` schema, frontmatter parser/writer, vault scanner. Projects are markdown pages in a `vault::Vault` with YAML frontmatter — billing fields (client, currency, default rate, billable default) live on the project itself so downstream features (`timer`, `finances`, `agent-dispatch`) can resolve them by reading the file. No CRDT, no database — the markdown file is the source of truth, same as the `task` crate."
+description = "First-party project feature for Task. `ProjectInfo` is the canonical project entity (`architect::Entity`-derived for schema-flexibility) — today it serializes to/from a markdown vault page's YAML frontmatter via the bundled parser + writer; under the `server` feature it also emits the SeaORM Model/Repo so the same schema can mount to SQLite without rewrite. Billing fields (client, currency, default rate, billable default) live on the project so downstream features (`timer`, `finance`, `agent-dispatch`) can resolve them by reading the file or the DB. Per `feedback_architect_entity_default`: schema-first, persistence-flexible."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+architect = { workspace = true }
 chrono = { workspace = true, features = ["clock", "serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -18,6 +19,24 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 vault.workspace = true
+
+# Server-only: SeaORM emissions from the architect derive.
+# Gated so wasm clients never pull SeaORM.
+sea-orm = { workspace = true, optional = true }
+
+fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"] }
+
+[features]
+default = []
+# `vox` is intentionally NOT exposed. architect's derive
+# emits `#[cfg(feature = "vox")]` references to the vox
+# crate; project is a wire/file format (not a service
+# trait), so enabling vox would force a vox dep we don't
+# need. The `unexpected_cfgs` warning architect emits is
+# harmless since the gated code never compiles.
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["server", "fake"]
 
 [dev-dependencies]
 tempfile = "3"
