@@ -2,10 +2,9 @@
 @import "../../../FastTrackStudio/fts-ui/crates/showcase/assets/fts-theme.css";
 
 @source "./src/**/*.{rs,html,css}";
-@source "../../crates/task-ui/src/**/*.rs";
-@source "../../features/knowledge/knowledge-ui/src/**/*.rs";
-@source "../../features/project/project-ui/src/**/*.rs";
-@source "../../crates/publish-core/src/**/*.rs";
+@source "../../crates/ui/src/**/*.rs";
+@source "../../features/*/*-ui/src/**/*.rs";
+@source "../../features/*/view-*/src/**/*.rs";
 @source "../../../FastTrackStudio/fts-ui/crates/fts-ui/src/**/*.rs";
 
 @layer base {

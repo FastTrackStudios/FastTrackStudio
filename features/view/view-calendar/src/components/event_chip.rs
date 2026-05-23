@@ -8,7 +8,8 @@ use dioxus::prelude::*;
 
 use crate::types::CalendarEvent;
 
-use super::drag::{DT_MIME, DragKind, DragState, use_drag_context};
+use super::drag::{DragKind, DragState, use_drag_context};
+use super::style::chip_palette;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct EventChipProps {
@@ -29,50 +30,103 @@ pub fn EventChip(props: EventChipProps) -> Element {
     let event = props.event.clone();
     let event_id = event.id;
 
-    let stem = event.color.stem();
-    let is_dragging = drag.read().is_some_and(|d| d.event == event_id);
-    let opacity = if is_dragging { "opacity: 0.4;" } else { "" };
+    let palette = chip_palette(event.color);
+    let is_dragging = drag
+        .read()
+        .as_ref()
+        .is_some_and(|d| d.event == event_id && d.committed);
+    // Hide the chip almost entirely during drag — the ghost block
+    // shows where it will land. Faint outline keeps the spot legible
+    // until drop, then snaps back into place.
+    let drag_style = if is_dragging {
+        "opacity: 0.15; pointer-events: none;"
+    } else {
+        ""
+    };
 
     let on_click = props.on_click;
-    let bg = format!(
-        "bg-{stem}-500/30 text-{stem}-50 border-l-2 border-{stem}-500 hover:bg-{stem}-500/40"
-    );
-    let style = format!("{}; {opacity}", props.position_style);
+    let style = format!("{}; {drag_style}", props.position_style);
     let time_label = format_time_range(&event);
+
+    // Adaptive layout — short events lose the time row, very short
+    // events collapse to a single horizontal line so the title
+    // still survives a 15-min slot.
+    let duration_min = event.duration_minutes();
+    let dense = duration_min < 50; // ≤40px tall: drop time row, tighter padding
+    let inline = duration_min < 25; // ≤20px tall: title + time on one row
+
+    let body = palette.body;
+    let hover = palette.hover;
+    let padding = if inline {
+        "px-2 py-0"
+    } else if dense {
+        "px-2 py-0.5"
+    } else {
+        "px-2 py-1"
+    };
 
     rsx! {
         div {
-            class: "absolute rounded-sm px-1.5 py-0.5 cursor-pointer select-none overflow-hidden {bg}",
+            class: "absolute rounded-md cursor-grab active:cursor-grabbing select-none overflow-hidden shadow-sm transition-colors {padding} {body} {hover}",
             style: "{style}",
-            draggable: !props.readonly,
-            ondragstart: move |e: Event<DragData>| {
+            onpointerdown: move |e: Event<PointerData>| {
                 if props.readonly { return; }
-                let dt = e.data().data_transfer();
-                let _ = dt.set_data(DT_MIME, &event_id.to_string());
+                e.stop_propagation();
+                let p = e.data().page_coordinates();
                 drag.set(Some(DragState {
                     event: event_id,
                     kind: DragKind::Move,
                     orig_start: event.start,
                     orig_end: event.end,
+                    color: event.color,
+                    title: event.title.clone(),
+                    start_page_x: p.x,
+                    start_page_y: p.y,
+                    committed: false,
                 }));
             },
-            ondragend: move |_| drag.set(None),
             onclick: move |e: MouseEvent| {
                 e.stop_propagation();
                 on_click.call(());
             },
-            div { class: "text-[11px] leading-4 font-medium truncate", "{event.title}" }
-            div { class: "text-[10px] leading-3 opacity-80 truncate", "{time_label}" }
-            // Resize handle — bottom edge.
+            if inline {
+                div { class: "flex items-baseline gap-1.5 text-[11px] leading-4 truncate",
+                    span { class: "font-semibold truncate", "{event.title}" }
+                    span { class: "opacity-85 shrink-0 text-[10px]", "{time_label}" }
+                }
+            } else if dense {
+                div { class: "text-[11px] leading-4 font-semibold truncate", "{event.title}" }
+            } else {
+                div { class: "text-[11px] leading-4 font-semibold truncate", "{event.title}" }
+                div { class: "text-[10px] leading-3 opacity-85 truncate", "{time_label}" }
+            }
+            // Resize handles — top + bottom edges.
             if !props.readonly {
                 ResizeHandle {
                     event_id,
                     orig_start: event.start,
                     orig_end: event.end,
+                    color: event.color,
+                    title: event.title.clone(),
+                    edge: ResizeEdge::Top,
+                }
+                ResizeHandle {
+                    event_id,
+                    orig_start: event.start,
+                    orig_end: event.end,
+                    color: event.color,
+                    title: event.title.clone(),
+                    edge: ResizeEdge::Bottom,
                 }
             }
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ResizeEdge {
+    Top,
+    Bottom,
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -80,6 +134,9 @@ struct ResizeHandleProps {
     event_id: crate::types::EventId,
     orig_start: chrono::DateTime<chrono::Utc>,
     orig_end: chrono::DateTime<chrono::Utc>,
+    color: crate::types::ColorTag,
+    title: String,
+    edge: ResizeEdge,
 }
 
 #[component]
@@ -89,23 +146,38 @@ fn ResizeHandle(props: ResizeHandleProps) -> Element {
     let event_id = props.event_id;
     let orig_start = props.orig_start;
     let orig_end = props.orig_end;
+    let color = props.color;
+    let title = props.title.clone();
+    let edge = props.edge;
+    let position = match edge {
+        ResizeEdge::Top => "top-0",
+        ResizeEdge::Bottom => "bottom-0",
+    };
 
     rsx! {
         div {
-            class: "absolute left-0 right-0 bottom-0 h-1 cursor-ns-resize hover:bg-foreground/40",
-            draggable: true,
-            ondragstart: move |e: Event<DragData>| {
+            class: "absolute left-0 right-0 {position} h-1.5 cursor-ns-resize hover:bg-white/40 z-10",
+            onpointerdown: move |e: Event<PointerData>| {
                 e.stop_propagation();
-                let dt = e.data().data_transfer();
-                let _ = dt.set_data(DT_MIME, &event_id.to_string());
+                let p = e.data().page_coordinates();
                 drag.set(Some(DragState {
                     event: event_id,
-                    kind: DragKind::ResizeEnd,
+                    kind: match edge {
+                        ResizeEdge::Top => DragKind::ResizeStart,
+                        ResizeEdge::Bottom => DragKind::ResizeEnd,
+                    },
                     orig_start,
                     orig_end,
+                    color,
+                    title: title.clone(),
+                    start_page_x: p.x,
+                    start_page_y: p.y,
+                    // Resize handles always commit immediately — the
+                    // tiny 6px handle has no "click vs drag"
+                    // ambiguity to resolve.
+                    committed: true,
                 }));
             },
-            ondragend: move |_| drag.set(None),
         }
     }
 }

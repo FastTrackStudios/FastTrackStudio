@@ -123,7 +123,7 @@ fn BackgroundCells(props: BackgroundCellsProps) -> Element {
                                 e.prevent_default();
                                 let dt = e.data().data_transfer();
                                 let Ok(id) = dt.get_data(DT_MIME).unwrap_or_default().parse::<Uuid>() else { return };
-                                let snapshot = *ctx.state.peek();
+                                let snapshot = ctx.state.peek().clone();
                                 let Some(ds) = snapshot else { return };
                                 if ds.event != id { return; }
                                 let orig_day = ds.orig_start.date_naive();
@@ -164,7 +164,7 @@ fn AllDayChip(props: AllDayChipProps) -> Element {
     let event = p.event.clone();
     let event_id = event.id;
     let stem = event.color.stem();
-    let is_dragging = drag.read().is_some_and(|d| d.event == event_id);
+    let is_dragging = drag.read().as_ref().is_some_and(|d| d.event == event_id);
     let opacity = if is_dragging { "opacity: 0.4;" } else { "" };
 
     let rounded_l = if p.continues_left {
@@ -194,6 +194,7 @@ fn AllDayChip(props: AllDayChipProps) -> Element {
             class: "truncate text-[11px] leading-4 px-1.5 py-0.5 mx-px my-px cursor-pointer select-none pointer-events-auto {bg} {rounded_l} {rounded_r}",
             style: "{style}",
             draggable: !props.readonly,
+            "data-cal-drag": "true",
             ondragstart: move |e: Event<DragData>| {
                 if props.readonly { return; }
                 let dt = e.data().data_transfer();
@@ -203,6 +204,11 @@ fn AllDayChip(props: AllDayChipProps) -> Element {
                     kind: DragKind::Move,
                     orig_start: event.start,
                     orig_end: event.end,
+                    color: event.color,
+                    title: event.title.clone(),
+                    start_page_x: 0.0,
+                    start_page_y: 0.0,
+                    committed: true,
                 }));
             },
             ondragend: move |_| drag.set(None),

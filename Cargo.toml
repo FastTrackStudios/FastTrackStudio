@@ -577,8 +577,8 @@ version = "0.3"
 default-features = false
 features = ["std"]
 
-[workspace.dependencies.task-ui]
-path = "crates/task-ui"
+[workspace.dependencies.ui]
+path = "crates/ui"
 
 # CRDT lib + SeaORM persistence — path deps pointing at architect's
 # in-repo libs. Same rev as the architect/macros/architect dep below.

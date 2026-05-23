@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
-task-ui.workspace = true
+ui.workspace = true
 
 [features]
 default = ["mobile"]

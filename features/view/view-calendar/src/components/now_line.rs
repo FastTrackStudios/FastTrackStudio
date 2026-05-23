@@ -36,24 +36,52 @@ pub fn NowLine(props: NowLineProps) -> Element {
     let total_minutes = i64::from(now.hour()) * 60 + i64::from(now.minute());
     let top_px = (total_minutes * props.px_per_hour) / 60;
     let col_one = col + 1;
+    let time_label = format_now(now);
 
     rsx! {
-        // Single column wrapper — the parent time-grid is a CSS
-        // grid with `grid-template-columns: 56px repeat(N, 1fr)`,
-        // and our `grid-column` lines up with today's day column.
+        // Time bubble — pinned to the hour-axis rail (grid column 1)
+        // at the same vertical as the line. Reads as a "you are
+        // here" pill, matching Google Calendar.
         div {
             class: "pointer-events-none relative",
-            style: "grid-column: {col_one + 1};", // +1 because col 1 is the hour-axis rail
-            // Red dot at left edge.
+            style: "grid-column: 1;",
             div {
-                class: "absolute w-2 h-2 rounded-full bg-rose-500 z-20",
-                style: "top: {top_px - 4}px; left: -4px;",
+                class: "absolute right-1 px-1 py-px rounded-sm bg-rose-500 text-white text-[10px] font-semibold leading-none z-30 shadow",
+                style: "top: {top_px - 7}px;",
+                "{time_label}"
             }
-            // Red 1px line across the day column.
+        }
+        // Day column — the parent time-grid is a CSS grid with
+        // `grid-template-columns: 56px repeat(N, 1fr)`. Our
+        // `grid-column` lines up with today's day column.
+        div {
+            class: "pointer-events-none relative",
+            style: "grid-column: {col_one + 1};",
+            // Filled dot at left edge.
             div {
-                class: "absolute left-0 right-0 h-px bg-rose-500 z-20",
-                style: "top: {top_px}px;",
+                class: "absolute w-2.5 h-2.5 rounded-full bg-rose-500 z-20 ring-2 ring-rose-500/30",
+                style: "top: {top_px - 5}px; left: -5px;",
+            }
+            // 2px line across the day column.
+            div {
+                class: "absolute left-0 right-0 h-0.5 bg-rose-500 z-20",
+                style: "top: {top_px - 1}px;",
             }
         }
     }
+}
+
+fn format_now(now: chrono::DateTime<chrono::Local>) -> String {
+    let h = now.hour();
+    let m = now.minute();
+    let (h12, suf) = if h == 0 {
+        (12, "AM")
+    } else if h < 12 {
+        (h, "AM")
+    } else if h == 12 {
+        (12, "PM")
+    } else {
+        (h - 12, "PM")
+    };
+    format!("{h12}:{m:02} {suf}")
 }

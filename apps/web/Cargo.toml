@@ -11,14 +11,14 @@ license.workspace = true
 # `dx serve` builds it correctly. Lifted from dioxus-flake's
 # packages/web pattern.
 dioxus = { workspace = true, features = ["router"] }
-task-ui.workspace = true
+ui.workspace = true
 
 [features]
 default = ["web"]
 web = ["dioxus/web", "dioxus/launch"]
 # Bundle-split the wasm binary along route variants. Requires
 # running `dx serve --wasm-split`.
-wasm-split = ["task-ui/wasm-split"]
+wasm-split = ["ui/wasm-split"]
 
 [lints]
 workspace = true
