@@ -2,18 +2,19 @@
 //!
 //! Backends use these to locate state files; agents use them
 //! over RPC to know which files they're reading or writing.
-//! Everything is `<vault>/Wiki/` relative — federation peers
-//! see the same shape.
+//! Everything is relative to the wiki root path passed into
+//! the backend (`<data_root>/orgs/<slug>/wiki/Knowledge/` on
+//! the server) — federation peers see the same shape.
 //!
 //! ## On-disk layout
 //!
-//! Mirrors `nashsu/llm_wiki`'s project shape — `Wiki/` is the
-//! entire LLM-Wiki project root, not a subfolder of it. That
-//! makes a Task `Wiki/` directory portable to `llm_wiki` (and
-//! vice versa) with minimal restructuring.
+//! Mirrors `nashsu/llm_wiki`'s project shape — the wiki root
+//! IS the entire LLM-Wiki project root, not a subfolder of
+//! it. That makes a Task wiki directory portable to
+//! `llm_wiki` (and vice versa) with minimal restructuring.
 //!
 //! ```text
-//! <vault>/Wiki/
+//! <wiki_root>/                  ← typically `<org>/wiki/Knowledge/`
 //! ├── schema.md         ← contract / conventions (project root)
 //! ├── purpose.md        ← goals / scope / key questions
 //! ├── index.md          ← content catalog (LLM-maintained)
@@ -32,14 +33,17 @@
 //! └── <Type>/<Slug>.md  ← actual pages (Concepts/, Entities/, ...)
 //! ```
 //!
-//! Wiki pages themselves live as plain markdown anywhere under
-//! `Wiki/` (typically `Wiki/<Type>/<Slug>.md`, e.g.
-//! `Wiki/Concepts/Spaced repetition.md`). The `type:`
-//! frontmatter field is what the graph + lint use, not the
-//! folder.
+//! Wiki pages themselves live as plain markdown anywhere
+//! under the wiki root (typically `<Type>/<Slug>.md`, e.g.
+//! `Concepts/Spaced repetition.md`). The `type:` frontmatter
+//! field is what the graph + lint use, not the folder.
 
-/// Folder name at the vault root that hosts the wiki.
-pub const WIKI_ROOT: &str = "Wiki";
+/// Empty — the wiki backend is now rooted directly at the
+/// path it was opened with (typically
+/// `<org>/wiki/Knowledge/`). Kept as a constant for code that
+/// joins paths, so `root.join(WIKI_ROOT)` round-trips to
+/// `root` itself.
+pub const WIKI_ROOT: &str = "";
 
 /// Schema doc filename (relative to `Wiki/`).
 pub const SCHEMA_MD: &str = "schema.md";

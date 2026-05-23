@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn parses_minimal_recipe() {
         let src = ">> title: Pasta\n>> servings: 2\n\nBoil @pasta{200%g} in salted water.";
-        let r = parse_cook("Wiki/Cookbook/Pasta.cook", src).expect("parse");
+        let r = parse_cook("Cookbook/Pasta.cook", src).expect("parse");
         assert_eq!(r.name, "Pasta");
         assert_eq!(r.servings, Some(2));
         assert_eq!(r.ingredients.len(), 1);
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_filename_for_title() {
-        let r = parse_cook("Wiki/Cookbook/Truffle Pasta.cook", "Just cook it.").unwrap();
+        let r = parse_cook("Cookbook/Truffle Pasta.cook", "Just cook it.").unwrap();
         assert_eq!(r.name, "Truffle Pasta");
     }
 
@@ -225,7 +225,7 @@ mod tests {
 
 Cook the @pasta{400%g}.
 ";
-        let r = parse_cook("Wiki/Cookbook/Carbonara.cook", src).unwrap();
+        let r = parse_cook("Cookbook/Carbonara.cook", src).unwrap();
         assert_eq!(r.name, "Carbonara");
         assert_eq!(r.description.as_deref(), Some("Roman classic"));
         assert_eq!(r.course.as_deref(), Some("dinner"));
@@ -238,7 +238,7 @@ Cook the @pasta{400%g}.
 
     #[test]
     fn optional_ingredient_modifier() {
-        let r = parse_cook("Wiki/Cookbook/X.cook", "Top with @?parmesan{}.").unwrap();
+        let r = parse_cook("Cookbook/X.cook", "Top with @?parmesan{}.").unwrap();
         assert_eq!(r.ingredients.len(), 1);
         assert!(r.ingredients[0].optional);
     }
@@ -246,7 +246,7 @@ Cook the @pasta{400%g}.
     #[test]
     fn recipe_reference_is_collected() {
         let r = parse_cook(
-            "Wiki/Cookbook/Pizza.cook",
+            "Cookbook/Pizza.cook",
             "Make @@./Shared/Pizza Dough{}, then top.",
         )
         .unwrap();
@@ -267,7 +267,7 @@ mod migration_check {
 Cook @Pasta{200%g} for 8 minutes.
 Drain and toss with @Olive Oil{30%ml} and @Truffles{5%g}.
 ";
-        let r = parse_cook("Wiki/Cookbook/Truffle Pasta.cook", src).unwrap();
+        let r = parse_cook("Cookbook/Truffle Pasta.cook", src).unwrap();
         assert_eq!(
             r.ingredients.len(),
             3,

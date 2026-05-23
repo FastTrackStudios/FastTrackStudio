@@ -1,5 +1,6 @@
 //! File-backed [`CookbookService`] impl. Source of truth is
-//! `<vault_root>/Wiki/Cookbook/*.cook` on disk.
+//! `<wiki_root>/Cookbook/*.cook` on disk (the wiki root is
+//! typically `<org>/wiki/Knowledge/`).
 //!
 //! Cheap to `Clone` (one `Arc<PathBuf>` inside). Re-scans the
 //! cookbook directory on every `list`. The cookbook is

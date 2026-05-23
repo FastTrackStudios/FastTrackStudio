@@ -289,7 +289,15 @@ pub(crate) async fn build_org_state(
             .map_or_else(|_| org_root.vault_dir(), PathBuf::from);
         let vault_sync_state = vault::Backend::under_parent(vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
-        let wiki = wiki_live::WikiBackend::under_parent(vault_root.clone())
+        // Wiki rooted at `<org>/wiki/Knowledge/` (the curated
+        // tier). `LLM/` scratch is a sibling subtree the
+        // wiki backend doesn't touch — agents read/write it
+        // through plain filesystem ops. `wiki_id = "default"`
+        // is conventional for the one-wiki-per-org case;
+        // future federation may surface multiple ids.
+        let wiki_root = std::env::var("TASK_SERVER_WIKI_ROOT")
+            .map_or_else(|_| org_root.wiki_knowledge_dir(), PathBuf::from);
+        let wiki = wiki_live::WikiBackend::single("default", wiki_root)
             .map_err(|e| eyre::eyre!("wiki backend: {e}"))?;
 
         // Agent-task queue. SQLite under the org root
