@@ -412,11 +412,14 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<ManifestEntry>) -> Result<(), 
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_millis() as i64);
+        let now = chrono::Utc::now();
         out.push(ManifestEntry {
             path: rel,
             sha256,
             mtime_ms,
             size: bytes.len() as u64,
+            created_at: now,
+            updated_at: now,
         });
     }
     Ok(())
