@@ -94,6 +94,16 @@ pub struct ProjectInfo {
     #[architect(json)]
     pub tags: Tags,
 
+    /// Parent project. `None` for top-level projects;
+    /// `Some(uuid)` for subprojects (e.g. `Fitness` /
+    /// `Nutrition` / `Sleep Tracking` parented under
+    /// `Health`). One level of nesting is what the existing
+    /// UIs surface today; deeper trees are allowed but
+    /// renderers may flatten beyond depth 1.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "parentId")]
+    #[architect(filterable)]
+    pub parent_id: Option<Uuid>,
+
     /// Federation pointer — `Some("@tombrooksmusic/png-worship-collective-album")`
     /// means this row is a *reference* to the canonical
     /// project owned by another org (e.g. a collaboration
