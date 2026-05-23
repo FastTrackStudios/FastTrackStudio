@@ -13,24 +13,106 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// `Vec<String>` newtype — JSON column. Shared across
+/// meal types.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+impl StringList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for StringList {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for StringList {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StringList {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for StringList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// `Vec<PantryDeduction>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct PantryDeductions(pub Vec<PantryDeduction>);
+
+impl PantryDeductions {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<PantryDeduction>> for PantryDeductions {
+    fn from(v: Vec<PantryDeduction>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<PantryDeduction> for PantryDeductions {
+    fn from_iter<I: IntoIterator<Item = PantryDeduction>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for PantryDeductions {
+    type Target = Vec<PantryDeduction>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "meals", repo)]
 pub struct Meal {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
     /// Display title — `"Tuesday Dinner"`, `"Post-workout
     /// shake"`, or just the recipe name on simple days.
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Calendar date this meal is scheduled for (or was
     /// cooked on, once `status` is `cooked`).
     #[serde(rename = "scheduledFor")]
+    #[architect(filterable, sortable)]
     pub scheduled_for: NaiveDate,
 
     /// Free-form slot. Canonical set in [`Slot`].
     #[serde(default = "default_slot")]
+    #[architect(filterable)]
     pub slot: String,
 
     /// Servings to make — multiplier on each referenced
@@ -42,29 +124,37 @@ pub struct Meal {
     /// Recipes this meal is built from. Vault-relative paths
     /// to `.cook` files (cooklang convention). Multi-recipe
     /// meals supported.
-    #[serde(skip_serializing_if = "Vec::is_empty", default, rename = "recipePaths")]
-    pub recipe_paths: Vec<String>,
+    #[serde(
+        skip_serializing_if = "StringList::is_empty",
+        default,
+        rename = "recipePaths"
+    )]
+    #[architect(json)]
+    pub recipe_paths: StringList,
 
     /// Free-form lifecycle status. Canonical set in
     /// [`Status`]: `planned` / `cooked` / `skipped` /
     /// `eating-out`.
     #[serde(default = "default_status")]
+    #[architect(filterable)]
     pub status: String,
 
     /// What got pulled from the pantry when this meal was
     /// cooked. Populated by [`crate::service::MealplanService::cook`];
     /// `None` while the meal is still `planned`.
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "PantryDeductions::is_empty",
         default,
         rename = "pantryDeductions"
     )]
-    pub pantry_deductions: Vec<PantryDeduction>,
+    #[architect(json)]
+    pub pantry_deductions: PantryDeductions,
 
     /// Free-form tags — `"meal-prep"`, `"date-night"`,
     /// `"leftovers"`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub tags: StringList,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -89,6 +179,7 @@ pub struct Meal {
 
 /// One row in [`Meal::pantry_deductions`] — what got
 /// consumed when the meal was cooked.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct PantryDeduction {
     /// `pantry::PantryItem` id.
@@ -130,7 +221,7 @@ impl Meal {
 
         let mut acc = cookbook::Nutrition::default();
         let mut any = false;
-        for path in &self.recipe_paths {
+        for path in self.recipe_paths.iter() {
             let Some(recipe) = index.get(path.as_str()) else {
                 continue;
             };

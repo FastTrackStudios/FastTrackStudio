@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `mealplan` — feature facade tying cookbook + pantry +
 //! the calendar together.
 //!

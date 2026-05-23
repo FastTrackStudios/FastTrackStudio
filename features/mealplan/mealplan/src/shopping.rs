@@ -26,13 +26,51 @@ use crate::fulfillment::{Fulfillment, Shortage, ShortageReason};
 
 // ── Model ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// `Vec<ShoppingEntry>` newtype — JSON column.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct ShoppingEntries(pub Vec<ShoppingEntry>);
+
+impl ShoppingEntries {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<ShoppingEntry>> for ShoppingEntries {
+    fn from(v: Vec<ShoppingEntry>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for ShoppingEntries {
+    type Target = Vec<ShoppingEntry>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for ShoppingEntries {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "shopping_lists", repo)]
 pub struct ShoppingList {
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
 
+    #[architect(filterable, sortable, fulltext)]
     pub name: String,
 
     /// Optional default store (a `locations::Location` of
@@ -43,10 +81,12 @@ pub struct ShoppingList {
         default,
         rename = "storeLocationId"
     )]
+    #[architect(filterable)]
     pub store_location_id: Option<Uuid>,
 
     #[serde(default)]
-    pub entries: Vec<ShoppingEntry>,
+    #[architect(json)]
+    pub entries: ShoppingEntries,
 
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -66,6 +106,7 @@ pub struct ShoppingList {
     pub details: String,
 }
 
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct ShoppingEntry {
     pub id: Uuid,
@@ -243,7 +284,7 @@ fn parse_page(page: &VaultPage) -> Option<ShoppingList> {
         id,
         name,
         store_location_id,
-        entries,
+        entries: ShoppingEntries(entries),
         date_created,
         date_modified,
         details: body.to_string(),
