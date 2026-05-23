@@ -57,6 +57,9 @@ project = { workspace = true }
 # resolvers. Existing auth/timer/finance paths keep working at
 # their XDG locations until PR 2 migrates them through OrgRoot.
 org-proto = { workspace = true }
+# Mount registry — `task mount add|list|rm` reads/writes
+# `mounts.toml` and resolves project-id → local path.
+mount = { workspace = true }
 # Finance — reports + invoice build. CLI shells out to the
 # `task-pdf-render` binary (libs/pdf) for the actual PDF
 # render; pulling fulgur into the CLI's compile graph hits a
