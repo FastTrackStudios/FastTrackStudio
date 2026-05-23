@@ -160,10 +160,24 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let mut parsed: Vec<ParsedField> = Vec::with_capacity(named.len());
     for f in named.iter() {
         let attrs = parse_field_attrs(f)?;
+        // Pass-through attrs end up on the emitted `Create`
+        // struct (whose only derive is `Facet` + optional
+        // `Dummy`). Strip helper attributes whose owning
+        // derive ISN'T applied to `Create` — otherwise rustc
+        // errors "cannot find attribute `serde` in this scope"
+        // because the attribute has no claimant on the Create
+        // struct. `#[serde(...)]` is the common case (entities
+        // that double as a markdown/JSON wire format on the
+        // ORIGINAL struct don't want their field-level serde
+        // attrs leaked onto the synthetic Create).
         let forward_attrs: Vec<syn::Attribute> = f
             .attrs
             .iter()
-            .filter(|a| !a.path().is_ident("architect"))
+            .filter(|a| {
+                !a.path().is_ident("architect")
+                    && !a.path().is_ident("serde")
+                    && !a.path().is_ident("schemars")
+            })
             .cloned()
             .collect();
         parsed.push(ParsedField {
@@ -442,7 +456,8 @@ fn build_server_block(
 
     quote! {
         #[cfg(feature = "server")]
-        mod #storage_mod {
+        #[doc(hidden)]
+        pub mod #storage_mod {
             // User's types (Uuid, DateTime<Utc>, etc.) come via super::*.
             // We deliberately avoid `use ::sea_orm::entity::prelude::*`
             // because it re-exports DateTime/etc and collides with the
@@ -581,4 +596,96 @@ fn build_server_block(
         #[cfg(feature = "server")]
         #vis use #storage_mod::#storage_ident;
     }
+}
+
+// ── `#[derive(JsonField)]` — JSON-column support ─────────────────────
+//
+// Companion derive for any `enum` or `struct` that appears in an
+// `#[derive(Entity)]` field carrying `#[architect(json)]`. SeaORM's
+// `From<T> for sea_orm::Value`, `TryGetable`, `ValueType`, and
+// `Nullable` are the four traits a column type must satisfy; this
+// derive emits all four (cfg-gated on the user's `server` feature)
+// via a `serde_json` round-trip.
+//
+// Vec<T> columns can't use this directly — orphan rules forbid
+// `impl From<Vec<X>> for sea_orm::Value`. Wrap in a newtype:
+//
+// ```ignore
+// #[derive(architect::JsonField, facet::Facet, Clone, Debug, PartialEq,
+//          serde::Serialize, serde::Deserialize)]
+// pub struct LineItems(pub Vec<InvoiceLineItem>);
+// ```
+//
+// Requirements on the annotated type:
+// - `serde::Serialize + serde::de::DeserializeOwned` (the trip is
+//   `serde_json::to_value` / `serde_json::from_value`).
+// - The user's crate must depend on `serde_json` for the emitted
+//   code to compile under the `server` feature.
+#[proc_macro_derive(JsonField)]
+pub fn derive_json_field(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let ident = &input.ident;
+    let (impl_g, ty_g, where_g) = input.generics.split_for_impl();
+    let type_name = ident.to_string();
+
+    quote! {
+        #[cfg(feature = "server")]
+        const _: () = {
+            extern crate serde_json as __serde_json;
+
+            impl #impl_g ::core::convert::From<#ident #ty_g> for ::sea_orm::Value #where_g {
+                fn from(v: #ident #ty_g) -> Self {
+                    ::sea_orm::Value::Json(
+                        __serde_json::to_value(&v).ok().map(::std::boxed::Box::new),
+                    )
+                }
+            }
+
+            impl #impl_g ::sea_orm::TryGetable for #ident #ty_g #where_g {
+                fn try_get_by<I: ::sea_orm::ColIdx>(
+                    res: &::sea_orm::QueryResult,
+                    idx: I,
+                ) -> ::core::result::Result<Self, ::sea_orm::TryGetError> {
+                    let v: __serde_json::Value =
+                        <__serde_json::Value as ::sea_orm::TryGetable>::try_get_by(res, idx)?;
+                    __serde_json::from_value(v).map_err(|e| {
+                        ::sea_orm::TryGetError::DbErr(::sea_orm::DbErr::Json(e.to_string()))
+                    })
+                }
+            }
+
+            impl #impl_g ::sea_orm::sea_query::ValueType for #ident #ty_g #where_g {
+                fn try_from(
+                    v: ::sea_orm::Value,
+                ) -> ::core::result::Result<Self, ::sea_orm::sea_query::ValueTypeErr> {
+                    match v {
+                        ::sea_orm::Value::Json(::core::option::Option::Some(b)) => {
+                            __serde_json::from_value::<Self>(*b)
+                                .map_err(|_| ::sea_orm::sea_query::ValueTypeErr)
+                        }
+                        _ => ::core::result::Result::Err(::sea_orm::sea_query::ValueTypeErr),
+                    }
+                }
+
+                fn type_name() -> ::std::string::String {
+                    ::std::string::String::from(#type_name)
+                }
+
+                fn array_type() -> ::sea_orm::sea_query::ArrayType {
+                    ::sea_orm::sea_query::ArrayType::Json
+                }
+
+                fn column_type() -> ::sea_orm::sea_query::ColumnType {
+                    ::sea_orm::sea_query::ColumnType::Json
+                }
+            }
+
+            impl #impl_g ::sea_orm::sea_query::Nullable for #ident #ty_g #where_g {
+                fn null() -> ::sea_orm::Value {
+                    ::sea_orm::Value::Json(::core::option::Option::None)
+                }
+            }
+        };
+    }
+    .into()
 }

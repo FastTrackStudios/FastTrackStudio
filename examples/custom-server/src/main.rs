@@ -104,8 +104,7 @@ async fn main() -> eyre::Result<()> {
         )
         .init();
 
-    let bind_addr =
-        std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4041".into());
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4041".into());
 
     // Step 1: pick a repo. Swap this line for any other ExampleRepo
     // impl — ExampleRepoStorage<DatabaseConnection>, your own
@@ -132,10 +131,7 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn vox_ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
     ws.on_upgrade(move |socket| async move {
         let repo = state.repo.clone();
         let factory = axum_ws::acceptor_fn(move |req, connection| match req.service() {
@@ -149,9 +145,9 @@ async fn vox_ws_handler(
                 // Step 2b: build the service from the same repo and
                 // mount it. The service is generic over R, so the
                 // concrete repo type just flows through.
-                connection.handle_with(ExampleServiceDispatcher::new(
-                    CustomExampleService::new(repo.clone()),
-                ));
+                connection.handle_with(ExampleServiceDispatcher::new(CustomExampleService::new(
+                    repo.clone(),
+                )));
                 Ok(())
             }
             other => {

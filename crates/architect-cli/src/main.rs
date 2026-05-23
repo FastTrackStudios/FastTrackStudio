@@ -61,9 +61,7 @@ fn main() -> ExitCode {
         Some((&"feature", rest)) => match rest.split_first() {
             Some((&"new", inner)) => {
                 let args: FeatureNewArgs = figue::from_slice(inner).unwrap();
-                repo_root().and_then(|root| {
-                    scaffold::feature_new(&root, &args.name, args.force)
-                })
+                repo_root().and_then(|root| scaffold::feature_new(&root, &args.name, args.force))
             }
             _ => {
                 eprintln!("{}: architect feature <new>", "ERROR".red().bold());
