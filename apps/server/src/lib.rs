@@ -19,6 +19,7 @@
 
 pub mod attachments;
 pub mod capability;
+pub mod server_mgmt;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -101,8 +102,11 @@ pub struct AppState {
     /// boot. Tests use `ServerKeypair::generate_ephemeral()`.
     pub keypair: ServerKeypair,
     /// Slug → per-org state. Built by scanning
-    /// `<data_root>/orgs/` at boot.
-    pub orgs: Arc<std::collections::HashMap<String, OrgAppState>>,
+    /// `<data_root>/orgs/` at boot and mutated at runtime by
+    /// the server-management `create_org` RPC. `RwLock` so
+    /// reads on the request hot path stay parallel; writes
+    /// happen only when an admin scaffolds a new org.
+    pub orgs: Arc<std::sync::RwLock<std::collections::HashMap<String, OrgAppState>>>,
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
     pub data_root: org_proto::DataRoot,
@@ -110,19 +114,62 @@ pub struct AppState {
 
 impl AppState {
     /// Look up an org by slug. Convenience for routes that
-    /// have extracted the slug from the URL path.
+    /// have extracted the slug from the URL path. Clones the
+    /// matched [`OrgAppState`] (`Clone` is cheap — all fields
+    /// are `Arc`/`Database` handles).
     #[must_use]
-    pub fn org(&self, slug: &str) -> Option<&OrgAppState> {
-        self.orgs.get(slug)
+    pub fn org(&self, slug: &str) -> Option<OrgAppState> {
+        self.orgs.read().ok()?.get(slug).cloned()
     }
 
     /// Slugs of every hosted org, sorted for deterministic
     /// `.well-known` output.
     #[must_use]
-    pub fn org_slugs(&self) -> Vec<&str> {
-        let mut slugs: Vec<&str> = self.orgs.keys().map(String::as_str).collect();
+    pub fn org_slugs(&self) -> Vec<String> {
+        let guard = match self.orgs.read() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        let mut slugs: Vec<String> = guard.keys().cloned().collect();
         slugs.sort_unstable();
         slugs
+    }
+
+    /// True when the server has no hosted orgs. Used by the
+    /// server-management RPC to decide whether to accept an
+    /// unauthenticated bootstrap `create_org`.
+    #[must_use]
+    pub fn is_bootstrap(&self) -> bool {
+        self.orgs.read().is_ok_and(|g| g.is_empty())
+    }
+
+    /// Slug of the home org, if exactly one is hosted. Used to
+    /// gate `create_org` after bootstrap — only home-org users
+    /// can mint new federated orgs.
+    #[must_use]
+    pub fn home_slug(&self) -> Option<String> {
+        let guard = self.orgs.read().ok()?;
+        for slug in guard.keys() {
+            // `is_home` lives in the manifest, not the runtime
+            // state — re-read from disk.
+            if let Ok(manifest) = self.data_root.org(slug.as_str()).manifest() {
+                if manifest.is_home {
+                    return Some(slug.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Hot-add a freshly scaffolded org to the live dispatcher.
+    /// The server-management RPC calls this after writing the
+    /// org's dir + initializing its DBs.
+    pub fn insert_org(&self, slug: String, state: OrgAppState) -> Result<(), &'static str> {
+        self.orgs
+            .write()
+            .map_err(|_| "orgs lock poisoned")?
+            .insert(slug, state);
+        Ok(())
     }
 }
 
@@ -133,8 +180,11 @@ impl AppState {
     /// only that one org is hosted (matches the
     /// single-org-process pattern earlier PRs used).
     ///
-    /// Auto-bootstraps `default` when no orgs exist so a
-    /// fresh install boots cleanly.
+    /// When no orgs are present the server boots empty — the
+    /// `/server/vox` `OrgManagementService` accepts an
+    /// unauthenticated `create_org` in that state so the CLI
+    /// can bootstrap the first org without touching the
+    /// server's filesystem.
     pub async fn new(slug_filter: Option<&str>) -> eyre::Result<Self> {
         let data_root =
             org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
@@ -156,7 +206,7 @@ impl AppState {
 
         Ok(Self {
             keypair,
-            orgs: Arc::new(orgs),
+            orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
         })
     }
@@ -181,7 +231,7 @@ impl AppState {
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
-            orgs: Arc::new(orgs),
+            orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
         })
     }
@@ -202,7 +252,7 @@ impl AppState {
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
-            orgs: Arc::new(orgs),
+            orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
         })
     }
@@ -211,7 +261,7 @@ impl AppState {
 /// Build one [`OrgAppState`] for a single org's
 /// [`OrgRoot`]. Opens every backend the vox dispatcher
 /// will mount.
-async fn build_org_state(
+pub(crate) async fn build_org_state(
     auth: AuthState,
     keypair: &ServerKeypair,
     org_root: org_proto::OrgRoot,
@@ -355,8 +405,9 @@ const DEFAULT_AUTH_SECRET: &str = "task-server-auth-dev-secret-32+!";
 /// - `slug_filter = None` + `$TASK_SERVER_ORG` set → host
 ///   just that env-selected org (legacy single-org boot).
 /// - `slug_filter = None`, env unset → host every loadable
-///   org under `<data_root>/orgs/`. Auto-bootstraps
-///   `default` when none exist so a fresh install boots.
+///   org under `<data_root>/orgs/`. Returns an empty vec
+///   when none exist; the server-management RPC handles
+///   first-org bootstrap from there.
 fn pick_server_orgs(
     data_root: &org_proto::DataRoot,
     slug_filter: Option<&str>,
@@ -374,12 +425,12 @@ fn pick_server_orgs(
     let scanned = data_root
         .scan_orgs()
         .map_err(|e| eyre::eyre!("scan orgs: {e}"))?;
-    if scanned.is_empty() {
-        let org = data_root
-            .init_org("default", "Default", false)
-            .map_err(|e| eyre::eyre!("auto-bootstrap default org: {e}"))?;
-        return Ok(vec![org]);
-    }
+    // Empty data root is no longer auto-bootstrapped. The
+    // `/server/vox` `OrgManagementService` accepts an
+    // unauthenticated `create_org` while in this state, so
+    // the CLI flow `task org create … --home` mints the
+    // first org without anyone touching the server's
+    // filesystem directly.
     Ok(scanned.into_iter().map(|(org, _)| org).collect())
 }
 
@@ -395,8 +446,9 @@ pub fn router(state: AppState) -> Router {
     // empty router so axum doesn't choke.
     let blob_router = state
         .orgs
-        .values()
-        .next()
+        .read()
+        .ok()
+        .and_then(|guard| guard.values().next().cloned())
         .map(|org| {
             let blob_state = AttachmentRouteState {
                 service: org.attachments.clone(),
@@ -417,11 +469,20 @@ pub fn router(state: AppState) -> Router {
         .route("/org/{slug}/vox", any(per_org_vox_handler))
         .with_state(state.clone());
 
+    // Server-management vox: `OrgManagementService` mounted on
+    // a top-level endpoint (not per-org). Lets a CLI connect
+    // once and ask the server to scaffold new orgs without
+    // touching the data root locally.
+    let server_mgmt = Router::new()
+        .route("/server/vox", any(server_vox_handler))
+        .with_state(state.clone());
+
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/vox", get(legacy_vox_handler))
         .merge(well_known)
         .merge(per_org)
+        .merge(server_mgmt)
         .merge(blob_router)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
@@ -437,22 +498,21 @@ pub fn router(state: AppState) -> Router {
 async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
     let orgs: Vec<serde_json::Value> = state
         .org_slugs()
-        .iter()
+        .into_iter()
         .filter_map(|slug| {
-            let org = state.org(slug)?;
             // We only have the slug here — the display
             // name + federation URL live in `org.toml`,
             // re-loaded for each entry. Cheap (TOML parse
             // of a tiny file) and avoids holding manifest
             // copies on every dispatched request.
-            let manifest = state.data_root.org(org.slug.as_str()).manifest().ok()?;
+            let manifest = state.data_root.org(slug.as_str()).manifest().ok()?;
             Some(serde_json::json!({
-                "slug": org.slug,
+                "slug": slug,
                 "display_name": manifest.display_name,
                 "is_home": manifest.is_home,
                 "federation_url": manifest.federation_url,
-                "vox": format!("/org/{}/vox", org.slug),
-                "health": format!("/org/{}/health", org.slug),
+                "vox": format!("/org/{slug}/vox"),
+                "health": format!("/org/{slug}/health"),
             }))
         })
         .collect();
@@ -486,13 +546,44 @@ async fn per_org_vox_handler(
     axum::extract::Path(slug): axum::extract::Path<String>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
-    let Some(org) = state.org(&slug).cloned() else {
+    let Some(org) = state.org(&slug) else {
         return axum::response::IntoResponse::into_response((
             axum::http::StatusCode::NOT_FOUND,
             format!("org `{slug}` not hosted"),
         ));
     };
     serve_org_vox(org, ws)
+}
+
+/// `/server/vox` — server-management WebSocket. Hosts the
+/// `OrgManagementService`. Unauthenticated requests are
+/// allowed in bootstrap mode (no orgs hosted yet); after that
+/// the service itself rejects requests whose `session_token`
+/// doesn't validate against the home org.
+async fn server_vox_handler(
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
+    let mgmt = crate::server_mgmt::OrgManagementImpl::new(state);
+    ws.on_upgrade(move |socket| async move {
+        let mgmt = mgmt.clone();
+        let acceptor =
+            architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
+                name if name == org_proto::org_management_descriptor().service_name => {
+                    connection.handle_with(org_proto::serve_org_management(mgmt.clone()));
+                    Ok(())
+                }
+                other => {
+                    tracing::info!(
+                        service = %other,
+                        "server-vox: unknown service requested"
+                    );
+                    Err(Vec::new())
+                }
+            });
+        architect::axum_ws::serve(socket, acceptor).await;
+    })
+    .into_response()
 }
 
 /// `/vox` — legacy single-org alias. Dispatches into the
@@ -504,7 +595,12 @@ async fn legacy_vox_handler(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
-    let Some(org) = state.orgs.values().next().cloned() else {
+    let Some(org) = state
+        .orgs
+        .read()
+        .ok()
+        .and_then(|guard| guard.values().next().cloned())
+    else {
         return axum::response::IntoResponse::into_response((
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "no org hosted on this server",
