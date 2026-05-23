@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `task` — first-party task feature.
 //!
 //! Tasks are plain markdown pages with YAML frontmatter living

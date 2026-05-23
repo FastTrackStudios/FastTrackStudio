@@ -87,6 +87,7 @@ pub fn capture(input: &str) -> TaskInfo {
 
     let title = title_parts.join(" ").trim().to_string();
     TaskInfo {
+        id: uuid::Uuid::new_v4(),
         path: String::new(),
         title: if title.is_empty() {
             "Untitled task".into()
@@ -97,17 +98,17 @@ pub fn capture(input: &str) -> TaskInfo {
         priority: priority.unwrap_or_else(|| "normal".into()),
         due,
         scheduled: None,
-        tags,
-        contexts,
-        projects,
+        tags: crate::model::StringList(tags),
+        contexts: crate::model::StringList(contexts),
+        projects: crate::model::StringList(projects),
         time_estimate: None,
-        time_entries: Vec::new(),
+        time_entries: crate::model::TimeEntries::default(),
         recurrence: None,
         recurrence_anchor: None,
-        complete_instances: Vec::new(),
+        complete_instances: crate::model::StringList::default(),
         completed_date: None,
         agent_profile: String::new(),
-        dispatched_agent_tasks: Vec::new(),
+        dispatched_agent_tasks: crate::model::StringList::default(),
         date_created: None,
         date_modified: None,
         details: String::new(),
@@ -212,11 +213,11 @@ mod tests {
     fn extracts_tags_contexts_projects() {
         let t = capture("Buy milk #errands #urgent @shopping [[Groceries]]");
         assert_eq!(t.title, "Buy milk");
-        assert!(t.tags.contains(&"errands".into()));
-        assert!(t.tags.contains(&"urgent".into()));
-        assert!(t.tags.contains(&"task".into())); // auto-added
-        assert_eq!(t.contexts, vec!["@shopping"]);
-        assert_eq!(t.projects, vec!["[[Groceries]]"]);
+        assert!(t.tags.0.contains(&"errands".into()));
+        assert!(t.tags.0.contains(&"urgent".into()));
+        assert!(t.tags.0.contains(&"task".into())); // auto-added
+        assert_eq!(t.contexts.0, vec!["@shopping"]);
+        assert_eq!(t.projects.0, vec!["[[Groceries]]"]);
     }
 
     #[test]

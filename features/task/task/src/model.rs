@@ -10,28 +10,125 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use facet::Facet;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// `Vec<String>` newtype — JSON column. Used for several
+/// list fields (tags, contexts, projects, etc.).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct StringList(pub Vec<String>);
+
+impl StringList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<String>> for StringList {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<String> for StringList {
+    fn from_iter<I: IntoIterator<Item = String>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for StringList {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for StringList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// `Vec<TimeEntry>` newtype — JSON column. Time entries live
+/// inline in the task page. If per-entry queries get hot,
+/// promote `TimeEntry` to its own entity later.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct TimeEntries(pub Vec<TimeEntry>);
+
+impl TimeEntries {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<TimeEntry>> for TimeEntries {
+    fn from(v: Vec<TimeEntry>) -> Self {
+        Self(v)
+    }
+}
+
+impl FromIterator<TimeEntry> for TimeEntries {
+    fn from_iter<I: IntoIterator<Item = TimeEntry>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl std::ops::Deref for TimeEntries {
+    type Target = Vec<TimeEntry>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// One task. Most fields are optional — the discriminator is
-/// usually just `tags: [..., task]` or `type: task` on the page.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+/// usually just `tags: [..., task]` or `type: task` on the
+/// page. `id` is added on first read for any task page that
+/// doesn't yet have one (parser backfill via
+/// `Uuid::new_v5(NAMESPACE_URL, path)` so the same path
+/// always resolves to the same id across machines until the
+/// next save writes it to frontmatter).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::Entity, Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[architect(table_name = "tasks", repo)]
 pub struct TaskInfo {
-    /// Vault-relative path of the markdown file backing this task
-    /// (e.g. `tasks/buy-milk.md`). Populated by the scanner; not
-    /// serialized into frontmatter.
+    /// Stable identity. Generated on first write; never
+    /// re-derived from the path. Downstream features (timer,
+    /// agent-dispatch) reference tasks by this UUID, so
+    /// renaming the markdown file doesn't orphan rows.
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+
+    /// Vault-relative path of the markdown file backing this
+    /// task (e.g. `tasks/buy-milk.md`). Populated by the
+    /// scanner; not serialized into frontmatter. Persisted as
+    /// a DB column under server so reverse lookups work.
     #[serde(skip)]
+    #[architect(filterable, sortable)]
     pub path: String,
 
+    #[architect(filterable, sortable, fulltext)]
     pub title: String,
 
     /// `"open"` / `"in-progress"` / `"done"` etc. Free-form so
     /// custom statuses (e.g. `"waiting"`, `"blocked"`) round-trip.
     /// Parsing prefers the [`Status`] enum but stores the raw
     /// string so unknown values survive.
+    #[architect(filterable, sortable)]
     pub status: String,
 
     /// `"none"` / `"low"` / `"normal"` / `"high"` / `"critical"`
     /// — free-form like `status`.
     #[serde(default = "default_priority")]
+    #[architect(filterable, sortable)]
     pub priority: String,
 
     /// Due date (YYYY-MM-DD or full ISO timestamp).
@@ -44,18 +141,21 @@ pub struct TaskInfo {
 
     /// Frontmatter `tags:` array. `"task"` is the conventional
     /// discriminator; everything else is user-defined.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub tags: StringList,
 
     /// GTD-style contexts (e.g. `"@shopping"`, `"@dev"`).
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub contexts: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub contexts: StringList,
 
     /// Project wikilinks (e.g. `"[[Website Redesign]]"`).
     /// Stored verbatim — the wikilink-to-page resolution lives in
     /// `vault-obsidian::links`.
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub projects: Vec<String>,
+    #[serde(skip_serializing_if = "StringList::is_empty", default)]
+    #[architect(json)]
+    pub projects: StringList,
 
     /// Estimated work in minutes.
     #[serde(
@@ -67,8 +167,13 @@ pub struct TaskInfo {
 
     /// One row per work session. Append-only; reading + summing
     /// is the consumer's job.
-    #[serde(skip_serializing_if = "Vec::is_empty", default, rename = "timeEntries")]
-    pub time_entries: Vec<TimeEntry>,
+    #[serde(
+        skip_serializing_if = "TimeEntries::is_empty",
+        default,
+        rename = "timeEntries"
+    )]
+    #[architect(json)]
+    pub time_entries: TimeEntries,
 
     /// RFC 5545 RRULE (e.g. `"FREQ=WEEKLY;BYDAY=MO"`).
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -85,11 +190,12 @@ pub struct TaskInfo {
 
     /// YYYY-MM-DD dates when each recurrence instance completed.
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "StringList::is_empty",
         default,
         rename = "complete_instances"
     )]
-    pub complete_instances: Vec<String>,
+    #[architect(json)]
+    pub complete_instances: StringList,
 
     /// YYYY-MM-DD when this task moved to `status: done`.
     #[serde(
@@ -121,11 +227,12 @@ pub struct TaskInfo {
     /// is an audit trail of every dispatch over the task's
     /// lifetime.
     #[serde(
-        skip_serializing_if = "Vec::is_empty",
+        skip_serializing_if = "StringList::is_empty",
         default,
         rename = "dispatchedAgentTasks"
     )]
-    pub dispatched_agent_tasks: Vec<String>,
+    #[architect(json)]
+    pub dispatched_agent_tasks: StringList,
 
     /// File-created ISO timestamp. Re-derived from `file.ctime`
     /// when missing — kept in the frontmatter so it round-trips
@@ -157,6 +264,7 @@ fn default_priority() -> String {
 
 /// Single time-tracking session. `endTime` is `None` while the
 /// timer is running.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
 pub struct TimeEntry {
     #[serde(rename = "startTime")]
