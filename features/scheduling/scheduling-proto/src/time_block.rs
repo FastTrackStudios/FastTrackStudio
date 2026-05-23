@@ -8,20 +8,46 @@
 //! booking-style entries that point at a template + a date.
 
 use facet::Facet;
+use serde::{Deserialize, Serialize};
 
 /// Stable id for a template (uuid v4 string, minted by the consumer
 /// so the proto stays serializer-agnostic).
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
 pub struct DayTemplateId(pub String);
 
+impl From<String> for DayTemplateId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
 /// Stable id for a single block within a template.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
 pub struct TimeBlockId(pub String);
+
+impl From<String> for TimeBlockId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
 
 /// Time of day as minutes-since-midnight. 0..=1440. We avoid
 /// `chrono::NaiveTime` on the wire so callers don't have to depend
 /// on chrono just to ship a payload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Copy, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
 pub struct TimeOfDay {
     pub minutes_since_midnight: u16,
 }
@@ -48,7 +74,10 @@ impl TimeOfDay {
 /// Coarse categorization of a block. Drives color + grouping in
 /// the UI. The set tracks the brief's table — every block in the
 /// example schedule maps to exactly one of these.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Copy, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
 #[repr(u8)]
 pub enum BlockCategory {
     /// Wake-up routine, morning reset.
@@ -73,11 +102,12 @@ pub enum BlockCategory {
     Sleep,
     /// Catch-all for blocks that don't fit the above. The UI
     /// renders them as a neutral chip.
+    #[default]
     Other,
 }
 
 /// One row in the day template.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 pub struct TimeBlock {
     pub id: TimeBlockId,
     pub start: TimeOfDay,
@@ -93,7 +123,7 @@ pub struct TimeBlock {
 /// cover the whole 24-hour day. The UI surfaces gaps + overlaps;
 /// the proto leaves validation to the consumer so storing
 /// partially-filled drafts works.
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Eq, Facet, Serialize, Deserialize)]
 pub struct DayTemplate {
     pub id: DayTemplateId,
     pub name: String,

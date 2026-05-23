@@ -59,10 +59,12 @@ mod tests {
                     Weekday::Wed,
                     Weekday::Thu,
                     Weekday::Fri,
-                ],
+                ]
+                .into(),
                 start: TimeOfDay::new(9, 0),
                 end: TimeOfDay::new(17, 0),
-            }],
+            }]
+            .into(),
         };
         let md = serialize_schedule(&s).unwrap();
         let inner = md.trim_start_matches("---\n").trim_end_matches("---\n");

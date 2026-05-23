@@ -161,10 +161,12 @@ mod tests {
                     Weekday::Wed,
                     Weekday::Thu,
                     Weekday::Fri,
-                ],
+                ]
+                .into(),
                 start: TimeOfDay::new(9, 0),
                 end: TimeOfDay::new(11, 0),
-            }],
+            }]
+            .into(),
         }
     }
 

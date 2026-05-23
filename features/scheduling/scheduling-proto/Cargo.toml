@@ -14,13 +14,20 @@ repository.workspace = true
 facet = { workspace = true }
 thiserror = { workspace = true }
 architect = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
+fake = { version = "4", optional = true, features = ["derive"] }
 
 [features]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
+server = ["architect/server-seaorm", "dep:sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]
 
 [lints]
 workspace = true
