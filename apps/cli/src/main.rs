@@ -134,6 +134,23 @@ enum CycleCmd {
         #[arg(long, default_value = "mon")]
         week_start: String,
     },
+    /// Capture a reflection note for a cycle. Writes a
+    /// templated page at
+    /// `<org>/wiki/Knowledge/cycles/<year>-Q<q>-C<n>.md`.
+    /// Idempotent: if the file exists, prints its path
+    /// instead of overwriting.
+    ///
+    /// Defaults to today's cycle (or the previous one when
+    /// today is inside a reset week). Override with
+    /// `--year/--quarter/--cycle`.
+    Reflect {
+        #[arg(long)]
+        year: Option<i32>,
+        #[arg(long)]
+        quarter: Option<u8>,
+        #[arg(long)]
+        cycle: Option<u8>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -987,8 +1004,116 @@ fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
                 }
             }
         }
+        CycleCmd::Reflect {
+            year,
+            quarter,
+            cycle,
+        } => {
+            let ctx = org_ctx::resolve_active(None)?;
+            let target = pick_reflection_cycle(year, quarter, cycle, rule)
+                .ok_or_else(|| eyre::eyre!("no matching cycle"))?;
+            let cycles_dir = ctx.root.wiki_knowledge_dir().join("cycles");
+            std::fs::create_dir_all(&cycles_dir)
+                .map_err(|e| eyre::eyre!("create {}: {e}", cycles_dir.display()))?;
+            let filename = format!("{}-Q{}-C{}.md", target.year, target.quarter, target.ordinal);
+            let path = cycles_dir.join(&filename);
+            if path.exists() {
+                println!("(reflection already exists)");
+                println!("  {}", path.display());
+                return Ok(());
+            }
+            let now = chrono::Utc::now();
+            let body = format!(
+                "---\n\
+                 type: cycle-reflection\n\
+                 id: {id}\n\
+                 cycleId: {id}\n\
+                 year: {year}\n\
+                 quarter: {quarter}\n\
+                 cycle: {ordinal}\n\
+                 start: {start}\n\
+                 end: {end}\n\
+                 dateCreated: {created}\n\
+                 ---\n\
+                 \n\
+                 # {year} Q{quarter} C{ordinal} reflection\n\
+                 \n\
+                 Cycle window: **{start} → {end}** (4 weeks, 25% each).\n\
+                 \n\
+                 ## What worked\n\
+                 \n\
+                 - \n\
+                 \n\
+                 ## What didn't\n\
+                 \n\
+                 - \n\
+                 \n\
+                 ## Lessons\n\
+                 \n\
+                 - \n\
+                 \n\
+                 ## Going into the next cycle\n\
+                 \n\
+                 - \n",
+                id = target.id,
+                year = target.year,
+                quarter = target.quarter,
+                ordinal = target.ordinal,
+                start = target.start_date,
+                end = target.end_date,
+                created = now.to_rfc3339(),
+            );
+            std::fs::write(&path, body)
+                .map_err(|e| eyre::eyre!("write {}: {e}", path.display()))?;
+            println!("Created cycle reflection at:");
+            println!("  {}", path.display());
+            println!(
+                "  for {}-Q{}-C{} ({} → {})",
+                target.year, target.quarter, target.ordinal, target.start_date, target.end_date,
+            );
+        }
     }
     Ok(())
+}
+
+/// Resolve which `cycle::Cycle` a reflection should target. If any
+/// of (year, quarter, cycle) are explicit, walk the generator and
+/// look it up. Otherwise pick the cycle that today's date lands in;
+/// if today is in a reset week, pick the cycle that just ended
+/// (the most recent C3 of that quarter).
+fn pick_reflection_cycle(
+    year: Option<i32>,
+    quarter: Option<u8>,
+    cycle_ord: Option<u8>,
+    rule: cycle::FirstWeekRule,
+) -> Option<cycle::Cycle> {
+    use chrono::Datelike;
+    let today = chrono::Local::now().date_naive();
+    if let (Some(y), Some(q), Some(c)) = (year, quarter, cycle_ord) {
+        let quarters = cycle::generate_year(y, chrono::Weekday::Mon, rule);
+        let qrec = quarters.iter().find(|qr| qr.ordinal == q)?;
+        return qrec.cycles.iter().find(|cy| cy.ordinal == c).cloned();
+    }
+    if let Some(c) = cycle::cycle_for_date(today, chrono::Weekday::Mon, rule) {
+        return Some(c);
+    }
+    // Reset week → walk this year's quarters and grab the most
+    // recent C3 that ended before today.
+    for cyclic_year in [today.year(), today.year() - 1] {
+        let quarters = cycle::generate_year(cyclic_year, chrono::Weekday::Mon, rule);
+        let mut latest: Option<cycle::Cycle> = None;
+        for q in quarters {
+            for c in q.cycles.iter() {
+                if c.end_date < today && latest.as_ref().is_none_or(|l| c.end_date > l.end_date) {
+                    latest = Some(c.clone());
+                }
+            }
+        }
+        if latest.is_some() {
+            return latest;
+        }
+    }
+    None
 }
 
 fn run_mount(cmd: MountCmd) -> eyre::Result<()> {
