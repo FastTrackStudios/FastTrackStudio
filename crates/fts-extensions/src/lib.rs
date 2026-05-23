@@ -77,6 +77,8 @@ mod continuous_action;
 mod error;
 mod item_actions;
 mod menu;
+#[cfg(all(feature = "mod-session", feature = "mod-input"))]
+mod mode_input;
 #[cfg(feature = "mod-session")]
 mod mode_selector;
 #[cfg(feature = "mod-session")]
@@ -460,6 +462,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         module.init(&module_ctx);
     }
     info!(modules = module_count, "All modules initialized");
+
+    // Bridge session mode changes to reaper-input workflows. Only wired
+    // when both modules are compiled in; otherwise this is a no-op build.
+    #[cfg(all(feature = "mod-session", feature = "mod-input"))]
+    {
+        mode_input::install();
+        info!("Mode → input workflow bridge installed");
+    }
 
     // Collect actions from all modules after init has populated runtime state.
     let module_actions = module::collect_actions(&modules);
