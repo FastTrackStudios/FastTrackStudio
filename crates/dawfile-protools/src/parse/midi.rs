@@ -12,6 +12,10 @@ use crate::types::{MidiEvent, MidiRegion, NO_REGION, Track, TrackKind, TrackRegi
 /// Magic marker that precedes MIDI event data within a 0x2000 block.
 const MIDI_MAGIC: &[u8] = b"MdNLB";
 
+/// Fixed tick base added to a MIDI region's three-point source-offset field.
+/// The real offset into the source chunk is `offset - MIDI_SRC_BASE`.
+const MIDI_SRC_BASE: u64 = 1_000_000_000_000;
+
 /// A raw MIDI event chunk before region assignment.
 #[derive(Debug, Clone)]
 struct MidiChunk {
@@ -249,17 +253,50 @@ fn parse_midi_regions(
             idx
         };
 
-        // Look up the MIDI chunk
+        // A MIDI region is a WINDOWED view of its source chunk, encoded with the
+        // same "three-point" (start, source-offset, length) layout as audio
+        // regions, right after the name. PT comps build a track from several
+        // windowed clips of one take, so we must honour the window — otherwise
+        // every clip of a shared take reports the take's full note count.
+        //
+        // `offset` carries a fixed 1e12 tick base; the real source offset is
+        // `offset - MIDI_SRC_BASE`. `length` is the clip length in ticks. Only
+        // the PT 10+ format (data in 0x2628) carries this; older formats keep
+        // the whole chunk.
+        let (clip_start, clip_src, clip_len) = if version >= 10 {
+            let j = name_offset + str_consumed;
+            let (start, offset, length) = cursor::parse_three_point(cursor, j);
+            (start, offset.saturating_sub(MIDI_SRC_BASE), length)
+        } else {
+            (0u64, 0u64, u64::MAX)
+        };
+
+        // Look up the MIDI chunk and keep only the events whose tick position
+        // falls inside the clip window, rebased to the clip's own start so the
+        // timeline placement (from 0x104f) positions them correctly.
         let events = if chunk_idx < chunks.len() {
-            chunks[chunk_idx].events.clone()
+            chunks[chunk_idx]
+                .events
+                .iter()
+                .filter(|e| {
+                    e.position >= clip_src
+                        && (clip_len == u64::MAX || e.position < clip_src.saturating_add(clip_len))
+                })
+                .map(|e| {
+                    let mut e = e.clone();
+                    e.position -= clip_src;
+                    e
+                })
+                .collect()
         } else {
             Vec::new()
         };
 
-        // Region length: max_pos is in PT ticks (relative to the chunk's zero).
-        // Convert to samples via the tempo map so downstream consumers can treat
-        // `length` as samples like audio regions.
-        let region_length_samples = if chunk_idx < chunks.len() {
+        // Region length in samples: the clip window length when windowed, else
+        // the full chunk extent.
+        let region_length_samples = if clip_len != u64::MAX {
+            tick_to_sample(clip_len, tempo_segments, target_sample_rate)
+        } else if chunk_idx < chunks.len() {
             tick_to_sample(
                 chunks[chunk_idx].max_pos,
                 tempo_segments,
@@ -272,7 +309,7 @@ fn parse_midi_regions(
         regions.push(MidiRegion {
             name,
             index: idx as u16,
-            start_pos: 0,
+            start_pos: tick_to_sample(clip_start, tempo_segments, target_sample_rate),
             sample_offset: 0,
             length: region_length_samples,
             events,
@@ -280,21 +317,6 @@ fn parse_midi_regions(
     }
 
     regions
-}
-
-/// Strip a region name's trailing `-NN` placement suffix to recover its
-/// playlist name. PT names MIDI regions `"<playlist>-<NN>"`, so
-/// `"Inst 1.02-01"` → `"Inst 1.02"` and `"MIDI 1-01"` → `"MIDI 1"`. The
-/// playlist name (WITH any `.01`/`.dup1` suffix) is exactly the active track's
-/// name in the 0x251a list, so it's what we match tracks against.
-fn region_playlist_name(region_name: &str) -> &str {
-    if let Some(idx) = region_name.rfind('-') {
-        let suffix = &region_name[idx + 1..];
-        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
-            return &region_name[..idx];
-        }
-    }
-    region_name
 }
 
 /// Parse the non-audio tracks (MIDI / instrument / master / click / folder
@@ -330,6 +352,43 @@ fn parse_midi_tracks(
         None => return tracks,
     };
 
+    // Parse the per-track clip-placement groups from 0x1058: each 0x1057 is one
+    // instrument track's playlist (a list of 0x1056/0x104f clip placements,
+    // each naming a windowed region by its array index). Groups are in document
+    // order, 1:1 with the kind-0x07 instrument tracks in the 0x2519 list (any
+    // trailing groups are inactive alternate playlists).
+    let placement_groups: Vec<Vec<u16>> = {
+        let mut groups = Vec::new();
+        if let Some(map) = find_block_recursive(blocks, ContentType::MidiRegionTrackMap) {
+            for entry in &map.children {
+                if entry.content_type != Some(ContentType::MidiRegionTrackMapEntries) {
+                    continue;
+                }
+                let mut idxs = Vec::new();
+                for c in &entry.children {
+                    if c.content_type != Some(ContentType::MidiRegionTrackEntry) {
+                        continue;
+                    }
+                    for f in &c.children {
+                        if f.content_type != Some(ContentType::AudioRegionTrackSubEntryNew) {
+                            continue;
+                        }
+                        // Region array index: u32 at the sub-entry's payload +4.
+                        let p = f.offset + 4;
+                        if p + 4 <= cursor.data().len() {
+                            idxs.push(u32::from_le_bytes(
+                                cursor.data()[p..p + 4].try_into().unwrap(),
+                            ) as u16);
+                        }
+                    }
+                }
+                groups.push(idxs);
+            }
+        }
+        groups
+    };
+    let mut next_group = 0usize;
+
     let data = cursor.data();
     let mut seen = std::collections::HashSet::new();
     for child in track_list.find_children(ContentType::MidiTrackInfo) {
@@ -349,22 +408,35 @@ fn parse_midi_tracks(
             continue;
         }
 
-        // Active-playlist regions: those whose playlist part equals this
-        // track's name. `region_index` is the array position so the emitter
-        // can index `session.midi_regions` directly; `start_pos` comes from
-        // the region's own decoded timeline position.
-        let track_regions: Vec<TrackRegion> = regions
-            .iter()
-            .enumerate()
-            .filter(|(_, r)| region_playlist_name(&r.name) == name)
-            .map(|(ri, r)| TrackRegion {
-                region_index: ri as u16,
-                start_pos: r.start_pos,
-                clip_flag_53: false,
-                clip_muted: false,
-                clip_color: None,
-            })
-            .collect();
+        // Kind byte at child payload +2: 0x07 = instrument/MIDI track, 0x05 =
+        // master, 0x02 = click/folder divider, 0x00 = audio. Only instrument
+        // tracks carry MIDI note placements; everything else stays empty.
+        let kind = data.get(child.offset + 2).copied().unwrap_or(0);
+
+        // Active-playlist clips: instrument tracks consume the next 0x1057 group
+        // in order; each placement references a windowed region by array index,
+        // placed at that region's own decoded timeline position.
+        let track_regions: Vec<TrackRegion> = if kind == 0x07 {
+            let group = placement_groups
+                .get(next_group)
+                .cloned()
+                .unwrap_or_default();
+            next_group += 1;
+            group
+                .into_iter()
+                .filter_map(|ri| {
+                    regions.get(ri as usize).map(|r| TrackRegion {
+                        region_index: ri,
+                        start_pos: r.start_pos,
+                        clip_flag_53: false,
+                        clip_muted: false,
+                        clip_color: None,
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         tracks.push(Track {
             name,
