@@ -34,7 +34,16 @@ session-ui = { path = "crates/session-ui", default-features = false }
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-synchronization = { path = "../daw/crates/daw-synchronization" }
+
+# ── REAPER bindings (reaper-rs) ──────────────────────────────────────
+# Needed by REAPER-touching action modules (e.g. take_ranking) that
+# call raw FFI for cursor / item selection / take-marker operations.
+# Branch must match daw-reaper's pin or Cargo will resolve two copies.
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # ── Testing (from daw repo) ─────────────────────────────────────────
 reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
