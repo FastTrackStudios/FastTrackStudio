@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `pantry` — typed view of food-on-hand pages in a
 //! `vault::Vault`.
 //!
