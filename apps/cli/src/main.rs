@@ -111,6 +111,29 @@ enum Commands {
     /// `plans/federated-task-platform.md` Phase 2.
     #[command(subcommand)]
     Mount(MountCmd),
+    /// Cyclic life-calendar — show / list the 4-week cycles
+    /// that anchor long-term planning. See
+    /// `plans/cyclic-life-calendar.md`.
+    #[command(subcommand)]
+    Cycle(CycleCmd),
+}
+
+#[derive(Subcommand)]
+enum CycleCmd {
+    /// Show the cycle that today's date sits inside. Prints
+    /// year / quarter / cycle ordinal + cycle bounds + how
+    /// far through it we are. Returns "(reset / bonus week)"
+    /// when today is between cycles.
+    Current,
+    /// List every quarter + cycle for a given cyclic year.
+    /// Defaults to the current calendar year.
+    List {
+        #[arg(long)]
+        year: Option<i32>,
+        /// Week-start day. Default: Monday.
+        #[arg(long, default_value = "mon")]
+        week_start: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -906,6 +929,63 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Mount(cmd) => {
             return run_mount(cmd);
+        }
+        Commands::Cycle(cmd) => {
+            return run_cycle(cmd);
+        }
+    }
+    Ok(())
+}
+
+fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
+    use chrono::Datelike;
+    let rule = cycle::FirstWeekRule::AtLeastFourDaysInYear;
+    match cmd {
+        CycleCmd::Current => {
+            let today = chrono::Local::now().date_naive();
+            // Walk the year (and its neighbors) to find whether
+            // we're inside a cycle or in a reset / bonus week.
+            if let Some(c) = cycle::cycle_for_date(today, chrono::Weekday::Mon, rule) {
+                let total = (c.end_date - c.start_date).num_days() + 1;
+                let elapsed = (today - c.start_date).num_days() + 1;
+                let pct = (elapsed as f64) * 100.0 / (total as f64);
+                println!(
+                    "{}-Q{}-C{}  ({} → {})",
+                    c.year, c.quarter, c.ordinal, c.start_date, c.end_date,
+                );
+                println!("today:   {today}");
+                println!("day {elapsed} of {total}   ({pct:.0}%)");
+                println!("id:      {}", c.id);
+            } else {
+                println!("today ({today}) is between cycles — reset or bonus week");
+            }
+        }
+        CycleCmd::List { year, week_start } => {
+            let year = year.unwrap_or_else(|| chrono::Local::now().year());
+            let wd = cycle::weekday_from_short(&week_start)
+                .ok_or_else(|| eyre::eyre!("bad --week-start `{week_start}`"))?;
+            let qs = cycle::generate_year(year, wd, rule);
+            let bonus = cycle::has_bonus_week(year, wd, rule);
+            println!(
+                "Cyclic year {year}  week-start={week_start}  {}",
+                if bonus { "[cyclic-leap]" } else { "" }
+            );
+            for q in qs {
+                println!("\nQ{}  {} → {}", q.ordinal, q.start_date, q.end_date,);
+                for c in q.cycles.iter() {
+                    println!(
+                        "  C{}   {} → {}   ({} days)",
+                        c.ordinal,
+                        c.start_date,
+                        c.end_date,
+                        (c.end_date - c.start_date).num_days() + 1,
+                    );
+                }
+                println!("  reset  {} → {}", q.reset_week_start, q.reset_week_end,);
+                if let (Some(s), Some(e)) = (q.bonus_week_start, q.bonus_week_end) {
+                    println!("  bonus  {s} → {e}   (week zero for {})", year + 1);
+                }
+            }
         }
     }
     Ok(())

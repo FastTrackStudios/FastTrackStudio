@@ -329,6 +329,10 @@ mount = { path = "features/mount/mount" }
 # `target_date` and a cyclic-calendar `kind`. See
 # `plans/cyclic-life-calendar.md`.
 goal = { path = "features/goal/goal" }
+# Cyclic life-calendar primitives — Cycle + Quarter entities
+# + pure-function date generator. See
+# `plans/cyclic-life-calendar.md`.
+cycle = { path = "features/cycle/cycle" }
 # Email feature — wire contract + backends. Same shape as
 # `vault-proto`: one `#[architect::rpc] trait EmailSync` proto
 # crate, sibling backend crates (`email-imap`, `email-jmap`,

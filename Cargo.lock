@@ -2727,6 +2727,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cycle"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14180,6 +14197,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "cycle",
  "dotenvy",
  "eyre",
  "finance",
