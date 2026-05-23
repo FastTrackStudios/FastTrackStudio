@@ -1,3 +1,7 @@
+// architect's Entity derive emits cfg-gated blocks; allow
+// at crate scope.
+#![allow(unexpected_cfgs)]
+
 //! `workouts` — programmed templates (`Routine`) +
 //! per-session logs (`WorkoutSession` / `LoggedSet`) in a
 //! `vault::Vault`. Two page types under one crate because
