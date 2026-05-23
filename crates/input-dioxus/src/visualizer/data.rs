@@ -226,7 +226,9 @@ fn section_for_summary(summary: &LeafActionSummary) -> ActionSection {
     }
     // Fallback: classify by variant type
     match summary {
-        LeafActionSummary::Operator(_) | LeafActionSummary::Motion(_) | LeafActionSummary::TextObject(_) => ActionSection::Vim,
+        LeafActionSummary::Operator(_)
+        | LeafActionSummary::Motion(_)
+        | LeafActionSummary::TextObject(_) => ActionSection::Vim,
         LeafActionSummary::SwitchMode(_) | LeafActionSummary::PushMode(_) => ActionSection::Mode,
         _ => ActionSection::from_action_label(&summary.label()),
     }
@@ -278,7 +280,11 @@ fn walk_trie(trie: &KeyTrie, path: &mut Vec<KeyChord>, out: &mut Vec<KeyBindingI
 
 /// Format a chord sequence as a human-readable string.
 pub fn format_chord_sequence(chords: &[KeyChord]) -> String {
-    chords.iter().map(format_chord).collect::<Vec<_>>().join(" ")
+    chords
+        .iter()
+        .map(format_chord)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Format a single chord as a human-readable string.

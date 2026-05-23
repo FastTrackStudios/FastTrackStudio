@@ -27,11 +27,11 @@ use actions_proto::{
     ActionDefinition, ActionEvent, ActionId, ActionResult, ActionsService,
     ActionsServiceDispatcher, DefinesActionsClient,
 };
-use vox::Caller;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::{info, warn};
+use vox::Caller;
 
 /// A registered cell with its cached actions and RPC client
 struct RegisteredCell {

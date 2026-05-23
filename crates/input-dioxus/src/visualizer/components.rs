@@ -97,11 +97,8 @@ pub fn InputVisualizer(handle: InputHandle) -> Element {
     drop(processor);
 
     // Build the effective binding set based on context filter.
-    let effective_bindings = build_effective_bindings(
-        &base_bindings,
-        &context_groups,
-        &(context_filter)(),
-    );
+    let effective_bindings =
+        build_effective_bindings(&base_bindings, &context_groups, &(context_filter)());
 
     // Context labels for the filter dropdown
     let context_labels: Vec<String> = context_groups
@@ -181,7 +178,9 @@ fn build_effective_bindings(
             for group in groups {
                 for binding in &group.bindings {
                     // Context layer overrides base bindings with the same first chord
-                    if let Some(existing) = merged.iter_mut().find(|b| b.sequence == binding.sequence) {
+                    if let Some(existing) =
+                        merged.iter_mut().find(|b| b.sequence == binding.sequence)
+                    {
                         *existing = binding.clone();
                     } else {
                         merged.push(binding.clone());
@@ -196,7 +195,9 @@ fn build_effective_bindings(
             let mut merged = base.to_vec();
             if let Some(group) = groups.iter().find(|g| g.when_label == *label) {
                 for binding in &group.bindings {
-                    if let Some(existing) = merged.iter_mut().find(|b| b.sequence == binding.sequence) {
+                    if let Some(existing) =
+                        merged.iter_mut().find(|b| b.sequence == binding.sequence)
+                    {
                         *existing = binding.clone();
                     } else {
                         merged.push(binding.clone());
@@ -590,8 +591,8 @@ fn KeyCap(
 
     // Check if this key's section passes the active filter.
     let section_filter_active = !active_sections.is_empty();
-    let passes_filter = !section_filter_active
-        || section.is_some_and(|s| active_sections.contains(&s));
+    let passes_filter =
+        !section_filter_active || section.is_some_and(|s| active_sections.contains(&s));
 
     let is_selected = (selected_key)()
         .as_ref()

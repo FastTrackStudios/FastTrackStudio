@@ -43,9 +43,9 @@ use facet::Facet;
 use vox::service;
 
 pub mod ids;
-pub mod macros;
 #[cfg(test)]
 mod macro_tests;
+pub mod macros;
 pub mod search;
 pub mod when;
 
@@ -478,22 +478,22 @@ mod tests {
 
     #[test]
     fn action_definition_with_menu_path() {
-        let def = ActionDefinition::new("fts.test.action", "Test", "desc")
-            .with_menu_path("FTS/Session");
+        let def =
+            ActionDefinition::new("fts.test.action", "Test", "desc").with_menu_path("FTS/Session");
         assert_eq!(def.menu_path.as_deref(), Some("FTS/Session"));
     }
 
     #[test]
     fn action_definition_with_shortcut() {
-        let def = ActionDefinition::new("fts.test.action", "Test", "desc")
-            .with_shortcut("Cmd+Shift+P");
+        let def =
+            ActionDefinition::new("fts.test.action", "Test", "desc").with_shortcut("Cmd+Shift+P");
         assert_eq!(def.shortcut_hint.as_deref(), Some("Cmd+Shift+P"));
     }
 
     #[test]
     fn action_definition_with_when() {
-        let def = ActionDefinition::new("fts.test.action", "Test", "desc")
-            .with_when("tab:performance");
+        let def =
+            ActionDefinition::new("fts.test.action", "Test", "desc").with_when("tab:performance");
         assert_eq!(def.when.as_deref(), Some("tab:performance"));
     }
 
@@ -521,8 +521,8 @@ mod tests {
 
     #[test]
     fn is_active_when_clause_matches() {
-        let def = ActionDefinition::new("fts.test.action", "Test", "desc")
-            .with_when("tab:performance");
+        let def =
+            ActionDefinition::new("fts.test.action", "Test", "desc").with_when("tab:performance");
         let mut ctx = ActionContext::new();
         ctx.set_tag("tab:performance");
         assert!(def.is_active(&ctx));
@@ -530,8 +530,8 @@ mod tests {
 
     #[test]
     fn is_active_when_clause_does_not_match() {
-        let def = ActionDefinition::new("fts.test.action", "Test", "desc")
-            .with_when("tab:performance");
+        let def =
+            ActionDefinition::new("fts.test.action", "Test", "desc").with_when("tab:performance");
         let ctx = ActionContext::new();
         assert!(!def.is_active(&ctx));
     }
@@ -552,8 +552,8 @@ mod tests {
     #[test]
     fn is_active_malformed_when_fails_open() {
         // Malformed when-clause should fail-open (return true)
-        let def = ActionDefinition::new("fts.test.action", "Test", "desc")
-            .with_when("&& broken &&");
+        let def =
+            ActionDefinition::new("fts.test.action", "Test", "desc").with_when("&& broken &&");
         let ctx = ActionContext::new();
         assert!(def.is_active(&ctx));
     }

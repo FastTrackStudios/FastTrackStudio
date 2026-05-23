@@ -145,9 +145,18 @@ mod tests {
 
     #[test]
     fn standalone_constants_exist() {
-        assert_eq!(standalone::OPEN_SETTINGS.as_str(), "fts.standalone.open_settings");
-        assert_eq!(standalone::TOGGLE_DARK_MODE.as_str(), "fts.standalone.toggle_dark_mode");
-        assert_eq!(standalone::COMMAND_PALETTE.as_str(), "fts.standalone.command_palette");
+        assert_eq!(
+            standalone::OPEN_SETTINGS.as_str(),
+            "fts.standalone.open_settings"
+        );
+        assert_eq!(
+            standalone::TOGGLE_DARK_MODE.as_str(),
+            "fts.standalone.toggle_dark_mode"
+        );
+        assert_eq!(
+            standalone::COMMAND_PALETTE.as_str(),
+            "fts.standalone.command_palette"
+        );
         assert_eq!(standalone::SHOW_ABOUT.as_str(), "fts.standalone.show_about");
     }
 }

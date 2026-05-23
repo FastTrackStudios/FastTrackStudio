@@ -6,10 +6,10 @@ use actions_proto::{ActionDefinition, LocalActionImplementation, LocalActionRegi
 use actions_registry::ActionsRegistry;
 use reaper_high::{ActionKind, Reaper, RegisteredAction};
 use reaper_medium::CommandId;
-use vox::Caller;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, warn};
+use vox::Caller;
 
 /// Global storage for registered actions (keeps them alive for REAPER)
 static REGISTERED_ACTIONS: OnceLock<Mutex<Vec<RegisteredAction>>> = OnceLock::new();
@@ -386,8 +386,7 @@ pub fn register_local_actions(
                     let handler = handler.clone();
                     move || handler()
                 };
-                if let Err(err) =
-                    register_local_action(action.definition, handler_for_registration)
+                if let Err(err) = register_local_action(action.definition, handler_for_registration)
                 {
                     summary.failed += 1;
                     warn!(
