@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::io;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -36,7 +36,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use session_proto::services::SessionModeServiceClient;
-use tokio::sync::Mutex;
 use tokio::time::interval;
 
 /// Bounded rolling window of RPC round-trip durations. Computes
@@ -76,7 +75,7 @@ impl LatencyStats {
 }
 
 /// Snapshot of remote state rendered each frame.
-#[derive(Default, Clone)]
+#[derive(Default)]
 struct Snapshot {
     // Polled at ~1Hz via RPC (no push stream available)
     mode: Option<String>,
@@ -143,7 +142,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
     let regions_client = RegionsClient::new(caller.clone());
     let tempo_map_client = TempoMapClient::new(caller.clone());
 
-    let state = Arc::new(Mutex::new(Snapshot::default()));
+    let state = Arc::new(RwLock::new(Snapshot::default()));
 
     // Seed all counts in parallel so the UI shows real numbers before
     // any events have fired.
@@ -161,7 +160,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
                         .ok()
                 },
             );
-            let mut guard = s_state.lock().await;
+            let mut guard = s_state.write().expect("snapshot rwlock poisoned");
             if let Some(v) = t {
                 guard.counts.tracks = Some(v);
             }
@@ -183,7 +182,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
     let stream_handle = tokio::spawn(async move {
         if let Err(e) = run_event_bus(event_bus_client, stream_projects, stream_state.clone()).await
         {
-            let mut guard = stream_state.lock().await;
+            let mut guard = stream_state.write().expect("snapshot rwlock poisoned");
             guard.last_error = Some(format!("event bus: {e}"));
         }
     });
@@ -193,7 +192,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
     let mode_stream_client = mode_client.clone();
     let mode_stream_handle = tokio::spawn(async move {
         if let Err(e) = run_mode_stream(mode_stream_client, mode_stream_state.clone()).await {
-            let mut guard = mode_stream_state.lock().await;
+            let mut guard = mode_stream_state.write().expect("snapshot rwlock poisoned");
             guard.last_error = Some(format!("mode stream: {e}"));
         }
     });
@@ -220,7 +219,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
 /// "seed" event, then one slug per `set_mode` transition.
 async fn run_mode_stream(
     client: SessionModeServiceClient,
-    state: Arc<Mutex<Snapshot>>,
+    state: Arc<RwLock<Snapshot>>,
 ) -> Result<()> {
     let (tx, mut rx) = vox::channel::<String>();
     client
@@ -230,7 +229,7 @@ async fn run_mode_stream(
     loop {
         match rx.recv().await {
             Ok(Some(slug)) => {
-                let mut guard = state.lock().await;
+                let mut guard = state.write().expect("snapshot rwlock poisoned");
                 guard.mode = Some(slug.get().to_string());
             }
             Ok(None) => return Err(eyre!("mode stream closed by server")),
@@ -247,7 +246,7 @@ async fn run_mode_stream(
 async fn run_event_bus(
     client: EventBusClient,
     projects: ProjectsClient,
-    state: Arc<Mutex<Snapshot>>,
+    state: Arc<RwLock<Snapshot>>,
 ) -> Result<()> {
     let (tx, mut rx) = vox::channel::<DawEvent>();
     let started = Instant::now();
@@ -256,7 +255,7 @@ async fn run_event_bus(
         .await
         .map_err(|e| eyre!("event bus subscribe: {e}"))?;
     {
-        let mut guard = state.lock().await;
+        let mut guard = state.write().expect("snapshot rwlock poisoned");
         guard.latency.push(started.elapsed());
     }
 
@@ -275,7 +274,7 @@ async fn run_event_bus(
                         if matches!(ev.event, ProjectEvent::CurrentChanged(_))
                 );
                 {
-                    let mut guard = state.lock().await;
+                    let mut guard = state.write().expect("snapshot rwlock poisoned");
                     guard.stream_ticks = guard.stream_ticks.wrapping_add(1);
                     guard.last_tick_at = Some(now);
                     apply_daw_event(&mut guard, event.get(), now);
@@ -286,7 +285,7 @@ async fn run_event_bus(
                     let state_c = state.clone();
                     tokio::spawn(async move {
                         if let Ok(Some(info)) = projects_c.current().await {
-                            let mut guard = state_c.lock().await;
+                            let mut guard = state_c.write().expect("snapshot rwlock poisoned");
                             guard.project = Some(info);
                             // counts are per-project; clear so the next
                             // user-visible value comes from a fresh seed.
@@ -479,12 +478,12 @@ fn short(s: &str) -> &str {
 /// `ProjectEvent::CurrentChanged` fires on tab switch and triggers an
 /// inline refresh too; this poll handles metadata changes (rename /
 /// save / etc.) and acts as a slow heartbeat for the Latency panel.
-async fn collect_polled(projects: &ProjectsClient, state: &Arc<Mutex<Snapshot>>) {
+async fn collect_polled(projects: &ProjectsClient, state: &Arc<RwLock<Snapshot>>) {
     let start = Instant::now();
     let project = projects.current().await.ok().flatten();
     let elapsed = start.elapsed();
 
-    let mut guard = state.lock().await;
+    let mut guard = state.write().expect("snapshot rwlock poisoned");
     guard.latency.push(elapsed);
     if project.is_some() {
         guard.project = project;
@@ -492,7 +491,7 @@ async fn collect_polled(projects: &ProjectsClient, state: &Arc<Mutex<Snapshot>>)
     guard.poll_ticks = guard.poll_ticks.wrapping_add(1);
 }
 
-async fn run_ui_loop(state: Arc<Mutex<Snapshot>>) -> Result<()> {
+async fn run_ui_loop(state: Arc<RwLock<Snapshot>>) -> Result<()> {
     enable_raw_mode().wrap_err("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).wrap_err("enter alt screen")?;
@@ -519,8 +518,15 @@ async fn run_ui_loop(state: Arc<Mutex<Snapshot>>) -> Result<()> {
             }
         }
         if Instant::now() >= next_render {
-            let snap = state.lock().await.clone();
-            if let Err(e) = terminal.draw(|f| render(f, &snap)) {
+            // Render under a read lock — no Snapshot clone, no per-frame
+            // allocation of the snapshot itself. The lock is held only
+            // while building the frame (sub-millisecond) and never
+            // bridges an `.await`.
+            let draw_result = {
+                let snap = state.read().expect("snapshot rwlock poisoned");
+                terminal.draw(|f| render(f, &snap))
+            };
+            if let Err(e) = draw_result {
                 break Err(eyre!("draw failed: {e}"));
             }
             next_render += render_tick;
