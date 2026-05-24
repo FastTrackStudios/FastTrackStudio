@@ -25,6 +25,10 @@ pub(crate) struct Page {
     /// labels (`[[Foo|alias]]`) are normalized to the page
     /// portion (`Foo`).
     pub outlinks: HashSet<String>,
+    /// Body markdown (everything after the frontmatter
+    /// close fence). Used by the context-subgraph builder
+    /// to extract first-paragraph summaries.
+    pub body: String,
 }
 
 pub(crate) fn parse_page(rel_path: String, body: &str) -> Page {
@@ -53,6 +57,7 @@ pub(crate) fn parse_page(rel_path: String, body: &str) -> Page {
         tags,
         sources,
         outlinks,
+        body: rest.to_string(),
     }
 }
 
