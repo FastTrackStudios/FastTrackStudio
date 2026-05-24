@@ -704,6 +704,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // gaccel registration.
     daw_reaper::extension_setup::register_window_geometry_actions();
 
+    // Register the cross-DAW project importer so REAPER's File > Open
+    // (and Finder double-click, once the Info.plist association is in
+    // place) accept .ptx / .als / .aaf / .dawproject and route them
+    // through daw_reaper::project_import::* into a fresh project.
+    match daw_reaper::register_project_importer(&mut HighReaper::get().medium_session()) {
+        Ok(()) => info!("Project importer registered (.ptx, .als, .aaf, .dawproject)"),
+        Err(e) => warn!("Project importer registration FAILED: {:?}", e),
+    }
+
     #[cfg(feature = "host-hooks")]
     {
         // ── Extensions → FastTrackStudio menu ────────────────────────────
