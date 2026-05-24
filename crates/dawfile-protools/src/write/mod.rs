@@ -23,6 +23,7 @@ pub mod block_ops;
 pub mod edit_groups;
 pub mod from_rpp;
 pub mod internal_tracks;
+pub mod midi;
 pub mod native;
 pub mod splice;
 
