@@ -1452,6 +1452,23 @@ impl ReaperProjectBuilder {
         self
     }
 
+    /// Add a marker with a REAPER color int (`0x01000000 | (b<<16)|(g<<8)|r`;
+    /// `0` = no custom color).
+    pub fn marker_with_color(
+        mut self,
+        id: i32,
+        position: f64,
+        name: impl Into<String>,
+        color: i32,
+    ) -> Self {
+        self.markers_regions.add(
+            MarkerBuilder::marker(id, position, name)
+                .color(color)
+                .build(),
+        );
+        self
+    }
+
     /// Add a region spanning from `start` to `end`.
     pub fn region(mut self, id: i32, start: f64, end: f64, name: impl Into<String>) -> Self {
         self.markers_regions

@@ -154,6 +154,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     is_folder: false,
                     display_order: u32::MAX,
                     comment: String::new(),
+                    is_master: false,
                 },
                 channel_pos: ch,
             });

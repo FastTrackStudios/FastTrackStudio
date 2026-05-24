@@ -571,10 +571,17 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         });
     }
 
-    // Markers (Pro Tools Memory Locations)
+    // Markers (Pro Tools Memory Locations). PT stores each marker's RGB
+    // directly; REAPER's MARKER colour int is `0x01000000 | (r<<16)|(g<<8)|b`
+    // (the `0x01000000` flag = "use custom colour"). Verified against the
+    // official converter (INTRO → 0x01FF7CD6) and the session's actual colours.
     for marker in &session.markers {
         let pos_secs = marker.sample_pos as f64 / sample_rate;
-        builder = builder.marker(marker.number as i32, pos_secs, &marker.name);
+        let color = marker
+            .color_rgb
+            .map(|(r, g, b)| 0x0100_0000i32 | ((r as i32) << 16) | ((g as i32) << 8) | (b as i32))
+            .unwrap_or(0);
+        builder = builder.marker_with_color(marker.number as i32, pos_secs, &marker.name, color);
     }
 
     // Build the unified track-emission order from PT's 0x251a display order
@@ -626,44 +633,23 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         Src::Midi => session.midi_tracks[e.idx].display_order,
     });
 
-    // Compute folder boundaries from `Track.is_folder` over the merged
-    // emission order.
-    //
-    // Heuristic (until `PTXTrackSpec.children` is decoded): each track flagged
-    // `is_folder` opens a new top-level folder; the previous folder (if any)
-    // closes on the track immediately before. The final open folder closes on
-    // the last track. This produces flat, 1-deep folders that surface the
-    // flag in REAPER without inventing nesting that isn't in the source.
-    let folder_end_levels: Vec<i32> = {
-        let flags: Vec<bool> = emit
-            .iter()
-            .map(|e| match e.src {
-                Src::Audio => session.audio_tracks[e.idx].is_folder,
-                Src::Midi => session.midi_tracks[e.idx].is_folder,
-            })
-            .collect();
-        let n = flags.len();
-        let mut ends = vec![0i32; n];
-        let mut depth: i32 = 0;
-        for i in 0..n {
-            if flags[i] {
-                if depth > 0 && i > 0 {
-                    ends[i - 1] += depth;
-                    depth = 0;
-                }
-                depth += 1;
-            }
-        }
-        if depth > 0 && n > 0 {
-            ends[n - 1] += depth;
-        }
-        ends
-    };
+    // Folders are DISABLED. The `Track.is_folder` byte (`0x251a` payload after
+    // the name) is `0x01` for the Master track AND for flat stem-family tracks,
+    // so the old "each is_folder opens a folder" heuristic nested most of the
+    // session under "Master 1" (and made Master a folder/bus). Until PT's real
+    // group/folder block is decoded, emit a flat track list — no folders.
+    let folder_end_levels: Vec<i32> = vec![0; emit.len()];
 
     // PT track comments are emitted as SWS/S&M Track Notes (a project-level
     // <EXTENSIONS> block keyed by track GUID), matching the official converter.
     // Collected here and appended after the project is serialized.
     let mut track_notes: Vec<(String, String)> = Vec::new();
+
+    // PT's Master track (kind 0x05) is emitted as a normal REAPER track (REAPER's
+    // own master is implicit). We tag its GUID in an <EXTENSIONS> block so a
+    // future native RPP→PTX writer can round-trip it back to a PT Master rather
+    // than a regular track/bus. Collected here, injected after serialization.
+    let mut master_guids: Vec<String> = Vec::new();
 
     for (plan_idx, e) in emit.iter().enumerate() {
         let end_levels = folder_end_levels[plan_idx];
@@ -675,10 +661,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 // (`track.output`, e.g. "Analog 1-2"/"Bus 1") is routing, not part of
                 // the name. Routing-to-bus emission is a separate follow-on.
                 let display_name = track.name.clone();
-                let is_folder_start = track.is_folder;
+                let is_folder_start = false; // folders disabled (unreliable is_folder byte)
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
                 if !track.comment.is_empty() {
                     track_notes.push((track_guid.clone(), track.comment.clone()));
+                }
+                if track.is_master {
+                    master_guids.push(track_guid.clone());
                 }
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
@@ -861,10 +850,13 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 // (`track.output`, e.g. "Analog 1-2"/"Bus 1") is routing, not part of
                 // the name. Routing-to-bus emission is a separate follow-on.
                 let display_name = track.name.clone();
-                let is_folder_start = track.is_folder;
+                let is_folder_start = false; // folders disabled (unreliable is_folder byte)
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
                 if !track.comment.is_empty() {
                     track_notes.push((track_guid.clone(), track.comment.clone()));
+                }
+                if track.is_master {
+                    master_guids.push(track_guid.clone());
                 }
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
@@ -979,7 +971,7 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     // inserted as the last child before the project's closing `>`. Each note
     // is keyed by the track's GUID; comment lines are emitted verbatim with a
     // leading `|`.
-    if !track_notes.is_empty() {
+    if !track_notes.is_empty() || !master_guids.is_empty() {
         let mut ext = String::from("  <EXTENSIONS\n");
         for (guid, comment) in &track_notes {
             ext.push_str(&format!("    <S&M_TRACKNOTES {guid}\n"));
@@ -987,6 +979,14 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 ext.push_str(&format!("      |{line}\n"));
             }
             ext.push_str("    >\n");
+        }
+        // Mark each PT Master track (auto-generated on import) so a native
+        // RPP→PTX writer can map it back to a PT Master rather than a regular
+        // track. `1` = auto-generated by the Pro Tools import.
+        for guid in &master_guids {
+            ext.push_str(&format!(
+                "    <FTS_PTIMPORT_MASTER {guid}\n      1\n    >\n"
+            ));
         }
         ext.push_str("  >\n");
         if let Some(pos) = rpp.rfind("\n>") {

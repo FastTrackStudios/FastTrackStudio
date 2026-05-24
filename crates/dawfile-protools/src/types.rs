@@ -361,6 +361,10 @@ pub struct Track {
     /// per-track `0x261c > 0x200b > 0x200a > 0x2015` block (e.g. "Demo Vox
     /// STEM STRETCHED to 92 BPM", "U-47"). Empty when the track has no comment.
     pub comment: String,
+    /// `true` for PT's Master track (`0x2519` kind byte `0x05`). It maps to
+    /// REAPER's dedicated master track, not a regular track, so the converter
+    /// must not emit it as a `<TRACK` (which would become a bus/folder parent).
+    pub is_master: bool,
 }
 
 /// A single breakpoint in a volume-automation envelope.
