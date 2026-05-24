@@ -1391,7 +1391,87 @@ enum WikiCmd {
 }
 
 #[derive(Subcommand)]
+enum AgentQueueCmd {
+    /// Snapshot a queue's tasks + the latest event-log
+    /// watermark in one round trip.
+    Read {
+        /// Queue id (slug). Defaults to the org slug.
+        #[arg(long)]
+        queue: Option<String>,
+        /// Only my tasks (by handle).
+        #[arg(long)]
+        only_handle: Option<String>,
+        #[arg(long)]
+        include_archived: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Atomic claim — flips `ready` + unclaimed → `running`.
+    Claim {
+        task_id: String,
+        /// Caller handle (e.g. `codex@host-1`). Defaults to
+        /// `${USER}@${HOSTNAME}`.
+        #[arg(long)]
+        handle: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set a non-`running` status. `running` rejected — use
+    /// `claim`.
+    SetStatus {
+        task_id: String,
+        new_status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark `done` with a result blob (JSON-serialisable
+    /// string; the queue stores it verbatim).
+    Complete {
+        task_id: String,
+        /// Result payload (or `-` for stdin).
+        result: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Link this agent task to an in-flight thread/session.
+    Link {
+        task_id: String,
+        session_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List edges where either endpoint belongs to `queue_id`.
+    Links {
+        #[arg(long)]
+        queue: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum AgentCmd {
+    /// Agent task queue lifecycle — read / claim / set-status
+    /// / complete. Mirrors the `AgentTaskQueue` RPC the server
+    /// mounts on `/org/<slug>/vox`.
+    #[command(subcommand)]
+    Queue(AgentQueueCmd),
     /// One-shot chat against `codex app-server`. Spawns the
     /// daemon rooted at `--workspace`, sends `thread/start` +
     /// `turn/start`, prints streamed assistant text until the
@@ -4854,6 +4934,7 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
     use futures::StreamExt;
 
     match cmd {
+        AgentCmd::Queue(qc) => Box::pin(run_agent_queue(qc)).await,
         AgentCmd::Chat {
             workspace,
             model,
@@ -6486,6 +6567,169 @@ async fn run_pantry(cmd: PantryCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
             println!("deleted {}", p.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Agent task queue (agent-proto / agent-tasks) ─────────────────────
+
+async fn run_agent_queue(cmd: AgentQueueCmd) -> eyre::Result<()> {
+    use agent_proto::service::tasks::AgentTaskQueueClient;
+    use agent_proto::tasks::QueueFilter;
+
+    async fn connect_queue(url: String) -> eyre::Result<AgentTaskQueueClient> {
+        Box::pin(vox::connect(&url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    let connect = |url: String| connect_queue(url);
+    let default_handle = || {
+        format!(
+            "{}@{}",
+            std::env::var("USER").unwrap_or_else(|_| "anon".into()),
+            std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("HOST"))
+                .unwrap_or_else(|_| "host".into())
+        )
+    };
+    let body = |s: String| -> eyre::Result<String> {
+        if s == "-" {
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
+            Ok(buf)
+        } else {
+            Ok(s)
+        }
+    };
+
+    match cmd {
+        AgentQueueCmd::Read {
+            queue,
+            only_handle,
+            include_archived,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let queue_id = queue.unwrap_or_else(|| slug.clone());
+            let filter = QueueFilter {
+                assignee: String::new(),
+                include_archived,
+                only_handle: only_handle.unwrap_or_default(),
+                linked_session_id: String::new(),
+                agent_profile: String::new(),
+            };
+            let snap = client
+                .read_queue(queue_id, filter)
+                .await
+                .map_err(|e| eyre::eyre!("read_queue: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&snap).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!(
+                "queue {}  ({} tasks, watermark={})",
+                snap.queue.id,
+                snap.tasks.len(),
+                snap.latest_event_id
+            );
+            for t in &snap.tasks {
+                println!("  {:<10}  {:<32}  {}", t.status, t.title, t.id);
+            }
+        }
+        AgentQueueCmd::Claim {
+            task_id,
+            handle,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let h = handle.unwrap_or_else(default_handle);
+            let t = client
+                .claim_agent_task(task_id, h.clone())
+                .await
+                .map_err(|e| eyre::eyre!("claim: {e:?}"))?;
+            println!("claimed {} as {h} → [{}]", t.title, t.status);
+        }
+        AgentQueueCmd::SetStatus {
+            task_id,
+            new_status,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let t = client
+                .set_agent_task_status(task_id, new_status)
+                .await
+                .map_err(|e| eyre::eyre!("set_status: {e:?}"))?;
+            println!("{} → [{}]", t.title, t.status);
+        }
+        AgentQueueCmd::Complete {
+            task_id,
+            result,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let result_blob = body(result)?;
+            let t = client
+                .complete_agent_task(task_id, result_blob)
+                .await
+                .map_err(|e| eyre::eyre!("complete: {e:?}"))?;
+            println!("completed {} → [{}]", t.title, t.status);
+        }
+        AgentQueueCmd::Link {
+            task_id,
+            session_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let t = client
+                .link_agent_task_to_session(task_id, session_id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("link: {e:?}"))?;
+            println!("linked {} → session {session_id}", t.title);
+        }
+        AgentQueueCmd::Links {
+            queue,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let queue_id = queue.unwrap_or_else(|| slug.clone());
+            let links = client
+                .list_agent_task_links(queue_id)
+                .await
+                .map_err(|e| eyre::eyre!("links: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&links).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for l in &links {
+                println!("{}  →  {}  ({})", l.from_task, l.to_task, l.kind);
+            }
         }
     }
     Ok(())
