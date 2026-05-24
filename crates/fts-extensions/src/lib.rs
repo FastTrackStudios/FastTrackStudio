@@ -51,7 +51,12 @@ impl Global {
 struct App {
     session: RefCell<ReaperSession>,
     task_middleware: RefCell<MainTaskMiddleware>,
-    action_handlers: HashMap<String, Arc<dyn Fn() + Send + Sync>>,
+    /// REAPER-action → handler map. Wrapped in `RefCell` so the
+    /// late-registration path (e.g. reaper-input discovering a brand
+    /// new workflow `.styx` file at runtime) can push new entries
+    /// without rebuilding `App`. REAPER's main thread is the only
+    /// touchpoint, so a `RefCell` is sufficient.
+    action_handlers: RefCell<HashMap<String, Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl App {
@@ -60,11 +65,44 @@ impl App {
     }
 
     fn dispatch_action(&self, command_name: &str) {
-        if let Some(handler) = self.action_handlers.get(command_name) {
+        let handler = self.action_handlers.borrow().get(command_name).cloned();
+        if let Some(handler) = handler {
             handler();
         } else {
             tracing::debug!("Unhandled action: {command_name}");
         }
+    }
+
+    /// Register a [`DynActionDef`] discovered after startup. Adds the
+    /// handler to the dispatch map and registers the command name with
+    /// REAPER's action list so `named_command_lookup` resolves it the
+    /// next time a binding fires it. No-op if the command is already
+    /// registered (REAPER's registry handles the duplicate case).
+    fn register_late_action(
+        &self,
+        def: reaper_input::infrastructure::action_registry::DynActionDef,
+    ) {
+        let cmd_id = daw_reaper::action_registry::register_action_main_thread(
+            &def.command_id,
+            &def.display_name,
+            def.appears_in_menu,
+            def.toggle_state.is_some(),
+        );
+        if cmd_id > 0 {
+            info!(
+                command_id = %def.command_id,
+                cmd_id,
+                "Late-registered action"
+            );
+        } else {
+            warn!(
+                command_id = %def.command_id,
+                "Failed to late-register action with REAPER"
+            );
+        }
+        self.action_handlers
+            .borrow_mut()
+            .insert(def.command_id.clone(), def.handler);
     }
 }
 
@@ -463,6 +501,20 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
     info!(modules = module_count, "All modules initialized");
 
+    // Restore the persisted session mode before installing the input
+    // bridge. `set_mode` applies the window layout, toolbars, and fires
+    // listeners — so doing this first means the bridge's initial
+    // workflow activation (run inside `install`) already sees the
+    // correct mode and there's no flash of the default Organize mode.
+    #[cfg(feature = "mod-session")]
+    {
+        if let Some(mode) = session::mode_actions::restore_persisted_mode() {
+            info!(mode = %mode, "Restored persisted session mode");
+        } else {
+            info!("No persisted session mode — staying on default");
+        }
+    }
+
     // Bridge session mode changes to reaper-input workflows. Only wired
     // when both modules are compiled in; otherwise this is a no-op build.
     #[cfg(all(feature = "mod-session", feature = "mod-input"))]
@@ -521,10 +573,25 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let app = App {
         session: RefCell::new(session),
         task_middleware: RefCell::new(task_middleware),
-        action_handlers: all_actions,
+        action_handlers: RefCell::new(all_actions),
     };
 
     APP.set(Fragile::new(app)).map_err(|_| "App already set")?;
+
+    // Install the late-registration callback so reaper-input can push
+    // new actions through to REAPER + the dispatch map whenever it
+    // discovers a new workflow `.styx` file at runtime.
+    #[cfg(feature = "mod-input")]
+    reaper_input::infrastructure::action_registry::set_action_registrar(Box::new(|def| {
+        let Some(app_fragile) = APP.get() else {
+            tracing::warn!(
+                command_id = %def.command_id,
+                "Late-action fired before App initialised; ignoring"
+            );
+            return;
+        };
+        app_fragile.get().register_late_action(def);
+    }));
 
     #[cfg(feature = "ui-dock")]
     {
