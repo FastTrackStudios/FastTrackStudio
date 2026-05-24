@@ -8,16 +8,13 @@ edition.workspace = true
 # UI
 dioxus = { workspace = true, features = ["desktop"] }
 
-# Session
+# Session — facade, UI, and the shared CLI connection helper
 session.workspace = true
 session-ui = { workspace = true, features = ["web"] }
+session-cli.workspace = true
 
-# Vox RPC
+# Vox RPC (gateway link/dispatch + connection)
 vox.workspace = true
-vox-stream.workspace = true
-
-# DAW facade
-daw = { workspace = true, features = ["sync"] }
 
 # WebSocket gateway
 axum = { version = "0.8", features = ["ws"] }

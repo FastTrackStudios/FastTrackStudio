@@ -94,6 +94,10 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch =
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-cli = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+# `daw-proto` is listed here so the fts-cli TUI can build typed
+# service clients (TransportClient, TracksClient, ProjectsClient) on
+# top of the Vox connection it shares with session-cli.
+daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 
 # Dock UI (sibling repo)
 dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
@@ -196,17 +200,74 @@ color = "0.3"
 wgpu = "27"
 pollster = "0.4"
 
-# Redirect bearcove/vox.git transitive deps to the FTS fork (fixes wasm32 compilation).
-[patch."https://github.com/bearcove/vox.git"]
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
-vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+# ── Sibling FTS repo overrides ────────────────────────────────────────
+# Point the umbrella at the local sibling checkouts so a single
+# `cargo build` in this repo picks up uncommitted / unpushed work from
+# any of the domain repos. Comment out a section to fall back to the
+# pinned GitHub `main` rev.
+
+[patch."https://github.com/FastTrackStudios/session.git"]
+session = { path = "../session/crates/session" }
+session-proto = { path = "../session/crates/session-proto" }
+session-ui = { path = "../session/crates/session-ui" }
+session-cli = { path = "../session/apps/cli" }
+
+[patch."https://github.com/FastTrackStudios/daw.git"]
+daw = { path = "../daw/crates/daw" }
+daw-cli = { path = "../daw/apps/daw" }
+daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-control = { path = "../daw/crates/daw-control" }
+daw-reaper = { path = "../daw/crates/daw-reaper" }
+audio-controls = { path = "../daw/crates/audio-controls" }
+reaper-test = { path = "../daw/crates/reaper-test" }
+reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
+reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+
+[patch."https://github.com/FastTrackStudios/keyflow.git"]
+keyflow = { path = "../keyflow/crates/keyflow" }
+keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
+keyflow-text = { path = "../keyflow/crates/keyflow-text" }
+keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
+engraver = { path = "../keyflow/crates/engraver" }
+engraver-proto = { path = "../keyflow/crates/engraver-proto" }
+
+# Signal patched out for now — local signal pins an older vox rev
+# (Codys-Wright/vox@2a2f793b) that drags facet 0.44 into the
+# workspace and conflicts with the rest of FTS on facet 0.46.
+# Re-enable when signal bumps to bearcove/vox@27eef573 (or matches
+# whatever rev daw/session settle on).
+#
+# [patch."https://github.com/FastTrackStudios/signal.git"]
+# signal = { path = "../signal/crates/signal" }
+# signal-ui = { path = "../signal/crates/signal-ui" }
+# signal-cli = { path = "../signal/apps/cli" }
+# macromod = { path = "../signal/crates/macromod" }
+
+[patch."https://github.com/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../input_actions/crates/actions-proto" }
+actions-registry = { path = "../input_actions/crates/actions-registry" }
+actions-standalone = { path = "../input_actions/crates/actions-standalone" }
+actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
+input-dioxus = { path = "../input_actions/crates/input-dioxus" }
+input = { path = "../input_actions/crates/input" }
+
+# Pin every transitive vox reference to the same bearcove rev that the
+# sibling domain repos (daw, session, keyflow, …) use. Without this,
+# any third-party crate that loosely pulls in `bearcove/vox.git` can
+# drag an older vox-macros-core in, which transitively pins facet 0.44
+# and conflicts with the facet 0.46 the FTS workspace runs on.
+# Redirect the OLD `Codys-Wright/vox` rev (signal still pins 2a2f793b
+# which transitively drags in facet 0.44 and conflicts with the rest
+# of the FTS workspace running on facet 0.46) to the bearcove rev
+# every other sibling agrees on.
+[patch."https://github.com/Codys-Wright/vox.git"]
+vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-core = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox-inprocess = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,

@@ -8,17 +8,34 @@ name = "fts"
 path = "src/main.rs"
 
 [dependencies]
-daw-cli.workspace = true
-daw = { workspace = true, features = ["file"] }
-signal-cli.workspace = true
 session-cli.workspace = true
-tokio.workspace = true
+session-proto.workspace = true
+daw-proto.workspace = true
+vox.workspace = true
+vox-stream.workspace = true
+moire.workspace = true
+tokio = { workspace = true, features = ["net", "macros", "rt-multi-thread", "time"] }
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde_json.workspace = true
-serde.workspace = true
-signal.workspace = true
-macromod.workspace = true
 clap = { version = "4", features = ["derive"] }
-midly = "0.5.3"
+which = "7"
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Disabled until the corresponding domain crates catch up to the
+# current vox / facet / daw API:
+# - daw-cli + daw  → ported, but fts-cli's own daw.rs / introspect.rs
+#   modules still reference removed APIs (FxParamHandle, private Daw,
+#   …). Re-add after a port.
+# - signal-cli + signal + macromod → signal pins old
+#   Codys-Wright/vox@2a2f793b (facet 0.44); workspace runs facet 0.46.
+#
+# daw-cli.workspace = true
+# daw = { workspace = true, features = ["file"] }
+# signal-cli.workspace = true
+# signal.workspace = true
+# macromod.workspace = true
+# serde_json.workspace = true
+# serde.workspace = true
+# midly = "0.5.3"

@@ -1,25 +1,20 @@
-//! Local Session Services
+//! Session Services
 //!
-//! Discovers a running REAPER instance via its Unix socket, connects via vox,
-//! initializes the DAW singleton, and builds the setlist from open projects.
+//! Connects to the REAPER-hosted `fts-extensions` over its Unix socket
+//! (via the shared `session_cli::connection::connect` helper) and points the
+//! Session UI at the remote `SetlistService` running inside REAPER. Also runs
+//! the in-process WebSocket gateway that re-exposes those services to browsers.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use daw::sync::LocalCaller;
-use daw::{Caller, Daw};
-use eyre::{bail, Result};
+use eyre::{Result, WrapErr};
 use session::{
-    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl,
-    SongServiceDispatcher, SongServiceImpl,
-    setlist_service_service_descriptor, song_service_service_descriptor,
+    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl, SongServiceDispatcher,
+    SongServiceImpl, setlist_service_service_descriptor, song_service_service_descriptor,
 };
 use session_ui::Session;
 
 use crate::gateway;
-
-const SOCKET_DIR: &str = "/tmp";
-const SOCKET_PREFIX: &str = "fts-daw-";
-const SOCKET_SUFFIX: &str = ".sock";
 
 /// Start the WebSocket gateway immediately (does not require REAPER).
 pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
@@ -36,8 +31,7 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
             SongServiceDispatcher::new(song),
         );
 
-    let bind_addr = std::env::var("GATEWAY_WS_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:3030".to_string());
+    let bind_addr = std::env::var("GATEWAY_WS_ADDR").unwrap_or_else(|_| "0.0.0.0:3030".to_string());
     let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR")
         .ok()
         .or_else(discover_web_static_dir);
@@ -47,13 +41,8 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
 
     let (info_tx, info_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
-        if let Err(e) = gateway::start_gateway(
-            handler,
-            &bind_addr,
-            static_dir.as_deref(),
-            info_tx,
-        )
-        .await
+        if let Err(e) =
+            gateway::start_gateway(handler, &bind_addr, static_dir.as_deref(), info_tx).await
         {
             tracing::error!("WebSocket gateway error: {e}");
         }
@@ -65,151 +54,30 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
     Ok(gw_info)
 }
 
-/// Connect to REAPER and initialize session services.
+/// Connect to the REAPER-hosted `fts-extensions` and point the Session UI at
+/// its remote `SetlistService`.
+///
+/// Uses the shared `session_cli::connection::connect` helper (the same path
+/// the CLI uses): it discovers the newest live `/tmp/fts-daw-*.sock`, performs
+/// the vox handshake, and returns a `vox::Caller`. The setlist is owned and
+/// built by the session module running inside REAPER — the desktop is a pure
+/// client. Can be retried until REAPER is available.
 pub async fn connect_to_reaper() -> Result<()> {
-    let caller = discover_and_connect().await?;
-    Daw::init(caller)?;
-    tracing::info!("DAW initialized");
-
-    let setlist = SetlistServiceImpl::new();
-
-    let local = LocalCaller::new(SetlistServiceDispatcher::new(setlist)).await?;
-    let client = SetlistServiceClient::new(local.caller());
-
-    client
-        .build_from_open_projects()
+    let caller = session_cli::connection::connect(None)
         .await
-        .map_err(|e| eyre::eyre!("{e:?}"))?;
-    tracing::info!("Setlist built from open projects");
+        .wrap_err("connect to fts-extensions socket")?;
+    tracing::info!("Connected to fts-extensions in REAPER");
 
+    let client = SetlistServiceClient::new(caller.clone());
     Session::init(client)?;
-    tracing::info!("Session services initialized");
+    tracing::info!("Session UI initialized against remote SetlistService");
     Ok(())
 }
 
-async fn discover_and_connect() -> Result<Caller> {
-    let sockets = discover_sockets();
-    if sockets.is_empty() {
-        bail!(
-            "No REAPER sockets found in {SOCKET_DIR} — is REAPER running with the FTS extension?"
-        );
-    }
-
-    tracing::info!("Found {} REAPER socket(s)", sockets.len());
-
-    for (pid, path) in &sockets {
-        tracing::debug!("Trying REAPER socket: {} (pid {pid})", path.display());
-        match connect_to_daw(path).await {
-            Ok(caller) => {
-                tracing::info!("Connected to REAPER (pid {pid}) via {}", path.display());
-                return Ok(caller);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to connect to {}: {e}", path.display());
-            }
-        }
-    }
-
-    bail!("Could not connect to any REAPER instance")
-}
-
-fn discover_sockets() -> Vec<(u32, PathBuf)> {
-    let Ok(entries) = std::fs::read_dir(SOCKET_DIR) else {
-        return Vec::new();
-    };
-
-    entries
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let path = entry.path();
-            let pid = pid_from_socket_path(&path)?;
-            if !is_process_alive(pid) {
-                return None;
-            }
-            Some((pid, path))
-        })
-        .collect()
-}
-
-fn pid_from_socket_path(path: &Path) -> Option<u32> {
-    let filename = path.file_name()?.to_str()?;
-    let rest = filename.strip_prefix(SOCKET_PREFIX)?;
-    let pid_str = rest.strip_suffix(SOCKET_SUFFIX)?;
-    pid_str.parse().ok()
-}
-
-fn is_process_alive(pid: u32) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-async fn connect_to_daw(path: &Path) -> eyre::Result<Caller> {
-    let stream = tokio::net::UnixStream::connect(path).await?;
-    let link = vox_stream::StreamLink::unix(stream);
-    let handshake_result = initiator_handshake_result(64);
-    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
-        .establish::<vox::NoopClient>()
-        .await?;
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
-
-    let conn = session
-        .open_connection(
-            vox::ConnectionSettings {
-                parity: vox::Parity::Odd,
-                max_concurrent_requests: 64,
-                initial_channel_credit: 16,
-            },
-            vec![vox::MetadataEntry {
-                key: std::borrow::Cow::Borrowed("role"),
-                value: vox::MetadataValue::String(std::borrow::Cow::Borrowed(
-                    "fasttrackstudio-desktop",
-                )),
-                flags: vox::MetadataFlags::NONE,
-            }],
-        )
-        .await?;
-
-    let mut driver = vox::Driver::new(conn, ());
-    let caller = Caller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
-
-    Ok(caller)
-}
-
-fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeResult {
-    vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests,
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests,
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    }
-}
-
+/// Try to find the web app's `dx build` output directory, relative to the
+/// cargo workspace root (release first, then debug).
 fn discover_web_static_dir() -> Option<String> {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .parent()?;
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?.parent()?;
 
     let candidates = [
         workspace_root.join("target/dx/fasttrackstudio-web/release/web/public"),
