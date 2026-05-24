@@ -603,23 +603,6 @@ pub fn poll_and_broadcast_transport() {
     }
 }
 
-/// Quarter-note position for `tpos_seconds` within `project`. Uses
-/// `TimeMap2_timeToBeats` which returns the full-beats value REAPER
-/// considers canonical for the project's tempo map.
-#[allow(dead_code)]
-fn position_qn(medium: &reaper_medium::Reaper, project: ReaProject, tpos_seconds: f64) -> f64 {
-    // `PositionInSeconds::new` rejects NaN; fall back to 0 if the
-    // backend hands us something unrepresentable.
-    let Ok(tpos) = PositionInSeconds::new(tpos_seconds) else {
-        return 0.0;
-    };
-    // SAFETY: project came from enum_projects; valid within this tick.
-    let result = unsafe {
-        medium.time_map_2_time_to_beats_unchecked(ReaperProjectContext::Proj(project), tpos)
-    };
-    result.full_beats.get()
-}
-
 /// Cheap equality check tolerating sub-millisecond playhead drift —
 /// position is broadcast on the continuous channel, so the state
 /// channel only fires on "real" changes (transport actions, edits,
