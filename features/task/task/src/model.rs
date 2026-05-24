@@ -157,6 +157,29 @@ pub struct TaskInfo {
     #[architect(json)]
     pub projects: StringList,
 
+    /// Owning project (stable UUID). Authoritative pointer
+    /// — the `projects:` wikilink array above stays as a
+    /// human-readable hint, but downstream code (timer
+    /// project-defaults, kanban grouping, agent dispatch
+    /// scoping) reads `project_id` first. `None` when the
+    /// task is not yet associated to a project.
+    #[serde(skip_serializing_if = "Option::is_none", default, rename = "projectId")]
+    #[architect(filterable)]
+    pub project_id: Option<Uuid>,
+
+    /// Milestone this task rolls up to. Optional. A milestone
+    /// is project-scoped, so `milestone_id` implies
+    /// `project_id` (the backend doesn't currently enforce
+    /// it; the CLI's `set-milestone` does). See the
+    /// `milestone` crate for the rollup contract.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "milestoneId"
+    )]
+    #[architect(filterable)]
+    pub milestone_id: Option<Uuid>,
+
     /// Estimated work in minutes.
     #[serde(
         skip_serializing_if = "Option::is_none",

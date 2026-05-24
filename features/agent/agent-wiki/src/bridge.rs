@@ -144,15 +144,50 @@ pub async fn run_ingest(
 
     let blocks: IngestBlocks = parse_ingest_blocks(&generation)?;
 
-    let drafts: Vec<wiki_live::queue::PageDraft> = blocks
+    // Source traceability: inject `sources: ["<raw_path>"]`
+    // into each generated page's YAML frontmatter so every
+    // wiki page traces back to the raw file(s) that produced
+    // it (matches nashsu/llm_wiki's `sources:` field).
+    let mut drafts: Vec<wiki_live::queue::PageDraft> = blocks
         .files
         .iter()
         .map(|fb| wiki_live::queue::PageDraft {
             path: fb.path.clone(),
-            markdown: fb.content.clone(),
+            markdown: inject_sources_frontmatter(&fb.content, &raw_ref.path),
             overwrite: true,
         })
         .collect();
+
+    // Guaranteed source-summary fallback (matches
+    // nashsu/llm_wiki's "always create wiki/sources/<slug>.md
+    // even if the LLM omits it" behavior). Two guards:
+    //   1. Skip if the LLM already named the page in its
+    //      FILE blocks (drafts already covers it).
+    //   2. Skip if the page already exists on disk — Codex
+    //      may have written it directly via tool use during
+    //      the turn, in which case we should NOT clobber with
+    //      a stub.
+    // Without these, a mis-formatted LLM response can drop
+    // the source pointer and downstream sweeps eventually
+    // reap orphans.
+    let summary_path = format!("wiki/sources/{source_basename}.md");
+    let summary_exists_on_disk = wiki.vault_root().join(&summary_path).exists();
+    if !drafts.iter().any(|d| d.path == summary_path) && !summary_exists_on_disk {
+        let title = if req.source_title.is_empty() {
+            req.source_filename.clone()
+        } else {
+            req.source_title.clone()
+        };
+        let stub = format!(
+            "---\ntype: source\ntitle: \"Source: {title}\"\nsources:\n  - {raw_path}\n---\n\n# Source: {title}\n\n*The LLM did not emit a source-summary page on this ingest run; this stub is a fallback so the source has a reachable wiki page.*\n",
+            raw_path = raw_ref.path,
+        );
+        drafts.push(wiki_live::queue::PageDraft {
+            path: summary_path,
+            markdown: stub,
+            overwrite: false,
+        });
+    }
     wiki.record_pages(&task.id, &drafts)
         .map_err(|e| AgentWikiError::Bridge(format!("record_pages: {e}")))?;
 
@@ -637,4 +672,109 @@ fn collect_dedup_input(wiki: &WikiLive) -> Result<String, AgentWikiError> {
     // Same shape as page_index_lines for now — slugs +
     // title. The LLM groups by name similarity.
     collect_page_index_lines(wiki)
+}
+
+/// Inject `sources: ["<path>"]` into a page's YAML
+/// frontmatter. Idempotent — if the page already has a
+/// `sources:` list, appends to it (de-duped by path).
+/// If the page has no frontmatter, wraps the body in a
+/// fresh `---` fence.
+#[must_use]
+pub(crate) fn inject_sources_frontmatter(markdown: &str, source_path: &str) -> String {
+    // Match a leading `---\n...\n---\n` fence (the standard
+    // YAML frontmatter convention). Anything else gets a
+    // fresh fence prepended.
+    let trimmed = markdown.trim_start_matches('\n');
+    if let Some(rest) = trimmed.strip_prefix("---\n") {
+        if let Some(end_idx) = rest.find("\n---\n") {
+            let fm = &rest[..end_idx];
+            let body = &rest[end_idx + 5..];
+            let new_fm = merge_sources_into_fm(fm, source_path);
+            return format!("---\n{new_fm}---\n{body}");
+        }
+    }
+    // No frontmatter — wrap.
+    format!("---\nsources:\n  - {source_path}\n---\n\n{markdown}")
+}
+
+/// Merge `<source_path>` into the `sources:` list inside a
+/// YAML frontmatter string. Preserves all other keys.
+fn merge_sources_into_fm(fm: &str, source_path: &str) -> String {
+    let mut out = String::new();
+    let mut in_sources_block = false;
+    let mut had_sources = false;
+    let mut already_present = false;
+    let mut emitted_path = false;
+    for line in fm.lines() {
+        if in_sources_block {
+            // Continuation of the sources block when the line
+            // starts with `  -` or `  ` (a list item or
+            // continuation). Anything else closes the block.
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix('-') {
+                if rest.trim() == source_path {
+                    already_present = true;
+                }
+                out.push_str(line);
+                out.push('\n');
+                continue;
+            }
+            if !emitted_path && !already_present {
+                out.push_str(&format!("  - {source_path}\n"));
+                emitted_path = true;
+            }
+            in_sources_block = false;
+            // Fall through to write the current (non-list) line.
+        }
+        if line.trim_start().starts_with("sources:") {
+            had_sources = true;
+            in_sources_block = true;
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    // Sources block ran to end of frontmatter.
+    if in_sources_block && !emitted_path && !already_present {
+        out.push_str(&format!("  - {source_path}\n"));
+    }
+    if !had_sources {
+        out.push_str(&format!("sources:\n  - {source_path}\n"));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn injects_into_existing_frontmatter() {
+        let src = "---\ntitle: Foo\n---\n\nBody.\n";
+        let out = inject_sources_frontmatter(src, "raw/sources/x.md");
+        assert!(out.contains("sources:"));
+        assert!(out.contains("raw/sources/x.md"));
+        assert!(out.contains("title: Foo"));
+    }
+    #[test]
+    fn wraps_when_no_frontmatter() {
+        let src = "Just a body.\n";
+        let out = inject_sources_frontmatter(src, "raw/sources/x.md");
+        assert!(out.starts_with("---\nsources:\n  - raw/sources/x.md\n---\n"));
+    }
+    #[test]
+    fn idempotent_when_already_listed() {
+        let src = "---\nsources:\n  - raw/sources/x.md\n---\nBody.\n";
+        let out = inject_sources_frontmatter(src, "raw/sources/x.md");
+        let count = out.matches("raw/sources/x.md").count();
+        assert_eq!(count, 1, "should not duplicate the source path");
+    }
+    #[test]
+    fn appends_to_existing_list() {
+        let src = "---\nsources:\n  - raw/sources/old.md\n---\nBody.\n";
+        let out = inject_sources_frontmatter(src, "raw/sources/new.md");
+        assert!(out.contains("raw/sources/old.md"));
+        assert!(out.contains("raw/sources/new.md"));
+    }
 }

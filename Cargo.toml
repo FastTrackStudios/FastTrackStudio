@@ -335,6 +335,10 @@ mount = { path = "features/mount/mount" }
 # `target_date` and a cyclic-calendar `kind`. See
 # `plans/cyclic-life-calendar.md`.
 goal = { path = "features/goal/goal" }
+# Project-scoped milestones — GitHub-Projects-style checkpoints
+# tasks roll up to. Maps cleanly to Forgejo / GitHub milestone
+# API for the future sync.
+milestone = { path = "features/milestone/milestone" }
 # Cyclic life-calendar primitives — Cycle + Quarter entities
 # + pure-function date generator. See
 # `plans/cyclic-life-calendar.md`.

@@ -2,6 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 use uuid::Uuid;
 use vault::Vault;
 
@@ -42,6 +44,13 @@ fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
     vault.pages.iter().position(|p| {
         looks_like_pantry_item(p) && parse_page(p).map(|i| i.id == id).unwrap_or(false)
     })
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
+    }
 }
 
 impl PantryService for Store {

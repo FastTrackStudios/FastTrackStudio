@@ -9524,6 +9524,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "milestone"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "vault",
+ "vault-proto",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14164,6 +14186,8 @@ dependencies = [
  "tracing",
  "uuid",
  "vault",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -14199,17 +14223,26 @@ dependencies = [
  "agent-wiki",
  "architect-auth",
  "base64",
+ "body",
  "chrono",
  "clap",
+ "cookbook",
  "cycle",
  "dotenvy",
+ "exercises",
  "eyre",
  "finance",
  "finance-db",
  "finance-proto",
  "futures",
+ "goal",
+ "intake",
+ "locations",
+ "mealplan",
+ "milestone",
  "mount",
  "org-proto",
+ "pantry",
  "project",
  "sea-orm",
  "sea-orm-migration",
@@ -14233,6 +14266,7 @@ dependencies = [
  "wiki-live",
  "wiki-proto",
  "wiki-search",
+ "workouts",
 ]
 
 [[package]]
@@ -14248,14 +14282,22 @@ dependencies = [
  "attachments-proto",
  "axum",
  "base64",
+ "body",
  "chrono",
+ "cookbook",
  "ed25519-dalek",
+ "exercises",
  "eyre",
  "finance-db",
  "finance-proto",
  "futures",
  "goal",
+ "intake",
+ "locations",
+ "mealplan",
+ "milestone",
  "org-proto",
+ "pantry",
  "project",
  "rand 0.8.6",
  "reqwest 0.12.28",
@@ -14282,6 +14324,7 @@ dependencies = [
  "walkdir",
  "wiki-live",
  "wiki-proto",
+ "workouts",
 ]
 
 [[package]]

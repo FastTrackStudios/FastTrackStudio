@@ -10,6 +10,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
+
 use crate::model::Recipe;
 use crate::parse::parse_cook;
 use crate::scan::scan_cookbook;
@@ -37,6 +40,13 @@ impl Store {
 
 fn map_io(e: impl std::fmt::Display) -> CookbookError {
     CookbookError::Io(e.to_string())
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
+    }
 }
 
 impl CookbookService for Store {

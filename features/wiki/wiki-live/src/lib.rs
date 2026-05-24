@@ -41,6 +41,7 @@ mod index;
 pub mod log_md;
 pub mod queue;
 mod raw;
+pub mod reviews;
 mod snapshot;
 mod source_watcher;
 mod state;

@@ -52,7 +52,15 @@ pub use fulfillment::{
 pub use model::{Meal, PantryDeduction, Slot, Status};
 pub use parse::{ParseError, looks_like_meal, parse_page};
 pub use scan::{meals_between, meals_on, scan_vault};
-pub use service::{MealplanError, MealplanService};
+pub use service::{MealplanError, MealplanService, MealplanServiceRpc};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    MealplanServiceClient, MealplanServiceRpcDispatcher as MealplanDispatcher,
+    Service as MealplanServiceBridge, layer as mealplan_service_layer,
+    mealplan_service_rpc_service_descriptor as mealplan_service_descriptor,
+    serve as serve_mealplan_service,
+};
 pub use shopping::{
     ShoppingEntry, ShoppingError, ShoppingList, ShoppingService, Store as ShoppingStore,
     looks_like_shopping_list,

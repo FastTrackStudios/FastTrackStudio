@@ -23,8 +23,24 @@ vault.workspace = true
 vault-proto.workspace = true
 vault-live = { workspace = true }
 vault-obsidian = { workspace = true }
-# `task-cli task …` subcommands — first-party task feature.
-task.workspace = true
+# `task-cli task …` subcommands — first-party task feature
+# (RPC client; vox feature enabled to import `TaskServiceClient`).
+task = { workspace = true, features = ["vox"] }
+# `task-cli milestone …` — project-scoped checkpoints.
+milestone = { workspace = true, features = ["vox"] }
+# Entity-CRUD over RPC for the four file-backed services
+# mounted by the server alongside project / goal / task /
+# milestone. Each provides a `task <verb> …` surface.
+locations = { workspace = true, features = ["vox"] }
+cookbook = { workspace = true, features = ["vox"] }
+mealplan = { workspace = true, features = ["vox"] }
+pantry = { workspace = true, features = ["vox"] }
+# Fitness suite — body metrics, exercise library, workout
+# routines+sessions, food intake. RPC clients only.
+body = { workspace = true, features = ["vox"] }
+exercises = { workspace = true, features = ["vox"] }
+workouts = { workspace = true, features = ["vox"] }
+intake = { workspace = true, features = ["vox"] }
 # `task-cli agent …` subcommands — drives `codex app-server`
 # via agent-codex (vendored CodexMonitor control plane).
 agent-codex.workspace = true
@@ -51,8 +67,12 @@ sea-orm-migration = { workspace = true }
 architect-auth = { workspace = true, features = ["full"] }
 sha2 = "0.10"
 base64 = { workspace = true }
-# Project lookup for timer's project-defaults resolver.
-project = { workspace = true }
+# Project lookup for timer's project-defaults resolver +
+# `task project list|get` via `ProjectServiceClient`.
+project = { workspace = true, features = ["vox"] }
+# `task goal list|get` via `GoalServiceClient` + cycle id
+# resolution against the local generator.
+goal = { workspace = true, features = ["vox"] }
 # Org-root layout (Phase 1 of plans/federated-task-platform.md).
 # Owns `task org init|list` + the `DataRoot` / `OrgRoot` path
 # resolvers. Existing auth/timer/finance paths keep working at

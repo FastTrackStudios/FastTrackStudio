@@ -35,8 +35,20 @@ pub mod parse;
 pub mod scan;
 pub mod write;
 
+pub mod backend;
+pub mod service;
+
+pub use backend::TaskBackend;
 pub use capture::capture;
 pub use model::{Priority, Status, TaskInfo, TimeEntry};
 pub use parse::{ParseError, parse_page, parse_str};
 pub use scan::scan_vault;
+pub use service::{TaskError, TaskService, TaskServiceRpc};
 pub use write::{WriteError, serialize_task, write_task};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    Service as TaskServiceBridge, TaskServiceClient, TaskServiceRpcDispatcher as TaskDispatcher,
+    layer as task_service_layer, serve as serve_task_service,
+    task_service_rpc_service_descriptor as task_service_descriptor,
+};

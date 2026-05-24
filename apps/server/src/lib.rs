@@ -87,6 +87,29 @@ pub struct OrgAppState {
     pub projects: project::ProjectBackend,
     /// Goal list / get backend — walks `vault/Goals/**/*.md`.
     pub goals: goal::GoalBackend,
+    /// Milestone backend — project-scoped checkpoints, walks
+    /// `vault/Projects/<slug>/milestones/*.md`.
+    pub milestones: milestone::MilestoneBackend,
+    /// Task backend — walks every `type: task` page in the
+    /// vault.
+    pub tasks: task::TaskBackend,
+    /// Locations backend — `type: location` pages.
+    pub locations: locations::Store,
+    /// Cookbook (cooklang recipes under `Wiki/Cookbook/`).
+    pub cookbook: cookbook::Store,
+    /// Mealplan — scheduled meals + their fulfillment math.
+    pub mealplan: mealplan::Store,
+    /// Pantry — stocked ingredients + barcode lookup.
+    pub pantry: pantry::Store,
+    /// Body metrics — weight / body-fat / measurements log.
+    pub body: body::Store,
+    /// Exercise library — movement definitions referenced by
+    /// routines + sessions.
+    pub exercises: exercises::Store,
+    /// Workout routines + sessions (planned + completed lifts).
+    pub workouts: workouts::Store,
+    /// Food intake — per-day calorie + macro log.
+    pub intake: intake::Store,
     pub agent_tasks: agent_tasks::Store,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
@@ -291,7 +314,15 @@ pub(crate) async fn build_org_state(
         // flat parent dir).
         let vault_root = std::env::var("TASK_SERVER_VAULT_ROOT")
             .map_or_else(|_| org_root.vault_dir(), PathBuf::from);
-        let vault_sync_state = vault::Backend::under_parent(vault_root.clone())
+        // `single("default", vault_root)` — one vault per org,
+        // and `vault_id = "default"` resolves *to the org's vault
+        // root directly*. Earlier we used `under_parent`, which
+        // routed writes into `vault_root/default/…` — and every
+        // `ProjectBackend` / `GoalBackend` scan then saw each
+        // file twice (once at the real path, once under the
+        // ghost `default/` subdir). Same `wiki_id = "default"`
+        // convention the wiki backend already uses on line 304.
+        let vault_sync_state = vault::Backend::single("default", vault_root.clone())
             .map_err(|e| eyre::eyre!("vault backend: {e}"))?;
         // Wiki rooted at `<org>/wiki/Knowledge/` (the curated
         // tier). `LLM/` scratch is a sibling subtree the
@@ -301,7 +332,7 @@ pub(crate) async fn build_org_state(
         // future federation may surface multiple ids.
         let wiki_root = std::env::var("TASK_SERVER_WIKI_ROOT")
             .map_or_else(|_| org_root.wiki_knowledge_dir(), PathBuf::from);
-        let wiki = wiki_live::WikiBackend::single("default", wiki_root)
+        let wiki = wiki_live::WikiBackend::single("default", wiki_root.clone())
             .map_err(|e| eyre::eyre!("wiki backend: {e}"))?;
 
         // Agent-task queue. SQLite under the org root
@@ -390,6 +421,40 @@ pub(crate) async fn build_org_state(
         // wrappers, no shared mutable state.
         let projects = project::ProjectBackend::new(vault_root.clone());
         let goals = goal::GoalBackend::new(vault_root.clone());
+        let milestones = milestone::MilestoneBackend::new(vault_root.clone());
+        let tasks = task::TaskBackend::new(vault_root.clone());
+        // Locations + mealplan / pantry each hold their own
+        // `vault::Vault` snapshot behind an `Arc<Mutex<…>>`.
+        // We open the vault once per store — they're independent
+        // mutable views; cross-coordination happens at the
+        // service level. `Vault::open` is cheap (no parsing
+        // beyond directory walk).
+        let locations_vault = vault::Vault::open(&vault_root)
+            .map_err(|e| eyre::eyre!("open locations vault: {e}"))?;
+        let locations = locations::Store::new(locations_vault);
+        // Cookbook lives at `<wiki_root>/Cookbook/*.cook` —
+        // typically `<org>/wiki/Knowledge/Cookbook/`, NOT the
+        // vault root. Match the wiki backend's anchor.
+        let cookbook = cookbook::Store::new(wiki_root.clone());
+        let mealplan_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open mealplan vault: {e}"))?;
+        let mealplan = mealplan::Store::new(mealplan_vault);
+        let pantry_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open pantry vault: {e}"))?;
+        let pantry = pantry::Store::new(pantry_vault);
+        // Fitness suite. Each takes its own vault snapshot.
+        let body_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open body vault: {e}"))?;
+        let body = body::Store::new(body_vault);
+        let exercises_vault = vault::Vault::open(&vault_root)
+            .map_err(|e| eyre::eyre!("open exercises vault: {e}"))?;
+        let exercises = exercises::Store::new(exercises_vault);
+        let workouts_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open workouts vault: {e}"))?;
+        let workouts = workouts::Store::new(workouts_vault);
+        let intake_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open intake vault: {e}"))?;
+        let intake = intake::Store::new(intake_vault);
 
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
@@ -399,6 +464,16 @@ pub(crate) async fn build_org_state(
             wiki,
             projects,
             goals,
+            milestones,
+            tasks,
+            locations,
+            cookbook,
+            mealplan,
+            pantry,
+            body,
+            exercises,
+            workouts,
+            intake,
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
             timer,
@@ -637,6 +712,16 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
         let wiki = org.wiki.clone();
         let projects_backend = org.projects.clone();
         let goals_backend = org.goals.clone();
+        let milestones_backend = org.milestones.clone();
+        let tasks_backend = org.tasks.clone();
+        let locations_backend = org.locations.clone();
+        let cookbook_backend = org.cookbook.clone();
+        let mealplan_backend = org.mealplan.clone();
+        let pantry_backend = org.pantry.clone();
+        let body_backend = org.body.clone();
+        let exercises_backend = org.exercises.clone();
+        let workouts_backend = org.workouts.clone();
+        let intake_backend = org.intake.clone();
         let agent_tasks_store = org.agent_tasks.clone();
         let timer_store = org.timer.clone();
         let acceptor =
@@ -753,6 +838,13 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
                     connection.handle_with(wiki_proto::service::multimodal::serve(wiki.clone()));
                     Ok(())
                 }
+                name if name
+                    == wiki_proto::service::review::review_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::review::serve(wiki.clone()));
+                    Ok(())
+                }
                 // Project + Goal services — file-backed
                 // readers that walk the org's vault on each
                 // request. UI surfaces consume the
@@ -765,6 +857,65 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
                 }
                 name if name == goal::goal_service_descriptor().service_name => {
                     connection.handle_with(goal::serve_goal_service(goals_backend.clone()));
+                    Ok(())
+                }
+                name if name == milestone::milestone_service_descriptor().service_name => {
+                    connection.handle_with(milestone::serve_milestone_service(
+                        milestones_backend.clone(),
+                    ));
+                    Ok(())
+                }
+                name if name == task::task_service_descriptor().service_name => {
+                    connection.handle_with(task::serve_task_service(tasks_backend.clone()));
+                    Ok(())
+                }
+                // Entity-CRUD services: locations + the
+                // mealplan trio (recipes, scheduled meals,
+                // pantry). All four expose the same
+                // `list / get / create / update / rename /
+                // delete` shape; pantry + mealplan
+                // additionally expose domain verbs
+                // (`consume`, `cook`, …) at the trait level.
+                name if name == locations::locations_service_descriptor().service_name => {
+                    connection.handle_with(locations::serve_locations_service(
+                        locations_backend.clone(),
+                    ));
+                    Ok(())
+                }
+                name if name == cookbook::cookbook_service_descriptor().service_name => {
+                    connection
+                        .handle_with(cookbook::serve_cookbook_service(cookbook_backend.clone()));
+                    Ok(())
+                }
+                name if name == mealplan::mealplan_service_descriptor().service_name => {
+                    connection
+                        .handle_with(mealplan::serve_mealplan_service(mealplan_backend.clone()));
+                    Ok(())
+                }
+                name if name == pantry::pantry_service_descriptor().service_name => {
+                    connection.handle_with(pantry::serve_pantry_service(pantry_backend.clone()));
+                    Ok(())
+                }
+                // Fitness suite — body / exercises / workouts /
+                // intake. All four mounted per-org alongside
+                // the entity-CRUD services above.
+                name if name == body::body_service_descriptor().service_name => {
+                    connection.handle_with(body::serve_body_service(body_backend.clone()));
+                    Ok(())
+                }
+                name if name == exercises::exercises_service_descriptor().service_name => {
+                    connection.handle_with(exercises::serve_exercises_service(
+                        exercises_backend.clone(),
+                    ));
+                    Ok(())
+                }
+                name if name == workouts::workouts_service_descriptor().service_name => {
+                    connection
+                        .handle_with(workouts::serve_workouts_service(workouts_backend.clone()));
+                    Ok(())
+                }
+                name if name == intake::intake_service_descriptor().service_name => {
+                    connection.handle_with(intake::serve_intake_service(intake_backend.clone()));
                     Ok(())
                 }
                 other => {

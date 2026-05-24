@@ -116,6 +116,897 @@ enum Commands {
     /// `plans/cyclic-life-calendar.md`.
     #[command(subcommand)]
     Cycle(CycleCmd),
+    /// Projects served by the active org. Talks to
+    /// `/org/<slug>/vox` via the architect-generated
+    /// `ProjectServiceClient`.
+    #[command(subcommand)]
+    Project(ProjectCmd),
+    /// Goals (with cycle anchoring) served by the active
+    /// org. Talks to `/org/<slug>/vox` via the architect-
+    /// generated `GoalServiceClient`.
+    #[command(subcommand)]
+    Goal(GoalCmd),
+    /// Project milestones — GitHub-Projects-style checkpoints.
+    /// Tasks roll up via `milestoneId`; milestones can ladder
+    /// up to life-goals via `goalId`. Designed to sync 1:1
+    /// with Forgejo / GitHub milestones in the future.
+    #[command(subcommand)]
+    Milestone(MilestoneCmd),
+    /// Physical places — studios, rooms, venues, storage.
+    /// Pantry + inventory reference these by id.
+    #[command(subcommand)]
+    Location(LocationCmd),
+    /// Cookbook recipes (cooklang `.cook` files under
+    /// `Wiki/Cookbook/`).
+    #[command(subcommand)]
+    Recipe(RecipeCmd),
+    /// Scheduled meals + cooking lifecycle (planned →
+    /// cooked → pantry deductions).
+    #[command(subcommand)]
+    Meal(MealCmd),
+    /// Pantry — stocked food items, qty + unit tracking,
+    /// barcode resolution.
+    #[command(subcommand)]
+    Pantry(PantryCmd),
+    /// Body metrics — weight / body-fat / measurements log.
+    #[command(subcommand)]
+    Body(BodyCmd),
+    /// Exercise library — movement definitions referenced
+    /// by routines + sessions.
+    #[command(subcommand)]
+    Exercise(ExerciseCmd),
+    /// Workout routines + sessions.
+    #[command(subcommand)]
+    Workout(WorkoutCmd),
+    /// Food intake log — daily calorie + macro tracking.
+    #[command(subcommand)]
+    Intake(IntakeCmd),
+}
+
+#[derive(Subcommand)]
+enum BodyCmd {
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        /// e.g. `weight`, `body_fat`, `waist`. Free-form;
+        /// canonical set in `body::MetricKind`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Default unit (`kg`, `%`, `cm`).
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long)]
+        goal: Option<f64>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append a measurement to a metric's time series.
+    Log {
+        target: String,
+        value: f64,
+        /// Date (`YYYY-MM-DD`). Defaults to today.
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExerciseCmd {
+    List {
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        muscle: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkoutCmd {
+    /// Routines (the program — push/pull/legs, etc).
+    #[command(subcommand)]
+    Routine(WorkoutRoutineCmd),
+    /// Sessions (one workout instance).
+    #[command(subcommand)]
+    Session(WorkoutSessionCmd),
+}
+
+#[derive(Subcommand)]
+enum WorkoutRoutineCmd {
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkoutSessionCmd {
+    List {
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a fresh session from a routine + day.
+    StartFromRoutine {
+        routine: String,
+        day: String,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Log a working set against a session.
+    LogSet {
+        session: String,
+        exercise: String,
+        reps: u32,
+        weight: f64,
+        #[arg(long)]
+        rpe: Option<f64>,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum IntakeCmd {
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Get the intake log for `YYYY-MM-DD`. Creates empty
+    /// if missing.
+    ForDay {
+        date: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    LogRecipe {
+        date: String,
+        recipe: String,
+        servings: f64,
+        #[arg(long, default_value = "snack")]
+        slot: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    LogPantry {
+        date: String,
+        item: String,
+        qty: f64,
+        #[arg(long, default_value = "snack")]
+        slot: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    LogFreeform {
+        date: String,
+        name: String,
+        #[arg(long)]
+        kcal: Option<f64>,
+        #[arg(long, default_value = "snack")]
+        slot: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum LocationCmd {
+    /// List every location in the active org's vault.
+    List {
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        /// `studio|room|storage|venue|home|other`. Default
+        /// `other`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Parent location (id or path) for nested places.
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long)]
+        address: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RecipeCmd {
+    /// List every recipe in the active org's cookbook.
+    List {
+        /// Substring filter on title.
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        /// Recipe path (e.g. `Wiki/Cookbook/Oatmeal.cook`).
+        path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Delete {
+        path: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MealCmd {
+    /// List meals. Filters compose (AND).
+    List {
+        /// Only meals scheduled on this date (`YYYY-MM-DD`).
+        #[arg(long)]
+        date: Option<String>,
+        /// `planned|cooked|skipped|eating-out`.
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        /// `YYYY-MM-DD`. Required.
+        #[arg(long)]
+        date: String,
+        /// `breakfast|lunch|dinner|snack`. Default `dinner`.
+        #[arg(long)]
+        slot: Option<String>,
+        /// Recipe paths (repeatable or comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        recipe: Vec<String>,
+        #[arg(long, default_value_t = 1)]
+        servings: u32,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark cooked. Pantry deductions auto-computed from
+    /// the recipe's `can_cook` check; pass `--no-deduct`
+    /// to skip pantry adjustment (e.g. ate-out leftovers).
+    Cook {
+        target: String,
+        #[arg(long)]
+        no_deduct: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Skip {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PantryCmd {
+    List {
+        #[arg(long)]
+        low_stock: bool,
+        #[arg(long)]
+        expired: bool,
+        /// Only items expiring within N days (uses
+        /// `best_before` stock entries).
+        #[arg(long)]
+        expiring_in: Option<i64>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        #[arg(long)]
+        qty: Option<f64>,
+        /// Unit slug (`g` / `ml` / `each` / `cup` / `clove`).
+        #[arg(long)]
+        unit: Option<String>,
+        /// Location id or path.
+        #[arg(long)]
+        location: Option<String>,
+        /// Free-form food category.
+        #[arg(long)]
+        food_category: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decrement `qty` by `amount`.
+    Consume {
+        target: String,
+        amount: f64,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Increment `qty` by `amount`.
+    Restock {
+        target: String,
+        amount: f64,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark opened; stamps today onto `openedDate`.
+    Open {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Find a pantry row by barcode. `--resolve` falls back
+    /// to OpenFoodFacts if no local match.
+    FindByBarcode {
+        barcode: String,
+        #[arg(long)]
+        resolve: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCmd {
+    /// List every project the active org's vault carries.
+    /// Output: one row per project with status + parent
+    /// breadcrumb. Pass `--json` for machine-readable output.
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit JSON instead of the human-readable table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch one project by id or by vault-relative path.
+    /// Prints title + status + tags + the full details body.
+    Get {
+        /// Project UUID OR vault-relative path
+        /// (`Projects/Health/Fitness/Fitness.md`).
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a new project. Title is the only required
+    /// argument; sensible defaults fill the rest. The backend
+    /// chooses a `Projects/<slug>.md` path unless `--path`
+    /// overrides it.
+    Create {
+        title: String,
+        /// Vault-relative path. Default: `Projects/<slug>.md`.
+        #[arg(long)]
+        path: Option<String>,
+        /// Parent project id OR vault-relative path. Resolved
+        /// against `list()` before the create call so paths
+        /// work too.
+        #[arg(long)]
+        parent: Option<String>,
+        /// One of `active|on_hold|done|cancelled`. Default
+        /// `active`.
+        #[arg(long)]
+        status: Option<String>,
+        /// `p0..p4` / `urgent|high|normal|low|lowest`. Default
+        /// `normal`.
+        #[arg(long)]
+        priority: Option<String>,
+        /// Comma-separated tag list.
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        /// Body / details (markdown). Reads stdin when `-`.
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the project status. Convenience over `update`.
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set the project priority. Convenience over `update`.
+    SetPriority {
+        target: String,
+        priority: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear the project parent. Pass `none` / `null`
+    /// to unparent.
+    SetParent {
+        target: String,
+        /// `none`, `null`, a project UUID, or a vault-relative
+        /// path.
+        parent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark the project archived (kept on disk; timer refuses
+    /// new sessions against it).
+    Archive {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Reverse of `archive`.
+    Unarchive {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Move the backing markdown file. Preserves `id` so
+    /// downstream FKs (timer rows, links) survive.
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete the project. Refuses if any other project lists
+    /// it as parent — reparent or delete children first.
+    Delete {
+        target: String,
+        /// Skip the y/N prompt.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum GoalCmd {
+    /// List every goal the active org's vault carries.
+    /// Output groups by lifetime root, shows the kind chip
+    /// (lifetime / yearly / cycle / …) and cycle anchor when
+    /// present.
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Only goals scoped to the current cycle (per
+        /// `cycle::cycle_for_date(today)`).
+        #[arg(long)]
+        current_cycle: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Fetch one goal by id or by vault-relative path.
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a new goal. Title is the only required arg.
+    Create {
+        title: String,
+        /// `lifetime|yearly|quarterly|cycle|weekly`. Default
+        /// `lifetime` for top-level, `cycle` when `--cycle`
+        /// (or `--cycle-current`) is set, else `lifetime`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Status slug. Default `aspiration`.
+        #[arg(long)]
+        status: Option<String>,
+        /// Vault-relative path. Default `Goals/<slug>.md`.
+        #[arg(long)]
+        path: Option<String>,
+        /// Parent goal id or path.
+        #[arg(long)]
+        parent: Option<String>,
+        /// ISO date `YYYY-MM-DD`. Required for `yearly` goals
+        /// by convention but not enforced.
+        #[arg(long)]
+        target_date: Option<String>,
+        /// Cycle UUID. Mutually exclusive with
+        /// `--cycle-current`.
+        #[arg(long)]
+        cycle: Option<String>,
+        /// Anchor to today's cycle.
+        #[arg(long)]
+        cycle_current: bool,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the goal status.
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear the parent goal (`none` clears).
+    SetParent {
+        target: String,
+        parent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Anchor a goal to a specific cycle (by UUID, by
+    /// `YYYY:Qn:Cm`, or `current` for today's cycle). Pass
+    /// `none` / `null` to clear.
+    SetCycle {
+        target: String,
+        cycle: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Move the backing markdown file. `id` is preserved.
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete the goal. Refuses if any other goal lists it as
+    /// parent.
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -497,10 +1388,427 @@ enum WikiCmd {
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
+    /// `Wiki/schema.md` + `Wiki/purpose.md` operations.
+    /// Talks to the server over vox (per-org); these are
+    /// the canonical authoring + bootstrap entry points.
+    #[command(subcommand)]
+    Schema(WikiSchemaCmd),
+    /// `Wiki/index.md` catalog operations.
+    #[command(subcommand)]
+    Catalog(WikiCatalogCmd),
+    /// `Wiki/raw/sources/` — listing + reading + deleting
+    /// raw sources via the server.
+    #[command(subcommand)]
+    Raw(WikiRawCmd),
+    /// LLM ingest queue — list, retry, cancel pending
+    /// ingestion tasks. The actual `enqueue` happens via
+    /// `wiki import` + `wiki rescan` (existing FS verbs).
+    #[command(subcommand)]
+    IngestQueue(WikiIngestCmd),
+    /// Lint findings (RPC) — list + resolve via the server.
+    /// The lint *runner* (LLM pass) is `wiki lint`. This
+    /// sub-tree marks existing findings resolved /
+    /// dismissed / deferred.
+    #[command(subcommand)]
+    LintFindings(WikiFindingsCmd),
+    /// Review queue — LLM-proposed page changes await curator
+    /// approval here. `list` shows pending items; `apply`
+    /// accepts the proposal (rewrite-page / append-note / etc).
+    #[command(subcommand)]
+    Review(WikiReviewCmd),
+    /// Research plans — list + status. The proposer is the
+    /// existing flat `wiki research` (LLM call). This sub-tree
+    /// manages the plans the server tracks.
+    #[command(subcommand)]
+    ResearchPlans(WikiResearchCmd),
+    /// Filesystem watcher — re-ingest on external edits.
+    #[command(subcommand)]
+    Watch(WikiWatchCmd),
+}
+
+#[derive(Subcommand)]
+enum WikiReviewCmd {
+    /// List every open review item.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Accept the LLM's proposed action on a review item.
+    ///
+    /// Actions:
+    /// - `rewrite-page <path> <body|->`  — replace a page's body
+    /// - `append-note <path> <body|->`   — append to the page
+    /// - `research <query>`              — convert to a ResearchPlan
+    ///
+    /// Body args read stdin when given as `-`.
+    Apply {
+        item_id: String,
+        /// `rewrite-page` / `append-note` / `research`.
+        action: String,
+        /// First positional arg: page path (for rewrite/append)
+        /// or query text (for research).
+        arg: String,
+        /// Second positional: markdown body for rewrite /
+        /// append (`-` = stdin). Unused for `research`.
+        #[arg(default_value = "")]
+        body: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiResearchCmd {
+    /// List every research plan and its status.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the status of a research plan.
+    /// `proposed|running|awaiting|integrated|cancelled`.
+    SetStatus {
+        plan_id: String,
+        status: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiWatchCmd {
+    /// Enable filesystem watch on `Wiki/raw/sources/` so
+    /// dropping a file there auto-enqueues an ingest.
+    On {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Off {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Status {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiSchemaCmd {
+    /// Print `Wiki/schema.md`.
+    Show {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print `Wiki/purpose.md`.
+    Purpose {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace `Wiki/schema.md`. Read body from `<path>` or
+    /// `-` for stdin.
+    WriteSchema {
+        path: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Replace `Wiki/purpose.md`.
+    WritePurpose {
+        path: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Initialize `Wiki/` if missing. Idempotent.
+    Bootstrap {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Server-side health snapshot (orphan count, lint
+    /// queue depth, last ingest mtime, …).
+    Health {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiCatalogCmd {
+    /// Dump the catalog (`Wiki/index.md` parsed).
+    Show {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Force-rebuild the catalog by re-scanning the vault.
+    Rebuild {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiRawCmd {
+    /// List every raw source the wiki carries.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the raw source bytes to stdout.
+    Read {
+        path: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete a raw source. Returns the review items the
+    /// server enqueued for any pages that depended on it.
+    Delete {
+        path: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Rescan `Wiki/raw/sources/`; enqueues fresh ingest
+    /// tasks for any new files since last scan.
+    Rescan {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiIngestCmd {
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Retry a previously-failed ingest task.
+    Retry {
+        task_id: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Cancel a pending or running ingest task.
+    Cancel {
+        task_id: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiFindingsCmd {
+    /// All open lint findings.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a finding resolved (or `dismiss` / `defer`).
+    Resolve {
+        finding_id: String,
+        /// `resolved` / `dismissed` / `deferred`.
+        action: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentQueueCmd {
+    /// Snapshot a queue's tasks + the latest event-log
+    /// watermark in one round trip.
+    Read {
+        /// Queue id (slug). Defaults to the org slug.
+        #[arg(long)]
+        queue: Option<String>,
+        /// Only my tasks (by handle).
+        #[arg(long)]
+        only_handle: Option<String>,
+        #[arg(long)]
+        include_archived: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Atomic claim — flips `ready` + unclaimed → `running`.
+    Claim {
+        task_id: String,
+        /// Caller handle (e.g. `codex@host-1`). Defaults to
+        /// `${USER}@${HOSTNAME}`.
+        #[arg(long)]
+        handle: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set a non-`running` status. `running` rejected — use
+    /// `claim`.
+    SetStatus {
+        task_id: String,
+        new_status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark `done` with a result blob (JSON-serialisable
+    /// string; the queue stores it verbatim).
+    Complete {
+        task_id: String,
+        /// Result payload (or `-` for stdin).
+        result: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Link this agent task to an in-flight thread/session.
+    Link {
+        task_id: String,
+        session_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List edges where either endpoint belongs to `queue_id`.
+    Links {
+        #[arg(long)]
+        queue: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
 enum AgentCmd {
+    /// Agent task queue lifecycle — read / claim / set-status
+    /// / complete. Mirrors the `AgentTaskQueue` RPC the server
+    /// mounts on `/org/<slug>/vox`.
+    #[command(subcommand)]
+    Queue(AgentQueueCmd),
     /// One-shot chat against `codex app-server`. Spawns the
     /// daemon rooted at `--workspace`, sends `thread/start` +
     /// `turn/start`, prints streamed assistant text until the
@@ -543,50 +1851,321 @@ enum AgentCmd {
 
 #[derive(Subcommand)]
 enum TaskCmd {
-    /// Create a new task from a natural-language line. Extracts
-    /// `#tag`s, `@context`s, `[[Project]]`s, `!priority`, and
-    /// date keywords (`today`, `tomorrow`, `next monday`, `mon`,
-    /// `YYYY-MM-DD`). Title = the remaining text.
-    ///
-    /// Examples:
-    ///   task task capture "Buy milk tomorrow #errands @shopping"
-    ///   task task capture "Ship vault-graph !high next friday"
+    /// Create a new task from a natural-language line.
+    /// Extracts `#tag`s, `@context`s, `[[Project]]`s,
+    /// `!priority`, and date keywords (`today`, `tomorrow`,
+    /// `next monday`, `mon`, `YYYY-MM-DD`). Title = the
+    /// remaining text. Pushes the result through the
+    /// per-org RPC.
     Capture {
-        /// The task line. Quote the whole thing.
         text: String,
-        /// Vault root. Defaults to `examples/vault`.
-        #[arg(long, default_value = "examples/vault")]
-        vault: std::path::PathBuf,
-        /// Override folder. Default: `tasks/`.
+        /// Project id or vault-relative path. Sets
+        /// `projectId` on the resulting task.
         #[arg(long)]
-        folder: Option<String>,
+        project: Option<String>,
+        /// Milestone id or path. Sets `milestoneId`. If both
+        /// `--project` and `--milestone` are passed they must
+        /// agree (CLI-side check).
+        #[arg(long)]
+        milestone: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
-    /// List tasks in the vault. Filters compose (AND).
+    /// List tasks. Filters compose (AND).
     List {
-        #[arg(long, default_value = "examples/vault")]
-        vault: std::path::PathBuf,
-        /// Restrict to one status (e.g. `open`, `done`).
+        /// Status slug (`open`, `in-progress`, `done`, …).
         #[arg(long)]
         status: Option<String>,
-        /// Restrict to tasks with this tag (without `#`).
         #[arg(long)]
         tag: Option<String>,
-        /// Restrict to tasks with this context (with or without `@`).
+        /// `@`-prefix optional.
         #[arg(long)]
         context: Option<String>,
+        /// Restrict to one project (id or path).
+        #[arg(long)]
+        project: Option<String>,
+        /// Restrict to one milestone (id or path). `none`
+        /// lists tasks with no milestone.
+        #[arg(long)]
+        milestone: Option<String>,
+        /// Only tasks whose status is not done.
+        #[arg(long)]
+        open: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
-    /// Mark a task done. Sets `status: done` and `completedDate`
-    /// to today. `task_id` matches a unique basename prefix.
+    /// Fetch one task by id or path.
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a task with explicit fields (no NLP parsing).
+    /// Use `capture` for the conversational form.
+    Create {
+        title: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        priority: Option<String>,
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        scheduled: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        contexts: Vec<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        milestone: Option<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark done. Sets `status: done` + `completedDate`.
     Done {
-        /// Task identifier — basename, prefix, or full
-        /// `tasks/foo.md` path.
-        task_id: String,
-        #[arg(long, default_value = "examples/vault")]
-        vault: std::path::PathBuf,
-        /// Re-open the task (clear `completedDate`, set status
-        /// to `open`).
+        target: String,
+        /// Reopen instead (clears `completedDate`, status
+        /// = `open`).
         #[arg(long)]
         undo: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    SetPriority {
+        target: String,
+        priority: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the due date.
+    SetDue {
+        target: String,
+        due: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the scheduled date.
+    SetScheduled {
+        target: String,
+        scheduled: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the owning project.
+    SetProject {
+        target: String,
+        project: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the milestone link.
+    SetMilestone {
+        target: String,
+        milestone: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Replace the tag list.
+    SetTags {
+        target: String,
+        #[arg(value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Move backing markdown file. `id` preserved.
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MilestoneCmd {
+    /// List every milestone in the active org's vault.
+    List {
+        /// Restrict to one project (id or path).
+        #[arg(long)]
+        project: Option<String>,
+        /// Restrict to one goal (id or path).
+        #[arg(long)]
+        goal: Option<String>,
+        /// Only milestones whose status is not closed.
+        #[arg(long)]
+        open: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a milestone. `--project` is required.
+    Create {
+        title: String,
+        /// Project id or path. Required.
+        #[arg(long)]
+        project: String,
+        /// Optional life-goal link (id or path).
+        #[arg(long)]
+        goal: Option<String>,
+        #[arg(long)]
+        path: Option<String>,
+        /// `open` / `closed`. Default `open`.
+        #[arg(long)]
+        status: Option<String>,
+        /// YYYY-MM-DD.
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        /// External reference for future Forgejo / GitHub
+        /// sync (e.g. `forgejo:starcommand.live/foo/bar#7`).
+        #[arg(long)]
+        forge_ref: Option<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// `open` or `closed`. Convenience over `update`.
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the due date.
+    SetDue {
+        target: String,
+        due: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the life-goal link.
+    SetGoal {
+        target: String,
+        goal: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the forge sync ref.
+    SetForgeRef {
+        target: String,
+        forge_ref: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// `closed`. Just `set-status <target> closed`.
+    Close {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Reopen (status = open).
+    Reopen {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
     },
 }
 
@@ -985,7 +2564,7 @@ async fn main() -> eyre::Result<()> {
             }
         },
         Commands::Task(cmd) => {
-            return run_task(cmd);
+            return Box::pin(run_task(cmd)).await;
         }
         Commands::Agent(cmd) => {
             return run_agent(cmd).await;
@@ -1011,8 +2590,774 @@ async fn main() -> eyre::Result<()> {
         Commands::Cycle(cmd) => {
             return run_cycle(cmd);
         }
+        Commands::Project(cmd) => {
+            return Box::pin(run_project(cmd)).await;
+        }
+        Commands::Goal(cmd) => {
+            return Box::pin(run_goal(cmd)).await;
+        }
+        Commands::Milestone(cmd) => {
+            return Box::pin(run_milestone(cmd)).await;
+        }
+        Commands::Location(cmd) => {
+            return Box::pin(run_location(cmd)).await;
+        }
+        Commands::Recipe(cmd) => {
+            return Box::pin(run_recipe(cmd)).await;
+        }
+        Commands::Meal(cmd) => {
+            return Box::pin(run_meal(cmd)).await;
+        }
+        Commands::Pantry(cmd) => {
+            return Box::pin(run_pantry(cmd)).await;
+        }
+        Commands::Body(cmd) => {
+            return Box::pin(run_body(cmd)).await;
+        }
+        Commands::Exercise(cmd) => {
+            return Box::pin(run_exercise(cmd)).await;
+        }
+        Commands::Workout(cmd) => {
+            return Box::pin(run_workout(cmd)).await;
+        }
+        Commands::Intake(cmd) => {
+            return Box::pin(run_intake(cmd)).await;
+        }
     }
     Ok(())
+}
+
+/// Resolve the per-org vox URL from CLI flags + env.
+/// Mirror of the helper inside `run_vault_sync`, lifted out
+/// because project + goal share the same routing surface.
+fn resolve_org_vox_url(server: Option<String>, org_slug: &str) -> String {
+    let base = server.unwrap_or_else(|| {
+        std::env::var("TASK_VOX_URL").unwrap_or_else(|_| "ws://127.0.0.1:18080".to_owned())
+    });
+    let stripped = base.trim_end_matches("/vox").trim_end_matches('/');
+    format!("{stripped}/org/{org_slug}/vox")
+}
+
+/// Resolve the active org slug from `--org` flag or the
+/// stored session. Returns a friendly error if neither
+/// resolves.
+fn resolve_active_org(override_slug: Option<String>) -> eyre::Result<String> {
+    if let Some(s) = override_slug {
+        return Ok(s);
+    }
+    session_store::load()?
+        .map(|s| s.active)
+        .ok_or_else(|| eyre::eyre!("no active org — pass --org or sign in first"))
+}
+
+async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
+    use project::ProjectServiceClient;
+
+    match cmd {
+        ProjectCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: ProjectServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            // Group by parent for human readability: roots
+            // first, then each root's subprojects indented.
+            let total = rows.len();
+            let roots: Vec<&project::ProjectInfo> =
+                rows.iter().filter(|p| p.parent_id.is_none()).collect();
+            println!("{} projects ({} top-level)\n", total, roots.len());
+            for root in roots {
+                print_project_row(root, 0);
+                let kids: Vec<&project::ProjectInfo> = rows
+                    .iter()
+                    .filter(|p| p.parent_id == Some(root.id))
+                    .collect();
+                for k in kids {
+                    print_project_row(k, 2);
+                }
+            }
+        }
+        ProjectCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: ProjectServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let p = if let Ok(id) = uuid::Uuid::parse_str(&target) {
+                client
+                    .get(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
+            } else {
+                client
+                    .get_by_path(target.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
+            };
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&p).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            println!("{} [{}]\n", p.title, p.status);
+            println!("  id:       {}", p.id);
+            println!("  path:     {}", p.path);
+            println!("  priority: {}", p.priority);
+            if let Some(parent) = p.parent_id {
+                println!("  parent:   {parent}");
+            }
+            if !p.tags.0.is_empty() {
+                println!("  tags:     {}", p.tags.0.join(", "));
+            }
+            if !p.details.is_empty() {
+                println!("\n{}", p.details);
+            }
+        }
+        ProjectCmd::Create {
+            title,
+            path,
+            parent,
+            status,
+            priority,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+
+            let parent_id = match parent {
+                None => None,
+                Some(s) => Some(resolve_project_target(&client, &s).await?.id),
+            };
+            let details = resolve_body(details)?;
+            let new_project = project::ProjectInfo {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                status: status.unwrap_or_else(|| "active".into()),
+                priority: priority.unwrap_or_else(|| "normal".into()),
+                lead: String::new(),
+                tags: project::model::Tags(tags),
+                parent_id,
+                same_as: None,
+                details,
+                client_id: None,
+                billable_default: false,
+                currency: String::new(),
+                default_rate_cents: 0,
+                estimated_seconds: 0,
+                agent_profile: String::new(),
+                color: String::new(),
+                archived: false,
+                date_created: None,
+                date_modified: None,
+            };
+            let created = client
+                .create(new_project)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        ProjectCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.status = status).await?;
+        }
+        ProjectCmd::SetPriority {
+            target,
+            priority,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.priority = priority).await?;
+        }
+        ProjectCmd::SetParent {
+            target,
+            parent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let client = connect_project_client(&url).await?;
+            let new_parent = if matches!(parent.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(resolve_project_target(&client, &parent).await?.id)
+            };
+            mutate_project(target, org, server, |p| p.parent_id = new_parent).await?;
+        }
+        ProjectCmd::Archive {
+            target,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.archived = true).await?;
+        }
+        ProjectCmd::Unarchive {
+            target,
+            org,
+            server,
+        } => {
+            mutate_project(target, org, server, |p| p.archived = false).await?;
+        }
+        ProjectCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            let renamed = client
+                .rename(p.id, new_path.clone())
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        ProjectCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_project_client(&url).await?;
+            let p = resolve_project_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", p.title, p.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(p.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", p.path);
+        }
+    }
+    Ok(())
+}
+
+async fn connect_project_client(url: &str) -> eyre::Result<project::ProjectServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_project_target(
+    client: &project::ProjectServiceClient,
+    target: &str,
+) -> eyre::Result<project::ProjectInfo> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_project<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut project::ProjectInfo),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_project_client(&url).await?;
+    let mut p = resolve_project_target(&client, &target).await?;
+    apply(&mut p);
+    let updated = client
+        .update(p)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+fn resolve_body(arg: Option<String>) -> eyre::Result<String> {
+    use std::io::Read;
+    match arg {
+        None => Ok(String::new()),
+        Some(s) if s == "-" => {
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            Ok(buf)
+        }
+        Some(s) => Ok(s),
+    }
+}
+
+fn confirm(prompt: &str) -> eyre::Result<bool> {
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout();
+    write!(out, "{prompt} [y/N] ")?;
+    out.flush()?;
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line)?;
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+fn print_project_row(p: &project::ProjectInfo, indent: usize) {
+    let pad = " ".repeat(indent);
+    let tags = if p.tags.0.is_empty() {
+        String::new()
+    } else {
+        format!("  [{}]", p.tags.0.join(", "))
+    };
+    println!(
+        "{pad}{:<28}  {:<10}  {:<8}{tags}",
+        p.title, p.status, p.priority
+    );
+}
+
+async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
+    use chrono::Weekday;
+    use cycle::FirstWeekRule;
+    use goal::GoalServiceClient;
+
+    match cmd {
+        GoalCmd::List {
+            org,
+            server,
+            current_cycle,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: GoalServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let mut rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            if current_cycle {
+                let today = chrono::Local::now().date_naive();
+                let now = cycle::cycle_for_date(
+                    today,
+                    Weekday::Mon,
+                    FirstWeekRule::AtLeastFourDaysInYear,
+                );
+                if let Some(c) = now {
+                    rows.retain(|g| g.cycle_id == Some(c.id));
+                } else {
+                    println!("today is between cycles — nothing to show");
+                    return Ok(());
+                }
+            }
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            // Resolve cycle id → label once, reused across rows.
+            let cycle_label = |g: &goal::Goal| -> Option<String> {
+                use chrono::Datelike;
+                let id = g.cycle_id?;
+                let base = chrono::Local::now().date_naive().year();
+                for off in [-1, 0, 1, 2] {
+                    let qs = cycle::generate_year(
+                        base + off,
+                        Weekday::Mon,
+                        FirstWeekRule::AtLeastFourDaysInYear,
+                    );
+                    for q in qs {
+                        for c in q.cycles.iter() {
+                            if c.id == id {
+                                return Some(format!("{} Q{} C{}", c.year, c.quarter, c.ordinal));
+                            }
+                        }
+                    }
+                }
+                None
+            };
+
+            println!("{} goals\n", rows.len());
+            let roots: Vec<&goal::Goal> = rows.iter().filter(|g| g.parent_id.is_none()).collect();
+            for root in roots {
+                print_goal_row(root, 0, cycle_label(root));
+                for kid in rows.iter().filter(|g| g.parent_id == Some(root.id)) {
+                    print_goal_row(kid, 2, cycle_label(kid));
+                    for gc in rows.iter().filter(|g| g.parent_id == Some(kid.id)) {
+                        print_goal_row(gc, 4, cycle_label(gc));
+                    }
+                }
+            }
+        }
+        GoalCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client: GoalServiceClient = Box::pin(vox::connect(&url).establish())
+                .await
+                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let g = if let Ok(id) = uuid::Uuid::parse_str(&target) {
+                client
+                    .get(id)
+                    .await
+                    .map_err(|e| eyre::eyre!("get(id): {e:?}"))?
+            } else {
+                client
+                    .get_by_path(target.clone())
+                    .await
+                    .map_err(|e| eyre::eyre!("get(path): {e:?}"))?
+            };
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&g).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            println!("{} [{}]\n", g.title, g.status);
+            println!("  id:       {}", g.id);
+            println!("  path:     {}", g.path);
+            println!("  kind:     {}", g.kind);
+            if let Some(parent) = g.parent_id {
+                println!("  parent:   {parent}");
+            }
+            if let Some(td) = g.target_date {
+                println!("  target:   {td}");
+            }
+            if let Some(cid) = g.cycle_id {
+                println!("  cycle:    {cid}");
+            }
+            if !g.tags.0.is_empty() {
+                println!("  tags:     {}", g.tags.0.join(", "));
+            }
+            if !g.details.is_empty() {
+                println!("\n{}", g.details);
+            }
+        }
+        GoalCmd::Create {
+            title,
+            kind,
+            status,
+            path,
+            parent,
+            target_date,
+            cycle,
+            cycle_current,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_goal_client(&url).await?;
+
+            let parent_id = match parent {
+                None => None,
+                Some(s) => Some(resolve_goal_target(&client, &s).await?.id),
+            };
+            let cycle_id = resolve_cycle_arg(cycle, cycle_current)?;
+            let kind_str = kind.unwrap_or_else(|| {
+                if cycle_id.is_some() {
+                    "cycle".into()
+                } else {
+                    "lifetime".into()
+                }
+            });
+            let target_date = match target_date {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--target-date: {e}"))?,
+                ),
+            };
+            let details = resolve_body(details)?;
+            let new_goal = goal::Goal {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                kind: kind_str,
+                status: status.unwrap_or_else(|| "aspiration".into()),
+                parent_id,
+                target_date,
+                cycle_id,
+                tags: goal::Tags(tags),
+                date_created: None,
+                date_modified: None,
+                details,
+            };
+            let created = client
+                .create(new_goal)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        GoalCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => {
+            mutate_goal(target, org, server, |g| g.status = status).await?;
+        }
+        GoalCmd::SetParent {
+            target,
+            parent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let client = connect_goal_client(&url).await?;
+            let new_parent = if matches!(parent.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(resolve_goal_target(&client, &parent).await?.id)
+            };
+            mutate_goal(target, org, server, |g| g.parent_id = new_parent).await?;
+        }
+        GoalCmd::SetCycle {
+            target,
+            cycle,
+            org,
+            server,
+        } => {
+            let is_current = cycle == "current";
+            let arg = if is_current { None } else { Some(cycle) };
+            let new_cycle = resolve_cycle_arg(arg, is_current)?;
+            mutate_goal(target, org, server, |g| g.cycle_id = new_cycle).await?;
+        }
+        GoalCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_goal_client(&url).await?;
+            let g = resolve_goal_target(&client, &target).await?;
+            let renamed = client
+                .rename(g.id, new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        GoalCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_goal_client(&url).await?;
+            let g = resolve_goal_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", g.title, g.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(g.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", g.path);
+        }
+    }
+    Ok(())
+}
+
+async fn connect_goal_client(url: &str) -> eyre::Result<goal::GoalServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_goal_target(
+    client: &goal::GoalServiceClient,
+    target: &str,
+) -> eyre::Result<goal::Goal> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_goal<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut goal::Goal),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_goal_client(&url).await?;
+    let mut g = resolve_goal_target(&client, &target).await?;
+    apply(&mut g);
+    let updated = client
+        .update(g)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+/// Resolve a `--cycle` flag / argument into a concrete cycle
+/// UUID. Accepts:
+/// - a literal UUID
+/// - `YYYY:Qn:Cm` (e.g. `2026:Q3:C1`)
+/// - the cycle-current shortcut (when `current = true` or arg
+///   is `current`)
+/// - `none` / `null` / "" → clear
+fn resolve_cycle_arg(arg: Option<String>, current: bool) -> eyre::Result<Option<uuid::Uuid>> {
+    use chrono::{Datelike, Local, Weekday};
+    use cycle::FirstWeekRule;
+
+    if current {
+        let today = Local::now().date_naive();
+        return Ok(cycle::cycle_for_date(
+            today,
+            Weekday::Mon,
+            FirstWeekRule::AtLeastFourDaysInYear,
+        )
+        .map(|c| c.id));
+    }
+    let Some(s) = arg else {
+        return Ok(None);
+    };
+    if matches!(s.as_str(), "none" | "null" | "") {
+        return Ok(None);
+    }
+    if let Ok(id) = uuid::Uuid::parse_str(&s) {
+        return Ok(Some(id));
+    }
+    // Parse `YYYY:Qn:Cm`.
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() == 3 {
+        let year = parts[0].parse::<i32>().ok();
+        let q = parts[1]
+            .strip_prefix('Q')
+            .and_then(|n| n.parse::<u8>().ok());
+        let ord = parts[2]
+            .strip_prefix('C')
+            .and_then(|n| n.parse::<u8>().ok());
+        if let (Some(year), Some(q), Some(ord)) = (year, q, ord) {
+            let base = Local::now().date_naive().year();
+            for off in [-1_i32, 0, 1, 2] {
+                let qs = cycle::generate_year(
+                    base + off,
+                    Weekday::Mon,
+                    FirstWeekRule::AtLeastFourDaysInYear,
+                );
+                for qq in qs {
+                    if qq.year == year && qq.ordinal == q {
+                        for c in qq.cycles.iter() {
+                            if c.ordinal == ord {
+                                return Ok(Some(c.id));
+                            }
+                        }
+                    }
+                }
+            }
+            return Err(eyre::eyre!(
+                "cycle `{s}` not found in surrounding years ({}..={})",
+                base - 1,
+                base + 2
+            ));
+        }
+    }
+    Err(eyre::eyre!(
+        "--cycle: expected UUID, `YYYY:Qn:Cm`, `current`, or `none` (got `{s}`)"
+    ))
+}
+
+fn print_goal_row(g: &goal::Goal, indent: usize, cycle: Option<String>) {
+    let pad = " ".repeat(indent);
+    let cycle_str = cycle.map(|c| format!("  @{c}")).unwrap_or_default();
+    let target = g
+        .target_date
+        .map(|d| format!("  (target {d})"))
+        .unwrap_or_default();
+    println!(
+        "{pad}{:<32}  {:<10}  {:<10}{cycle_str}{target}",
+        g.title, g.kind, g.status
+    );
 }
 
 fn run_cycle(cmd: CycleCmd) -> eyre::Result<()> {
@@ -2915,7 +5260,581 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             }
             Ok(())
         }
+        WikiCmd::Schema(c) => run_wiki_schema(c).await,
+        WikiCmd::Catalog(c) => run_wiki_catalog(c).await,
+        WikiCmd::Raw(c) => run_wiki_raw(c).await,
+        WikiCmd::IngestQueue(c) => run_wiki_ingest(c).await,
+        WikiCmd::LintFindings(c) => run_wiki_lint_findings(c).await,
+        WikiCmd::Review(c) => run_wiki_review(c).await,
+        WikiCmd::ResearchPlans(c) => run_wiki_research_plans(c).await,
+        WikiCmd::Watch(c) => run_wiki_watch(c).await,
     }
+}
+
+// ── Wiki RPC handlers ────────────────────────────────────────────────
+
+async fn run_wiki_schema(cmd: WikiSchemaCmd) -> eyre::Result<()> {
+    use wiki_proto::service::schema::SchemaClient;
+    async fn connect(url: &str) -> eyre::Result<SchemaClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiSchemaCmd::Show {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let doc = c
+                .read_schema(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("read_schema: {e:?}"))?;
+            if json {
+                println!("{doc:#?}");
+            } else {
+                println!("{}", doc.markdown);
+            }
+        }
+        WikiSchemaCmd::Purpose {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let doc = c
+                .read_purpose(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("read_purpose: {e:?}"))?;
+            if json {
+                println!("{doc:#?}");
+            } else {
+                println!("{}", doc.markdown);
+            }
+        }
+        WikiSchemaCmd::WriteSchema {
+            path,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let body = if path == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+                s
+            } else {
+                std::fs::read_to_string(&path)?
+            };
+            c.write_schema(wiki_id, body)
+                .await
+                .map_err(|e| eyre::eyre!("write_schema: {e:?}"))?;
+            println!("wrote schema");
+        }
+        WikiSchemaCmd::WritePurpose {
+            path,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let body = if path == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+                s
+            } else {
+                std::fs::read_to_string(&path)?
+            };
+            c.write_purpose(wiki_id, body)
+                .await
+                .map_err(|e| eyre::eyre!("write_purpose: {e:?}"))?;
+            println!("wrote purpose");
+        }
+        WikiSchemaCmd::Bootstrap {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.bootstrap(wiki_id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("bootstrap: {e:?}"))?;
+            println!("bootstrapped {wiki_id}");
+        }
+        WikiSchemaCmd::Health {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let h = c
+                .health(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("health: {e:?}"))?;
+            println!("{h:#?}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_catalog(cmd: WikiCatalogCmd) -> eyre::Result<()> {
+    use wiki_proto::service::catalog::CatalogClient;
+    async fn connect(url: &str) -> eyre::Result<CatalogClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiCatalogCmd::Show {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let idx = c
+                .read_index(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("read_index: {e:?}"))?;
+            println!("{idx:#?}");
+        }
+        WikiCatalogCmd::Rebuild {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let idx = c
+                .rebuild_index(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("rebuild_index: {e:?}"))?;
+            if json {
+                println!("{idx:#?}");
+            } else {
+                println!("rebuilt catalog");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
+    use wiki_proto::service::raw_layer::RawLayerClient;
+    async fn connect(url: &str) -> eyre::Result<RawLayerClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiRawCmd::List {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_raw_sources(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?;
+            if json {
+                println!("{rows:#?}");
+            } else {
+                for r in &rows {
+                    println!("{r:?}");
+                }
+            }
+        }
+        WikiRawCmd::Read {
+            path,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let bytes = c
+                .read_raw_source(wiki_id, path)
+                .await
+                .map_err(|e| eyre::eyre!("read_raw_source: {e:?}"))?;
+            std::io::Write::write_all(&mut std::io::stdout(), &bytes)?;
+        }
+        WikiRawCmd::Delete {
+            path,
+            yes,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            if !yes && !confirm(&format!("delete raw source `{path}`?"))? {
+                println!("aborted");
+                return Ok(());
+            }
+            let reviews = c
+                .delete_raw_source(wiki_id, path.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete_raw_source: {e:?}"))?;
+            println!("deleted {path} ({} review items enqueued)", reviews.len());
+        }
+        WikiRawCmd::Rescan {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let tasks = c
+                .rescan_sources(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("rescan_sources: {e:?}"))?;
+            println!("enqueued {} ingest task(s)", tasks.len());
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_ingest(cmd: WikiIngestCmd) -> eyre::Result<()> {
+    use wiki_proto::service::ingest::IngestClient;
+    async fn connect(url: &str) -> eyre::Result<IngestClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiIngestCmd::List {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_ingest(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_ingest: {e:?}"))?;
+            if json {
+                println!("{rows:#?}");
+            } else {
+                for t in &rows {
+                    println!("{t:#?}");
+                }
+            }
+        }
+        WikiIngestCmd::Retry {
+            task_id,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let t = c
+                .retry_ingest(wiki_id, task_id)
+                .await
+                .map_err(|e| eyre::eyre!("retry_ingest: {e:?}"))?;
+            println!("retrying {t:#?}");
+        }
+        WikiIngestCmd::Cancel {
+            task_id,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.cancel_ingest(wiki_id, task_id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("cancel_ingest: {e:?}"))?;
+            println!("cancelled {task_id}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_lint_findings(cmd: WikiFindingsCmd) -> eyre::Result<()> {
+    use wiki_proto::service::lint::LintClient;
+    async fn connect(url: &str) -> eyre::Result<LintClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiFindingsCmd::List {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_findings(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_findings: {e:?}"))?;
+            if json {
+                println!("{rows:#?}");
+            } else {
+                for f in &rows {
+                    println!("{f:#?}");
+                }
+            }
+        }
+        WikiFindingsCmd::Resolve {
+            finding_id,
+            action,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let parsed = match action.as_str() {
+                "resolve" | "resolved" => wiki_proto::lint::FindingAction::Resolve,
+                "dismiss" | "dismissed" => wiki_proto::lint::FindingAction::Dismiss {
+                    reason: String::new(),
+                },
+                "promote-review" | "review" => wiki_proto::lint::FindingAction::PromoteToReview,
+                "promote-research" | "research" => {
+                    wiki_proto::lint::FindingAction::PromoteToResearch
+                }
+                other => {
+                    return Err(eyre::eyre!(
+                        "unknown action `{other}` — try resolve / dismiss / promote-review / promote-research"
+                    ));
+                }
+            };
+            c.resolve_finding(wiki_id, finding_id.clone(), parsed)
+                .await
+                .map_err(|e| eyre::eyre!("resolve_finding: {e:?}"))?;
+            println!("{finding_id} → {action}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_review(cmd: WikiReviewCmd) -> eyre::Result<()> {
+    use wiki_proto::review::{ReviewAction, ReviewItem};
+    use wiki_proto::service::review::ReviewClient;
+    async fn connect(url: &str) -> eyre::Result<ReviewClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    let read_body = |s: String| -> eyre::Result<String> {
+        if s == "-" {
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
+            Ok(buf)
+        } else if std::path::Path::new(&s).exists() {
+            Ok(std::fs::read_to_string(&s)?)
+        } else {
+            Ok(s)
+        }
+    };
+    match cmd {
+        WikiReviewCmd::List {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows: Vec<ReviewItem> = c
+                .list_review(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_review: {e:?}"))?;
+            if rows.is_empty() {
+                println!("(no pending review items)");
+            }
+            for r in &rows {
+                println!("{r:#?}");
+            }
+        }
+        WikiReviewCmd::Apply {
+            item_id,
+            action,
+            arg,
+            body,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let parsed = match action.as_str() {
+                "rewrite-page" => ReviewAction::RewritePage {
+                    path: arg.clone(),
+                    markdown: read_body(body)?,
+                },
+                "append-note" => ReviewAction::AppendNote {
+                    path: arg.clone(),
+                    body: read_body(body)?,
+                },
+                "research" => ReviewAction::Research { query: arg.clone() },
+                other => {
+                    return Err(eyre::eyre!(
+                        "unknown action `{other}` — try rewrite-page / append-note / research"
+                    ));
+                }
+            };
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.apply_review(wiki_id, item_id.clone(), parsed)
+                .await
+                .map_err(|e| eyre::eyre!("apply_review: {e:?}"))?;
+            println!("applied {action} on {item_id}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_research_plans(cmd: WikiResearchCmd) -> eyre::Result<()> {
+    use wiki_proto::research::ResearchStatus;
+    use wiki_proto::service::research::ResearchClient;
+    async fn connect(url: &str) -> eyre::Result<ResearchClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiResearchCmd::List {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_research(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_research: {e:?}"))?;
+            if rows.is_empty() {
+                println!("(no research plans)");
+            }
+            for p in &rows {
+                println!("{p:#?}");
+            }
+        }
+        WikiResearchCmd::SetStatus {
+            plan_id,
+            status,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let parsed = match status.to_ascii_lowercase().as_str() {
+                "proposed" => ResearchStatus::Proposed,
+                "running" => ResearchStatus::Running,
+                "awaiting" => ResearchStatus::Awaiting,
+                "submitted" => ResearchStatus::Submitted,
+                "cancelled" | "canceled" => ResearchStatus::Cancelled,
+                other => {
+                    return Err(eyre::eyre!(
+                        "unknown status `{other}` — try proposed / running / awaiting / submitted / cancelled"
+                    ));
+                }
+            };
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.set_research_status(wiki_id, plan_id.clone(), parsed)
+                .await
+                .map_err(|e| eyre::eyre!("set_research_status: {e:?}"))?;
+            println!("{plan_id} → {status}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_watch(cmd: WikiWatchCmd) -> eyre::Result<()> {
+    use wiki_proto::service::watcher::WatcherClient;
+    async fn connect(url: &str) -> eyre::Result<WatcherClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiWatchCmd::On {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let r = c
+                .set_watch(wiki_id, true)
+                .await
+                .map_err(|e| eyre::eyre!("set_watch: {e:?}"))?;
+            println!("watch enabled: {r}");
+        }
+        WikiWatchCmd::Off {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let r = c
+                .set_watch(wiki_id, false)
+                .await
+                .map_err(|e| eyre::eyre!("set_watch: {e:?}"))?;
+            println!("watch disabled: {r}");
+        }
+        WikiWatchCmd::Status {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let r = c
+                .is_watching(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("is_watching: {e:?}"))?;
+            println!("watching: {r}");
+        }
+    }
+    Ok(())
 }
 
 async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
@@ -2926,6 +5845,7 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
     use futures::StreamExt;
 
     match cmd {
+        AgentCmd::Queue(qc) => Box::pin(run_agent_queue(qc)).await,
         AgentCmd::Chat {
             workspace,
             model,
@@ -2994,41 +5914,70 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
     }
 }
 
-fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
+async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
     match cmd {
         TaskCmd::Capture {
             text,
-            vault,
-            folder,
+            project,
+            milestone,
+            org,
+            server,
+            json,
         } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
             let mut info = task::capture(&text);
-            info.path = task::write::default_task_path(&info.title, folder.as_deref());
-            let abs = task::write_task(&vault, &mut info, false)
-                .map_err(|e| eyre::eyre!("write task: {e}"))?;
-            println!("Created {}", abs.display());
-            println!("  title:    {}", info.title);
-            println!("  status:   {}", info.status);
-            println!("  priority: {}", info.priority);
-            if let Some(d) = &info.due {
+            info.path = task::write::default_task_path(&info.title, None);
+            if let Some(p) = project {
+                let pc = connect_project_client(&url).await?;
+                info.project_id = Some(resolve_project_target(&pc, &p).await?.id);
+            }
+            if let Some(m) = milestone {
+                let mc = connect_milestone_client(&url).await?;
+                let ms = resolve_milestone_target(&mc, &m).await?;
+                info.milestone_id = Some(ms.id);
+                if info.project_id.is_none() {
+                    info.project_id = Some(ms.project_id);
+                }
+            }
+            let client = connect_task_client(&url).await?;
+            let created = client
+                .create(info)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("captured {} ({})", created.title, created.path);
+            println!("  id:       {}", created.id);
+            println!("  status:   {}", created.status);
+            println!("  priority: {}", created.priority);
+            if let Some(d) = &created.due {
                 println!("  due:      {d}");
-            }
-            if !info.tags.is_empty() {
-                println!("  tags:     {}", info.tags.join(", "));
-            }
-            if !info.contexts.is_empty() {
-                println!("  contexts: {}", info.contexts.join(", "));
-            }
-            if !info.projects.is_empty() {
-                println!("  projects: {}", info.projects.join(", "));
             }
         }
         TaskCmd::List {
-            vault,
             status,
             tag,
             context,
+            project,
+            milestone,
+            open,
+            org,
+            server,
+            json,
         } => {
-            let v = vault::Vault::open(&vault).map_err(|e| eyre::eyre!("open: {e}"))?;
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
             let ctx_filter = context.map(|c| {
                 if c.starts_with('@') {
                     c
@@ -3036,7 +5985,23 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     format!("@{c}")
                 }
             });
-            let mut tasks: Vec<_> = task::scan_vault(&v)
+            let project_id = match project {
+                Some(p) => {
+                    let pc = connect_project_client(&url).await?;
+                    Some(resolve_project_target(&pc, &p).await?.id)
+                }
+                None => None,
+            };
+            let milestone_filter = match milestone.as_deref() {
+                Some("none" | "null") => Some(None),
+                Some(m) => {
+                    let mc = connect_milestone_client(&url).await?;
+                    Some(Some(resolve_milestone_target(&mc, m).await?.id))
+                }
+                None => None,
+            };
+
+            let mut rows: Vec<_> = rows
                 .into_iter()
                 .filter(|t| {
                     status
@@ -3052,10 +6017,16 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                         .as_deref()
                         .is_none_or(|c| t.contexts.iter().any(|x| x == c))
                 })
+                .filter(|t| project_id.is_none_or(|pid| t.project_id == Some(pid)))
+                .filter(|t| match &milestone_filter {
+                    None => true,
+                    Some(want) => &t.milestone_id == want,
+                })
+                .filter(|t| {
+                    !open || !task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
+                })
                 .collect();
-            tasks.sort_by(|a, b| {
-                // Open before done; then by due date ascending
-                // (None last); then by title.
+            rows.sort_by(|a, b| {
                 let a_done = task::Status::from_str(&a.status).is_some_and(task::Status::is_done);
                 let b_done = task::Status::from_str(&b.status).is_some_and(task::Status::is_done);
                 a_done
@@ -3064,11 +6035,19 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     .then_with(|| a.due.cmp(&b.due))
                     .then_with(|| a.title.cmp(&b.title))
             });
-            if tasks.is_empty() {
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
                 println!("(no tasks)");
                 return Ok(());
             }
-            for t in &tasks {
+            for t in &rows {
                 let marker = if task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
                 {
                     "[x]"
@@ -3085,49 +6064,2426 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     "high" => " !",
                     _ => "",
                 };
-                println!("{marker} {}{prio}{due}    {}", t.title, t.path);
+                let ms = if t.milestone_id.is_some() { " *" } else { "" };
+                println!("{marker} {}{prio}{due}{ms}    {}", t.title, t.path);
+            }
+        }
+        TaskCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_task_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&t).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", t.title, t.status);
+            println!("  id:       {}", t.id);
+            println!("  path:     {}", t.path);
+            println!("  priority: {}", t.priority);
+            if let Some(d) = &t.due {
+                println!("  due:      {d}");
+            }
+            if let Some(s) = &t.scheduled {
+                println!("  sched:    {s}");
+            }
+            if let Some(p) = t.project_id {
+                println!("  project:  {p}");
+            }
+            if let Some(m) = t.milestone_id {
+                println!("  milestone:{m}");
+            }
+            if !t.tags.is_empty() {
+                println!("  tags:     {}", t.tags.join(", "));
+            }
+            if !t.contexts.is_empty() {
+                println!("  contexts: {}", t.contexts.join(", "));
+            }
+            if !t.details.is_empty() {
+                println!("\n{}", t.details);
+            }
+        }
+        TaskCmd::Create {
+            title,
+            path,
+            status,
+            priority,
+            due,
+            scheduled,
+            tags,
+            contexts,
+            project,
+            milestone,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let project_id = match project {
+                Some(p) => {
+                    let pc = connect_project_client(&url).await?;
+                    Some(resolve_project_target(&pc, &p).await?.id)
+                }
+                None => None,
+            };
+            let (milestone_id, project_id) = match milestone {
+                Some(m) => {
+                    let mc = connect_milestone_client(&url).await?;
+                    let ms = resolve_milestone_target(&mc, &m).await?;
+                    (Some(ms.id), project_id.or(Some(ms.project_id)))
+                }
+                None => (None, project_id),
+            };
+            let details = resolve_body(details)?;
+            let new_task = task::TaskInfo {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                status: status.unwrap_or_else(|| "open".into()),
+                priority: priority.unwrap_or_else(|| "normal".into()),
+                due,
+                scheduled,
+                tags: task::model::StringList(tags),
+                contexts: task::model::StringList(contexts),
+                projects: task::model::StringList::default(),
+                project_id,
+                milestone_id,
+                time_estimate: None,
+                time_entries: task::model::TimeEntries::default(),
+                recurrence: None,
+                recurrence_anchor: None,
+                complete_instances: task::model::StringList::default(),
+                completed_date: None,
+                agent_profile: String::new(),
+                dispatched_agent_tasks: task::model::StringList::default(),
+                date_created: None,
+                date_modified: None,
+                details,
+            };
+            let client = connect_task_client(&url).await?;
+            let created = client
+                .create(new_task)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
             }
         }
         TaskCmd::Done {
-            task_id,
-            vault,
+            target,
             undo,
+            org,
+            server,
         } => {
-            let v = vault::Vault::open(&vault).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let tasks = task::scan_vault(&v);
-            let needle = task_id.trim_end_matches(".md").to_ascii_lowercase();
-            let matches: Vec<_> = tasks
-                .iter()
-                .filter(|t| {
-                    t.path.eq_ignore_ascii_case(&task_id)
-                        || std::path::Path::new(&t.path)
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .is_some_and(|s| s.to_ascii_lowercase().starts_with(&needle))
-                })
+            mutate_task(target, org, server, |t| {
+                if undo {
+                    t.status = "open".into();
+                    t.completed_date = None;
+                } else {
+                    t.status = "done".into();
+                    t.completed_date = Some(chrono::Local::now().date_naive());
+                }
+            })
+            .await?;
+        }
+        TaskCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => mutate_task(target, org, server, |t| t.status = status).await?,
+        TaskCmd::SetPriority {
+            target,
+            priority,
+            org,
+            server,
+        } => mutate_task(target, org, server, |t| t.priority = priority).await?,
+        TaskCmd::SetDue {
+            target,
+            due,
+            org,
+            server,
+        } => {
+            let v = if matches!(due.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(due)
+            };
+            mutate_task(target, org, server, |t| t.due = v).await?;
+        }
+        TaskCmd::SetScheduled {
+            target,
+            scheduled,
+            org,
+            server,
+        } => {
+            let v = if matches!(scheduled.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(scheduled)
+            };
+            mutate_task(target, org, server, |t| t.scheduled = v).await?;
+        }
+        TaskCmd::SetProject {
+            target,
+            project,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let new_proj = if matches!(project.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                let pc = connect_project_client(&url).await?;
+                Some(resolve_project_target(&pc, &project).await?.id)
+            };
+            mutate_task(target, org, server, |t| t.project_id = new_proj).await?;
+        }
+        TaskCmd::SetMilestone {
+            target,
+            milestone,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let (new_ms, new_proj) = if matches!(milestone.as_str(), "none" | "null" | "") {
+                (None, None)
+            } else {
+                let mc = connect_milestone_client(&url).await?;
+                let ms = resolve_milestone_target(&mc, &milestone).await?;
+                (Some(ms.id), Some(ms.project_id))
+            };
+            mutate_task(target, org, server, |t| {
+                t.milestone_id = new_ms;
+                if let Some(p) = new_proj {
+                    // Auto-fix project link when it's missing or
+                    // points elsewhere — milestone is the
+                    // narrower truth.
+                    t.project_id = Some(p);
+                }
+            })
+            .await?;
+        }
+        TaskCmd::SetTags {
+            target,
+            tags,
+            org,
+            server,
+        } => {
+            mutate_task(target, org, server, |t| {
+                t.tags = task::model::StringList(tags);
+            })
+            .await?;
+        }
+        TaskCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_task_target(&client, &target).await?;
+            let renamed = client
+                .rename(t.id, new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        TaskCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_task_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", t.title, t.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(t.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", t.path);
+        }
+    }
+    Ok(())
+}
+
+async fn connect_task_client(url: &str) -> eyre::Result<task::TaskServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_task_target(
+    client: &task::TaskServiceClient,
+    target: &str,
+) -> eyre::Result<task::TaskInfo> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_task<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut task::TaskInfo),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_task_client(&url).await?;
+    let mut t = resolve_task_target(&client, &target).await?;
+    apply(&mut t);
+    let updated = client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
+    match cmd {
+        MilestoneCmd::List {
+            project,
+            goal,
+            open,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let project_id = match project {
+                Some(p) => {
+                    let pc = connect_project_client(&url).await?;
+                    Some(resolve_project_target(&pc, &p).await?.id)
+                }
+                None => None,
+            };
+            let goal_id = match goal {
+                Some(g) => {
+                    let gc = connect_goal_client(&url).await?;
+                    Some(resolve_goal_target(&gc, &g).await?.id)
+                }
+                None => None,
+            };
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|m| project_id.is_none_or(|pid| m.project_id == pid))
+                .filter(|m| goal_id.is_none_or(|gid| m.goal_id == Some(gid)))
+                .filter(|m| !open || m.status != "closed")
                 .collect();
-            let matched = match matches.as_slice() {
-                [] => return Err(eyre::eyre!("no task matched {task_id:?}")),
-                [t] => *t,
-                multi => {
-                    return Err(eyre::eyre!(
-                        "{} tasks matched {task_id:?} (be more specific)",
-                        multi.len()
-                    ));
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!("(no milestones)");
+                return Ok(());
+            }
+            println!("{} milestones\n", rows.len());
+            for m in &rows {
+                let due = m
+                    .due_date
+                    .map(|d| format!("  (due {d})"))
+                    .unwrap_or_default();
+                let goal = m.goal_id.map(|_| "  →goal".to_string()).unwrap_or_default();
+                println!("{:<32}  {:<8}{due}{goal}    {}", m.title, m.status, m.path);
+            }
+        }
+        MilestoneCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let m = resolve_milestone_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", m.title, m.status);
+            println!("  id:       {}", m.id);
+            println!("  path:     {}", m.path);
+            println!("  project:  {}", m.project_id);
+            if let Some(g) = m.goal_id {
+                println!("  goal:     {g}");
+            }
+            if let Some(d) = m.due_date {
+                println!("  due:      {d}");
+            }
+            if let Some(r) = &m.forge_ref {
+                println!("  forge:    {r}");
+            }
+            if !m.tags.is_empty() {
+                println!("  tags:     {}", m.tags.0.join(", "));
+            }
+            if !m.details.is_empty() {
+                println!("\n{}", m.details);
+            }
+        }
+        MilestoneCmd::Create {
+            title,
+            project,
+            goal,
+            path,
+            status,
+            due,
+            tags,
+            forge_ref,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let pc = connect_project_client(&url).await?;
+            let project_id = resolve_project_target(&pc, &project).await?.id;
+            let goal_id = match goal {
+                None => None,
+                Some(g) => {
+                    let gc = connect_goal_client(&url).await?;
+                    Some(resolve_goal_target(&gc, &g).await?.id)
                 }
             };
-            let mut info = matched.clone();
-            if undo {
-                info.status = "open".into();
-                info.completed_date = None;
+            let due_date = match due {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--due: {e}"))?,
+                ),
+            };
+            let details = resolve_body(details)?;
+            let new_ms = milestone::Milestone {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                project_id,
+                goal_id,
+                status: status.unwrap_or_else(|| "open".into()),
+                due_date,
+                tags: milestone::Tags(tags),
+                forge_ref,
+                date_created: None,
+                date_modified: None,
+                details,
+            };
+            let client = connect_milestone_client(&url).await?;
+            let created = client
+                .create(new_ms)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
             } else {
-                info.status = "done".into();
-                info.completed_date = Some(chrono::Local::now().date_naive());
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
             }
-            task::write_task(&vault, &mut info, true)
-                .map_err(|e| eyre::eyre!("write task: {e}"))?;
-            let verb = if undo { "Reopened" } else { "Done" };
-            println!("{verb} {}    {}", info.title, info.path);
+        }
+        MilestoneCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => mutate_milestone(target, org, server, |m| m.status = status).await?,
+        MilestoneCmd::SetDue {
+            target,
+            due,
+            org,
+            server,
+        } => {
+            let v = if matches!(due.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(
+                    chrono::NaiveDate::parse_from_str(&due, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--due: {e}"))?,
+                )
+            };
+            mutate_milestone(target, org, server, |m| m.due_date = v).await?;
+        }
+        MilestoneCmd::SetGoal {
+            target,
+            goal,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let new_goal = if matches!(goal.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                let gc = connect_goal_client(&url).await?;
+                Some(resolve_goal_target(&gc, &goal).await?.id)
+            };
+            mutate_milestone(target, org, server, |m| m.goal_id = new_goal).await?;
+        }
+        MilestoneCmd::SetForgeRef {
+            target,
+            forge_ref,
+            org,
+            server,
+        } => {
+            let v = if matches!(forge_ref.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(forge_ref)
+            };
+            mutate_milestone(target, org, server, |m| m.forge_ref = v).await?;
+        }
+        MilestoneCmd::Close {
+            target,
+            org,
+            server,
+        } => mutate_milestone(target, org, server, |m| m.status = "closed".into()).await?,
+        MilestoneCmd::Reopen {
+            target,
+            org,
+            server,
+        } => mutate_milestone(target, org, server, |m| m.status = "open".into()).await?,
+        MilestoneCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let m = resolve_milestone_target(&client, &target).await?;
+            let renamed = client
+                .rename(m.id, new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        MilestoneCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let m = resolve_milestone_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", m.title, m.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(m.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", m.path);
+        }
+    }
+    Ok(())
+}
+
+async fn connect_milestone_client(url: &str) -> eyre::Result<milestone::MilestoneServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_milestone_target(
+    client: &milestone::MilestoneServiceClient,
+    target: &str,
+) -> eyre::Result<milestone::Milestone> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_milestone<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut milestone::Milestone),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_milestone_client(&url).await?;
+    let mut m = resolve_milestone_target(&client, &target).await?;
+    apply(&mut m);
+    let updated = client
+        .update(m)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+// ── Location (locations::Store) ──────────────────────────────────────
+
+async fn connect_locations_client(url: &str) -> eyre::Result<locations::LocationsServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_location_target(
+    client: &locations::LocationsServiceClient,
+    target: &str,
+) -> eyre::Result<locations::Location> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|l| l.path == target || l.name == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_location(cmd: LocationCmd) -> eyre::Result<()> {
+    match cmd {
+        LocationCmd::List {
+            kind,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|l| kind.as_deref().is_none_or(|k| l.kind == k))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for l in &rows {
+                let addr = l
+                    .address
+                    .as_deref()
+                    .map(|a| format!("  ({a})"))
+                    .unwrap_or_default();
+                println!("{:<28}  {:<8}{addr}    {}", l.name, l.kind, l.path);
+            }
+        }
+        LocationCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let l = resolve_location_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&l).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", l.name, l.kind);
+            println!("  id:       {}", l.id);
+            println!("  path:     {}", l.path);
+            if let Some(a) = &l.address {
+                println!("  address:  {a}");
+            }
+            if !l.tags.0.is_empty() {
+                println!("  tags:     {}", l.tags.0.join(", "));
+            }
+            if !l.details.is_empty() {
+                println!("\n{}", l.details);
+            }
+        }
+        LocationCmd::Create {
+            name,
+            kind,
+            parent,
+            address,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let parent_id = match parent {
+                None => None,
+                Some(p) => Some(resolve_location_target(&client, &p).await?.id),
+            };
+            let new_loc = locations::Location {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                name,
+                kind: kind.unwrap_or_else(|| "other".into()),
+                parent_id,
+                address,
+                tags: locations::model::Tags(tags),
+                same_as: None,
+                date_created: None,
+                date_modified: None,
+                details: resolve_body(details)?,
+            };
+            let created = client
+                .create(new_loc)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        LocationCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let l = resolve_location_target(&client, &target).await?;
+            let renamed = client
+                .rename(l.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        LocationCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let l = resolve_location_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", l.name, l.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(l.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", l.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Recipe (cookbook::Store) — read + delete only ─────────────────────
+
+async fn connect_cookbook_client(url: &str) -> eyre::Result<cookbook::CookbookServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
+    match cmd {
+        RecipeCmd::List {
+            query,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|r| {
+                    query
+                        .as_deref()
+                        .is_none_or(|q| r.name.to_lowercase().contains(&q.to_lowercase()))
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} recipes\n", rows.len());
+            for r in &rows {
+                let s = r
+                    .servings
+                    .map(|n| format!("  ({n} srv)"))
+                    .unwrap_or_default();
+                println!("{:<40}{s}    {}", r.name, r.path);
+            }
+        }
+        RecipeCmd::Get {
+            path,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            let r = client
+                .get(path)
+                .await
+                .map_err(|e| eyre::eyre!("get: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", r.name);
+            println!("  path:     {}", r.path);
+            if let Some(s) = r.servings {
+                println!("  servings: {s}");
+            }
+            if !r.ingredients.0.is_empty() {
+                println!("  ingredients ({} items):", r.ingredients.0.len());
+                for i in r.ingredients.0.iter().take(20) {
+                    println!("    - {} {} {}", i.qty.unwrap_or(0.0), i.unit, i.name);
+                }
+            }
+        }
+        RecipeCmd::Delete {
+            path,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            if !yes && !confirm(&format!("delete `{path}`?"))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(path.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {path}");
+        }
+    }
+    Ok(())
+}
+
+// ── Meal (mealplan::Store) ───────────────────────────────────────────
+
+async fn connect_mealplan_client(url: &str) -> eyre::Result<mealplan::MealplanServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_meal_target(
+    client: &mealplan::MealplanServiceClient,
+    target: &str,
+) -> eyre::Result<mealplan::Meal> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|m| m.path == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
+    match cmd {
+        MealCmd::List {
+            date,
+            status,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let parsed_date = match date {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--date: {e}"))?,
+                ),
+            };
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|m| parsed_date.is_none_or(|d| m.scheduled_for == d))
+                .filter(|m| status.as_deref().is_none_or(|s| m.status == s))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for m in &rows {
+                println!(
+                    "{}  {}  {:<10}  {:<10}    {}",
+                    m.scheduled_for, m.slot, m.status, m.name, m.path
+                );
+            }
+        }
+        MealCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", m.name, m.status);
+            println!("  id:       {}", m.id);
+            println!("  path:     {}", m.path);
+            println!("  date:     {}", m.scheduled_for);
+            println!("  slot:     {}", m.slot);
+            println!("  servings: {}", m.servings);
+            for r in m.recipe_paths.iter() {
+                println!("  recipe:   {r}");
+            }
+        }
+        MealCmd::Create {
+            name,
+            date,
+            slot,
+            recipe,
+            servings,
+            tags,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let scheduled_for = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map_err(|e| eyre::eyre!("--date: {e}"))?;
+            let new_meal = mealplan::Meal {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                name,
+                scheduled_for,
+                slot: slot.unwrap_or_else(|| "dinner".into()),
+                servings,
+                recipe_paths: mealplan::model::StringList(recipe),
+                status: "planned".into(),
+                pantry_deductions: mealplan::model::PantryDeductions::default(),
+                tags: mealplan::model::StringList(tags),
+                date_created: None,
+                date_modified: None,
+                details: String::new(),
+            };
+            let created = client
+                .create(new_meal)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!(
+                    "created {} for {} ({})",
+                    created.name, created.scheduled_for, created.path
+                );
+                println!("  id: {}", created.id);
+            }
+        }
+        MealCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let mut m = resolve_meal_target(&client, &target).await?;
+            m.status = status;
+            let updated = client
+                .update(m)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!("{}  [{}]  {}", updated.name, updated.status, updated.path);
+        }
+        MealCmd::Cook {
+            target,
+            no_deduct,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            // Auto-deduction logic lives server-side under
+            // `can_cook` / `cook` — we pass an empty list and
+            // let the server fill in from the recipes. The
+            // `--no-deduct` flag is reserved for the future
+            // ate-out-leftovers path; today both routes pass
+            // the same empty list.
+            let _ = no_deduct;
+            let deductions = Vec::new();
+            let cooked = client
+                .cook(m.id.to_string(), deductions)
+                .await
+                .map_err(|e| eyre::eyre!("cook: {e:?}"))?;
+            println!("cooked {}  ({})", cooked.name, cooked.path);
+        }
+        MealCmd::Skip {
+            target,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            let skipped = client
+                .skip(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("skip: {e:?}"))?;
+            println!("skipped {}  ({})", skipped.name, skipped.path);
+        }
+        MealCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            let renamed = client
+                .rename(m.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        MealCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", m.name, m.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", m.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Pantry (pantry::Store) ───────────────────────────────────────────
+
+async fn connect_pantry_client(url: &str) -> eyre::Result<pantry::PantryServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_pantry_target(
+    client: &pantry::PantryServiceClient,
+    target: &str,
+) -> eyre::Result<pantry::PantryItem> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|p| p.path == target || p.name == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_pantry(cmd: PantryCmd) -> eyre::Result<()> {
+    match cmd {
+        PantryCmd::List {
+            low_stock,
+            expired,
+            expiring_in,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let today = chrono::Local::now().date_naive();
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|p| !low_stock || p.qty.is_some_and(|q| q < 1.0))
+                .filter(|p| {
+                    !expired
+                        || p.stock_entries
+                            .iter()
+                            .any(|e| e.best_before.is_some_and(|d| d < today))
+                })
+                .filter(|p| {
+                    expiring_in.is_none_or(|n| {
+                        let cutoff = today + chrono::Duration::days(n);
+                        p.stock_entries
+                            .iter()
+                            .any(|e| e.best_before.is_some_and(|d| d <= cutoff && d >= today))
+                    })
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for p in &rows {
+                let q = p
+                    .qty
+                    .map_or_else(|| "?".into(), |n| format!("{n} {}", p.unit));
+                println!("{:<32}  {:<12}    {}", p.name, q, p.path);
+            }
+        }
+        PantryCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&p).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", p.name);
+            println!("  id:       {}", p.id);
+            println!("  path:     {}", p.path);
+            println!("  status:   {}", p.status);
+            if let Some(q) = p.qty {
+                println!("  qty:      {q} {}", p.unit);
+            }
+            if !p.food_category.is_empty() {
+                println!("  food:     {}", p.food_category);
+            }
+            if let Some(l) = p.location_id {
+                println!("  location: {l}");
+            }
+        }
+        PantryCmd::Create {
+            name,
+            qty,
+            unit,
+            location,
+            food_category,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let location_id = match location {
+                None => None,
+                Some(loc) => {
+                    let lc = connect_locations_client(&u).await?;
+                    Some(resolve_location_target(&lc, &loc).await?.id)
+                }
+            };
+            // PantryItem has many fields; use the
+            // `PantryItemDraft::into_item` helper to construct
+            // a fully-defaulted item from a minimal draft.
+            let draft = pantry::PantryItemDraft {
+                barcode: String::new(),
+                name,
+                brand: None,
+                food_category: food_category.unwrap_or_default(),
+                unit: unit.unwrap_or_default(),
+                nutrition_per_unit: None,
+                nutrition_unit: None,
+                image_url: None,
+            };
+            let mut new_item = draft.into_item(location_id);
+            new_item.qty = qty;
+            if !tags.is_empty() {
+                new_item.tags = pantry::model::StringList(tags);
+            }
+            new_item.details = resolve_body(details)?;
+            let created = client
+                .create(new_item)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        PantryCmd::Consume {
+            target,
+            amount,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let updated = client
+                .consume(p.id.to_string(), amount)
+                .await
+                .map_err(|e| eyre::eyre!("consume: {e:?}"))?;
+            let q = updated.qty.map_or_else(|| "?".into(), |n| n.to_string());
+            println!("{}  qty={q} {}", updated.name, updated.unit);
+        }
+        PantryCmd::Restock {
+            target,
+            amount,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let updated = client
+                .restock(p.id.to_string(), amount)
+                .await
+                .map_err(|e| eyre::eyre!("restock: {e:?}"))?;
+            let q = updated.qty.map_or_else(|| "?".into(), |n| n.to_string());
+            println!("{}  qty={q} {}", updated.name, updated.unit);
+        }
+        PantryCmd::Open {
+            target,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let updated = client
+                .open(p.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("open: {e:?}"))?;
+            println!("opened {}", updated.name);
+        }
+        PantryCmd::FindByBarcode {
+            barcode,
+            resolve,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            if resolve {
+                let r = client
+                    .resolve_barcode(barcode)
+                    .await
+                    .map_err(|e| eyre::eyre!("resolve_barcode: {e:?}"))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
+                    );
+                } else {
+                    println!("{r:#?}");
+                }
+            } else {
+                let p = client
+                    .find_by_barcode(barcode)
+                    .await
+                    .map_err(|e| eyre::eyre!("find_by_barcode: {e:?}"))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&p).map_err(|e| eyre::eyre!("json: {e}"))?
+                    );
+                } else {
+                    println!("{} ({})", p.name, p.path);
+                }
+            }
+        }
+        PantryCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let renamed = client
+                .rename(p.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        PantryCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", p.name, p.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(p.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", p.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Agent task queue (agent-proto / agent-tasks) ─────────────────────
+
+async fn run_agent_queue(cmd: AgentQueueCmd) -> eyre::Result<()> {
+    use agent_proto::service::tasks::AgentTaskQueueClient;
+    use agent_proto::tasks::QueueFilter;
+
+    async fn connect_queue(url: String) -> eyre::Result<AgentTaskQueueClient> {
+        Box::pin(vox::connect(&url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    let connect = |url: String| connect_queue(url);
+    let default_handle = || {
+        format!(
+            "{}@{}",
+            std::env::var("USER").unwrap_or_else(|_| "anon".into()),
+            std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("HOST"))
+                .unwrap_or_else(|_| "host".into())
+        )
+    };
+    let body = |s: String| -> eyre::Result<String> {
+        if s == "-" {
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
+            Ok(buf)
+        } else {
+            Ok(s)
+        }
+    };
+
+    match cmd {
+        AgentQueueCmd::Read {
+            queue,
+            only_handle,
+            include_archived,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let queue_id = queue.unwrap_or_else(|| slug.clone());
+            let filter = QueueFilter {
+                assignee: String::new(),
+                include_archived,
+                only_handle: only_handle.unwrap_or_default(),
+                linked_session_id: String::new(),
+                agent_profile: String::new(),
+            };
+            let snap = client
+                .read_queue(queue_id, filter)
+                .await
+                .map_err(|e| eyre::eyre!("read_queue: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&snap).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!(
+                "queue {}  ({} tasks, watermark={})",
+                snap.queue.id,
+                snap.tasks.len(),
+                snap.latest_event_id
+            );
+            for t in &snap.tasks {
+                println!("  {:<10}  {:<32}  {}", t.status, t.title, t.id);
+            }
+        }
+        AgentQueueCmd::Claim {
+            task_id,
+            handle,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let h = handle.unwrap_or_else(default_handle);
+            let t = client
+                .claim_agent_task(task_id, h.clone())
+                .await
+                .map_err(|e| eyre::eyre!("claim: {e:?}"))?;
+            println!("claimed {} as {h} → [{}]", t.title, t.status);
+        }
+        AgentQueueCmd::SetStatus {
+            task_id,
+            new_status,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let t = client
+                .set_agent_task_status(task_id, new_status)
+                .await
+                .map_err(|e| eyre::eyre!("set_status: {e:?}"))?;
+            println!("{} → [{}]", t.title, t.status);
+        }
+        AgentQueueCmd::Complete {
+            task_id,
+            result,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let result_blob = body(result)?;
+            let t = client
+                .complete_agent_task(task_id, result_blob)
+                .await
+                .map_err(|e| eyre::eyre!("complete: {e:?}"))?;
+            println!("completed {} → [{}]", t.title, t.status);
+        }
+        AgentQueueCmd::Link {
+            task_id,
+            session_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let t = client
+                .link_agent_task_to_session(task_id, session_id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("link: {e:?}"))?;
+            println!("linked {} → session {session_id}", t.title);
+        }
+        AgentQueueCmd::Links {
+            queue,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect(url.clone()).await?;
+            let queue_id = queue.unwrap_or_else(|| slug.clone());
+            let links = client
+                .list_agent_task_links(queue_id)
+                .await
+                .map_err(|e| eyre::eyre!("links: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&links).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for l in &links {
+                println!("{}  →  {}  ({})", l.from_task, l.to_task, l.kind);
+            }
+        }
+    }
+    Ok(())
+}
+
+// ── Body metrics (body::Store) ───────────────────────────────────────
+
+async fn connect_body_client(url: &str) -> eyre::Result<body::BodyServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_body_target(
+    client: &body::BodyServiceClient,
+    target: &str,
+) -> eyre::Result<body::BodyMetric> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|m| m.path == target || m.name == target || m.kind == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_body(cmd: BodyCmd) -> eyre::Result<()> {
+    match cmd {
+        BodyCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for m in &rows {
+                let goal = m.goal.map(|g| format!(" goal={g}")).unwrap_or_default();
+                let latest = m
+                    .entries
+                    .0
+                    .last()
+                    .map(|e| format!("  last {}: {}{}", e.date, e.value, m.unit))
+                    .unwrap_or_default();
+                println!("{:<24}  {:<10}{goal}{latest}", m.name, m.kind);
+            }
+        }
+        BodyCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let m = resolve_body_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", m.name, m.kind);
+            println!("  id:    {}", m.id);
+            println!("  path:  {}", m.path);
+            println!("  unit:  {}", m.unit);
+            if let Some(g) = m.goal {
+                println!("  goal:  {g}");
+            }
+            println!("  entries: {} (last 10)", m.entries.0.len());
+            for e in m.entries.0.iter().rev().take(10) {
+                println!("    {}  {}{}", e.date, e.value, m.unit);
+            }
+        }
+        BodyCmd::Create {
+            name,
+            kind,
+            unit,
+            goal,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let new_metric = body::BodyMetric {
+                path: String::new(),
+                id: uuid::Uuid::nil(),
+                name,
+                kind: kind.unwrap_or_else(|| "other".into()),
+                unit: unit.unwrap_or_default(),
+                goal,
+                tags: body::model::Tags(Vec::new()),
+                entries: body::model::Entries(Vec::new()),
+                date_created: None,
+                date_modified: None,
+                details: String::new(),
+            };
+            let created = client
+                .create(new_metric)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        BodyCmd::Log {
+            target,
+            value,
+            date,
+            unit,
+            note,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let m = resolve_body_target(&client, &target).await?;
+            let day = match date {
+                Some(s) => chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                    .map_err(|e| eyre::eyre!("--date: {e}"))?,
+                None => chrono::Local::now().date_naive(),
+            };
+            let entry = body::model::BodyEntry {
+                id: uuid::Uuid::new_v4(),
+                date: day,
+                value,
+                unit,
+                note,
+            };
+            let updated = client
+                .log_entry(m.id.to_string(), entry)
+                .await
+                .map_err(|e| eyre::eyre!("log_entry: {e:?}"))?;
+            println!(
+                "logged {} {} on {} for {}",
+                value, updated.unit, day, updated.name
+            );
+        }
+        BodyCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let m = resolve_body_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", m.name, m.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", m.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Exercises (exercises::Store) ─────────────────────────────────────
+
+async fn connect_exercises_client(url: &str) -> eyre::Result<exercises::ExercisesServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_exercise_target(
+    client: &exercises::ExercisesServiceClient,
+    target: &str,
+) -> eyre::Result<exercises::Exercise> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|e| e.path == target || e.name.eq_ignore_ascii_case(target))
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_exercise(cmd: ExerciseCmd) -> eyre::Result<()> {
+    match cmd {
+        ExerciseCmd::List {
+            query,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|e| {
+                    query
+                        .as_deref()
+                        .is_none_or(|q| e.name.to_lowercase().contains(&q.to_lowercase()))
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for e in &rows {
+                println!("{:<32}  {:<12}    {}", e.name, e.category, e.path);
+            }
+        }
+        ExerciseCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let e = resolve_exercise_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&e).map_err(|err| eyre::eyre!("json: {err}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", e.name);
+            println!("  id:        {}", e.id);
+            println!("  path:      {}", e.path);
+            println!("  category:  {}", e.category);
+            if !e.primary_muscles.is_empty() {
+                println!("  muscles:   {}", e.primary_muscles.0.join(", "));
+            }
+            if !e.equipment.is_empty() {
+                println!("  equipment: {}", e.equipment.0.join(", "));
+            }
+        }
+        ExerciseCmd::Create {
+            name,
+            kind,
+            muscle,
+            tags,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let primary_muscles = muscle
+                .map(|m| exercises::model::StringList(vec![m]))
+                .unwrap_or_default();
+            let new_ex = exercises::Exercise {
+                path: String::new(),
+                id: uuid::Uuid::nil(),
+                name,
+                aliases: exercises::model::StringList::default(),
+                description: None,
+                category: kind.unwrap_or_else(|| "other".into()),
+                primary_muscles,
+                secondary_muscles: exercises::model::StringList::default(),
+                equipment: exercises::model::StringList::default(),
+                mechanics: None,
+                force: None,
+                instructions: exercises::model::StringList::default(),
+                video_url: None,
+                image_url: None,
+                tags: exercises::model::StringList(tags),
+                date_created: None,
+                date_modified: None,
+                details: String::new(),
+            };
+            let created = client
+                .create(new_ex)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        ExerciseCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let e = resolve_exercise_target(&client, &target).await?;
+            let renamed = client
+                .rename(e.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        ExerciseCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let e = resolve_exercise_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", e.name, e.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(e.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", e.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Workouts (routines + sessions) ───────────────────────────────────
+
+async fn connect_workouts_client(url: &str) -> eyre::Result<workouts::WorkoutsServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_routine_target(
+    client: &workouts::WorkoutsServiceClient,
+    target: &str,
+) -> eyre::Result<workouts::Routine> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get_routine(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get_routine: {e:?}"));
+    }
+    let rows = client
+        .list_routines()
+        .await
+        .map_err(|e| eyre::eyre!("list_routines: {e:?}"))?;
+    rows.into_iter()
+        .find(|r| r.path == target || r.name.eq_ignore_ascii_case(target))
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn resolve_session_target(
+    client: &workouts::WorkoutsServiceClient,
+    target: &str,
+) -> eyre::Result<workouts::WorkoutSession> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get_session(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get_session: {e:?}"));
+    }
+    let rows = client
+        .list_sessions()
+        .await
+        .map_err(|e| eyre::eyre!("list_sessions: {e:?}"))?;
+    rows.into_iter()
+        .find(|s| s.path == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_workout(cmd: WorkoutCmd) -> eyre::Result<()> {
+    match cmd {
+        WorkoutCmd::Routine(rc) => run_workout_routine(rc).await,
+        WorkoutCmd::Session(sc) => run_workout_session(sc).await,
+    }
+}
+
+async fn run_workout_routine(cmd: WorkoutRoutineCmd) -> eyre::Result<()> {
+    match cmd {
+        WorkoutRoutineCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let rows = client
+                .list_routines()
+                .await
+                .map_err(|e| eyre::eyre!("list_routines: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for r in &rows {
+                println!("{:<32}  {} days    {}", r.name, r.days.0.len(), r.path);
+            }
+        }
+        WorkoutRoutineCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let r = resolve_routine_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", r.name);
+            println!("  id:    {}", r.id);
+            println!("  path:  {}", r.path);
+            for d in &r.days.0 {
+                println!("  day:   {}  ({} slots)", d.name, d.slots.len());
+            }
+        }
+        WorkoutRoutineCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let r = resolve_routine_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", r.name, r.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete_routine(r.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete_routine: {e:?}"))?;
+            println!("deleted {}", r.path);
+        }
+    }
+    Ok(())
+}
+
+async fn run_workout_session(cmd: WorkoutSessionCmd) -> eyre::Result<()> {
+    match cmd {
+        WorkoutSessionCmd::List {
+            date,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let parsed = match date {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--date: {e}"))?,
+                ),
+            };
+            let rows: Vec<_> = client
+                .list_sessions()
+                .await
+                .map_err(|e| eyre::eyre!("list_sessions: {e:?}"))?
+                .into_iter()
+                .filter(|s| parsed.is_none_or(|d| s.date == d))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for s in &rows {
+                println!(
+                    "{}  {:<24}  {} sets    {}",
+                    s.date,
+                    s.name,
+                    s.logged_sets.0.len(),
+                    s.path
+                );
+            }
+        }
+        WorkoutSessionCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let s = resolve_session_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&s).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} ({})\n", s.name, s.date);
+            println!("  id:    {}", s.id);
+            println!("  path:  {}", s.path);
+            for set in &s.logged_sets.0 {
+                let rpe = set.rpe.map(|r| format!(" @ rpe {r}")).unwrap_or_default();
+                println!(
+                    "    [{}] {}: {}x{}kg{rpe}",
+                    set.order, set.exercise_name, set.reps, set.weight_kg
+                );
+            }
+        }
+        WorkoutSessionCmd::StartFromRoutine {
+            routine,
+            day,
+            date,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let r = resolve_routine_target(&client, &routine).await?;
+            let date_str = date.unwrap_or_else(|| chrono::Local::now().date_naive().to_string());
+            let session = client
+                .start_from_routine(r.id.to_string(), day, date_str)
+                .await
+                .map_err(|e| eyre::eyre!("start_from_routine: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&session).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("started {} ({})", session.name, session.path);
+                println!("  id: {}", session.id);
+            }
+        }
+        WorkoutSessionCmd::LogSet {
+            session,
+            exercise,
+            reps,
+            weight,
+            rpe,
+            note,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let s = resolve_session_target(&client, &session).await?;
+            // Resolve the exercise to its id (auto-population
+            // of `exercise_name` happens server-side; we still
+            // pass a best-effort cache here).
+            let ec = connect_exercises_client(&u).await?;
+            let ex = resolve_exercise_target(&ec, &exercise).await?;
+            let order = u32::try_from(s.logged_sets.0.len()).unwrap_or(0);
+            let set = workouts::LoggedSet {
+                id: uuid::Uuid::new_v4(),
+                exercise_id: ex.id,
+                exercise_name: ex.name,
+                order,
+                reps,
+                weight_kg: weight,
+                rir: None,
+                rpe,
+                completed: true,
+                note,
+            };
+            let updated = client
+                .log_set(s.id.to_string(), set)
+                .await
+                .map_err(|e| eyre::eyre!("log_set: {e:?}"))?;
+            println!(
+                "logged set #{order} on {} ({} total sets)",
+                updated.name,
+                updated.logged_sets.0.len()
+            );
+        }
+        WorkoutSessionCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let s = resolve_session_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", s.name, s.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete_session(s.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete_session: {e:?}"))?;
+            println!("deleted {}", s.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Intake (intake::Store) ───────────────────────────────────────────
+
+async fn connect_intake_client(url: &str) -> eyre::Result<intake::IntakeServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_intake_target(
+    client: &intake::IntakeServiceClient,
+    target: &str,
+) -> eyre::Result<intake::IntakeLog> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|l| l.path == target || l.date.to_string() == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_intake(cmd: IntakeCmd) -> eyre::Result<()> {
+    match cmd {
+        IntakeCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for l in &rows {
+                println!(
+                    "{}  {:<24}  {} entries    {}",
+                    l.date,
+                    l.name,
+                    l.entries.0.len(),
+                    l.path
+                );
+            }
+        }
+        IntakeCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let l = resolve_intake_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&l).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} ({})\n", l.name, l.date);
+            println!("  id:    {}", l.id);
+            println!("  path:  {}", l.path);
+            for e in &l.entries.0 {
+                let slot = e.slot.as_deref().unwrap_or("?");
+                println!("    [{slot}] {}", e.name);
+            }
+        }
+        IntakeCmd::ForDay {
+            date,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let l = client
+                .for_day(date.clone())
+                .await
+                .map_err(|e| eyre::eyre!("for_day: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&l).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("{} ({})", l.name, l.date);
+                println!("  {} entries", l.entries.0.len());
+            }
+        }
+        IntakeCmd::LogRecipe {
+            date,
+            recipe,
+            servings,
+            slot,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let updated = client
+                .log_recipe(date, recipe, servings, slot)
+                .await
+                .map_err(|e| eyre::eyre!("log_recipe: {e:?}"))?;
+            println!(
+                "logged → {} entries on {}",
+                updated.entries.0.len(),
+                updated.date
+            );
+        }
+        IntakeCmd::LogPantry {
+            date,
+            item,
+            qty,
+            slot,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            // Resolve pantry path/name → id.
+            let pc = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&pc, &item).await?;
+            let updated = client
+                .log_pantry(date, p.id.to_string(), qty, slot)
+                .await
+                .map_err(|e| eyre::eyre!("log_pantry: {e:?}"))?;
+            println!(
+                "logged → {} entries on {}",
+                updated.entries.0.len(),
+                updated.date
+            );
+        }
+        IntakeCmd::LogFreeform {
+            date,
+            name,
+            kcal,
+            slot,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let nutrition = cookbook::Nutrition {
+                calories: kcal,
+                protein_g: None,
+                carbs_g: None,
+                fat_g: None,
+                fiber_g: None,
+                sugar_g: None,
+            };
+            let updated = client
+                .log_freeform(date, name, nutrition, slot)
+                .await
+                .map_err(|e| eyre::eyre!("log_freeform: {e:?}"))?;
+            println!(
+                "logged → {} entries on {}",
+                updated.entries.0.len(),
+                updated.date
+            );
+        }
+        IntakeCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let l = resolve_intake_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", l.name, l.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(l.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", l.path);
         }
     }
     Ok(())

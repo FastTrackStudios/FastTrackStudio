@@ -5,6 +5,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 use cookbook::Store as CookbookStore;
 use cookbook::{self, CookbookService};
 use pantry::{PantryService, Store as PantryStore};
@@ -104,6 +106,13 @@ fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
         .pages
         .iter()
         .position(|p| looks_like_meal(p) && parse_page(p).map(|m| m.id == id).unwrap_or(false))
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
+    }
 }
 
 impl MealplanService for Store {

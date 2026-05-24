@@ -37,7 +37,17 @@ pub use model::{
 };
 pub use parse::{ParseError, looks_like_pantry_item, parse_page};
 pub use scan::{expired, expiring_within, low_stock, scan_vault};
-pub use service::{BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService};
+pub use service::{
+    BarcodeResolution, ConsumeReceipt, EntryDebit, PantryError, PantryService, PantryServiceRpc,
+};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    PantryServiceClient, PantryServiceRpcDispatcher as PantryDispatcher,
+    Service as PantryServiceBridge, layer as pantry_service_layer,
+    pantry_service_rpc_service_descriptor as pantry_service_descriptor,
+    serve as serve_pantry_service,
+};
 pub use store::Store;
 pub use units::{CountUnit, MassUnit, PackageUnit, Unit, VolumeUnit, convert_str};
 pub use write::{WriteError, default_pantry_path, serialize_pantry_item, write_pantry_item};

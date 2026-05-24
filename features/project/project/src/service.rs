@@ -19,6 +19,10 @@ pub enum ProjectError {
     /// server.
     #[error("not found: {0}")]
     NotFound(String),
+    /// `create` collided with an existing file at the same
+    /// vault-relative path.
+    #[error("already exists: {0}")]
+    AlreadyExists(String),
     /// Caller asked for a malformed id or path.
     #[error("bad request: {0}")]
     BadRequest(String),
@@ -45,4 +49,25 @@ pub trait ProjectService {
     /// the link-resolution layer, which sees paths long
     /// before it sees ids.
     fn get_by_path(&self, path: &str) -> Result<ProjectInfo, ProjectError>;
+
+    /// Create a new project. The backend assigns
+    /// `project.path` (default `Projects/<slug>.md`) when empty
+    /// and `project.id` when nil. Returns the stored row.
+    /// `AlreadyExists` on path collision.
+    fn create(&self, project: ProjectInfo) -> Result<ProjectInfo, ProjectError>;
+
+    /// Replace the project whose `id` matches. `NotFound` when
+    /// unknown. Path mutations are ignored — rename via
+    /// [`Self::rename`] so backing-file moves are explicit.
+    fn update(&self, project: ProjectInfo) -> Result<ProjectInfo, ProjectError>;
+
+    /// Move the backing markdown file to a new vault-relative
+    /// path. `id` is preserved so downstream FKs (timer rows,
+    /// links from other vault pages) survive.
+    fn rename(&self, id: Uuid, new_path: &str) -> Result<ProjectInfo, ProjectError>;
+
+    /// Remove the backing file. `NotFound` if the id is
+    /// already gone. Refuses if any other project lists this
+    /// one as `parent_id`.
+    fn delete(&self, id: Uuid) -> Result<(), ProjectError>;
 }

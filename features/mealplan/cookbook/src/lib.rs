@@ -35,7 +35,15 @@ pub mod write;
 pub use model::{Course, Ingredient, Ingredients, Nutrition, Recipe, StringList};
 pub use parse::{ParseError, parse_cook, parse_cook_at};
 pub use scan::{COOKBOOK_DIR, RecipeImage, image_paths_for, scan_cookbook, scan_cookbook_at};
-pub use service::{CookbookError, CookbookService};
+pub use service::{CookbookError, CookbookService, CookbookServiceRpc};
 pub use store::Store;
+
+#[cfg(feature = "vox")]
+pub use service::{
+    CookbookServiceClient, CookbookServiceRpcDispatcher as CookbookDispatcher,
+    Service as CookbookServiceBridge,
+    cookbook_service_rpc_service_descriptor as cookbook_service_descriptor,
+    layer as cookbook_service_layer, serve as serve_cookbook_service,
+};
 pub use wiki::{WikiEdge, WikiEdgeKind, recipe_wiki_edges};
 pub use write::{WriteError, default_recipe_path, delete_cook, rename_cook, write_cook};

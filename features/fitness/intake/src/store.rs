@@ -15,6 +15,8 @@ use crate::parse::{looks_like_intake, parse_page};
 use crate::scan::scan_vault;
 use crate::service::{IntakeError, IntakeService};
 use crate::write::{default_intake_path, serialize_intake};
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 
 #[derive(Clone)]
 pub struct Store {
@@ -73,6 +75,13 @@ fn slot_to_opt(slot: &str) -> Option<String> {
         None
     } else {
         Some(slot.to_string())
+    }
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
     }
 }
 
