@@ -13309,6 +13309,14 @@ name = "moire-trace-capture"
 version = "1.0.0"
 
 [[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
+name = "session-ui"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "anyrender_svg"
 version = "0.6.3"
 source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
@@ -13427,11 +13435,3 @@ version = "1.0.0"
 name = "wgpu_context"
 version = "0.1.2"
 source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "session-ui"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
