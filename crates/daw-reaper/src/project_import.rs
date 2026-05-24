@@ -896,9 +896,10 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                         }
                         let region = &session.midi_regions[tr.region_index as usize];
 
-                        // Comp flatten: keep only this placement's notes (those
-                        // before the next clip on the track). See
-                        // `TrackRegion::note_trim_ticks`.
+                        // Comp flatten: keep only this placement's notes — those
+                        // within the clip's source window `[clip_lo, note_trim)`
+                        // (chunk-tick space). See `TrackRegion`.
+                        let clip_lo = tr.clip_lo_ticks;
                         let note_trim = tr.note_trim_ticks;
 
                         let position_secs = tr.start_pos as f64 / sample_rate;
@@ -929,7 +930,10 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                                 let region_end = region.length.max(FALLBACK_DUR);
 
                                 for (i, event) in region.events.iter().enumerate() {
-                                    if event.velocity == 0 || event.position >= note_trim {
+                                    if event.velocity == 0
+                                        || event.position < clip_lo
+                                        || event.position >= note_trim
+                                    {
                                         continue;
                                     }
                                     let dur = if event.duration > 0 {

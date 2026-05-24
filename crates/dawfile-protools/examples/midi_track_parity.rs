@@ -161,13 +161,13 @@ fn main() {
             .regions
             .iter()
             .map(|r| {
-                let trim = r.note_trim_ticks;
+                let (lo, hi) = (r.clip_lo_ticks, r.note_trim_ticks);
                 s.midi_regions
                     .get(r.region_index as usize)
                     .map(|reg| {
                         reg.events
                             .iter()
-                            .filter(|e| e.velocity > 0 && e.position < trim)
+                            .filter(|e| e.velocity > 0 && e.position >= lo && e.position < hi)
                             .count()
                     })
                     .unwrap_or(0)

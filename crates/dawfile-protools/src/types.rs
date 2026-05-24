@@ -187,9 +187,14 @@ pub struct MidiRegion {
     /// Clip timeline start in PT ticks (the three-point `start`). Used by the
     /// comp flatten to order a track's clips and cap overlaps.
     pub clip_start_ticks: u64,
-    /// Clip length in PT ticks (the three-point `length`). The events are
-    /// windowed by source-offset only (kept to the take end), so this is the
-    /// clip's nominal extent used by the comp flatten, not an events bound.
+    /// Clip source offset into the take in PT ticks (three-point `offset`,
+    /// minus the 1e12 base). `events` are the FULL chunk; the comp flatten
+    /// windows them per placement. When `clip_start_ticks == clip_src_ticks`
+    /// the clip sits at its natural position and plays the whole take (PT only
+    /// cuts off notes on clips that were actually trimmed).
+    pub clip_src_ticks: u64,
+    /// Clip length in PT ticks (the three-point `length`) — the clip's nominal
+    /// trimmed extent, used as the upper source bound for cut clips.
     pub clip_len_ticks: u64,
     /// MIDI events in this region.
     pub events: Vec<MidiEvent>,
@@ -444,11 +449,13 @@ pub struct TrackRegion {
     /// of `0x1050` payload. Field locations within `0x104f` partly
     /// verified (+25/+26 read as i16 LE `FE FF` = -2 for default).
     pub clip_color: Option<i16>,
-    /// Upper bound (exclusive, in clip-relative ticks) for MIDI events from
-    /// this placement's region. PT comps overlap clips; the flatten keeps only
-    /// notes before the next clip on the track (`min(clip_len, next_start -
-    /// start)`), the last clip uncapped (`u64::MAX`). Audio placements set
-    /// `u64::MAX` (no trim).
+    /// Lower bound (inclusive, in source-chunk ticks) for MIDI events from this
+    /// placement. `clip_src` for a trimmed clip, `0` for a full-take clip. Audio
+    /// placements set `0`.
+    pub clip_lo_ticks: u64,
+    /// Upper bound (exclusive, in source-chunk ticks) for MIDI events from this
+    /// placement: the clip's trimmed end and/or the comp boundary (the next
+    /// clip on the track). `u64::MAX` = play to take end. Audio sets `u64::MAX`.
     pub note_trim_ticks: u64,
 }
 

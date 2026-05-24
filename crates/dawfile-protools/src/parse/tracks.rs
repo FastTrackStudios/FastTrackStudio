@@ -205,6 +205,7 @@ fn assign_regions_old(
                 clip_flag_53: false,
                 clip_muted: false,
                 clip_color: None,
+                clip_lo_ticks: 0,
                 note_trim_ticks: u64::MAX,
             });
         }
@@ -378,6 +379,7 @@ fn collect_slot_regions(
                     clip_flag_53,
                     clip_color,
                     clip_muted,
+                    clip_lo_ticks: 0,
                     note_trim_ticks: u64::MAX,
                 });
             }

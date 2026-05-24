@@ -276,23 +276,14 @@ fn parse_midi_regions(
             (0u64, 0u64, u64::MAX)
         };
 
-        // Window the source chunk by source-offset ONLY (keep events from
-        // `clip_src` to the take end), rebased to the clip start. We do NOT cap
-        // by `clip_len` here: PT comps overlap clips, so the upper bound is the
-        // NEXT clip on the track — applied per-placement in `parse_midi_tracks`
-        // (the last clip plays to the take end). Capping by `clip_len` here
-        // would drop the trailing notes single-clip tracks keep.
+        // Keep the FULL source chunk (events stay at their chunk-relative tick
+        // positions). All windowing is done per-placement in `parse_midi_tracks`
+        // on the chunk-tick axis, because the same take can be referenced by
+        // several clips with different windows, and because PT only "cuts off"
+        // (excludes) notes for clips that were actually trimmed — a clip placed
+        // at its natural position (`clip_start == clip_src`) plays the whole take.
         let events = if chunk_idx < chunks.len() {
-            chunks[chunk_idx]
-                .events
-                .iter()
-                .filter(|e| e.position >= clip_src)
-                .map(|e| {
-                    let mut e = e.clone();
-                    e.position -= clip_src;
-                    e
-                })
-                .collect()
+            chunks[chunk_idx].events.clone()
         } else {
             Vec::new()
         };
@@ -317,6 +308,7 @@ fn parse_midi_regions(
             sample_offset: 0,
             length: region_length_samples,
             clip_start_ticks: clip_start,
+            clip_src_ticks: clip_src,
             clip_len_ticks: if clip_len == u64::MAX { 0 } else { clip_len },
             events,
         });
@@ -349,7 +341,7 @@ fn parse_midi_tracks(
     tempo_segments: &[TempoSegment],
     target_sample_rate: u32,
 ) -> Vec<Track> {
-    let _ = (rate_factor, tempo_segments, target_sample_rate);
+    let _ = rate_factor;
     let mut tracks = Vec::new();
 
     // Parse track definitions from 0x2519
@@ -438,40 +430,61 @@ fn parse_midi_tracks(
                 .unwrap_or_default();
             next_group += 1;
 
-            // Resolve each placement to (region_index, clip_start, clip_len),
-            // then sort by timeline start for the flatten.
-            let mut clips: Vec<(u16, u64, u64)> = group
+            // Resolve each placement to (region_index, start, src, len) and sort
+            // by timeline start for the comp flatten.
+            let mut clips: Vec<(u16, u64, u64, u64)> = group
                 .into_iter()
                 .filter_map(|ri| {
                     regions
                         .get(ri as usize)
-                        .map(|r| (ri, r.clip_start_ticks, r.clip_len_ticks))
+                        .map(|r| (ri, r.clip_start_ticks, r.clip_src_ticks, r.clip_len_ticks))
                 })
                 .collect();
             clips.sort_by_key(|c| c.1);
 
+            // A track with a single clip plays its whole take (no comp, no
+            // cut-off) — confirmed exact against the exports (Bass, Drums.dupN,
+            // Presence). A comp (multiple clips) windows each clip to its source
+            // span and caps it at the next clip on the track.
+            let single = clips.len() == 1;
+
             clips
                 .iter()
                 .enumerate()
-                .map(|(i, &(ri, start, len))| {
-                    // Boundary = the next clip whose start is STRICTLY greater
-                    // (clips sharing a start are stacked comp takes, not a
-                    // tiling boundary — capping at an equal start would zero
-                    // them out).
-                    let next_start = clips[i + 1..].iter().map(|c| c.1).find(|&s| s > start);
-                    let note_trim_ticks = match next_start {
-                        // Cap at the next clip's start, but never extend past
-                        // this clip's own length (preserves gaps between clips).
-                        Some(ns) => len.min(ns.saturating_sub(start)),
-                        // Last clip (by timeline): play to the take end.
-                        None => u64::MAX,
+                .map(|(i, &(ri, start, src, len))| {
+                    // Events are the full chunk at chunk-tick positions; bound
+                    // them in chunk-tick space.
+                    let (clip_lo_ticks, note_trim_ticks) = if single {
+                        (0, u64::MAX)
+                    } else {
+                        // Source window [src, src+len), then capped at the comp
+                        // boundary — the next clip with a strictly-greater start
+                        // (equal-start clips are stacked takes, not a boundary).
+                        // timeline = start + (chunk_pos - src), so the boundary
+                        // in chunk-tick space is `next_start - start + src`.
+                        let next_start = clips[i + 1..].iter().map(|c| c.1).find(|&s| s > start);
+                        let comp_hi = match next_start {
+                            Some(ns) => ns.saturating_sub(start).saturating_add(src),
+                            None => u64::MAX,
+                        };
+                        (src, src.saturating_add(len).min(comp_hi))
                     };
+
+                    // Item placement so a kept note at chunk_pos lands at
+                    // timeline `start + (chunk_pos - src)`.
+                    let placement_ticks = start.saturating_sub(src);
+
                     TrackRegion {
                         region_index: ri,
-                        start_pos: regions[ri as usize].start_pos,
+                        start_pos: tick_to_sample(
+                            placement_ticks,
+                            tempo_segments,
+                            target_sample_rate,
+                        ),
                         clip_flag_53: false,
                         clip_muted: false,
                         clip_color: None,
+                        clip_lo_ticks,
                         note_trim_ticks,
                     }
                 })
