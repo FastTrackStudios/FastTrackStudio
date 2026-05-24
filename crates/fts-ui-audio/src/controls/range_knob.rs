@@ -4,7 +4,7 @@
 //! them fills with the accent color. Vertical drag on the left half adjusts
 //! the min handle; right half adjusts the max handle.
 
-use crate::drag::{DragState, begin_drag};
+use crate::drag::{begin_drag, DragState};
 use crate::param::ParamHandle;
 use crate::theme::*;
 use dioxus::prelude::*;

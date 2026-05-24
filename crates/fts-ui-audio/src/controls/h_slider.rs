@@ -3,7 +3,7 @@
 //! Drag horizontally to adjust. Double-click resets to `default_value` when
 //! provided. Optional tick-mark and text-mark groups render along the track.
 
-use crate::drag::{DragAxis, DragState, begin_drag_axis};
+use crate::drag::{begin_drag_axis, DragAxis, DragState};
 use crate::marks::{TextMarkGroup, TickMarkGroup};
 use crate::param::ParamHandle;
 use crate::theme::*;

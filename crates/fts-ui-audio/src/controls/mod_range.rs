@@ -5,7 +5,7 @@
 //! handles drive the modulation range. Drag the base track horizontally; drag
 //! the small min/max marker thumbs to adjust the range.
 
-use crate::drag::{DragAxis, DragState, begin_drag_axis};
+use crate::drag::{begin_drag_axis, DragAxis, DragState};
 use crate::param::ParamHandle;
 use crate::theme::*;
 use dioxus::prelude::*;

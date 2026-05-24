@@ -8,7 +8,7 @@ use dioxus_primitives::toast::{
 };
 use std::time::Duration;
 
-pub use dioxus_primitives::toast::{ToastOptions, ToastType, Toasts, consume_toast, use_toast};
+pub use dioxus_primitives::toast::{consume_toast, use_toast, ToastOptions, ToastType, Toasts};
 
 use fts_story_runtime::story;
 
