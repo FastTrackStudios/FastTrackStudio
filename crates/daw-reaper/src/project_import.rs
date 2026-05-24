@@ -704,6 +704,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                         t = t.color(rgb);
                     }
+                    // Preserve PT track view height (px) so the track keeps its
+                    // shape on round-trip. 0 = not parsed → leave Reaper default.
+                    if track.height_px > 0 {
+                        t = t.height(track.height_px as i32);
+                    }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.audio_regions.len() {
                             continue;
@@ -881,6 +886,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     }
                     if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                         t = t.color(rgb);
+                    }
+                    // Preserve PT track view height (px) so the track keeps its
+                    // shape on round-trip. 0 = not parsed → leave Reaper default.
+                    if track.height_px > 0 {
+                        t = t.height(track.height_px as i32);
                     }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.midi_regions.len() {

@@ -856,6 +856,15 @@ impl TrackBuilder {
         self
     }
 
+    /// Set the track's TCP height in pixels (REAPER `TRACKHEIGHT`).
+    pub fn height(mut self, px: i32) -> Self {
+        self.track.track_height = Some(crate::types::track::TrackHeightSettings {
+            height: px,
+            folder_override: false,
+        });
+        self
+    }
+
     /// Set the track's automation mode (corresponds to REAPER's `AUTOMODE`
     /// line). PT-imported tracks default to [`AutomationMode::Read`] so
     /// REAPER plays back any imported automation envelopes; standalone

@@ -311,6 +311,13 @@ pub struct Track {
     /// every index 0..=255 through the official converter). See
     /// `daw_reaper::project_import::pt_color_to_rgb` and `PT_TRACK_PALETTE`.
     pub color_byte: u8,
+    /// Track view height in pixels, parsed from the `0x200b` block. Pro Tools
+    /// stores the height as a u16 right after the color field (new format:
+    /// color-frame + 10; older format: after `c0 00 00 00 00 01`). The eight
+    /// PT size presets are 16 (Micro), 23 (Mini), 43 (Small), 97 (Medium,
+    /// default), 192 (Large), 300 (Jumbo), 600 (Extreme), 684 (Fit). Maps
+    /// directly to Reaper's `TRACKHEIGHT`. `0` = not found / use default.
+    pub height_px: u16,
     /// Volume-automation breakpoints decoded from this track's `0x260a[0]`
     /// (the first `0x260a` child of the per-track `0x260d` wrapper).
     ///

@@ -618,8 +618,11 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
 
         let mut color_by_name: std::collections::HashMap<String, u8> =
             std::collections::HashMap::new();
+        let mut height_by_name: std::collections::HashMap<String, u16> =
+            std::collections::HashMap::new();
         // Scan a 0x200b block for the `01 <idx> 00 01 00 03` color frame.
-        fn find_color_index(data: &[u8], lo: usize, hi: usize) -> Option<u8> {
+        // Returns the position of the frame's leading `01`.
+        fn find_color_frame(data: &[u8], lo: usize, hi: usize) -> Option<usize> {
             let hi = hi.min(data.len());
             let mut p = lo;
             while p + 6 <= hi {
@@ -629,11 +632,32 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                     && data[p + 4] == 0x00
                     && data[p + 5] == 0x03
                 {
-                    return Some(data[p + 1]);
+                    return Some(p);
                 }
                 p += 1;
             }
             None
+        }
+
+        // Track view height (px), a u16 stored just after the color field.
+        // New format: at color-frame + 10. Older format: right after the
+        // `c0 00 00 00 00 01` marker. PT presets: 16/23/43/97/192/300/600/684.
+        fn find_height(data: &[u8], lo: usize, hi: usize, frame: Option<usize>) -> u16 {
+            let hi = hi.min(data.len());
+            if let Some(f) = frame {
+                if f + 12 <= hi {
+                    return u16::from_le_bytes([data[f + 10], data[f + 11]]);
+                }
+            }
+            const OLD: &[u8] = &[0xc0, 0, 0, 0, 0, 0x01];
+            let mut p = lo;
+            while p + OLD.len() + 2 <= hi {
+                if &data[p..p + OLD.len()] == OLD {
+                    return u16::from_le_bytes([data[p + 6], data[p + 7]]);
+                }
+                p += 1;
+            }
+            0
         }
 
         let aux_blocks = collect_blocks_recursive(&blocks, ContentType::TrackAuxState);
@@ -643,15 +667,20 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             // Newer sessions (PT 12+) frame the index as `01 <idx> 00 01 00 03`.
             // Older sessions store a 2-byte LE i16 at +106 (relative to the
             // block payload, i.e. `b.offset + 108`), where -2 = "no color".
-            let color = find_color_index(data, start, end).unwrap_or_else(|| {
-                let p = b.offset + 108;
-                if p + 2 <= data.len() {
-                    let val = i16::from_le_bytes([data[p], data[p + 1]]);
-                    if val < 0 { 0 } else { val as u8 }
-                } else {
-                    0
+            let frame = find_color_frame(data, start, end);
+            let color = match frame {
+                Some(f) => data[f + 1],
+                None => {
+                    let p = b.offset + 108;
+                    if p + 2 <= data.len() {
+                        let val = i16::from_le_bytes([data[p], data[p + 1]]);
+                        if val < 0 { 0 } else { val as u8 }
+                    } else {
+                        0
+                    }
                 }
-            });
+            };
+            let height = find_height(data, start, end, frame);
 
             // Walk up to 10 ancestors looking for a 0x2619 name anywhere
             // in the subtree.
@@ -671,19 +700,23 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             }
             if let Some(n) = name {
                 // First write wins — preserves the earliest (most-likely-live) entry
-                color_by_name.entry(n).or_insert(color);
+                color_by_name.entry(n.clone()).or_insert(color);
+                height_by_name.entry(n).or_insert(height);
             }
         }
 
         for t in audio_tracks.iter_mut() {
             if let Some(c) = color_by_name.get(&t.name) {
                 t.color_byte = *c;
+                t.height_px = height_by_name.get(&t.name).copied().unwrap_or(0);
             } else {
                 // Audio tracks store the base name ("Vocal Split"); 0x2619
                 // may carry the active-playlist name ("Vocal Split.01").
                 for suffix in [".01", ".02", ".03", ".04", ".05"] {
-                    if let Some(c) = color_by_name.get(&format!("{}{suffix}", t.name)) {
+                    let keyed = format!("{}{suffix}", t.name);
+                    if let Some(c) = color_by_name.get(&keyed) {
                         t.color_byte = *c;
+                        t.height_px = height_by_name.get(&keyed).copied().unwrap_or(0);
                         break;
                     }
                 }
@@ -692,6 +725,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         for t in midi_tracks.iter_mut() {
             if let Some(c) = color_by_name.get(&t.name) {
                 t.color_byte = *c;
+                t.height_px = height_by_name.get(&t.name).copied().unwrap_or(0);
             }
         }
     }
