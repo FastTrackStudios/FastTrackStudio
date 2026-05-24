@@ -77,40 +77,249 @@ impl ReviewBlockKind {
 /// ---END REVIEW---
 /// ```
 pub fn parse_ingest_blocks(response: &str) -> Result<IngestBlocks, AgentWikiError> {
-    let trimmed = response.trim_start();
-    if !trimmed.starts_with("---FILE:") && !trimmed.starts_with("---REVIEW:") {
-        return Err(AgentWikiError::MalformedResponse(
-            "expected the response to start with `---FILE:` (or `---REVIEW:`)",
-            response.chars().take(120).collect::<String>(),
-        ));
-    }
+    // Line-walker parser ported from nashsu/llm_wiki's
+    // `parseFileBlocks` hazard list — battle-tested against
+    // every shape real LLMs produce:
+    //
+    //   H1. CRLF line endings → normalize to LF up front.
+    //   H2. Stream truncation (missing close) → surface as
+    //       MalformedResponse rather than silent drop.
+    //   H3. Marker whitespace / case variants — `--- FILE: …`,
+    //       `---END FILE--- `, `---file: …`, etc. — all
+    //       accepted via case-insensitive line-anchored match.
+    //   H4. Preamble prose before the first block → skip.
+    //   H5. Literal `---END FILE---` inside a fenced code
+    //       block (the LLM writes about our format) →
+    //       fence-aware skip.
+    //   H6. Empty path → InvalidFileTarget error.
+    //
+    // Pure prose with NO openers still errors so we don't
+    // silently swallow a model that ignored the structured-
+    // output ask entirely.
+    let normalized = response.replace("\r\n", "\n");
+    let lines: Vec<&str> = normalized.lines().collect();
 
     let mut out = IngestBlocks {
         files: Vec::new(),
         reviews: Vec::new(),
     };
 
-    let mut cursor = 0usize;
-    while cursor < response.len() {
-        // Advance to the next `---FILE:` / `---REVIEW:` header.
-        let after = &response[cursor..];
-        if let Some(file_start_rel) = after.find("---FILE:") {
-            // Anything before this is filler between blocks.
-            let block_start = cursor + file_start_rel;
-            let (block, end) = parse_one(response, block_start, "---FILE:", "---END FILE---")?;
-            out.files.push(parse_file_block(block)?);
-            cursor = end;
-        } else if let Some(rev_start_rel) = after.find("---REVIEW:") {
-            let block_start = cursor + rev_start_rel;
-            let (block, end) = parse_one(response, block_start, "---REVIEW:", "---END REVIEW---")?;
-            out.reviews.push(parse_review_block(block)?);
-            cursor = end;
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(path) = match_file_opener(lines[i]) {
+            i += 1;
+            let (content, consumed) = collect_until_close(&lines[i..], "FILE")?;
+            i += consumed;
+            out.files.push(parse_file_block_lines(&path, &content)?);
+        } else if let Some((kind_raw, title)) = match_review_opener(lines[i]) {
+            i += 1;
+            let (content, consumed) = collect_until_close(&lines[i..], "REVIEW")?;
+            i += consumed;
+            out.reviews
+                .push(parse_review_block_lines(&kind_raw, &title, &content)?);
         } else {
-            break;
+            // Skip prose / preamble / inter-block filler.
+            i += 1;
         }
     }
 
+    if out.files.is_empty() && out.reviews.is_empty() {
+        return Err(AgentWikiError::MalformedResponse(
+            "no `---FILE:` / `---REVIEW:` blocks found in response",
+            response.chars().take(120).collect::<String>(),
+        ));
+    }
     Ok(out)
+}
+
+/// Match a line-anchored `---FILE: <path>---` opener
+/// (case-insensitive, whitespace-tolerant). Returns the
+/// extracted path on success.
+fn match_file_opener(line: &str) -> Option<String> {
+    let l = line.trim();
+    let lower = l.to_ascii_lowercase();
+    let rest = lower.strip_prefix("---")?.trim_start();
+    if !rest.starts_with("file:") {
+        return None;
+    }
+    // Slice the original (case-preserving) line at the same offsets.
+    let after_prefix = l[3..].trim_start();
+    let after_file = after_prefix
+        .get(5..)? // "file:" (case-insensitive — we know matched)
+        .trim_start();
+    let trimmed = after_file.trim_end();
+    // Strip the trailing `---` (with optional whitespace).
+    let path = trimmed.trim_end_matches('-').trim();
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.to_string())
+}
+
+/// Match a line-anchored `---REVIEW: <kind> | <title>---`
+/// opener. Returns `(kind, title)`.
+fn match_review_opener(line: &str) -> Option<(String, String)> {
+    let l = line.trim();
+    let lower = l.to_ascii_lowercase();
+    let rest = lower.strip_prefix("---")?.trim_start();
+    if !rest.starts_with("review:") {
+        return None;
+    }
+    let after_prefix = l[3..].trim_start();
+    let after_review = after_prefix
+        .get(7..)? // "review:"
+        .trim_start()
+        .trim_end()
+        .trim_end_matches('-')
+        .trim();
+    let (kind, title) = after_review
+        .split_once('|')
+        .map(|(k, t)| (k.trim().to_string(), t.trim().to_string()))
+        .unwrap_or_else(|| (after_review.to_string(), String::new()));
+    Some((kind, title))
+}
+
+/// True if the line is a line-anchored close marker for
+/// `kind` (either `FILE` or `REVIEW`). Matches `---END FILE---`,
+/// `--- end file ---`, etc.
+fn is_close_marker(line: &str, kind: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    let stripped = match lower.strip_prefix("---") {
+        Some(s) => s.trim_start(),
+        None => return false,
+    };
+    let after_end = match stripped.strip_prefix("end") {
+        Some(s) => s.trim_start(),
+        None => return false,
+    };
+    let kind_lower = kind.to_ascii_lowercase();
+    let after_kind = match after_end.strip_prefix(kind_lower.as_str()) {
+        Some(s) => s,
+        None => return false,
+    };
+    after_kind.trim().trim_end_matches('-').trim().is_empty()
+}
+
+/// Match a CommonMark code-fence open / close. Returns
+/// `Some(("```", 3))` for a `\`\`\`rust` line or similar.
+/// Allows up to 3 leading spaces (CommonMark fence rule).
+fn match_fence_open(line: &str) -> Option<(char, usize)> {
+    let leading = line.chars().take_while(|c| *c == ' ').count();
+    if leading > 3 {
+        return None;
+    }
+    let body = &line[leading..];
+    let first = body.chars().next()?;
+    if first != '`' && first != '~' {
+        return None;
+    }
+    let run = body.chars().take_while(|c| *c == first).count();
+    if run < 3 {
+        return None;
+    }
+    Some((first, run))
+}
+
+/// Walk `lines` collecting content until the close marker
+/// for `kind`. Tracks fence depth so a literal close marker
+/// quoted inside a code fence doesn't end the block early
+/// (nashsu's H5).
+fn collect_until_close(lines: &[&str], kind: &str) -> Result<(Vec<String>, usize), AgentWikiError> {
+    let mut content = Vec::new();
+    let mut fence_char: Option<char> = None;
+    let mut fence_len = 0usize;
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        // Fence state update.
+        if let Some((ch, run)) = match_fence_open(line) {
+            match fence_char {
+                None => {
+                    fence_char = Some(ch);
+                    fence_len = run;
+                }
+                Some(open_ch) if open_ch == ch && run >= fence_len => {
+                    fence_char = None;
+                    fence_len = 0;
+                }
+                _ => {}
+            }
+        }
+        if fence_char.is_none() && is_close_marker(line, kind) {
+            return Ok((content, i + 1));
+        }
+        content.push(line.to_string());
+        i += 1;
+    }
+    Err(AgentWikiError::MalformedResponse(
+        "missing close marker",
+        content
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
+}
+
+fn parse_file_block_lines(path_raw: &str, content: &[String]) -> Result<FileBlock, AgentWikiError> {
+    if path_raw.is_empty() {
+        return Err(AgentWikiError::InvalidFileTarget(
+            path_raw.to_string(),
+            "empty path",
+        ));
+    }
+    let path = path_raw
+        .strip_prefix("wiki/")
+        .or_else(|| path_raw.strip_prefix("Wiki/"))
+        .unwrap_or(path_raw)
+        .to_string();
+    if path.is_empty() || path.contains("..") {
+        return Err(AgentWikiError::InvalidFileTarget(
+            path,
+            "must be wiki-relative, no `..` allowed",
+        ));
+    }
+    let body = content.join("\n");
+    Ok(FileBlock {
+        path,
+        content: body.trim_end_matches('\n').to_string() + "\n",
+    })
+}
+
+fn parse_review_block_lines(
+    kind_raw: &str,
+    title: &str,
+    content: &[String],
+) -> Result<ReviewBlock, AgentWikiError> {
+    let kind = ReviewBlockKind::parse(kind_raw)?;
+    let mut description = String::new();
+    let mut options: Vec<String> = Vec::new();
+    let mut pages: Vec<String> = Vec::new();
+    let mut search_queries: Vec<String> = Vec::new();
+    for line in content {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("OPTIONS:") {
+            options = rest.split('|').map(|s| s.trim().to_string()).collect();
+        } else if let Some(rest) = l.strip_prefix("PAGES:") {
+            pages = rest.split(',').map(|s| s.trim().to_string()).collect();
+        } else if let Some(rest) = l.strip_prefix("SEARCH:") {
+            search_queries = rest.split('|').map(|s| s.trim().to_string()).collect();
+        } else if !l.is_empty() {
+            if !description.is_empty() {
+                description.push('\n');
+            }
+            description.push_str(line);
+        }
+    }
+    Ok(ReviewBlock {
+        kind,
+        title: title.to_string(),
+        description,
+        options,
+        pages,
+        search_queries,
+    })
 }
 
 /// Return the slice between the open header at `start`
@@ -133,6 +342,7 @@ fn parse_one<'a>(
     Ok((&src[start..end], end))
 }
 
+#[allow(dead_code)] // Replaced by line-walker; kept for any future direct callers.
 fn parse_file_block(raw: &str) -> Result<FileBlock, AgentWikiError> {
     // Strip the header line.
     let rest = raw
@@ -184,6 +394,7 @@ fn parse_file_block(raw: &str) -> Result<FileBlock, AgentWikiError> {
     })
 }
 
+#[allow(dead_code)] // Replaced by line-walker; kept for any future direct callers.
 fn parse_review_block(raw: &str) -> Result<ReviewBlock, AgentWikiError> {
     let rest = raw
         .strip_prefix("---REVIEW:")
@@ -546,8 +757,82 @@ Body.
     }
 
     #[test]
-    fn rejects_non_block_start() {
+    fn accepts_preamble_before_first_block() {
+        // Real LLMs often emit 1-2 sentences of preface even
+        // when told to start with `-`. Treat that as harmless;
+        // the parser advances to the first `---FILE:` header.
         let resp = "Sure! Here are the files:\n\n---FILE: wiki/foo.md---\nbody\n---END FILE---";
+        let parsed = parse_ingest_blocks(resp).expect("should accept preamble");
+        assert_eq!(parsed.files.len(), 1);
+        assert_eq!(parsed.files[0].path, "foo.md");
+    }
+
+    // ── Ported nashsu/llm_wiki hazards ──────────────────────
+
+    #[test]
+    fn h1_normalizes_crlf() {
+        // Windows line endings would defeat a regex anchored
+        // on bare `\n`. Normalize early.
+        let resp = "---FILE: foo.md---\r\nbody line 1\r\nbody line 2\r\n---END FILE---\r\n";
+        let parsed = parse_ingest_blocks(resp).unwrap();
+        assert_eq!(parsed.files.len(), 1);
+        assert!(parsed.files[0].content.contains("body line 1"));
+        assert!(parsed.files[0].content.contains("body line 2"));
+    }
+
+    #[test]
+    fn h3_marker_whitespace_and_case() {
+        // Real LLMs emit lots of small variants. All should
+        // parse — `--- FILE: foo.md ---`, `---file: bar.md---`,
+        // `---END FILE--- ` (trailing space).
+        let resp = "--- FILE: foo.md ---\nbody\n---END FILE--- \n\n---file: bar.md---\nbody2\n--- end file ---\n";
+        let parsed = parse_ingest_blocks(resp).unwrap();
+        assert_eq!(parsed.files.len(), 2);
+        assert_eq!(parsed.files[0].path, "foo.md");
+        assert_eq!(parsed.files[1].path, "bar.md");
+    }
+
+    #[test]
+    fn h5_fenced_close_marker_does_not_close_outer_block() {
+        // When the LLM is writing a wiki page ABOUT our ingest
+        // format, the literal `---END FILE---` inside a code
+        // fence MUST NOT close the outer block. nashsu's H5.
+        let resp = "---FILE: docs/ingest-format.md---\n# Format\n\n```\nresponse = \"---FILE: x.md---\\nbody\\n---END FILE---\"\n```\n\nMore prose after the fence.\n---END FILE---\n";
+        let parsed = parse_ingest_blocks(resp).unwrap();
+        assert_eq!(parsed.files.len(), 1);
+        assert!(
+            parsed.files[0]
+                .content
+                .contains("More prose after the fence")
+        );
+    }
+
+    #[test]
+    fn h2_missing_close_marker_errors() {
+        // Stream truncation should surface as an error, not
+        // silently drop the block.
+        let resp = "---FILE: foo.md---\nbody with no close marker\n";
+        let err = parse_ingest_blocks(resp).unwrap_err();
+        assert!(matches!(
+            err,
+            AgentWikiError::MalformedResponse("missing close marker", _)
+        ));
+    }
+
+    #[test]
+    fn h6_empty_path_errors() {
+        let resp = "---FILE: ---\nbody\n---END FILE---\n";
+        // Empty path between `FILE:` and `---` — opener match
+        // would yield an empty string; we reject pre-walk so
+        // the line isn't treated as an opener at all.
+        assert!(parse_ingest_blocks(resp).is_err());
+    }
+
+    #[test]
+    fn rejects_pure_prose() {
+        // Still error when there are no blocks at all — that
+        // means the LLM ignored the structured-output ask.
+        let resp = "I'm checking the existing wiki pages now…";
         assert!(parse_ingest_blocks(resp).is_err());
     }
 }

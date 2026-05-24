@@ -160,11 +160,19 @@ pub async fn run_ingest(
 
     // Guaranteed source-summary fallback (matches
     // nashsu/llm_wiki's "always create wiki/sources/<slug>.md
-    // even if the LLM omits it" behavior). Without this, a
-    // mis-formatted LLM response can drop the source pointer
-    // and downstream sweeps eventually reap orphans.
+    // even if the LLM omits it" behavior). Two guards:
+    //   1. Skip if the LLM already named the page in its
+    //      FILE blocks (drafts already covers it).
+    //   2. Skip if the page already exists on disk — Codex
+    //      may have written it directly via tool use during
+    //      the turn, in which case we should NOT clobber with
+    //      a stub.
+    // Without these, a mis-formatted LLM response can drop
+    // the source pointer and downstream sweeps eventually
+    // reap orphans.
     let summary_path = format!("wiki/sources/{source_basename}.md");
-    if !drafts.iter().any(|d| d.path == summary_path) {
+    let summary_exists_on_disk = wiki.vault_root().join(&summary_path).exists();
+    if !drafts.iter().any(|d| d.path == summary_path) && !summary_exists_on_disk {
         let title = if req.source_title.is_empty() {
             req.source_filename.clone()
         } else {
