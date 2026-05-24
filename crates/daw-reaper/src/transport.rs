@@ -151,13 +151,16 @@ fn time_to_musical_position(
     time_seconds: f64,
 ) -> daw_proto::primitives::MusicalPosition {
     let Some(pos) = PositionInSeconds::new(time_seconds).ok() else {
-        return daw_proto::primitives::MusicalPosition::new(1, 1, 0);
+        return daw_proto::primitives::MusicalPosition::ZERO;
     };
     let result = medium.time_map_2_time_to_beats(reaper_ctx, pos);
-    let measure_offset = project.measure_offset();
-    let measure = result.measure_index + measure_offset + 1;
+    // Store 0-based (the proto convention — Display adds +1 to render
+    // REAPER's familiar 1-based bars:beats). `measure_offset` is the
+    // `projmeasoffs` adjustment; it's applied at storage time so any
+    // arithmetic on these MusicalPositions stays correct.
+    let measure = result.measure_index + project.measure_offset();
     let beats_since = result.beats_since_measure.get();
-    let beat = beats_since.floor() as i32 + 1;
+    let beat = beats_since.floor() as i32;
     let subdivision = ((beats_since.fract()) * 1000.0).round() as i32;
     daw_proto::primitives::MusicalPosition::new(measure, beat, subdivision.clamp(0, 999))
 }
@@ -572,40 +575,15 @@ pub fn poll_and_broadcast_transport() {
         let state = read_transport_state_for_project(&project, reaper_ctx, medium);
 
         if want_position {
-            let playhead_seconds = state
-                .playhead_position
-                .time
-                .map(|t| t.as_seconds())
-                .unwrap_or(0.0);
-            let edit_cursor_seconds = state
-                .edit_position
-                .time
-                .map(|t| t.as_seconds())
-                .unwrap_or(0.0);
-            let qn = position_qn(medium, result.project, playhead_seconds);
-            let edit_qn = position_qn(medium, result.project, edit_cursor_seconds);
-            // Reuse the already-computed musical positions from the
-            // transport-state read; those apply `projmeasoffs` via
-            // `time_to_musical_position`. Falling back to ZERO is fine —
-            // it just means the conversion failed (e.g. invalid time),
-            // and the subscriber will see a stale bar/beat for that tick.
-            let playhead_musical = state
-                .playhead_position
-                .musical
-                .unwrap_or(daw_proto::primitives::MusicalPosition::ZERO);
-            let edit_cursor_musical = state
-                .edit_position
-                .musical
-                .unwrap_or(daw_proto::primitives::MusicalPosition::ZERO);
+            // `state` already carries both representations on each
+            // cursor's Position struct — reuse them straight through
+            // (musical is computed by `time_to_musical_position` which
+            // applies `projmeasoffs`).
             hub.publish_position(PositionTick {
                 project_guid: project_guid.clone(),
-                playhead_seconds,
-                playhead_qn: qn,
+                playhead: state.playhead_position.clone(),
+                edit_cursor: state.edit_position.clone(),
                 is_playing: state.is_playing(),
-                edit_cursor_seconds,
-                edit_cursor_qn: edit_qn,
-                playhead_musical,
-                edit_cursor_musical,
             });
         }
 
@@ -628,6 +606,7 @@ pub fn poll_and_broadcast_transport() {
 /// Quarter-note position for `tpos_seconds` within `project`. Uses
 /// `TimeMap2_timeToBeats` which returns the full-beats value REAPER
 /// considers canonical for the project's tempo map.
+#[allow(dead_code)]
 fn position_qn(medium: &reaper_medium::Reaper, project: ReaProject, tpos_seconds: f64) -> f64 {
     // `PositionInSeconds::new` rejects NaN; fall back to 0 if the
     // backend hands us something unrepresentable.
