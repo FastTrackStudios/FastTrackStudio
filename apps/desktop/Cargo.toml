@@ -16,6 +16,12 @@ session-cli.workspace = true
 # Vox RPC (gateway link/dispatch + connection)
 vox.workspace = true
 
+# DAW facade — Tools page uses daw::reaper::project_import for PTX→RPP conversion
+daw = { workspace = true, features = ["reaper"] }
+
+# Native file dialogs for the Tools page
+rfd = "0.17"
+
 # WebSocket gateway
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }

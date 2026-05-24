@@ -10,6 +10,13 @@ use session_ui::{ConnectionState, Session, SessionShell};
 
 mod gateway;
 mod services;
+mod tools;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Session,
+    Tools,
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -123,8 +130,40 @@ fn DesktopShell() -> Element {
         }
     });
 
+    let mut tab = use_signal(|| Tab::Session);
+    let tab_class = |active: bool| {
+        if active {
+            "px-3 py-1.5 text-sm rounded-md bg-neutral-200 font-medium"
+        } else {
+            "px-3 py-1.5 text-sm rounded-md hover:bg-neutral-100 opacity-70"
+        }
+    };
+
     rsx! {
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
-        SessionShell { connection_state }
+        div { class: "flex flex-col h-screen",
+            nav { class: "flex gap-1 px-3 py-2 border-b border-neutral-200 shrink-0",
+                button {
+                    class: tab_class(tab() == Tab::Session),
+                    onclick: move |_| tab.set(Tab::Session),
+                    "Session"
+                }
+                button {
+                    class: tab_class(tab() == Tab::Tools),
+                    onclick: move |_| tab.set(Tab::Tools),
+                    "Tools"
+                }
+            }
+            div { class: "flex-1 min-h-0 overflow-auto",
+                // SessionShell stays mounted across tab switches so its
+                // connection/event state isn't torn down; Tools is shown on top.
+                div { class: if tab() == Tab::Session { "h-full" } else { "hidden" },
+                    SessionShell { connection_state }
+                }
+                if tab() == Tab::Tools {
+                    tools::ToolsPage {}
+                }
+            }
+        }
     }
 }
