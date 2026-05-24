@@ -59,6 +59,34 @@ pub struct ProToolsSession {
     /// separately from the audio/MIDI track lists. Decoded from `0x261e`
     /// blocks; see [`InternalTrack`].
     pub internal_tracks: Vec<InternalTrack>,
+    /// Per-instance plugin state blobs extracted from the session, keyed by
+    /// the owning track name. Currently detects instruments whose state is a
+    /// self-contained, format-portable blob (e.g. Omnisphere). See
+    /// [`PluginInstanceState`].
+    pub plugin_states: Vec<PluginInstanceState>,
+}
+
+/// Which plugin a [`PluginInstanceState`] blob belongs to. Determines how the
+/// converter re-wraps the blob for the target host (Reaper VST3/AU).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginStateKind {
+    /// Spectrasonics Omnisphere (also hosts Keyscape / Trilian / Stylus
+    /// libraries). State is the `<SynthMaster …>` XML document.
+    Omnisphere,
+}
+
+/// A single plugin instance's saved state, extracted from the PT session and
+/// tagged with its owning track so the converter can re-emit it on the
+/// matching Reaper track.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginInstanceState {
+    /// Name of the track that hosts this plugin instance.
+    pub track_name: String,
+    /// Which plugin this state belongs to.
+    pub kind: PluginStateKind,
+    /// The raw, format-portable state blob (for Omnisphere, the
+    /// `<SynthMaster …>…</SynthMaster>` XML bytes).
+    pub state: Vec<u8>,
 }
 
 /// An "internal" PT track — anything that's not an audio or MIDI playback
@@ -184,6 +212,22 @@ pub struct MidiRegion {
     pub sample_offset: u64,
     /// Length of the region (in samples at target rate).
     pub length: u64,
+    /// Clip timeline start in PT ticks (the three-point `start`). Used by the
+    /// comp flatten to order a track's clips and cap overlaps.
+    pub clip_start_ticks: u64,
+    /// Clip source offset into the take in PT ticks (three-point `offset`,
+    /// minus the 1e12 base). `events` are the FULL chunk; the comp flatten
+    /// windows them per placement. When `clip_start_ticks == clip_src_ticks`
+    /// the clip sits at its natural position and plays the whole take (PT only
+    /// cuts off notes on clips that were actually trimmed).
+    pub clip_src_ticks: u64,
+    /// Clip length in PT ticks (the three-point `length`) — the clip's nominal
+    /// trimmed extent, used as the upper source bound for cut clips.
+    pub clip_len_ticks: u64,
+    /// The take's timeline offset in PT ticks (`chunk.zero_ticks - ZERO_TICKS`).
+    /// Note positions are chunk-relative; the timeline position of a note is
+    /// `take_offset_ticks + position + (clip_start_ticks - clip_src_ticks)`.
+    pub take_offset_ticks: u64,
     /// MIDI events in this region.
     pub events: Vec<MidiEvent>,
 }
@@ -284,18 +328,24 @@ pub struct Track {
     /// unassigned or the block omits a destination (the 61-byte variant
     /// — payload begins `ff ff 01 01 ...`).
     pub output: String,
-    /// Pro Tools color palette byte from `0x200b +163`.
+    /// Pro Tools track color palette index.
     ///
-    /// Encodes a (column, row) position in PT's 23-column × 3-row color
-    /// palette. `0` means "no color" / default. Otherwise:
+    /// Parsed from the `0x200b` (TrackAuxState) block: newer sessions frame
+    /// it as `01 <idx> 00 01 00 03`; older sessions store it as an i16 at
+    /// payload `+106` (`0xfffe` / -2 = no color, normalized to `0` here).
+    /// `0` means "no color" / Reaper default.
     ///
-    /// - `(byte - 2) / 24` = row (0 = lightest, 2 = darkest)
-    /// - `(byte - 2) % 24` = hue column (0..22, sweeping the color wheel
-    ///   starting from dark blue)
-    ///
-    /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
-    /// to REAPER's u32 RGB.
+    /// The index→RGB mapping is PT's genuine palette (recovered by sweeping
+    /// every index 0..=255 through the official converter). See
+    /// `daw_reaper::project_import::pt_color_to_rgb` and `PT_TRACK_PALETTE`.
     pub color_byte: u8,
+    /// Track view height in pixels, parsed from the `0x200b` block. Pro Tools
+    /// stores the height as a u16 right after the color field (new format:
+    /// color-frame + 10; older format: after `c0 00 00 00 00 01`). The eight
+    /// PT size presets are 16 (Micro), 23 (Mini), 43 (Small), 97 (Medium,
+    /// default), 192 (Large), 300 (Jumbo), 600 (Extreme), 684 (Fit). Maps
+    /// directly to Reaper's `TRACKHEIGHT`. `0` = not found / use default.
+    pub height_px: u16,
     /// Volume-automation breakpoints decoded from this track's `0x260a[0]`
     /// (the first `0x260a` child of the per-track `0x260d` wrapper).
     ///
@@ -315,6 +365,12 @@ pub struct Track {
     ///
     /// Empty when the track has no automation envelope.
     pub mute_automation: Vec<MuteAutomationBreakpoint>,
+    /// Pan-automation breakpoints decoded from `0x260d > 0x260c[0] >
+    /// 0x260a[0]` (pan lives one level deeper than volume/mute, under a
+    /// `0x260c` sub-wrapper). Same 6-byte layout as volume: `u32 LE
+    /// time_samples + i16 LE value`, where `value` is pan × 100 (−100..100,
+    /// left→right). Empty when the track has no pan envelope.
+    pub pan_automation: Vec<PanAutomationBreakpoint>,
     /// Hierarchy / grouping marker decoded from `0x251a` payload byte
     /// (immediately after the length-prefixed track name).
     ///
@@ -358,6 +414,10 @@ pub struct Track {
     /// per-track `0x261c > 0x200b > 0x200a > 0x2015` block (e.g. "Demo Vox
     /// STEM STRETCHED to 92 BPM", "U-47"). Empty when the track has no comment.
     pub comment: String,
+    /// `true` for PT's Master track (`0x2519` kind byte `0x05`). It maps to
+    /// REAPER's dedicated master track, not a regular track, so the converter
+    /// must not emit it as a `<TRACK` (which would become a bus/folder parent).
+    pub is_master: bool,
 }
 
 /// A single breakpoint in a volume-automation envelope.
@@ -370,6 +430,15 @@ pub struct VolumeAutomationBreakpoint {
     pub time_samples: u32,
     /// Volume in 0.1 dB units (centibel). `0` = unity; `-60` = -6 dB.
     pub value_centibel: i16,
+}
+
+/// A single breakpoint in a pan-automation envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PanAutomationBreakpoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// Pan × 100 (−100 = full left, 0 = center, 100 = full right).
+    pub value: i16,
 }
 
 /// A single breakpoint in a mute-automation envelope.
@@ -407,6 +476,11 @@ pub struct FadeRegion {
     pub out_length: u64,
     /// Curve shape: `1` = linear, `2` = equal power, `3` = equal gain.
     pub shape: u8,
+    /// Curve linearity flag (`0x262f` byte after `shape`): `0` = linear,
+    /// non-zero = a non-linear (curved) fade. PT/the converter collapses all
+    /// non-linear Reaper curves to a single value here, so only linear-vs-
+    /// curved is recoverable (map non-linear → Bezier, like the official tool).
+    pub curve: u8,
     /// Index into the per-session fade-definition list (`0x262f` blocks in
     /// document order). Useful for cross-referencing or debugging.
     pub fade_index: u32,
@@ -444,12 +518,20 @@ pub struct TrackRegion {
     /// Per-clip color palette index from the inner `0x104f` sub-block
     /// at payload `+16..+17` (i16 LE). `None` = no `0x104f` child
     /// present. `Some(-2)` = default/no color. Other values map to
-    /// the same 23×3 PT palette as `Track.color_byte`.
+    /// the same PT palette as `Track.color_byte`.
     ///
     /// Discovered via Frida byte-read trace; `0x104f` lives at start
     /// of `0x1050` payload. Field locations within `0x104f` partly
     /// verified (+25/+26 read as i16 LE `FE FF` = -2 for default).
     pub clip_color: Option<i16>,
+    /// Lower bound (inclusive, in source-chunk ticks) for MIDI events from this
+    /// placement. `clip_src` for a trimmed clip, `0` for a full-take clip. Audio
+    /// placements set `0`.
+    pub clip_lo_ticks: u64,
+    /// Upper bound (exclusive, in source-chunk ticks) for MIDI events from this
+    /// placement: the clip's trimmed end and/or the comp boundary (the next
+    /// clip on the track). `u64::MAX` = play to take end. Audio sets `u64::MAX`.
+    pub note_trim_ticks: u64,
 }
 
 /// A single constant-tempo segment on the session timeline.

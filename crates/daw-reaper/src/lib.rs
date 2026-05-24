@@ -64,6 +64,7 @@ pub mod main_thread;
 pub mod marker;
 pub mod midi;
 pub mod peak;
+pub mod plugin_bridge;
 pub mod plugin_loader;
 pub mod position_conversion;
 pub mod project;

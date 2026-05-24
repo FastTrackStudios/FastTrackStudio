@@ -1007,21 +1007,26 @@ fn rename_all_track_name_occurrences(session: &mut RawSession, old_name: &str, n
 }
 
 fn patch_color(session: &mut RawSession, color: u8) {
+    // The track color lives in each TrackAuxState (0x200b) block as an i16
+    // inside the frame `01 <color:i16> 01 .. 01 <height:u16>` — an `0x01`
+    // byte at relative offsets +0, +3, +9 (see the parser's `find_color_frame`
+    // for the version-independent signature). The color i16 is at frame + 1
+    // (-2 / 0xfffe = "no color"). The offset varies, so scan for the frame.
+    let ranges: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x200b)
+        .iter()
+        .map(|b| (b.start, b.start + 11 + b.block_size as usize))
+        .collect();
     let color_i16 = if color == 0 { -2i16 } else { color as i16 };
-    let bytes = color_i16.to_le_bytes();
-    // 0x200b +106..+107
-    for ct in [0x200b, 0x200a, 0x2015] {
-        let offset_in_payload = match ct {
-            0x200b => 106,
-            0x200a => 97,
-            0x2015 => 88,
-            _ => continue,
-        };
-        for b in collect_by_raw_ct(&session.blocks, ct) {
-            let p = b.start + 9 + offset_in_payload;
-            if p + 2 <= session.data.len() {
-                session.data[p..p + 2].copy_from_slice(&bytes);
+    for (lo, hi) in ranges {
+        let hi = hi.min(session.data.len());
+        let mut p = lo;
+        while p + 12 <= hi {
+            let d = &session.data;
+            if d[p] == 0x01 && d[p + 3] == 0x01 && d[p + 9] == 0x01 {
+                session.data[p + 1..p + 3].copy_from_slice(&color_i16.to_le_bytes());
+                break;
             }
+            p += 1;
         }
     }
 }

@@ -23,13 +23,16 @@ pub mod block_ops;
 pub mod edit_groups;
 pub mod from_rpp;
 pub mod internal_tracks;
+pub mod midi;
 pub mod native;
+pub mod registry;
 pub mod splice;
 
 // Re-export the shared error type under both its native name and the
 // legacy alias for backwards compatibility with the from_rpp module.
 pub use from_rpp::WriteError as RppToPtxError;
 pub use from_rpp::{WriteError, find_converter_binary, rpp_to_ptx_via_converter};
+pub use midi::{ChunkNote, MidiTrackInput, inject_midi};
 pub use native::{NativeTrackSpec, write_single_track_ptx};
 
 use crate::content_type::ContentType;

@@ -17,6 +17,7 @@ pub mod midi;
 pub mod mix_aux;
 pub mod mute_automation;
 pub mod mute_resolver;
+pub mod plugin_states;
 pub mod plugins;
 pub mod regions;
 pub mod solo;
@@ -558,27 +559,32 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
-    // Step 12c: Decode per-track color palette index from 0x200b +106..+107.
+    // Step 12c: Decode per-track color palette index and view height from
+    // the 0x200b (TrackAuxState) block.
     //
-    // The color is a 2-byte LE i16: -2 (= 0xfffe) means "default / no
-    // color", any non-negative value is a palette index (mapped to RGB
-    // via the table in `docs/pt-color-palette-ground-truth.md`).
+    // Color: a palette index framed by `01 <idx> 00 01 00 03` (newer
+    // sessions) or a 2-byte LE i16 at payload +106 (older sessions, -2 =
+    // none). The frame's byte offset varies per track, so we scan for it.
+    // The index maps to RGB via the PT palette (see
+    // `daw_reaper::project_import::pt_color_to_rgb`), derived by sweeping
+    // every index 0..=255 through the official converter. idx 0 = default.
     //
-    // Verified via RPP→PTX probe + plaintext-diff: a track with
-    // `color(0xd86e41)` set in RPP produces +106..+107 = `18 00` (=24)
-    // in PTX while baseline (no color) shows `fe ff` (=-2). See
-    // `docs/pt-field-map.md`.
+    // Height: a u16 (pixels) just after the color field — at color-frame +
+    // 10 (new format) or right after `c0 00 00 00 00 01` (old format). PT
+    // presets: 16/23/43/97(default)/192/300/600/684.
     //
-    // We previously read `+163` which was a different field that
-    // happened to correlate with palette index on Color Testing
-    // (probably a per-track ordinal counter). The +163 reading was
-    // wrong on LotF and other fixtures.
-    //
-    // To resolve which track each 0x200b belongs to, walk upward from
-    // the block through its ancestors and find the nearest `0x2619`
-    // (track name) descendant.
+    // Assignment is by track order, NOT by resolving a nearby 0x2619 name: a
+    // track's name can be edited after creation (the size-test renames
+    // "Audio N" → "Micro"), which leaves the name block stale and breaks name
+    // matching. The 0x2015 comment blocks are 1:1 with the track list in
+    // document order (block N ↔ `display_order == N`); each one is nested
+    // inside its track's 0x200b. So we walk each 0x2015 up to its enclosing
+    // 0x200b and read color/height there — guaranteeing the same ordering as
+    // the (verified) comment assignment, even though raw 0x200b blocks are
+    // more numerous than tracks (sends, master, etc.).
     {
         let data = cursor.data();
+
         let mut parents: std::collections::HashMap<usize, Option<&Block>> =
             std::collections::HashMap::new();
         fn build_parents<'a>(
@@ -593,85 +599,90 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
         build_parents(&blocks, None, &mut parents);
 
-        fn find_2619_name(b: &Block, data: &[u8]) -> Option<String> {
-            for c in &b.children {
-                if c.content_type == Some(ContentType::MarkerEntry) {
-                    let p = c.offset + 2;
-                    if p + 4 > data.len() {
-                        return None;
-                    }
-                    let len = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
-                    if len == 0 || len > 64 || p + 4 + len > data.len() {
-                        return None;
-                    }
-                    return Some(
-                        String::from_utf8_lossy(&data[p + 4..p + 4 + len])
-                            .trim_end_matches('\0')
-                            .to_string(),
-                    );
+        // Locate the color+height frame inside a 0x200b block. Across all PT
+        // versions it has the form `01 <color:i16> 01 .... 01 <height:u16>`,
+        // i.e. an `0x01` byte at relative offsets +0, +3 and +9 (the bytes
+        // between differ by version: `00 03` for PT12+, `c0 00 00 00 00` for
+        // older). We anchor on that three-`01` signature rather than the
+        // version-specific filler, which previously required a special case
+        // per format (and a wrong fixed `+106` fallback). Returns the frame's
+        // leading `01` position.
+        fn find_color_frame(data: &[u8], lo: usize, hi: usize) -> Option<usize> {
+            let hi = hi.min(data.len());
+            let mut p = lo;
+            while p + 12 <= hi {
+                if data[p] == 0x01 && data[p + 3] == 0x01 && data[p + 9] == 0x01 {
+                    return Some(p);
                 }
-                if let Some(n) = find_2619_name(c, data) {
-                    return Some(n);
-                }
+                p += 1;
             }
             None
         }
 
-        let mut color_by_name: std::collections::HashMap<String, u8> =
-            std::collections::HashMap::new();
-        let aux_blocks = collect_blocks_recursive(&blocks, ContentType::TrackAuxState);
-        for b in &aux_blocks {
-            // Color is i16 LE at +106..+107 (verified by RPP→PTX diff).
-            // We expose it as a u8 (`color_byte`) since palette indices
-            // observed so far are all < 256; -2/0xfffe (default) maps to 0.
-            let p = b.offset + 2 + 106;
-            let color = if p + 2 <= data.len() {
-                let val = i16::from_le_bytes([data[p], data[p + 1]]);
-                if val < 0 { 0 } else { val as u8 }
-            } else {
-                0
-            };
-
-            // Walk up to 10 ancestors looking for a 0x2619 name anywhere
-            // in the subtree.
-            let mut name: Option<String> = None;
-            let mut anc = parents.get(&b.offset).cloned().flatten();
-            let mut depth = 0;
-            while let Some(a) = anc {
-                if let Some(n) = find_2619_name(a, data) {
-                    name = Some(n);
-                    break;
+        fn read_color_height(b: &Block, data: &[u8]) -> (u8, u16) {
+            let start = b.offset;
+            let end = b.offset + 4 + b.block_size as usize;
+            match find_color_frame(data, start, end) {
+                Some(f) => {
+                    // Color is an i16 at +1 (-2 / 0xfffe = "no color" → 0).
+                    let raw = i16::from_le_bytes([data[f + 1], data[f + 2]]);
+                    let color = if !(0..=255).contains(&raw) {
+                        0
+                    } else {
+                        raw as u8
+                    };
+                    // Height is a u16 (pixels) at +10.
+                    let height = u16::from_le_bytes([data[f + 10], data[f + 11]]);
+                    (color, height)
                 }
-                anc = parents.get(&a.offset).cloned().flatten();
-                depth += 1;
-                if depth > 10 {
-                    break;
-                }
-            }
-            if let Some(n) = name {
-                // First write wins — preserves the earliest (most-likely-live) entry
-                color_by_name.entry(n).or_insert(color);
+                None => (0, 0),
             }
         }
 
-        for t in audio_tracks.iter_mut() {
-            if let Some(c) = color_by_name.get(&t.name) {
-                t.color_byte = *c;
-            } else {
-                // Audio tracks store the base name ("Vocal Split"); 0x2619
-                // may carry the active-playlist name ("Vocal Split.01").
-                for suffix in [".01", ".02", ".03", ".04", ".05"] {
-                    if let Some(c) = color_by_name.get(&format!("{}{suffix}", t.name)) {
-                        t.color_byte = *c;
+        // Walk each 0x2015 (comment) block — 1:1 with the track list in
+        // document order — up to its enclosing 0x200b, and read that block's
+        // color + height. `per_track[N]` then belongs to `display_order == N`.
+        fn collect_2015<'a>(blocks: &'a [Block], out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == 0x2015 {
+                    out.push(b);
+                }
+                collect_2015(&b.children, out);
+            }
+        }
+        let mut comment_blocks = Vec::new();
+        collect_2015(&blocks, &mut comment_blocks);
+        let per_track: Vec<(u8, u16)> = comment_blocks
+            .iter()
+            .map(|cb| {
+                // Walk up to the nearest 0x200b ancestor.
+                let mut anc = parents.get(&cb.offset).cloned().flatten();
+                let mut depth = 0;
+                while let Some(a) = anc {
+                    if a.content_type == Some(ContentType::TrackAuxState) {
+                        return read_color_height(a, data);
+                    }
+                    anc = parents.get(&a.offset).cloned().flatten();
+                    depth += 1;
+                    if depth > 6 {
                         break;
                     }
                 }
+                (0, 0)
+            })
+            .collect();
+
+        let mut assign = |t: &mut crate::types::Track| {
+            if let Some(&(color, height)) = per_track.get(t.display_order as usize) {
+                t.color_byte = color;
+                t.height_px = height;
             }
+        };
+        for t in audio_tracks.iter_mut() {
+            assign(t);
         }
         for t in midi_tracks.iter_mut() {
-            if let Some(c) = color_by_name.get(&t.name) {
-                t.color_byte = *c;
-            }
+            assign(t);
         }
     }
 
@@ -946,6 +957,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     let edit_groups = parse_edit_groups(&blocks, data);
     let stem_mappings = parse_stem_mappings(&blocks, data);
     let internal_tracks = parse_internal_tracks(&blocks, data);
+    let plugin_states = plugin_states::parse_plugin_states(&blocks, &cursor);
 
     Ok(ProToolsSession {
         version,
@@ -965,6 +977,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         edit_groups,
         stem_mappings,
         internal_tracks,
+        plugin_states,
     })
 }
 

@@ -308,11 +308,11 @@ fn marker_and_region_at(low: &reaper_low::Reaper, pos: f64) -> (Option<usize>, O
 }
 
 fn c_str_d_position() -> *const std::os::raw::c_char {
-    b"D_POSITION\0".as_ptr() as *const _
+    c"D_POSITION".as_ptr()
 }
 fn c_str_d_playrate() -> *const std::os::raw::c_char {
-    b"D_PLAYRATE\0".as_ptr() as *const _
+    c"D_PLAYRATE".as_ptr()
 }
 fn c_str_d_startoffs() -> *const std::os::raw::c_char {
-    b"D_STARTOFFS\0".as_ptr() as *const _
+    c"D_STARTOFFS".as_ptr()
 }

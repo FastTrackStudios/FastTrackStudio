@@ -136,27 +136,36 @@ pub unsafe extern "C" fn load_project(
 // Import dispatcher
 // ============================================================================
 
+/// Convert any supported project file to REAPER RPP text, dispatching on the
+/// file extension. Supported inputs: Pro Tools (`.ptx`/`.ptf`/`.pts`),
+/// Ableton (`.als`), AAF (`.aaf`), and dawproject (`.dawproject`).
+///
+/// This is the shared entry point behind both the REAPER import hook and the
+/// public [`crate::project_import::convert_to_rpp`]-based file API.
+pub fn convert_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".als") {
+        import_ableton(path)
+    } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
+        import_protools(path, None)
+    } else if lower.ends_with(".aaf") {
+        import_aaf(path)
+    } else if lower.ends_with(".dawproject") {
+        import_dawproject(path)
+    } else {
+        Err(format!("Unsupported input format: {path}").into())
+    }
+}
+
 fn import_file(
     path: &str,
     genstate: *mut reaper_low::raw::ProjectStateContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let lower = path.to_lowercase();
-
-    let rpp_text = if lower.ends_with(".als") {
-        import_ableton(path)?
-    } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
-        import_protools(path)?
-    } else if lower.ends_with(".aaf") {
-        import_aaf(path)?
-    } else if lower.ends_with(".dawproject") {
-        import_dawproject(path)?
-    } else {
-        return Err(format!("Unsupported format: {path}").into());
-    };
+    let rpp_text = convert_to_rpp(path)?;
 
     // Debug dump: write the converted RPP next to the source file so we can
-    // inspect what REAPER is being asked to parse. Keyed off env var to avoid
-    // littering disk by default.
+    // inspect what REAPER is being asked to parse. Keyed off env var to override
+    // the default /tmp location.
     let dump_dir = std::env::var("FTS_IMPORT_DUMP_DIR")
         .ok()
         .unwrap_or_else(|| "/tmp".to_string());
@@ -271,6 +280,18 @@ fn import_ableton(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 /// UUID so re-running the conversion on the same PT session produces the
 /// same GUID for the same track (matters for round-trip identity and for
 /// tools that diff converter output).
+/// Map a PT fade-def curve byte to a REAPER fade curve. PT/the converter only
+/// distinguishes linear (`0`) from curved (non-zero); curved fades map to
+/// Bezier, matching the official converter's behaviour.
+fn pt_fade_curve(curve: u8) -> dawfile_reaper::types::item::FadeCurveType {
+    use dawfile_reaper::types::item::FadeCurveType;
+    if curve == 0 {
+        FadeCurveType::Linear
+    } else {
+        FadeCurveType::Bezier
+    }
+}
+
 fn deterministic_guid(seed: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -486,20 +507,43 @@ fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
 /// Public so that command-line tools and tests can run the conversion without
 /// going through the REAPER plugin entry point.
 pub fn protools_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    import_protools(path)
+    import_protools(path, None)
 }
 
-fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+/// Like [`protools_to_rpp`], but emit audio-file paths relative to
+/// `audio_base` instead of the `.ptx`'s own directory. Use this when the
+/// `.ptx` is read from one location but the resulting `.rpp` will be opened
+/// somewhere else (e.g. converting locally for a session that lives on another
+/// machine): pass the session folder as it exists on the target machine.
+pub fn protools_to_rpp_with_audio_base(
+    path: &str,
+    audio_base: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    import_protools(path, Some(audio_base))
+}
+
+fn import_protools(
+    path: &str,
+    audio_base: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
     let session = dawfile_protools::read_session(path, 48000)?;
     let sample_rate = session.session_sample_rate as f64;
 
     // Pro Tools stores audio files in `Audio Files/` next to the .ptx.
     // Resolve a bare filename ("kick.wav") to the on-disk absolute path so
     // REAPER items point at real audio instead of dangling-source stubs.
-    let session_dir = std::path::Path::new(path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // `audio_base` overrides the .ptx directory for path emission (used when
+    // the .rpp will be opened on a different machine than the .ptx was read).
+    let session_dir = match audio_base {
+        Some(b) => std::path::PathBuf::from(b),
+        None => std::path::Path::new(path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    };
+    // When a base override is given the files aren't local, so skip the
+    // `.exists()` probes and always emit `<base>/Audio Files/<file>`.
+    let force_emit = audio_base.is_some();
     let audio_files_dir = session_dir.join("Audio Files");
     let resolve_audio_path = |filename: &str| -> String {
         if filename.is_empty() {
@@ -512,7 +556,7 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         }
         // Try Audio Files/ subdir first (the standard layout).
         let in_audio = audio_files_dir.join(filename);
-        if in_audio.exists() {
+        if force_emit || in_audio.exists() {
             return in_audio.to_string_lossy().into_owned();
         }
         // Fall back to session dir.
@@ -602,10 +646,17 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         });
     }
 
-    // Markers (Pro Tools Memory Locations)
+    // Markers (Pro Tools Memory Locations). PT stores each marker's RGB
+    // directly; REAPER's MARKER colour int is `0x01000000 | (r<<16)|(g<<8)|b`
+    // (the `0x01000000` flag = "use custom colour"). Verified against the
+    // official converter (INTRO → 0x01FF7CD6) and the session's actual colours.
     for marker in &session.markers {
         let pos_secs = marker.sample_pos as f64 / sample_rate;
-        builder = builder.marker(marker.number as i32, pos_secs, &marker.name);
+        let color = marker
+            .color_rgb
+            .map(|(r, g, b)| 0x0100_0000i32 | ((r as i32) << 16) | ((g as i32) << 8) | (b as i32))
+            .unwrap_or(0);
+        builder = builder.marker_with_color(marker.number as i32, pos_secs, &marker.name, color);
     }
 
     // Build the unified track-emission order from PT's 0x251a display order
@@ -706,6 +757,50 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     // Collected here and appended after the project is serialized.
     let mut track_notes: Vec<(String, String)> = Vec::new();
 
+    // PT's Master track (kind 0x05) is emitted as a normal REAPER track (REAPER's
+    // own master is implicit). We tag its GUID in an <EXTENSIONS> block so a
+    // future native RPP→PTX writer can round-trip it back to a PT Master rather
+    // than a regular track/bus. Collected here, injected after serialization.
+    let mut master_guids: Vec<String> = Vec::new();
+
+    // Converted plugin FX, keyed by owning track name. Each entry is the raw
+    // `<VST …>` block + preset name produced by the plugin bridge (e.g.
+    // Omnisphere state transplanted into a Reaper VST3 chunk).
+    // Normalize a track name by stripping a trailing ".NN" playlist suffix,
+    // for fuzzy matching when the emitted RPP track name carries a playlist
+    // suffix the PT plugin container's name does not.
+    fn norm_track_name(name: &str) -> &str {
+        match name.rsplit_once('.') {
+            Some((base, suf)) if !suf.is_empty() && suf.chars().all(|c| c.is_ascii_digit()) => base,
+            _ => name,
+        }
+    }
+    // Pending converted plugins (track_name, fx). Claimed at most once per
+    // emitted track: prefer an exact track-name match, then a normalized one.
+    let mut pending_fx: Vec<(String, Option<crate::plugin_bridge::ConvertedFx>)> = session
+        .plugin_states
+        .iter()
+        .filter_map(|ps| {
+            crate::plugin_bridge::convert(ps).map(|fx| (ps.track_name.clone(), Some(fx)))
+        })
+        .collect();
+    // Claim the FX for a track: exact name match first, else normalized.
+    let mut claim_fx = |track_name: &str| -> Vec<crate::plugin_bridge::ConvertedFx> {
+        if let Some(slot) = pending_fx
+            .iter_mut()
+            .find(|(n, fx)| fx.is_some() && n == track_name)
+        {
+            return slot.1.take().into_iter().collect();
+        }
+        if let Some(slot) = pending_fx
+            .iter_mut()
+            .find(|(n, fx)| fx.is_some() && norm_track_name(n) == norm_track_name(track_name))
+        {
+            return slot.1.take().into_iter().collect();
+        }
+        Vec::new()
+    };
+
     for (plan_idx, e) in emit.iter().enumerate() {
         let end_levels = folder_end_levels[plan_idx];
         let is_folder_start = folder_starts[plan_idx];
@@ -720,6 +815,9 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
                 if !track.comment.is_empty() {
                     track_notes.push((track_guid.clone(), track.comment.clone()));
+                }
+                if track.is_master {
+                    master_guids.push(track_guid.clone());
                 }
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
@@ -755,6 +853,49 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     }
                     if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                         t = t.color(rgb);
+                    }
+                    // Preserve PT track view height (px) so the track keeps its
+                    // shape on round-trip. 0 = not parsed → leave Reaper default.
+                    if track.height_px > 0 {
+                        t = t.height(track.height_px as i32);
+                    }
+                    // Volume / mute automation envelopes (parsed from 0x260a[0]
+                    // / 0x260a[1]). Volume points are centibel → linear gain
+                    // (1.0 = 0 dB). Mute points are step/square (Reaper MUTEENV:
+                    // 0 = muted, 1 = audible).
+                    if !track.volume_automation.is_empty() {
+                        t = t.envelope("VOLENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.volume_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let lin = 10f64.powf(bp.value_centibel as f64 / 200.0);
+                                e = e.linear(secs, lin);
+                            }
+                            e
+                        });
+                    }
+                    if !track.mute_automation.is_empty() {
+                        t = t.envelope("MUTEENV", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.mute_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let v = if bp.muted { 1.0 } else { 0.0 };
+                                e = e.square(secs, v);
+                            }
+                            e
+                        });
+                    }
+                    // Pan automation (0x260d > 0x260c[0] > 0x260a[0]) → PANENV2.
+                    // Stored value is pan × 100; Reaper pan is -1..1.
+                    if !track.pan_automation.is_empty() {
+                        t = t.envelope("PANENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.pan_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                e = e.linear(secs, (bp.value as f64 / 100.0).clamp(-1.0, 1.0));
+                            }
+                            e
+                        });
                     }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.audio_regions.len() {
@@ -832,9 +973,23 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                         //     the fade-in (= the same in_length).
                         let item_start = tr.start_pos;
                         let item_end = item_start.saturating_add(region.length);
-                        let mut fade_in_secs: Option<f64> = None;
-                        let mut fade_out_secs: Option<f64> = None;
+                        // (length_secs, curve_byte) for each fade.
+                        let mut fade_in_secs: Option<(f64, u8)> = None;
+                        let mut fade_out_secs: Option<(f64, u8)> = None;
                         let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
+                        // Does this item start *inside* another clip on the track? If
+                        // so, a fade entry at its start is the incoming half of a
+                        // crossfade — PT stores that as the outgoing clip's fade-out
+                        // (in_length == 0), so the incoming fade-in must be inferred.
+                        let starts_in_crossfade = track.regions.iter().any(|o| {
+                            let os = o.start_pos;
+                            let ol = session
+                                .audio_regions
+                                .get(o.region_index as usize)
+                                .map(|r| r.length)
+                                .unwrap_or(0);
+                            os < item_start && item_start < os.saturating_add(ol)
+                        });
                         for f in &track.fades {
                             let crossfade = f.in_length > 0 && f.out_length > 0;
                             let fade_total = f.in_length.max(f.out_length);
@@ -842,8 +997,17 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                                 continue;
                             }
                             // Fade-IN: the fade's start coincides with this item's start.
-                            if f.start_pos.abs_diff(item_start) <= tolerance && f.in_length > 0 {
-                                fade_in_secs = Some(f.in_length as f64 / sample_rate);
+                            if f.start_pos.abs_diff(item_start) <= tolerance {
+                                if f.in_length > 0 {
+                                    fade_in_secs =
+                                        Some((f.in_length as f64 / sample_rate, f.curve));
+                                } else if f.out_length > 0 && starts_in_crossfade {
+                                    // Crossfade incoming half: PT stored only the
+                                    // outgoing fade-out, but this clip fades in over
+                                    // the same overlap.
+                                    fade_in_secs =
+                                        Some((f.out_length as f64 / sample_rate, f.curve));
+                                }
                             }
                             // Fade-OUT: the fade ends at this item's end. For pure
                             // fade-outs (`in == 0`) PT places start_pos = item_end - out_length.
@@ -858,9 +1022,20 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                                 } else {
                                     f.in_length
                                 };
-                                fade_out_secs = Some(out_len as f64 / sample_rate);
+                                fade_out_secs = Some((out_len as f64 / sample_rate, f.curve));
                             }
                         }
+
+                        // Strip the trailing `.L`/`.R` channel suffix from the
+                        // region name so a stereo clip reads as one clean stereo
+                        // item (e.g. "…_Bass.L" → "…_Bass") — matching the official
+                        // converter. The item still references the interleaved
+                        // stereo source, so it stays stereo; only the label changes.
+                        let clip_name = region
+                            .name
+                            .strip_suffix(".L")
+                            .or_else(|| region.name.strip_suffix(".R"))
+                            .unwrap_or(&region.name);
 
                         t = t.item(position_secs, length_secs, |item| {
                             // Set the TAKE name (not the item name) to the region
@@ -868,24 +1043,18 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                             // than stacking item-level + take-level labels.
                             let mut item = item;
                             if !absolute_path.is_empty() {
-                                item = item.source_wave(&absolute_path).take_name(&region.name);
+                                item = item.source_wave(&absolute_path).take_name(clip_name);
                             } else {
-                                item = item.name(&region.name);
+                                item = item.name(clip_name);
                             }
                             if offset_secs > 0.0 {
                                 item = item.slip_offset(offset_secs);
                             }
-                            if let Some(fi) = fade_in_secs {
-                                item = item.fade_in(
-                                    fi,
-                                    dawfile_reaper::types::item::FadeCurveType::Linear,
-                                );
+                            if let Some((fi, c)) = fade_in_secs {
+                                item = item.fade_in(fi, pt_fade_curve(c));
                             }
-                            if let Some(fo) = fade_out_secs {
-                                item = item.fade_out(
-                                    fo,
-                                    dawfile_reaper::types::item::FadeCurveType::Linear,
-                                );
+                            if let Some((fo, c)) = fade_out_secs {
+                                item = item.fade_out(fo, pt_fade_curve(c));
                             }
                             item
                         });
@@ -906,12 +1075,25 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 if !track.comment.is_empty() {
                     track_notes.push((track_guid.clone(), track.comment.clone()));
                 }
+                if track.is_master {
+                    master_guids.push(track_guid.clone());
+                }
+                let fxs = claim_fx(&track.name);
+                let fx_guid_base = track_guid.clone();
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
                         .guid(&track_guid)
                         .automation_mode(dawfile_reaper::types::track::AutomationMode::Read);
                     if is_folder_start {
                         t = t.folder_start();
+                    }
+                    // Converted instrument plugins (e.g. Omnisphere) — transplant
+                    // the full plugin state onto the track's FX chain.
+                    for (i, fx) in fxs.iter().enumerate() {
+                        let block = fx.raw_block.clone();
+                        let preset = fx.preset_name.clone();
+                        let fxid = deterministic_guid(&format!("{fx_guid_base}:fx{i}"));
+                        t = t.fx(move |b| b.raw_block(block).preset(preset).fxid(fxid).wak(0, 0));
                     }
                     let linear_vol = if track.volume_centibel <= -1440 {
                         0.0
@@ -930,11 +1112,60 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     if let Some(rgb) = pt_color_to_rgb(track.color_byte) {
                         t = t.color(rgb);
                     }
+                    // Preserve PT track view height (px) so the track keeps its
+                    // shape on round-trip. 0 = not parsed → leave Reaper default.
+                    if track.height_px > 0 {
+                        t = t.height(track.height_px as i32);
+                    }
+                    // Volume / mute automation envelopes (parsed from 0x260a[0]
+                    // / 0x260a[1]). Volume points are centibel → linear gain
+                    // (1.0 = 0 dB). Mute points are step/square (Reaper MUTEENV:
+                    // 0 = muted, 1 = audible).
+                    if !track.volume_automation.is_empty() {
+                        t = t.envelope("VOLENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.volume_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let lin = 10f64.powf(bp.value_centibel as f64 / 200.0);
+                                e = e.linear(secs, lin);
+                            }
+                            e
+                        });
+                    }
+                    if !track.mute_automation.is_empty() {
+                        t = t.envelope("MUTEENV", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.mute_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let v = if bp.muted { 1.0 } else { 0.0 };
+                                e = e.square(secs, v);
+                            }
+                            e
+                        });
+                    }
+                    // Pan automation (0x260d > 0x260c[0] > 0x260a[0]) → PANENV2.
+                    // Stored value is pan × 100; Reaper pan is -1..1.
+                    if !track.pan_automation.is_empty() {
+                        t = t.envelope("PANENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.pan_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                e = e.linear(secs, (bp.value as f64 / 100.0).clamp(-1.0, 1.0));
+                            }
+                            e
+                        });
+                    }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.midi_regions.len() {
                             continue;
                         }
                         let region = &session.midi_regions[tr.region_index as usize];
+
+                        // Comp flatten: keep only this placement's notes — those
+                        // within the clip's source window `[clip_lo, note_trim)`
+                        // (chunk-tick space). See `TrackRegion`.
+                        let clip_lo = tr.clip_lo_ticks;
+                        let note_trim = tr.note_trim_ticks;
 
                         let position_secs = tr.start_pos as f64 / sample_rate;
                         let length_secs = region.length as f64 / sample_rate;
@@ -943,55 +1174,58 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                             continue;
                         }
 
-                        t = t.item(position_secs, length_secs, |item| {
-                            // `.midi(...)` adds the MIDI take; do NOT also call
-                            // `.source_midi()` — that would push an empty MIDI take
-                            // first, leaving the real data on take #1 (and REAPER
-                            // would render the item as silent take #0).
-                            item.name(&region.name).midi(|midi| {
-                                // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
-                                // the REAPER builder to use the same PPQN so positions
-                                // and durations don't need numeric rescaling.
-                                let mut midi = midi.ticks_per_qn(960_000);
+                        t =
+                            t.item(position_secs, length_secs, |item| {
+                                // `.midi(...)` adds the MIDI take; do NOT also call
+                                // `.source_midi()` — that would push an empty MIDI take
+                                // first, leaving the real data on take #1 (and REAPER
+                                // would render the item as silent take #0).
+                                item.name(&region.name).midi(|midi| {
+                                    // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
+                                    // the REAPER builder to use the same PPQN so positions
+                                    // and durations don't need numeric rescaling.
+                                    let mut midi = midi.ticks_per_qn(960_000);
 
-                                // Many PT regions store duration=0 for every event
-                                // (a paired note-on/note-off encoding the parser
-                                // doesn't fully reconstruct yet). For those events,
-                                // fall back to "until the next note of the same
-                                // pitch" so notes sustain naturally instead of
-                                // truncating to silence.
-                                const FALLBACK_DUR: u64 = 480_000; // half a quarter
-                                let region_end = region.length.max(FALLBACK_DUR);
+                                    // Many PT regions store duration=0 for every event
+                                    // (a paired note-on/note-off encoding the parser
+                                    // doesn't fully reconstruct yet). For those events,
+                                    // fall back to "until the next note of the same
+                                    // pitch" so notes sustain naturally instead of
+                                    // truncating to silence.
+                                    const FALLBACK_DUR: u64 = 480_000; // half a quarter
+                                    let region_end = region.length.max(FALLBACK_DUR);
 
-                                for (i, event) in region.events.iter().enumerate() {
-                                    if event.velocity == 0 {
-                                        continue;
+                                    for (i, event) in region.events.iter().enumerate() {
+                                        if event.velocity == 0
+                                            || event.position < clip_lo
+                                            || event.position >= note_trim
+                                        {
+                                            continue;
+                                        }
+                                        let dur = if event.duration > 0 {
+                                            event.duration as u32
+                                        } else {
+                                            // Find the next note of the SAME pitch and
+                                            // end this one just before it. Failing that,
+                                            // use the region end, capped at one quarter.
+                                            let next = region.events[i + 1..]
+                                                .iter()
+                                                .find(|e| e.note == event.note)
+                                                .map(|e| e.position);
+                                            let end = next.unwrap_or(region_end);
+                                            let span = end.saturating_sub(event.position);
+                                            span.clamp(FALLBACK_DUR, 960_000) as u32
+                                        };
+                                        // Emit relative to the clip's kept-window
+                                        // start so notes sit inside the item, which
+                                        // begins `clip_lo` into the take.
+                                        midi = midi
+                                            .at(event.position.saturating_sub(clip_lo))
+                                            .note(0, 0, event.note, event.velocity, dur);
                                     }
-                                    let dur = if event.duration > 0 {
-                                        event.duration as u32
-                                    } else {
-                                        // Find the next note of the SAME pitch and
-                                        // end this one just before it. Failing that,
-                                        // use the region end, capped at one quarter.
-                                        let next = region.events[i + 1..]
-                                            .iter()
-                                            .find(|e| e.note == event.note)
-                                            .map(|e| e.position);
-                                        let end = next.unwrap_or(region_end);
-                                        let span = end.saturating_sub(event.position);
-                                        span.clamp(FALLBACK_DUR, 960_000) as u32
-                                    };
-                                    midi = midi.at(event.position).note(
-                                        0,
-                                        0,
-                                        event.note,
-                                        event.velocity,
-                                        dur,
-                                    );
-                                }
-                                midi
-                            })
-                        });
+                                    midi
+                                })
+                            });
                     }
                     if end_levels > 0 {
                         t = t.folder_end(end_levels);
@@ -1010,7 +1244,7 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     // inserted as the last child before the project's closing `>`. Each note
     // is keyed by the track's GUID; comment lines are emitted verbatim with a
     // leading `|`.
-    if !track_notes.is_empty() {
+    if !track_notes.is_empty() || !master_guids.is_empty() {
         let mut ext = String::from("  <EXTENSIONS\n");
         for (guid, comment) in &track_notes {
             ext.push_str(&format!("    <S&M_TRACKNOTES {guid}\n"));
@@ -1018,6 +1252,14 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 ext.push_str(&format!("      |{line}\n"));
             }
             ext.push_str("    >\n");
+        }
+        // Mark each PT Master track (auto-generated on import) so a native
+        // RPP→PTX writer can map it back to a PT Master rather than a regular
+        // track. `1` = auto-generated by the Pro Tools import.
+        for guid in &master_guids {
+            ext.push_str(&format!(
+                "    <FTS_PTIMPORT_MASTER {guid}\n      1\n    >\n"
+            ));
         }
         ext.push_str("  >\n");
         if let Some(pos) = rpp.rfind("\n>") {
@@ -1305,76 +1547,288 @@ fn parse_hex_color(hex: &str) -> Option<u32> {
 
 // ── Color mapping ──────────────────────────────────────────────────────────
 
-/// Convert a Pro Tools color palette byte to a REAPER-compatible color
+// PT track-color palette: index -> (r,g,b). Derived empirically by sweeping
+// every index 0..=255 through the official PT→Reaper converter (47-track
+// unanimous agreement per index). idx 0 is Reaper's default "no color".
+pub const PT_TRACK_PALETTE: [(u8, u8, u8); 256] = [
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (65, 110, 216),
+    (65, 110, 216),
+    (65, 75, 216),
+    (105, 65, 216),
+    (163, 65, 216),
+    (216, 65, 209),
+    (216, 65, 153),
+    (216, 65, 120),
+    (216, 65, 77),
+    (216, 65, 80),
+    (216, 102, 65),
+    (216, 148, 65),
+    (216, 211, 65),
+    (151, 216, 65),
+    (90, 216, 65),
+    (65, 216, 85),
+    (65, 216, 105),
+    (65, 216, 135),
+    (65, 216, 171),
+    (65, 216, 214),
+    (65, 181, 216),
+    (65, 148, 216),
+    (65, 120, 216),
+    (65, 110, 216),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+];
+
+/// Convert a Pro Tools track color palette index to a REAPER `COLOR`/`PEAKCOL`
 /// integer (`0x01000000 | (B << 16) | (G << 8) | R`).
 ///
-/// The byte is the raw value of `0x200b +163` per the dawfile-protools
-/// decoder. Encoding (user-confirmed against the 23×3 Color Testing
-/// fixture):
+/// `index` is the palette byte parsed from the track's `0x200b` block (framed
+/// by `01 <idx> 00 01 00 03`). The index→RGB mapping is PT's genuine palette,
+/// recovered by sweeping every index 0..=255 through the official PT→Reaper
+/// converter and reading back the emitted `PEAKCOL` (47-track unanimous
+/// agreement per index). It is therefore exact and complete: change a track's
+/// color in Pro Tools and the parsed index — and hence this color — follows.
 ///
-/// - byte `0x00..0x01` = no color / default (returns `None`)
-/// - byte `>= 0x02`: `(byte - 2) / 24` is the row (0..2), `(byte - 2) % 24`
-///   is the column (0..22). PT's palette has 23 hues sweeping the color
-///   wheel starting at dark blue.
-///
-/// Each subsequent row is a darker variant of the same column hue.
-/// REAPER's `COLOR` field needs the high bit (`0x01000000`) set for the
-/// custom color to be honored; without it REAPER falls back to default.
-pub fn pt_color_to_rgb(byte: u8) -> Option<u32> {
-    if byte < 2 {
+/// Returns `None` only when the lookup would yield Reaper's plain default
+/// (index 0/1), so no explicit color is emitted and the track keeps Reaper's
+/// own default.
+pub fn pt_color_to_rgb(index: u8) -> Option<u32> {
+    // idx 0/1 map to Reaper's default track color (56, 69, 102) — treat as
+    // "no custom color" so we don't override Reaper's default needlessly.
+    if index <= 1 {
         return None;
     }
-    let pos = (byte - 2) as usize;
-    let row = pos / 24;
-    let col = pos % 24;
-    if col >= 23 || row >= 3 {
-        return None;
-    }
-
-    // 23-hue palette at row 0 (lightest / most-saturated row).
-    // Approximations based on PT's stock palette ordering described by the
-    // user: dark blue → purple → magenta → pink → fuchsia → light red →
-    // red → red-orange → orange → light orange → yellow → yellow-green →
-    // light green → green → green-with-some-blue → cyan → teal → light
-    // blue → blue → darker blue → very dark blue → (wraps to blue) → blue.
-    const ROW0: [(u8, u8, u8); 23] = [
-        (0x4A, 0x5C, 0xBE), // 0  dark blue
-        (0x7D, 0x5A, 0xC2), // 1  purple
-        (0xB0, 0x4A, 0xB8), // 2  magenta
-        (0xCF, 0x66, 0xA7), // 3  pink
-        (0xD1, 0x4C, 0x8E), // 4  fuchsia
-        (0xE0, 0x6B, 0x6B), // 5  light red
-        (0xD9, 0x3D, 0x3D), // 6  red
-        (0xE0, 0x55, 0x2A), // 7  red-orange
-        (0xE6, 0x7E, 0x22), // 8  orange
-        (0xEF, 0xA8, 0x4A), // 9  light orange
-        (0xEC, 0xCB, 0x3D), // 10 yellow
-        (0xC4, 0xCB, 0x3D), // 11 yellow-green
-        (0x9B, 0xCB, 0x4E), // 12 light green
-        (0x68, 0xB0, 0x4C), // 13 green
-        (0x4F, 0xB0, 0x80), // 14 green-with-blue
-        (0x42, 0xB6, 0xB0), // 15 cyan
-        (0x35, 0x97, 0xA8), // 16 teal
-        (0x52, 0x9F, 0xC2), // 17 light blue
-        (0x42, 0x7D, 0xC2), // 18 blue
-        (0x36, 0x5F, 0xA8), // 19 darker blue
-        (0x2A, 0x46, 0x8C), // 20 very dark blue
-        (0x36, 0x5F, 0xA8), // 21 wrap (≈ darker blue)
-        (0x42, 0x7D, 0xC2), // 22 wrap (≈ blue)
-    ];
-
-    let (r0, g0, b0) = ROW0[col];
-    // Row 1: ~70% brightness, Row 2: ~45% brightness.
-    let scale = match row {
-        0 => 100,
-        1 => 70,
-        _ => 45,
-    };
-    let r = ((r0 as u32) * scale / 100) as u8;
-    let g = ((g0 as u32) * scale / 100) as u8;
-    let b = ((b0 as u32) * scale / 100) as u8;
-
-    // REAPER COLOR field: high byte 0x01 = "use this color".
+    let (r, g, b) = PT_TRACK_PALETTE[index as usize];
     Some(0x01_00_00_00 | ((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
 }
 
