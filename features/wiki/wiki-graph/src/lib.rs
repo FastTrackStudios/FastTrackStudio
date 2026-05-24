@@ -32,6 +32,7 @@
 //! `build_graph` / `gaps` methods.
 
 mod build;
+mod context;
 mod gaps;
 mod louvain;
 mod parse;
@@ -40,6 +41,7 @@ mod scoring;
 mod tier_lint;
 
 pub use build::{build_clusters, build_graph};
+pub use context::{ContextOpts, ContextResult, build_context};
 pub use gaps::find_gaps;
 pub use parse::extract_wikilinks;
 pub use scan::ScanError;

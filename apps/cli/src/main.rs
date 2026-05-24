@@ -1203,6 +1203,38 @@ enum WikiCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Build a **token-budgeted context subgraph** for an
+    /// LLM prompt. Returns relevance-ranked page summaries +
+    /// outbound connections as markdown — paste the output
+    /// straight into a system / user message. The agent
+    /// gets a structural view of the wiki instead of having
+    /// to grep raw files.
+    ///
+    /// Inspired by graphify's "query the graph instead of
+    /// grepping" pitch, but for the entire wiki (concepts +
+    /// entities + sources, not just code).
+    Context {
+        /// Free-text query. Empty = top-centrality view.
+        query: String,
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// `concept` / `entity` / `source` filter on
+        /// `type:` frontmatter.
+        #[arg(long, default_value = "")]
+        node_type: String,
+        /// Soft token cap. `chars/4` heuristic. Default
+        /// 8000 (~32k chars, comfortably fits in any
+        /// modern context window).
+        #[arg(long, default_value_t = 8000)]
+        budget_tokens: usize,
+        /// Hard node ceiling. `0` = unlimited.
+        #[arg(long, default_value_t = 0)]
+        max_nodes: usize,
+        /// Chars of body kept per page summary. Default
+        /// 600 (~150 tokens).
+        #[arg(long, default_value_t = 600)]
+        summary_chars: usize,
+    },
     /// Surface knowledge gaps — orphan pages (degree ≤ 1)
     /// and missing-page wikilinks. No LLM.
     Gaps {
@@ -4856,6 +4888,41 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("  … {} more", graph.nodes.len() - 20);
                 }
             }
+            Ok(())
+        }
+        WikiCmd::Context {
+            query,
+            vault,
+            node_type,
+            budget_tokens,
+            max_nodes,
+            summary_chars,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let result = wiki_graph::build_context(
+                &vault,
+                wiki_graph::ContextOpts {
+                    query,
+                    node_type,
+                    budget_tokens,
+                    max_nodes,
+                    summary_chars,
+                },
+            )
+            .map_err(|e| eyre::eyre!("build_context: {e}"))?;
+            // The whole point is that the markdown is the
+            // output — print it to stdout so the caller can
+            // pipe it directly into an LLM prompt.
+            print!("{}", result.markdown);
+            eprintln!(
+                "\n[wiki context] {}/{} nodes, ~{} tokens (budget {})",
+                result.included.len(),
+                result.nodes_considered,
+                result.tokens_estimate,
+                budget_tokens
+            );
             Ok(())
         }
         WikiCmd::Gaps { vault, json } => {
