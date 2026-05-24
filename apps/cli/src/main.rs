@@ -148,6 +148,313 @@ enum Commands {
     /// barcode resolution.
     #[command(subcommand)]
     Pantry(PantryCmd),
+    /// Body metrics — weight / body-fat / measurements log.
+    #[command(subcommand)]
+    Body(BodyCmd),
+    /// Exercise library — movement definitions referenced
+    /// by routines + sessions.
+    #[command(subcommand)]
+    Exercise(ExerciseCmd),
+    /// Workout routines + sessions.
+    #[command(subcommand)]
+    Workout(WorkoutCmd),
+    /// Food intake log — daily calorie + macro tracking.
+    #[command(subcommand)]
+    Intake(IntakeCmd),
+}
+
+#[derive(Subcommand)]
+enum BodyCmd {
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        /// e.g. `weight`, `body_fat`, `waist`. Free-form;
+        /// canonical set in `body::MetricKind`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Default unit (`kg`, `%`, `cm`).
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long)]
+        goal: Option<f64>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append a measurement to a metric's time series.
+    Log {
+        target: String,
+        value: f64,
+        /// Date (`YYYY-MM-DD`). Defaults to today.
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExerciseCmd {
+    List {
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        muscle: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkoutCmd {
+    /// Routines (the program — push/pull/legs, etc).
+    #[command(subcommand)]
+    Routine(WorkoutRoutineCmd),
+    /// Sessions (one workout instance).
+    #[command(subcommand)]
+    Session(WorkoutSessionCmd),
+}
+
+#[derive(Subcommand)]
+enum WorkoutRoutineCmd {
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkoutSessionCmd {
+    List {
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a fresh session from a routine + day.
+    StartFromRoutine {
+        routine: String,
+        day: String,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Log a working set against a session.
+    LogSet {
+        session: String,
+        exercise: String,
+        reps: u32,
+        weight: f64,
+        #[arg(long)]
+        rpe: Option<f64>,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum IntakeCmd {
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Get the intake log for `YYYY-MM-DD`. Creates empty
+    /// if missing.
+    ForDay {
+        date: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    LogRecipe {
+        date: String,
+        recipe: String,
+        servings: f64,
+        #[arg(long, default_value = "snack")]
+        slot: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    LogPantry {
+        date: String,
+        item: String,
+        qty: f64,
+        #[arg(long, default_value = "snack")]
+        slot: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    LogFreeform {
+        date: String,
+        name: String,
+        #[arg(long)]
+        kcal: Option<f64>,
+        #[arg(long, default_value = "snack")]
+        slot: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1886,6 +2193,18 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Pantry(cmd) => {
             return Box::pin(run_pantry(cmd)).await;
+        }
+        Commands::Body(cmd) => {
+            return Box::pin(run_body(cmd)).await;
+        }
+        Commands::Exercise(cmd) => {
+            return Box::pin(run_exercise(cmd)).await;
+        }
+        Commands::Workout(cmd) => {
+            return Box::pin(run_workout(cmd)).await;
+        }
+        Commands::Intake(cmd) => {
+            return Box::pin(run_intake(cmd)).await;
         }
     }
     Ok(())
@@ -6167,6 +6486,849 @@ async fn run_pantry(cmd: PantryCmd) -> eyre::Result<()> {
                 .await
                 .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
             println!("deleted {}", p.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Body metrics (body::Store) ───────────────────────────────────────
+
+async fn connect_body_client(url: &str) -> eyre::Result<body::BodyServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_body_target(
+    client: &body::BodyServiceClient,
+    target: &str,
+) -> eyre::Result<body::BodyMetric> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|m| m.path == target || m.name == target || m.kind == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_body(cmd: BodyCmd) -> eyre::Result<()> {
+    match cmd {
+        BodyCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for m in &rows {
+                let goal = m.goal.map(|g| format!(" goal={g}")).unwrap_or_default();
+                let latest = m
+                    .entries
+                    .0
+                    .last()
+                    .map(|e| format!("  last {}: {}{}", e.date, e.value, m.unit))
+                    .unwrap_or_default();
+                println!("{:<24}  {:<10}{goal}{latest}", m.name, m.kind);
+            }
+        }
+        BodyCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let m = resolve_body_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", m.name, m.kind);
+            println!("  id:    {}", m.id);
+            println!("  path:  {}", m.path);
+            println!("  unit:  {}", m.unit);
+            if let Some(g) = m.goal {
+                println!("  goal:  {g}");
+            }
+            println!("  entries: {} (last 10)", m.entries.0.len());
+            for e in m.entries.0.iter().rev().take(10) {
+                println!("    {}  {}{}", e.date, e.value, m.unit);
+            }
+        }
+        BodyCmd::Create {
+            name,
+            kind,
+            unit,
+            goal,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let new_metric = body::BodyMetric {
+                path: String::new(),
+                id: uuid::Uuid::nil(),
+                name,
+                kind: kind.unwrap_or_else(|| "other".into()),
+                unit: unit.unwrap_or_default(),
+                goal,
+                tags: body::model::Tags(Vec::new()),
+                entries: body::model::Entries(Vec::new()),
+                date_created: None,
+                date_modified: None,
+                details: String::new(),
+            };
+            let created = client
+                .create(new_metric)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        BodyCmd::Log {
+            target,
+            value,
+            date,
+            unit,
+            note,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let m = resolve_body_target(&client, &target).await?;
+            let day = match date {
+                Some(s) => chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                    .map_err(|e| eyre::eyre!("--date: {e}"))?,
+                None => chrono::Local::now().date_naive(),
+            };
+            let entry = body::model::BodyEntry {
+                id: uuid::Uuid::new_v4(),
+                date: day,
+                value,
+                unit,
+                note,
+            };
+            let updated = client
+                .log_entry(m.id.to_string(), entry)
+                .await
+                .map_err(|e| eyre::eyre!("log_entry: {e:?}"))?;
+            println!(
+                "logged {} {} on {} for {}",
+                value, updated.unit, day, updated.name
+            );
+        }
+        BodyCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_body_client(&u).await?;
+            let m = resolve_body_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", m.name, m.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", m.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Exercises (exercises::Store) ─────────────────────────────────────
+
+async fn connect_exercises_client(url: &str) -> eyre::Result<exercises::ExercisesServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_exercise_target(
+    client: &exercises::ExercisesServiceClient,
+    target: &str,
+) -> eyre::Result<exercises::Exercise> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|e| e.path == target || e.name.eq_ignore_ascii_case(target))
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_exercise(cmd: ExerciseCmd) -> eyre::Result<()> {
+    match cmd {
+        ExerciseCmd::List {
+            query,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|e| {
+                    query
+                        .as_deref()
+                        .is_none_or(|q| e.name.to_lowercase().contains(&q.to_lowercase()))
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for e in &rows {
+                println!("{:<32}  {:<12}    {}", e.name, e.category, e.path);
+            }
+        }
+        ExerciseCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let e = resolve_exercise_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&e).map_err(|err| eyre::eyre!("json: {err}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", e.name);
+            println!("  id:        {}", e.id);
+            println!("  path:      {}", e.path);
+            println!("  category:  {}", e.category);
+            if !e.primary_muscles.is_empty() {
+                println!("  muscles:   {}", e.primary_muscles.0.join(", "));
+            }
+            if !e.equipment.is_empty() {
+                println!("  equipment: {}", e.equipment.0.join(", "));
+            }
+        }
+        ExerciseCmd::Create {
+            name,
+            kind,
+            muscle,
+            tags,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let primary_muscles = muscle
+                .map(|m| exercises::model::StringList(vec![m]))
+                .unwrap_or_default();
+            let new_ex = exercises::Exercise {
+                path: String::new(),
+                id: uuid::Uuid::nil(),
+                name,
+                aliases: exercises::model::StringList::default(),
+                description: None,
+                category: kind.unwrap_or_else(|| "other".into()),
+                primary_muscles,
+                secondary_muscles: exercises::model::StringList::default(),
+                equipment: exercises::model::StringList::default(),
+                mechanics: None,
+                force: None,
+                instructions: exercises::model::StringList::default(),
+                video_url: None,
+                image_url: None,
+                tags: exercises::model::StringList(tags),
+                date_created: None,
+                date_modified: None,
+                details: String::new(),
+            };
+            let created = client
+                .create(new_ex)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        ExerciseCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let e = resolve_exercise_target(&client, &target).await?;
+            let renamed = client
+                .rename(e.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        ExerciseCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_exercises_client(&u).await?;
+            let e = resolve_exercise_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", e.name, e.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(e.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", e.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Workouts (routines + sessions) ───────────────────────────────────
+
+async fn connect_workouts_client(url: &str) -> eyre::Result<workouts::WorkoutsServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_routine_target(
+    client: &workouts::WorkoutsServiceClient,
+    target: &str,
+) -> eyre::Result<workouts::Routine> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get_routine(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get_routine: {e:?}"));
+    }
+    let rows = client
+        .list_routines()
+        .await
+        .map_err(|e| eyre::eyre!("list_routines: {e:?}"))?;
+    rows.into_iter()
+        .find(|r| r.path == target || r.name.eq_ignore_ascii_case(target))
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn resolve_session_target(
+    client: &workouts::WorkoutsServiceClient,
+    target: &str,
+) -> eyre::Result<workouts::WorkoutSession> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get_session(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get_session: {e:?}"));
+    }
+    let rows = client
+        .list_sessions()
+        .await
+        .map_err(|e| eyre::eyre!("list_sessions: {e:?}"))?;
+    rows.into_iter()
+        .find(|s| s.path == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_workout(cmd: WorkoutCmd) -> eyre::Result<()> {
+    match cmd {
+        WorkoutCmd::Routine(rc) => run_workout_routine(rc).await,
+        WorkoutCmd::Session(sc) => run_workout_session(sc).await,
+    }
+}
+
+async fn run_workout_routine(cmd: WorkoutRoutineCmd) -> eyre::Result<()> {
+    match cmd {
+        WorkoutRoutineCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let rows = client
+                .list_routines()
+                .await
+                .map_err(|e| eyre::eyre!("list_routines: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for r in &rows {
+                println!("{:<32}  {} days    {}", r.name, r.days.0.len(), r.path);
+            }
+        }
+        WorkoutRoutineCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let r = resolve_routine_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", r.name);
+            println!("  id:    {}", r.id);
+            println!("  path:  {}", r.path);
+            for d in &r.days.0 {
+                println!("  day:   {}  ({} slots)", d.name, d.slots.len());
+            }
+        }
+        WorkoutRoutineCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let r = resolve_routine_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", r.name, r.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete_routine(r.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete_routine: {e:?}"))?;
+            println!("deleted {}", r.path);
+        }
+    }
+    Ok(())
+}
+
+async fn run_workout_session(cmd: WorkoutSessionCmd) -> eyre::Result<()> {
+    match cmd {
+        WorkoutSessionCmd::List {
+            date,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let parsed = match date {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--date: {e}"))?,
+                ),
+            };
+            let rows: Vec<_> = client
+                .list_sessions()
+                .await
+                .map_err(|e| eyre::eyre!("list_sessions: {e:?}"))?
+                .into_iter()
+                .filter(|s| parsed.is_none_or(|d| s.date == d))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for s in &rows {
+                println!(
+                    "{}  {:<24}  {} sets    {}",
+                    s.date,
+                    s.name,
+                    s.logged_sets.0.len(),
+                    s.path
+                );
+            }
+        }
+        WorkoutSessionCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let s = resolve_session_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&s).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} ({})\n", s.name, s.date);
+            println!("  id:    {}", s.id);
+            println!("  path:  {}", s.path);
+            for set in &s.logged_sets.0 {
+                let rpe = set.rpe.map(|r| format!(" @ rpe {r}")).unwrap_or_default();
+                println!(
+                    "    [{}] {}: {}x{}kg{rpe}",
+                    set.order, set.exercise_name, set.reps, set.weight_kg
+                );
+            }
+        }
+        WorkoutSessionCmd::StartFromRoutine {
+            routine,
+            day,
+            date,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let r = resolve_routine_target(&client, &routine).await?;
+            let date_str = date.unwrap_or_else(|| chrono::Local::now().date_naive().to_string());
+            let session = client
+                .start_from_routine(r.id.to_string(), day, date_str)
+                .await
+                .map_err(|e| eyre::eyre!("start_from_routine: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&session).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("started {} ({})", session.name, session.path);
+                println!("  id: {}", session.id);
+            }
+        }
+        WorkoutSessionCmd::LogSet {
+            session,
+            exercise,
+            reps,
+            weight,
+            rpe,
+            note,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let s = resolve_session_target(&client, &session).await?;
+            // Resolve the exercise to its id (auto-population
+            // of `exercise_name` happens server-side; we still
+            // pass a best-effort cache here).
+            let ec = connect_exercises_client(&u).await?;
+            let ex = resolve_exercise_target(&ec, &exercise).await?;
+            let order = u32::try_from(s.logged_sets.0.len()).unwrap_or(0);
+            let set = workouts::LoggedSet {
+                id: uuid::Uuid::new_v4(),
+                exercise_id: ex.id,
+                exercise_name: ex.name,
+                order,
+                reps,
+                weight_kg: weight,
+                rir: None,
+                rpe,
+                completed: true,
+                note,
+            };
+            let updated = client
+                .log_set(s.id.to_string(), set)
+                .await
+                .map_err(|e| eyre::eyre!("log_set: {e:?}"))?;
+            println!(
+                "logged set #{order} on {} ({} total sets)",
+                updated.name,
+                updated.logged_sets.0.len()
+            );
+        }
+        WorkoutSessionCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_workouts_client(&u).await?;
+            let s = resolve_session_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", s.name, s.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete_session(s.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete_session: {e:?}"))?;
+            println!("deleted {}", s.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Intake (intake::Store) ───────────────────────────────────────────
+
+async fn connect_intake_client(url: &str) -> eyre::Result<intake::IntakeServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_intake_target(
+    client: &intake::IntakeServiceClient,
+    target: &str,
+) -> eyre::Result<intake::IntakeLog> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|l| l.path == target || l.date.to_string() == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_intake(cmd: IntakeCmd) -> eyre::Result<()> {
+    match cmd {
+        IntakeCmd::List { org, server, json } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for l in &rows {
+                println!(
+                    "{}  {:<24}  {} entries    {}",
+                    l.date,
+                    l.name,
+                    l.entries.0.len(),
+                    l.path
+                );
+            }
+        }
+        IntakeCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let l = resolve_intake_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&l).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} ({})\n", l.name, l.date);
+            println!("  id:    {}", l.id);
+            println!("  path:  {}", l.path);
+            for e in &l.entries.0 {
+                let slot = e.slot.as_deref().unwrap_or("?");
+                println!("    [{slot}] {}", e.name);
+            }
+        }
+        IntakeCmd::ForDay {
+            date,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let l = client
+                .for_day(date.clone())
+                .await
+                .map_err(|e| eyre::eyre!("for_day: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&l).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("{} ({})", l.name, l.date);
+                println!("  {} entries", l.entries.0.len());
+            }
+        }
+        IntakeCmd::LogRecipe {
+            date,
+            recipe,
+            servings,
+            slot,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let updated = client
+                .log_recipe(date, recipe, servings, slot)
+                .await
+                .map_err(|e| eyre::eyre!("log_recipe: {e:?}"))?;
+            println!(
+                "logged → {} entries on {}",
+                updated.entries.0.len(),
+                updated.date
+            );
+        }
+        IntakeCmd::LogPantry {
+            date,
+            item,
+            qty,
+            slot,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            // Resolve pantry path/name → id.
+            let pc = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&pc, &item).await?;
+            let updated = client
+                .log_pantry(date, p.id.to_string(), qty, slot)
+                .await
+                .map_err(|e| eyre::eyre!("log_pantry: {e:?}"))?;
+            println!(
+                "logged → {} entries on {}",
+                updated.entries.0.len(),
+                updated.date
+            );
+        }
+        IntakeCmd::LogFreeform {
+            date,
+            name,
+            kcal,
+            slot,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let nutrition = cookbook::Nutrition {
+                calories: kcal,
+                protein_g: None,
+                carbs_g: None,
+                fat_g: None,
+                fiber_g: None,
+                sugar_g: None,
+            };
+            let updated = client
+                .log_freeform(date, name, nutrition, slot)
+                .await
+                .map_err(|e| eyre::eyre!("log_freeform: {e:?}"))?;
+            println!(
+                "logged → {} entries on {}",
+                updated.entries.0.len(),
+                updated.date
+            );
+        }
+        IntakeCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_intake_client(&u).await?;
+            let l = resolve_intake_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", l.name, l.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(l.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", l.path);
         }
     }
     Ok(())

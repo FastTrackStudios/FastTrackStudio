@@ -13,6 +13,8 @@ use crate::service::{WorkoutsError, WorkoutsService};
 use crate::write::{
     default_routine_path, default_session_path, serialize_routine, serialize_session,
 };
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 
 #[derive(Clone)]
 pub struct Store {
@@ -49,6 +51,13 @@ fn find_session_idx(vault: &Vault, id: Uuid) -> Option<usize> {
     vault.pages.iter().position(|p| {
         looks_like_session(p) && parse_session(p).map(|s| s.id == id).unwrap_or(false)
     })
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
+    }
 }
 
 impl WorkoutsService for Store {

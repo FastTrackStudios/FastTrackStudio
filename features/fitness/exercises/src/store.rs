@@ -11,6 +11,8 @@ use crate::parse::{looks_like_exercise, parse_page};
 use crate::scan::scan_vault;
 use crate::service::{ExercisesError, ExercisesService};
 use crate::write::{default_exercise_path, serialize_exercise};
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 
 #[derive(Clone)]
 pub struct Store {
@@ -42,6 +44,13 @@ fn find_idx(vault: &Vault, id: Uuid) -> Option<usize> {
         .pages
         .iter()
         .position(|p| looks_like_exercise(p) && parse_page(p).map(|e| e.id == id).unwrap_or(false))
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
+    }
 }
 
 impl ExercisesService for Store {

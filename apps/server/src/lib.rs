@@ -101,6 +101,15 @@ pub struct OrgAppState {
     pub mealplan: mealplan::Store,
     /// Pantry — stocked ingredients + barcode lookup.
     pub pantry: pantry::Store,
+    /// Body metrics — weight / body-fat / measurements log.
+    pub body: body::Store,
+    /// Exercise library — movement definitions referenced by
+    /// routines + sessions.
+    pub exercises: exercises::Store,
+    /// Workout routines + sessions (planned + completed lifts).
+    pub workouts: workouts::Store,
+    /// Food intake — per-day calorie + macro log.
+    pub intake: intake::Store,
     pub agent_tasks: agent_tasks::Store,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
@@ -433,6 +442,19 @@ pub(crate) async fn build_org_state(
         let pantry_vault =
             vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open pantry vault: {e}"))?;
         let pantry = pantry::Store::new(pantry_vault);
+        // Fitness suite. Each takes its own vault snapshot.
+        let body_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open body vault: {e}"))?;
+        let body = body::Store::new(body_vault);
+        let exercises_vault = vault::Vault::open(&vault_root)
+            .map_err(|e| eyre::eyre!("open exercises vault: {e}"))?;
+        let exercises = exercises::Store::new(exercises_vault);
+        let workouts_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open workouts vault: {e}"))?;
+        let workouts = workouts::Store::new(workouts_vault);
+        let intake_vault =
+            vault::Vault::open(&vault_root).map_err(|e| eyre::eyre!("open intake vault: {e}"))?;
+        let intake = intake::Store::new(intake_vault);
 
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
@@ -448,6 +470,10 @@ pub(crate) async fn build_org_state(
             cookbook,
             mealplan,
             pantry,
+            body,
+            exercises,
+            workouts,
+            intake,
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
             timer,
@@ -692,6 +718,10 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
         let cookbook_backend = org.cookbook.clone();
         let mealplan_backend = org.mealplan.clone();
         let pantry_backend = org.pantry.clone();
+        let body_backend = org.body.clone();
+        let exercises_backend = org.exercises.clone();
+        let workouts_backend = org.workouts.clone();
+        let intake_backend = org.intake.clone();
         let agent_tasks_store = org.agent_tasks.clone();
         let timer_store = org.timer.clone();
         let acceptor =
@@ -857,6 +887,28 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
                 }
                 name if name == pantry::pantry_service_descriptor().service_name => {
                     connection.handle_with(pantry::serve_pantry_service(pantry_backend.clone()));
+                    Ok(())
+                }
+                // Fitness suite — body / exercises / workouts /
+                // intake. All four mounted per-org alongside
+                // the entity-CRUD services above.
+                name if name == body::body_service_descriptor().service_name => {
+                    connection.handle_with(body::serve_body_service(body_backend.clone()));
+                    Ok(())
+                }
+                name if name == exercises::exercises_service_descriptor().service_name => {
+                    connection.handle_with(exercises::serve_exercises_service(
+                        exercises_backend.clone(),
+                    ));
+                    Ok(())
+                }
+                name if name == workouts::workouts_service_descriptor().service_name => {
+                    connection
+                        .handle_with(workouts::serve_workouts_service(workouts_backend.clone()));
+                    Ok(())
+                }
+                name if name == intake::intake_service_descriptor().service_name => {
+                    connection.handle_with(intake::serve_intake_service(intake_backend.clone()));
                     Ok(())
                 }
                 other => {

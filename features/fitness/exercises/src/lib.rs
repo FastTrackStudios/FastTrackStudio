@@ -35,6 +35,14 @@ pub mod write;
 pub use model::{Category, Equipment, Exercise, Force, Mechanics};
 pub use parse::{ParseError, looks_like_exercise, parse_page};
 pub use scan::{by_category, by_equipment, scan_vault};
-pub use service::{ExercisesError, ExercisesService};
+pub use service::{ExercisesError, ExercisesService, ExercisesServiceRpc};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    ExercisesServiceClient, ExercisesServiceRpcDispatcher as ExercisesDispatcher,
+    Service as ExercisesServiceBridge,
+    exercises_service_rpc_service_descriptor as exercises_service_descriptor,
+    layer as exercises_service_layer, serve as serve_exercises_service,
+};
 pub use store::Store;
 pub use write::{WriteError, default_exercise_path, serialize_exercise, write_exercise};
