@@ -688,6 +688,44 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
     // than a regular track/bus. Collected here, injected after serialization.
     let mut master_guids: Vec<String> = Vec::new();
 
+    // Converted plugin FX, keyed by owning track name. Each entry is the raw
+    // `<VST …>` block + preset name produced by the plugin bridge (e.g.
+    // Omnisphere state transplanted into a Reaper VST3 chunk).
+    // Normalize a track name by stripping a trailing ".NN" playlist suffix,
+    // for fuzzy matching when the emitted RPP track name carries a playlist
+    // suffix the PT plugin container's name does not.
+    fn norm_track_name(name: &str) -> &str {
+        match name.rsplit_once('.') {
+            Some((base, suf)) if !suf.is_empty() && suf.chars().all(|c| c.is_ascii_digit()) => base,
+            _ => name,
+        }
+    }
+    // Pending converted plugins (track_name, fx). Claimed at most once per
+    // emitted track: prefer an exact track-name match, then a normalized one.
+    let mut pending_fx: Vec<(String, Option<crate::plugin_bridge::ConvertedFx>)> = session
+        .plugin_states
+        .iter()
+        .filter_map(|ps| {
+            crate::plugin_bridge::convert(ps).map(|fx| (ps.track_name.clone(), Some(fx)))
+        })
+        .collect();
+    // Claim the FX for a track: exact name match first, else normalized.
+    let mut claim_fx = |track_name: &str| -> Vec<crate::plugin_bridge::ConvertedFx> {
+        if let Some(slot) = pending_fx
+            .iter_mut()
+            .find(|(n, fx)| fx.is_some() && n == track_name)
+        {
+            return slot.1.take().into_iter().collect();
+        }
+        if let Some(slot) = pending_fx
+            .iter_mut()
+            .find(|(n, fx)| fx.is_some() && norm_track_name(n) == norm_track_name(track_name))
+        {
+            return slot.1.take().into_iter().collect();
+        }
+        Vec::new()
+    };
+
     for (plan_idx, e) in emit.iter().enumerate() {
         let end_levels = folder_end_levels[plan_idx];
         let is_folder_start = folder_starts[plan_idx];
@@ -948,12 +986,22 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 if track.is_master {
                     master_guids.push(track_guid.clone());
                 }
+                let fxs = claim_fx(&track.name);
+                let fx_guid_base = track_guid.clone();
                 builder = builder.track(&display_name, |t| {
                     let mut t = t
                         .guid(&track_guid)
                         .automation_mode(dawfile_reaper::types::track::AutomationMode::Read);
                     if is_folder_start {
                         t = t.folder_start();
+                    }
+                    // Converted instrument plugins (e.g. Omnisphere) — transplant
+                    // the full plugin state onto the track's FX chain.
+                    for (i, fx) in fxs.iter().enumerate() {
+                        let block = fx.raw_block.clone();
+                        let preset = fx.preset_name.clone();
+                        let fxid = deterministic_guid(&format!("{fx_guid_base}:fx{i}"));
+                        t = t.fx(move |b| b.raw_block(block).preset(preset).fxid(fxid).wak(0, 0));
                     }
                     let linear_vol = if track.volume_centibel <= -1440 {
                         0.0

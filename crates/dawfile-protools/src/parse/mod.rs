@@ -17,6 +17,7 @@ pub mod midi;
 pub mod mix_aux;
 pub mod mute_automation;
 pub mod mute_resolver;
+pub mod plugin_states;
 pub mod plugins;
 pub mod regions;
 pub mod solo;
@@ -952,6 +953,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     let edit_groups = parse_edit_groups(&blocks, data);
     let stem_mappings = parse_stem_mappings(&blocks, data);
     let internal_tracks = parse_internal_tracks(&blocks, data);
+    let plugin_states = plugin_states::parse_plugin_states(&blocks, &cursor);
 
     Ok(ProToolsSession {
         version,
@@ -971,6 +973,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         edit_groups,
         stem_mappings,
         internal_tracks,
+        plugin_states,
     })
 }
 

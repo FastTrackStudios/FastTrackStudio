@@ -24,6 +24,7 @@ dawfile-reaper = { path = "../dawfile-reaper" }
 dawfile-ableton = { path = "../dawfile-ableton" }
 dawfile-protools = { path = "../dawfile-protools" }
 dawfile-aaf = { path = "../dawfile-aaf" }
+base64 = "0.22.1"
 dawfile-dawproject = { path = "../dawfile-dawproject" }
 
 # REAPER bindings for actual DAW control

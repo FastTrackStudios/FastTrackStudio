@@ -59,6 +59,34 @@ pub struct ProToolsSession {
     /// separately from the audio/MIDI track lists. Decoded from `0x261e`
     /// blocks; see [`InternalTrack`].
     pub internal_tracks: Vec<InternalTrack>,
+    /// Per-instance plugin state blobs extracted from the session, keyed by
+    /// the owning track name. Currently detects instruments whose state is a
+    /// self-contained, format-portable blob (e.g. Omnisphere). See
+    /// [`PluginInstanceState`].
+    pub plugin_states: Vec<PluginInstanceState>,
+}
+
+/// Which plugin a [`PluginInstanceState`] blob belongs to. Determines how the
+/// converter re-wraps the blob for the target host (Reaper VST3/AU).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginStateKind {
+    /// Spectrasonics Omnisphere (also hosts Keyscape / Trilian / Stylus
+    /// libraries). State is the `<SynthMaster …>` XML document.
+    Omnisphere,
+}
+
+/// A single plugin instance's saved state, extracted from the PT session and
+/// tagged with its owning track so the converter can re-emit it on the
+/// matching Reaper track.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginInstanceState {
+    /// Name of the track that hosts this plugin instance.
+    pub track_name: String,
+    /// Which plugin this state belongs to.
+    pub kind: PluginStateKind,
+    /// The raw, format-portable state blob (for Omnisphere, the
+    /// `<SynthMaster …>…</SynthMaster>` XML bytes).
+    pub state: Vec<u8>,
 }
 
 /// An "internal" PT track — anything that's not an audio or MIDI playback

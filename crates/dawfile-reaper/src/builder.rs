@@ -62,6 +62,9 @@ pub struct FxBuilder {
     fxid: Option<String>,
     preset_name: Option<String>,
     state_data: Vec<String>,
+    raw_block: String,
+    wak: Option<[i32; 2]>,
+    float_pos: Option<[i32; 4]>,
 }
 
 impl FxBuilder {
@@ -75,7 +78,31 @@ impl FxBuilder {
             fxid: None,
             preset_name: None,
             state_data: vec![],
+            raw_block: String::new(),
+            wak: None,
+            float_pos: None,
         }
+    }
+
+    /// Set the `WAK` line values (REAPER's wet/auto-bypass flags). REAPER
+    /// writes `WAK 0 0` for a normal active FX.
+    pub fn wak(mut self, a: i32, b: i32) -> Self {
+        self.wak = Some([a, b]);
+        self
+    }
+
+    /// Set the `FLOATPOS` rectangle (floating FX window position).
+    pub fn float_pos(mut self, pos: [i32; 4]) -> Self {
+        self.float_pos = Some(pos);
+        self
+    }
+
+    /// Set the complete raw plugin block (`<VST …> … >`), used for verbatim
+    /// state transplant (e.g. a converted Omnisphere chunk). When set, it is
+    /// emitted as-is by the serializer instead of a synthesized header.
+    pub fn raw_block(mut self, block: impl Into<String>) -> Self {
+        self.raw_block = block.into();
+        self
     }
 
     /// Mark this FX as bypassed.
@@ -118,11 +145,11 @@ impl FxBuilder {
             offline: self.offline,
             fxid: self.fxid,
             preset_name: self.preset_name,
-            float_pos: None,
-            wak: None,
+            float_pos: self.float_pos,
+            wak: self.wak,
             parallel: false,
             state_data: self.state_data,
-            raw_block: String::new(),
+            raw_block: self.raw_block,
             param_envelopes: vec![],
             params_on_tcp: vec![],
         }
