@@ -8,7 +8,9 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use eyre::Result;
+use eyre::{Result, WrapErr};
+
+mod connection;
 
 // ============================================================================
 // CLI Definitions
@@ -83,6 +85,22 @@ pub enum SessionCommand {
         /// Position in seconds
         seconds: f64,
     },
+    /// FTS session mode (Organize / Write / Produce / Record / …)
+    #[command(subcommand)]
+    Mode(ModeCommand),
+}
+
+#[derive(Subcommand)]
+pub enum ModeCommand {
+    /// Print the currently active mode slug.
+    Get,
+    /// Switch the active mode by slug.
+    Set {
+        /// One of: organize, write, produce, record, edit, mix, master, live, video, minimal.
+        slug: String,
+    },
+    /// List all known mode slugs (declaration order).
+    List,
 }
 
 #[derive(Subcommand)]
@@ -129,12 +147,13 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             ref output,
             guide,
         } => cmd_organize(input, output.as_deref(), guide),
+        SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
         other => {
-            // Live commands require Phase 3 RPC connection
+            // Other live commands not yet wired through RPC.
             let cmd_name = match other {
-                SessionCommand::Combine { .. } | SessionCommand::Organize { .. } => {
-                    unreachable!()
-                }
+                SessionCommand::Combine { .. }
+                | SessionCommand::Organize { .. }
+                | SessionCommand::Mode(_) => unreachable!(),
                 SessionCommand::Setlist => "setlist",
                 SessionCommand::Songs => "songs",
                 SessionCommand::Song { .. } => "song",
@@ -161,6 +180,61 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             )
         }
     }
+}
+
+// ============================================================================
+// Mode commands
+// ============================================================================
+
+async fn cmd_mode(socket: Option<&std::path::Path>, cmd: ModeCommand, as_json: bool) -> Result<()> {
+    use session_proto::services::SessionModeServiceClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let client = SessionModeServiceClient::new(caller);
+
+    match cmd {
+        ModeCommand::Get => {
+            let slug = client
+                .current_mode()
+                .await
+                .wrap_err("current_mode RPC failed")?;
+            print_value(&slug, as_json)
+        }
+        ModeCommand::Set { slug } => {
+            client
+                .set_mode(slug.clone())
+                .await
+                .wrap_err_with(|| format!("set_mode({slug}) RPC failed"))?;
+            print_value(&format!("set mode = {slug}"), as_json)
+        }
+        ModeCommand::List => {
+            let modes = client
+                .list_modes()
+                .await
+                .wrap_err("list_modes RPC failed")?;
+            if as_json {
+                let json = serde_json::to_string(&modes)?;
+                println!("{json}");
+            } else {
+                for m in modes {
+                    println!("{m}");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn print_value(value: &str, as_json: bool) -> Result<()> {
+    if as_json {
+        let json = serde_json::to_string(value)?;
+        println!("{json}");
+    } else {
+        println!("{value}");
+    }
+    Ok(())
 }
 
 // ============================================================================
