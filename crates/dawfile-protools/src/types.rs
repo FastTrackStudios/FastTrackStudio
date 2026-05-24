@@ -196,6 +196,10 @@ pub struct MidiRegion {
     /// Clip length in PT ticks (the three-point `length`) — the clip's nominal
     /// trimmed extent, used as the upper source bound for cut clips.
     pub clip_len_ticks: u64,
+    /// The take's timeline offset in PT ticks (`chunk.zero_ticks - ZERO_TICKS`).
+    /// Note positions are chunk-relative; the timeline position of a note is
+    /// `take_offset_ticks + position + (clip_start_ticks - clip_src_ticks)`.
+    pub take_offset_ticks: u64,
     /// MIDI events in this region.
     pub events: Vec<MidiEvent>,
 }

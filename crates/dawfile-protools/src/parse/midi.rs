@@ -95,13 +95,15 @@ fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
     const EVENTS_START_OFFSET: usize = 23;
     const EVENT_STRIDE: usize = 35;
     const POS_OFFSET: usize = 27;
-    const NOTE_OFFSET: usize = 9;
+    // The MIDI note number is byte +0 (verified against the reference exports:
+    // ev[0] = 0x40/0x44/0x34 = 64/68/52 match exactly). Byte +9 is a secondary
+    // "source note" field (the pre-edit pitch) — reading it there gave wrong,
+    // often out-of-range pitches.
+    const NOTE_OFFSET: usize = 0;
     const VEL_OFFSET: usize = 10;
     // The 35-byte record holds four baseline-2^62-encoded u64 fields (their
     // MSB `0x40` markers sit at byte offsets 8/18/26/34): duration at +1, two
     // unused fields at +11/+19, and the absolute note-on position at +27.
-    // (The duration was previously read at +11 — an always-zero field — which
-    // collapsed every note to a single tick.)
     const DUR_OFFSET: usize = 1;
 
     for block in midi_blocks {
@@ -137,7 +139,14 @@ fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
                     break;
                 }
 
-                let note = data[ev_offset + NOTE_OFFSET];
+                // The note number sits in the NEXT record's +0 byte (the +27
+                // position field of record i is the onset for the note recorded
+                // at record i+1). Pair them so notes land on the right onsets.
+                let note_off = ev_offset + EVENT_STRIDE + NOTE_OFFSET;
+                if note_off >= data.len() {
+                    break;
+                }
+                let note = data[note_off];
                 let velocity = data[ev_offset + VEL_OFFSET];
 
                 // Duration field at +11 (8 bytes). PT stores this in two forms
@@ -288,6 +297,16 @@ fn parse_midi_regions(
             Vec::new()
         };
 
+        // The chunk's `zero_ticks` baseline encodes where the take sits on the
+        // session timeline (relative to the session's ZERO_TICKS origin). Note
+        // positions are stored chunk-relative, so the take's timeline offset
+        // (`zero_ticks - ZERO_TICKS`) must be added back when placing the clip;
+        // without it every take collapses to the session start.
+        let take_offset_ticks = chunks
+            .get(chunk_idx)
+            .map(|c| c.zero_ticks.saturating_sub(ZERO_TICKS))
+            .unwrap_or(0);
+
         // Region length in samples: the clip's nominal extent.
         let region_length_samples = if clip_len != u64::MAX {
             tick_to_sample(clip_len, tempo_segments, target_sample_rate)
@@ -310,6 +329,7 @@ fn parse_midi_regions(
             clip_start_ticks: clip_start,
             clip_src_ticks: clip_src,
             clip_len_ticks: if clip_len == u64::MAX { 0 } else { clip_len },
+            take_offset_ticks,
             events,
         });
     }
@@ -471,8 +491,10 @@ fn parse_midi_tracks(
                     };
 
                     // Item placement so a kept note at chunk_pos lands at
-                    // timeline `start + (chunk_pos - src)`.
-                    let placement_ticks = start.saturating_sub(src);
+                    // timeline `take_offset + chunk_pos + (start - src)` — the
+                    // take's recorded position plus the clip's slip.
+                    let take_offset = regions[ri as usize].take_offset_ticks;
+                    let placement_ticks = take_offset.saturating_add(start).saturating_sub(src);
 
                     TrackRegion {
                         region_index: ri,

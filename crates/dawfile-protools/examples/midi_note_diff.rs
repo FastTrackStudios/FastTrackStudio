@@ -174,9 +174,10 @@ fn main() {
                     {
                         continue;
                     }
-                    let tl = reg.clip_start_ticks as f64
-                        + (e.position as f64 - reg.clip_src_ticks as f64);
-                    ourn.push((e.note, tl / 960000.0));
+                    let tl = reg.take_offset_ticks as i64
+                        + e.position as i64
+                        + (reg.clip_start_ticks as i64 - reg.clip_src_ticks as i64);
+                    ourn.push((e.note, tl as f64 / 960000.0));
                 }
             }
         }
