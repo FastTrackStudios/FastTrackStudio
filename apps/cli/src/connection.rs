@@ -77,9 +77,11 @@ async fn discover_newest_socket() -> Result<PathBuf> {
 }
 
 async fn open_session(path: &Path) -> Result<vox::Caller> {
+    let t0 = std::time::Instant::now();
     let stream = tokio::net::UnixStream::connect(path)
         .await
         .wrap_err_with(|| format!("connect to {}", path.display()))?;
+    let t_socket = t0.elapsed();
     let link = vox_stream::StreamLink::unix(stream);
 
     let handshake = vox::HandshakeResult {
@@ -101,15 +103,18 @@ async fn open_session(path: &Path) -> Result<vox::Caller> {
         peer_schema: vec![],
         peer_metadata: vec![],
     };
+    let t1 = std::time::Instant::now();
     let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
         .establish::<vox::NoopClient>()
         .await
         .map_err(|e| eyre!("vox handshake failed: {e:?}"))?;
+    let t_establish = t1.elapsed();
     let session = root
         .session
         .clone()
         .ok_or_else(|| eyre!("vox root session missing handle"))?;
 
+    let t2 = std::time::Instant::now();
     let conn = session
         .open_connection(
             vox::ConnectionSettings {
@@ -132,9 +137,20 @@ async fn open_session(path: &Path) -> Result<vox::Caller> {
         )
         .await
         .map_err(|e| eyre!("open_connection failed: {e:?}"))?;
+    let t_open = t2.elapsed();
 
     let mut driver = vox::Driver::new(conn, ());
     let caller = vox::Caller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
+
+    // Trace-level so it stays out of normal output; enable with
+    // `RUST_LOG=session_cli::connection=debug` (or `=trace`).
+    tracing::debug!(
+        socket_us = t_socket.as_micros() as u64,
+        establish_us = t_establish.as_micros() as u64,
+        open_us = t_open.as_micros() as u64,
+        total_us = t0.elapsed().as_micros() as u64,
+        "vox open_session timing"
+    );
     Ok(caller)
 }

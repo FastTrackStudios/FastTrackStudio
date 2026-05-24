@@ -7,8 +7,51 @@
 
 use std::path::PathBuf;
 
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use eyre::{Result, WrapErr};
+
+/// Which RPC the bench should probe. `All` is a convenience that
+/// expands to the full set; CLI parsing keeps it as one variant so
+/// the user can pass `-t all` without listing them.
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
+pub enum BenchTarget {
+    All,
+    Mode,
+    Project,
+    Tempo,
+    #[clap(name = "time-sig")]
+    TimeSig,
+    #[clap(name = "play-state")]
+    PlayState,
+    #[clap(name = "track-count")]
+    TrackCount,
+}
+
+impl BenchTarget {
+    /// Concrete targets `All` expands to (ordered for stable output).
+    fn expanded() -> &'static [BenchTarget] {
+        &[
+            BenchTarget::Mode,
+            BenchTarget::Project,
+            BenchTarget::Tempo,
+            BenchTarget::TimeSig,
+            BenchTarget::PlayState,
+            BenchTarget::TrackCount,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            BenchTarget::All => "all",
+            BenchTarget::Mode => "mode",
+            BenchTarget::Project => "project",
+            BenchTarget::Tempo => "tempo",
+            BenchTarget::TimeSig => "time-sig",
+            BenchTarget::PlayState => "play-state",
+            BenchTarget::TrackCount => "track-count",
+        }
+    }
+}
 
 pub mod connection;
 
@@ -89,10 +132,19 @@ pub enum SessionCommand {
     #[command(subcommand)]
     Mode(ModeCommand),
     /// Measure RPC roundtrip latency over one persistent connection.
+    ///
+    /// Reports min / p50 / p95 / p99 / max for each target. Use
+    /// `--target all` (default) to see every probe side-by-side so
+    /// you can spot which RPCs are slow.
     Bench {
-        /// Number of calls to time
+        /// Number of calls per target.
         #[arg(short, long, default_value = "200")]
         count: usize,
+        /// Which RPC(s) to probe. Repeat or comma-separate for several;
+        /// `all` runs the full set. Targets: mode, project, tempo,
+        /// time-sig, play-state, track-count.
+        #[arg(short, long, default_value = "all", value_delimiter = ',')]
+        target: Vec<BenchTarget>,
     },
 }
 
@@ -154,7 +206,9 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             guide,
         } => cmd_organize(input, output.as_deref(), guide),
         SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
-        SessionCommand::Bench { count } => cmd_bench(socket.as_deref(), count).await,
+        SessionCommand::Bench { count, target } => {
+            cmd_bench(socket.as_deref(), count, target).await
+        }
         SessionCommand::Play => cmd_transport(socket.as_deref(), TransportOp::Play).await,
         SessionCommand::Pause => cmd_transport(socket.as_deref(), TransportOp::Pause).await,
         SessionCommand::Stop => cmd_transport(socket.as_deref(), TransportOp::Stop).await,
@@ -448,7 +502,14 @@ fn resolve_track_paths(track: &mut daw::file::types::track::Track, source_dir: &
 // Transport commands
 // ============================================================================
 
-async fn cmd_bench(socket: Option<&std::path::Path>, count: usize) -> Result<()> {
+async fn cmd_bench(
+    socket: Option<&std::path::Path>,
+    count: usize,
+    targets: Vec<BenchTarget>,
+) -> Result<()> {
+    use daw_proto::project::ProjectsClient;
+    use daw_proto::track::TracksClient;
+    use daw_proto::transport::TransportClient;
     use session_proto::services::SessionModeServiceClient;
 
     let t_connect = std::time::Instant::now();
@@ -456,31 +517,114 @@ async fn cmd_bench(socket: Option<&std::path::Path>, count: usize) -> Result<()>
         .await
         .wrap_err("connect to fts-extensions socket")?;
     let connect_us = t_connect.elapsed().as_micros();
-    let client = SessionModeServiceClient::new(caller);
 
-    // Warmup so the JIT'd dispatch path is hot.
-    let _ = client.current_mode().await;
+    // Build every client we might need — cheap, each is just a wrapper
+    // around the same `Caller` clone. Easier than a per-target match.
+    let mode = SessionModeServiceClient::new(caller.clone());
+    let projects = ProjectsClient::new(caller.clone());
+    let transport = TransportClient::new(caller.clone());
+    let tracks = TracksClient::new(caller.clone());
 
-    let mut samples = Vec::with_capacity(count);
-    for _ in 0..count {
-        let t0 = std::time::Instant::now();
-        let _ = client
-            .current_mode()
-            .await
-            .map_err(|e| eyre::eyre!("rpc failed: {e:?}"))?;
-        samples.push(t0.elapsed().as_micros() as u64);
-    }
-    samples.sort_unstable();
-    let min = samples[0];
-    let p50 = samples[count / 2];
-    let p95 = samples[(count as f64 * 0.95) as usize];
-    let p99 = samples[(count as f64 * 0.99) as usize];
-    let max = samples[count - 1];
-    let avg: u64 = samples.iter().sum::<u64>() / count as u64;
+    // Expand `All` once; deduplicate so `--target mode,mode` doesn't
+    // double-run.
+    let mut wanted: Vec<BenchTarget> = if targets.iter().any(|t| *t == BenchTarget::All) {
+        BenchTarget::expanded().to_vec()
+    } else {
+        targets
+    };
+    wanted.sort_by_key(|t| t.label());
+    wanted.dedup();
+
     println!("connect+handshake: {} µs", connect_us);
     println!(
-        "rpc current_mode (n={count}): min {min} p50 {p50} avg {avg} p95 {p95} p99 {p99} max {max} (µs)"
+        "{:<12}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+        "target", "min", "p50", "avg", "p95", "p99", "max"
     );
+    println!("{}", "─".repeat(64));
+
+    for target in wanted {
+        // Warmup so first-call schema/cache costs don't poison the
+        // sample. Same one-shot path the timed loop will hit.
+        run_probe(target, &mode, &projects, &transport, &tracks).await?;
+        let mut samples = Vec::with_capacity(count);
+        for _ in 0..count {
+            let t0 = std::time::Instant::now();
+            run_probe(target, &mode, &projects, &transport, &tracks).await?;
+            samples.push(t0.elapsed().as_micros() as u64);
+        }
+        samples.sort_unstable();
+        let n = samples.len();
+        let min = samples[0];
+        let p50 = samples[n / 2];
+        let p95 = samples[(n as f64 * 0.95) as usize];
+        let p99 = samples[((n as f64 * 0.99) as usize).min(n - 1)];
+        let max = samples[n - 1];
+        let avg: u64 = samples.iter().sum::<u64>() / n as u64;
+        println!(
+            "{:<12}  {:>5}µs  {:>5}µs  {:>5}µs  {:>5}µs  {:>5}µs  {:>5}µs",
+            target.label(),
+            min,
+            p50,
+            avg,
+            p95,
+            p99,
+            max
+        );
+    }
+    println!("(n={count} per target)");
+    Ok(())
+}
+
+/// Fire one RPC for the given target, swallow the value (we only care
+/// about timing) and surface RPC errors. Per-call ProjectContext is
+/// `Current` since the user almost always wants the active tab's
+/// numbers — no benefit from a per-project parameter for a bench.
+async fn run_probe(
+    target: BenchTarget,
+    mode: &session_proto::services::SessionModeServiceClient,
+    projects: &daw_proto::project::ProjectsClient,
+    transport: &daw_proto::transport::TransportClient,
+    tracks: &daw_proto::track::TracksClient,
+) -> Result<()> {
+    use daw_proto::ProjectContext;
+    match target {
+        BenchTarget::All => unreachable!("expanded before reaching run_probe"),
+        BenchTarget::Mode => {
+            mode.current_mode()
+                .await
+                .map_err(|e| eyre::eyre!("mode rpc failed: {e:?}"))?;
+        }
+        BenchTarget::Project => {
+            projects
+                .current()
+                .await
+                .map_err(|e| eyre::eyre!("project rpc failed: {e:?}"))?;
+        }
+        BenchTarget::Tempo => {
+            transport
+                .get_tempo(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("tempo rpc failed: {e:?}"))?;
+        }
+        BenchTarget::TimeSig => {
+            transport
+                .get_time_signature(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("time-sig rpc failed: {e:?}"))?;
+        }
+        BenchTarget::PlayState => {
+            transport
+                .get_play_state(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("play-state rpc failed: {e:?}"))?;
+        }
+        BenchTarget::TrackCount => {
+            tracks
+                .count(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("track-count rpc failed: {e:?}"))?;
+        }
+    }
     Ok(())
 }
 
