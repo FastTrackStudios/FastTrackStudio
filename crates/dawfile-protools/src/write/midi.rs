@@ -351,8 +351,11 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
             continue;
         }
         let chunk_idx = regions.len() as u32;
-        // Note chunk. zero_ticks == ZERO_TICKS keeps take_offset == 0.
-        let mut chunk_bytes = encode_note_chunk(&track.notes, ZERO_TICKS);
+        // Note chunk. PT timestamps carry a 2^62 baseline on top of the
+        // session tick origin; the chunk's zero_ticks header and every event
+        // position field must include it (top byte 0x40) or PT can't parse the
+        // records. take_offset == 0 (notes are already chunk-relative).
+        let mut chunk_bytes = encode_note_chunk(&track.notes, BASELINE + ZERO_TICKS);
         // Staggered terminator record. The decoder pairs note `i` with record
         // `i+1`; the chunk's final iteration therefore reads ONE record past
         // the last note. Without a separator that read would bleed into the
