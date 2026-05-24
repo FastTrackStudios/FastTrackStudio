@@ -202,7 +202,17 @@ fn emit_rpp_to_context(
     rpp_text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for line in rpp_text.lines() {
-        let c_line = CString::new(line)?;
+        // ProjectStateContext::AddLine is printf-style — its first argument
+        // is the format string. Any `%` characters in the raw RPP would
+        // be interpreted as format specifiers and at best print garbage,
+        // at worst crash on a missing variadic argument. Pre-escape
+        // (the converter never emits intentional format specifiers).
+        let escaped = if line.contains('%') {
+            line.replace('%', "%%")
+        } else {
+            line.to_string()
+        };
+        let c_line = CString::new(escaped)?;
         unsafe {
             let ctx = &mut *genstate;
             ctx.AddLine(c_line.as_ptr());
