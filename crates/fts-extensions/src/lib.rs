@@ -36,6 +36,13 @@ pub struct Global {
     _log_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
+/// Audio-sync handles (single-project cell + multi-project registry).
+/// Held in its own static so the timer callback can borrow it without
+/// reaching through the [`Global`] singleton; `None` until the post-
+/// session registration in `plugin_main` completes.
+pub static AUDIO_SYNC: OnceLock<Option<daw_reaper::extension_setup::AudioSyncHandle>> =
+    OnceLock::new();
+
 impl Global {
     pub fn get() -> &'static Global {
         GLOBAL.get().expect("Global not initialized")
@@ -122,6 +129,7 @@ mod mode_selector;
 #[cfg(feature = "mod-session")]
 mod mode_toolbars;
 mod reaper_utils;
+mod sync_settings;
 mod tempo;
 #[cfg(feature = "ui-dock")]
 mod ui_test_panel;
@@ -220,6 +228,17 @@ extern "C" fn timer_callback() {
                 daw_reaper::poll_and_broadcast_tracks,
             );
         }
+        // Keep the audio-sync multi-project slot table in sync with
+        // REAPER's open project tabs. Cheap (one `enum_projects` loop)
+        // and safe to call every tick. Skipped when registration
+        // failed at startup.
+        if let Some(Some(handle)) = AUDIO_SYNC.get() {
+            let registry = handle.registry.clone();
+            catch_panic("refresh_audio_sync_registry", move || {
+                daw_reaper::extension_setup::refresh_audio_sync_registry(&registry);
+            });
+        }
+
         catch_panic("_fire_timer_callbacks", daw::_fire_timer_callbacks);
         catch_panic(
             "process_pending_actions",
@@ -246,6 +265,7 @@ fn process_pending_actions(app: &App) {
 // ── Initialisation ───────────────────────────────────────────────────────────
 
 fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> {
+    use daw_reaper::socket_publisher::publish_extension_socket;
     use daw_reaper::{build_extension_daw_with, create_daw_handler};
 
     tokio_runtime
@@ -255,8 +275,21 @@ fn initialize_daw(tokio_runtime: &tokio::runtime::Runtime) -> eyre::Result<Daw> 
             // time so startup only creates one in-process service graph.
             let handler = create_daw_handler();
             #[cfg(feature = "mod-session")]
-            let handler =
-                session::daw_services::layer_services_with_daw(handler, daw_reaper::Reaper);
+            let handler = {
+                let h = session::daw_services::layer_services_with_daw(handler, daw_reaper::Reaper);
+                // Mount the FTS session control surfaces (mode /
+                // take-ranking / record control) so external Vox
+                // peers — CLI, desktop, mobile — can call them.
+                session::daw_services::layer_control_surfaces(h)
+            };
+
+            // Publish the same service router on a Unix socket so
+            // external apps (CLI, desktop, mobile, audio-sync peers)
+            // can call into the in-process surface. The publisher
+            // clones the router internally (Arc-backed), so the local
+            // build below sees the same dispatchers.
+            publish_extension_socket(handler.clone());
+
             build_extension_daw_with(handler).await
         })
         .map_err(|e| eyre::eyre!("Failed to initialise in-process DAW: {e}"))
@@ -468,6 +501,11 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let _ = daw::init_from_parts(g.daw.clone(), g.tokio_runtime.clone());
     daw_reaper::set_task_support(&g.task_support);
 
+    // Spin up the per-domain push broadcasters (item / tempo / fx /
+    // routing / take). Required for any external subscriber to receive
+    // events; safe to call before module subscriptions hook in.
+    daw_reaper::extension_setup::init_surviving_broadcasters();
+
     let task_middleware = MainTaskMiddleware::new(g.task_sender.clone(), g.task_receiver.clone());
 
     // ── Collect modules ──────────────────────────────────────────────────
@@ -607,7 +645,64 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "host-hooks")]
     daw_reaper::register_project_importer(&mut session)?;
 
+    // Register the FTS DAW control surface (honors FTS_CSURF_MODE +
+    // FTS_CSURF_DISABLED env vars) so external read-only subscribers
+    // — web UIs, MIDI/OSC surfaces — get the same callback stream the
+    // bridge plugin used to provide.
+    daw_reaper::extension_setup::register_control_surface(&mut session);
+
+    // Register the per-buffer audio-thread snapshot hooks (single +
+    // multi-project). Required for any clock-sync / drift-correction
+    // consumer downstream; safe to leave in place even when no peer
+    // discovery has been configured.
+    let audio_sync_handle = daw_reaper::extension_setup::init_audio_sync(&mut session);
+    let _ = AUDIO_SYNC.set(audio_sync_handle.clone());
+
     drop(session);
+
+    // ClockSync — env-gated UDP peer discovery + offset estimation.
+    // Opt in with `FTS_AUDIO_SYNC_PORT=<u16>` (and optionally
+    // `FTS_AUDIO_SYNC_DRIFT=1`); off entirely otherwise. Uses the
+    // host tokio runtime + task_support so the drift corrector can
+    // call back into REAPER from the main thread.
+    if let Some(handle) = audio_sync_handle.as_ref() {
+        // Read persisted on/off state from REAPER ExtState. Defaults
+        // ON for clock-sync (multicast peer discovery + position
+        // broadcast — passive on the wire when no peers, safe to
+        // leave on) and OFF for drift correction (auto-rate-changes
+        // are intrusive; opt in deliberately).
+        let cs_enabled = sync_settings::clock_sync_enabled();
+        let drift_enabled = sync_settings::drift_enabled();
+        if cs_enabled {
+            let g = Global::get();
+            // Use ClockSync's default port (7777). User can still
+            // override per-run via FTS_AUDIO_SYNC_PORT env var if a
+            // collision happens.
+            const CLOCK_SYNC_PORT: u16 = 7777;
+            daw_reaper::extension_setup::init_clock_sync(
+                g.tokio_runtime.handle().clone(),
+                handle.cell.clone(),
+                CLOCK_SYNC_PORT,
+                drift_enabled,
+                |rate: f64| {
+                    use reaper_medium::PlaybackSpeedFactor;
+                    let ts = &Global::get().task_support;
+                    let _ = ts.do_later_in_main_thread_asap(move || {
+                        let reaper = reaper_high::Reaper::get();
+                        let speed = PlaybackSpeedFactor::new(rate);
+                        reaper.medium_reaper().csurf_on_play_rate_change(speed);
+                    });
+                },
+            );
+        } else {
+            info!("Clock-sync disabled by persisted ExtState (toggle with FTS_CLOCK_SYNC_TOGGLE)");
+        }
+    }
+
+    // Register the FTS_WINDOW_* nudge / grow actions outside the
+    // session borrow — they take their own borrow internally for the
+    // gaccel registration.
+    daw_reaper::extension_setup::register_window_geometry_actions();
 
     #[cfg(feature = "host-hooks")]
     {

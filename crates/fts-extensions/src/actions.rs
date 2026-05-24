@@ -222,6 +222,23 @@ pub fn build_action_defs() -> ActionDefs {
             "Mode: Open All Toolbars",
             daw_reaper::window_manager::open_all_mode_toolbars,
         ),
+        // ── Sync toggles ────────────────────────────────────────────────────
+        // Both are persisted in REAPER ExtState (FTS_SESSION namespace);
+        // changes take effect on next plugin reload (no hot stop yet).
+        menu_action(
+            "FTS_CLOCK_SYNC_TOGGLE",
+            "Sync: Toggle clock-sync (multicast peer discovery)",
+            || {
+                crate::sync_settings::toggle_clock_sync();
+            },
+        ),
+        menu_action(
+            "FTS_DRIFT_CORRECTION_TOGGLE",
+            "Sync: Toggle drift correction (auto-rate-change)",
+            || {
+                crate::sync_settings::toggle_drift_correction();
+            },
+        ),
         // ── Info ─────────────────────────────────────────────────────────────
         menu_action("FTS_INFO", "FastTrackStudio Info", || {
             let version = env!("CARGO_PKG_VERSION");
