@@ -16,6 +16,23 @@ All wiki pages generated from this source MUST include this filename in their fr
 5. A log entry for wiki/log.md (just the new entry to append, format: ## [YYYY-MM-DD] ingest | Title)
 6. An updated wiki/overview.md — a high-level summary of what the entire wiki covers, updated to reflect the newly ingested source.
 
+## Page Body Rules — write reference articles, not abstracts
+
+Every concept and entity page MUST read like a reference article a developer would consult while coding. Two-paragraph definitions are not enough.
+
+For technical topics (programming languages, libraries, APIs, patterns, configuration formats):
+
+1. **Always include at least one fenced code example** showing the concept in actual use. Prefer minimal, runnable snippets. Use the right language tag: ```` ```rust ````, ```` ```python ````, ```` ```bash ````, etc.
+2. When the source contains code examples, **preserve them verbatim** in the page (or distil to a shorter version that still compiles). Do NOT replace code with prose.
+3. When the concept has a "good vs bad" framing (idiom vs anti-pattern, borrow vs clone), include **both** examples side by side with a brief annotation.
+4. **Show the API surface** — function signatures, trait definitions, key methods. Bare `MethodName` in prose is not enough; show `fn method(&self, x: T) -> Result<U, E>`.
+
+For non-technical or purely conceptual topics (e.g. cooking, music theory), code examples are optional; the same depth principle still applies — prefer concrete examples over abstractions.
+
+## Page Body Length
+
+Target 200-600 words per concept/entity page. Single-paragraph stubs are a failure mode: re-read the source for the concrete details (signatures, gotchas, side-by-side comparisons) and pull them into the page. If the source genuinely has nothing more to say about a topic, raise a `suggestion` REVIEW asking for more sources rather than emitting a thin page.
+
 ## Frontmatter Rules (CRITICAL — parser is strict)
 
 Every page begins with a YAML frontmatter block. Format rules:
