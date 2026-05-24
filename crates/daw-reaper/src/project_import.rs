@@ -71,9 +71,11 @@ pub fn register_project_importer(session: &mut ReaperSession) -> Result<(), Reap
 pub unsafe extern "C" fn want_project_file(fn_: *const c_char) -> bool {
     let path = unsafe { CStr::from_ptr(fn_) }.to_string_lossy();
     let lower = path.to_lowercase();
-    EXTENSIONS
+    let want = EXTENSIONS
         .iter()
-        .any(|(ext, _)| lower.ends_with(&format!(".{ext}")))
+        .any(|(ext, _)| lower.ends_with(&format!(".{ext}")));
+    tracing::info!(path = %path, want, "project_import.want_project_file");
+    want
 }
 
 /// Called by REAPER to enumerate supported extensions for the file dialog.
@@ -116,11 +118,15 @@ pub unsafe extern "C" fn load_project(
     genstate: *mut reaper_low::raw::ProjectStateContext,
 ) -> c_int {
     let path = unsafe { CStr::from_ptr(fn_) }.to_string_lossy();
+    tracing::info!(path = %path, "project_import.load_project: begin");
 
     match import_file(&path, genstate) {
-        Ok(()) => 0,
+        Ok(()) => {
+            tracing::info!(path = %path, "project_import.load_project: success");
+            0
+        }
         Err(e) => {
-            tracing::error!("Failed to import {}: {e}", path);
+            tracing::error!(path = %path, error = %e, "project_import.load_project: failed");
             -1
         }
     }
