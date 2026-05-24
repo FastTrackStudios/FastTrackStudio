@@ -32,6 +32,7 @@
 //! `build_graph` / `gaps` methods.
 
 mod build;
+pub mod code_extract;
 mod context;
 mod gaps;
 mod louvain;
@@ -41,6 +42,10 @@ mod scoring;
 mod tier_lint;
 
 pub use build::{build_clusters, build_graph};
+pub use code_extract::{
+    CodeEdge, CodeExtractError, CodeExtraction, CodeLang, CodeNode, Confidence, Relation,
+    SymbolKind, extract_file, extract_source, scan_code_tree,
+};
 pub use context::{ContextOpts, ContextResult, build_context};
 pub use gaps::find_gaps;
 pub use parse::extract_wikilinks;

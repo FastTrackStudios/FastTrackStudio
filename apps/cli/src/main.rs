@@ -1235,6 +1235,29 @@ enum WikiCmd {
         #[arg(long, default_value_t = 600)]
         summary_chars: usize,
     },
+    /// Tree-sitter-extracted **code-symbol graph** for a
+    /// project root. Walks `.rs` files (TS/JS/Python come in
+    /// follow-up PRs), emits functions / structs / traits /
+    /// impls as nodes, plus `Imports` / `Calls` /
+    /// `Implements` / `Defines` edges with `extracted` /
+    /// `inferred` confidence labels (matching graphify's
+    /// schema).
+    ///
+    /// This is the structural complement to the markdown
+    /// wiki — agents can ask "what calls `foo`?" and get a
+    /// real graph, not a grep.
+    Code {
+        /// Project root. Default: current directory.
+        #[arg(short, long, default_value = ".")]
+        root: std::path::PathBuf,
+        /// Emit JSON (the full graph) instead of the text
+        /// summary.
+        #[arg(long)]
+        json: bool,
+        /// Top-N node summary in the text view.
+        #[arg(long, default_value_t = 25)]
+        top: usize,
+    },
     /// Surface knowledge gaps — orphan pages (degree ≤ 1)
     /// and missing-page wikilinks. No LLM.
     Gaps {
@@ -4923,6 +4946,97 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                 result.tokens_estimate,
                 budget_tokens
             );
+            Ok(())
+        }
+        WikiCmd::Code { root, json, top } => {
+            let root = root
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("root {}: {e}", root.display()))?;
+            let extractions = wiki_graph::scan_code_tree(&root);
+            let mut total_nodes = 0usize;
+            let mut total_edges = 0usize;
+            let mut by_kind: std::collections::HashMap<&str, usize> =
+                std::collections::HashMap::new();
+            let mut all_nodes: Vec<wiki_graph::CodeNode> = Vec::new();
+            let mut all_edges: Vec<wiki_graph::CodeEdge> = Vec::new();
+            let mut errors = Vec::new();
+            for ex in extractions {
+                total_nodes += ex.nodes.len();
+                total_edges += ex.edges.len();
+                for n in &ex.nodes {
+                    *by_kind.entry(n.kind.as_str()).or_insert(0) += 1;
+                }
+                all_nodes.extend(ex.nodes);
+                all_edges.extend(ex.edges);
+                errors.extend(ex.errors);
+            }
+            if json {
+                let payload = serde_json::json!({
+                    "root": root.display().to_string(),
+                    "totals": {
+                        "nodes": total_nodes,
+                        "edges": total_edges,
+                        "errors": errors.len(),
+                    },
+                    "by_kind": by_kind,
+                    "nodes": all_nodes.iter().map(|n| serde_json::json!({
+                        "id": n.id,
+                        "label": n.label,
+                        "kind": n.kind.as_str(),
+                        "language": n.language.tag(),
+                        "source_file": n.source_file.display().to_string(),
+                        "line_start": n.line_start,
+                        "line_end": n.line_end,
+                    })).collect::<Vec<_>>(),
+                    "edges": all_edges.iter().map(|e| serde_json::json!({
+                        "source": e.source,
+                        "target": e.target,
+                        "relation": e.relation.as_str(),
+                        "confidence": e.confidence.as_str(),
+                    })).collect::<Vec<_>>(),
+                    "errors": errors,
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!("root: {}", root.display());
+                println!("nodes: {total_nodes}, edges: {total_edges}");
+                if !by_kind.is_empty() {
+                    let mut kinds: Vec<_> = by_kind.iter().collect();
+                    kinds.sort_by(|a, b| b.1.cmp(a.1));
+                    println!("by kind:");
+                    for (k, n) in kinds {
+                        println!("  {n:>5} {k}");
+                    }
+                }
+                // Top-N nodes by how often they appear as a
+                // target — i.e. most-called / most-imported.
+                use std::collections::HashMap;
+                let mut indeg: HashMap<&str, usize> = HashMap::new();
+                for e in &all_edges {
+                    *indeg.entry(e.target.as_str()).or_insert(0) += 1;
+                }
+                let mut ranked: Vec<_> = all_nodes
+                    .iter()
+                    .map(|n| (n, indeg.get(n.id.as_str()).copied().unwrap_or(0)))
+                    .collect();
+                ranked.sort_by(|a, b| b.1.cmp(&a.1));
+                println!("\ntop {top} by in-degree (high = referenced a lot):");
+                for (n, deg) in ranked.iter().take(top) {
+                    println!(
+                        "  {deg:>3} {:<8} {} ({}:L{})",
+                        n.kind.as_str(),
+                        n.label,
+                        n.source_file.display(),
+                        n.line_start + 1
+                    );
+                }
+                if !errors.is_empty() {
+                    eprintln!("\n{} extraction error(s):", errors.len());
+                    for e in errors.iter().take(5) {
+                        eprintln!("  - {e}");
+                    }
+                }
+            }
             Ok(())
         }
         WikiCmd::Gaps { vault, json } => {
