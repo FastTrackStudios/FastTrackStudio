@@ -14,6 +14,12 @@ use facet::Facet;
 // ── Core Ruler Lanes ─────────────────────────────────────────────────────────
 
 /// Core FTS ruler lanes — always present in every project.
+///
+/// `Key = 3` is reserved-but-retired. We keep the variant so the
+/// `#[repr(u8)]` discriminants of Song/Sections/Marks don't shift
+/// (which would silently re-number every existing project's lane
+/// assignments). It's excluded from [`all`] so the lane is not
+/// auto-created any more — key signatures are encoded elsewhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
 #[repr(u8)]
 pub enum CoreLane {
@@ -25,19 +31,17 @@ pub enum CoreLane {
     Sections = 1,
     /// Structural/general markers: Count-In, cues.
     Marks = 2,
-    /// Key signature markers (e.g., "Eb", "F#m").
+    /// Reserved historical slot — see the enum doc.
+    #[deprecated(note = "KEY lane retired; key signatures are encoded separately now")]
     Key = 3,
 }
 
+#[allow(deprecated)]
 impl CoreLane {
-    /// All core lanes in display order.
+    /// All core lanes that should be created in every project. `Key`
+    /// is intentionally absent.
     pub const fn all() -> &'static [CoreLane] {
-        &[
-            CoreLane::Song,
-            CoreLane::Sections,
-            CoreLane::Marks,
-            CoreLane::Key,
-        ]
+        &[CoreLane::Song, CoreLane::Sections, CoreLane::Marks]
     }
 
     /// REAPER ruler lane index (1-based).
@@ -67,7 +71,11 @@ impl CoreLane {
         }
     }
 
-    /// Number of core lanes.
+    /// Reserved core-lane slot count. Stays at 4 even though Key is
+    /// no longer auto-created — `InstrumentLane::lane_index` and the
+    /// rest of the numbering offset off this value, and shifting it
+    /// would silently renumber every existing project's instrument
+    /// lanes.
     pub const fn count() -> u32 {
         4
     }
