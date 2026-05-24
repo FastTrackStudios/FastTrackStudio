@@ -14,13 +14,24 @@ use std::process::{Command, Stdio};
 use clap::Subcommand;
 use eyre::{Result, WrapErr, bail};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 #[derive(Subcommand)]
 pub enum ReaperCommand {
     /// Launch the FTS dev REAPER instance (`fts-dev` script).
     ///
     /// Reads `~/.fts-dev/launch.json` for executable / cfgfile / args.
-    /// Streams REAPER's stderr to this terminal until REAPER exits.
+    /// Detaches from this shell by default (new process group, stdio
+    /// pointed at /dev/null) so closing or signalling the launching
+    /// terminal doesn't take REAPER with it. Use `--foreground` to
+    /// keep REAPER attached and stream its stderr.
     Dev {
+        /// Stay attached: stream REAPER stderr until it exits. Without
+        /// this flag, `fts reaper dev` returns immediately after
+        /// REAPER is spawned in its own process group.
+        #[arg(short = 'f', long)]
+        foreground: bool,
         /// Additional args forwarded to REAPER (after `--`). Example:
         /// `fts reaper dev -- path/to/project.RPP`.
         #[arg(last = true)]
@@ -35,7 +46,7 @@ pub enum ReaperCommand {
 
 pub fn run(cmd: ReaperCommand) -> Result<()> {
     match cmd {
-        ReaperCommand::Dev { extra } => run_dev(extra),
+        ReaperCommand::Dev { foreground, extra } => run_dev(foreground, extra),
         ReaperCommand::Setup => run_setup(),
         ReaperCommand::Config => print_config(),
     }
@@ -56,18 +67,38 @@ fn fts_dev_bin() -> Result<String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-fn run_dev(extra: Vec<String>) -> Result<()> {
+fn run_dev(foreground: bool, extra: Vec<String>) -> Result<()> {
     let bin = fts_dev_bin()?;
-    let status = Command::new(&bin)
-        .args(&extra)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .wrap_err_with(|| format!("spawning {bin}"))?;
-    if !status.success() {
-        bail!("fts-dev exited with status {status}");
+    if foreground {
+        let status = Command::new(&bin)
+            .args(&extra)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .wrap_err_with(|| format!("spawning {bin}"))?;
+        if !status.success() {
+            bail!("fts-dev exited with status {status}");
+        }
+        return Ok(());
     }
+
+    // Detached spawn: REAPER survives this CLI exiting + any kill on
+    // the launching shell. New process group means signal propagation
+    // to the parent (Ctrl-C, SIGHUP on terminal close) doesn't reach
+    // REAPER. Stdio routed to /dev/null so REAPER's stderr can't keep
+    // a closing terminal pipe open.
+    let mut cmd = Command::new(&bin);
+    cmd.args(&extra)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    cmd.process_group(0);
+    let child = cmd
+        .spawn()
+        .wrap_err_with(|| format!("spawning {bin}"))?;
+    println!("fts-dev spawned (pid {}) — detached", child.id());
     Ok(())
 }
 

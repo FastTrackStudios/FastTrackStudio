@@ -25,7 +25,7 @@ use daw_proto::project::{ProjectEvent, ProjectsClient};
 use daw_proto::region::{RegionEvent, RegionsClient};
 use daw_proto::tempo_map::{TempoMapClient, TempoMapEvent};
 use daw_proto::track::{TrackEvent, TracksClient};
-use daw_proto::transport::TransportEvent;
+use daw_proto::transport::{TransportClient, TransportEvent};
 use daw_proto::primitives::Position;
 use daw_proto::{PlayState, ProjectContext, ProjectInfo, TimeSignature};
 use eyre::{Result, WrapErr, eyre};
@@ -135,6 +135,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
         .wrap_err("connect to fts-extensions socket")?;
 
     let mode_client = SessionModeServiceClient::new(caller.clone());
+    let transport_client = TransportClient::new(caller.clone());
     let projects_client = ProjectsClient::new(caller.clone());
     let event_bus_client = EventBusClient::new(caller.clone());
     let tracks_client = TracksClient::new(caller.clone());
@@ -207,7 +208,7 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
         }
     });
 
-    let result = run_ui_loop(state.clone()).await;
+    let result = run_ui_loop(state.clone(), transport_client).await;
     poll_handle.abort();
     stream_handle.abort();
     mode_stream_handle.abort();
@@ -491,7 +492,61 @@ async fn collect_polled(projects: &ProjectsClient, state: &Arc<RwLock<Snapshot>>
     guard.poll_ticks = guard.poll_ticks.wrapping_add(1);
 }
 
-async fn run_ui_loop(state: Arc<RwLock<Snapshot>>) -> Result<()> {
+/// Discriminator for the keys that map to a TransportClient call.
+/// Keeping a flat enum lets `fire_transport` route in one place instead
+/// of inlining a `tokio::spawn` per keybinding arm.
+#[derive(Clone, Copy)]
+enum TransportKey {
+    PlayPause,
+    Pause,
+    Stop,
+    ToggleRec,
+}
+
+impl TransportKey {
+    fn label(self) -> &'static str {
+        match self {
+            TransportKey::PlayPause => "play/pause",
+            TransportKey::Pause => "pause",
+            TransportKey::Stop => "stop",
+            TransportKey::ToggleRec => "toggle_recording",
+        }
+    }
+}
+
+/// Spawn the RPC for a transport keypress so the UI loop never blocks
+/// on Vox. Logs success / failure into the event log so the user sees
+/// the action land at the same place every other event surfaces.
+fn fire_transport(
+    transport: &TransportClient,
+    state: &Arc<RwLock<Snapshot>>,
+    key: TransportKey,
+) {
+    let client = transport.clone();
+    let state = state.clone();
+    tokio::spawn(async move {
+        let t0 = Instant::now();
+        let res = match key {
+            TransportKey::PlayPause => client.play_pause(ProjectContext::Current).await,
+            TransportKey::Pause => client.pause(ProjectContext::Current).await,
+            TransportKey::Stop => client.stop(ProjectContext::Current).await,
+            TransportKey::ToggleRec => client.toggle_recording(ProjectContext::Current).await,
+        };
+        let dt = t0.elapsed();
+        let mut guard = state.write().expect("snapshot rwlock poisoned");
+        let summary = match res {
+            Ok(Ok(())) => format!("{} ({})", key.label(), format_short(dt)),
+            Ok(Err(e)) => format!("{} → daw err {:?}", key.label(), e),
+            Err(e) => format!("{} → rpc err {:?}", key.label(), e),
+        };
+        push_log(&mut guard, Instant::now(), "keybind", summary);
+    });
+}
+
+async fn run_ui_loop(
+    state: Arc<RwLock<Snapshot>>,
+    transport: TransportClient,
+) -> Result<()> {
     enable_raw_mode().wrap_err("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).wrap_err("enter alt screen")?;
@@ -511,6 +566,10 @@ async fn run_ui_loop(state: Arc<RwLock<Snapshot>>) -> Result<()> {
                     KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                         break Ok(());
                     }
+                    KeyCode::Char(' ') => fire_transport(&transport, &state, TransportKey::PlayPause),
+                    KeyCode::Char('s') => fire_transport(&transport, &state, TransportKey::Stop),
+                    KeyCode::Char('p') => fire_transport(&transport, &state, TransportKey::Pause),
+                    KeyCode::Char('r') => fire_transport(&transport, &state, TransportKey::ToggleRec),
                     _ => {}
                 },
                 Err(e) => break Err(eyre!("terminal event read failed: {e}")),
@@ -805,7 +864,7 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
         footer.push_str("   ");
         footer.push_str(err);
     }
-    footer.push_str("    q/Esc to quit");
+    footer.push_str("    [space] play/pause  [p] pause  [s] stop  [r] rec  [q] quit");
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             footer,
@@ -827,6 +886,7 @@ fn domain_color(d: &str) -> Color {
         "region" => Color::Magenta,
         "tempo_map" => Color::LightBlue,
         "project" => Color::LightRed,
+        "keybind" => Color::LightYellow,
         _ => Color::White,
     }
 }
