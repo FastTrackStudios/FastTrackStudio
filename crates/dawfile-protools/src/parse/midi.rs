@@ -97,7 +97,12 @@ fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
     const POS_OFFSET: usize = 27;
     const NOTE_OFFSET: usize = 9;
     const VEL_OFFSET: usize = 10;
-    const DUR_OFFSET: usize = 11;
+    // The 35-byte record holds four baseline-2^62-encoded u64 fields (their
+    // MSB `0x40` markers sit at byte offsets 8/18/26/34): duration at +1, two
+    // unused fields at +11/+19, and the absolute note-on position at +27.
+    // (The duration was previously read at +11 — an always-zero field — which
+    // collapsed every note to a single tick.)
+    const DUR_OFFSET: usize = 1;
 
     for block in midi_blocks {
         // Scan for ALL MdNLB magic markers within the block.
