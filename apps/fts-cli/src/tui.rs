@@ -100,17 +100,78 @@ struct Snapshot {
     poll_ticks: u64,
     stream_ticks: u64,
     /// Most recent push events for the live event log panel.
-    event_log: VecDeque<EventLogEntry>,
+    event_log: EventLog,
+}
+
+/// Origin of an event-log entry. Replaces a `&'static str` so a typo
+/// can't silently route a log line through the default colour, and so
+/// the colour table is owned by the enum instead of a string match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EventDomain {
+    Transport,
+    Track,
+    Marker,
+    Region,
+    Project,
+    TempoMap,
+    Keybind,
+}
+
+impl EventDomain {
+    fn label(self) -> &'static str {
+        match self {
+            EventDomain::Transport => "transport",
+            EventDomain::Track => "track",
+            EventDomain::Marker => "marker",
+            EventDomain::Region => "region",
+            EventDomain::Project => "project",
+            EventDomain::TempoMap => "tempo_map",
+            EventDomain::Keybind => "keybind",
+        }
+    }
+
+    fn color(self) -> Color {
+        match self {
+            EventDomain::Transport => Color::Cyan,
+            EventDomain::Track => Color::Green,
+            EventDomain::Marker => Color::Yellow,
+            EventDomain::Region => Color::Magenta,
+            EventDomain::Project => Color::LightRed,
+            EventDomain::TempoMap => Color::LightBlue,
+            EventDomain::Keybind => Color::LightYellow,
+        }
+    }
 }
 
 #[derive(Clone)]
 struct EventLogEntry {
     at: Instant,
-    domain: &'static str,
+    domain: EventDomain,
     summary: String,
 }
 
-const EVENT_LOG_CAP: usize = 200;
+/// Bounded ring buffer of recent push events. Hides the
+/// pop-on-overflow housekeeping behind a single `push` method so call
+/// sites don't have to thread the capacity through.
+#[derive(Default, Clone)]
+struct EventLog {
+    entries: VecDeque<EventLogEntry>,
+}
+
+impl EventLog {
+    const CAP: usize = 200;
+
+    fn push(&mut self, at: Instant, domain: EventDomain, summary: String) {
+        if self.entries.len() == Self::CAP {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(EventLogEntry { at, domain, summary });
+    }
+
+    fn iter_recent(&self) -> impl DoubleEndedIterator<Item = &EventLogEntry> {
+        self.entries.iter()
+    }
+}
 
 /// Per-project entity counts the dashboard maintains from push events.
 /// Cleared together on project switch so stale numbers from a previous
@@ -303,172 +364,176 @@ async fn run_event_bus(
 
 fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
     match event {
-        DawEvent::TransportPosition(tick) => {
-            // Publisher emits one tick per open project tab. Drop
-            // ticks for non-active tabs so the display reflects what
-            // the user is actually looking at in REAPER.
-            if snap
-                .active_project_guid
-                .as_deref()
-                .is_some_and(|g| g != tick.project_guid.as_str())
-            {
-                return;
-            }
-            snap.playhead = Some(tick.playhead.clone());
-            snap.edit_cursor = Some(tick.edit_cursor.clone());
-            snap.is_playing = Some(tick.is_playing);
-        }
-        DawEvent::TransportState(ev) => {
-            let summary = match ev {
-                TransportEvent::PlayStateChanged { play_state, .. } => {
-                    snap.play_state = Some(*play_state);
-                    format!("play_state = {:?}", play_state)
-                }
-                TransportEvent::TempoChanged {
-                    tempo,
-                    time_signature,
-                    ..
-                } => {
-                    snap.tempo = Some(tempo.bpm());
-                    snap.time_signature = Some(*time_signature);
-                    format!(
-                        "tempo {:.2} BPM   ts {}/{}",
-                        tempo.bpm(),
-                        time_signature.numerator(),
-                        time_signature.denominator()
-                    )
-                }
-                TransportEvent::Snapshot { state, .. } => {
-                    snap.play_state = Some(state.play_state);
-                    snap.tempo = Some(state.tempo.bpm());
-                    snap.time_signature = Some(state.time_signature);
-                    "transport snapshot".to_string()
-                }
-                TransportEvent::RecordModeChanged { record_mode, .. } => {
-                    format!("record_mode = {:?}", record_mode)
-                }
-                TransportEvent::LoopingChanged { looping, .. } => {
-                    format!("looping = {}", looping)
-                }
-                TransportEvent::LoopRegionChanged { .. } => "loop region".to_string(),
-                TransportEvent::TimeSelectionChanged { .. } => "time selection".to_string(),
-                TransportEvent::PlayrateChanged { playrate, .. } => {
-                    format!("playrate = {:.3}", playrate)
-                }
-            };
-            push_log(snap, now, "transport", summary);
-        }
-        DawEvent::Track(env) => {
-            let summary = match &env.event {
-                TrackEvent::Added(t) => {
-                    snap.counts.tracks = Some(snap.counts.tracks.unwrap_or(0) + 1);
-                    format!("+ track {}", t.name.as_str())
-                }
-                TrackEvent::Removed(guid) => {
-                    snap.counts.tracks = Some(snap.counts.tracks.unwrap_or(0).saturating_sub(1));
-                    format!("- track {}", short(guid))
-                }
-                TrackEvent::Renamed { name, .. } => format!("rename → {}", name),
-                TrackEvent::MuteChanged { muted, .. } => format!("mute = {}", muted),
-                TrackEvent::SoloChanged { soloed, .. } => format!("solo = {}", soloed),
-                TrackEvent::ArmChanged { armed, .. } => format!("arm = {}", armed),
-                TrackEvent::VolumeChanged { volume, .. } => format!("vol = {:.2}", volume),
-                TrackEvent::PanChanged { pan, .. } => format!("pan = {:.2}", pan),
-                TrackEvent::Moved {
-                    old_index,
-                    new_index,
-                    ..
-                } => format!("moved {} → {}", old_index, new_index),
-                other => format!("{:?}", other),
-            };
-            push_log(snap, now, "track", summary);
-        }
-        DawEvent::Marker(env) => {
-            let summary = match &env.event {
-                MarkerEvent::Added(m) => {
-                    snap.counts.markers = Some(snap.counts.markers.unwrap_or(0) + 1);
-                    format!("+ marker @{} {}", m.position, m.name.as_str())
-                }
-                MarkerEvent::Removed(id) => {
-                    snap.counts.markers =
-                        Some(snap.counts.markers.unwrap_or(0).saturating_sub(1));
-                    format!("- marker #{}", id)
-                }
-                MarkerEvent::Changed(m) => format!("marker {:?} → {}", m.id, m.name.as_str()),
-                MarkerEvent::MarkersChanged(list) => {
-                    snap.counts.markers = Some(list.len() as u32);
-                    format!("markers reload (n={})", list.len())
-                }
-            };
-            push_log(snap, now, "marker", summary);
-        }
-        DawEvent::Region(env) => {
-            let summary = match &env.event {
-                RegionEvent::Added(r) => {
-                    snap.counts.regions = Some(snap.counts.regions.unwrap_or(0) + 1);
-                    format!("+ region {:?} {}", r.id, r.name.as_str())
-                }
-                RegionEvent::Removed(id) => {
-                    snap.counts.regions =
-                        Some(snap.counts.regions.unwrap_or(0).saturating_sub(1));
-                    format!("- region #{}", id)
-                }
-                RegionEvent::Changed(r) => format!("region {:?} → {}", r.id, r.name.as_str()),
-                RegionEvent::RegionsChanged(list) => {
-                    snap.counts.regions = Some(list.len() as u32);
-                    format!("regions reload (n={})", list.len())
-                }
-            };
-            push_log(snap, now, "region", summary);
-        }
-        DawEvent::Project(env) => {
-            if let ProjectEvent::CurrentChanged(guid) = &env.event {
-                snap.active_project_guid = guid.clone();
-                // Clear position fields so old project's playhead
-                // doesn't linger for one tick during the switch.
-                snap.playhead = None;
-                snap.edit_cursor = None;
-            }
-            let summary = match &env.event {
-                ProjectEvent::CurrentChanged(guid) => format!(
-                    "current → {}",
-                    guid.as_deref().map(short).unwrap_or("(none)")
-                ),
-                ProjectEvent::Opened(p) => format!("+ {}", p.name.as_str()),
-                ProjectEvent::Closed(g) => format!("- {}", short(g)),
-                ProjectEvent::Changed(p) => format!("Δ {}", p.name.as_str()),
-                ProjectEvent::ProjectsChanged(list) => format!("reload n={}", list.len()),
-            };
-            push_log(snap, now, "project", summary);
-        }
-        DawEvent::TempoMap(env) => {
-            let summary = match &env.event {
-                TempoMapEvent::PointAdded(p) => {
-                    snap.counts.tempo_points =
-                        Some(snap.counts.tempo_points.unwrap_or(0) + 1);
-                    format!("+ point {:.2} BPM", p.bpm)
-                }
-                TempoMapEvent::PointRemoved(i) => {
-                    snap.counts.tempo_points =
-                        Some(snap.counts.tempo_points.unwrap_or(0).saturating_sub(1));
-                    format!("- point #{i}")
-                }
-                TempoMapEvent::PointChanged(p) => format!("point → {:.2} BPM", p.bpm),
-                TempoMapEvent::MapChanged(list) => {
-                    snap.counts.tempo_points = Some(list.len() as u32);
-                    format!("map reload (n={})", list.len())
-                }
-            };
-            push_log(snap, now, "tempo_map", summary);
-        }
+        DawEvent::TransportPosition(tick) => apply_position_tick(snap, tick),
+        DawEvent::TransportState(ev) => apply_transport_state(snap, ev, now),
+        DawEvent::Track(env) => apply_track_event(snap, &env.event, now),
+        DawEvent::Marker(env) => apply_marker_event(snap, &env.event, now),
+        DawEvent::Region(env) => apply_region_event(snap, &env.event, now),
+        DawEvent::Project(env) => apply_project_event(snap, &env.event, now),
+        DawEvent::TempoMap(env) => apply_tempo_map_event(snap, &env.event, now),
     }
 }
 
-fn push_log(snap: &mut Snapshot, at: Instant, domain: &'static str, summary: String) {
-    if snap.event_log.len() == EVENT_LOG_CAP {
-        snap.event_log.pop_front();
+fn apply_position_tick(snap: &mut Snapshot, tick: &daw_proto::transport::PositionTick) {
+    // Publisher emits one tick per open project tab. Drop ticks for
+    // non-active tabs so the display reflects what the user is actually
+    // looking at in REAPER.
+    if snap
+        .active_project_guid
+        .as_deref()
+        .is_some_and(|g| g != tick.project_guid.as_str())
+    {
+        return;
     }
-    snap.event_log.push_back(EventLogEntry { at, domain, summary });
+    snap.playhead = Some(tick.playhead.clone());
+    snap.edit_cursor = Some(tick.edit_cursor.clone());
+    snap.is_playing = Some(tick.is_playing);
+}
+
+fn apply_transport_state(snap: &mut Snapshot, ev: &TransportEvent, now: Instant) {
+    let summary = match ev {
+        TransportEvent::PlayStateChanged { play_state, .. } => {
+            snap.play_state = Some(*play_state);
+            format!("play_state = {:?}", play_state)
+        }
+        TransportEvent::TempoChanged {
+            tempo,
+            time_signature,
+            ..
+        } => {
+            snap.tempo = Some(tempo.bpm());
+            snap.time_signature = Some(*time_signature);
+            format!(
+                "tempo {:.2} BPM   ts {}/{}",
+                tempo.bpm(),
+                time_signature.numerator(),
+                time_signature.denominator()
+            )
+        }
+        TransportEvent::Snapshot { state, .. } => {
+            snap.play_state = Some(state.play_state);
+            snap.tempo = Some(state.tempo.bpm());
+            snap.time_signature = Some(state.time_signature);
+            "transport snapshot".to_string()
+        }
+        TransportEvent::RecordModeChanged { record_mode, .. } => {
+            format!("record_mode = {:?}", record_mode)
+        }
+        TransportEvent::LoopingChanged { looping, .. } => format!("looping = {}", looping),
+        TransportEvent::LoopRegionChanged { .. } => "loop region".to_string(),
+        TransportEvent::TimeSelectionChanged { .. } => "time selection".to_string(),
+        TransportEvent::PlayrateChanged { playrate, .. } => format!("playrate = {:.3}", playrate),
+    };
+    push_log(snap, now, EventDomain::Transport, summary);
+}
+
+fn apply_track_event(snap: &mut Snapshot, ev: &TrackEvent, now: Instant) {
+    let summary = match ev {
+        TrackEvent::Added(t) => {
+            snap.counts.tracks = Some(snap.counts.tracks.unwrap_or(0) + 1);
+            format!("+ track {}", t.name.as_str())
+        }
+        TrackEvent::Removed(guid) => {
+            snap.counts.tracks = Some(snap.counts.tracks.unwrap_or(0).saturating_sub(1));
+            format!("- track {}", short(guid))
+        }
+        TrackEvent::Renamed { name, .. } => format!("rename → {}", name),
+        TrackEvent::MuteChanged { muted, .. } => format!("mute = {}", muted),
+        TrackEvent::SoloChanged { soloed, .. } => format!("solo = {}", soloed),
+        TrackEvent::ArmChanged { armed, .. } => format!("arm = {}", armed),
+        TrackEvent::VolumeChanged { volume, .. } => format!("vol = {:.2}", volume),
+        TrackEvent::PanChanged { pan, .. } => format!("pan = {:.2}", pan),
+        TrackEvent::Moved {
+            old_index,
+            new_index,
+            ..
+        } => format!("moved {} → {}", old_index, new_index),
+        other => format!("{:?}", other),
+    };
+    push_log(snap, now, EventDomain::Track, summary);
+}
+
+fn apply_marker_event(snap: &mut Snapshot, ev: &MarkerEvent, now: Instant) {
+    let summary = match ev {
+        MarkerEvent::Added(m) => {
+            snap.counts.markers = Some(snap.counts.markers.unwrap_or(0) + 1);
+            format!("+ marker @{} {}", m.position, m.name.as_str())
+        }
+        MarkerEvent::Removed(id) => {
+            snap.counts.markers = Some(snap.counts.markers.unwrap_or(0).saturating_sub(1));
+            format!("- marker #{}", id)
+        }
+        MarkerEvent::Changed(m) => format!("marker {:?} → {}", m.id, m.name.as_str()),
+        MarkerEvent::MarkersChanged(list) => {
+            snap.counts.markers = Some(list.len() as u32);
+            format!("markers reload (n={})", list.len())
+        }
+    };
+    push_log(snap, now, EventDomain::Marker, summary);
+}
+
+fn apply_region_event(snap: &mut Snapshot, ev: &RegionEvent, now: Instant) {
+    let summary = match ev {
+        RegionEvent::Added(r) => {
+            snap.counts.regions = Some(snap.counts.regions.unwrap_or(0) + 1);
+            format!("+ region {:?} {}", r.id, r.name.as_str())
+        }
+        RegionEvent::Removed(id) => {
+            snap.counts.regions = Some(snap.counts.regions.unwrap_or(0).saturating_sub(1));
+            format!("- region #{}", id)
+        }
+        RegionEvent::Changed(r) => format!("region {:?} → {}", r.id, r.name.as_str()),
+        RegionEvent::RegionsChanged(list) => {
+            snap.counts.regions = Some(list.len() as u32);
+            format!("regions reload (n={})", list.len())
+        }
+    };
+    push_log(snap, now, EventDomain::Region, summary);
+}
+
+fn apply_project_event(snap: &mut Snapshot, ev: &ProjectEvent, now: Instant) {
+    if let ProjectEvent::CurrentChanged(guid) = ev {
+        snap.active_project_guid = guid.clone();
+        // Clear position fields so old project's playhead doesn't
+        // linger for one tick during the switch.
+        snap.playhead = None;
+        snap.edit_cursor = None;
+    }
+    let summary = match ev {
+        ProjectEvent::CurrentChanged(guid) => format!(
+            "current → {}",
+            guid.as_deref().map(short).unwrap_or("(none)")
+        ),
+        ProjectEvent::Opened(p) => format!("+ {}", p.name.as_str()),
+        ProjectEvent::Closed(g) => format!("- {}", short(g)),
+        ProjectEvent::Changed(p) => format!("Δ {}", p.name.as_str()),
+        ProjectEvent::ProjectsChanged(list) => format!("reload n={}", list.len()),
+    };
+    push_log(snap, now, EventDomain::Project, summary);
+}
+
+fn apply_tempo_map_event(snap: &mut Snapshot, ev: &TempoMapEvent, now: Instant) {
+    let summary = match ev {
+        TempoMapEvent::PointAdded(p) => {
+            snap.counts.tempo_points = Some(snap.counts.tempo_points.unwrap_or(0) + 1);
+            format!("+ point {:.2} BPM", p.bpm)
+        }
+        TempoMapEvent::PointRemoved(i) => {
+            snap.counts.tempo_points =
+                Some(snap.counts.tempo_points.unwrap_or(0).saturating_sub(1));
+            format!("- point #{i}")
+        }
+        TempoMapEvent::PointChanged(p) => format!("point → {:.2} BPM", p.bpm),
+        TempoMapEvent::MapChanged(list) => {
+            snap.counts.tempo_points = Some(list.len() as u32);
+            format!("map reload (n={})", list.len())
+        }
+    };
+    push_log(snap, now, EventDomain::TempoMap, summary);
+}
+
+fn push_log(snap: &mut Snapshot, at: Instant, domain: EventDomain, summary: String) {
+    snap.event_log.push(at, domain, summary);
 }
 
 fn short(s: &str) -> &str {
@@ -539,7 +604,7 @@ fn fire_transport(
             Ok(Err(e)) => format!("{} → daw err {:?}", key.label(), e),
             Err(e) => format!("{} → rpc err {:?}", key.label(), e),
         };
-        push_log(&mut guard, Instant::now(), "keybind", summary);
+        push_log(&mut guard, Instant::now(), EventDomain::Keybind, summary);
     });
 }
 
@@ -631,13 +696,10 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
         .unwrap_or(Cow::Borrowed("(no project)"));
     let mode = snap.mode.as_deref().unwrap_or("—");
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("Project ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            project_name.to_string(),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        ),
+        dim("Project "),
+        bold(project_name.to_string()),
         Span::raw("    "),
-        Span::styled("Mode ", Style::default().fg(Color::DarkGray)),
+        dim("Mode "),
         Span::styled(
             mode.to_string(),
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
@@ -675,95 +737,73 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
         .time_signature
         .map(|t| format!("{}/{}", t.numerator(), t.denominator()))
         .unwrap_or_else(|| "—".to_string());
+    let edit_sec = snap
+        .edit_cursor
+        .as_ref()
+        .and_then(|p| p.time.map(|t| t.to_string()))
+        .unwrap_or_else(|| "—".to_string());
+    let edit_musical = snap
+        .edit_cursor
+        .as_ref()
+        .and_then(|p| p.musical.map(|m| m.to_string()))
+        .unwrap_or_else(|| "—".to_string());
+    // Compute the play/edit delta via Position's own method so we
+    // share one source of truth across the time + bars renderings.
+    let (delta_sec, delta_musical) = match (snap.playhead.as_ref(), snap.edit_cursor.as_ref()) {
+        (Some(p), Some(e)) => {
+            let d = if let Some(ts) = snap.time_signature {
+                p.delta_from_with_ts(e, ts)
+            } else {
+                p.delta_from(e)
+            };
+            let sec = d.to_string();
+            let mus = snap
+                .time_signature
+                .and_then(|ts| d.musical_string(ts))
+                .unwrap_or_else(|| "—".to_string());
+            (sec, mus)
+        }
+        _ => ("—".to_string(), "—".to_string()),
+    };
+    let stream_info = format!(
+        "{} ticks   age {}",
+        snap.stream_ticks,
+        snap.last_tick_at
+            .map(|t| format_short(t.elapsed()))
+            .unwrap_or_else(|| "—".to_string()),
+    );
+    let pad = || Span::raw("    ");
     let transport_lines = vec![
+        Line::from(vec![dim("State    "), colored(play_label, play_color)]),
         Line::from(vec![
-            Span::styled("State    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(play_label, Style::default().fg(play_color)),
+            dim("Playhead "),
+            bold(pos_sec),
+            pad(),
+            dim("Musical "),
+            bold(pos_musical),
         ]),
         Line::from(vec![
-            Span::styled("Playhead ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                pos_sec,
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("    "),
-            Span::styled("Musical ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                pos_musical,
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-            ),
+            dim("Edit cur "),
+            bold(edit_sec),
+            pad(),
+            dim("Musical "),
+            bold(edit_musical),
         ]),
-        {
-            let edit_sec = snap
-                .edit_cursor
-                .as_ref()
-                .and_then(|p| p.time.map(|t| t.to_string()))
-                .unwrap_or_else(|| "—".to_string());
-            let edit_musical = snap
-                .edit_cursor
-                .as_ref()
-                .and_then(|p| p.musical.map(|m| m.to_string()))
-                .unwrap_or_else(|| "—".to_string());
-            Line::from(vec![
-                Span::styled("Edit cur ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    edit_sec,
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("    "),
-                Span::styled("Musical ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    edit_musical,
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-                ),
-            ])
-        },
-        {
-            // Compute delta via Position's own method, then format the
-            // two components from one source of truth instead of
-            // open-coding the subtraction here.
-            let (delta_sec, delta_musical) =
-                match (snap.playhead.as_ref(), snap.edit_cursor.as_ref()) {
-                    (Some(p), Some(e)) => {
-                        let d = if let Some(ts) = snap.time_signature {
-                            p.delta_from_with_ts(e, ts)
-                        } else {
-                            p.delta_from(e)
-                        };
-                        let sec = d.to_string();
-                        let mus = snap
-                            .time_signature
-                            .and_then(|ts| d.musical_string(ts))
-                            .unwrap_or_else(|| "—".to_string());
-                        (sec, mus)
-                    }
-                    _ => ("—".to_string(), "—".to_string()),
-                };
-            Line::from(vec![
-                Span::styled("Δ play−edit ", Style::default().fg(Color::DarkGray)),
-                Span::styled(delta_sec, Style::default().fg(Color::Cyan)),
-                Span::raw("    "),
-                Span::styled("Δ musical ", Style::default().fg(Color::DarkGray)),
-                Span::styled(delta_musical, Style::default().fg(Color::Cyan)),
-            ])
-        },
         Line::from(vec![
-            Span::styled("Tempo    ", Style::default().fg(Color::DarkGray)),
+            dim("Δ play−edit "),
+            colored(delta_sec, Color::Cyan),
+            pad(),
+            dim("Δ musical "),
+            colored(delta_musical, Color::Cyan),
+        ]),
+        Line::from(vec![
+            dim("Tempo    "),
             Span::raw(tempo),
-            Span::raw("    "),
-            Span::styled("Time sig ", Style::default().fg(Color::DarkGray)),
+            pad(),
+            dim("Time sig "),
             Span::raw(ts),
         ]),
-        Line::from(vec![
-            Span::styled("Stream   ", Style::default().fg(Color::DarkGray)),
-            Span::raw(format!(
-                "{} ticks   age {}",
-                snap.stream_ticks,
-                snap.last_tick_at
-                    .map(|t| format_short(t.elapsed()))
-                    .unwrap_or_else(|| "—".to_string()),
-            )),
-        ]),
+        Line::from(vec![dim("Stream   "), Span::raw(stream_info)]),
     ];
     f.render_widget(
         Paragraph::new(transport_lines)
@@ -772,29 +812,24 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
     );
 
     // ── Counts (all push-maintained) ───────────────────────────
-    let bold_white = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
-    let dim = Style::default().fg(Color::DarkGray);
-    let counts = Paragraph::new(Line::from(vec![
-        Span::styled("Tracks ", dim),
-        Span::styled(opt(snap.counts.tracks), bold_white),
-        Span::raw("    "),
-        Span::styled("Markers ", dim),
-        Span::styled(opt(snap.counts.markers), bold_white),
-        Span::raw("    "),
-        Span::styled("Regions ", dim),
-        Span::styled(opt(snap.counts.regions), bold_white),
-        Span::raw("    "),
-        Span::styled("Tempo pts ", dim),
-        Span::styled(opt(snap.counts.tempo_points), bold_white),
-    ]))
-    .block(Block::default().borders(Borders::ALL).title("Counts (push)"));
+    let pad = || Span::raw("    ");
+    let mut spans = Vec::with_capacity(11);
+    spans.extend(kv("Tracks ", opt(snap.counts.tracks)));
+    spans.push(pad());
+    spans.extend(kv("Markers ", opt(snap.counts.markers)));
+    spans.push(pad());
+    spans.extend(kv("Regions ", opt(snap.counts.regions)));
+    spans.push(pad());
+    spans.extend(kv("Tempo pts ", opt(snap.counts.tempo_points)));
+    let counts = Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::ALL).title("Counts (push)"));
     f.render_widget(counts, chunks[2]);
 
     // ── Latency ────────────────────────────────────────────────
     let latency_text = match snap.latency.summary() {
         Some((min, avg, p95, max, n)) => vec![
             Line::from(vec![
-                Span::styled("RPC ", Style::default().fg(Color::DarkGray)),
+                dim("RPC "),
                 Span::raw(format!(
                     "min {}   avg {}   p95 {}   max {}",
                     format_short(min),
@@ -802,23 +837,16 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
                     format_short(p95),
                     format_short(max),
                 )),
-                Span::styled(
-                    format!("   (n={n})"),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                dim(format!("   (n={n})")),
             ]),
             Line::from(vec![
-                Span::styled("Path ", Style::default().fg(Color::DarkGray)),
+                dim("Path "),
                 Span::raw(
-                    "Unix socket / Vox RPC. Push events (position) bypass RPC entirely."
-                        .to_string(),
+                    "Unix socket / Vox RPC. Push events (position) bypass RPC entirely.",
                 ),
             ]),
         ],
-        None => vec![Line::from(Span::styled(
-            "no RPC samples yet",
-            Style::default().fg(Color::DarkGray),
-        ))],
+        None => vec![Line::from(dim("no RPC samples yet"))],
     };
     f.render_widget(
         Paragraph::new(latency_text)
@@ -830,20 +858,14 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
     let visible_rows = chunks[4].height.saturating_sub(2) as usize; // borders
     let event_lines: Vec<Line> = snap
         .event_log
-        .iter()
+        .iter_recent()
         .rev()
         .take(visible_rows)
         .map(|e| {
             let age_ms = e.at.elapsed().as_millis();
             Line::from(vec![
-                Span::styled(
-                    format!("{:>5}ms ", age_ms),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("{:<10}", e.domain),
-                    Style::default().fg(domain_color(e.domain)),
-                ),
+                dim(format!("{:>5}ms ", age_ms)),
+                colored(format!("{:<10}", e.domain.label()), e.domain.color()),
                 Span::raw(" "),
                 Span::raw(&e.summary),
             ])
@@ -865,30 +887,39 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
         footer.push_str(err);
     }
     footer.push_str("    [space] play/pause  [p] pause  [s] stop  [r] rec  [q] quit");
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            footer,
-            Style::default().fg(Color::DarkGray),
-        ))),
-        chunks[5],
-    );
+    f.render_widget(Paragraph::new(Line::from(dim(footer))), chunks[5]);
 }
 
 fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
     v.map(|x| x.to_string()).unwrap_or_else(|| "—".to_string())
 }
 
-fn domain_color(d: &str) -> Color {
-    match d {
-        "transport" => Color::Cyan,
-        "track" => Color::Green,
-        "marker" => Color::Yellow,
-        "region" => Color::Magenta,
-        "tempo_map" => Color::LightBlue,
-        "project" => Color::LightRed,
-        "keybind" => Color::LightYellow,
-        _ => Color::White,
-    }
+// ── Render style helpers ─────────────────────────────────────────────
+//
+// The panel code repeats the same two-tone "dim label, bold value"
+// pattern dozens of times. These tiny helpers cut the noise and make
+// it impossible to forget a Modifier or pick the wrong shade.
+
+fn dim<'a>(text: impl Into<Cow<'a, str>>) -> Span<'a> {
+    Span::styled(text, Style::default().fg(Color::DarkGray))
+}
+
+fn bold<'a>(text: impl Into<Cow<'a, str>>) -> Span<'a> {
+    Span::styled(
+        text,
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    )
+}
+
+fn colored<'a>(text: impl Into<Cow<'a, str>>, color: Color) -> Span<'a> {
+    Span::styled(text, Style::default().fg(color))
+}
+
+/// `label`+`value` as a two-span pair. Used in panels that show many
+/// key/value cells on one line — concatenate several pairs with
+/// padding spans between.
+fn kv<'a>(label: &'a str, value: impl Into<Cow<'a, str>>) -> [Span<'a>; 2] {
+    [dim(label), bold(value)]
 }
 
 fn format_play_state(s: &PlayState) -> String {
@@ -926,4 +957,115 @@ fn short_path(p: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| p.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pure-function tests on the `apply_*_event` helpers. Each one
+    //! takes `&mut Snapshot` + a borrowed event and produces a fully
+    //! deterministic state mutation — no I/O, no clock, no Vox. The
+    //! split out of the giant `apply_daw_event` match is what makes
+    //! these tests trivially short.
+    use super::*;
+    use daw_proto::track::{Track, TrackEvent};
+
+    fn now() -> Instant {
+        Instant::now()
+    }
+
+    fn make_track(name: &str) -> Track {
+        // Track is a proto struct with quite a few fields; use Default
+        // and tweak only what the assertion looks at.
+        let mut t = Track::default();
+        t.name = name.into();
+        t
+    }
+
+    #[test]
+    fn track_added_increments_count() {
+        let mut snap = Snapshot::default();
+        snap.counts.tracks = Some(3);
+        apply_track_event(&mut snap, &TrackEvent::Added(make_track("Vocal")), now());
+        assert_eq!(snap.counts.tracks, Some(4));
+        // The Added event must also surface in the log so the user can
+        // see the change land — silent state mutation would be a bug.
+        assert_eq!(snap.event_log.entries.len(), 1);
+        assert_eq!(snap.event_log.entries[0].domain, EventDomain::Track);
+    }
+
+    #[test]
+    fn track_removed_decrements_count_with_floor() {
+        let mut snap = Snapshot::default();
+        snap.counts.tracks = Some(0);
+        // saturating_sub means we can't go negative even if the
+        // publisher and client briefly disagree on the seed.
+        apply_track_event(
+            &mut snap,
+            &TrackEvent::Removed("guid-1234".into()),
+            now(),
+        );
+        assert_eq!(snap.counts.tracks, Some(0));
+    }
+
+    #[test]
+    fn project_current_changed_clears_position_and_records_active_guid() {
+        let mut snap = Snapshot::default();
+        snap.playhead = Some(Position::start());
+        snap.edit_cursor = Some(Position::start());
+        snap.active_project_guid = Some("old".into());
+
+        apply_project_event(
+            &mut snap,
+            &ProjectEvent::CurrentChanged(Some("new-guid".into())),
+            now(),
+        );
+
+        assert_eq!(snap.active_project_guid.as_deref(), Some("new-guid"));
+        // Position fields cleared so the previous project's playhead
+        // doesn't bleed into the new tab for one render tick.
+        assert!(snap.playhead.is_none());
+        assert!(snap.edit_cursor.is_none());
+    }
+
+    #[test]
+    fn position_tick_for_inactive_project_is_dropped() {
+        let mut snap = Snapshot::default();
+        snap.active_project_guid = Some("active".into());
+
+        let mut tick = daw_proto::transport::PositionTick::stopped_at_origin();
+        tick.project_guid = "other-tab".into();
+        tick.is_playing = true;
+
+        apply_position_tick(&mut snap, &tick);
+
+        // The active filter rejected this tick — `is_playing` should
+        // not have been touched.
+        assert!(snap.is_playing.is_none());
+    }
+
+    #[test]
+    fn position_tick_for_active_project_lands() {
+        let mut snap = Snapshot::default();
+        snap.active_project_guid = Some("active".into());
+
+        let mut tick = daw_proto::transport::PositionTick::stopped_at_origin();
+        tick.project_guid = "active".into();
+        tick.is_playing = true;
+
+        apply_position_tick(&mut snap, &tick);
+
+        assert_eq!(snap.is_playing, Some(true));
+        assert!(snap.playhead.is_some());
+    }
+
+    #[test]
+    fn event_log_caps_at_capacity() {
+        let mut log = EventLog::default();
+        for i in 0..(EventLog::CAP + 5) {
+            log.push(Instant::now(), EventDomain::Transport, format!("{i}"));
+        }
+        // Ring buffer drops oldest; head should be the 5th push.
+        assert_eq!(log.entries.len(), EventLog::CAP);
+        assert_eq!(log.entries.front().unwrap().summary, "5");
+    }
 }
