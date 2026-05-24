@@ -553,6 +553,21 @@ impl ItemBuilder {
         self
     }
 
+    /// Set the item's clip gain (item trim, linear; 1.0 = 0 dB) via VOLPAN.
+    pub fn gain(mut self, item_trim: f64) -> Self {
+        let vp = self
+            .item
+            .volpan
+            .get_or_insert(crate::types::item::VolPanSettings {
+                item_trim: 1.0,
+                take_pan: 0.0,
+                take_volume: 1.0,
+                take_pan_law: -1.0,
+            });
+        vp.item_trim = item_trim;
+        self
+    }
+
     /// Mark this item as selected.
     pub fn selected(mut self) -> Self {
         self.item.selected = true;
