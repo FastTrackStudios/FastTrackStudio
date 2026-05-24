@@ -9,11 +9,7 @@ pub struct Tuba;
 impl From<Tuba> for Group<ItemMetadata> {
     fn from(_val: Tuba) -> Self {
         Group::builder("Tuba")
-            .patterns(vec![
-                "tuba",
-                "euphonium",
-                "euph",
-            ])
+            .patterns(vec!["tuba", "euphonium", "euph"])
             .build()
     }
 }

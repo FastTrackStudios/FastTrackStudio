@@ -9,12 +9,7 @@ pub struct Trombone;
 impl From<Trombone> for Group<ItemMetadata> {
     fn from(_val: Trombone) -> Self {
         Group::builder("Trombone")
-            .patterns(vec![
-                "trombone",
-                "tromb",
-                "tbn",
-                "bone",
-            ])
+            .patterns(vec!["trombone", "tromb", "tbn", "bone"])
             .build()
     }
 }

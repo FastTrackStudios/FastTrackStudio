@@ -15,14 +15,9 @@ impl From<Strings> for Group<ItemMetadata> {
             .prefix("FDL")
             .patterns(vec![
                 // Fiddle (folk/country/bluegrass)
-                "fiddle",
-                // Violin
-                "violin",
-                "vln",
-                // Viola
-                "viola",
-                "vla",
-                // Cello
+                "fiddle", // Violin
+                "violin", "vln", // Viola
+                "viola", "vla", // Cello
                 "cello",
             ])
             .build()

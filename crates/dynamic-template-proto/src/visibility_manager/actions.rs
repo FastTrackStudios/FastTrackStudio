@@ -101,6 +101,16 @@ actions_proto::define_actions! {
             description: "Hide all group tracks",
             category: View,
         }
+        PROFILE_DRUM_EDITING = "profile_drum_editing" {
+            name: "Drum Editing Profile",
+            description: "Show and size drum tracks for editing, hiding unrelated tracks",
+            category: View,
+        }
+        PROFILE_MIDI_EDITING = "profile_midi_editing" {
+            name: "MIDI Editing Profile",
+            description: "Show and size MIDI-oriented template groups for editing",
+            category: View,
+        }
         REBUILD_CACHE = "rebuild_cache" {
             name: "Rebuild Cache",
             description: "Rebuild the track-to-group classification cache",

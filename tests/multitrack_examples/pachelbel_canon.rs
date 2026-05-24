@@ -1,4 +1,4 @@
-use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
+use daw_proto::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -43,9 +43,7 @@ fn pachelbel_canon() -> Result<()> {
         .item("02_Cello.wav")
         .end();
 
-    let expected = TrackStructureBuilder::new()
-        .group(orchestra)
-        .build();
+    let expected = TrackStructureBuilder::new().group(orchestra).build();
 
     assert_tracks_equal(&tracks, &expected)?;
 

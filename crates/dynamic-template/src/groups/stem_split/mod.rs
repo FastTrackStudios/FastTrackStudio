@@ -29,8 +29,8 @@ impl From<StemSplit> for Group<ItemMetadata> {
                 "isolated",
                 // Generic stem patterns (these match when items are
                 // clearly stem-split outputs rather than live recordings)
-                "other",       // Demucs "other" stem
-                "no_vocals",   // Vocal-removed version
+                "other",     // Demucs "other" stem
+                "no_vocals", // Vocal-removed version
                 "no vocals",
                 "instrumental", // Instrumental stem
                 "accompaniment",
@@ -41,8 +41,15 @@ impl From<StemSplit> for Group<ItemMetadata> {
 
 /// Standard stem categories recognized by stem separation tools.
 const STEM_CATEGORIES: &[&str] = &[
-    "drums", "bass", "vocals", "other", "piano", "guitar", "no_vocals",
-    "instrumental", "accompaniment",
+    "drums",
+    "bass",
+    "vocals",
+    "other",
+    "piano",
+    "guitar",
+    "no_vocals",
+    "instrumental",
+    "accompaniment",
 ];
 
 /// Check if a set of item names looks like stem-split outputs.

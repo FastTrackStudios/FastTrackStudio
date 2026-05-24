@@ -22,19 +22,19 @@
 //! ```
 
 // Re-export the Color type and palette
-pub use color_palette::palette;
 pub use color_palette::Color;
+pub use color_palette::palette;
 
 // Re-export all instrument color modules from music-catalog
+pub use music_catalog::instruments::bass;
+pub use music_catalog::instruments::drums;
 pub use music_catalog::instruments::groups;
 pub use music_catalog::instruments::guitars;
-pub use music_catalog::instruments::vocals;
-pub use music_catalog::instruments::drums;
-pub use music_catalog::instruments::bass;
 pub use music_catalog::instruments::keys;
-pub use music_catalog::instruments::synths;
 pub use music_catalog::instruments::orchestra;
 pub use music_catalog::instruments::percussion;
+pub use music_catalog::instruments::synths;
+pub use music_catalog::instruments::vocals;
 
 // Re-export section colors as `guide` for backward compatibility
 pub use music_catalog::sections::colors as section_colors;
@@ -44,15 +44,15 @@ pub use music_catalog::sections::utility;
 /// Backward-compatible `guide` module that re-exports from music-catalog.
 /// New code should prefer `section_colors` and `cues` directly.
 pub mod guide {
-    pub use music_catalog::sections::utility::*;
     pub use music_catalog::sections::colors::*;
     pub use music_catalog::sections::cues::*;
+    pub use music_catalog::sections::utility::*;
 }
 
 // Re-export lookup functions
 pub use music_catalog::lookup::color_for_name as color_for_group;
-pub use music_catalog::lookup::color_for_region;
 pub use music_catalog::lookup::color_for_path;
+pub use music_catalog::lookup::color_for_region;
 
 // ============================================================================
 // REAPER-specific color conversion utilities

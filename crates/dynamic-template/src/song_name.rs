@@ -273,23 +273,26 @@ fn detect_with_fuzzy_matching(inputs: &[String], min_count: usize) -> HashSet<St
     for token in &all_tokens {
         // Find tokens that contain this one or that this one contains
         for other in &all_tokens {
-            if token != other && token.len() >= MIN_TOKEN_LENGTH && other.len() >= MIN_TOKEN_LENGTH
-                && (other.contains(token.as_str()) || token.contains(other.as_str())) {
-                    // Group under the shorter token (base form)
-                    let base = if token.len() <= other.len() {
-                        token
-                    } else {
-                        other
-                    };
-                    containment_groups
-                        .entry(base.clone())
-                        .or_default()
-                        .insert(token.clone());
-                    containment_groups
-                        .entry(base.clone())
-                        .or_default()
-                        .insert(other.clone());
-                }
+            if token != other
+                && token.len() >= MIN_TOKEN_LENGTH
+                && other.len() >= MIN_TOKEN_LENGTH
+                && (other.contains(token.as_str()) || token.contains(other.as_str()))
+            {
+                // Group under the shorter token (base form)
+                let base = if token.len() <= other.len() {
+                    token
+                } else {
+                    other
+                };
+                containment_groups
+                    .entry(base.clone())
+                    .or_default()
+                    .insert(token.clone());
+                containment_groups
+                    .entry(base.clone())
+                    .or_default()
+                    .insert(other.clone());
+            }
         }
     }
 
@@ -388,10 +391,8 @@ pub fn strip_song_names(input: &str, song_names: &HashSet<String>) -> String {
                     let after = &result[idx + token.len()..];
 
                     // Clean up separators around the removed token
-                    let before = before
-                        .trim_end_matches(['-', '_', '.', ' ']);
-                    let after = after
-                        .trim_start_matches(['-', '_', '.', ' ']);
+                    let before = before.trim_end_matches(['-', '_', '.', ' ']);
+                    let after = after.trim_start_matches(['-', '_', '.', ' ']);
 
                     result = if before.is_empty() {
                         after.to_string()

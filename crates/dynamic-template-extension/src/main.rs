@@ -12,10 +12,9 @@ use std::collections::HashMap;
 
 use daw::Daw;
 use daw_extension_runtime::GuestOptions;
-use dynamic_template::{auto_color, default_config, OrganizeIntoTracks};
+use dynamic_template::{OrganizeIntoTracks, auto_color, default_config};
 use dynamic_template_proto::{
-    actions::dynamic_template_actions,
-    auto_color::actions::auto_color_actions,
+    actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
     visibility_manager::actions::visibility_manager_actions,
 };
 use eyre::Result;
@@ -172,8 +171,8 @@ async fn handle_action(
 ) -> Result<()> {
     info!("[dynamic-template] Action triggered: {command_name}");
 
-    use dynamic_template_actions as dt;
     use auto_color_actions as ac;
+    use dynamic_template_actions as dt;
     use visibility_manager_actions as vm;
 
     let sort_selected = dt::SORT_SELECTED.to_id().to_command_id();
@@ -255,13 +254,13 @@ async fn handle_action(
         }
         n if n == rebuild_cache => {
             rebuild_group_cache(daw, group_cache).await?;
-            info!("[dynamic-template] Rebuilt group cache: {} entries", group_cache.len());
+            info!(
+                "[dynamic-template] Rebuilt group cache: {} entries",
+                group_cache.len()
+            );
         }
         cmd if cmd.starts_with(vis_toggle_prefix) => {
-            let group_name = cmd
-                .strip_prefix(vis_toggle_prefix)
-                .unwrap()
-                .to_lowercase();
+            let group_name = cmd.strip_prefix(vis_toggle_prefix).unwrap().to_lowercase();
             toggle_group_visibility(daw, group_cache, &group_name).await?;
         }
 
@@ -353,7 +352,11 @@ async fn sort_tracks(daw: &Daw, selected_only: bool) -> Result<()> {
 
     info!(
         "[dynamic-template] Timing: project={:?} fetch_tracks={:?} organize={:?} apply_hierarchy={:?} total={:?}",
-        t_project, t_fetch, t_organize, t_apply, t0.elapsed()
+        t_project,
+        t_fetch,
+        t_organize,
+        t_apply,
+        t0.elapsed()
     );
     Ok(())
 }
@@ -538,7 +541,10 @@ async fn toggle_group_visibility(
         .await?;
 
     let action = if new_visibility { "Showing" } else { "Hiding" };
-    info!("[dynamic-template] {action} {} {normalized} tracks", group_tracks.len());
+    info!(
+        "[dynamic-template] {action} {} {normalized} tracks",
+        group_tracks.len()
+    );
     Ok(())
 }
 
@@ -547,9 +553,7 @@ async fn show_all_tracks(daw: &Daw) -> Result<()> {
     let project = daw.current_project().await?;
     let all_tracks = project.tracks().all().await?;
 
-    project
-        .begin_undo_block("FTS: Show all tracks")
-        .await?;
+    project.begin_undo_block("FTS: Show all tracks").await?;
 
     let tracks_handle = project.tracks();
     for track in &all_tracks {
@@ -567,10 +571,7 @@ async fn show_all_tracks(daw: &Daw) -> Result<()> {
 }
 
 /// Hide all tracks that belong to a classified group.
-async fn hide_all_group_tracks(
-    daw: &Daw,
-    group_cache: &mut HashMap<String, String>,
-) -> Result<()> {
+async fn hide_all_group_tracks(daw: &Daw, group_cache: &mut HashMap<String, String>) -> Result<()> {
     if group_cache.is_empty() {
         rebuild_group_cache(daw, group_cache).await?;
     }

@@ -64,11 +64,11 @@ mod multitrack_examples {
     mod selwyn_jazz_much_too_much;
     mod simon_lyn_copper;
     mod snowmine_curfews;
-    mod swing_jazz_quartet;
     mod steve_maggiora_bring_it_on_back;
     mod steve_maggiora_hey_lady;
     mod steve_maggiora_its_too_late;
     mod stevie_wonder_superstition;
+    mod swing_jazz_quartet;
     mod tabla_breakbeat_scorpio;
     mod tears_for_fears_shout;
     mod the_cure_friday_im_in_love;

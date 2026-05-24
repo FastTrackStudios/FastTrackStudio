@@ -39,7 +39,14 @@ impl From<Snare> for ItemMetadataGroup {
 
         // Use the convenience method - extension trait is in scope via prelude
         ItemMetadataGroup::builder("Snare")
-            .patterns(["snare", "snr", "sn", "snareloop", "snare_loop", "snare loop"])
+            .patterns([
+                "snare",
+                "snr",
+                "sn",
+                "snareloop",
+                "snare_loop",
+                "snare loop",
+            ])
             .field_value_descriptors(ItemMetadataField::MultiMic, multi_mic_descriptors)
             .tagged_collection(sum_collection)
             .build()

@@ -81,8 +81,8 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
                 "electric",
                 "elec", // Common abbreviation for Electric (as in "Elec Gui")
                 "guitar",
-                "gtr",  // Very common 3-letter abbreviation used by engineers
-                "eg", // Common abbreviation for Electric Guitar
+                "gtr", // Very common 3-letter abbreviation used by engineers
+                "eg",  // Common abbreviation for Electric Guitar
                 "lead guitar",
                 "lead_guitar",
                 "leadguitar",
@@ -102,13 +102,7 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
                 "flying v",
             ])
             // Prevent matching bass or piano items that start with "Elec"
-            .exclude([
-                "bass",
-                "piano",
-                "pno",
-                "keys",
-                "keyboard",
-            ])
+            .exclude(["bass", "piano", "pno", "keys", "keyboard"])
             .performer(ItemMetadataGroup::builder("Performer").build()) // Priority 1: Performer (uses global patterns)
             .field_value_descriptors(ItemMetadataField::Variant, variant_descriptors) // Priority 2: Variant/model
             .arrangement(guitar_arrangement) // Priority 3: Arrangement
@@ -134,8 +128,8 @@ impl From<ElectricGuitar> for ItemMetadataGroup {
 
 #[cfg(test)]
 mod tests {
-    use crate::{default_config, OrganizeIntoTracks};
-    use daw_proto::{assert_tracks_equal, TrackStructureBuilder};
+    use crate::{OrganizeIntoTracks, default_config};
+    use daw_proto::{TrackStructureBuilder, assert_tracks_equal};
 
     type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
 

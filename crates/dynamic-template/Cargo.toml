@@ -16,6 +16,7 @@ path = "src/main.rs"
 dynamic-template-proto = { workspace = true }
 daw = { workspace = true }
 daw-proto = { workspace = true }
+daw-reaper = { workspace = true }
 eyre = { workspace = true }
 monarchy = { workspace = true }
 color-palette = { workspace = true }

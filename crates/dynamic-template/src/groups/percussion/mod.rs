@@ -10,7 +10,13 @@ impl From<Percussion> for Group<ItemMetadata> {
     fn from(_val: Percussion) -> Self {
         Group::builder("Percussion")
             .prefix("Perc")
-            .patterns(vec!["percussion", "perc", "aux perc", "auxperc", "aux_perc"])
+            .patterns(vec![
+                "percussion",
+                "perc",
+                "aux perc",
+                "auxperc",
+                "aux_perc",
+            ])
             // Exclude drum kit items
             .exclude(vec!["drum", "kick", "snare", "hihat", "cymbal", "tom"])
             // Add subgroups for specific percussion instruments
@@ -236,9 +242,7 @@ impl From<Castanets> for Group<ItemMetadata> {
 pub struct Tabla;
 impl From<Tabla> for Group<ItemMetadata> {
     fn from(_val: Tabla) -> Self {
-        Group::builder("Tabla")
-            .patterns(vec!["tabla"])
-            .build()
+        Group::builder("Tabla").patterns(vec!["tabla"]).build()
     }
 }
 

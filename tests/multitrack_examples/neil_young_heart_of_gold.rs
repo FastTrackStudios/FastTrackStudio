@@ -1,4 +1,4 @@
-use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
+use daw_proto::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -121,10 +121,7 @@ fn neil_young_heart_of_gold() -> Result<()> {
         .item("20.Vocal.HARMONY Dbl OptoComp_01.wav")
         .end();
 
-    let vocals = TrackGroup::folder("Vocals")
-        .group(lead)
-        .group(bgvs)
-        .end();
+    let vocals = TrackGroup::folder("Vocals").group(lead).group(bgvs).end();
 
     // ============================================================================
     // Compose final structure

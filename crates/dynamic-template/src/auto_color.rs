@@ -4,13 +4,13 @@
 //! track names → monarchy_sort() → Structure → color_for_path() → color map.
 //!
 //! It also provides DAW-agnostic functions to apply and clear colors on tracks
-//! via the `TrackService` trait. These work with any backend (daw-standalone for
+//! via the `Tracks` trait. These work with any backend (daw-standalone for
 //! testing, daw-reaper for production).
 
 use crate::colors;
 use color_palette::Color;
-use daw_proto::track::{Track, TrackRef, TrackService};
 use daw_proto::ProjectContext;
+use daw_proto::track::{Track, TrackRef, Tracks};
 use monarchy::Metadata;
 use std::collections::HashMap;
 
@@ -63,20 +63,17 @@ fn collect_colors_from_structure<M: Metadata>(
 }
 
 // ============================================================================
-// Track Color Application (via TrackService)
+// Track Color Application (via Tracks)
 // ============================================================================
 
 /// Classify all tracks in a project and apply colors.
 ///
 /// Collects track names, runs them through `classify_and_color()` to get a
-/// name→Color mapping, then applies each color via `TrackService::set_track_color()`.
+/// name→Color mapping, then applies each color via `Tracks::set_color()`.
 ///
 /// Returns the number of tracks that were colored.
-pub async fn apply_colors(
-    service: &impl TrackService,
-    project: ProjectContext,
-) -> u32 {
-    let tracks = service.get_tracks(project.clone()).await;
+pub fn apply_colors(service: &impl Tracks, project: ProjectContext) -> u32 {
+    let tracks = service.all(project.clone());
     if tracks.is_empty() {
         return 0;
     }
@@ -84,17 +81,17 @@ pub async fn apply_colors(
     let names: Vec<String> = tracks.iter().map(|t| t.name.clone()).collect();
     let color_map = classify_and_color(names);
 
-    apply_color_map(service, project, &tracks, &color_map).await
+    apply_color_map(service, project, &tracks, &color_map)
 }
 
 /// Apply a pre-computed color map to tracks.
 ///
 /// For each track, looks up its name in the color map and sets the color
-/// via `TrackService::set_track_color()`.
+/// via `Tracks::set_color()`.
 ///
 /// Returns the number of tracks that were colored.
-pub async fn apply_color_map(
-    service: &impl TrackService,
+pub fn apply_color_map(
+    service: &impl Tracks,
     project: ProjectContext,
     tracks: &[Track],
     color_map: &HashMap<String, Color>,
@@ -104,10 +101,12 @@ pub async fn apply_color_map(
     for track in tracks {
         if let Some(color) = color_map.get(&track.name) {
             let rgb = color.to_hex();
-            service
-                .set_track_color(project.clone(), TrackRef::Guid(track.guid.clone()), rgb)
-                .await;
-            colored += 1;
+            if service
+                .set_color(project.clone(), TrackRef::Guid(track.guid.clone()), rgb)
+                .is_ok()
+            {
+                colored += 1;
+            }
         }
     }
 
@@ -119,18 +118,17 @@ pub async fn apply_color_map(
 /// Sets color to 0 for every track, which the DAW interprets as "default/no custom color".
 ///
 /// Returns the number of tracks cleared.
-pub async fn clear_colors(
-    service: &impl TrackService,
-    project: ProjectContext,
-) -> u32 {
-    let tracks = service.get_tracks(project.clone()).await;
+pub fn clear_colors(service: &impl Tracks, project: ProjectContext) -> u32 {
+    let tracks = service.all(project.clone());
     let mut cleared = 0u32;
 
     for track in &tracks {
-        service
-            .set_track_color(project.clone(), TrackRef::Guid(track.guid.clone()), 0)
-            .await;
-        cleared += 1;
+        if service
+            .set_color(project.clone(), TrackRef::Guid(track.guid.clone()), 0)
+            .is_ok()
+        {
+            cleared += 1;
+        }
     }
 
     cleared

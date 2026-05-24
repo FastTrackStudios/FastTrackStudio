@@ -31,6 +31,7 @@ vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 # Sibling repos
 daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-standalone = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
@@ -53,13 +54,14 @@ eyre = "0.6"
 
 # ── Local development overrides ──────────────────────────────────────
 # Uncomment for local development:
-# [patch."https://github.com/FastTrackStudios/daw.git"]
-# daw = { path = "../daw/crates/daw" }
-# daw-proto = { path = "../daw/crates/daw-proto" }
-# daw-control = { path = "../daw/crates/daw-control" }
-# daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-# fts-devtools = { path = "../daw/crates/fts-devtools" }
-#
+[patch."https://github.com/FastTrackStudios/daw.git"]
+daw = { path = "../daw/crates/daw" }
+daw-proto = { path = "../daw/crates/daw-proto" }
+daw-control = { path = "../daw/crates/daw-control" }
+daw-reaper = { path = "../daw/crates/daw-reaper" }
+daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
+fts-devtools = { path = "../daw/crates/fts-devtools" }
+
 # [patch."https://github.com/FastTrackStudios/input_actions.git"]
 # actions-proto = { path = "../input_actions/crates/actions-proto" }
 

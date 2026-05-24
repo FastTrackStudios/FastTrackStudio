@@ -3,8 +3,8 @@
 //! This is the canonical source for section colors used by both the
 //! auto-color system (REAPER regions/markers) and the keyflow UI.
 
-use color_palette::palette;
 use color_palette::Color;
+use color_palette::palette;
 
 // ============================================================================
 // Guide / Utility track colors
@@ -92,7 +92,11 @@ pub struct SectionColorSet {
 
 impl SectionColorSet {
     pub const fn new(bright: Color, muted: Color, text: Color) -> Self {
-        Self { bright, muted, text }
+        Self {
+            bright,
+            muted,
+            text,
+        }
     }
 
     /// Get bright color as CSS rgb() string
@@ -137,11 +141,8 @@ pub mod ui_palettes {
     use super::SectionColorSet;
     use color_palette::palette;
 
-    pub const INTRO: SectionColorSet = SectionColorSet::new(
-        palette::sky::S400,
-        palette::sky::S200,
-        palette::sky::S800,
-    );
+    pub const INTRO: SectionColorSet =
+        SectionColorSet::new(palette::sky::S400, palette::sky::S200, palette::sky::S800);
     pub const VERSE: SectionColorSet = SectionColorSet::new(
         palette::emerald::S400,
         palette::emerald::S200,

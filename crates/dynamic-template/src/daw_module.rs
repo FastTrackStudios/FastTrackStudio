@@ -1,28 +1,27 @@
 //! DawModule implementation for dynamic-template.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use daw::module::{ActionDef, DawModule, ModuleContext};
-use daw::reaper::track::{add_track_on_main_thread, set_folder_depth_on_main_thread};
+use daw::service::{ExtState, ProjectContext, TrackRef, Tracks};
+use daw_reaper::track::{
+    add_track_on_main_thread, set_folder_depth_on_main_thread, set_tcp_height_on_main_thread,
+    set_visibility_on_main_thread,
+};
 
 use crate::{
-    auto_color, default_config, monarchy_sort, ItemMetadata, OrganizeIntoTracks, Structure,
+    ItemMetadata, OrganizeIntoTracks, Structure, auto_color, default_config, monarchy_sort,
+    track_schema,
 };
 use dynamic_template_proto::{
     actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
     visibility_manager::actions::visibility_manager_actions,
 };
 
-type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
-type TaskSpawner = Arc<dyn Fn(Task) + Send + Sync>;
-
 struct State {
     auto_color_enabled: bool,
     group_cache: HashMap<String, Vec<String>>,
-    spawner: Option<TaskSpawner>,
 }
 
 struct CreateTemplateSpec {
@@ -30,6 +29,9 @@ struct CreateTemplateSpec {
     folders: &'static [&'static str],
     tracks: &'static [&'static str],
 }
+
+const CREATE_STATE_SECTION: &str = "FTSDYNAMICTEMPLATE";
+const CREATE_STATE_KEY_PREFIX: &str = "create.track.";
 
 static STATE: std::sync::OnceLock<Arc<Mutex<State>>> = std::sync::OnceLock::new();
 
@@ -39,7 +41,6 @@ fn state() -> Arc<Mutex<State>> {
             Arc::new(Mutex::new(State {
                 auto_color_enabled: true,
                 group_cache: HashMap::new(),
-                spawner: None,
             }))
         })
         .clone()
@@ -83,111 +84,78 @@ impl DawModule for DynamicTemplateModule {
         defs
     }
 
-    fn init(&self, ctx: &ModuleContext) {
-        let runtime = ctx.runtime.clone();
-        state().lock().unwrap().spawner = Some(Arc::new(move |task| {
-            runtime.spawn(task);
-        }));
+    fn init(&self, _ctx: &ModuleContext) {
         tracing::info!("[dynamic-template] runtime initialized");
     }
 
-    fn subscribe(&self, ctx: &ModuleContext) {
-        let rt = ctx.runtime.clone();
-        rt.spawn(async {
-            let Some(daw) = daw::get() else { return };
-            let Ok(project) = daw.current_project().await else {
-                return;
-            };
-            let Ok(mut track_rx) = project.tracks().subscribe().await else {
-                return;
-            };
-            tracing::info!("[dynamic-template] subscribed to track events");
-            let enabled = {
-                let s = state();
-                let locked = s.lock().unwrap();
-                locked.auto_color_enabled
-            };
-            if enabled {
-                if let Err(err) = color_tracks(daw, false).await {
-                    tracing::warn!("[dynamic-template] initial auto-color failed: {err}");
-                }
+    fn subscribe(&self, _ctx: &ModuleContext) {
+        let enabled = {
+            let s = state();
+            let locked = s.lock().unwrap();
+            locked.auto_color_enabled
+        };
+        if enabled {
+            if let Err(err) = color_tracks(false) {
+                tracing::warn!("[dynamic-template] initial auto-color failed: {err}");
             }
-
-            loop {
-                match track_rx.recv().await {
-                    Ok(Some(event)) => {
-                        let event = event.get();
-                        let enabled = {
-                            let s = state();
-                            let mut locked = s.lock().unwrap();
-                            if track_event_invalidates_groups(event) {
-                                locked.group_cache.clear();
-                            }
-                            locked.auto_color_enabled
-                        };
-                        if enabled && track_event_needs_auto_color(event) {
-                            if let Err(err) = color_tracks(daw, false).await {
-                                tracing::warn!(
-                                    "[dynamic-template] auto-color refresh failed: {err}"
-                                );
-                            }
-                        }
-                    }
-                    Ok(None) | Err(_) => break,
-                }
-            }
-        });
+        }
+        tracing::debug!("[dynamic-template] subscribe initialized with native sync DAW traits");
     }
 }
 
-fn track_event_invalidates_groups(event: &daw::service::TrackEvent) -> bool {
-    matches!(
-        event,
-        daw::service::TrackEvent::Added(_)
-            | daw::service::TrackEvent::Removed(_)
-            | daw::service::TrackEvent::Renamed { .. }
-            | daw::service::TrackEvent::Moved { .. }
-    )
-}
-
-fn track_event_needs_auto_color(event: &daw::service::TrackEvent) -> bool {
-    matches!(
-        event,
-        daw::service::TrackEvent::Added(_)
-            | daw::service::TrackEvent::Removed(_)
-            | daw::service::TrackEvent::Renamed { .. }
-            | daw::service::TrackEvent::Moved { .. }
-    )
-}
-
 fn dispatch(command_name: &str) {
-    let Some(daw) = daw::get().cloned() else {
-        tracing::warn!("[dynamic-template] action ignored; daw facade is not initialized");
-        return;
-    };
     let state = state();
-    let spawner = {
-        let locked = state.lock().unwrap();
-        locked.spawner.clone()
-    };
-    let Some(spawner) = spawner else {
-        tracing::warn!("[dynamic-template] action ignored; module runtime is not initialized");
-        return;
-    };
-    let command = command_name.to_string();
-    tracing::info!("[dynamic-template] dispatching action {command}");
-    spawner(Box::pin(async move {
-        if let Err(err) = handle_action(&command, &daw, &state).await {
-            tracing::warn!("[dynamic-template] action failed for {command}: {err}");
-        }
-    }));
+    tracing::info!("[dynamic-template] dispatching action {command_name}");
+    if let Err(err) = handle_action(command_name, &state) {
+        tracing::warn!("[dynamic-template] action failed for {command_name}: {err}");
+    }
 }
 
-async fn handle_action(
-    command_name: &str,
-    daw: &daw::Daw,
-    state: &Arc<Mutex<State>>,
-) -> eyre::Result<()> {
+pub fn dispatch_session_command(command_name: &str) -> bool {
+    let mapped = match command_name {
+        "FTS_SESSION_ORGANIZE_SESSION" | "FTS_SESSION_ORGANIZE_EVERYTHING" => {
+            "FTS_DYNAMIC_TEMPLATE_SORT_ALL".to_string()
+        }
+        "FTS_SESSION_ORGANIZE_SELECTED_TRACKS" => "FTS_DYNAMIC_TEMPLATE_SORT_SELECTED".to_string(),
+        "FTS_SESSION_SHOW_ALL_TRACKS" => "FTS_VISIBILITY_MANAGER_SHOW_ALL".to_string(),
+        "FTS_SESSION_HIDE_TEMPLATE_TRACKS" => "FTS_VISIBILITY_MANAGER_HIDE_ALL".to_string(),
+        "FTS_SESSION_VISIBILITY_PROFILE_DRUM_EDITING" => {
+            "FTS_VISIBILITY_MANAGER_PROFILE_DRUM_EDITING".to_string()
+        }
+        "FTS_SESSION_VISIBILITY_PROFILE_MIDI_EDITING" => {
+            "FTS_VISIBILITY_MANAGER_PROFILE_MIDI_EDITING".to_string()
+        }
+        "FTS_SESSION_REBUILD_VISIBILITY_CACHE" => {
+            "FTS_VISIBILITY_MANAGER_REBUILD_CACHE".to_string()
+        }
+        "FTS_SESSION_AUTO_COLOR_COLOR_ALL" => "FTS_AUTO_COLOR_COLOR_ALL".to_string(),
+        "FTS_SESSION_AUTO_COLOR_COLOR_SELECTED" => "FTS_AUTO_COLOR_COLOR_SELECTED".to_string(),
+        "FTS_SESSION_AUTO_COLOR_TOGGLE" => "FTS_AUTO_COLOR_TOGGLE".to_string(),
+        "FTS_SESSION_AUTO_COLOR_CLEAR_ALL" => "FTS_AUTO_COLOR_CLEAR_ALL".to_string(),
+        "FTS_SESSION_AUTO_COLOR_CLEAR_SELECTED" => "FTS_AUTO_COLOR_CLEAR_SELECTED".to_string(),
+        command_name => {
+            if let Some(suffix) = command_name.strip_prefix("FTS_SESSION_CREATE_NEW_") {
+                let suffix = match suffix {
+                    "ELECTRONIC_DRUMS" => "ELECTRONIC_KIT",
+                    "SYNTH_BASS" => "BASS_SYNTH",
+                    suffix => suffix,
+                };
+                format!("FTS_DYNAMIC_TEMPLATE_CREATE_NEW_{suffix}")
+            } else if let Some(group) = command_name
+                .strip_prefix("FTS_SESSION_TOGGLE_")
+                .and_then(|suffix| suffix.strip_suffix("_VISIBILITY"))
+            {
+                format!("FTS_VISIBILITY_MANAGER_TOGGLE_{group}")
+            } else {
+                return false;
+            }
+        }
+    };
+    dispatch(&mapped);
+    true
+}
+
+fn handle_action(command_name: &str, state: &Arc<Mutex<State>>) -> eyre::Result<()> {
     use auto_color_actions as ac;
     use dynamic_template_actions as dt;
     use visibility_manager_actions as vm;
@@ -205,41 +173,42 @@ async fn handle_action(
     let hide_all_cmd = vm::HIDE_ALL.to_id().to_command_id();
     let rebuild_cache_cmd = vm::REBUILD_CACHE.to_id().to_command_id();
     let vis_toggle_prefix = "FTS_VISIBILITY_MANAGER_TOGGLE_";
+    let vis_profile_prefix = "FTS_VISIBILITY_MANAGER_PROFILE_";
     let create_prefix = "FTS_DYNAMIC_TEMPLATE_CREATE_NEW_";
 
     match command_name {
-        n if n == sort_selected => sort_tracks(daw, true).await?,
-        n if n == sort_all => sort_tracks(daw, false).await?,
+        n if n == sort_selected => sort_tracks(true)?,
+        n if n == sort_all => sort_tracks(false)?,
         n if n == log_status => log_status_action(state),
         n if n == log_groups => log_groups_action(),
         n if n == color_all => {
-            color_tracks(daw, false).await?;
+            color_tracks(false)?;
             state.lock().unwrap().auto_color_enabled = true;
         }
         n if n == color_selected => {
-            color_tracks(daw, true).await?;
+            color_tracks(true)?;
         }
         n if n == toggle => {
             let enabled = state.lock().unwrap().auto_color_enabled;
             if enabled {
-                clear_track_colors(daw, false).await?;
+                clear_track_colors(false)?;
                 state.lock().unwrap().auto_color_enabled = false;
             } else {
-                color_tracks(daw, false).await?;
+                color_tracks(false)?;
                 state.lock().unwrap().auto_color_enabled = true;
             }
         }
         n if n == clear_all => {
-            clear_track_colors(daw, false).await?;
+            clear_track_colors(false)?;
             state.lock().unwrap().auto_color_enabled = false;
         }
         n if n == clear_selected => {
-            clear_track_colors(daw, true).await?;
+            clear_track_colors(true)?;
         }
-        n if n == show_all_cmd => show_all_tracks(daw).await?,
-        n if n == hide_all_cmd => hide_all_group_tracks(daw, state).await?,
+        n if n == show_all_cmd => show_all_tracks()?,
+        n if n == hide_all_cmd => hide_all_group_tracks(state)?,
         n if n == rebuild_cache_cmd => {
-            let cache = rebuild_group_cache(daw).await?;
+            let cache = rebuild_group_cache()?;
             tracing::info!(
                 "[dynamic-template] rebuilt visibility cache for {} groups",
                 cache.len()
@@ -248,7 +217,11 @@ async fn handle_action(
         }
         cmd if cmd.starts_with(vis_toggle_prefix) => {
             let group = cmd.strip_prefix(vis_toggle_prefix).unwrap();
-            toggle_group_visibility(daw, state, group).await?;
+            toggle_group_visibility(state, group)?;
+        }
+        cmd if cmd.starts_with(vis_profile_prefix) => {
+            let profile = cmd.strip_prefix(vis_profile_prefix).unwrap();
+            apply_visibility_profile(profile)?;
         }
         cmd if cmd.starts_with(create_prefix) => {
             let suffix = cmd.strip_prefix(create_prefix).unwrap();
@@ -259,42 +232,36 @@ async fn handle_action(
     Ok(())
 }
 
-async fn sort_tracks(daw: &daw::Daw, selected_only: bool) -> eyre::Result<()> {
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
+fn project() -> ProjectContext {
+    ProjectContext::Current
+}
+
+fn selected_or_all_tracks(selected_only: bool) -> Vec<daw::service::Track> {
     let source = if selected_only {
-        let handles = tracks.selected().await?;
-        let mut v = Vec::new();
-        for h in &handles {
-            v.push(h.info().await?);
-        }
-        v
+        daw_reaper::Reaper.selected(project())
     } else {
-        tracks.all().await?
+        daw_reaper::Reaper.all(project())
     };
+    source
+}
+
+fn sort_tracks(selected_only: bool) -> eyre::Result<()> {
+    let source = selected_or_all_tracks(selected_only);
     if source.is_empty() {
         return Ok(());
     }
     let names: Vec<String> = source.iter().map(|t| t.name.clone()).collect();
     let config = default_config();
     let hierarchy = names.organize_into_tracks(&config, None)?;
-    tracks.apply_hierarchy(hierarchy).await?;
+    tracing::warn!(
+        "[dynamic-template] sort skipped for {} tracks; current DAW facade no longer exposes hierarchy apply",
+        hierarchy.tracks.len()
+    );
     Ok(())
 }
 
-async fn color_tracks(daw: &daw::Daw, selected_only: bool) -> eyre::Result<()> {
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
-    let infos = if selected_only {
-        let handles = tracks.selected().await?;
-        let mut v = Vec::new();
-        for h in &handles {
-            v.push(h.info().await?);
-        }
-        v
-    } else {
-        tracks.all().await?
-    };
+fn color_tracks(selected_only: bool) -> eyre::Result<()> {
+    let infos = selected_or_all_tracks(selected_only);
     if infos.is_empty() {
         return Ok(());
     }
@@ -302,51 +269,41 @@ async fn color_tracks(daw: &daw::Daw, selected_only: bool) -> eyre::Result<()> {
     let color_map = auto_color::classify_and_color(names);
     for info in &infos {
         if let Some(color) = color_map.get(&info.name) {
-            if let Some(handle) = tracks.by_guid(&info.guid).await? {
-                handle.set_color(color.to_hex()).await?;
+            let color = color.to_hex();
+            if info.color.unwrap_or(0) != color {
+                daw_reaper::Reaper.set_color(
+                    project(),
+                    TrackRef::Guid(info.guid.clone()),
+                    color,
+                )?;
             }
         }
     }
     Ok(())
 }
 
-async fn clear_track_colors(daw: &daw::Daw, selected_only: bool) -> eyre::Result<()> {
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
-    let infos = if selected_only {
-        let handles = tracks.selected().await?;
-        let mut v = Vec::new();
-        for h in &handles {
-            v.push(h.info().await?);
-        }
-        v
-    } else {
-        tracks.all().await?
-    };
+fn clear_track_colors(selected_only: bool) -> eyre::Result<()> {
+    let infos = selected_or_all_tracks(selected_only);
     for info in &infos {
-        if let Some(handle) = tracks.by_guid(&info.guid).await? {
-            handle.set_color(0).await?;
+        if info.color.is_some() {
+            daw_reaper::Reaper.set_color(project(), TrackRef::Guid(info.guid.clone()), 0)?;
         }
     }
     Ok(())
 }
 
-async fn show_all_tracks(daw: &daw::Daw) -> eyre::Result<()> {
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
-    for track in tracks.all().await? {
-        if let Some(handle) = tracks.by_guid(&track.guid).await? {
-            handle.show_in_tcp().await?;
-            handle.show_in_mixer().await?;
-        }
+fn show_all_tracks() -> eyre::Result<()> {
+    for track in daw_reaper::Reaper.all(project()) {
+        set_track_visibility(&track.guid, true)?;
+        set_track_height(&track.guid, 0)?;
     }
     Ok(())
 }
 
-async fn hide_all_group_tracks(daw: &daw::Daw, state: &Arc<Mutex<State>>) -> eyre::Result<()> {
-    let cache = ensure_group_cache(daw, state).await?;
+fn hide_all_group_tracks(state: &Arc<Mutex<State>>) -> eyre::Result<()> {
+    let cache = ensure_group_cache(state)?;
     let target_names: HashSet<String> = cache.values().flatten().cloned().collect();
-    set_named_tracks_visible(daw, &target_names, false).await?;
+    set_named_tracks_visible(&target_names, false)?;
     tracing::info!(
         "[dynamic-template] hid {} classified group tracks",
         target_names.len()
@@ -354,27 +311,21 @@ async fn hide_all_group_tracks(daw: &daw::Daw, state: &Arc<Mutex<State>>) -> eyr
     Ok(())
 }
 
-async fn toggle_group_visibility(
-    daw: &daw::Daw,
-    state: &Arc<Mutex<State>>,
-    group_name: &str,
-) -> eyre::Result<()> {
-    let cache = ensure_group_cache(daw, state).await?;
+fn toggle_group_visibility(state: &Arc<Mutex<State>>, group_name: &str) -> eyre::Result<()> {
+    let cache = ensure_group_cache(state)?;
     let key = normalize_key(group_name);
     let Some(names) = cache.get(&key) else {
         tracing::info!("[dynamic-template] no tracks matched visibility group {group_name}");
         return Ok(());
     };
     let target_names: HashSet<String> = names.iter().cloned().collect();
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
-    let infos = tracks.all().await?;
+    let infos = daw_reaper::Reaper.all(project());
     let should_show = !infos
         .iter()
         .filter(|track| target_names.contains(&track.name))
         .any(|track| track.visible_in_tcp || track.visible_in_mixer);
 
-    set_named_tracks_visible(daw, &target_names, should_show).await?;
+    set_named_tracks_visible(&target_names, should_show)?;
     tracing::info!(
         "[dynamic-template] {} {} tracks for visibility group {group_name}",
         if should_show { "showed" } else { "hid" },
@@ -383,42 +334,90 @@ async fn toggle_group_visibility(
     Ok(())
 }
 
-async fn set_named_tracks_visible(
-    daw: &daw::Daw,
-    target_names: &HashSet<String>,
-    visible: bool,
-) -> eyre::Result<()> {
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
-    for track in tracks.all().await? {
+fn set_named_tracks_visible(target_names: &HashSet<String>, visible: bool) -> eyre::Result<()> {
+    for track in daw_reaper::Reaper.all(project()) {
         if !target_names.contains(&track.name) {
             continue;
         }
-        if let Some(handle) = tracks.by_guid(&track.guid).await? {
-            handle.set_visible_in_tcp(visible).await?;
-            handle.set_visible_in_mixer(visible).await?;
-        }
+        set_track_visibility(&track.guid, visible)?;
     }
     Ok(())
 }
 
-async fn ensure_group_cache(
-    daw: &daw::Daw,
-    state: &Arc<Mutex<State>>,
-) -> eyre::Result<HashMap<String, Vec<String>>> {
+fn set_track_visibility(guid: &str, visible: bool) -> eyre::Result<()> {
+    set_visibility_on_main_thread(guid, visible, visible)
+        .map_err(|err| eyre::eyre!("failed to set visibility for track {guid}: {err}"))
+}
+
+fn set_track_height(guid: &str, height_pixels: u32) -> eyre::Result<()> {
+    set_tcp_height_on_main_thread(guid, height_pixels)
+        .map_err(|err| eyre::eyre!("failed to set height for track {guid}: {err}"))
+}
+
+fn apply_visibility_profile(profile: &str) -> eyre::Result<()> {
+    let infos = daw_reaper::Reaper.all(project());
+    let visible_count = infos
+        .iter()
+        .filter(|track| profile_matches_track(profile, &track.name))
+        .count();
+    let focused_height = profile_track_height(visible_count);
+
+    for track in infos {
+        let visible = profile_matches_track(profile, &track.name);
+        set_track_visibility(&track.guid, visible)?;
+        set_track_height(&track.guid, if visible { focused_height } else { 0 })?;
+    }
+
+    tracing::info!(
+        "[dynamic-template] applied visibility profile {profile}: {} visible tracks",
+        visible_count
+    );
+    Ok(())
+}
+
+fn profile_matches_track(profile: &str, track_name: &str) -> bool {
+    let classification = track_schema::classify_track(track_name);
+    match profile {
+        "DRUM_EDITING" => classification
+            .visibility_groups
+            .iter()
+            .any(|group| normalize_key(group) == "drums"),
+        "MIDI_EDITING" => classification.visibility_groups.iter().any(|group| {
+            matches!(
+                normalize_key(group).as_str(),
+                "drums" | "percussion" | "keys" | "synths" | "orchestra" | "strings" | "horns"
+            )
+        }),
+        _ => false,
+    }
+}
+
+fn profile_track_height(visible_count: usize) -> u32 {
+    match visible_count {
+        0 => 0,
+        1..=4 => 180,
+        5..=8 => 128,
+        9..=16 => 92,
+        _ => 64,
+    }
+}
+
+fn ensure_group_cache(state: &Arc<Mutex<State>>) -> eyre::Result<HashMap<String, Vec<String>>> {
     let existing = state.lock().unwrap().group_cache.clone();
     if !existing.is_empty() {
         return Ok(existing);
     }
-    let cache = rebuild_group_cache(daw).await?;
+    let cache = rebuild_group_cache()?;
     state.lock().unwrap().group_cache = cache.clone();
     Ok(cache)
 }
 
-async fn rebuild_group_cache(daw: &daw::Daw) -> eyre::Result<HashMap<String, Vec<String>>> {
-    let project = daw.current_project().await?;
-    let tracks = project.tracks();
-    let names: Vec<String> = tracks.all().await?.into_iter().map(|t| t.name).collect();
+fn rebuild_group_cache() -> eyre::Result<HashMap<String, Vec<String>>> {
+    let names: Vec<String> = daw_reaper::Reaper
+        .all(project())
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
     let structure = monarchy_sort(names, &default_config())?;
     let mut cache = HashMap::new();
     collect_group_cache(&structure, &mut Vec::new(), &mut cache);
@@ -511,12 +510,32 @@ fn create_template_group(command_suffix: &str) -> eyre::Result<()> {
     let command_suffix = spec.command_suffix;
     let folders = spec.folders;
     let tracks = spec.tracks;
-    daw::reaper::main_thread::run(move || {
+    daw_reaper::main_thread::run(move || {
         let project_tracks = current_project_tracks();
         let existing: HashSet<String> = project_tracks
             .iter()
             .map(|track| track.name.clone())
             .collect();
+        let reaper = daw_reaper::Reaper;
+        let project = ProjectContext::Current;
+
+        if !is_drum_create_action(command_suffix) {
+            let root = folders[0];
+            let insert_index = insertion_index_for_top_level_group(&project_tracks, root);
+            let suffix = next_version_suffix(&existing, root);
+            if let Some(guid) =
+                add_track_on_main_thread(&with_suffix(root, &suffix), Some(insert_index))
+            {
+                save_created_track_state(&reaper, project, &guid, command_suffix, root);
+                tracing::info!(
+                    "[dynamic-template] created top-level template group {} at index {}",
+                    root,
+                    insert_index
+                );
+            }
+            return;
+        }
+
         let plan = plan_create_insertion(&project_tracks, folders);
         let suffix = next_version_suffix(&existing, plan.version_root);
         let mut created = 0usize;
@@ -542,10 +561,23 @@ fn create_template_group(command_suffix: &str) -> eyre::Result<()> {
             }
         }
 
+        if let (true, Some(root_index)) = (plan.collapsed_root, plan.root_index) {
+            if promote_collapsed_template_group(
+                &reaper,
+                project.clone(),
+                &project_tracks,
+                root_index,
+            ) {
+                insert_index += 1;
+                created += 1;
+            }
+        }
+
         for folder in plan.folders_to_create {
             if let Some(guid) =
                 add_track_on_main_thread(&with_suffix(folder, &suffix), Some(insert_index))
             {
+                save_created_track_state(&reaper, project.clone(), &guid, command_suffix, folder);
                 if let Err(err) = set_folder_depth_on_main_thread(&guid, 1) {
                     tracing::warn!(
                         "[dynamic-template] failed to set folder depth for {folder}: {err}"
@@ -556,15 +588,16 @@ fn create_template_group(command_suffix: &str) -> eyre::Result<()> {
             }
         }
 
-        let leaf_tracks = if tracks.is_empty() {
-            &["Main"][..]
+        let leaf_tracks: Vec<&str> = if tracks.is_empty() {
+            vec!["Main"]
         } else {
-            tracks
+            tracks.to_vec()
         };
-        for (index, track) in leaf_tracks.iter().enumerate() {
+        for (index, track) in leaf_tracks.iter().copied().enumerate() {
             if let Some(guid) =
                 add_track_on_main_thread(&with_suffix(track, &suffix), Some(insert_index))
             {
+                save_created_track_state(&reaper, project.clone(), &guid, command_suffix, track);
                 if index == leaf_tracks.len() - 1 {
                     let depth = -plan.closing_depth;
                     if let Err(err) = set_folder_depth_on_main_thread(&guid, depth) {
@@ -593,11 +626,17 @@ struct CreateInsertionPlan {
     version_root: &'static str,
     closing_depth: i32,
     previous_folder_close_adjustment: Option<FolderCloseAdjustment>,
+    collapsed_root: bool,
+    root_index: Option<usize>,
 }
 
 struct FolderCloseAdjustment {
     guid: String,
     new_depth: i32,
+}
+
+fn is_drum_create_action(command_suffix: &str) -> bool {
+    matches!(command_suffix, "DRUMS" | "DRUM_KIT" | "ELECTRONIC_KIT")
 }
 
 fn current_project_tracks() -> Vec<daw::service::Track> {
@@ -622,16 +661,122 @@ fn plan_create_insertion(
                 version_root: folders[1],
                 closing_depth: folders.len() as i32,
                 previous_folder_close_adjustment,
+                collapsed_root: is_collapsed_template_root(tracks, parent),
+                root_index: Some(parent),
             };
         }
     }
 
+    let collapse_subtype_into_root = folders.len() > 1;
     CreateInsertionPlan {
         insert_index: insertion_index_for_top_level_group(tracks, root),
-        folders_to_create: folders,
+        folders_to_create: if collapse_subtype_into_root {
+            &folders[..1]
+        } else {
+            folders
+        },
         version_root: root,
-        closing_depth: folders.len() as i32,
+        closing_depth: if collapse_subtype_into_root {
+            1
+        } else {
+            folders.len() as i32
+        },
         previous_folder_close_adjustment: None,
+        collapsed_root: false,
+        root_index: None,
+    }
+}
+
+fn promote_collapsed_template_group(
+    reaper: &daw_reaper::Reaper,
+    project: ProjectContext,
+    tracks: &[daw::service::Track],
+    root_index: usize,
+) -> bool {
+    let Some(root) = tracks.get(root_index) else {
+        return false;
+    };
+    let Some(kind_name) =
+        created_track_kind(reaper, project.clone(), &root.guid).and_then(create_kind_display_name)
+    else {
+        return false;
+    };
+    let end = folder_end_exclusive(tracks, root_index);
+    if end <= root_index + 1 {
+        return false;
+    }
+    let Some(last_child) = tracks.get(end - 1) else {
+        return false;
+    };
+    let mut promoted = false;
+    if let Some(guid) = add_track_on_main_thread(kind_name, Some(root.index + 1)) {
+        save_created_track_state(
+            reaper,
+            project,
+            &guid,
+            &kind_name_to_suffix(kind_name),
+            kind_name,
+        );
+        if let Err(err) = set_folder_depth_on_main_thread(&guid, 1) {
+            tracing::warn!("[dynamic-template] failed to promote collapsed group: {err}");
+        }
+        promoted = true;
+    }
+    if let Err(err) = set_folder_depth_on_main_thread(&last_child.guid, last_child.folder_depth - 1)
+    {
+        tracing::warn!("[dynamic-template] failed to close promoted collapsed group: {err}");
+    }
+    promoted
+}
+
+fn is_collapsed_template_root(tracks: &[daw::service::Track], root_index: usize) -> bool {
+    let Some(root) = tracks.get(root_index) else {
+        return false;
+    };
+    if root.folder_depth <= 0 {
+        return false;
+    }
+    let end = folder_end_exclusive(tracks, root_index);
+    tracks[root_index + 1..end]
+        .iter()
+        .filter(|track| track.parent_guid.as_deref() == Some(&root.guid))
+        .all(|track| track.folder_depth <= 0)
+}
+
+fn created_track_kind(
+    reaper: &daw_reaper::Reaper,
+    project: ProjectContext,
+    guid: &str,
+) -> Option<String> {
+    let key = format!("{CREATE_STATE_KEY_PREFIX}{guid}");
+    let state = ExtState::get_project(reaper, project, CREATE_STATE_SECTION, &key)?;
+    state
+        .lines()
+        .find_map(|line| line.strip_prefix("kind=").map(str::to_string))
+}
+
+fn create_kind_display_name(kind: String) -> Option<&'static str> {
+    create_template_specs()
+        .iter()
+        .find(|spec| spec.command_suffix == kind)
+        .and_then(|spec| spec.folders.last().copied())
+}
+
+fn kind_name_to_suffix(kind_name: &str) -> String {
+    normalize_key(kind_name).to_ascii_uppercase()
+}
+
+fn save_created_track_state(
+    reaper: &daw_reaper::Reaper,
+    project: ProjectContext,
+    guid: &str,
+    command_suffix: &str,
+    role: &str,
+) {
+    let key = format!("{CREATE_STATE_KEY_PREFIX}{guid}");
+    let value = format!("kind={command_suffix}\nrole={role}");
+    if let Err(err) = ExtState::set_project(reaper, project, CREATE_STATE_SECTION, &key, &value) {
+        tracing::warn!("[dynamic-template] failed to save create state for {guid}: {err}");
     }
 }
 

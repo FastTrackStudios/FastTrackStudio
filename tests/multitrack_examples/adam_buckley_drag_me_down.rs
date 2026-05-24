@@ -1,4 +1,4 @@
-use daw_proto::{assert_tracks_equal, TrackGroup, TrackStructureBuilder};
+use daw_proto::{TrackGroup, TrackStructureBuilder, assert_tracks_equal};
 use dynamic_template::*;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>;
@@ -240,10 +240,7 @@ fn adam_buckley_drag_me_down() -> Result<()> {
         .item("50_BackingVox3.wav")
         .end();
 
-    let vocals = TrackGroup::folder("Vocals")
-        .group(lead)
-        .group(bgvs)
-        .end();
+    let vocals = TrackGroup::folder("Vocals").group(lead).group(bgvs).end();
 
     // --- SFX ---
     let sfx = TrackGroup::folder("SFX")
