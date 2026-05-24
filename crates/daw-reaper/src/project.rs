@@ -781,7 +781,12 @@ impl Projects for crate::Reaper {
             Some(p) => ProjectContext::Proj(p.raw()),
             None => ProjectContext::CurrentProject,
         };
-        ensure_ruler_lane_exists(low, proj_ctx, lane_index);
+        // Don't pre-extend via `RULER_LANE_ORDER:N = -1`. That call
+        // appears to add *two* lane rows at the tail (an inserted
+        // slot for the requested index plus an empty trailing row),
+        // which surfaced as a stray "lane 4" after we created
+        // SONG / SECTIONS / MARKS. Writing the name on a missing
+        // index auto-creates the lane in place, no extra row.
         let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
         let value = std::ffi::CString::new(name).unwrap_or_default();
         unsafe {
@@ -829,11 +834,17 @@ fn ensure_ruler_lane_exists(
     project: ProjectContext,
     lane_index: u32,
 ) {
-    // Treat lane 1 as always-present (REAPER projects always have a default
-    // ruler lane, even when no explicit name is set). For higher indices,
-    // insert via RULER_LANE_ORDER:N = -1.
+    // `lane_index` is 0-based (matches `RULER_LANE_NAME:N` keys).
+    // `ruler_lane_count` returns the *number* of named lanes, so we
+    // need to insert until count is at least `lane_index + 1` —
+    // otherwise asking for lane 2 (third position) with two existing
+    // lanes does nothing and the third lane never appears.
     let mut count = ruler_lane_count(low, project).max(1);
-    while count < lane_index {
+    while count <= lane_index {
+        // RULER_LANE_ORDER:N is 1-based in REAPER's project-info API.
+        // count==2 means we currently have lanes at API indices 0 and
+        // 1 (file rows 1 and 2); inserting at row count+1=3 creates
+        // the new lane at API index 2.
         let key = std::ffi::CString::new(format!("RULER_LANE_ORDER:{}", count + 1)).unwrap();
         unsafe {
             low.GetSetProjectInfo(project.to_raw(), key.as_ptr(), -1.0, true);
@@ -843,8 +854,13 @@ fn ensure_ruler_lane_exists(
 }
 
 fn ruler_lane_count(low: &crate::safe_wrappers::ReaperLow, project: ProjectContext) -> u32 {
+    // Iterate the 0-based name-table index — RULER_LANE_NAME:0 is
+    // the leftmost lane, not RULER_LANE_NAME:1. Starting at 1 missed
+    // the first lane entirely and undercounted by one, which
+    // cascaded into `ensure_ruler_lane_exists` and `hide_stray_lanes`
+    // both operating on the wrong slots.
     let mut count = 0u32;
-    for i in 1..=128 {
+    for i in 0..128 {
         let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", i)).unwrap();
         let mut buf = [0u8; 256];
         let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
@@ -854,7 +870,7 @@ fn ruler_lane_count(low: &crate::safe_wrappers::ReaperLow, project: ProjectConte
             if name.is_empty() {
                 break;
             }
-            count = i;
+            count = i + 1; // number of named lanes ending at this index
         }
     }
     count.max(1)
