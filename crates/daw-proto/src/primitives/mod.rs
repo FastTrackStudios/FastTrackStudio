@@ -130,9 +130,13 @@ impl Position {
         }
     }
 
-    /// Time component in seconds (0.0 if no time representation set).
-    pub fn seconds(&self) -> f64 {
-        self.time.map(|t| t.as_seconds()).unwrap_or(0.0)
+    /// Time component in seconds, or `None` when this position only
+    /// carries a musical / MIDI representation. Returning `Option`
+    /// instead of `0.0` removes a footgun — silently treating
+    /// "missing" as "at the origin" once produced an off-by-zero in
+    /// the offset-map code that took an hour to spot.
+    pub fn seconds(&self) -> Option<f64> {
+        self.time.map(|t| t.as_seconds())
     }
 
     /// `self − other` in both seconds and quarter-notes. Returns
