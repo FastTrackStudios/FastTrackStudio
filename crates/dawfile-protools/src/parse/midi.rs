@@ -139,25 +139,24 @@ fn parse_midi_chunks(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<MidiChunk> {
                     break;
                 }
 
-                // The note number sits in the NEXT record's +0 byte (the +27
-                // position field of record i is the onset for the note recorded
-                // at record i+1). Pair them so notes land on the right onsets.
-                let note_off = ev_offset + EVENT_STRIDE + NOTE_OFFSET;
-                if note_off >= data.len() {
+                // A record's +27 position is the ONSET for the note described by
+                // the NEXT record: note/velocity/duration all live in record
+                // i+1, while the onset comes from record i's +27. Pair them so
+                // each note lands on the right onset with its own velocity and
+                // length.
+                let nrec = ev_offset + EVENT_STRIDE;
+                if nrec + EVENT_STRIDE > data.len() {
                     break;
                 }
-                let note = data[note_off];
-                let velocity = data[ev_offset + VEL_OFFSET];
+                let note = data[nrec + NOTE_OFFSET];
+                let velocity = data[nrec + VEL_OFFSET];
 
-                // Duration field at +11 (8 bytes). PT stores this in two forms
-                // depending on the source track / event type:
-                //   * top byte 0x40 → `2^62 + ticks` (same baseline as the
-                //     position field; the actual duration is `value - 2^62`)
+                // Duration field (8 bytes, baseline-2^62 encoded):
+                //   * top byte 0x40 → `2^62 + ticks` (actual duration = value - 2^62)
                 //   * top byte 0x00 → small positive u64, ticks directly
-                //   * top byte 0xff → negative i64 = paired note-off record,
-                //     skip to avoid duplicating notes
+                //   * top byte 0xff → negative i64 = paired note-off record, skip
                 //   * anything else → unknown, skip
-                let dur_bytes: [u8; 8] = data[ev_offset + DUR_OFFSET..ev_offset + DUR_OFFSET + 8]
+                let dur_bytes: [u8; 8] = data[nrec + DUR_OFFSET..nrec + DUR_OFFSET + 8]
                     .try_into()
                     .unwrap();
                 let dur_raw = u64::from_le_bytes(dur_bytes);
