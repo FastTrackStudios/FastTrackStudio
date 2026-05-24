@@ -26,7 +26,7 @@ use daw_proto::region::{RegionEvent, RegionsClient};
 use daw_proto::tempo_map::{TempoMapClient, TempoMapEvent};
 use daw_proto::track::{TrackEvent, TracksClient};
 use daw_proto::transport::TransportEvent;
-use daw_proto::primitives::MusicalPosition;
+use daw_proto::primitives::Position;
 use daw_proto::{PlayState, ProjectContext, ProjectInfo, TimeSignature};
 use eyre::{Result, WrapErr, eyre};
 use ratatui::Terminal;
@@ -89,18 +89,11 @@ struct Snapshot {
     tempo: Option<f64>,
     time_signature: Option<TimeSignature>,
     play_state: Option<PlayState>,
-    position_seconds: Option<f64>,
-    position_qn: Option<f64>,
-    edit_cursor_seconds: Option<f64>,
-    edit_cursor_qn: Option<f64>,
-    playhead_musical: Option<MusicalPosition>,
-    edit_cursor_musical: Option<MusicalPosition>,
+    playhead: Option<Position>,
+    edit_cursor: Option<Position>,
     is_playing: Option<bool>,
     // Counters maintained from push events (seeded once at startup)
-    track_count: Option<u32>,
-    marker_count: Option<u32>,
-    region_count: Option<u32>,
-    tempo_point_count: Option<u32>,
+    counts: Counts,
     // Diagnostics
     latency: LatencyStats,
     last_error: Option<String>,
@@ -119,6 +112,23 @@ struct EventLogEntry {
 }
 
 const EVENT_LOG_CAP: usize = 200;
+
+/// Per-project entity counts the dashboard maintains from push events.
+/// Cleared together on project switch so stale numbers from a previous
+/// tab never linger.
+#[derive(Default, Clone)]
+struct Counts {
+    tracks: Option<u32>,
+    markers: Option<u32>,
+    regions: Option<u32>,
+    tempo_points: Option<u32>,
+}
+
+impl Counts {
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
 
 pub async fn run(socket: Option<PathBuf>) -> Result<()> {
     let caller = session_cli::connection::connect(socket.as_deref())
@@ -153,16 +163,16 @@ pub async fn run(socket: Option<PathBuf>) -> Result<()> {
             );
             let mut guard = s_state.lock().await;
             if let Some(v) = t {
-                guard.track_count = Some(v);
+                guard.counts.tracks = Some(v);
             }
             if let Some(v) = m {
-                guard.marker_count = Some(v);
+                guard.counts.markers = Some(v);
             }
             if let Some(v) = r {
-                guard.region_count = Some(v);
+                guard.counts.regions = Some(v);
             }
             if let Some(v) = tp {
-                guard.tempo_point_count = Some(v);
+                guard.counts.tempo_points = Some(v);
             }
         });
     }
@@ -280,10 +290,7 @@ async fn run_event_bus(
                             guard.project = Some(info);
                             // counts are per-project; clear so the next
                             // user-visible value comes from a fresh seed.
-                            guard.track_count = None;
-                            guard.marker_count = None;
-                            guard.region_count = None;
-                            guard.tempo_point_count = None;
+                            guard.counts.clear();
                         }
                     });
                 }
@@ -307,12 +314,8 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
             {
                 return;
             }
-            snap.position_seconds = Some(tick.playhead_seconds);
-            snap.position_qn = Some(tick.playhead_qn);
-            snap.edit_cursor_seconds = Some(tick.edit_cursor_seconds);
-            snap.edit_cursor_qn = Some(tick.edit_cursor_qn);
-            snap.playhead_musical = Some(tick.playhead_musical);
-            snap.edit_cursor_musical = Some(tick.edit_cursor_musical);
+            snap.playhead = Some(tick.playhead.clone());
+            snap.edit_cursor = Some(tick.edit_cursor.clone());
             snap.is_playing = Some(tick.is_playing);
         }
         DawEvent::TransportState(ev) => {
@@ -358,11 +361,11 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
         DawEvent::Track(env) => {
             let summary = match &env.event {
                 TrackEvent::Added(t) => {
-                    snap.track_count = Some(snap.track_count.unwrap_or(0) + 1);
+                    snap.counts.tracks = Some(snap.counts.tracks.unwrap_or(0) + 1);
                     format!("+ track {}", t.name.as_str())
                 }
                 TrackEvent::Removed(guid) => {
-                    snap.track_count = Some(snap.track_count.unwrap_or(0).saturating_sub(1));
+                    snap.counts.tracks = Some(snap.counts.tracks.unwrap_or(0).saturating_sub(1));
                     format!("- track {}", short(guid))
                 }
                 TrackEvent::Renamed { name, .. } => format!("rename → {}", name),
@@ -383,17 +386,17 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
         DawEvent::Marker(env) => {
             let summary = match &env.event {
                 MarkerEvent::Added(m) => {
-                    snap.marker_count = Some(snap.marker_count.unwrap_or(0) + 1);
-                    let secs = m.position.time.map(|t| t.as_seconds()).unwrap_or(0.0);
-                    format!("+ marker @{:.3}s {}", secs, m.name.as_str())
+                    snap.counts.markers = Some(snap.counts.markers.unwrap_or(0) + 1);
+                    format!("+ marker @{} {}", m.position, m.name.as_str())
                 }
                 MarkerEvent::Removed(id) => {
-                    snap.marker_count = Some(snap.marker_count.unwrap_or(0).saturating_sub(1));
+                    snap.counts.markers =
+                        Some(snap.counts.markers.unwrap_or(0).saturating_sub(1));
                     format!("- marker #{}", id)
                 }
                 MarkerEvent::Changed(m) => format!("marker {:?} → {}", m.id, m.name.as_str()),
                 MarkerEvent::MarkersChanged(list) => {
-                    snap.marker_count = Some(list.len() as u32);
+                    snap.counts.markers = Some(list.len() as u32);
                     format!("markers reload (n={})", list.len())
                 }
             };
@@ -402,16 +405,17 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
         DawEvent::Region(env) => {
             let summary = match &env.event {
                 RegionEvent::Added(r) => {
-                    snap.region_count = Some(snap.region_count.unwrap_or(0) + 1);
+                    snap.counts.regions = Some(snap.counts.regions.unwrap_or(0) + 1);
                     format!("+ region {:?} {}", r.id, r.name.as_str())
                 }
                 RegionEvent::Removed(id) => {
-                    snap.region_count = Some(snap.region_count.unwrap_or(0).saturating_sub(1));
+                    snap.counts.regions =
+                        Some(snap.counts.regions.unwrap_or(0).saturating_sub(1));
                     format!("- region #{}", id)
                 }
                 RegionEvent::Changed(r) => format!("region {:?} → {}", r.id, r.name.as_str()),
                 RegionEvent::RegionsChanged(list) => {
-                    snap.region_count = Some(list.len() as u32);
+                    snap.counts.regions = Some(list.len() as u32);
                     format!("regions reload (n={})", list.len())
                 }
             };
@@ -422,12 +426,8 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
                 snap.active_project_guid = guid.clone();
                 // Clear position fields so old project's playhead
                 // doesn't linger for one tick during the switch.
-                snap.position_seconds = None;
-                snap.position_qn = None;
-                snap.edit_cursor_seconds = None;
-                snap.edit_cursor_qn = None;
-                snap.playhead_musical = None;
-                snap.edit_cursor_musical = None;
+                snap.playhead = None;
+                snap.edit_cursor = None;
             }
             let summary = match &env.event {
                 ProjectEvent::CurrentChanged(guid) => format!(
@@ -444,17 +444,18 @@ fn apply_daw_event(snap: &mut Snapshot, event: &DawEvent, now: Instant) {
         DawEvent::TempoMap(env) => {
             let summary = match &env.event {
                 TempoMapEvent::PointAdded(p) => {
-                    snap.tempo_point_count = Some(snap.tempo_point_count.unwrap_or(0) + 1);
+                    snap.counts.tempo_points =
+                        Some(snap.counts.tempo_points.unwrap_or(0) + 1);
                     format!("+ point {:.2} BPM", p.bpm)
                 }
                 TempoMapEvent::PointRemoved(i) => {
-                    snap.tempo_point_count =
-                        Some(snap.tempo_point_count.unwrap_or(0).saturating_sub(1));
+                    snap.counts.tempo_points =
+                        Some(snap.counts.tempo_points.unwrap_or(0).saturating_sub(1));
                     format!("- point #{i}")
                 }
                 TempoMapEvent::PointChanged(p) => format!("point → {:.2} BPM", p.bpm),
                 TempoMapEvent::MapChanged(list) => {
-                    snap.tempo_point_count = Some(list.len() as u32);
+                    snap.counts.tempo_points = Some(list.len() as u32);
                     format!("map reload (n={})", list.len())
                 }
             };
@@ -592,12 +593,14 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
         .map(play_state_color)
         .unwrap_or(Color::DarkGray);
     let pos_sec = snap
-        .position_seconds
-        .map(format_seconds)
+        .playhead
+        .as_ref()
+        .and_then(|p| p.time.map(|t| t.to_string()))
         .unwrap_or_else(|| "—".to_string());
     let pos_musical = snap
-        .playhead_musical
-        .map(format_musical_pos)
+        .playhead
+        .as_ref()
+        .and_then(|p| p.musical.map(|m| m.to_string()))
         .unwrap_or_else(|| "—".to_string());
     let tempo = snap
         .tempo
@@ -627,12 +630,14 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
         ]),
         {
             let edit_sec = snap
-                .edit_cursor_seconds
-                .map(format_seconds)
+                .edit_cursor
+                .as_ref()
+                .and_then(|p| p.time.map(|t| t.to_string()))
                 .unwrap_or_else(|| "—".to_string());
             let edit_musical = snap
-                .edit_cursor_musical
-                .map(format_musical_pos)
+                .edit_cursor
+                .as_ref()
+                .and_then(|p| p.musical.map(|m| m.to_string()))
                 .unwrap_or_else(|| "—".to_string());
             Line::from(vec![
                 Span::styled("Edit cur ", Style::default().fg(Color::DarkGray)),
@@ -649,22 +654,26 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
             ])
         },
         {
-            let delta_sec = match (snap.position_seconds, snap.edit_cursor_seconds) {
-                (Some(p), Some(e)) => {
-                    let d = p - e;
-                    let sign = if d >= 0.0 { "+" } else { "" };
-                    format!("{}{:.3}s", sign, d)
-                }
-                _ => "—".to_string(),
-            };
-            let delta_musical = match (
-                snap.position_qn,
-                snap.edit_cursor_qn,
-                snap.time_signature,
-            ) {
-                (Some(p), Some(e), Some(ts)) => format_musical_delta(p - e, ts),
-                _ => "—".to_string(),
-            };
+            // Compute delta via Position's own method, then format the
+            // two components from one source of truth instead of
+            // open-coding the subtraction here.
+            let (delta_sec, delta_musical) =
+                match (snap.playhead.as_ref(), snap.edit_cursor.as_ref()) {
+                    (Some(p), Some(e)) => {
+                        let d = if let Some(ts) = snap.time_signature {
+                            p.delta_from_with_ts(e, ts)
+                        } else {
+                            p.delta_from(e)
+                        };
+                        let sec = d.to_string();
+                        let mus = snap
+                            .time_signature
+                            .and_then(|ts| d.musical_string(ts))
+                            .unwrap_or_else(|| "—".to_string());
+                        (sec, mus)
+                    }
+                    _ => ("—".to_string(), "—".to_string()),
+                };
             Line::from(vec![
                 Span::styled("Δ play−edit ", Style::default().fg(Color::DarkGray)),
                 Span::styled(delta_sec, Style::default().fg(Color::Cyan)),
@@ -698,18 +707,20 @@ fn render(f: &mut ratatui::Frame, snap: &Snapshot) {
     );
 
     // ── Counts (all push-maintained) ───────────────────────────
+    let bold_white = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+    let dim = Style::default().fg(Color::DarkGray);
     let counts = Paragraph::new(Line::from(vec![
-        Span::styled("Tracks ", Style::default().fg(Color::DarkGray)),
-        Span::styled(opt(snap.track_count), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Tracks ", dim),
+        Span::styled(opt(snap.counts.tracks), bold_white),
         Span::raw("    "),
-        Span::styled("Markers ", Style::default().fg(Color::DarkGray)),
-        Span::styled(opt(snap.marker_count), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Markers ", dim),
+        Span::styled(opt(snap.counts.markers), bold_white),
         Span::raw("    "),
-        Span::styled("Regions ", Style::default().fg(Color::DarkGray)),
-        Span::styled(opt(snap.region_count), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Regions ", dim),
+        Span::styled(opt(snap.counts.regions), bold_white),
         Span::raw("    "),
-        Span::styled("Tempo pts ", Style::default().fg(Color::DarkGray)),
-        Span::styled(opt(snap.tempo_point_count), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Tempo pts ", dim),
+        Span::styled(opt(snap.counts.tempo_points), bold_white),
     ]))
     .block(Block::default().borders(Borders::ALL).title("Counts (push)"));
     f.render_widget(counts, chunks[2]);
@@ -831,50 +842,6 @@ fn play_state_color(s: &PlayState) -> Color {
         PlayState::Paused => Color::Yellow,
         PlayState::Stopped => Color::DarkGray,
     }
-}
-
-fn format_seconds(p: f64) -> String {
-    let p = p.max(0.0);
-    let minutes = (p / 60.0).floor() as u64;
-    let seconds = p - (minutes as f64) * 60.0;
-    format!("{minutes:02}:{seconds:06.3}")
-}
-
-/// Format quarter-note position as `bar.beat.subdivision` using the
-/// project's time signature. Bars are 1-based to match REAPER's UI;
-/// beats are 1-based within the bar; subdivision is thousandths of a
-/// beat (matching `MusicalPosition::subdivision` semantics).
-/// Format a server-computed `MusicalPosition` (which already has
-/// `projmeasoffs` applied) as `measure.beat.subdivision`. Both the
-/// measure and beat are already 1-based in REAPER's convention.
-fn format_musical_pos(m: MusicalPosition) -> String {
-    format!("{}.{}.{:03}", m.measure, m.beat, m.subdivision)
-}
-
-#[allow(dead_code)]
-fn format_musical(qn: f64, ts: TimeSignature) -> String {
-    let beats_per_measure = ts.numerator().max(1) as f64;
-    let measure = (qn / beats_per_measure).floor() as i64;
-    let beats_in_measure = qn - measure as f64 * beats_per_measure;
-    let beat = beats_in_measure.floor() as i64;
-    let subdivision = ((beats_in_measure - beat as f64) * 1000.0).round() as i64;
-    let subdivision = subdivision.clamp(0, 999);
-    // Display 1-based to match REAPER's bars:beats:ticks readout.
-    format!("{}.{}.{:03}", measure + 1, beat + 1, subdivision)
-}
-
-/// Format a signed quarter-note delta as `±bars.beats.subdivision`,
-/// using the supplied time signature to convert QN → bars.
-fn format_musical_delta(qn_delta: f64, ts: TimeSignature) -> String {
-    let beats_per_measure = ts.numerator().max(1) as f64;
-    let sign = if qn_delta >= 0.0 { "+" } else { "-" };
-    let abs_qn = qn_delta.abs();
-    let bars = (abs_qn / beats_per_measure).floor() as i64;
-    let beats_in_bar = abs_qn - bars as f64 * beats_per_measure;
-    let beats = beats_in_bar.floor() as i64;
-    let sub = ((beats_in_bar - beats as f64) * 1000.0).round() as i64;
-    let sub = sub.clamp(0, 999);
-    format!("{}{}.{}.{:03}", sign, bars, beats, sub)
 }
 
 fn format_short(d: Duration) -> String {
