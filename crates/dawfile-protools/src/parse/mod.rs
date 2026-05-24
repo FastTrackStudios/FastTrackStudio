@@ -17,6 +17,7 @@ pub mod midi;
 pub mod mix_aux;
 pub mod mute_automation;
 pub mod mute_resolver;
+pub mod plugin_states;
 pub mod plugins;
 pub mod regions;
 pub mod solo;
@@ -300,6 +301,164 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
+    // Step 12a2: Assign PT display order from the 0x251a track list.
+    //
+    // The 0x2519/0x251a list enumerates EVERY track (audio, MIDI, master,
+    // folder/divider) in PT's on-screen Edit-window order. That order is what
+    // the user sees and what the official converter preserves — unlike the
+    // channel-map `index`, which is internal voice assignment and buries
+    // Master/Click/Shake at the bottom. We build a `name → sequence` map from
+    // the first occurrence of each name, then stamp every parsed track with
+    // its position so the emitter can sort audio + MIDI into one merged order.
+    {
+        let data = cursor.data();
+        let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
+            .into_iter()
+            .next();
+        let mut order_by_name: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        if let Some(list) = track_list {
+            let mut seq = 0u32;
+            for child in list.find_children(ContentType::MidiTrackInfo) {
+                let name_off = child.offset + 4;
+                if name_off + 4 > data.len() {
+                    continue;
+                }
+                let (name, _) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() {
+                    continue;
+                }
+                // First occurrence wins (the active entry); later duplicates
+                // are alternate-playlist or the 2× tail copy — ignore them.
+                let full = order_by_name.entry(name.clone()).or_insert(seq);
+                if *full != seq {
+                    // Name already seen earlier; don't advance the counter.
+                    continue;
+                }
+                // Also index by the suffix-stripped base name so audio tracks
+                // (which store "ClickPrint", not "ClickPrint.01") can match.
+                order_by_name
+                    .entry(strip_playlist_suffix(&name).to_string())
+                    .or_insert(seq);
+                seq += 1;
+            }
+        }
+        let order_lookup = |name: &str| -> Option<u32> {
+            if let Some(o) = order_by_name.get(name) {
+                return Some(*o);
+            }
+            order_by_name
+                .get(strip_playlist_suffix(name))
+                .copied()
+                .or_else(|| {
+                    [".01", ".02", ".03", ".04", ".05"]
+                        .iter()
+                        .find_map(|s| order_by_name.get(&format!("{name}{s}")).copied())
+                })
+        };
+        for t in audio_tracks.iter_mut() {
+            if let Some(o) = order_lookup(&t.name) {
+                t.display_order = o;
+            }
+        }
+        for t in midi_tracks.iter_mut() {
+            if let Some(o) = order_lookup(&t.name) {
+                t.display_order = o;
+            }
+        }
+    }
+
+    // Step 12a3: Decode per-track comments from the 0x2015 block.
+    //
+    // PT stores one 0x2015 comment block per track, nested as
+    // `0x261c > 0x200b > 0x200a > 0x2015`. Inside it the comment is a
+    // length-prefixed string that follows a fixed marker:
+    //   `37 20 00 00 01 00 00 00 00 <id:u16> <len:u32> <bytes>`
+    // An empty comment yields only the `37 20` block-type bytes ("7 "), which
+    // the anchor below skips.
+    //
+    // The 0x2015 blocks appear in document order, 1:1 with the 0x2519/0x251a
+    // track list — i.e. block N belongs to the track at `display_order == N`.
+    // We assign by that index rather than resolving the track name from a
+    // nearby 0x2619, because the name block isn't reliably reachable for every
+    // track (master/click/divider containers nest it differently).
+    {
+        let data = cursor.data();
+
+        // Collect 0x2015 blocks (no ContentType variant; match the raw type).
+        fn collect_2015<'a>(blocks: &'a [Block], out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == 0x2015 {
+                    out.push(b);
+                }
+                collect_2015(&b.children, out);
+            }
+        }
+
+        // Extract the comment string from a 0x2015 block. The comment lives in
+        // a `0x2037` (`37 20`) sub-block with this layout (offsets from the
+        // `37 20`):
+        //   +0  `37 20`  type
+        //   +2  7 flag bytes (vary per track — do NOT match on these)
+        //   +9  id        u16 (hi byte 0)
+        //   +11 len       u32
+        //   +15 string    `len` bytes
+        // A track with no comment has `len == 0`, which we skip.
+        const ANCHOR: &[u8] = &[0x37, 0x20];
+        // True end of a block including all nested children (block_size only
+        // covers this block's own payload, not the descendants beneath it).
+        fn block_end(b: &Block) -> usize {
+            let own = b.offset + b.block_size as usize;
+            b.children
+                .iter()
+                .map(block_end)
+                .max()
+                .unwrap_or(own)
+                .max(own)
+        }
+        fn extract_comment(b: &Block, data: &[u8]) -> Option<String> {
+            let lo = b.offset;
+            let hi = (block_end(b) + 16).min(data.len());
+            let mut p = lo;
+            while p + 15 <= hi {
+                // Anchor on the `37 20` sub-block type, with the id high byte
+                // (+10) zero as a cheap guard against stray `37 20` bytes.
+                if &data[p..p + ANCHOR.len()] == ANCHOR && data[p + 10] == 0x00 {
+                    let lp = p + 11;
+                    let len = u32::from_le_bytes(data[lp..lp + 4].try_into().unwrap()) as usize;
+                    if (1..=512).contains(&len) && lp + 4 + len <= hi {
+                        let cand = &data[lp + 4..lp + 4 + len];
+                        if cand.iter().all(|&c| (0x20..0x7f).contains(&c)) {
+                            return Some(String::from_utf8_lossy(cand).to_string());
+                        }
+                    }
+                }
+                p += 1;
+            }
+            None
+        }
+
+        let mut comment_blocks = Vec::new();
+        collect_2015(&blocks, &mut comment_blocks);
+        let comments: Vec<Option<String>> = comment_blocks
+            .iter()
+            .map(|cb| extract_comment(cb, data))
+            .collect();
+
+        let mut assign = |t: &mut crate::types::Track| {
+            let idx = t.display_order as usize;
+            if let Some(Some(c)) = comments.get(idx) {
+                t.comment = c.clone();
+            }
+        };
+        for t in audio_tracks.iter_mut() {
+            assign(t);
+        }
+        for t in midi_tracks.iter_mut() {
+            assign(t);
+        }
+    }
+
     // Step 12b: Decode per-track output routing from 0x260e blocks.
     //
     // Each `0x260d` per-track wrapper holds exactly one `0x260e` routing
@@ -400,27 +559,32 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
-    // Step 12c: Decode per-track color palette index from 0x200b +106..+107.
+    // Step 12c: Decode per-track color palette index and view height from
+    // the 0x200b (TrackAuxState) block.
     //
-    // The color is a 2-byte LE i16: -2 (= 0xfffe) means "default / no
-    // color", any non-negative value is a palette index (mapped to RGB
-    // via the table in `docs/pt-color-palette-ground-truth.md`).
+    // Color: a palette index framed by `01 <idx> 00 01 00 03` (newer
+    // sessions) or a 2-byte LE i16 at payload +106 (older sessions, -2 =
+    // none). The frame's byte offset varies per track, so we scan for it.
+    // The index maps to RGB via the PT palette (see
+    // `daw_reaper::project_import::pt_color_to_rgb`), derived by sweeping
+    // every index 0..=255 through the official converter. idx 0 = default.
     //
-    // Verified via RPP→PTX probe + plaintext-diff: a track with
-    // `color(0xd86e41)` set in RPP produces +106..+107 = `18 00` (=24)
-    // in PTX while baseline (no color) shows `fe ff` (=-2). See
-    // `docs/pt-field-map.md`.
+    // Height: a u16 (pixels) just after the color field — at color-frame +
+    // 10 (new format) or right after `c0 00 00 00 00 01` (old format). PT
+    // presets: 16/23/43/97(default)/192/300/600/684.
     //
-    // We previously read `+163` which was a different field that
-    // happened to correlate with palette index on Color Testing
-    // (probably a per-track ordinal counter). The +163 reading was
-    // wrong on LotF and other fixtures.
-    //
-    // To resolve which track each 0x200b belongs to, walk upward from
-    // the block through its ancestors and find the nearest `0x2619`
-    // (track name) descendant.
+    // Assignment is by track order, NOT by resolving a nearby 0x2619 name: a
+    // track's name can be edited after creation (the size-test renames
+    // "Audio N" → "Micro"), which leaves the name block stale and breaks name
+    // matching. The 0x2015 comment blocks are 1:1 with the track list in
+    // document order (block N ↔ `display_order == N`); each one is nested
+    // inside its track's 0x200b. So we walk each 0x2015 up to its enclosing
+    // 0x200b and read color/height there — guaranteeing the same ordering as
+    // the (verified) comment assignment, even though raw 0x200b blocks are
+    // more numerous than tracks (sends, master, etc.).
     {
         let data = cursor.data();
+
         let mut parents: std::collections::HashMap<usize, Option<&Block>> =
             std::collections::HashMap::new();
         fn build_parents<'a>(
@@ -435,85 +599,90 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
         build_parents(&blocks, None, &mut parents);
 
-        fn find_2619_name(b: &Block, data: &[u8]) -> Option<String> {
-            for c in &b.children {
-                if c.content_type == Some(ContentType::MarkerEntry) {
-                    let p = c.offset + 2;
-                    if p + 4 > data.len() {
-                        return None;
-                    }
-                    let len = u32::from_le_bytes(data[p..p + 4].try_into().unwrap()) as usize;
-                    if len == 0 || len > 64 || p + 4 + len > data.len() {
-                        return None;
-                    }
-                    return Some(
-                        String::from_utf8_lossy(&data[p + 4..p + 4 + len])
-                            .trim_end_matches('\0')
-                            .to_string(),
-                    );
+        // Locate the color+height frame inside a 0x200b block. Across all PT
+        // versions it has the form `01 <color:i16> 01 .... 01 <height:u16>`,
+        // i.e. an `0x01` byte at relative offsets +0, +3 and +9 (the bytes
+        // between differ by version: `00 03` for PT12+, `c0 00 00 00 00` for
+        // older). We anchor on that three-`01` signature rather than the
+        // version-specific filler, which previously required a special case
+        // per format (and a wrong fixed `+106` fallback). Returns the frame's
+        // leading `01` position.
+        fn find_color_frame(data: &[u8], lo: usize, hi: usize) -> Option<usize> {
+            let hi = hi.min(data.len());
+            let mut p = lo;
+            while p + 12 <= hi {
+                if data[p] == 0x01 && data[p + 3] == 0x01 && data[p + 9] == 0x01 {
+                    return Some(p);
                 }
-                if let Some(n) = find_2619_name(c, data) {
-                    return Some(n);
-                }
+                p += 1;
             }
             None
         }
 
-        let mut color_by_name: std::collections::HashMap<String, u8> =
-            std::collections::HashMap::new();
-        let aux_blocks = collect_blocks_recursive(&blocks, ContentType::TrackAuxState);
-        for b in &aux_blocks {
-            // Color is i16 LE at +106..+107 (verified by RPP→PTX diff).
-            // We expose it as a u8 (`color_byte`) since palette indices
-            // observed so far are all < 256; -2/0xfffe (default) maps to 0.
-            let p = b.offset + 2 + 106;
-            let color = if p + 2 <= data.len() {
-                let val = i16::from_le_bytes([data[p], data[p + 1]]);
-                if val < 0 { 0 } else { val as u8 }
-            } else {
-                0
-            };
-
-            // Walk up to 10 ancestors looking for a 0x2619 name anywhere
-            // in the subtree.
-            let mut name: Option<String> = None;
-            let mut anc = parents.get(&b.offset).cloned().flatten();
-            let mut depth = 0;
-            while let Some(a) = anc {
-                if let Some(n) = find_2619_name(a, data) {
-                    name = Some(n);
-                    break;
+        fn read_color_height(b: &Block, data: &[u8]) -> (u8, u16) {
+            let start = b.offset;
+            let end = b.offset + 4 + b.block_size as usize;
+            match find_color_frame(data, start, end) {
+                Some(f) => {
+                    // Color is an i16 at +1 (-2 / 0xfffe = "no color" → 0).
+                    let raw = i16::from_le_bytes([data[f + 1], data[f + 2]]);
+                    let color = if !(0..=255).contains(&raw) {
+                        0
+                    } else {
+                        raw as u8
+                    };
+                    // Height is a u16 (pixels) at +10.
+                    let height = u16::from_le_bytes([data[f + 10], data[f + 11]]);
+                    (color, height)
                 }
-                anc = parents.get(&a.offset).cloned().flatten();
-                depth += 1;
-                if depth > 10 {
-                    break;
-                }
-            }
-            if let Some(n) = name {
-                // First write wins — preserves the earliest (most-likely-live) entry
-                color_by_name.entry(n).or_insert(color);
+                None => (0, 0),
             }
         }
 
-        for t in audio_tracks.iter_mut() {
-            if let Some(c) = color_by_name.get(&t.name) {
-                t.color_byte = *c;
-            } else {
-                // Audio tracks store the base name ("Vocal Split"); 0x2619
-                // may carry the active-playlist name ("Vocal Split.01").
-                for suffix in [".01", ".02", ".03", ".04", ".05"] {
-                    if let Some(c) = color_by_name.get(&format!("{}{suffix}", t.name)) {
-                        t.color_byte = *c;
+        // Walk each 0x2015 (comment) block — 1:1 with the track list in
+        // document order — up to its enclosing 0x200b, and read that block's
+        // color + height. `per_track[N]` then belongs to `display_order == N`.
+        fn collect_2015<'a>(blocks: &'a [Block], out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == 0x2015 {
+                    out.push(b);
+                }
+                collect_2015(&b.children, out);
+            }
+        }
+        let mut comment_blocks = Vec::new();
+        collect_2015(&blocks, &mut comment_blocks);
+        let per_track: Vec<(u8, u16)> = comment_blocks
+            .iter()
+            .map(|cb| {
+                // Walk up to the nearest 0x200b ancestor.
+                let mut anc = parents.get(&cb.offset).cloned().flatten();
+                let mut depth = 0;
+                while let Some(a) = anc {
+                    if a.content_type == Some(ContentType::TrackAuxState) {
+                        return read_color_height(a, data);
+                    }
+                    anc = parents.get(&a.offset).cloned().flatten();
+                    depth += 1;
+                    if depth > 6 {
                         break;
                     }
                 }
+                (0, 0)
+            })
+            .collect();
+
+        let mut assign = |t: &mut crate::types::Track| {
+            if let Some(&(color, height)) = per_track.get(t.display_order as usize) {
+                t.color_byte = color;
+                t.height_px = height;
             }
+        };
+        for t in audio_tracks.iter_mut() {
+            assign(t);
         }
         for t in midi_tracks.iter_mut() {
-            if let Some(c) = color_by_name.get(&t.name) {
-                t.color_byte = *c;
-            }
+            assign(t);
         }
     }
 
@@ -536,20 +705,41 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     // generated PTX where 0x1029 isn't populated.
     mix_aux::fill_vol_pan_from_2624(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
 
-    // Step 12d: Decode per-track `is_folder` flag from 0x251a.
+    // Step 12d: Decode folder hierarchy (parent flag + nesting depth).
     //
-    // The byte at offset (`0x251a` payload + 4 + len(name)) is `0x01` for
-    // folder/container tracks (including Master), `0x00` otherwise. PT
-    // groups child tracks under their folder parent in a separate block
-    // we haven't decoded yet, but we can at least surface the flag so
-    // REAPER can model the per-track folder marker.
+    // Pro Tools encodes track folders/nesting across three structures:
+    //
+    //   * `0x251a` (MidiTrackInfo, one per track, document/display order):
+    //     carries a 6-byte track UID at `name_end + <gap> + 4` (after the
+    //     `2a 00 00 00` sentinel). This UID is what folder groups reference.
+    //
+    //   * `0x210b` (one per track, display order): payload `+5` is a role
+    //     byte — `0x02` = FOLDER PARENT, `0x05` = Master, `0x07` = instrument,
+    //     `0x00` = ordinary leaf. Keyed by track name.
+    //
+    //   * `0x210c` (one per session): a flat list of GROUPS. Each group is a
+    //     synthetic group-UID followed by a member count and that many member
+    //     UIDs. A member is either a track UID (a 0x251a UID) or ANOTHER
+    //     group's UID (a nested sub-folder). This fully encodes the tree:
+    //     group order is reverse-display-order of the owning folder track.
+    //
+    // We reconstruct a per-track `folder_depth` (0 = top level) and set
+    // `is_folder` from the `0x210b` role byte. Sessions with an EMPTY 0x210c
+    // (PT users who only make flat "divider" tracks) yield all-zero depth and
+    // no folders — matching the official converter, which also flattens them.
+    //
+    // Verified against authored ground-truth round-trips (folders.ptx,
+    // folders2.ptx) reconstructing the exact nesting written via the RPP
+    // builder. See `crates/daw-reaper/examples/gen_folders*.rs`.
     {
         let data = cursor.data();
+
+        // (a) display order + UID, from the first unique-name 0x251a entry.
         let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
             .into_iter()
             .next();
-        let mut folder_by_name: std::collections::HashMap<String, bool> =
-            std::collections::HashMap::new();
+        // (name, uid) in display order; uid is [0;6] if not found.
+        let mut order: Vec<(String, [u8; 6])> = Vec::new();
         if let Some(list) = track_list {
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             for child in list.find_children(ContentType::MidiTrackInfo) {
@@ -557,36 +747,168 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                 if name_off + 4 > data.len() {
                     continue;
                 }
-                let (name, str_consumed) = cursor.length_prefixed_string(name_off);
-                if name.is_empty() {
+                let (name, consumed) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() || !seen.insert(name.clone()) {
                     continue;
                 }
-                if !seen.insert(name.clone()) {
-                    break;
-                }
-                // is_folder flag is the first byte AFTER the length-
-                // prefixed name within the 0x251a payload.
-                let flag_off = name_off + str_consumed;
-                if flag_off < data.len() {
-                    folder_by_name.insert(name, data[flag_off] != 0);
-                }
-            }
-        }
-        for t in audio_tracks.iter_mut() {
-            if let Some(f) = folder_by_name.get(&t.name) {
-                t.is_folder = *f;
-            } else {
-                for suffix in [".01", ".02", ".03", ".04", ".05"] {
-                    if let Some(f) = folder_by_name.get(&format!("{}{suffix}", t.name)) {
-                        t.is_folder = *f;
+                let after = name_off + consumed;
+                // UID sits just past a `2a 00 00 00` sentinel; search a small
+                // window forward for it (PT inserts a few padding bytes first).
+                let mut uid = [0u8; 6];
+                let mut i = after;
+                while i + 10 <= data.len() && i < after + 24 {
+                    if data[i..i + 4] == [0x2a, 0, 0, 0] {
+                        uid.copy_from_slice(&data[i + 4..i + 10]);
                         break;
                     }
+                    i += 1;
+                }
+                order.push((name, uid));
+            }
+        }
+
+        // (b) folder role byte per track name, from 0x210b `+5`.
+        fn collect_raw<'a>(blocks: &'a [Block], raw: u16, out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == raw {
+                    out.push(b);
+                }
+                collect_raw(&b.children, raw, out);
+            }
+        }
+        let mut role_by_name: std::collections::HashMap<String, u8> =
+            std::collections::HashMap::new();
+        let mut b210b = Vec::new();
+        collect_raw(&blocks, 0x210b, &mut b210b);
+        for b in &b210b {
+            let p = b.offset;
+            if p + 6 > data.len() {
+                continue;
+            }
+            let role = data[p + 5];
+            let (name, _) = cursor.length_prefixed_string(p + 6);
+            role_by_name.entry(name).or_insert(role);
+        }
+
+        // (c) groups from 0x210c.
+        let mut groups: Vec<([u8; 6], Vec<[u8; 6]>)> = Vec::new();
+        let mut b210c = Vec::new();
+        collect_raw(&blocks, 0x210c, &mut b210c);
+        for b in &b210c {
+            let end = (b.offset + 7 + b.block_size as usize).min(data.len());
+            // Find first group record (`2a 00 00 00 <uid>`).
+            let mut j = b.offset + 3;
+            while j + 10 <= end && data[j..j + 4] != [0x2a, 0, 0, 0] {
+                j += 1;
+            }
+            while j + 13 <= end {
+                if data[j..j + 4] != [0x2a, 0, 0, 0] {
+                    j += 1;
+                    continue;
+                }
+                let mut guid = [0u8; 6];
+                guid.copy_from_slice(&data[j + 4..j + 10]);
+                // member count two bytes past the UID record.
+                let count = data.get(j + 12).copied().unwrap_or(0) as usize;
+                j += 13;
+                let mut members = Vec::new();
+                for _ in 0..count {
+                    while j + 10 <= end && data[j..j + 4] != [0x2a, 0, 0, 0] {
+                        j += 1;
+                    }
+                    if j + 10 > end {
+                        break;
+                    }
+                    let mut m = [0u8; 6];
+                    m.copy_from_slice(&data[j + 4..j + 10]);
+                    members.push(m);
+                    j += 10 + 1; // uid record + 1 trailing byte
+                }
+                groups.push((guid, members));
+            }
+        }
+
+        // (d) reconstruct depth.
+        let group_by_uid: std::collections::HashMap<[u8; 6], usize> = groups
+            .iter()
+            .enumerate()
+            .map(|(i, (g, _))| (*g, i))
+            .collect();
+        let mut depth: std::collections::HashMap<[u8; 6], u32> = std::collections::HashMap::new();
+        // Recursively assign member depths; a member that is itself a group is
+        // a sub-folder whose members live one level deeper.
+        fn assign(
+            gi: usize,
+            d: u32,
+            groups: &[([u8; 6], Vec<[u8; 6]>)],
+            gmap: &std::collections::HashMap<[u8; 6], usize>,
+            depth: &mut std::collections::HashMap<[u8; 6], u32>,
+            guard: usize,
+        ) {
+            if guard > 256 {
+                return; // cycle guard
+            }
+            for m in &groups[gi].1 {
+                if let Some(&child) = gmap.get(m) {
+                    assign(child, d + 1, groups, gmap, depth, guard + 1);
+                } else {
+                    depth.insert(*m, d);
                 }
             }
         }
-        for t in midi_tracks.iter_mut() {
-            if let Some(f) = folder_by_name.get(&t.name) {
-                t.is_folder = *f;
+        let referenced: std::collections::HashSet<[u8; 6]> =
+            groups.iter().flat_map(|(_, m)| m.iter().copied()).collect();
+        for (i, (g, _)) in groups.iter().enumerate() {
+            if !referenced.contains(g) {
+                assign(i, 1, &groups, &group_by_uid, &mut depth, 0);
+            }
+        }
+        // Folder parents themselves aren't group members; their depth is one
+        // less than the children they contain. Groups are listed in reverse
+        // display order of their owning folder track, so zip reversed.
+        let folder_parents: Vec<[u8; 6]> = order
+            .iter()
+            .filter(|(n, _)| role_by_name.get(n).copied().unwrap_or(0) == 0x02)
+            .map(|(_, u)| *u)
+            .collect();
+        for (gi, owner) in folder_parents.iter().rev().enumerate() {
+            if let Some((_, members)) = groups.get(gi)
+                && let Some(m0) = members.first()
+            {
+                let md = depth.get(m0).copied().unwrap_or(1);
+                depth.insert(*owner, md.saturating_sub(1));
+            }
+        }
+
+        // (e) stamp tracks. Match by name → UID → depth + role.
+        let uid_by_name: std::collections::HashMap<String, [u8; 6]> =
+            order.iter().map(|(n, u)| (n.clone(), *u)).collect();
+        let lookup_uid = |name: &str| -> Option<[u8; 6]> {
+            if let Some(u) = uid_by_name.get(name) {
+                return Some(*u);
+            }
+            for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                if let Some(u) = uid_by_name.get(&format!("{name}{suffix}")) {
+                    return Some(*u);
+                }
+            }
+            None
+        };
+        let lookup_role = |name: &str| -> u8 {
+            if let Some(r) = role_by_name.get(name) {
+                return *r;
+            }
+            for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                if let Some(r) = role_by_name.get(&format!("{name}{suffix}")) {
+                    return *r;
+                }
+            }
+            0
+        };
+        for t in audio_tracks.iter_mut().chain(midi_tracks.iter_mut()) {
+            t.is_folder = lookup_role(&t.name) == 0x02;
+            if let Some(uid) = lookup_uid(&t.name) {
+                t.folder_depth = depth.get(&uid).copied().unwrap_or(0);
             }
         }
     }
@@ -635,6 +957,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     let edit_groups = parse_edit_groups(&blocks, data);
     let stem_mappings = parse_stem_mappings(&blocks, data);
     let internal_tracks = parse_internal_tracks(&blocks, data);
+    let plugin_states = plugin_states::parse_plugin_states(&blocks, &cursor);
 
     Ok(ProToolsSession {
         version,
@@ -654,6 +977,7 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         edit_groups,
         stem_mappings,
         internal_tracks,
+        plugin_states,
     })
 }
 

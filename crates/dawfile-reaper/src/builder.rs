@@ -62,6 +62,9 @@ pub struct FxBuilder {
     fxid: Option<String>,
     preset_name: Option<String>,
     state_data: Vec<String>,
+    raw_block: String,
+    wak: Option<[i32; 2]>,
+    float_pos: Option<[i32; 4]>,
 }
 
 impl FxBuilder {
@@ -75,7 +78,31 @@ impl FxBuilder {
             fxid: None,
             preset_name: None,
             state_data: vec![],
+            raw_block: String::new(),
+            wak: None,
+            float_pos: None,
         }
+    }
+
+    /// Set the `WAK` line values (REAPER's wet/auto-bypass flags). REAPER
+    /// writes `WAK 0 0` for a normal active FX.
+    pub fn wak(mut self, a: i32, b: i32) -> Self {
+        self.wak = Some([a, b]);
+        self
+    }
+
+    /// Set the `FLOATPOS` rectangle (floating FX window position).
+    pub fn float_pos(mut self, pos: [i32; 4]) -> Self {
+        self.float_pos = Some(pos);
+        self
+    }
+
+    /// Set the complete raw plugin block (`<VST …> … >`), used for verbatim
+    /// state transplant (e.g. a converted Omnisphere chunk). When set, it is
+    /// emitted as-is by the serializer instead of a synthesized header.
+    pub fn raw_block(mut self, block: impl Into<String>) -> Self {
+        self.raw_block = block.into();
+        self
     }
 
     /// Mark this FX as bypassed.
@@ -118,11 +145,11 @@ impl FxBuilder {
             offline: self.offline,
             fxid: self.fxid,
             preset_name: self.preset_name,
-            float_pos: None,
-            wak: None,
+            float_pos: self.float_pos,
+            wak: self.wak,
             parallel: false,
             state_data: self.state_data,
-            raw_block: String::new(),
+            raw_block: self.raw_block,
             param_envelopes: vec![],
             params_on_tcp: vec![],
         }
@@ -553,6 +580,21 @@ impl ItemBuilder {
         self
     }
 
+    /// Set the item's clip gain (item trim, linear; 1.0 = 0 dB) via VOLPAN.
+    pub fn gain(mut self, item_trim: f64) -> Self {
+        let vp = self
+            .item
+            .volpan
+            .get_or_insert(crate::types::item::VolPanSettings {
+                item_trim: 1.0,
+                take_pan: 0.0,
+                take_volume: 1.0,
+                take_pan_law: -1.0,
+            });
+        vp.item_trim = item_trim;
+        self
+    }
+
     /// Mark this item as selected.
     pub fn selected(mut self) -> Self {
         self.item.selected = true;
@@ -853,6 +895,15 @@ impl TrackBuilder {
     /// Set track GUID.
     pub fn guid(mut self, guid: impl Into<String>) -> Self {
         self.track.track_id = Some(guid.into());
+        self
+    }
+
+    /// Set the track's TCP height in pixels (REAPER `TRACKHEIGHT`).
+    pub fn height(mut self, px: i32) -> Self {
+        self.track.track_height = Some(crate::types::track::TrackHeightSettings {
+            height: px,
+            folder_override: false,
+        });
         self
     }
 
@@ -1449,6 +1500,23 @@ impl ReaperProjectBuilder {
     pub fn marker(mut self, id: i32, position: f64, name: impl Into<String>) -> Self {
         self.markers_regions
             .add(MarkerBuilder::marker(id, position, name).build());
+        self
+    }
+
+    /// Add a marker with a REAPER color int (`0x01000000 | (b<<16)|(g<<8)|r`;
+    /// `0` = no custom color).
+    pub fn marker_with_color(
+        mut self,
+        id: i32,
+        position: f64,
+        name: impl Into<String>,
+        color: i32,
+    ) -> Self {
+        self.markers_regions.add(
+            MarkerBuilder::marker(id, position, name)
+                .color(color)
+                .build(),
+        );
         self
     }
 

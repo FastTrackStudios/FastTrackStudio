@@ -45,6 +45,9 @@ pub trait Markers {
     /// Set the marker's color. `0` clears to the DAW default.
     fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()>;
 
+    /// Move the marker to a ruler lane. `None` returns it to the DAW default.
+    fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()>;
+
     /// Subscribe to marker changes across all open projects. Subscribers
     /// filter by `project_guid` on the envelope.
     async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerStreamEvent>);

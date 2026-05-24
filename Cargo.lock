@@ -2306,6 +2306,7 @@ name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "base64 0.22.1",
  "camino",
  "crossbeam-channel",
  "daw-audio-sync",
@@ -11358,10 +11359,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
 name = "dioxus"
 version = "0.7.6"
 
@@ -11448,3 +11445,7 @@ version = "0.7.6"
 [[patch.unused]]
 name = "manganis-macro"
 version = "0.7.6"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"

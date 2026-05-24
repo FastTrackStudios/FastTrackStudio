@@ -463,6 +463,31 @@ impl Project {
         Ok(())
     }
 
+    /// Get a project/global config value by REAPER-style config key.
+    pub async fn get_config(&self, key: &str) -> crate::Result<Option<f64>> {
+        Ok(self
+            .clients
+            .project
+            .get_project_config(
+                daw_proto::ProjectContext::project(&self.guid),
+                key.to_string(),
+            )
+            .await?)
+    }
+
+    /// Set a project/global config value by REAPER-style config key.
+    pub async fn set_config(&self, key: &str, value: f64) -> crate::Result<bool> {
+        Ok(self
+            .clients
+            .project
+            .set_project_config(
+                daw_proto::ProjectContext::project(&self.guid),
+                key.to_string(),
+                value,
+            )
+            .await?)
+    }
+
     /// Get the number of named ruler lanes.
     pub async fn ruler_lane_count(&self) -> crate::Result<u32> {
         Ok(self

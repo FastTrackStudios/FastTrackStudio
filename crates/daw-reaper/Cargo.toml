@@ -24,6 +24,7 @@ dawfile-reaper = { path = "../dawfile-reaper" }
 dawfile-ableton = { path = "../dawfile-ableton" }
 dawfile-protools = { path = "../dawfile-protools" }
 dawfile-aaf = { path = "../dawfile-aaf" }
+base64 = "0.22.1"
 dawfile-dawproject = { path = "../dawfile-dawproject" }
 
 # REAPER bindings for actual DAW control
@@ -49,6 +50,7 @@ swell-ui.workspace = true
 [dev-dependencies]
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
+base64 = "0.22.1"
 reaper-test.workspace = true
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
