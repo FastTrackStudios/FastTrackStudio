@@ -545,6 +545,7 @@ fn parse_midi_tracks(
             mute_automation: Vec::new(),
             pan_automation: Vec::new(),
             is_folder: false,
+            folder_depth: 0,
             display_order: u32::MAX,
             comment: String::new(),
             is_master: kind == 0x05,

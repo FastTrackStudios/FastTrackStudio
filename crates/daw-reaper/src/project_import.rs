@@ -633,12 +633,49 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         Src::Midi => session.midi_tracks[e.idx].display_order,
     });
 
-    // Folders are DISABLED. The `Track.is_folder` byte (`0x251a` payload after
-    // the name) is `0x01` for the Master track AND for flat stem-family tracks,
-    // so the old "each is_folder opens a folder" heuristic nested most of the
-    // session under "Master 1" (and made Master a folder/bus). Until PT's real
-    // group/folder block is decoded, emit a flat track list — no folders.
-    let folder_end_levels: Vec<i32> = vec![0; emit.len()];
+    // Compute REAPER folder open/close from PT's reconstructed `folder_depth`
+    // (0 = top level) over the merged emission order. PT's per-track depth and
+    // folder-parent flag come from the `0x210b`/`0x210c` group decode in
+    // dawfile-protools (see `Track::folder_depth` / `Track::is_folder`).
+    //
+    // REAPER models folders implicitly: a folder PARENT carries `ISBUS 1 1`
+    // (handled below via `folder_start()`), and the LAST track in a folder
+    // carries `ISBUS 2 -N` to pop N levels (`folder_end(N)`). We walk the
+    // emission order tracking the current depth; whenever the NEXT track is
+    // shallower (or we hit the end) the current track closes the difference.
+    //
+    // Folder parents are depth `d` and their children depth `d+1`; a leaf at
+    // depth `d` that is the last before a return to depth `d-k` closes `k`
+    // levels. Sessions with no `0x210c` groups have all-zero depth → no
+    // folders, matching the official converter's flattening of PT "divider"
+    // tracks.
+    let depths: Vec<u32> = emit
+        .iter()
+        .map(|e| match e.src {
+            Src::Audio => session.audio_tracks[e.idx].folder_depth,
+            Src::Midi => session.midi_tracks[e.idx].folder_depth,
+        })
+        .collect();
+    let folder_end_levels: Vec<i32> = {
+        let n = depths.len();
+        let mut ends = vec![0i32; n];
+        for i in 0..n {
+            let next = depths.get(i + 1).copied().unwrap_or(0);
+            if depths[i] > next {
+                ends[i] = (depths[i] - next) as i32;
+            }
+        }
+        ends
+    };
+    // A track OPENS a REAPER folder only when the following track is deeper.
+    // We drive folder-open off the reconstructed depth — NOT the raw
+    // `is_folder` role byte — so PT "divider" folder-parents that have no
+    // children (empty `0x210c`, e.g. the ALL THAT I AM session) stay flat,
+    // matching the official converter instead of opening a folder that never
+    // closes and swallows every later track.
+    let folder_starts: Vec<bool> = (0..depths.len())
+        .map(|i| depths.get(i + 1).copied().unwrap_or(0) > depths[i])
+        .collect();
 
     // PT track comments are emitted as SWS/S&M Track Notes (a project-level
     // <EXTENSIONS> block keyed by track GUID), matching the official converter.
@@ -653,6 +690,7 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 
     for (plan_idx, e) in emit.iter().enumerate() {
         let end_levels = folder_end_levels[plan_idx];
+        let is_folder_start = folder_starts[plan_idx];
         match e.src {
             Src::Audio => {
                 let track = &session.audio_tracks[e.idx];
@@ -661,7 +699,6 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 // (`track.output`, e.g. "Analog 1-2"/"Bus 1") is routing, not part of
                 // the name. Routing-to-bus emission is a separate follow-on.
                 let display_name = track.name.clone();
-                let is_folder_start = false; // folders disabled (unreliable is_folder byte)
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
                 if !track.comment.is_empty() {
                     track_notes.push((track_guid.clone(), track.comment.clone()));
@@ -893,7 +930,6 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 // (`track.output`, e.g. "Analog 1-2"/"Bus 1") is routing, not part of
                 // the name. Routing-to-bus emission is a separate follow-on.
                 let display_name = track.name.clone();
-                let is_folder_start = false; // folders disabled (unreliable is_folder byte)
                 let track_guid = deterministic_guid(&format!("pt:{}:{}", plan_idx, track.name));
                 if !track.comment.is_empty() {
                     track_notes.push((track_guid.clone(), track.comment.clone()));
@@ -1661,4 +1697,78 @@ fn ableton_color_to_rgb(color_index: i32) -> u32 {
         _ => (0x80, 0x80, 0x80), // Gray (unreachable)
     };
     (r << 16) | (g << 8) | b
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::protools_to_rpp;
+
+    fn fixture(name: &str) -> String {
+        format!(
+            "{}/tests/reaper-assets/protools/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    /// Extract the (NAME, ISBUS) sequence from RPP track blocks in order.
+    fn track_isbus(rpp: &str) -> Vec<(String, Option<String>)> {
+        let mut out = Vec::new();
+        let mut cur_name: Option<String> = None;
+        let mut cur_isbus: Option<String> = None;
+        for line in rpp.lines() {
+            let t = line.trim();
+            if let Some(rest) = t.strip_prefix("NAME ") {
+                if let Some(n) = cur_name.take() {
+                    out.push((n, cur_isbus.take()));
+                }
+                cur_name = Some(rest.trim_matches('"').to_string());
+                cur_isbus = None;
+            } else if let Some(rest) = t.strip_prefix("ISBUS ") {
+                cur_isbus = Some(rest.to_string());
+            }
+        }
+        if let Some(n) = cur_name.take() {
+            out.push((n, cur_isbus.take()));
+        }
+        out
+    }
+
+    /// Authored: FolderA{ChildA1, ChildA2{GrandA2a, GrandA2b}}, SiblingB.
+    /// Expect FolderA + ChildA2 open folders, GrandA2b closes 2 levels.
+    #[test]
+    fn nested_folder_round_trip_emits_isbus() {
+        let rpp = protools_to_rpp(&fixture("folder-nesting.ptx")).expect("convert");
+        let seq = track_isbus(&rpp);
+        let get = |n: &str| {
+            seq.iter()
+                .find(|(name, _)| name == n)
+                .map(|(_, i)| i.clone())
+        };
+        assert_eq!(get("FolderA"), Some(Some("1 1".to_string())));
+        assert_eq!(get("ChildA1"), Some(None));
+        assert_eq!(get("ChildA2"), Some(Some("1 1".to_string())));
+        assert_eq!(get("GrandA2a"), Some(None));
+        assert_eq!(get("GrandA2b"), Some(Some("2 -2".to_string())));
+        assert_eq!(get("SiblingB"), Some(None));
+    }
+
+    /// Authored: two independent sibling folders F1{leafA,leafB} F2{leafC,leafD}
+    /// plus a top-level leaf. Each folder closes one level on its last child.
+    #[test]
+    fn sibling_folders_round_trip_emits_isbus() {
+        let rpp = protools_to_rpp(&fixture("folder-siblings.ptx")).expect("convert");
+        let seq = track_isbus(&rpp);
+        let get = |n: &str| {
+            seq.iter()
+                .find(|(name, _)| name == n)
+                .map(|(_, i)| i.clone())
+        };
+        assert_eq!(get("F1"), Some(Some("1 1".to_string())));
+        assert_eq!(get("leafA"), Some(None));
+        assert_eq!(get("leafB"), Some(Some("2 -1".to_string())));
+        assert_eq!(get("F2"), Some(Some("1 1".to_string())));
+        assert_eq!(get("leafC"), Some(None));
+        assert_eq!(get("leafD"), Some(Some("2 -1".to_string())));
+        assert_eq!(get("leafTop"), Some(None));
+    }
 }
