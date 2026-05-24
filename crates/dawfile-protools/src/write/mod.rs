@@ -31,6 +31,7 @@ pub mod splice;
 // legacy alias for backwards compatibility with the from_rpp module.
 pub use from_rpp::WriteError as RppToPtxError;
 pub use from_rpp::{WriteError, find_converter_binary, rpp_to_ptx_via_converter};
+pub use midi::{ChunkNote, MidiTrackInput, inject_midi};
 pub use native::{NativeTrackSpec, write_single_track_ptx};
 
 use crate::content_type::ContentType;
