@@ -99,19 +99,7 @@ async fn main() -> Result<()> {
     }
     match cli.command {
         Some(Command::Reaper(cmd)) => reaper::run(cmd)?,
-        Some(Command::Session(cmd)) => {
-            // Fast path: if `ftsd` is running, route mode/transport
-            // calls through it (~10ms instead of ~870ms cold start).
-            // Falls through to direct Vox for commands the daemon
-            // doesn't yet handle, or when no daemon is up.
-            if let Some(handled) = daemon_fast_path(&cmd).await? {
-                if !handled {
-                    session_cli::run(cli.socket, cmd, cli.json).await?;
-                }
-            } else {
-                session_cli::run(cli.socket, cmd, cli.json).await?;
-            }
-        }
+        Some(Command::Session(cmd)) => session_cli::run(cli.socket, cmd, cli.json).await?,
         Some(Command::Daemon(cmd)) => run_daemon_cmd(cmd, cli.socket).await?,
         None => {
             // No subcommand and no -i flag — print help and exit
