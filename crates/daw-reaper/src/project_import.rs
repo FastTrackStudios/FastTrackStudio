@@ -890,15 +890,26 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                             }
                         }
 
+                        // Strip the trailing `.L`/`.R` channel suffix from the
+                        // region name so a stereo clip reads as one clean stereo
+                        // item (e.g. "…_Bass.L" → "…_Bass") — matching the official
+                        // converter. The item still references the interleaved
+                        // stereo source, so it stays stereo; only the label changes.
+                        let clip_name = region
+                            .name
+                            .strip_suffix(".L")
+                            .or_else(|| region.name.strip_suffix(".R"))
+                            .unwrap_or(&region.name);
+
                         t = t.item(position_secs, length_secs, |item| {
                             // Set the TAKE name (not the item name) to the region
                             // name so REAPER displays a single readable label rather
                             // than stacking item-level + take-level labels.
                             let mut item = item;
                             if !absolute_path.is_empty() {
-                                item = item.source_wave(&absolute_path).take_name(&region.name);
+                                item = item.source_wave(&absolute_path).take_name(clip_name);
                             } else {
-                                item = item.name(&region.name);
+                                item = item.name(clip_name);
                             }
                             if offset_secs > 0.0 {
                                 item = item.slip_offset(offset_secs);
