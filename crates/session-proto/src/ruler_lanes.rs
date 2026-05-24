@@ -13,23 +13,31 @@ use facet::Facet;
 
 // ── Core Ruler Lanes ─────────────────────────────────────────────────────────
 
-/// Core FTS ruler lanes — always present in every project.
+/// Core FTS ruler lanes, in user-facing display order:
+/// SONG → SECTIONS → MARKS.
 ///
-/// `Key = 3` is reserved-but-retired. We keep the variant so the
-/// `#[repr(u8)]` discriminants of Song/Sections/Marks don't shift
-/// (which would silently re-number every existing project's lane
-/// assignments). It's excluded from [`all`] so the lane is not
-/// auto-created any more — key signatures are encoded elsewhere.
+/// REAPER's intrinsic per-position flags still apply:
+/// - lane 1 (first row) gets flag=4 ("default marker lane")
+/// - lane 2 (second row) gets flag=8 ("default region lane")
+///
+/// With this ordering SECTIONS is the default region lane, which is
+/// what we want — fresh section regions auto-route there. SONG is
+/// the default marker lane, but we don't want markers there, so
+/// COUNT-IN / SONGSTART / SONGEND / =END all get explicit
+/// `set_lane(MARKS)` via `classify_marker_lane`. The song-bounded
+/// region also gets explicit `set_lane(SONG)` since the default
+/// region lane would otherwise put it on SECTIONS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
 #[repr(u8)]
 pub enum CoreLane {
-    /// Song-level markers/regions: SONGSTART, SONGEND, full-song region.
-    /// **Default marker lane**.
+    /// Song-bounded region only — named after the song.
+    /// Pinned explicitly (default region lane is SECTIONS).
     Song = 0,
-    /// Regions for song sections (Verse, Chorus, Bridge, Outro, etc.).
-    /// **Default region lane** — new regions go here.
+    /// Section regions: VS / CH / BR / OUT / etc. Default region
+    /// lane (flag=8), so fresh regions land here automatically.
     Sections = 1,
-    /// Structural/general markers: Count-In, cues.
+    /// Structural markers: COUNT-IN, SONGSTART, SONGEND, =END.
+    /// Pinned explicitly via `classify_marker_lane`.
     Marks = 2,
     /// Reserved historical slot — see the enum doc.
     #[deprecated(note = "KEY lane retired; key signatures are encoded separately now")]
@@ -38,25 +46,30 @@ pub enum CoreLane {
 
 #[allow(deprecated)]
 impl CoreLane {
-    /// All core lanes that should be created in every project. `Key`
-    /// is intentionally absent.
+    /// All core lanes that should be created in every project, in
+    /// the user-visible order SONG → SECTIONS → MARKS.
     pub const fn all() -> &'static [CoreLane] {
         &[CoreLane::Song, CoreLane::Sections, CoreLane::Marks]
     }
 
-    /// 1-based ruler lane index — what users see in REAPER's UI and
-    /// what `I_LANENUMBER` on a marker/region uses. SONG=1,
-    /// SECTIONS=2, MARKS=3.
+    /// 0-based lane index. Same value used for **both** REAPER's
+    /// project-info name-table keys (`RULER_LANE_NAME:N`,
+    /// `RULER_LANE_FLAGS:N`, `RULER_LANE_ORDER:N`) **and** for
+    /// `I_LANENUMBER` on a marker / region.
+    ///
+    /// Empirical evidence (saved RPP grep against what we wrote):
+    /// passing `I_LANENUMBER=1` for SONG-bounded regions made REAPER
+    /// serialise them on file row 2 (SECTIONS), not row 1 (SONG).
+    /// So `I_LANENUMBER` is the same 0-based index — REAPER's docs
+    /// reading "0 = automatic" appears to be wrong or version-
+    /// dependent here.
     pub const fn lane_index(&self) -> u32 {
-        *self as u32 + 1
+        *self as u32
     }
 
-    /// 0-based index for REAPER's `RULER_LANE_NAME:N` /
-    /// `RULER_LANE_FLAGS:N` / `RULER_LANE_ORDER:N` project-info keys.
-    /// REAPER uses N=0 for the leftmost lane (what the UI labels
-    /// "1"), so we have to subtract one from `lane_index`. Calling
-    /// `set_ruler_lane_name(1, ...)` named lane *2* in the UI, which
-    /// is what left an empty unnamed "1" lane above SONG.
+    /// Same as `lane_index`. Kept as a separate name so call sites
+    /// targeting the project-info name table read self-documenting
+    /// (we used to need a 0/1-based offset between them).
     pub const fn name_key_index(&self) -> u32 {
         *self as u32
     }
@@ -75,10 +88,19 @@ impl CoreLane {
     /// - `8` = default region lane
     /// - `4` = default marker lane
     /// - `0` = normal
+    ///
+    /// Observed reality: `RULER_LANE_FLAGS:N` project-info writes do
+    /// **not** actually apply at the REAPER side (the saved RPP keeps
+    /// `RULERLANE` flags wherever REAPER's position-based defaults
+    /// put them, regardless of what we wrote). So these values are
+    /// documentation of intent: which slot REAPER will treat as
+    /// default-marker (slot 0) vs default-region (slot 1). We arrange
+    /// `all()` so MARKS occupies slot 0 and SONG occupies slot 1,
+    /// and let REAPER's intrinsic defaults do the routing.
     pub const fn flags(&self) -> i32 {
         match self {
-            Self::Sections => 8, // default region lane
-            Self::Song => 4,     // default marker lane
+            Self::Marks => 4, // documented: default marker lane (slot 0)
+            Self::Song => 8,  // documented: default region lane (slot 1)
             _ => 0,
         }
     }
