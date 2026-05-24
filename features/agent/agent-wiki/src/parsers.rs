@@ -269,20 +269,48 @@ fn parse_file_block_lines(path_raw: &str, content: &[String]) -> Result<FileBloc
             "empty path",
         ));
     }
-    let path = path_raw
-        .strip_prefix("wiki/")
-        .or_else(|| path_raw.strip_prefix("Wiki/"))
-        .unwrap_or(path_raw)
-        .to_string();
-    if path.is_empty() || path.contains("..") {
+    // Preserve the `wiki/` prefix when present — nashsu/llm_wiki's
+    // canonical convention is `wiki/concepts/X.md`. Stripping it
+    // (the old behavior) caused pages to land at the vault root
+    // (`concepts/X.md`) while Codex's autonomous tool-use wrote
+    // them at `wiki/concepts/X.md`, bifurcating the wiki.
+    // Normalize `Wiki/` → `wiki/` so case variants land in the
+    // same place.
+    let normalized = if let Some(rest) = path_raw.strip_prefix("Wiki/") {
+        format!("wiki/{rest}")
+    } else {
+        path_raw.to_string()
+    };
+    // If the path is wiki-rooted but missing the prefix entirely
+    // (e.g. legacy `concepts/X.md`), prepend `wiki/` so all writes
+    // land under `wiki/`. Schema/index/log/overview live at the
+    // wiki root (no `wiki/` prefix) and are recognized by name.
+    let canonical = if matches!(
+        normalized.as_str(),
+        "schema.md" | "purpose.md" | "index.md" | "log.md" | "overview.md"
+    ) || normalized.starts_with("wiki/")
+        || normalized.starts_with("_state/")
+        || normalized.starts_with("raw/")
+        || normalized.starts_with("media/")
+    {
+        normalized
+    } else if normalized.starts_with("concepts/")
+        || normalized.starts_with("entities/")
+        || normalized.starts_with("sources/")
+    {
+        format!("wiki/{normalized}")
+    } else {
+        normalized
+    };
+    if canonical.is_empty() || canonical.contains("..") {
         return Err(AgentWikiError::InvalidFileTarget(
-            path,
+            canonical,
             "must be wiki-relative, no `..` allowed",
         ));
     }
     let body = content.join("\n");
     Ok(FileBlock {
-        path,
+        path: canonical,
         content: body.trim_end_matches('\n').to_string() + "\n",
     })
 }
@@ -739,7 +767,7 @@ Body.
 ---END FILE---";
         let parsed = parse_ingest_blocks(resp).expect("parse");
         assert_eq!(parsed.files.len(), 1);
-        assert_eq!(parsed.files[0].path, "Concepts/Foo.md");
+        assert_eq!(parsed.files[0].path, "wiki/Concepts/Foo.md");
         assert!(parsed.files[0].content.starts_with("---\n"));
         assert!(parsed.files[0].content.contains("# Foo"));
     }
@@ -764,7 +792,7 @@ Body.
         let resp = "Sure! Here are the files:\n\n---FILE: wiki/foo.md---\nbody\n---END FILE---";
         let parsed = parse_ingest_blocks(resp).expect("should accept preamble");
         assert_eq!(parsed.files.len(), 1);
-        assert_eq!(parsed.files[0].path, "foo.md");
+        assert_eq!(parsed.files[0].path, "wiki/foo.md");
     }
 
     // ── Ported nashsu/llm_wiki hazards ──────────────────────
@@ -826,6 +854,46 @@ Body.
         // would yield an empty string; we reject pre-walk so
         // the line isn't treated as an opener at all.
         assert!(parse_ingest_blocks(resp).is_err());
+    }
+
+    #[test]
+    fn canonicalizes_legacy_paths_under_wiki_prefix() {
+        // Without `wiki/` prefix, paths under the canonical
+        // tiers (concepts/ entities/ sources/) get auto-rooted
+        // under `wiki/` so they don't bifurcate the layout when
+        // the LLM forgets the prefix.
+        let resp = "---FILE: concepts/x.md---\nbody\n---END FILE---\n\n---FILE: entities/y.md---\nb2\n---END FILE---\n\n---FILE: sources/z.md---\nb3\n---END FILE---";
+        let parsed = parse_ingest_blocks(resp).unwrap();
+        assert_eq!(parsed.files[0].path, "wiki/concepts/x.md");
+        assert_eq!(parsed.files[1].path, "wiki/entities/y.md");
+        assert_eq!(parsed.files[2].path, "wiki/sources/z.md");
+    }
+
+    #[test]
+    fn reserved_root_paths_stay_unprefixed() {
+        // Schema/index/log/overview live at the wiki root, not
+        // under `wiki/`. Don't auto-prefix them.
+        for name in &[
+            "index.md",
+            "log.md",
+            "overview.md",
+            "schema.md",
+            "purpose.md",
+        ] {
+            let resp = format!("---FILE: {name}---\nbody\n---END FILE---");
+            let parsed = parse_ingest_blocks(&resp).unwrap();
+            assert_eq!(
+                parsed.files[0].path, *name,
+                "reserved path stripped wrongly"
+            );
+        }
+    }
+
+    #[test]
+    fn case_variant_wiki_normalized_to_lower() {
+        let resp = "---FILE: Wiki/concepts/x.md---\nbody\n---END FILE---";
+        let parsed = parse_ingest_blocks(resp).unwrap();
+        assert_eq!(parsed.files[0].path, "wiki/concepts/x.md");
     }
 
     #[test]
