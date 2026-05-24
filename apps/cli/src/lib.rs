@@ -150,6 +150,29 @@ pub enum SessionCommand {
         /// (e.g. 40044 for transport play/pause) as a string.
         command_id: String,
     },
+    /// Set the display name of a ruler lane in the current project.
+    /// Direct primitive over `Projects::set_ruler_lane_name` — useful
+    /// for debugging why a lane didn't pick up its convention name
+    /// (e.g. `fts session rename-lane 1 SONG`). Lane index is
+    /// 1-based; REAPER will auto-create the lane if it doesn't exist
+    /// yet.
+    RenameLane {
+        /// 1-based ruler lane index.
+        index: u32,
+        /// New display name. Pass an empty string to clear.
+        name: String,
+    },
+    /// Set a numeric project-info key on the current project. Direct
+    /// access to `Projects::set_project_info` — useful for poking
+    /// REAPER's internal ruler-lane configuration directly. Example:
+    /// `fts session set-project-info RULER_LANE_FLAGS:2 8` marks lane
+    /// 2 as the default region lane.
+    SetProjectInfo {
+        /// Project-info key (e.g. `RULER_LANE_FLAGS:2`, `RULER_LANE_ORDER:1`).
+        key: String,
+        /// Numeric value.
+        value: f64,
+    },
     /// Measure RPC roundtrip latency over one persistent connection.
     ///
     /// Reports min / p50 / p95 / p99 / max for each target. Use
@@ -226,6 +249,12 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
         } => cmd_organize(input, output.as_deref(), guide),
         SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
         SessionCommand::Action { command_id } => cmd_action(socket.as_deref(), &command_id).await,
+        SessionCommand::RenameLane { index, name } => {
+            cmd_rename_lane(socket.as_deref(), index, &name).await
+        }
+        SessionCommand::SetProjectInfo { key, value } => {
+            cmd_set_project_info(socket.as_deref(), &key, value).await
+        }
         SessionCommand::Bench { count, target } => {
             cmd_bench(socket.as_deref(), count, target).await
         }
@@ -957,5 +986,49 @@ async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Resul
              etc.). Check the extension log for handler-side errors."
         );
     }
+    Ok(())
+}
+
+// ============================================================================
+// Ruler lane primitives — direct pokes for debugging convention drift
+// ============================================================================
+
+async fn cmd_rename_lane(socket: Option<&std::path::Path>, index: u32, name: &str) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let projects = ProjectsClient::new(caller);
+
+    let start = std::time::Instant::now();
+    projects
+        .set_ruler_lane_name(ProjectContext::Current, index, name.to_string())
+        .await
+        .map_err(|e| eyre::eyre!("set_ruler_lane_name rpc failed: {e:?}"))?;
+    println!("lane {index} → {:?}   ({:?})", name, start.elapsed());
+    Ok(())
+}
+
+async fn cmd_set_project_info(
+    socket: Option<&std::path::Path>,
+    key: &str,
+    value: f64,
+) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let projects = ProjectsClient::new(caller);
+
+    let start = std::time::Instant::now();
+    projects
+        .set_project_info(ProjectContext::Current, key.to_string(), value)
+        .await
+        .map_err(|e| eyre::eyre!("set_project_info rpc failed: {e:?}"))?;
+    println!("{key} = {value}   ({:?})", start.elapsed());
     Ok(())
 }
