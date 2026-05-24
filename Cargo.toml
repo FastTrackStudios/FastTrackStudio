@@ -4,9 +4,6 @@ name = "fasttrackstudio"
 [workspace]
 members = [
     # Crates
-    "crates/dynamic-template/dynamic-template-extension",
-    "crates/input/input-extension",
-    "crates/keyflow/keyflow-extension",
     "crates/shared/installer-core",
     "crates/shared/utils",
     "crates/shared/vox-discover",
@@ -16,7 +13,6 @@ members = [
     "apps/mobile",
     "apps/fts-cli",
     "apps/installer",
-    "apps/tests/playground-wasm",
     "apps/tests/wasm",
     # Tools
     "xtask",
@@ -28,8 +24,8 @@ resolver = "2"
 [workspace.lints.clippy]
 
 [workspace.package]
-edition = "2021"
-rust-version = "1.82"
+edition = "2024"
+rust-version = "1.85"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/FastTrackStudios/FastTrackStudio"
@@ -169,8 +165,8 @@ lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag 
 dioxus-time = { git = "https://github.com/ealmloff/dioxus-std", rev = "7e0c41ef8c5514e46e8ac657227568660cf38987" }
 lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
 
-# Dioxus UI framework (pinned to 0.7.2 - native 0.7.3 not yet on crates.io)
-dioxus = "0.7.2"
+# Dioxus UI framework (0.7.9 — matches dioxus-flake's pinned dx)
+dioxus = "0.7.9"
 rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
 
 # macOS dependencies for swell-ui (using exact versions for compatibility)

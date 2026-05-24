@@ -1,12 +1,12 @@
 [package]
 name = "wasm-tests"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "WASM integration tests using Dioxus - tests browser client connecting to gateway"
 
 [dependencies]
 # Dioxus UI framework (for rendering test results)
-dioxus = { version = "0.7.1" }
+dioxus = { workspace = true }
 
 # Vox RPC
 vox.workspace = true

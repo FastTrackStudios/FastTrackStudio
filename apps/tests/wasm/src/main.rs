@@ -4,7 +4,7 @@
 //! gateway-ws server. Results are exposed to JavaScript for Playwright to read.
 //!
 //! Usage:
-//! 1. Start the host with gateway-ws (cargo run -p test-extension)
+//! 1. Start the desktop app, which runs the gateway (cargo run -p fasttrackstudio-desktop)
 //! 2. Build this app with dx build --release
 //! 3. Run Playwright tests that load this app and check results
 //!

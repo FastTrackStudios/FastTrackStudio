@@ -2,11 +2,11 @@
 name = "fasttrackstudio-web"
 version = "0.1.0"
 authors = ["Cody Wright <acodywright@gmail.com>"]
-edition = "2021"
+edition.workspace = true
 
 [dependencies]
 # UI
-dioxus = { version = "0.7.2" }
+dioxus = { workspace = true }
 
 # Session
 session.workspace = true
