@@ -31,6 +31,7 @@
 //! `wiki_proto::WikiService` plug this in for the
 //! `build_graph` / `gaps` methods.
 
+pub mod analyze;
 mod build;
 pub mod code_extract;
 mod context;
@@ -41,6 +42,9 @@ mod scan;
 mod scoring;
 mod tier_lint;
 
+pub use analyze::{
+    AnalyzedGraph, analyze, fan_out_hubs, god_nodes, kind_counts, relation_counts, render_report,
+};
 pub use build::{build_clusters, build_graph};
 pub use code_extract::{
     CodeEdge, CodeExtractError, CodeExtraction, CodeLang, CodeNode, Confidence, Relation,

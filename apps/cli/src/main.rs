@@ -1254,7 +1254,12 @@ enum WikiCmd {
         /// summary.
         #[arg(long)]
         json: bool,
-        /// Top-N node summary in the text view.
+        /// Render the full `GRAPH_REPORT.md` shape (god
+        /// nodes, fan-out hubs, kind histogram). Mutually
+        /// exclusive with `--json`.
+        #[arg(long, conflicts_with = "json")]
+        report: bool,
+        /// Top-N node summary in the text + report views.
         #[arg(long, default_value_t = 25)]
         top: usize,
     },
@@ -4948,11 +4953,33 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             );
             Ok(())
         }
-        WikiCmd::Code { root, json, top } => {
+        WikiCmd::Code {
+            root,
+            json,
+            report,
+            top,
+        } => {
             let root = root
                 .canonicalize()
                 .map_err(|e| eyre::eyre!("root {}: {e}", root.display()))?;
             let extractions = wiki_graph::scan_code_tree(&root);
+
+            if report {
+                // Cross-file analysis + GRAPH_REPORT.md
+                // render. This is the agent-context payload
+                // for "give me a high-level map of this
+                // codebase".
+                let g = wiki_graph::analyze(&extractions);
+                print!("{}", wiki_graph::render_report(&g, top));
+                eprintln!(
+                    "[wiki code report] {} nodes, {} edges ({} resolved, {} unresolved)",
+                    g.nodes.len(),
+                    g.edges.len(),
+                    g.resolved_edges,
+                    g.unresolved_edges
+                );
+                return Ok(());
+            }
             let mut total_nodes = 0usize;
             let mut total_edges = 0usize;
             let mut by_kind: std::collections::HashMap<&str, usize> =
