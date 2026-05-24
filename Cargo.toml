@@ -61,6 +61,7 @@ architect = { path = "../../architect/macros/architect" }
 
 # ── Facet reflection ────────────────────────────────────────────────
 facet = { version = "0.46" }
+facet-json = { version = "0.46" }
 
 # ── Keyflow (sibling repo — facade pattern) ─────────────────────────
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }

@@ -91,6 +91,12 @@ pub enum SessionCommand {
     },
     /// Show current setlist
     Setlist,
+    /// (Re)build the setlist by scanning every open REAPER project
+    /// tab for SONGSTART / SONGEND markers and section regions.
+    /// Subsequent `setlist` / `songs` / `song` calls hit the cached
+    /// build; rerun this after opening, closing, or editing project
+    /// structure.
+    BuildSetlist,
     /// List songs in the setlist
     Songs,
     /// Show song detail
@@ -212,40 +218,42 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
         SessionCommand::Play => cmd_transport(socket.as_deref(), TransportOp::Play).await,
         SessionCommand::Pause => cmd_transport(socket.as_deref(), TransportOp::Pause).await,
         SessionCommand::Stop => cmd_transport(socket.as_deref(), TransportOp::Stop).await,
-        other => {
-            // Other live commands not yet wired through RPC.
-            let cmd_name = match other {
-                SessionCommand::Combine { .. }
-                | SessionCommand::Organize { .. }
-                | SessionCommand::Mode(_)
-                | SessionCommand::Bench { .. }
-                | SessionCommand::Play
-                | SessionCommand::Pause
-                | SessionCommand::Stop => unreachable!(),
-                SessionCommand::Setlist => "setlist",
-                SessionCommand::Songs => "songs",
-                SessionCommand::Song { .. } => "song",
-                SessionCommand::Sections { .. } => "sections",
-                SessionCommand::Goto(GotoCommand::Song { .. }) => "goto song",
-                SessionCommand::Goto(GotoCommand::Section { .. }) => "goto section",
-                SessionCommand::Next => "next",
-                SessionCommand::Previous => "previous",
-                SessionCommand::NextSection => "next-section",
-                SessionCommand::PrevSection => "prev-section",
-                SessionCommand::Play => "play",
-                SessionCommand::Pause => "pause",
-                SessionCommand::Stop => "stop",
-                SessionCommand::Loop(LoopCommand::Song) => "loop song",
-                SessionCommand::Loop(LoopCommand::Section) => "loop section",
-                SessionCommand::Loop(LoopCommand::Clear) => "loop clear",
-                SessionCommand::Seek { .. } => "seek",
-            };
-            let _ = (socket, as_json); // suppress unused warnings
-            eyre::bail!(
-                "Session command '{}' not yet implemented. \
-                 Session CLI requires RPC connection to the session cell running in REAPER.",
-                cmd_name
-            )
+        // Setlist / song views — read-only, print human-readable
+        // unless --json. Connect once per call (cold-start is the
+        // price for one-shot CLI; use the daemon for fast paths).
+        SessionCommand::Setlist => cmd_setlist(socket.as_deref(), as_json).await,
+        SessionCommand::BuildSetlist => cmd_build_setlist(socket.as_deref()).await,
+        SessionCommand::Songs => cmd_songs(socket.as_deref(), as_json).await,
+        SessionCommand::Song { index } => cmd_song(socket.as_deref(), index, as_json).await,
+        SessionCommand::Sections { song_index } => {
+            cmd_sections(socket.as_deref(), song_index, as_json).await
+        }
+        // Navigation — single async call, no output unless --json.
+        SessionCommand::Goto(GotoCommand::Song { index }) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::GoSong(index)).await
+        }
+        SessionCommand::Goto(GotoCommand::Section { index }) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::GoSection(index)).await
+        }
+        SessionCommand::Next => cmd_setlist_nav(socket.as_deref(), SetlistNav::NextSong).await,
+        SessionCommand::Previous => cmd_setlist_nav(socket.as_deref(), SetlistNav::PrevSong).await,
+        SessionCommand::NextSection => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::NextSection).await
+        }
+        SessionCommand::PrevSection => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::PrevSection).await
+        }
+        SessionCommand::Seek { seconds } => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::Seek(seconds)).await
+        }
+        SessionCommand::Loop(LoopCommand::Song) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopSong).await
+        }
+        SessionCommand::Loop(LoopCommand::Section) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopSection).await
+        }
+        SessionCommand::Loop(LoopCommand::Clear) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopClear).await
         }
     }
 }
@@ -659,5 +667,238 @@ async fn cmd_transport(socket: Option<&std::path::Path>, op: TransportOp) -> Res
     res.map_err(|e| eyre::eyre!("transport {label} rpc failed: {e:?}"))?
         .map_err(|e| eyre::eyre!("transport {label} daw error: {e:?}"))?;
     println!("{label}  rpc roundtrip {rt:?}");
+    Ok(())
+}
+
+// ============================================================================
+// Setlist / Song commands
+//
+// The setlist + per-song detail come from `SetlistService` mounted by
+// fts-extensions. Implementation in `session::setlist_service` builds
+// the setlist by enumerating REAPER project tabs and parsing each
+// project's PREROLL / SONGSTART / SONGEND markers + section regions.
+//
+// CLI output: human-readable by default (one line per row), JSON when
+// `--json` is set so other tools can pipe results.
+// ============================================================================
+
+async fn cmd_build_setlist(socket: Option<&std::path::Path>) -> Result<()> {
+    let client = setlist_client(socket).await?;
+    let start = std::time::Instant::now();
+    client
+        .build_from_open_projects()
+        .await
+        .map_err(rpc_err("build_from_open_projects"))?;
+    let setlist = client.setlist().await.map_err(rpc_err("setlist"))?;
+    println!(
+        "built setlist '{}' with {} song(s) in {:?}",
+        setlist.name,
+        setlist.songs.len(),
+        start.elapsed()
+    );
+    Ok(())
+}
+
+async fn cmd_setlist(socket: Option<&std::path::Path>, as_json: bool) -> Result<()> {
+    let client = setlist_client(socket).await?;
+    // Don't auto-build: build_from_open_projects walks every open
+    // REAPER tab, hydrates per-song MIDI charts via keyflow, and can
+    // take many seconds on a real session. Prompt the user to run
+    // `fts session build-setlist` explicitly so they know they're
+    // paying that cost.
+    let setlist = match client.setlist().await {
+        Ok(s) => s,
+        Err(e) if is_not_found(&e) => {
+            println!(
+                "(no setlist cached yet — run `fts session build-setlist` to scan open projects)"
+            );
+            return Ok(());
+        }
+        Err(e) => return Err(rpc_err("setlist")(e)),
+    };
+    if as_json {
+        print_json(&setlist)?;
+    } else {
+        println!("Setlist: {}", setlist.name);
+        println!("  songs: {}", setlist.songs.len());
+        if let Some(id) = &setlist.id {
+            println!("  id:    {id}");
+        }
+        for (i, song) in setlist.songs.iter().enumerate() {
+            let dur = song.end_seconds - song.start_seconds;
+            println!(
+                "  [{i:>2}] {:<32}  {:6.2}s  ({} sections)",
+                song.name,
+                dur.max(0.0),
+                song.sections.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_songs(socket: Option<&std::path::Path>, as_json: bool) -> Result<()> {
+    let songs = setlist_client(socket)
+        .await?
+        .songs()
+        .await
+        .map_err(rpc_err("songs"))?;
+    if as_json {
+        print_json(&songs)?;
+    } else if songs.is_empty() {
+        println!("(no songs in current setlist)");
+    } else {
+        for (i, s) in songs.iter().enumerate() {
+            println!("[{i:>2}] {}", s.name);
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_song(socket: Option<&std::path::Path>, index: usize, as_json: bool) -> Result<()> {
+    let song = setlist_client(socket)
+        .await?
+        .song(index)
+        .await
+        .map_err(rpc_err("song"))?;
+    if as_json {
+        print_json(&song)?;
+    } else {
+        println!("Song [{index}] {}", song.name);
+        println!("  project_guid : {}", song.project_guid);
+        println!(
+            "  range        : {:.3}s → {:.3}s ({:.3}s)",
+            song.start_seconds,
+            song.end_seconds,
+            song.end_seconds - song.start_seconds
+        );
+        if let Some(co) = song.count_in_seconds {
+            println!("  count-in     : {co:.3}s");
+        }
+        if let Some(t) = song.tempo {
+            println!("  tempo        : {t:.2} BPM");
+        }
+        if let Some(ts) = song.time_signature {
+            println!("  time sig     : {}/{}", ts.numerator(), ts.denominator());
+        }
+        println!("  sections     : {}", song.sections.len());
+        for (i, sec) in song.sections.iter().enumerate() {
+            println!("    [{i:>2}] {}", sec.name);
+        }
+        if !song.comments.is_empty() {
+            println!("  comments     : {}", song.comments.len());
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_sections(
+    socket: Option<&std::path::Path>,
+    song_index: usize,
+    as_json: bool,
+) -> Result<()> {
+    let sections = setlist_client(socket)
+        .await?
+        .sections(song_index)
+        .await
+        .map_err(rpc_err("sections"))?;
+    if as_json {
+        print_json(&sections)?;
+    } else if sections.is_empty() {
+        println!("(no sections in song {song_index})");
+    } else {
+        for (i, sec) in sections.iter().enumerate() {
+            println!("[{i:>2}] {}", sec.name);
+        }
+    }
+    Ok(())
+}
+
+/// Discriminator for navigation-style setlist commands. They all
+/// share the same shape (one async call, no output unless --json)
+/// and the same dispatch — collapsing them into one match keeps the
+/// adding-a-new-nav-verb cost at one variant + one arm.
+enum SetlistNav {
+    GoSong(usize),
+    GoSection(usize),
+    NextSong,
+    PrevSong,
+    NextSection,
+    PrevSection,
+    Seek(f64),
+    LoopSong,
+    LoopSection,
+    LoopClear,
+}
+
+async fn cmd_setlist_nav(socket: Option<&std::path::Path>, nav: SetlistNav) -> Result<()> {
+    let client = setlist_client(socket).await?;
+    match nav {
+        SetlistNav::GoSong(i) => client.go_to_song(i).await.map_err(rpc_err("go_to_song"))?,
+        SetlistNav::GoSection(i) => client
+            .go_to_section(i)
+            .await
+            .map_err(rpc_err("go_to_section"))?,
+        SetlistNav::NextSong => client.next_song().await.map_err(rpc_err("next_song"))?,
+        SetlistNav::PrevSong => client
+            .previous_song()
+            .await
+            .map_err(rpc_err("previous_song"))?,
+        SetlistNav::NextSection => client
+            .next_section()
+            .await
+            .map_err(rpc_err("next_section"))?,
+        SetlistNav::PrevSection => client
+            .previous_section()
+            .await
+            .map_err(rpc_err("previous_section"))?,
+        SetlistNav::Seek(s) => client.seek_to(s).await.map_err(rpc_err("seek_to"))?,
+        SetlistNav::LoopSong | SetlistNav::LoopSection | SetlistNav::LoopClear => {
+            // No matching trait method yet — keep the CLI flag for
+            // forward compatibility but tell the user it's unwired
+            // instead of pretending to work.
+            eyre::bail!(
+                "loop {} not yet wired on the server — `SetlistService` exposes \
+                 navigation + seek but no `set_loop` method.",
+                match nav {
+                    SetlistNav::LoopSong => "song",
+                    SetlistNav::LoopSection => "section",
+                    SetlistNav::LoopClear => "clear",
+                    _ => unreachable!(),
+                }
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn setlist_client(
+    socket: Option<&std::path::Path>,
+) -> Result<session_proto::services::SetlistServiceClient> {
+    use session_proto::services::SetlistServiceClient;
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    Ok(SetlistServiceClient::new(caller))
+}
+
+fn rpc_err(
+    label: &'static str,
+) -> impl FnOnce(vox::VoxError<session_proto::SessionServiceError>) -> eyre::Report {
+    move |e| eyre::eyre!("setlist.{label}: {e:?}")
+}
+
+/// True when the server reported "no setlist cached yet". The CLI
+/// uses this to decide whether to auto-build before retrying.
+fn is_not_found(e: &vox::VoxError<session_proto::SessionServiceError>) -> bool {
+    matches!(
+        e,
+        vox::VoxError::User(session_proto::SessionServiceError::NotFound { .. })
+    )
+}
+
+fn print_json<T: facet::Facet<'static>>(value: &T) -> Result<()> {
+    let json = facet_json::to_string(value).map_err(|e| eyre::eyre!("encode json: {e:?}"))?;
+    println!("{json}");
     Ok(())
 }
