@@ -335,6 +335,7 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
     let mut chunks: Vec<u8> = Vec::new();
     let mut regions: Vec<Vec<u8>> = Vec::new();
     let mut groups: Vec<Vec<u8>> = Vec::new();
+    let mut last_mdchun_len_at: Option<usize> = None;
 
     for (ti, track) in tracks.iter().enumerate() {
         if track.notes.is_empty() {
@@ -369,6 +370,7 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         // and only scans for the MdNLB magic, so it tolerated the omission).
         chunks.extend_from_slice(b"MdChun");
         chunks.extend_from_slice(&[0x01, 0x00]);
+        last_mdchun_len_at = Some(chunks.len()); // offset of this chunk's len u32
         chunks.extend_from_slice(&(chunk_bytes.len() as u32).to_le_bytes());
         chunks.extend_from_slice(&chunk_bytes);
 
@@ -392,7 +394,27 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
 
     // 0x2000 payload: u32 chunk count, then each MdChun-framed chunk.
     let mut chunk_payload = (regions.len() as u32).to_le_bytes().to_vec();
+    let len_field_in_payload = last_mdchun_len_at.map(|o| o + 4); // +4 for the count prefix
     chunk_payload.extend_from_slice(&chunks);
+    // The 0x2000 block keeps its original size (registry-safety), but PT
+    // also validates that the chunk-list data FILLS the block — trailing dead
+    // bytes give "size of header doesn't match amount of data read". So we
+    // absorb the slack into the LAST chunk's MdChun length (PT treats it as
+    // in-chunk free space, exactly as the original sessions do) instead of
+    // leaving raw padding. Compute the target from the existing 0x2000 block.
+    if let (Some(lf), Some((s, e))) = (
+        len_field_in_payload,
+        find_first_raw(&session.blocks, ContentType::MidiEventsBlock as u16)
+            .map(|b| (b.start, b.end)),
+    ) {
+        let target = e - (s + 9);
+        if chunk_payload.len() < target {
+            let slack = (target - chunk_payload.len()) as u32;
+            let cur = u32::from_le_bytes(chunk_payload[lf..lf + 4].try_into().unwrap());
+            chunk_payload[lf..lf + 4].copy_from_slice(&(cur + slack).to_le_bytes());
+            chunk_payload.resize(target, 0);
+        }
+    }
     replace_block_payload(session, ContentType::MidiEventsBlock as u16, &chunk_payload);
     replace_block_payload(
         session,
