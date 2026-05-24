@@ -13,7 +13,7 @@
 #![cfg(target_os = "macos")]
 
 use cocoa::base::{BOOL, NO, YES, id, nil};
-use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString, NSUInteger};
+use cocoa::foundation::{NSPoint, NSRange, NSRect, NSSize, NSString, NSUInteger};
 use objc::declare::ClassDecl;
 use objc::rc::StrongPtr;
 use objc::runtime::{Class, Object, Sel};
@@ -98,13 +98,6 @@ fn register_class() -> &'static Class {
     });
 
     Class::get("FTSDioxusInputView").expect("class must be registered")
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-struct NSRange {
-    location: NSUInteger,
-    length: NSUInteger,
 }
 
 extern "C" fn accepts_first_responder(_this: &Object, _sel: Sel) -> BOOL {
