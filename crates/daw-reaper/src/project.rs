@@ -829,6 +829,9 @@ fn ensure_ruler_lane_exists(
     project: ProjectContext,
     lane_index: u32,
 ) {
+    // Treat lane 1 as always-present (REAPER projects always have a default
+    // ruler lane, even when no explicit name is set). For higher indices,
+    // insert via RULER_LANE_ORDER:N = -1.
     let mut count = ruler_lane_count(low, project).max(1);
     while count < lane_index {
         let key = std::ffi::CString::new(format!("RULER_LANE_ORDER:{}", count + 1)).unwrap();

@@ -2332,6 +2332,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vox 0.5.0",
+ "vox-stream 0.5.0",
 ]
 
 [[package]]
@@ -11358,6 +11359,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
 name = "dioxus"
 version = "0.7.6"
 
@@ -11444,7 +11449,3 @@ version = "0.7.6"
 [[patch.unused]]
 name = "manganis-macro"
 version = "0.7.6"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"

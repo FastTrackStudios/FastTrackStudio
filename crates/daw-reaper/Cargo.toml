@@ -15,8 +15,9 @@ daw-audio-sync = { path = "../daw-audio-sync" }
 uuid = { workspace = true }
 architect = { workspace = true, features = ["vox"] }
 vox.workspace = true
+vox-stream.workspace = true
 tracing.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["net"] }
 moire.workspace = true
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation
