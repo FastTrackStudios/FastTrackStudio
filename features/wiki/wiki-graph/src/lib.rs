@@ -43,7 +43,8 @@ mod scoring;
 mod tier_lint;
 
 pub use analyze::{
-    AnalyzedGraph, analyze, fan_out_hubs, god_nodes, kind_counts, relation_counts, render_report,
+    AffectedResult, AnalyzedGraph, affected_by, analyze, fan_out_hubs, god_nodes, kind_counts,
+    relation_counts, render_report,
 };
 pub use build::{build_clusters, build_graph};
 pub use code_extract::{

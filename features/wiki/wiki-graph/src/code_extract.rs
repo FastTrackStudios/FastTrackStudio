@@ -54,6 +54,8 @@ use arborium_tree_sitter::{Node, Parser, Tree, TreeCursor};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodeLang {
     Rust,
+    TypeScript,
+    JavaScript,
 }
 
 impl CodeLang {
@@ -64,6 +66,9 @@ impl CodeLang {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {
             "rs" => Some(Self::Rust),
+            "ts" | "mts" | "cts" => Some(Self::TypeScript),
+            "tsx" => Some(Self::TypeScript), // TSX uses the TS grammar for our needs
+            "js" | "mjs" | "cjs" | "jsx" => Some(Self::JavaScript),
             _ => None,
         }
     }
@@ -73,12 +78,16 @@ impl CodeLang {
     pub fn tag(self) -> &'static str {
         match self {
             Self::Rust => "rust",
+            Self::TypeScript => "ts",
+            Self::JavaScript => "js",
         }
     }
 
     fn ts_language(self) -> arborium_tree_sitter::Language {
         match self {
             Self::Rust => arborium::lang_rust::language().into(),
+            Self::TypeScript => arborium::lang_typescript::language().into(),
+            Self::JavaScript => arborium::lang_javascript::language().into(),
         }
     }
 }
@@ -233,7 +242,10 @@ pub fn extract_source(
     let tree = parser
         .parse(source, None)
         .ok_or_else(|| CodeExtractError::NoTree(rel_path.to_path_buf()))?;
-    Ok(walk_rust(rel_path, source, &tree, lang))
+    Ok(match lang {
+        CodeLang::Rust => walk_rust(rel_path, source, &tree, lang),
+        CodeLang::TypeScript | CodeLang::JavaScript => walk_ts(rel_path, source, &tree, lang),
+    })
 }
 
 /// Walk the tree, emit nodes for each top-level (and
@@ -467,6 +479,194 @@ fn make_id(rel_path: &Path, lang: CodeLang, kind: SymbolKind, name: &str) -> Str
     format!("code:{}:{}:{}:{}", lang.tag(), path_s, kind.as_str(), name)
 }
 
+/// TypeScript / JavaScript AST walker. Shares the
+/// `CodeNode` / `CodeEdge` shape with Rust; per-language
+/// node-kind names differ. Covers:
+///
+/// | TS/JS AST node             | [`SymbolKind`] |
+/// |----------------------------|----------------|
+/// | `function_declaration`     | `Fn`           |
+/// | `class_declaration`        | `Struct`       |
+/// | `interface_declaration`    | `Trait` (TS)   |
+/// | `enum_declaration` (TS)    | `Enum`         |
+/// | `type_alias_declaration`   | `TypeAlias`    |
+/// | `method_definition`        | `Fn`           |
+/// | `lexical_declaration` w/ `const` + function value | `Const` |
+/// | `import_statement`         | edge `Imports` |
+/// | `call_expression`          | edge `Calls`   |
+fn walk_ts(rel_path: &Path, source: &str, tree: &Tree, lang: CodeLang) -> CodeExtraction {
+    let mut ex = CodeExtraction::default();
+    let mut cursor = tree.walk();
+    let mut scope: Vec<String> = Vec::new();
+    visit_ts(
+        &mut cursor,
+        source.as_bytes(),
+        rel_path,
+        lang,
+        &mut ex,
+        &mut scope,
+    );
+    ex
+}
+
+fn visit_ts(
+    cursor: &mut TreeCursor,
+    src: &[u8],
+    rel_path: &Path,
+    lang: CodeLang,
+    ex: &mut CodeExtraction,
+    scope: &mut Vec<String>,
+) {
+    let node = cursor.node();
+    let kind = node.kind();
+    let mut pushed_scope = false;
+
+    match kind {
+        "function_declaration" | "method_definition" | "generator_function_declaration" => {
+            if let Some(name) = field_text(node, "name", src) {
+                let id = make_id(rel_path, lang, SymbolKind::Fn, &name);
+                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Fn, lang, rel_path, &node);
+                scope.push(id);
+                pushed_scope = true;
+            }
+        }
+        "class_declaration" | "abstract_class_declaration" => {
+            if let Some(name) = field_text(node, "name", src) {
+                let id = make_id(rel_path, lang, SymbolKind::Struct, &name);
+                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Struct, lang, rel_path, &node);
+                scope.push(id);
+                pushed_scope = true;
+            }
+        }
+        "interface_declaration" => {
+            if let Some(name) = field_text(node, "name", src) {
+                let id = make_id(rel_path, lang, SymbolKind::Trait, &name);
+                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Trait, lang, rel_path, &node);
+                scope.push(id);
+                pushed_scope = true;
+            }
+        }
+        "enum_declaration" => {
+            if let Some(name) = field_text(node, "name", src) {
+                let id = make_id(rel_path, lang, SymbolKind::Enum, &name);
+                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Enum, lang, rel_path, &node);
+            }
+        }
+        "type_alias_declaration" => {
+            if let Some(name) = field_text(node, "name", src) {
+                let id = make_id(rel_path, lang, SymbolKind::TypeAlias, &name);
+                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::TypeAlias, lang, rel_path, &node);
+            }
+        }
+        "lexical_declaration" => {
+            // `const fn = (...) => …` / `const Foo = class …`
+            // Iterate variable_declarators, name the symbol.
+            let mut walk = node.walk();
+            if walk.goto_first_child() {
+                loop {
+                    let c = walk.node();
+                    if c.kind() == "variable_declarator" {
+                        if let Some(name) = field_text(c, "name", src) {
+                            let value = c.child_by_field_name("value");
+                            let symbol_kind = match value.map(|v| v.kind()) {
+                                Some(
+                                    "arrow_function"
+                                    | "function_expression"
+                                    | "function"
+                                    | "generator_function",
+                                ) => SymbolKind::Fn,
+                                Some("class_expression" | "class") => SymbolKind::Struct,
+                                _ => SymbolKind::Const,
+                            };
+                            let id = make_id(rel_path, lang, symbol_kind, &name);
+                            push_node_and_defines_edge(
+                                ex, scope, &id, &name, symbol_kind, lang, rel_path, &c,
+                            );
+                        }
+                    }
+                    if !walk.goto_next_sibling() {
+                        break;
+                    }
+                }
+            }
+        }
+        "import_statement" => {
+            // Take the source string verbatim (`"react"`,
+            // `"./foo"`, etc.).
+            if let Some(src_node) = node.child_by_field_name("source") {
+                let path_text = node_text(src_node, src);
+                let parent = scope.last().cloned().unwrap_or_else(|| {
+                    make_id(rel_path, lang, SymbolKind::Module, "<file>")
+                });
+                ex.edges.push(CodeEdge {
+                    source: parent,
+                    target: format!("ext:{}", path_text.trim_matches(|c| c == '"' || c == '\'')),
+                    relation: Relation::Imports,
+                    confidence: Confidence::Extracted,
+                });
+            }
+        }
+        "call_expression" => {
+            if let Some(func) = node.child_by_field_name("function") {
+                let callee = call_target_name(func, src);
+                if let (Some(parent), Some(target)) = (scope.last(), callee) {
+                    ex.edges.push(CodeEdge {
+                        source: parent.clone(),
+                        target: format!("name:{target}"),
+                        relation: Relation::Calls,
+                        confidence: Confidence::Inferred,
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            visit_ts(cursor, src, rel_path, lang, ex, scope);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+
+    if pushed_scope {
+        scope.pop();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_node_and_defines_edge(
+    ex: &mut CodeExtraction,
+    scope: &[String],
+    id: &str,
+    label: &str,
+    kind: SymbolKind,
+    lang: CodeLang,
+    rel_path: &Path,
+    node: &Node,
+) {
+    ex.nodes.push(CodeNode {
+        id: id.to_string(),
+        label: label.to_string(),
+        kind,
+        language: lang,
+        source_file: rel_path.to_path_buf(),
+        line_start: node.start_position().row as u32,
+        line_end: node.end_position().row as u32,
+    });
+    if let Some(parent) = scope.last() {
+        ex.edges.push(CodeEdge {
+            source: parent.clone(),
+            target: id.to_string(),
+            relation: Relation::Defines,
+            confidence: Confidence::Extracted,
+        });
+    }
+}
+
 /// Walk `root` recursively, extracting from every file with
 /// a [`CodeLang`]-recognized extension. Returns a flat list
 /// of per-file extractions plus a count of files we tried
@@ -477,11 +677,18 @@ fn make_id(rel_path: &Path, lang: CodeLang, kind: SymbolKind, name: &str) -> Str
 /// `node_modules/`, `.git/`, hidden dirs).
 pub fn scan_code_tree(root: &Path) -> Vec<CodeExtraction> {
     let mut out = Vec::new();
+    // Walker filters out hidden / build / vendored dirs.
+    // `filter_entry` blocks recursion through any entry that
+    // returns false — but the ROOT itself usually has a name
+    // like `src` / `task` / `.` (the cwd), so we never test
+    // it. We test only descendant entries via depth() > 0.
     let walker = walkdir::WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
             let name = e.file_name().to_string_lossy();
-            // Skip hidden, build artifacts, vendored deps.
             !name.starts_with('.')
                 && name != "target"
                 && name != "node_modules"
@@ -587,5 +794,53 @@ mod tests {
     fn unsupported_extension_errors() {
         let result = CodeLang::from_extension("py");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn extracts_fn_class_import_call_from_typescript() {
+        let src = r#"
+            import { foo } from "./foo";
+            import Bar from "bar";
+
+            export class MyService {
+                greet(name: string): string {
+                    return foo(name);
+                }
+            }
+
+            export function bootstrap(): MyService {
+                return new MyService();
+            }
+
+            const helper = (x: number) => x + 1;
+        "#;
+        let ex = extract_source(Path::new("test.ts"), src, CodeLang::TypeScript).unwrap();
+        let labels: Vec<&str> = ex.nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"MyService"), "class missing: {labels:?}");
+        assert!(labels.contains(&"bootstrap"), "fn missing: {labels:?}");
+        assert!(labels.contains(&"greet"), "method missing: {labels:?}");
+        assert!(labels.contains(&"helper"), "arrow fn missing: {labels:?}");
+
+        let imports = ex
+            .edges
+            .iter()
+            .filter(|e| e.relation == Relation::Imports)
+            .count();
+        assert!(imports >= 2, "expected ≥2 imports: {:?}", ex.edges);
+        let calls = ex
+            .edges
+            .iter()
+            .filter(|e| e.relation == Relation::Calls)
+            .count();
+        assert!(calls >= 1, "expected ≥1 call (foo or new MyService())");
+    }
+
+    #[test]
+    fn extension_dispatch_ts_and_jsx() {
+        assert_eq!(CodeLang::from_extension("ts"), Some(CodeLang::TypeScript));
+        assert_eq!(CodeLang::from_extension("tsx"), Some(CodeLang::TypeScript));
+        assert_eq!(CodeLang::from_extension("js"), Some(CodeLang::JavaScript));
+        assert_eq!(CodeLang::from_extension("jsx"), Some(CodeLang::JavaScript));
+        assert_eq!(CodeLang::from_extension("mjs"), Some(CodeLang::JavaScript));
     }
 }
