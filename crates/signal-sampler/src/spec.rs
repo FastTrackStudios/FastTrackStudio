@@ -132,6 +132,29 @@ impl LibrarySpec {
         facet_toml::from_str(s).map_err(|e| SamplerError::SpecParse(e.to_string()))
     }
 
+    pub fn from_sfz(s: &str) -> Result<Self, SamplerError> {
+        let zones = parse_sfz_zones(s)?;
+        Ok(Self {
+            name: "Imported SFZ".to_string(),
+            version: String::new(),
+            vendor: String::new(),
+            sections: Vec::new(),
+            mics: Vec::new(),
+            dynamics: DynamicsSpec::default(),
+            articulations: Vec::new(),
+            legato_engine: None,
+            short_note_timing: None,
+            keyswitch: None,
+            zones,
+            wavetables: Vec::new(),
+            grooves: Vec::new(),
+            tags: Vec::new(),
+            instrument: String::new(),
+            category: String::new(),
+            style: Vec::new(),
+        })
+    }
+
     /// Look up an articulation by its `id` field.
     pub fn articulation(&self, id: &str) -> Option<&ArticulationSpec> {
         self.articulations.iter().find(|a| a.id == id)
@@ -157,6 +180,173 @@ impl LibrarySpec {
             set.insert(t.clone());
         }
         set
+    }
+}
+
+fn parse_sfz_zones(s: &str) -> Result<Vec<ZoneSpec>, SamplerError> {
+    let mut current_group: HashMap<String, String> = HashMap::new();
+    let mut current_region: HashMap<String, String> = HashMap::new();
+    let mut zones = Vec::new();
+    let mut in_region = false;
+
+    for token in sfz_tokens(s) {
+        match token.as_str() {
+            "<group>" => {
+                if current_region.contains_key("sample") {
+                    zones.push(zone_from_sfz(&current_group, &current_region)?);
+                    current_region.clear();
+                }
+                current_group.clear();
+                in_region = false;
+            }
+            "<region>" => {
+                if current_region.contains_key("sample") {
+                    zones.push(zone_from_sfz(&current_group, &current_region)?);
+                    current_region.clear();
+                }
+                in_region = true;
+            }
+            _ => {
+                if let Some((key, value)) = token.split_once('=') {
+                    let target = if in_region {
+                        &mut current_region
+                    } else {
+                        &mut current_group
+                    };
+                    target.insert(key.trim().to_ascii_lowercase(), value.trim().to_string());
+                }
+            }
+        }
+    }
+    if current_region.contains_key("sample") {
+        zones.push(zone_from_sfz(&current_group, &current_region)?);
+    }
+    Ok(zones)
+}
+
+fn sfz_tokens(s: &str) -> Vec<String> {
+    s.lines()
+        .flat_map(|line| {
+            let line = line.split("//").next().unwrap_or("").trim();
+            line.split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn sfz_value<'a>(
+    group: &'a HashMap<String, String>,
+    region: &'a HashMap<String, String>,
+    key: &str,
+) -> Option<&'a str> {
+    region
+        .get(key)
+        .or_else(|| group.get(key))
+        .map(String::as_str)
+}
+
+fn sfz_u8(
+    group: &HashMap<String, String>,
+    region: &HashMap<String, String>,
+    key: &str,
+) -> Option<u8> {
+    sfz_value(group, region, key).and_then(parse_sfz_note_or_u8)
+}
+
+fn sfz_u32(
+    group: &HashMap<String, String>,
+    region: &HashMap<String, String>,
+    key: &str,
+) -> Option<u32> {
+    sfz_value(group, region, key).and_then(|value| value.parse().ok())
+}
+
+fn sfz_f32(
+    group: &HashMap<String, String>,
+    region: &HashMap<String, String>,
+    key: &str,
+) -> Option<f32> {
+    sfz_value(group, region, key).and_then(|value| value.parse().ok())
+}
+
+fn parse_sfz_note_or_u8(value: &str) -> Option<u8> {
+    value
+        .parse()
+        .ok()
+        .or_else(|| crate::midi::note_name_to_midi(value).ok())
+}
+
+fn zone_from_sfz(
+    group: &HashMap<String, String>,
+    region: &HashMap<String, String>,
+) -> Result<ZoneSpec, SamplerError> {
+    let file = sfz_value(group, region, "sample")
+        .ok_or_else(|| SamplerError::SpecParse("SFZ region missing sample".to_string()))?
+        .replace('\\', "/");
+    let key = sfz_u8(group, region, "key");
+    let key_min = key.or_else(|| sfz_u8(group, region, "lokey")).unwrap_or(0);
+    let key_max = key
+        .or_else(|| sfz_u8(group, region, "hikey"))
+        .unwrap_or(127);
+    let root_key = sfz_u8(group, region, "pitch_keycenter")
+        .or(key)
+        .unwrap_or(key_min);
+    let transpose = sfz_f32(group, region, "transpose").unwrap_or(0.0) * 100.0;
+    let tune = sfz_f32(group, region, "tune").unwrap_or(0.0);
+    let seq_position = sfz_u32(group, region, "seq_position").unwrap_or(1);
+    let seq_length = sfz_u32(group, region, "seq_length").unwrap_or(0);
+    let group_id = sfz_value(group, region, "group").unwrap_or("").to_string();
+    let off_by = sfz_value(group, region, "off_by")
+        .map(|value| vec![value.to_string()])
+        .unwrap_or_default();
+    let trigger_mode = sfz_value(group, region, "trigger")
+        .map(normalize_sfz_trigger)
+        .unwrap_or_default();
+
+    Ok(ZoneSpec {
+        file,
+        key_min,
+        key_max,
+        root_key,
+        vel_min: sfz_u8(group, region, "lovel").unwrap_or(0),
+        vel_max: sfz_u8(group, region, "hivel").unwrap_or(127),
+        rr_index: seq_position.saturating_sub(1),
+        rr_mode: (seq_length > 0)
+            .then(|| "cycle".to_string())
+            .unwrap_or_default(),
+        gain_db: sfz_f32(group, region, "volume").unwrap_or(0.0),
+        pan: (sfz_f32(group, region, "pan").unwrap_or(0.0) / 100.0).clamp(-1.0, 1.0),
+        tune_cents: tune + transpose,
+        sample_start: sfz_u32(group, region, "offset").unwrap_or(0),
+        sample_end: sfz_u32(group, region, "end").unwrap_or(0),
+        loop_start: sfz_u32(group, region, "loop_start").unwrap_or(0),
+        loop_end: sfz_u32(group, region, "loop_end").unwrap_or(0),
+        playback_mode: String::new(),
+        trigger_mode,
+        trigger_cc: sfz_u8(group, region, "on_locc").unwrap_or(0),
+        trigger_value_min: sfz_u8(group, region, "on_locc").unwrap_or(0),
+        trigger_value_max: sfz_u8(group, region, "on_hicc").unwrap_or(0),
+        mic: String::new(),
+        articulation: String::new(),
+        dynamic: String::new(),
+        direction: String::new(),
+        group: group_id.clone(),
+        group_polyphony: 0,
+        choke_group: group_id,
+        off_by,
+        section: String::new(),
+        variant: String::new(),
+    })
+}
+
+fn normalize_sfz_trigger(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "release" => "release".to_string(),
+        "first" => "first-note".to_string(),
+        "legato" => "legato".to_string(),
+        "attack" => String::new(),
+        other => other.to_string(),
     }
 }
 
@@ -240,6 +430,14 @@ pub struct DynamicsSpec {
     /// Six-layer CC1 crossfade zones (piano has 6 dynamics).
     #[facet(default)]
     pub cc1_layers_6: Vec<Cc1Layer>,
+    /// Half-pedal damping curve for CC64 values 1..63. Empty/`"linear"` =
+    /// straight response, `"squared"` keeps low values closer to normal
+    /// damping, `"sqrt"` makes low values more resonant.
+    #[facet(default)]
+    pub half_pedal_curve: String,
+    /// Release-time multiplier at CC64=63. 0 means the engine default.
+    #[facet(default)]
+    pub half_pedal_max_release_multiplier: f32,
 }
 
 /// One CC1 dynamic layer with its crossfade range.
@@ -463,12 +661,54 @@ pub struct ZoneSpec {
     /// but different `rr_index` form one round-robin group.
     #[facet(default)]
     pub rr_index: u32,
+    /// Round-robin mode for this zone group. Empty/`"cycle"` = sequential,
+    /// `"random"` = seeded pseudo-random, `"no-repeat-random"` avoids the
+    /// previous slot when more than one RR slot is available.
+    #[facet(default)]
+    pub rr_mode: String,
     /// Per-zone gain in dB. Default 0.
     #[facet(default)]
     pub gain_db: f32,
+    /// Equal-power stereo pan. -1 = left, 0 = center, +1 = right.
+    #[facet(default)]
+    pub pan: f32,
     /// Pitch fine-tune in cents. Default 0.
     #[facet(default)]
     pub tune_cents: f32,
+    /// First sample frame to play from this zone. 0 = sample start.
+    #[facet(default)]
+    pub sample_start: u32,
+    /// One-past-last sample frame to play from this zone. 0 = sample end.
+    #[facet(default)]
+    pub sample_end: u32,
+    /// Forward sustain-loop start frame. 0 with `loop_end == 0` = no loop.
+    #[facet(default)]
+    pub loop_start: u32,
+    /// Forward sustain-loop end frame (one-past-last). 0 = no loop.
+    #[facet(default)]
+    pub loop_end: u32,
+    /// Playback mode. Empty or `"forward"` = normal playback, `"reverse"` =
+    /// play the zone window backwards, `"alternate"`/`"alternating"` =
+    /// ping-pong between loop points.
+    #[facet(default)]
+    pub playback_mode: String,
+    /// Trigger mode. Empty/`"attack"` = held until note-off; `"one-shot"`
+    /// ignores note-off and plays to the end/window; `"release"`/`"key-up"`
+    /// fires on note-off; `"pedal-down"` / `"pedal-up"` fires on CC64
+    /// threshold crossings; `"cc"` / `"cc-threshold"` fires when `trigger_cc`
+    /// crosses into `trigger_value_min..=trigger_value_max`; `"aftertouch"`
+    /// fires when channel or poly aftertouch crosses into that same value range.
+    #[facet(default)]
+    pub trigger_mode: String,
+    /// MIDI CC number for CC-threshold trigger zones. 0 disables CC matching.
+    #[facet(default)]
+    pub trigger_cc: u8,
+    /// Lowest CC value that fires a CC-threshold trigger. Defaults to 64.
+    #[facet(default)]
+    pub trigger_value_min: u8,
+    /// Highest CC value that fires a CC-threshold trigger. 0 means 127.
+    #[facet(default)]
+    pub trigger_value_max: u8,
     /// Microphone / output-bus identifier — references a `MicSpec.id` in the
     /// containing `LibrarySpec.mics`. Empty string means the zone is
     /// mic-agnostic (single-mic libraries / synth zones).
@@ -504,6 +744,24 @@ pub struct ZoneSpec {
     /// existing filename-based scanner already uses.
     #[facet(default)]
     pub direction: String,
+    /// Logical zone group id. Used for group-level editing and for choke
+    /// relationships when `off_by` references another group.
+    #[facet(default)]
+    pub group: String,
+    /// Maximum simultaneous hits for this zone group. 0 = unlimited. This is
+    /// enforced at the group/choke id level, so multi-mic zones for one hit
+    /// are treated as one practical group event.
+    #[facet(default)]
+    pub group_polyphony: u32,
+    /// Choke/exclusive group id. A zone with this set silences currently
+    /// playing voices in the same choke group before it starts.
+    #[facet(default)]
+    pub choke_group: String,
+    /// Group/choke ids this zone silences on note-on. This maps directly to
+    /// DecentSampler-style `off_by` behavior for hi-hats and other mutually
+    /// exclusive one-shots.
+    #[facet(default)]
+    pub off_by: Vec<String>,
     /// Section identifier for multi-section libraries (orchestral with
     /// 1v/2v/Va/Ce/Ba; CS Brass with French Horn/Trombone/etc; Pacific
     /// with Cello/Violin/Viola/etc). References a `SectionSpec.id`. Empty
@@ -691,5 +949,40 @@ mod tests {
         let ks = spec.keyswitch.as_ref().unwrap();
         assert_eq!(ks.cc58_function(0), Some("Sustain: Low Latency Legato"));
         assert_eq!(ks.cc58_function(88), Some("Con Sordino On"));
+    }
+
+    #[test]
+    fn parse_sfz_subset_to_zones() {
+        let sfz = r#"
+            <group> lokey=C2 hikey=C5 group=1 off_by=2
+            <region> sample=Samples\Kick.wav key=C3 lovel=1 hivel=90 pitch_keycenter=C3 volume=-3 pan=-50 seq_position=2 seq_length=4 trigger=release loop_start=10 loop_end=20
+            <region> sample=snare.wav lokey=60 hikey=62 transpose=1 tune=-5 offset=4 end=128
+        "#;
+
+        let spec = LibrarySpec::from_sfz(sfz).expect("parse sfz");
+
+        assert_eq!(spec.zones.len(), 2);
+        let kick = &spec.zones[0];
+        assert_eq!(kick.file, "Samples/Kick.wav");
+        assert_eq!(kick.key_min, 48);
+        assert_eq!(kick.key_max, 48);
+        assert_eq!(kick.root_key, 48);
+        assert_eq!(kick.vel_min, 1);
+        assert_eq!(kick.vel_max, 90);
+        assert_eq!(kick.rr_index, 1);
+        assert_eq!(kick.rr_mode, "cycle");
+        assert_eq!(kick.trigger_mode, "release");
+        assert_eq!(kick.group, "1");
+        assert_eq!(kick.off_by, vec!["2"]);
+        assert_eq!(kick.loop_start, 10);
+        assert_eq!(kick.loop_end, 20);
+        assert!((kick.pan + 0.5).abs() < f32::EPSILON);
+
+        let snare = &spec.zones[1];
+        assert_eq!(snare.key_min, 60);
+        assert_eq!(snare.key_max, 62);
+        assert_eq!(snare.sample_start, 4);
+        assert_eq!(snare.sample_end, 128);
+        assert_eq!(snare.tune_cents, 95.0);
     }
 }

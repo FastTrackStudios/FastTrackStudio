@@ -9,7 +9,18 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, StreamConfig};
 use crossbeam_channel::{Receiver, Sender, bounded};
 
-use crate::{InstrumentId, SamplerBank, engine::cache::PreloadStats};
+use crate::{
+    InstrumentId, SamplerBank,
+    bank::PreloadProfile,
+    engine::cache::{EvictStats, PreloadStats},
+};
+
+fn output_device_name(device: &cpal::Device) -> String {
+    device
+        .description()
+        .map(|description| description.name().to_string())
+        .unwrap_or_default()
+}
 
 /// Live sample player with cpal audio output.
 ///
@@ -19,11 +30,12 @@ use crate::{InstrumentId, SamplerBank, engine::cache::PreloadStats};
 pub struct SamplerPlayer {
     /// Shared bank — clone this arc to drive MIDI from another thread.
     pub bank: Arc<Mutex<SamplerBank>>,
-    _stream: Arc<cpal::Stream>,
+    _stream: Option<Arc<cpal::Stream>>,
     pub sample_rate: u32,
     stats: Arc<AudioStats>,
     clock_start: Arc<Instant>,
     events_tx: Sender<AudioEvent>,
+    events_rx: Receiver<AudioEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,7 +67,7 @@ enum AudioEvent {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AudioStatsSnapshot {
     pub stream_errors: u64,
     pub callback_overruns: u64,
@@ -69,6 +81,17 @@ pub struct AudioStatsSnapshot {
     pub max_midi_to_callback_us: u64,
     pub last_callback_interval_us: u64,
     pub max_callback_interval_us: u64,
+    pub dropped_events: u64,
+    pub pending_events: usize,
+    pub stolen_voices: usize,
+    pub cache_misses: usize,
+    pub sample_misses: usize,
+    pub loaded_sample_bytes: usize,
+    pub cache_budget_bytes: Option<usize>,
+    pub cache_over_budget_bytes: usize,
+    pub recent_cache_misses: Vec<String>,
+    pub recent_sample_misses: Vec<String>,
+    pub resize_events: u64,
 }
 
 #[derive(Default)]
@@ -88,10 +111,23 @@ struct AudioStats {
     previous_callback_us: AtomicU64,
     last_callback_interval_us: AtomicU64,
     max_callback_interval_us: AtomicU64,
+    dropped_events: AtomicU64,
+    resize_events: AtomicU64,
 }
 
 impl AudioStats {
-    fn snapshot(&self) -> AudioStatsSnapshot {
+    fn snapshot(
+        &self,
+        pending_events: usize,
+        stolen_voices: usize,
+        cache_misses: usize,
+        sample_misses: usize,
+        loaded_sample_bytes: usize,
+        cache_budget_bytes: Option<usize>,
+        cache_over_budget_bytes: usize,
+        recent_cache_misses: Vec<String>,
+        recent_sample_misses: Vec<String>,
+    ) -> AudioStatsSnapshot {
         AudioStatsSnapshot {
             stream_errors: self.stream_errors.load(Ordering::Relaxed),
             callback_overruns: self.callback_overruns.load(Ordering::Relaxed),
@@ -105,6 +141,17 @@ impl AudioStats {
             max_midi_to_callback_us: self.max_midi_to_callback_us.load(Ordering::Relaxed),
             last_callback_interval_us: self.last_callback_interval_us.load(Ordering::Relaxed),
             max_callback_interval_us: self.max_callback_interval_us.load(Ordering::Relaxed),
+            dropped_events: self.dropped_events.load(Ordering::Relaxed),
+            pending_events,
+            stolen_voices,
+            cache_misses,
+            sample_misses,
+            loaded_sample_bytes,
+            cache_budget_bytes,
+            cache_over_budget_bytes,
+            recent_cache_misses,
+            recent_sample_misses,
+            resize_events: self.resize_events.load(Ordering::Relaxed),
         }
     }
 
@@ -122,6 +169,8 @@ impl AudioStats {
             &self.previous_callback_us,
             &self.last_callback_interval_us,
             &self.max_callback_interval_us,
+            &self.dropped_events,
+            &self.resize_events,
         ] {
             c.store(0, Ordering::Relaxed);
         }
@@ -157,22 +206,42 @@ impl SamplerPlayer {
     }
 
     /// Create a player with a specific audio device (substring name match).
+    /// Sample rate is taken from the device's default config — passing
+    /// `None` uses the device's native rate (typically 44.1 or 48 kHz),
+    /// which avoids the silent-stream pitfall when the host's audio
+    /// server (PipeWire / CoreAudio) refuses rate-mismatched streams.
     pub fn with_device(device_name: Option<&str>) -> eyre::Result<Self> {
-        Self::with_device_config(device_name, 48_000, Some(256))
+        Self::with_device_config(device_name, None, Some(256))
     }
 
-    /// Create a player with an explicit sample rate and optional fixed buffer size.
+    /// Create a player with an optional explicit sample rate. `None` =
+    /// use the device's native rate (recommended). `buffer_size = None`
+    /// uses the backend's default buffer.
     pub fn with_device_config(
         device_name: Option<&str>,
-        sample_rate: u32,
+        sample_rate: Option<u32>,
         buffer_size: Option<u32>,
+    ) -> eyre::Result<Self> {
+        Self::with_device_config_and_cache_budget(device_name, sample_rate, buffer_size, None)
+    }
+
+    /// Create a player with an optional decoded-sample cache budget.
+    ///
+    /// The current implementation reports budget pressure in
+    /// [`AudioStatsSnapshot`]; eviction is intentionally separate so the
+    /// real-time callback never loses sample data unexpectedly.
+    pub fn with_device_config_and_cache_budget(
+        device_name: Option<&str>,
+        sample_rate: Option<u32>,
+        buffer_size: Option<u32>,
+        cache_budget_bytes: Option<usize>,
     ) -> eyre::Result<Self> {
         let host = cpal::default_host();
 
         let device = match device_name {
             Some(name) => host
                 .output_devices()?
-                .find(|d| d.name().map_or(false, |n| n.contains(name)))
+                .find(|d| output_device_name(d).contains(name))
                 .ok_or_else(|| eyre::eyre!("audio device not found: {name}"))?,
             None => host
                 .default_output_device()
@@ -183,6 +252,10 @@ impl SamplerPlayer {
         let default_channels = default_config.channels();
         let channels = default_channels.min(2).max(1);
         let channels_usize = channels as usize;
+        // Honor the device's native sample rate by default — avoids the
+        // silent-stream failure mode when the audio server rejects a
+        // requested-but-unsupported rate.
+        let sample_rate = sample_rate.unwrap_or_else(|| default_config.sample_rate());
         let config = StreamConfig {
             channels,
             sample_rate,
@@ -199,20 +272,24 @@ impl SamplerPlayer {
 
         tracing::info!(
             "signal-sampler: opening output — device={:?}, requested_sr={sample_rate}, requested_ch={channels}, default_sr={}, default_ch={}, buffer={:?}, expected_buffer_ms={expected_latency_ms:.2}",
-            device.name().unwrap_or_default(),
+            output_device_name(&device),
             default_config.sample_rate(),
             default_channels,
             config.buffer_size,
         );
         eprintln!(
             "Audio output: device={:?}, sample_rate={sample_rate}, channels={channels}, buffer={:?}, expected_buffer_ms={expected_latency_ms:.2}",
-            device.name().unwrap_or_default(),
+            output_device_name(&device),
             config.buffer_size,
         );
 
-        let bank = Arc::new(Mutex::new(SamplerBank::new(sample_rate)));
+        let bank = Arc::new(Mutex::new(SamplerBank::with_cache_budget(
+            sample_rate,
+            cache_budget_bytes,
+        )));
         let bank_audio = Arc::clone(&bank);
         let (events_tx, events_rx) = bounded::<AudioEvent>(4096);
+        let events_rx_audio = events_rx.clone();
         let stats = Arc::new(AudioStats::default());
         let clock_start = Arc::new(Instant::now());
         stats
@@ -221,6 +298,9 @@ impl SamplerPlayer {
         let stats_audio = Arc::clone(&stats);
         let stats_errors = Arc::clone(&stats);
         let clock_audio = Arc::clone(&clock_start);
+        let mut channel_scratch = buffer_size
+            .map(|frames| vec![0.0; frames as usize * 2])
+            .unwrap_or_default();
 
         let stream = device.build_output_stream(
             &config,
@@ -229,9 +309,10 @@ impl SamplerPlayer {
                     data,
                     channels_usize,
                     &bank_audio,
-                    &events_rx,
+                    &events_rx_audio,
                     &stats_audio,
                     &clock_audio,
+                    &mut channel_scratch,
                 );
             },
             move |err| {
@@ -246,12 +327,41 @@ impl SamplerPlayer {
 
         Ok(Self {
             bank,
-            _stream: Arc::new(stream),
+            _stream: Some(Arc::new(stream)),
             sample_rate,
             stats,
             clock_start,
             events_tx,
+            events_rx,
         })
+    }
+
+    /// Create a player that does not open an audio device.
+    ///
+    /// This is intended for integration tests and offline probes: use the
+    /// normal load/MIDI APIs, then call [`render_offline`](Self::render_offline)
+    /// to render into an interleaved stereo buffer.
+    pub fn new_offline(sample_rate: u32) -> Self {
+        Self::new_offline_with_cache_budget(sample_rate, None)
+    }
+
+    pub fn new_offline_with_cache_budget(
+        sample_rate: u32,
+        cache_budget_bytes: Option<usize>,
+    ) -> Self {
+        let (events_tx, events_rx) = bounded::<AudioEvent>(4096);
+        Self {
+            bank: Arc::new(Mutex::new(SamplerBank::with_cache_budget(
+                sample_rate,
+                cache_budget_bytes,
+            ))),
+            _stream: None,
+            sample_rate,
+            stats: Arc::new(AudioStats::default()),
+            clock_start: Arc::new(Instant::now()),
+            events_tx,
+            events_rx,
+        }
     }
 
     // ── Instrument management (convenience pass-throughs) ────────────────────
@@ -266,7 +376,7 @@ impl SamplerPlayer {
     ) -> eyre::Result<()> {
         self.bank
             .lock()
-            .unwrap()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
             .load_instrument(id, spec_path, samples_root, section, mic)
     }
 
@@ -277,35 +387,103 @@ impl SamplerPlayer {
     /// This is the recommended entry point for zone-mapped libraries and
     /// (in the simplified groove mode) Stylus RMX-style loops.
     pub fn load_pack(&self, id: impl Into<InstrumentId>, pack_path: &Path) -> eyre::Result<()> {
-        self.bank.lock().unwrap().load_pack(id, pack_path)
+        self.bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
+            .load_pack(id, pack_path)
     }
 
     /// Load a `.signalblock` file. The block references one `.signalpack`
     /// plus block-level params (gain, pan, transpose). Background preload
     /// streams in immediately.
     pub fn load_block(&self, id: impl Into<InstrumentId>, block_path: &Path) -> eyre::Result<()> {
-        self.bank.lock().unwrap().load_block(id, block_path)
+        self.bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
+            .load_block(id, block_path)
+    }
+
+    /// Load a `.signalengine` — one playable Engine instance (one source
+    /// pack + per-mic Layers + voice config). Background preload streams
+    /// in middle-out priority.
+    pub fn load_engine(&self, id: impl Into<InstrumentId>, engine_path: &Path) -> eyre::Result<()> {
+        let spec = crate::engine_spec::EngineSpec::from_file(engine_path)?;
+        let dir = engine_path.parent().unwrap_or(std::path::Path::new(""));
+        self.bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
+            .load_engine_spec(id, &spec, dir)
+    }
+
+    /// Load a `.signalpreset` — full kit/rig with N Engine instances,
+    /// note routing, optional Modules + master FX (latter parse-only).
+    /// Returns the per-engine instrument ids registered under
+    /// `<id_prefix>:<engine_id>`.
+    pub fn load_preset(
+        &self,
+        id_prefix: &str,
+        preset_path: &Path,
+    ) -> eyre::Result<Vec<InstrumentId>> {
+        let preset = crate::preset_spec::PresetSpec::from_file(preset_path)?;
+        let dir = preset_path.parent().unwrap_or(std::path::Path::new(""));
+        self.bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
+            .load_preset_spec(id_prefix, &preset, dir)
     }
 
     pub fn unload_instrument(&self, id: &str) {
-        self.bank.lock().unwrap().unload_instrument(id);
+        self.clear_pending_events();
+        match self.bank.lock() {
+            Ok(mut bank) => bank.unload_instrument(id),
+            Err(_) => tracing::warn!("signal-sampler: sampler bank lock poisoned; unload skipped"),
+        }
     }
 
     pub fn set_midi_channel(&self, id: impl Into<InstrumentId>, channel: u8) {
-        self.bank.lock().unwrap().set_midi_channel(id, channel);
+        match self.bank.lock() {
+            Ok(mut bank) => bank.set_midi_channel(id, channel),
+            Err(_) => {
+                tracing::warn!("signal-sampler: sampler bank lock poisoned; MIDI channel skipped")
+            }
+        }
     }
 
     pub fn set_muted(&self, id: &str, muted: bool) {
-        self.bank.lock().unwrap().set_muted(id, muted);
+        match self.bank.lock() {
+            Ok(mut bank) => bank.set_muted(id, muted),
+            Err(_) => tracing::warn!("signal-sampler: sampler bank lock poisoned; mute skipped"),
+        }
     }
 
     pub fn preload_instrument(&self, id: &str) -> eyre::Result<PreloadStats> {
-        self.bank.lock().unwrap().preload_instrument(id)
+        self.bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?
+            .preload_instrument(id)
+    }
+
+    pub fn set_preload_profile(&self, profile: PreloadProfile) {
+        match self.bank.lock() {
+            Ok(mut bank) => bank.set_preload_profile(profile),
+            Err(_) => {
+                tracing::warn!(
+                    "signal-sampler: sampler bank lock poisoned; preload profile skipped"
+                )
+            }
+        }
     }
 
     // ── Direct MIDI (convenience pass-throughs) ──────────────────────────────
 
     pub fn note_on(&self, id: &str, note: u8, velocity: u8) {
+        // Just enqueue. Synchronous warm-decode used to live here, but it
+        // held `bank.lock()` through a ~15 ms FLAC decode and starved the
+        // audio thread (try_lock failed → output filled with zeros → clicks
+        // and underruns on every key press). The bank's background preload
+        // brings every sample online without blocking the audio path; until
+        // a sample is decoded, the audio thread simply doesn't spawn that
+        // voice and the user hears a brief silence on the first press.
         self.enqueue(AudioEvent::NoteOn {
             id: id.into(),
             note,
@@ -328,6 +506,24 @@ impl SamplerPlayer {
         });
     }
 
+    pub fn all_notes_off(&self, id: &str) {
+        self.clear_pending_events();
+        match self.bank.lock() {
+            Ok(mut bank) => bank.all_notes_off(id),
+            Err(_) => {
+                tracing::warn!("signal-sampler: sampler bank lock poisoned; all-notes-off skipped")
+            }
+        }
+    }
+
+    pub fn panic(&self, id: &str) {
+        self.clear_pending_events();
+        match self.bank.lock() {
+            Ok(mut bank) => bank.panic(id),
+            Err(_) => tracing::warn!("signal-sampler: sampler bank lock poisoned; panic skipped"),
+        }
+    }
+
     pub fn cc(&self, id: &str, controller: u8, value: u8) {
         self.enqueue(AudioEvent::Cc {
             id: id.into(),
@@ -338,6 +534,9 @@ impl SamplerPlayer {
 
     /// Dispatch a raw MIDI message, routed by channel assignment.
     pub fn midi_message(&self, channel: u8, status: u8, data1: u8, data2: u8) {
+        // Same rationale as `note_on`: don't hold `bank.lock()` here
+        // (warm_midi_message_samples does synchronous FLAC decode) — it
+        // would starve the audio callback. Just enqueue.
         self.enqueue(AudioEvent::Midi {
             channel,
             status,
@@ -348,7 +547,9 @@ impl SamplerPlayer {
 
     fn enqueue(&self, event: AudioEvent) {
         if self.events_tx.try_send(event).is_err() {
+            self.stats.dropped_events.fetch_add(1, Ordering::Relaxed);
             tracing::warn!("signal-sampler: audio event queue full; dropping event");
+            return;
         }
         self.stats.midi_messages.fetch_add(1, Ordering::Relaxed);
         self.stats.last_midi_us.store(
@@ -358,13 +559,103 @@ impl SamplerPlayer {
     }
 
     pub fn audio_stats(&self) -> AudioStatsSnapshot {
-        self.stats.snapshot()
+        let (
+            stolen_voices,
+            cache_misses,
+            sample_misses,
+            loaded_sample_bytes,
+            cache_budget_bytes,
+            cache_over_budget_bytes,
+            recent_cache_misses,
+            recent_sample_misses,
+            bank_resize_events,
+        ) = self
+            .bank
+            .try_lock()
+            .map(|bank| {
+                (
+                    bank.total_stolen_voices(),
+                    bank.total_cache_misses(),
+                    bank.total_sample_misses(),
+                    bank.total_loaded_sample_bytes(),
+                    bank.cache_budget_bytes(),
+                    bank.cache_over_budget_bytes(),
+                    bank.recent_cache_misses(),
+                    bank.recent_sample_misses(),
+                    bank.resize_events(),
+                )
+            })
+            .unwrap_or((0, 0, 0, 0, None, 0, Vec::new(), Vec::new(), 0));
+        let mut snapshot = self.stats.snapshot(
+            self.events_rx.len(),
+            stolen_voices,
+            cache_misses,
+            sample_misses,
+            loaded_sample_bytes,
+            cache_budget_bytes,
+            cache_over_budget_bytes,
+            recent_cache_misses,
+            recent_sample_misses,
+        );
+        snapshot.resize_events = snapshot.resize_events.saturating_add(bank_resize_events);
+        snapshot
+    }
+
+    pub fn evict_cache_over_budget(&self) -> EvictStats {
+        self.bank
+            .try_lock()
+            .map(|bank| bank.evict_cache_over_budget())
+            .unwrap_or_default()
+    }
+
+    pub fn clear_pending_events(&self) -> usize {
+        self.events_rx.try_iter().count()
+    }
+
+    /// Render one offline stereo block. `output` is interleaved L/R and is
+    /// cleared before rendering.
+    pub fn render_offline(&self, output: &mut [f32]) -> eyre::Result<()> {
+        if self._stream.is_some() {
+            return Err(eyre::eyre!(
+                "render_offline is only available on SamplerPlayer::new_offline"
+            ));
+        }
+        let mut bank = self
+            .bank
+            .lock()
+            .map_err(|_| eyre::eyre!("sampler bank lock poisoned"))?;
+        for event in self.events_rx.try_iter() {
+            apply_audio_event(&mut bank, event);
+        }
+        output.fill(0.0);
+        bank.render(output);
+        Ok(())
     }
 
     /// `(loaded, total)` background-preload progress for an instrument, or
     /// `(0, 0)` if not loaded. Cheap; meant for per-frame UI updates.
     pub fn preload_progress(&self, id: &str) -> (usize, usize) {
-        self.bank.lock().unwrap().preload_progress(id)
+        // try_lock — never block the calling thread (typically UI redraw)
+        // on the audio thread's brief render-block lock. Returning a
+        // stale snapshot is fine; the UI polls again on its next frame.
+        self.bank
+            .try_lock()
+            .map(|bank| bank.preload_progress(id))
+            .unwrap_or((0, 0))
+    }
+
+    pub fn active_voices(&self, id: &str) -> usize {
+        self.bank
+            .try_lock()
+            .map(|bank| bank.active_voices(id))
+            .unwrap_or(0)
+    }
+
+    pub fn stolen_voices(&self, id: &str) -> usize {
+        self.bank
+            .try_lock()
+            .map(|bank| bank.stolen_voices(id))
+            .unwrap_or(0)
     }
 
     /// Reset all rolling audio counters (callbacks, render-time peaks, lock
@@ -385,6 +676,7 @@ fn render_block(
     events_rx: &Receiver<AudioEvent>,
     stats: &AudioStats,
     clock_start: &Instant,
+    channel_scratch: &mut Vec<f32>,
 ) {
     let start = Instant::now();
     let callback_us = clock_start.elapsed().as_micros() as u64;
@@ -431,11 +723,21 @@ fn render_block(
         b.render(data);
     } else {
         let frames = data.len() / channels;
-        let mut stereo = vec![0.0f32; frames * 2];
-        b.render(&mut stereo);
+        let scratch_len = frames * 2;
+        if channel_scratch.len() != scratch_len {
+            channel_scratch.resize(scratch_len, 0.0);
+            stats.resize_events.fetch_add(1, Ordering::Relaxed);
+            tracing::warn!(
+                frames,
+                channels,
+                "signal-sampler: resized non-stereo output scratch"
+            );
+        }
+        channel_scratch.fill(0.0);
+        b.render(channel_scratch);
         for (frame, out) in data.chunks_mut(channels).enumerate() {
-            let l = stereo[frame * 2];
-            let r = stereo[frame * 2 + 1];
+            let l = channel_scratch[frame * 2];
+            let r = channel_scratch[frame * 2 + 1];
             match out.len() {
                 1 => out[0] = (l + r) * 0.5,
                 _ => {
@@ -476,5 +778,34 @@ fn apply_audio_event(bank: &mut SamplerBank, event: AudioEvent) {
             data1,
             data2,
         } => bank.midi_message(channel, status, data1, data2),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SamplerPlayer;
+
+    #[test]
+    fn offline_player_renders_without_audio_device() {
+        let player = SamplerPlayer::new_offline(48_000);
+        player.note_on("missing", 60, 100);
+
+        let mut block = vec![1.0; 128 * 2];
+        player.render_offline(&mut block).expect("offline render");
+
+        assert!(block.iter().all(|sample| *sample == 0.0));
+        assert_eq!(player.audio_stats().midi_messages, 1);
+    }
+
+    #[test]
+    fn all_notes_off_drains_pending_audio_events() {
+        let player = SamplerPlayer::new_offline(48_000);
+        player.note_on("missing", 60, 100);
+        assert_eq!(player.audio_stats().pending_events, 1);
+
+        player.all_notes_off("missing");
+
+        assert_eq!(player.audio_stats().pending_events, 0);
+        assert_eq!(player.audio_stats().midi_messages, 1);
     }
 }

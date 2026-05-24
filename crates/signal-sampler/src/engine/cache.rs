@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
+use arc_swap::ArcSwap;
 use flacenc::component::BitRepr;
 use flacenc::error::Verify;
 use rayon::prelude::*;
@@ -25,6 +26,25 @@ pub struct PreloadStats {
     pub loaded: usize,
     pub failed: usize,
     pub bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EvictStats {
+    pub evicted: usize,
+    pub bytes_before: usize,
+    pub bytes_after: usize,
+    pub bytes_freed: usize,
+}
+
+impl EvictStats {
+    pub fn add(&mut self, other: EvictStats) {
+        if self.bytes_before == 0 {
+            self.bytes_before = other.bytes_before;
+        }
+        self.evicted += other.evicted;
+        self.bytes_freed += other.bytes_freed;
+        self.bytes_after = other.bytes_after;
+    }
 }
 
 // ── Loaded sample data ────────────────────────────────────────────────────────
@@ -42,6 +62,10 @@ pub struct SampleData {
 }
 
 impl SampleData {
+    pub fn decoded_bytes(&self) -> usize {
+        self.frames.len() * std::mem::size_of::<f32>()
+    }
+
     /// Read one stereo frame (or duplicate mono → stereo). Returns (L, R).
     #[inline]
     pub fn frame(&self, frame_idx: usize) -> (f32, f32) {
@@ -80,8 +104,10 @@ pub struct SampleCache {
 }
 
 struct CacheInner {
-    /// Path-keyed map of fully decoded samples.
+    /// Writer-owned path-keyed map of fully decoded samples.
     loaded: RwLock<HashMap<PathBuf, Arc<SampleData>>>,
+    /// Lock-free read snapshot for the audio thread.
+    loaded_snapshot: ArcSwap<HashMap<PathBuf, Arc<SampleData>>>,
     /// Read-only after construction.
     prepared: HashMap<PathBuf, PreparedEntry>,
     /// Read-only after construction.
@@ -115,7 +141,7 @@ pub struct SignalPcmPack {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PackEntry {
+pub struct PackEntry {
     offset: u64,
     bytes: u64,
     channels: u16,
@@ -134,6 +160,7 @@ impl SampleCache {
         Self {
             inner: Arc::new(CacheInner {
                 loaded: RwLock::new(HashMap::new()),
+                loaded_snapshot: ArcSwap::from_pointee(HashMap::new()),
                 prepared: HashMap::new(),
                 prepared_dir: None,
                 pcm_pack: None,
@@ -148,6 +175,7 @@ impl SampleCache {
         Self {
             inner: Arc::new(CacheInner {
                 loaded: RwLock::new(HashMap::new()),
+                loaded_snapshot: ArcSwap::from_pointee(HashMap::new()),
                 prepared: HashMap::new(),
                 prepared_dir: None,
                 pcm_pack: Some(pack),
@@ -192,6 +220,7 @@ impl SampleCache {
         Self {
             inner: Arc::new(CacheInner {
                 loaded: RwLock::new(HashMap::new()),
+                loaded_snapshot: ArcSwap::from_pointee(HashMap::new()),
                 prepared,
                 prepared_dir,
                 pcm_pack,
@@ -208,11 +237,10 @@ impl SampleCache {
     }
 
     /// Lock-free try-read for the audio thread. Returns `None` on cache
-    /// miss; the audio thread should silently skip the voice rather than
-    /// block. The background preloader will populate the slot shortly.
+    /// miss; the audio thread should silently skip the voice. The background
+    /// preloader publishes new snapshots as samples arrive.
     pub fn get_loaded(&self, path: &Path) -> Option<Arc<SampleData>> {
-        let map = self.inner.loaded.try_read().ok()?;
-        map.get(path).map(Arc::clone)
+        self.inner.loaded_snapshot.load().get(path).map(Arc::clone)
     }
 
     /// Decode one sample (if not already cached) and insert it into the
@@ -223,11 +251,7 @@ impl SampleCache {
             return Ok(());
         }
         let data = decode_path(&self.inner, path)?;
-        self.inner
-            .loaded
-            .write()
-            .unwrap()
-            .insert(path.to_owned(), Arc::new(data));
+        self.insert_loaded(path.to_owned(), Arc::new(data), true);
         Ok(())
     }
 
@@ -242,18 +266,14 @@ impl SampleCache {
         let data = decode_path(&self.inner, path)?;
         let elapsed = start.elapsed();
         if elapsed.as_millis() >= 5 {
-            tracing::warn!(
+            tracing::debug!(
                 "sample cache miss loaded {} in {:.2} ms",
                 path.display(),
                 elapsed.as_secs_f64() * 1000.0
             );
         }
         let arc = Arc::new(data);
-        self.inner
-            .loaded
-            .write()
-            .unwrap()
-            .insert(path.to_owned(), Arc::clone(&arc));
+        self.insert_loaded(path.to_owned(), Arc::clone(&arc), true);
         Ok(arc)
     }
 
@@ -303,16 +323,12 @@ impl SampleCache {
                 };
                 match result {
                     Ok(data) => {
-                        let bytes = data.frames.len() * std::mem::size_of::<f32>();
+                        let bytes = data.decoded_bytes();
                         // Brief write lock per sample — readers (audio thread)
                         // see the new entry as soon as the lock releases. Audio
                         // try_read calls that race with this just return None
                         // for one block, no big deal.
-                        self.inner
-                            .loaded
-                            .write()
-                            .unwrap()
-                            .insert(path.clone(), Arc::new(data));
+                        self.insert_loaded(path.clone(), Arc::new(data), false);
                         loaded_n.fetch_add(1, Ordering::Relaxed);
                         bytes_n.fetch_add(bytes, Ordering::Relaxed);
                     }
@@ -322,6 +338,9 @@ impl SampleCache {
                     }
                 }
                 let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                if done <= 8 || done == total || done % 32 == 0 {
+                    self.publish_loaded_snapshot();
+                }
                 if total >= 100 && (done == total || done % 250 == 0) {
                     tracing::info!("signal-sampler: preloaded {done}/{total} samples");
                 }
@@ -334,13 +353,154 @@ impl SampleCache {
         }
     }
 
+    pub fn preload_cancelable<'a>(
+        &self,
+        paths: impl Iterator<Item = &'a Path>,
+        mut should_cancel: impl FnMut() -> bool,
+    ) -> PreloadStats {
+        let mut stats = PreloadStats::default();
+        let mut inserted_since_publish = 0usize;
+        for path in paths {
+            if should_cancel() {
+                break;
+            }
+            let already_loaded = self
+                .inner
+                .loaded
+                .read()
+                .map(|loaded| loaded.contains_key(path))
+                .unwrap_or(false);
+            if already_loaded {
+                continue;
+            }
+            // Decode + insert without publishing the audio-thread snapshot
+            // on every insert — publishing clones the whole `loaded` map,
+            // so per-insert publishing is O(n²) and crawls on large packs.
+            // We batch publishes (every 256 inserts) and do one final
+            // publish at the end so the audio thread sees the full set.
+            let data = match decode_path(&self.inner, path) {
+                Ok(d) => d,
+                Err(e) => {
+                    stats.failed += 1;
+                    tracing::warn!("cache: failed to preload {}: {e}", path.display());
+                    continue;
+                }
+            };
+            let bytes = data.decoded_bytes();
+            self.insert_loaded(path.to_owned(), Arc::new(data), false);
+            stats.loaded += 1;
+            stats.bytes += bytes;
+            inserted_since_publish += 1;
+            if inserted_since_publish >= 256 {
+                self.publish_loaded_snapshot();
+                inserted_since_publish = 0;
+            }
+        }
+        // Final publish so the audio thread sees every preloaded sample.
+        self.publish_loaded_snapshot();
+        stats
+    }
+
     /// Number of samples currently in cache.
     pub fn len(&self) -> usize {
-        self.inner.loaded.read().map(|m| m.len()).unwrap_or(0)
+        self.inner.loaded_snapshot.load().len()
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.inner
+            .loaded_snapshot
+            .load()
+            .values()
+            .map(|data| data.decoded_bytes())
+            .sum()
+    }
+
+    /// Evict decoded samples until this cache is at or below `budget_bytes`.
+    ///
+    /// This removes entries from the cache map and publishes a new audio-thread
+    /// snapshot. Existing voices may still hold `Arc<SampleData>` references,
+    /// so their playback is not interrupted; the data is released once those
+    /// voices finish.
+    pub fn evict_until_under_budget(&self, budget_bytes: usize) -> EvictStats {
+        let (stats, changed) = {
+            let mut loaded = self.inner.loaded.write().unwrap();
+            let bytes_before = loaded
+                .values()
+                .map(|data| data.decoded_bytes())
+                .sum::<usize>();
+            if bytes_before <= budget_bytes {
+                return EvictStats {
+                    bytes_before,
+                    bytes_after: bytes_before,
+                    ..EvictStats::default()
+                };
+            }
+
+            let mut candidates = loaded
+                .iter()
+                .map(|(path, data)| (path.clone(), data.decoded_bytes()))
+                .collect::<Vec<_>>();
+            candidates.sort_by(|(left_path, left_bytes), (right_path, right_bytes)| {
+                right_bytes
+                    .cmp(left_bytes)
+                    .then_with(|| left_path.cmp(right_path))
+            });
+
+            let mut bytes_after = bytes_before;
+            let mut evicted = 0;
+            for (path, bytes) in candidates {
+                if bytes_after <= budget_bytes {
+                    break;
+                }
+                if loaded.remove(&path).is_some() {
+                    evicted += 1;
+                    bytes_after = bytes_after.saturating_sub(bytes);
+                }
+            }
+
+            (
+                EvictStats {
+                    evicted,
+                    bytes_before,
+                    bytes_after,
+                    bytes_freed: bytes_before.saturating_sub(bytes_after),
+                },
+                evicted > 0,
+            )
+        };
+
+        if changed {
+            self.publish_loaded_snapshot();
+        }
+        stats
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn snapshot_len(&self) -> usize {
+        self.inner.loaded_snapshot.load().len()
+    }
+
+    pub fn republish_snapshot(&self) {
+        self.publish_loaded_snapshot();
+    }
+
+    fn insert_loaded(&self, path: PathBuf, data: Arc<SampleData>, publish: bool) {
+        {
+            let mut loaded = self.inner.loaded.write().unwrap();
+            loaded.insert(path, data);
+        }
+        if publish {
+            self.publish_loaded_snapshot();
+        }
+    }
+
+    fn publish_loaded_snapshot(&self) {
+        if let Ok(loaded) = self.inner.loaded.read() {
+            self.inner.loaded_snapshot.store(Arc::new(loaded.clone()));
+        }
     }
 }
 
@@ -722,6 +882,11 @@ impl SignalPcmPack {
     /// Number of audio entries indexed in the pack.
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Iterate (source-path, entry) pairs for debug inspection.
+    pub fn entries_iter(&self) -> impl Iterator<Item = (&PathBuf, &PackEntry)> {
+        self.entries.iter()
     }
 
     /// Pack file path.
@@ -1384,4 +1549,50 @@ fn load_flac_reader<R: Read>(
         sample_rate,
         num_frames,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(frames: usize) -> Arc<SampleData> {
+        Arc::new(SampleData {
+            frames: Arc::new(vec![0.0; frames]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: frames,
+        })
+    }
+
+    #[test]
+    fn eviction_removes_largest_samples_until_under_budget() {
+        let cache = SampleCache::new();
+        cache.insert_loaded(PathBuf::from("small.wav"), sample(4), false);
+        cache.insert_loaded(PathBuf::from("large.wav"), sample(16), false);
+        cache.insert_loaded(PathBuf::from("medium.wav"), sample(8), true);
+
+        let stats = cache.evict_until_under_budget(48);
+
+        assert_eq!(stats.bytes_before, 112);
+        assert_eq!(stats.bytes_after, 48);
+        assert_eq!(stats.bytes_freed, 64);
+        assert_eq!(stats.evicted, 1);
+        assert!(cache.get_loaded(Path::new("large.wav")).is_none());
+        assert!(cache.get_loaded(Path::new("medium.wav")).is_some());
+        assert!(cache.get_loaded(Path::new("small.wav")).is_some());
+    }
+
+    #[test]
+    fn eviction_preserves_active_arc_handles() {
+        let cache = SampleCache::new();
+        let held = sample(16);
+        cache.insert_loaded(PathBuf::from("held.wav"), Arc::clone(&held), true);
+
+        let stats = cache.evict_until_under_budget(0);
+
+        assert_eq!(stats.evicted, 1);
+        assert!(cache.get_loaded(Path::new("held.wav")).is_none());
+        assert_eq!(held.num_frames, 16);
+        assert_eq!(Arc::strong_count(&held), 1);
+    }
 }

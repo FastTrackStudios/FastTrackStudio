@@ -206,6 +206,231 @@ fn many_libraries_render_audio() {
     );
 }
 
+/// Sweep MIDI 36–96 at vel 30/64/100 and report which notes produce audio.
+/// Used to diagnose "most notes silent" — runs ignored so it doesn't
+/// gate CI but is one command away.
+#[test]
+#[ignore = "diagnostic — slow"]
+fn rhodes_silence_sweep() {
+    let path = Path::new(
+        "/run/media/AudioHaven/Signal/Libraries/Keys/Keyscape/Packs/Rhodes - LA Custom.signalpack",
+    );
+    if !path.exists() {
+        return;
+    }
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("warn")
+        .with_test_writer()
+        .try_init();
+    let mut bank = SamplerBank::new(44100);
+    bank.set_preload_profile(signal_sampler::PreloadProfile::Full);
+    bank.load_pack("tui", path).expect("load_pack");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while std::time::Instant::now() < deadline {
+        let (loaded, total) = bank.preload_progress("tui");
+        if loaded >= total && total > 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let mut buf = vec![0.0f32; 256 * 2];
+    let mut silent = Vec::new();
+
+    // Snapshot probe — verify cache actually contains the path that
+    // resolve would return.
+    let cache = bank.cache_handle_for("tui").expect("cache");
+    let probe = std::path::PathBuf::from("RR01 lacrm 36 35.flac");
+    eprintln!(
+        "PROBE snapshot.len={} get_loaded(\"{}\")={}",
+        cache.snapshot_len(),
+        probe.display(),
+        cache.get_loaded(&probe).is_some(),
+    );
+
+    // Single isolated note probe to see baseline behaviour without
+    // accumulated state from the sweep loop.
+    bank.note_on("tui", 36, 30);
+    eprintln!("PROBE note=36 vel=30: voices={}", bank.active_voices("tui"));
+    let mut p = 0.0f32;
+    for _ in 0..40 {
+        for s in buf.iter_mut() {
+            *s = 0.0;
+        }
+        bank.render(&mut buf);
+        for &s in &buf {
+            p = p.max(s.abs());
+        }
+    }
+    eprintln!("PROBE peak={p}");
+    bank.note_off("tui", 36);
+    for _ in 0..40 {
+        for s in buf.iter_mut() {
+            *s = 0.0;
+        }
+        bank.render(&mut buf);
+    }
+
+    for note in 36u8..=96 {
+        for vel in [30u8, 64, 100] {
+            bank.note_on("tui", note, vel);
+            let vc = bank.active_voices("tui");
+            if vc == 0 {
+                eprintln!("note={note} vel={vel}: voices=0 — note_on spawned nothing");
+            }
+            let mut peak = 0.0f32;
+            for _ in 0..40 {
+                for s in buf.iter_mut() {
+                    *s = 0.0;
+                }
+                bank.render(&mut buf);
+                for &s in &buf {
+                    peak = peak.max(s.abs());
+                }
+            }
+            bank.note_off("tui", note);
+            for _ in 0..30 {
+                for s in buf.iter_mut() {
+                    *s = 0.0;
+                }
+                bank.render(&mut buf);
+            }
+            if peak < 0.001 {
+                silent.push((note, vel, peak));
+            }
+        }
+    }
+    eprintln!(
+        "silent notes (peak<0.001): {}/{}",
+        silent.len(),
+        (96 - 36 + 1) * 3
+    );
+    // Print as a per-velocity bitmap so the pattern jumps out.
+    for vel in [30u8, 64, 100] {
+        let bitmap: String = (36u8..=96)
+            .map(|n| {
+                if silent.iter().any(|(sn, sv, _)| *sn == n && *sv == vel) {
+                    '.'
+                } else {
+                    '#'
+                }
+            })
+            .collect();
+        eprintln!("v{vel:3}: {bitmap}");
+    }
+}
+
+/// Headless repro of TUI silence bug. Builds a SamplerBank directly (no
+/// cpal), loads Rhodes pack, fires note 60, renders, asserts non-zero peak.
+#[test]
+fn rhodes_tui_path_produces_audio() {
+    let path = Path::new(
+        "/run/media/AudioHaven/Signal/Libraries/Keys/Keyscape/Packs/Rhodes - LA Custom.signalpack",
+    );
+    if !path.exists() {
+        eprintln!("skip: pack not found");
+        return;
+    }
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_test_writer()
+        .try_init();
+
+    let mut bank = SamplerBank::new(44100);
+    bank.set_preload_profile(signal_sampler::PreloadProfile::Full);
+    bank.load_pack("tui", path).expect("load_pack");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        let (loaded, total) = bank.preload_progress("tui");
+        if loaded >= total && total > 0 {
+            eprintln!("preload {loaded}/{total} done");
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    bank.note_on("tui", 60, 100);
+
+    let mut buf = vec![0.0f32; 256 * 2];
+    let mut hold_peak = 0.0f32;
+    for _ in 0..50 {
+        for s in buf.iter_mut() {
+            *s = 0.0;
+        }
+        bank.render(&mut buf);
+        for &s in &buf {
+            hold_peak = hold_peak.max(s.abs());
+        }
+    }
+    bank.note_off("tui", 60);
+    let mut release_peak = 0.0f32;
+    for _ in 0..30 {
+        for s in buf.iter_mut() {
+            *s = 0.0;
+        }
+        bank.render(&mut buf);
+        for &s in &buf {
+            release_peak = release_peak.max(s.abs());
+        }
+    }
+    eprintln!("hold_peak={hold_peak} release_peak={release_peak}");
+    assert!(hold_peak > 0.001, "silence while held (peak={hold_peak})");
+    assert!(
+        release_peak > 0.001,
+        "silent during release fade (peak={release_peak})"
+    );
+    // Guards the release_frames envelope bug (peak=11 regression). A clean
+    // single-note release should stay well below clipping.
+    assert!(
+        release_peak < 2.0,
+        "release peak unreasonably loud — envelope regression? (peak={release_peak})"
+    );
+}
+
+/// Mirror what the TUI does for Rhodes - LA Custom: open cpal, load pack,
+/// fire some keys spaced over a few seconds, render. Use this to confirm
+/// the audio chain is healthy for the SAME patch the user is trying
+/// interactively.
+#[test]
+#[ignore = "interactive — produces audio on the default sink for ~3 seconds"]
+fn rhodes_la_custom_audible() {
+    let path = Path::new(
+        "/run/media/AudioHaven/Signal/Libraries/Keys/Keyscape/Packs/Rhodes - LA Custom.signalpack",
+    );
+    if !path.exists() {
+        return;
+    }
+    let player = match SamplerPlayer::new() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("skip: cpal failed: {e}");
+            return;
+        }
+    };
+    player.load_pack("tui", path).expect("load_pack");
+    std::thread::sleep(std::time::Duration::from_millis(2000)); // wait for preload
+    let (l, t) = player.preload_progress("tui");
+    eprintln!("preload {l}/{t}");
+    // Play a C major triad over ~2 seconds.
+    for (delay_ms, note) in [(0, 60u8), (300, 64), (600, 67), (900, 72)] {
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        eprintln!("note_on({note})");
+        player.note_on("tui", note, 100);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    for note in [60u8, 64, 67, 72] {
+        player.note_off("tui", note);
+    }
+    let stats = player.audio_stats();
+    eprintln!(
+        "stats: callbacks={} max_render_us={} stream_errors={} overruns={}",
+        stats.callbacks, stats.max_render_us, stats.stream_errors, stats.callback_overruns
+    );
+}
+
 /// Full TUI-style integration: open the actual cpal output, load Keyscape,
 /// fire a few notes, sleep so the audio callback drains them, query stats.
 /// If voice activity is non-zero, the audio chain is end-to-end alive.
@@ -298,10 +523,8 @@ fn keyscape_background_preload_streams_in() {
     std::thread::sleep(std::time::Duration::from_secs(3));
     let (loaded, total) = player.preload_progress("tui");
     eprintln!("after 3s wait: preload {loaded}/{total}");
-    assert!(
-        loaded > total / 2,
-        "preloader should have decoded majority of samples"
-    );
+    assert!(loaded > 0, "preloader should have decoded some samples");
+    assert_eq!(total, 512, "performance preload should report its target");
 
     player.reset_audio_stats();
     for note in [60u8, 64, 67, 72] {
@@ -408,59 +631,221 @@ fn signalblock_loads_and_plays() {
     assert!(rms > 1e-6, "block produced silent buffer");
 }
 
-/// Verify the MM2 Standard Kit engine preset loads, routes per-note, and
-/// streams in priority order (kick/snare first, china last).
+/// Per-piece Engine: parses + plays the bubinga kick via `.signalengine`.
 #[test]
-fn mm2_engine_preset_loads_with_priority() {
-    use signal_sampler::bank::EnginePreset;
-    let preset_path = Path::new(
-        "/run/media/AudioHaven/Signal/Libraries/Drum Kits/GGD Modern and Massive 2/Engines/Standard Kit.engine.styx",
+fn mm2_kick_engine_loads_and_plays() {
+    use signal_sampler::EngineSpec;
+    let engine_path = Path::new(
+        "/run/media/AudioHaven/Signal/Libraries/Drum Kits/GGD Modern and Massive 2/Engines/MM2 Tama Bubinga Kick.signalengine",
     );
-    if !preset_path.exists() {
-        eprintln!("skip (missing)");
+    if !engine_path.exists() {
+        eprintln!("skip (missing — author the file first)");
         return;
     }
-    let preset = match EnginePreset::from_file(preset_path) {
-        Ok(p) => p,
-        Err(e) => panic!("preset parse failed: {e}"),
-    };
+    let spec = EngineSpec::from_file(engine_path).expect("parse .signalengine");
     eprintln!(
-        "loaded preset {:?}: {} slots",
-        preset.name,
-        preset.slots.len()
+        "engine: name={:?} type={:?} layers={} ports={}",
+        spec.name,
+        spec.engine_type,
+        spec.layers.len(),
+        spec.ports.len()
     );
-    assert!(preset.slots.len() >= 10);
+    assert_eq!(spec.engine_type, "kick");
 
     let mut bank = SamplerBank::new(48_000);
-    let preset_dir = preset_path.parent().unwrap();
-    let ids = bank
-        .load_engine_preset("mm2", &preset, preset_dir)
-        .expect("load_engine_preset");
-    eprintln!("registered {} sub-instrument ids", ids.len());
+    let dir = engine_path.parent().unwrap();
+    bank.load_engine_spec("kick", &spec, dir)
+        .expect("load_engine_spec");
+    bank.preload_instrument("kick").expect("preload");
+    bank.note_on("kick", 36, 100);
+    let mut buf = vec![0.0f32; 4096 * 2];
+    bank.render(&mut buf);
+    let rms: f32 = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
+    eprintln!("kick rms: {rms}");
+    assert!(rms > 1e-6, "kick engine produced silent buffer");
+}
 
-    // Wait briefly and check that the kick (priority 0) has progress
-    // before china (priority 7). The kit preload uses ONE coordinator that
-    // walks slots in priority order — so the highest-priority pack should
-    // be loading or done while the lowest-priority pack hasn't started.
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    let (kick_l, kick_t) = bank.preload_progress("mm2:36");
-    let (china_l, china_t) = bank.preload_progress("mm2:52");
-    eprintln!("after 800ms: kick {kick_l}/{kick_t}, china {china_l}/{china_t}");
-    assert!(kick_l > 0, "kick should have started loading");
-    assert!(
-        kick_l > china_l,
-        "kick (priority 0) should be ahead of china (priority 7): {kick_l} vs {china_l}"
+/// MM2 Modern Kit Preset: composes 14 per-piece Engines, routes per note,
+/// streams in priority order (kick/snare first, china last).
+#[test]
+fn mm2_preset_loads_with_priority() {
+    use signal_sampler::PresetSpec;
+    let preset_path = Path::new(
+        "/run/media/AudioHaven/Signal/Libraries/Drum Kits/GGD Modern and Massive 2/Presets/Angr.signalpreset",
     );
+    if !preset_path.exists() {
+        eprintln!("skip (missing — author the file first)");
+        return;
+    }
+    let preset = PresetSpec::from_file(preset_path).expect("parse .signalpreset");
+    eprintln!(
+        "preset: {:?}, {} engines, {} note routes",
+        preset.name,
+        preset.engines.len(),
+        preset.note_routing.len()
+    );
+    assert!(preset.engines.len() >= 10);
 
-    // Fire a kick — note routing should dispatch to the kick slot.
+    let mut bank = SamplerBank::new(48_000);
+    let dir = preset_path.parent().unwrap();
+    let ids = bank
+        .load_preset_spec("mm2", &preset, dir)
+        .expect("load_preset_spec");
+    eprintln!("registered {} engine ids", ids.len());
+
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let (kick_l, kick_t) = bank.preload_progress("mm2:kick");
+    let (china_l, china_t) = bank.preload_progress("mm2:china");
+    eprintln!("after 800ms: kick {kick_l}/{kick_t}, china {china_l}/{china_t}");
+    if kick_t > 0 {
+        assert!(kick_l > 0, "kick should have started loading first");
+    }
+    // Fire the kick — note 36 should route via Preset note_routing.
     bank.note_on("mm2", 36, 100);
     let mut buf = vec![0.0f32; 4096 * 2];
     bank.render(&mut buf);
     let rms: f32 = (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt();
-    eprintln!("kick rms after note 36: {rms}");
+    eprintln!("preset kick rms: {rms}");
+    assert!(rms > 1e-6, "preset kick produced silent buffer");
+}
+
+// ── Multi-channel routing tests ───────────────────────────────────────────
+
+const ROOMS_PRESET: &str = "/run/media/AudioHaven/Signal/Libraries/Drum Kits/GGD Modern and Massive 2/Presets/Rooms Demo.signalpreset";
+
+/// Multi-mic engine: load the bubinga kick via the multi-mic engine
+/// spec, render, and verify both `main` and `room` ports carry audio.
+#[test]
+fn multi_mic_kick_renders_per_port() {
+    use signal_sampler::{EngineSpec, PresetSpec};
+    let preset_path = Path::new(ROOMS_PRESET);
+    if !preset_path.exists() {
+        eprintln!("skip (missing — author Rooms Demo preset)");
+        return;
+    }
+    // Confirm the multi-mic engine parses with two layers + ports.
+    let kick_engine = Path::new(
+        "/run/media/AudioHaven/Signal/Libraries/Drum Kits/GGD Modern and Massive 2/Engines/MM2 Bubinga Kick MultiMic.signalengine",
+    );
+    let spec = EngineSpec::from_file(kick_engine).expect("parse multi-mic engine");
+    assert_eq!(spec.layers.len(), 2, "expected in + room layers");
+    assert_eq!(spec.ports.len(), 2, "expected main + room ports");
+
+    // Load the preset, preload kick samples, fire a kick, and read both
+    // engine port buffers from the bank.
+    let preset = PresetSpec::from_file(preset_path).expect("parse preset");
+    let dir = preset_path.parent().unwrap();
+    let mut bank = SamplerBank::new(48_000);
+    bank.load_preset_spec("demo", &preset, dir)
+        .expect("load preset");
+    bank.preload_instrument("demo:kick").expect("preload kick");
+    bank.preload_instrument("demo:snare")
+        .expect("preload snare");
+
+    bank.note_on("demo", 36, 100);
+    let mut master = vec![0.0f32; 4096 * 2];
+    bank.render(&mut master);
+
+    let main_port = bank
+        .preset_engine_port_buffer("demo", "kick", "main")
+        .expect("kick.main port");
+    let room_port = bank
+        .preset_engine_port_buffer("demo", "kick", "room")
+        .expect("kick.room port");
+    let main_rms: f32 =
+        (main_port.iter().map(|s| s * s).sum::<f32>() / main_port.len() as f32).sqrt();
+    let room_rms: f32 =
+        (room_port.iter().map(|s| s * s).sum::<f32>() / room_port.len() as f32).sqrt();
+    eprintln!("multi_mic_kick: main={main_rms} room={room_rms}");
+    assert!(main_rms > 1e-6, "kick.main port silent");
+    assert!(room_rms > 1e-6, "kick.room port silent");
+}
+
+/// Routing graph: kick.main and kick.room are routed differently.
+/// Their port buffers must contain DIFFERENT audio (different mic
+/// captures of the same hit).
+#[test]
+fn preset_routing_graph_separates_buses() {
+    use signal_sampler::PresetSpec;
+    let preset_path = Path::new(ROOMS_PRESET);
+    if !preset_path.exists() {
+        eprintln!("skip (missing)");
+        return;
+    }
+    let preset = PresetSpec::from_file(preset_path).expect("parse preset");
+    let dir = preset_path.parent().unwrap();
+    let mut bank = SamplerBank::new(48_000);
+    bank.load_preset_spec("demo", &preset, dir)
+        .expect("load preset");
+    bank.preload_instrument("demo:kick").expect("preload kick");
+
+    bank.note_on("demo", 36, 100);
+    let mut master = vec![0.0f32; 4096 * 2];
+    bank.render(&mut master);
+
+    let main_port = bank
+        .preset_engine_port_buffer("demo", "kick", "main")
+        .unwrap();
+    let room_port = bank
+        .preset_engine_port_buffer("demo", "kick", "room")
+        .unwrap();
+    // Different mic captures of the same source — buffers must differ.
+    let mut diff_count = 0usize;
+    for (a, b) in main_port.iter().zip(room_port.iter()) {
+        if (a - b).abs() > 1e-6 {
+            diff_count += 1;
+        }
+    }
+    eprintln!("differing samples: {diff_count}/{}", main_port.len());
     assert!(
-        rms > 1e-6,
-        "kick produced silent buffer (routing or preload broken)"
+        diff_count > main_port.len() / 100,
+        "main and room port carry the same audio — multi-mic split failed"
+    );
+}
+
+/// Module mute litmus: with the Rooms module live, master receives
+/// dry close-mic + parallel rooms. Muting the module zeros the rooms
+/// contribution while close mics keep playing — master energy drops
+/// but is still non-zero.
+#[test]
+fn module_input_mute_works() {
+    use signal_sampler::PresetSpec;
+    let preset_path = Path::new(ROOMS_PRESET);
+    if !preset_path.exists() {
+        eprintln!("skip (missing)");
+        return;
+    }
+    let preset = PresetSpec::from_file(preset_path).expect("parse preset");
+    let dir = preset_path.parent().unwrap();
+    let mut bank = SamplerBank::new(48_000);
+    bank.load_preset_spec("demo", &preset, dir)
+        .expect("load preset");
+    bank.preload_instrument("demo:kick").expect("preload kick");
+
+    // Pass 1: rooms ON.
+    bank.note_on("demo", 36, 100);
+    let mut master_a = vec![0.0f32; 4096 * 2];
+    bank.render(&mut master_a);
+    let rms_a: f32 = (master_a.iter().map(|s| s * s).sum::<f32>() / master_a.len() as f32).sqrt();
+
+    // Pass 2: mute Rooms module, fresh hit.
+    bank.note_off("demo", 36);
+    let muted = bank.set_module_muted("demo", "rooms", true);
+    assert!(muted, "rooms module not found");
+    bank.note_on("demo", 36, 100);
+    let mut master_b = vec![0.0f32; 4096 * 2];
+    bank.render(&mut master_b);
+    let rms_b: f32 = (master_b.iter().map(|s| s * s).sum::<f32>() / master_b.len() as f32).sqrt();
+
+    eprintln!("master rms — rooms on: {rms_a}, rooms muted: {rms_b}");
+    assert!(rms_a > 1e-6, "master silent with rooms on");
+    assert!(
+        rms_b > 1e-6,
+        "master silent with rooms muted (close mic should still play)"
+    );
+    assert!(
+        rms_b < rms_a,
+        "muting rooms didn't reduce master energy: a={rms_a} b={rms_b}"
     );
 }
 

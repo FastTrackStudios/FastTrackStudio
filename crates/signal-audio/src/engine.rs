@@ -1,10 +1,17 @@
-//! Live audio engine — cpal output stream with test tone through the DSP chain.
+//! Live audio engine — cpal output stream with test tone through the processing chain.
 
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::chain::ProcessingChain;
+
+fn output_device_name(device: &cpal::Device) -> String {
+    device
+        .description()
+        .map(|description| description.name().to_string())
+        .unwrap_or_else(|_| "unknown".into())
+}
 
 /// Generates one sample of a sawtooth-approximation test tone at the given phase.
 ///
@@ -22,36 +29,45 @@ fn test_tone_sample(phase: f64) -> f64 {
 ///
 /// Drop this struct to stop the stream.
 pub struct LiveAudioEngine {
-    _stream: cpal::Stream,
+    _stream: Option<cpal::Stream>,
 }
 
 impl LiveAudioEngine {
+    /// Construct a disabled engine. Useful when native audio output is owned
+    /// by another subsystem, or when startup should continue without audio.
+    pub fn disabled() -> Self {
+        Self { _stream: None }
+    }
+
     /// Start a cpal output stream that feeds a test tone through `chain`.
-    ///
-    /// Only f32 sample format is currently supported. If the default device
-    /// does not support f32 output, an error is logged and the engine silently
-    /// produces no audio (the struct is still returned so the chain remains
-    /// usable for parameter editing).
     pub fn new(chain: ProcessingChain) -> Self {
+        match Self::try_new(chain) {
+            Ok(engine) => engine,
+            Err(err) => {
+                tracing::warn!("signal-audio: audio disabled: {err}");
+                Self::disabled()
+            }
+        }
+    }
+
+    /// Try to start a cpal output stream that feeds a test tone through `chain`.
+    ///
+    /// Only f32 output is currently supported. Device/configuration failures
+    /// are returned so applications can keep running without crashing.
+    pub fn try_new(chain: ProcessingChain) -> Result<Self, String> {
         let host = cpal::default_host();
 
         let device = match host.default_output_device() {
             Some(d) => d,
             None => {
-                tracing::warn!("signal-audio: no default output device found — audio disabled");
-                // Return a dummy engine with no stream by panicking is bad;
-                // instead we start a silent do-nothing stream on a null-like path.
-                // Since we can't create a stream without a device, we just keep
-                // the struct as-is. In practice this shouldn't happen on a DAW machine.
-                panic!("No default output device available");
+                return Err("no default output device available".into());
             }
         };
 
         let config = match device.default_output_config() {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!("signal-audio: could not get default output config: {e}");
-                panic!("Could not get default output config: {e}");
+                return Err(format!("could not get default output config: {e}"));
             }
         };
 
@@ -60,23 +76,8 @@ impl LiveAudioEngine {
 
         tracing::info!(
             "signal-audio: opening output stream — device={:?}, sr={sample_rate}, ch={channels}",
-            device.name().unwrap_or_else(|_| "unknown".into()),
+            output_device_name(&device),
         );
-
-        // Update the chain's DSP to match the actual device sample rate.
-        {
-            use fts_dsp::{AudioConfig, Processor};
-            let cfg = AudioConfig {
-                sample_rate,
-                max_buffer_size: 512,
-            };
-            if let Ok(mut eq) = chain.eq.lock() {
-                eq.update(cfg);
-            }
-            if let Ok(mut comp) = chain.comp.lock() {
-                comp.update(cfg);
-            }
-        }
 
         const FREQ_HZ: f64 = 110.0;
         let phase_inc = FREQ_HZ / sample_rate;
@@ -115,7 +116,7 @@ impl LiveAudioEngine {
                                 }
                             }
 
-                            // Process through EQ + Comp
+                            // Process through the live chain.
                             chain.process(&mut left, &mut right);
 
                             // Interleave f64 → f32 output
@@ -132,19 +133,22 @@ impl LiveAudioEngine {
                         },
                         None,
                     )
-                    .expect("Failed to build f32 output stream")
+                    .map_err(|e| format!("failed to build f32 output stream: {e}"))?
             }
             fmt => {
-                tracing::warn!(
-                    "signal-audio: unsupported sample format {fmt:?} — only f32 is supported"
-                );
-                panic!("Unsupported sample format: {fmt:?}");
+                return Err(format!(
+                    "unsupported sample format {fmt:?}; only f32 is supported"
+                ));
             }
         };
 
-        stream.play().expect("Failed to start audio stream");
+        stream
+            .play()
+            .map_err(|e| format!("failed to start audio stream: {e}"))?;
         tracing::info!("signal-audio: stream started");
 
-        Self { _stream: stream }
+        Ok(Self {
+            _stream: Some(stream),
+        })
     }
 }

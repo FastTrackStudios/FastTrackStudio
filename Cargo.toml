@@ -55,7 +55,6 @@ signal-sampler = { path = "crates/signal-sampler" }
 # Using local paths directly (same as [patch] overrides) to avoid
 # git submodule fetch issues with stale nih-plug submodule rev.
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
-comp-dsp = { path = "../Plugins/FTS-Comp/crates/comp-dsp" }
 fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
 cpal = "0.17"
 
@@ -152,7 +151,6 @@ clap = { version = "4", features = ["derive"] }
 # ── Split FTS plugin repo local overrides ───────────────────────────────
 [patch."https://github.com/FastTrackStudios/FTS-Plugins.git"]
 eq-dsp = { path = "../Plugins/FTS-EQ/crates/eq-dsp" }
-comp-dsp = { path = "../Plugins/FTS-Comp/crates/comp-dsp" }
 fts-dsp = { path = "../Plugins/FTS-Audiocore/crates/fts-dsp" }
 audio-gui = { path = "../Plugins/FTS-Audiocore/crates/audio-gui" }
 fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }

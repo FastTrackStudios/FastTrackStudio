@@ -18,6 +18,7 @@ signal-proto = { path = "../signal-proto" }
 # Audio I/O
 cpal        = { workspace = true }
 crossbeam-channel = { workspace = true }
+arc-swap    = "1.7"
 hound       = "3.5"
 claxon      = "0.4"
 zstd        = "0.13"
@@ -29,3 +30,6 @@ eyre        = { workspace = true }
 tracing     = { workspace = true }
 rayon       = "1"
 walkdir     = "2"
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }

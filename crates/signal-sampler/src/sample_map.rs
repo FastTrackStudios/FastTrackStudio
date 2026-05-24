@@ -619,12 +619,31 @@ fn parse_keyscape_loose_stem(stem: &str) -> Option<SampleKey> {
         .find(|(_, value)| *value <= 127)
         .map(|(idx, _)| *idx)?;
     let note = tokens[note_idx].parse::<u8>().ok()?;
-    let dynamic = numeric
-        .iter()
-        .rev()
-        .find(|(idx, value)| *idx != note_idx && *value <= 127)
-        .map(|(_, value)| value.to_string())
-        .unwrap_or_else(|| "127".to_string());
+    // Velocity-layer tokens like `v01`..`v19` (Keyscape Classic-style)
+    // encode the dynamic separately from the note. Map them onto a
+    // velocity-scale dynamic label so different velocity layers don't
+    // collapse onto the same (artic, note, dyn) key and overwrite each
+    // other.
+    let v_dyn = tokens.iter().enumerate().find_map(|(idx, token)| {
+        if idx == note_idx {
+            return None;
+        }
+        let rest = token.strip_prefix('v')?;
+        let n: u16 = rest.parse().ok()?;
+        // Map v01..v19 → roughly equal spacing across 1..=127 so the
+        // dynamic-picker (closest by velocity) works as expected.
+        // v01 → 7, v10 → 67, v19 → 126.
+        let mapped = ((n as f32 / 19.0) * 127.0).round() as u16;
+        Some(mapped.clamp(1, 127).to_string())
+    });
+    let dynamic = v_dyn.unwrap_or_else(|| {
+        numeric
+            .iter()
+            .rev()
+            .find(|(idx, value)| *idx != note_idx && *value <= 127)
+            .map(|(_, value)| value.to_string())
+            .unwrap_or_else(|| "127".to_string())
+    });
 
     let articulation = loose_articulation(&tokens, note_idx)?;
     let direction = if articulation.contains("rel") || tokens.iter().any(|token| token == "rel") {
@@ -726,6 +745,20 @@ mod tests {
         assert_eq!(key.articulation, "Leg");
         assert_eq!(key.direction, "up");
         assert_eq!(key.rr, 0); // RR1 → index 0
+    }
+
+    #[test]
+    fn parse_classic_clr_r10_velocity() {
+        let key = parse_sample_stem("RR01_SL01 CLR r10_60 v01").unwrap();
+        eprintln!("v01 → {key:?}");
+        assert_eq!(key.articulation, "clrr10");
+        assert_eq!(key.note, 60);
+        let key10 = parse_sample_stem("RR01_SL01 CLR r10_60 v10").unwrap();
+        eprintln!("v10 → {key10:?}");
+        let key19 = parse_sample_stem("RR01_SL01 CLR r10_60 v19").unwrap();
+        eprintln!("v19 → {key19:?}");
+        assert_ne!(key.dynamic, key10.dynamic);
+        assert_ne!(key10.dynamic, key19.dynamic);
     }
 
     #[test]

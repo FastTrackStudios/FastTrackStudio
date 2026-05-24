@@ -17,10 +17,92 @@ use signal_sampler::{LibrarySpec, read_pack_header};
 
 use crate::types::{ColumnItem, DetailData};
 
-/// Lightweight summary of a single `.signalpack` on disk.
+/// What kind of loadable file this entry represents. Drives icon + dispatch
+/// in the TUI / collection browser.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EntryKind {
+    /// `.signalpack` — binary audio container (requires multi-mic Engine wrapper to load).
+    Pack,
+    /// `.signalblock` — saved configured block.
+    Block,
+    /// `.signalmodule` — reusable processing-graph node template.
+    Module,
+    /// `.signalengine` — one playable Engine instance.
+    Engine,
+    /// `.signalpreset` — full kit/rig with multiple engines + routing.
+    Preset,
+}
+
+impl EntryKind {
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::Preset => "🎚️",
+            Self::Engine => "⚙️",
+            Self::Module => "📦",
+            Self::Block => "🔲",
+            Self::Pack => "🎵",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Preset => "preset",
+            Self::Engine => "engine",
+            Self::Module => "module",
+            Self::Block => "block",
+            Self::Pack => "pack",
+        }
+    }
+
+    pub fn from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            "signalpack" => Some(Self::Pack),
+            "signalblock" => Some(Self::Block),
+            "signalmodule" => Some(Self::Module),
+            "signalengine" => Some(Self::Engine),
+            "signalpreset" => Some(Self::Preset),
+            _ => None,
+        }
+    }
+}
+
+/// One non-fatal problem encountered while scanning a library root.
+#[derive(Clone, Debug)]
+pub struct ScanError {
+    pub path: Option<PathBuf>,
+    pub message: String,
+}
+
+/// Detailed result for a filesystem scan. The TUI uses this to show whether
+/// an empty or sparse browser is caused by no files, unreadable directories,
+/// or loadable files that failed to parse.
+#[derive(Clone, Debug, Default)]
+pub struct ScanReport {
+    pub root: PathBuf,
+    pub entries: Vec<PackEntry>,
+    pub candidate_count: usize,
+    pub skipped_walk_entries: usize,
+    pub failed_loadables: usize,
+    pub errors: Vec<ScanError>,
+}
+
+impl ScanReport {
+    pub fn loaded_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn has_failures(&self) -> bool {
+        self.skipped_walk_entries > 0 || self.failed_loadables > 0
+    }
+}
+
+/// Lightweight summary of a single loadable file on disk (.signalpack,
+/// .signalengine, .signalpreset, .signalmodule, .signalblock).
 #[derive(Clone, Debug)]
 pub struct PackEntry {
-    /// Absolute path to the pack file.
+    /// Discriminator — which load path this entry uses.
+    pub kind: EntryKind,
+    /// Absolute path to the file.
     pub path: PathBuf,
     /// `LibrarySpec.name`, falling back to the file stem.
     pub name: String,
@@ -68,31 +150,231 @@ impl PackEntry {
     }
 }
 
-/// Scan `root` recursively for `.signalpack` files, opening each header.
-/// Returns `PackEntry` records sorted by path for stable display order.
+/// Scan `root` recursively for any Signal loadable file (.signalpack,
+/// .signalengine, .signalpreset, .signalmodule, .signalblock). Returns
+/// `PackEntry` records sorted by path. Errors during individual reads
+/// are logged and skipped.
 ///
-/// Errors during individual pack reads are logged and skipped — partial
-/// failures shouldn't kill the browser.
+/// Renamed conceptually to "loadables" but keeps the name `scan_packs`
+/// for back-compat. Use [`scan_loadables`] (alias) if you prefer.
 pub fn scan_packs(root: &Path) -> Vec<PackEntry> {
-    let paths: Vec<PathBuf> = walkdir::WalkDir::new(root)
+    scan_packs_report(root).entries
+}
+
+/// Scan `root` and retain diagnostic information about skipped directories
+/// and files that looked loadable but failed to parse.
+pub fn scan_packs_report(root: &Path) -> ScanReport {
+    const MAX_SCAN_ERRORS: usize = 32;
+    let mut report = ScanReport {
+        root: root.to_path_buf(),
+        ..ScanReport::default()
+    };
+    let mut entries: Vec<(PathBuf, EntryKind)> = Vec::new();
+
+    for item in walkdir::WalkDir::new(root)
         .follow_links(false)
         .max_depth(12)
         .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
-        .filter(|p| p.extension().is_some_and(|e| e == "signalpack"))
+    {
+        let entry = match item {
+            Ok(entry) => entry,
+            Err(err) => {
+                report.skipped_walk_entries += 1;
+                if report.errors.len() < MAX_SCAN_ERRORS {
+                    report.errors.push(ScanError {
+                        path: err.path().map(Path::to_path_buf),
+                        message: err.to_string(),
+                    });
+                }
+                continue;
+            }
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.into_path();
+        let Some(kind) = path
+            .extension()
+            .and_then(|x| x.to_str())
+            .and_then(EntryKind::from_extension)
+        else {
+            continue;
+        };
+        report.candidate_count += 1;
+        entries.push((path, kind));
+    }
+
+    let built: Vec<Result<PackEntry, (PathBuf, signal_sampler::SamplerError)>> = entries
+        .par_iter()
+        .map(|(path, kind)| {
+            build_entry_dispatch(path, root, *kind).map_err(|err| (path.clone(), err))
+        })
         .collect();
 
-    let mut entries: Vec<PackEntry> = paths
-        .par_iter()
-        .filter_map(|path| build_entry(path, root).ok())
-        .collect();
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    entries
+    let mut out = Vec::with_capacity(built.len());
+    for item in built {
+        match item {
+            Ok(entry) => out.push(entry),
+            Err((path, err)) => {
+                report.failed_loadables += 1;
+                if report.errors.len() < MAX_SCAN_ERRORS {
+                    report.errors.push(ScanError {
+                        path: Some(path),
+                        message: err.to_string(),
+                    });
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    report.entries = out;
+    report
 }
 
-fn build_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::SamplerError> {
+/// Alias for `scan_packs` — mirrors the new "loadables" terminology.
+pub fn scan_loadables(root: &Path) -> Vec<PackEntry> {
+    scan_packs(root)
+}
+
+/// Alias for [`scan_packs_report`] using the newer loadables terminology.
+pub fn scan_loadables_report(root: &Path) -> ScanReport {
+    scan_packs_report(root)
+}
+
+fn build_entry_dispatch(
+    path: &Path,
+    root: &Path,
+    kind: EntryKind,
+) -> Result<PackEntry, signal_sampler::SamplerError> {
+    match kind {
+        EntryKind::Pack => build_pack_entry(path, root),
+        EntryKind::Engine => build_engine_entry(path, root),
+        EntryKind::Preset => build_preset_entry(path, root),
+        EntryKind::Module => build_module_entry(path, root),
+        EntryKind::Block => build_block_entry(path, root),
+    }
+}
+
+fn folder_segments(path: &Path, root: &Path) -> Vec<String> {
+    path.parent()
+        .and_then(|p| p.strip_prefix(root).ok())
+        .map(|rel| {
+            rel.components()
+                .filter_map(|c| c.as_os_str().to_str().map(|s| s.to_string()))
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn build_engine_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::SamplerError> {
+    let spec = signal_sampler::EngineSpec::from_file(path)?;
+    let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let mut tags = TagSet::new();
+    if !spec.engine_type.is_empty() {
+        tags.insert(StructuredTag::new(
+            signal::tagging::TagCategory::Instrument,
+            spec.engine_type.clone(),
+        ));
+    }
+    Ok(PackEntry {
+        kind: EntryKind::Engine,
+        path: path.to_path_buf(),
+        name: if spec.name.is_empty() {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string()
+        } else {
+            spec.name
+        },
+        instrument: spec.engine_type,
+        category: "engine".into(),
+        style: Vec::new(),
+        tags,
+        vendor: String::new(),
+        folder: folder_segments(path, root),
+        sample_count: 0,
+        size_bytes,
+    })
+}
+
+fn build_preset_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::SamplerError> {
+    let spec = signal_sampler::PresetSpec::from_file(path)?;
+    let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    Ok(PackEntry {
+        kind: EntryKind::Preset,
+        path: path.to_path_buf(),
+        name: if spec.name.is_empty() {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string()
+        } else {
+            spec.name
+        },
+        instrument: String::new(),
+        category: "preset".into(),
+        style: Vec::new(),
+        tags: TagSet::new(),
+        vendor: String::new(),
+        folder: folder_segments(path, root),
+        sample_count: spec.engines.len(),
+        size_bytes,
+    })
+}
+
+fn build_module_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::SamplerError> {
+    let spec = signal_sampler::ModuleSpec::from_file(path)?;
+    let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    Ok(PackEntry {
+        kind: EntryKind::Module,
+        path: path.to_path_buf(),
+        name: if spec.name.is_empty() {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string()
+        } else {
+            spec.name
+        },
+        instrument: String::new(),
+        category: "module".into(),
+        style: Vec::new(),
+        tags: TagSet::new(),
+        vendor: String::new(),
+        folder: folder_segments(path, root),
+        sample_count: 0,
+        size_bytes,
+    })
+}
+
+fn build_block_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::SamplerError> {
+    let spec = signal_sampler::BlockSpec::from_file(path)?;
+    let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    Ok(PackEntry {
+        kind: EntryKind::Block,
+        path: path.to_path_buf(),
+        name: if spec.name.is_empty() {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string()
+        } else {
+            spec.name
+        },
+        instrument: spec.block_type,
+        category: "block".into(),
+        style: Vec::new(),
+        tags: TagSet::new(),
+        vendor: String::new(),
+        folder: folder_segments(path, root),
+        sample_count: 0,
+        size_bytes,
+    })
+}
+
+fn build_pack_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::SamplerError> {
     let header = read_pack_header(path)?;
     let spec: LibrarySpec = header.spec;
     let name = if spec.name.is_empty() {
@@ -131,6 +413,7 @@ fn build_entry(path: &Path, root: &Path) -> Result<PackEntry, signal_sampler::Sa
         .unwrap_or_default();
 
     Ok(PackEntry {
+        kind: EntryKind::Pack,
         path: path.to_path_buf(),
         name,
         instrument: spec.instrument,
@@ -193,4 +476,28 @@ pub fn search<'a>(entries: &'a [PackEntry], q: &str) -> Vec<&'a PackEntry> {
                     .any(|t| t.value.to_ascii_lowercase().contains(&q))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_report_for_empty_root_has_counts() {
+        let root =
+            std::env::temp_dir().join(format!("signal-browser-empty-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let report = scan_packs_report(&root);
+
+        assert_eq!(report.root, root);
+        assert_eq!(report.loaded_count(), 0);
+        assert_eq!(report.candidate_count, 0);
+        assert_eq!(report.failed_loadables, 0);
+        assert_eq!(report.skipped_walk_entries, 0);
+        assert!(report.errors.is_empty());
+
+        let _ = std::fs::remove_dir_all(&report.root);
+    }
 }

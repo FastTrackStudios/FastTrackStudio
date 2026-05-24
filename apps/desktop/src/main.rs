@@ -99,9 +99,10 @@ fn main() {
 
     // Create the live audio processing chain and start the engine.
     let chain = ProcessingChain::new(48000.0);
-    let _engine = signal_audio::LiveAudioEngine::new(chain.clone());
+    let _engine = signal_audio::LiveAudioEngine::disabled();
 
-    // Create the sampler player (opens cpal output stream on first instrument load).
+    // Create the sampler player. It owns the native cpal output stream; keep
+    // the processing-chain engine disabled until both paths share one mixer.
     let sampler = SamplerPlayer::new().expect("Failed to initialise SamplerPlayer");
 
     let app_state = AppState {

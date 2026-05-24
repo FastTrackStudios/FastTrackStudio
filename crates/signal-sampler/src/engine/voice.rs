@@ -64,11 +64,23 @@ pub struct Voice {
     /// Current playback position in frames (fractional for pitch shifting).
     position: f64,
 
+    /// First frame allowed for playback. Defaults to sample start.
+    start_frame: usize,
+
+    /// One-past-last frame allowed for playback. Defaults to sample length.
+    end_frame: usize,
+
+    loop_range: Option<(usize, usize)>,
+    reverse: bool,
+    alternating_loop: bool,
+
     /// Playback rate. 1.0 = original pitch, 2^(semitones/12) for transposition.
     rate: f64,
 
     /// Output gain [0.0, 1.0].
     pub gain: f32,
+    pan_l: f32,
+    pan_r: f32,
 
     /// Target gain for CC1 crossfade blend (updated per render block).
     pub target_gain: f32,
@@ -81,6 +93,14 @@ pub struct Voice {
 
     /// MIDI note this voice belongs to (for note-off matching).
     pub note: u8,
+
+    /// Index into the patch's `LibrarySpec.mics` declaration order.
+    /// `None` for libraries without explicit mics (folds to mic 0 in
+    /// multi-mic render).
+    pub mic_index: Option<u8>,
+
+    /// Hashed choke/exclusive group id for zone-mode voices.
+    pub choke_group: Option<u64>,
 
     /// Release fade duration in frames. Used when state transitions to Releasing.
     release_frames: usize,
@@ -102,16 +122,26 @@ impl Voice {
         release_frames: usize,
     ) -> Self {
         let rate = 2.0f64.powf(semitone_offset as f64 / 12.0);
+        let end_frame = data.num_frames;
         Self {
             data,
             position: 0.0,
+            start_frame: 0,
+            end_frame,
+            loop_range: None,
+            reverse: false,
+            alternating_loop: false,
             rate,
             gain,
+            pan_l: 1.0,
+            pan_r: 1.0,
             target_gain: gain,
             gain_ramp_frames: 0,
             state: VoiceState::Playing,
             kind,
             note,
+            mic_index: None,
+            choke_group: None,
             release_frames,
         }
     }
@@ -129,18 +159,88 @@ impl Voice {
         gain: f32,
         release_frames: usize,
     ) -> Self {
+        let end_frame = data.num_frames;
         Self {
             data,
             position: 0.0,
+            start_frame: 0,
+            end_frame,
+            loop_range: None,
+            reverse: false,
+            alternating_loop: false,
             rate,
             gain,
+            pan_l: 1.0,
+            pan_r: 1.0,
             target_gain: gain,
             gain_ramp_frames: 0,
             state: VoiceState::Playing,
             kind,
             note,
+            mic_index: None,
+            choke_group: None,
             release_frames,
         }
+    }
+
+    /// Set the mic index this voice routes to. `mic_index` indexes into
+    /// `LibrarySpec.mics` in declaration order.
+    pub fn data_num_frames(&self) -> usize {
+        self.data.num_frames
+    }
+
+    pub fn with_mic_index(mut self, mic_index: Option<u8>) -> Self {
+        self.mic_index = mic_index;
+        self
+    }
+
+    pub fn with_choke_group(mut self, choke_group: Option<u64>) -> Self {
+        self.choke_group = choke_group;
+        self
+    }
+
+    pub fn with_pan(mut self, pan: f32) -> Self {
+        let pan = pan.clamp(-1.0, 1.0);
+        let theta = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+        self.pan_l = theta.cos();
+        self.pan_r = theta.sin();
+        self
+    }
+
+    pub fn with_sample_window(mut self, start_frame: usize, end_frame: Option<usize>) -> Self {
+        let start = start_frame.min(self.data.num_frames);
+        let end = end_frame
+            .unwrap_or(self.data.num_frames)
+            .min(self.data.num_frames)
+            .max(start);
+        self.start_frame = start;
+        self.position = start as f64;
+        self.end_frame = end;
+        self
+    }
+
+    pub fn with_forward_loop(mut self, loop_start: usize, loop_end: usize) -> Self {
+        let start = loop_start.min(self.end_frame);
+        let end = loop_end.min(self.end_frame);
+        if end > start + 1 {
+            self.loop_range = Some((start, end));
+        }
+        self
+    }
+
+    pub fn with_alternating_loop(mut self, loop_start: usize, loop_end: usize) -> Self {
+        self = self.with_forward_loop(loop_start, loop_end);
+        if self.loop_range.is_some() {
+            self.alternating_loop = true;
+        }
+        self
+    }
+
+    pub fn reversed(mut self) -> Self {
+        self.reverse = true;
+        self.loop_range = None;
+        self.position = self.end_frame.saturating_sub(1) as f64;
+        self
     }
 
     /// Schedule a gain ramp to `target` over `frames` frames.
@@ -151,15 +251,37 @@ impl Voice {
 
     /// Trigger note-off. Short notes and release samples play to completion.
     pub fn note_off(&mut self) {
+        self.note_off_with_release_frames(self.release_frames);
+    }
+
+    pub fn note_off_with_release_frames(&mut self, release_frames: usize) {
         match self.kind {
             VoiceKind::Short | VoiceKind::Release => {
                 // Play to end — do not release early.
             }
             _ => {
                 if self.state == VoiceState::Playing {
+                    let frames = release_frames.max(1);
+                    // Update the divisor too — `next_frame` computes
+                    // `env = frames_remaining / self.release_frames`, so if
+                    // we set `frames_remaining` to a number larger than the
+                    // voice's stored `release_frames` the envelope amplifies
+                    // beyond 1.0 instead of fading. Sync them now.
+                    self.release_frames = frames;
                     self.state = VoiceState::Releasing {
-                        frames_remaining: self.release_frames,
+                        frames_remaining: frames,
                     };
+                }
+            }
+        }
+    }
+
+    pub fn repedal(&mut self) {
+        match self.kind {
+            VoiceKind::Short | VoiceKind::Release | VoiceKind::Legato => {}
+            _ => {
+                if matches!(self.state, VoiceState::Releasing { .. }) {
+                    self.state = VoiceState::Playing;
                 }
             }
         }
@@ -202,7 +324,7 @@ impl Voice {
 
         // Read sample with linear interpolation
         let frame_idx = self.position as usize;
-        if frame_idx >= self.data.num_frames {
+        if frame_idx >= self.end_frame || frame_idx < self.start_frame {
             self.state = VoiceState::Done;
             return (0.0, 0.0);
         }
@@ -211,7 +333,7 @@ impl Voice {
         let (l0, r0) = self.data.frame(frame_idx);
         let (l1, r1) = self
             .data
-            .frame((frame_idx + 1).min(self.data.num_frames - 1));
+            .frame((frame_idx + 1).min(self.end_frame.saturating_sub(1)));
 
         let l = l0 + (l1 - l0) * frac;
         let r = r0 + (r1 - r0) * frac;
@@ -219,9 +341,30 @@ impl Voice {
         let amp = self.gain * env;
 
         // Advance position
-        self.position += self.rate;
+        if self.reverse {
+            self.position -= self.rate;
+        } else {
+            self.position += self.rate;
+        }
+        if matches!(self.state, VoiceState::Playing) {
+            if let Some((loop_start, loop_end)) = self.loop_range {
+                if self.alternating_loop {
+                    if !self.reverse && self.position >= loop_end as f64 {
+                        self.position =
+                            (loop_end.saturating_sub(2)) as f64 - (self.position - loop_end as f64);
+                        self.reverse = true;
+                    } else if self.reverse && self.position < loop_start as f64 {
+                        self.position = loop_start as f64 + (loop_start as f64 - self.position);
+                        self.reverse = false;
+                    }
+                } else if !self.reverse && self.position >= loop_end as f64 {
+                    let len = (loop_end - loop_start) as f64;
+                    self.position = loop_start as f64 + (self.position - loop_end as f64) % len;
+                }
+            }
+        }
 
-        (l * amp, r * amp)
+        (l * amp * self.pan_l, r * amp * self.pan_r)
     }
 
     /// Render a block of stereo frames into `output` (interleaved L/R).
@@ -246,34 +389,84 @@ impl Voice {
 
 /// Maximum simultaneous voices before stealing.
 const MAX_VOICES: usize = 64;
+const STEAL_FADE_FRAMES: usize = 128;
 
-/// Pool of active voices with simple stealing policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoiceStealPolicy {
+    ReleaseFirstQuietest,
+    Oldest,
+    Quietest,
+    SameNoteFirst,
+    DropNew,
+}
+
+impl VoiceStealPolicy {
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "oldest" => Self::Oldest,
+            "quietest" => Self::Quietest,
+            "same-note" | "same_note" | "same-note-first" | "same_note_first" => {
+                Self::SameNoteFirst
+            }
+            "none" | "drop" | "drop-new" | "drop_new" => Self::DropNew,
+            _ => Self::ReleaseFirstQuietest,
+        }
+    }
+}
+
+/// Pool of active voices with bounded polyphony and voice stealing.
 pub struct VoicePool {
     voices: Vec<Voice>,
+    stolen: usize,
+    max_voices: usize,
+    steal_policy: VoiceStealPolicy,
 }
 
 impl VoicePool {
     pub fn new() -> Self {
         Self {
             voices: Vec::with_capacity(MAX_VOICES),
+            stolen: 0,
+            max_voices: MAX_VOICES,
+            steal_policy: VoiceStealPolicy::ReleaseFirstQuietest,
         }
     }
 
-    /// Add a voice, stealing the oldest if at capacity.
+    pub fn with_max_voices(max_voices: usize) -> Self {
+        let capacity = max_voices.max(1).min(MAX_VOICES);
+        Self {
+            voices: Vec::with_capacity(capacity),
+            stolen: 0,
+            max_voices: max_voices.max(1),
+            steal_policy: VoiceStealPolicy::ReleaseFirstQuietest,
+        }
+    }
+
+    pub fn set_max_voices(&mut self, max_voices: usize) {
+        self.max_voices = max_voices.max(1);
+        self.enforce_limit();
+    }
+
+    pub fn max_voices(&self) -> usize {
+        self.max_voices
+    }
+
+    pub fn set_steal_policy(&mut self, policy: VoiceStealPolicy) {
+        self.steal_policy = policy;
+    }
+
+    pub fn steal_policy(&self) -> VoiceStealPolicy {
+        self.steal_policy
+    }
+
+    /// Add a voice, stealing one or more voices if at capacity.
     pub fn spawn(&mut self, voice: Voice) {
         // Remove done voices first
         self.voices.retain(|v| !v.is_done());
 
-        if self.voices.len() >= MAX_VOICES {
-            // Steal: silence the oldest non-release voice
-            if let Some(idx) = self
-                .voices
-                .iter()
-                .position(|v| v.kind != VoiceKind::Release)
-            {
-                self.voices.remove(idx);
-            } else {
-                self.voices.remove(0);
+        if self.voices.len() >= self.max_voices {
+            if self.steal_one_for(&voice) == StealOutcome::DropIncoming {
+                return;
             }
         }
         self.voices.push(voice);
@@ -281,11 +474,42 @@ impl VoicePool {
 
     /// Send note-off to all voices playing `note` (except one-shot kinds).
     pub fn note_off(&mut self, note: u8) {
+        self.note_off_with_release_frames(note, None);
+    }
+
+    pub fn note_off_with_release_frames(&mut self, note: u8, release_frames: Option<usize>) {
         for v in &mut self.voices {
             if v.note == note {
-                v.note_off();
+                match release_frames {
+                    Some(frames) => v.note_off_with_release_frames(frames),
+                    None => v.note_off(),
+                }
             }
         }
+    }
+
+    /// Send note-off to every active voice.
+    pub fn all_notes_off(&mut self) {
+        for v in &mut self.voices {
+            v.note_off();
+        }
+    }
+
+    pub fn repedal_releasing(&mut self) -> usize {
+        let mut restored = 0;
+        for voice in &mut self.voices {
+            if matches!(voice.state, VoiceState::Releasing { .. }) {
+                voice.repedal();
+                if matches!(voice.state, VoiceState::Playing) {
+                    restored += 1;
+                }
+            }
+        }
+        restored
+    }
+
+    pub fn panic(&mut self) {
+        self.voices.clear();
     }
 
     /// Silence all voices for `note` immediately (used when legato transition fires).
@@ -310,6 +534,24 @@ impl VoicePool {
         }
     }
 
+    pub fn silence_choke_group(&mut self, group: u64, fade_frames: usize) {
+        for v in &mut self.voices {
+            if v.choke_group == Some(group) && v.state != VoiceState::Done {
+                v.ramp_gain(0.0, fade_frames);
+                v.state = VoiceState::Releasing {
+                    frames_remaining: fade_frames,
+                };
+            }
+        }
+    }
+
+    pub fn active_choke_group_count(&self, group: u64) -> usize {
+        self.voices
+            .iter()
+            .filter(|v| v.choke_group == Some(group) && v.state != VoiceState::Done)
+            .count()
+    }
+
     /// Render all active voices into an interleaved stereo buffer.
     pub fn render(&mut self, output: &mut [f32]) {
         for v in &mut self.voices {
@@ -318,12 +560,382 @@ impl VoicePool {
         self.voices.retain(|v| !v.is_done());
     }
 
+    /// Render voices into per-mic stereo buffers. Each voice writes only to
+    /// the buffer at its `mic_index`. Voices with `mic_index == None` (or
+    /// out-of-bounds) fold into buffer 0. **No allocation** — caller owns
+    /// the `Vec<Vec<f32>>` storage.
+    pub fn render_multi(&mut self, outputs: &mut [Vec<f32>]) {
+        if outputs.is_empty() {
+            return;
+        }
+        let nmics = outputs.len();
+        for v in &mut self.voices {
+            let idx = match v.mic_index {
+                Some(i) if (i as usize) < nmics => i as usize,
+                _ => 0,
+            };
+            v.render_block(&mut outputs[idx]);
+        }
+        self.voices.retain(|v| !v.is_done());
+    }
+
     pub fn active_count(&self) -> usize {
         self.voices.len()
+    }
+
+    pub fn stolen_count(&self) -> usize {
+        self.stolen
     }
 
     /// Mutable iterator over all active voices (used by engine for CC1 updates).
     pub fn voices_mut(&mut self) -> &mut Vec<Voice> {
         &mut self.voices
+    }
+
+    fn enforce_limit(&mut self) {
+        self.voices.retain(|v| !v.is_done());
+        while self.voices.len() > self.max_voices {
+            if self.steal_one_for_note(None) == StealOutcome::DropIncoming {
+                break;
+            }
+        }
+    }
+
+    fn steal_one_for(&mut self, incoming: &Voice) -> StealOutcome {
+        self.steal_one_for_note(Some(incoming.note))
+    }
+
+    fn steal_one_for_note(&mut self, incoming_note: Option<u8>) -> StealOutcome {
+        if self.steal_policy == VoiceStealPolicy::DropNew {
+            return StealOutcome::DropIncoming;
+        }
+
+        self.stolen = self.stolen.saturating_add(1);
+        if let Some(idx) = self.steal_index(incoming_note) {
+            self.voices.remove(idx);
+        } else if let Some(idx) = quietest_stealable_voice(&self.voices) {
+            self.voices[idx].ramp_gain(0.0, STEAL_FADE_FRAMES);
+            self.voices[idx].state = VoiceState::Releasing {
+                frames_remaining: STEAL_FADE_FRAMES,
+            };
+        }
+        StealOutcome::StoleExisting
+    }
+
+    fn steal_index(&self, incoming_note: Option<u8>) -> Option<usize> {
+        match self.steal_policy {
+            VoiceStealPolicy::ReleaseFirstQuietest => self
+                .voices
+                .iter()
+                .position(|v| matches!(v.state, VoiceState::Releasing { .. })),
+            VoiceStealPolicy::Oldest => Some(0),
+            VoiceStealPolicy::Quietest => None,
+            VoiceStealPolicy::SameNoteFirst => incoming_note
+                .and_then(|note| self.voices.iter().position(|v| v.note == note))
+                .or_else(|| {
+                    self.voices
+                        .iter()
+                        .position(|v| matches!(v.state, VoiceState::Releasing { .. }))
+                }),
+            VoiceStealPolicy::DropNew => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StealOutcome {
+    StoleExisting,
+    DropIncoming,
+}
+
+fn quietest_stealable_voice(voices: &[Voice]) -> Option<usize> {
+    voices
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.kind != VoiceKind::Release)
+        .min_by(|(_, a), (_, b)| {
+            a.gain
+                .partial_cmp(&b.gain)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(idx, _)| idx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Arc<SampleData> {
+        Arc::new(SampleData {
+            frames: Arc::new(vec![0.0; 32]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: 32,
+        })
+    }
+
+    fn voice(gain: f32) -> Voice {
+        Voice::new(sample(), 60, VoiceKind::SustainLo, 0, gain, 128)
+    }
+
+    #[test]
+    fn panic_clears_active_voices() {
+        let mut pool = VoicePool::new();
+        pool.spawn(voice(1.0));
+        assert_eq!(pool.active_count(), 1);
+
+        pool.panic();
+
+        assert_eq!(pool.active_count(), 0);
+    }
+
+    #[test]
+    fn voice_steal_counts_and_fades_old_voice() {
+        let mut pool = VoicePool::new();
+        for _ in 0..MAX_VOICES {
+            pool.spawn(voice(1.0));
+        }
+
+        pool.spawn(voice(1.0));
+
+        assert_eq!(pool.stolen_count(), 1);
+        assert_eq!(pool.active_count(), MAX_VOICES + 1);
+        assert!(
+            pool.voices
+                .iter()
+                .any(|v| matches!(v.state, VoiceState::Releasing { .. }))
+        );
+    }
+
+    #[test]
+    fn configurable_polyphony_limits_spawned_voices() {
+        let mut pool = VoicePool::with_max_voices(2);
+
+        pool.spawn(voice(1.0));
+        pool.spawn(voice(0.8));
+        pool.spawn(voice(0.6));
+
+        assert_eq!(pool.max_voices(), 2);
+        assert_eq!(pool.stolen_count(), 1);
+        assert_eq!(pool.active_count(), 3);
+        assert!(
+            pool.voices
+                .iter()
+                .any(|v| matches!(v.state, VoiceState::Releasing { .. }))
+        );
+    }
+
+    #[test]
+    fn lowering_polyphony_enforces_limit_immediately() {
+        let mut pool = VoicePool::new();
+        pool.spawn(voice(1.0));
+        pool.spawn(voice(0.8));
+        pool.spawn(voice(0.6));
+
+        pool.set_max_voices(1);
+
+        assert_eq!(pool.max_voices(), 1);
+        assert!(pool.stolen_count() >= 2);
+    }
+
+    #[test]
+    fn drop_new_policy_rejects_voice_at_limit() {
+        let mut pool = VoicePool::with_max_voices(1);
+        pool.set_steal_policy(VoiceStealPolicy::DropNew);
+
+        pool.spawn(voice(1.0));
+        pool.spawn(voice(0.5));
+
+        assert_eq!(pool.active_count(), 1);
+        assert_eq!(pool.stolen_count(), 0);
+    }
+
+    #[test]
+    fn parses_voice_steal_policy_names() {
+        assert_eq!(
+            VoiceStealPolicy::from_str("same-note-first"),
+            VoiceStealPolicy::SameNoteFirst
+        );
+        assert_eq!(
+            VoiceStealPolicy::from_str("oldest"),
+            VoiceStealPolicy::Oldest
+        );
+        assert_eq!(
+            VoiceStealPolicy::from_str("none"),
+            VoiceStealPolicy::DropNew
+        );
+        assert_eq!(
+            VoiceStealPolicy::from_str(""),
+            VoiceStealPolicy::ReleaseFirstQuietest
+        );
+    }
+
+    #[test]
+    fn choke_group_releases_existing_group_voices() {
+        let mut pool = VoicePool::new();
+        pool.spawn(voice(1.0).with_choke_group(Some(7)));
+        pool.spawn(voice(1.0).with_choke_group(Some(9)));
+
+        pool.silence_choke_group(7, 16);
+
+        assert!(matches!(
+            pool.voices[0].state,
+            VoiceState::Releasing {
+                frames_remaining: 16
+            }
+        ));
+        assert_eq!(pool.voices[1].state, VoiceState::Playing);
+    }
+
+    #[test]
+    fn counts_active_choke_group_voices() {
+        let mut pool = VoicePool::new();
+        pool.spawn(voice(1.0).with_choke_group(Some(7)));
+        pool.spawn(voice(1.0).with_choke_group(Some(7)));
+        pool.spawn(voice(1.0).with_choke_group(Some(9)));
+
+        assert_eq!(pool.active_choke_group_count(7), 2);
+        assert_eq!(pool.active_choke_group_count(9), 1);
+        assert_eq!(pool.active_choke_group_count(1), 0);
+    }
+
+    #[test]
+    fn sample_window_starts_and_stops_voice() {
+        let data = Arc::new(SampleData {
+            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: 4,
+        });
+        let mut voice = Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8)
+            .with_sample_window(1, Some(3));
+
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+        assert_eq!(voice.next_frame().0, 0.0);
+        assert!(voice.is_done());
+    }
+
+    #[test]
+    fn forward_loop_wraps_while_playing() {
+        let data = Arc::new(SampleData {
+            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: 4,
+        });
+        let mut voice =
+            Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_forward_loop(1, 3);
+
+        assert_eq!(voice.next_frame().0, 0.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+        assert!(!voice.is_done());
+    }
+
+    #[test]
+    fn alternating_loop_ping_pongs_between_points() {
+        let data = Arc::new(SampleData {
+            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: 4,
+        });
+        let mut voice =
+            Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_alternating_loop(1, 3);
+
+        assert_eq!(voice.next_frame().0, 0.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert!(!voice.is_done());
+    }
+
+    #[test]
+    fn reverse_playback_walks_sample_window_backwards() {
+        let data = Arc::new(SampleData {
+            frames: Arc::new(vec![0.0, 1.0, 2.0, 3.0]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: 4,
+        });
+        let mut voice = Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8)
+            .with_sample_window(1, Some(4))
+            .reversed();
+
+        assert_eq!(voice.next_frame().0, 3.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 0.0);
+        assert!(voice.is_done());
+    }
+
+    #[test]
+    fn one_shot_voice_ignores_note_off() {
+        let data = Arc::new(SampleData {
+            frames: Arc::new(vec![0.0, 1.0, 2.0]),
+            channels: 1,
+            sample_rate: 48_000,
+            num_frames: 3,
+        });
+        let mut voice = Voice::with_rate(data, 60, VoiceKind::Short, 1.0, 1.0, 8);
+
+        voice.note_off();
+
+        assert_eq!(voice.state, VoiceState::Playing);
+        assert_eq!(voice.next_frame().0, 0.0);
+        assert_eq!(voice.next_frame().0, 1.0);
+        assert_eq!(voice.next_frame().0, 2.0);
+    }
+
+    #[test]
+    fn repedal_restores_releasing_sustain_voices() {
+        let mut pool = VoicePool::new();
+        pool.spawn(voice(1.0));
+
+        pool.note_off(60);
+        assert!(matches!(pool.voices[0].state, VoiceState::Releasing { .. }));
+
+        assert_eq!(pool.repedal_releasing(), 1);
+        assert_eq!(pool.voices[0].state, VoiceState::Playing);
+    }
+
+    #[test]
+    fn note_off_can_override_release_frames() {
+        let mut pool = VoicePool::new();
+        pool.spawn(voice(1.0));
+
+        pool.note_off_with_release_frames(60, Some(512));
+
+        assert!(matches!(
+            pool.voices[0].state,
+            VoiceState::Releasing {
+                frames_remaining: 512
+            }
+        ));
+    }
+
+    #[test]
+    fn voice_pan_applies_equal_power_gains() {
+        let data = Arc::new(SampleData {
+            frames: Arc::new(vec![1.0, 1.0]),
+            channels: 2,
+            sample_rate: 48_000,
+            num_frames: 1,
+        });
+
+        let mut left =
+            Voice::with_rate(Arc::clone(&data), 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_pan(-1.0);
+        let mut right = Voice::with_rate(data, 60, VoiceKind::Zoned, 1.0, 1.0, 8).with_pan(1.0);
+
+        assert_eq!(left.next_frame(), (1.0, 0.0));
+        assert!({
+            let (l, r) = right.next_frame();
+            l.abs() < 1e-6 && (r - 1.0).abs() < 1e-6
+        });
     }
 }

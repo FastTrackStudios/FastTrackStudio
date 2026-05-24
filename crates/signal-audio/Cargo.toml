@@ -4,12 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Live audio processing engine for Signal — EQ + Comp chain with cpal I/O"
+description = "Live audio processing engine for Signal with cpal I/O"
 
 [dependencies]
-eq-dsp.workspace = true
-comp-dsp.workspace = true
-fts-dsp.workspace = true
 cpal = "0.17"
 midir.workspace = true
 crossbeam-channel.workspace = true

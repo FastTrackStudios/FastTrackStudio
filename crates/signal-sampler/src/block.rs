@@ -19,10 +19,33 @@ use std::path::{Path, PathBuf};
 
 use facet::Facet;
 
-use crate::engine::cache::SampleCache;
-use crate::{PlayerPatch, SampleEngine, SamplerError};
+use crate::engine::cache::{EvictStats, SampleCache};
+use crate::{PlayerPatch, SampleEngine, SamplerError, VoiceConfig};
 
 // ── Persisted form ──────────────────────────────────────────────────────────
+
+/// One block-parameter override — a `(name, value)` pair with raw f32
+/// (unlike `signal_proto::ParameterValue` which is normalized 0..1).
+///
+/// Used in two places:
+/// - **Module slots** carry `Vec<ParamOverride>` to tweak a block's params
+///   on a per-slot basis without authoring a separate `.signalblock`.
+/// - **Layer/Engine modulation targets** will eventually drive these too,
+///   reusing the same name-keyed dispatch in [`SamplerBlock::apply_override`].
+#[derive(Debug, Clone, Facet)]
+pub struct ParamOverride {
+    pub param: String,
+    pub value: f32,
+}
+
+impl ParamOverride {
+    pub fn new(param: impl Into<String>, value: f32) -> Self {
+        Self {
+            param: param.into(),
+            value,
+        }
+    }
+}
 
 /// Block-level audio params applied at the SamplerBlock's output.
 ///
@@ -91,6 +114,7 @@ pub struct SamplerBlock {
     /// (gain != 1.0 or pan != 0.0). Pre-allocated; never resized inside
     /// the audio callback.
     scratch: Vec<f32>,
+    resize_events: u64,
 }
 
 impl SamplerBlock {
@@ -126,6 +150,17 @@ impl SamplerBlock {
             pan_l: pan_l * gain_lin,
             pan_r: pan_r * gain_lin,
             scratch: Vec::new(),
+            resize_events: 0,
+        }
+    }
+
+    /// Pre-size the optional gain/pan render scratch for the expected audio
+    /// callback size. No-op for default-gain/default-pan blocks at render time,
+    /// but avoids a first-callback allocation when block params need scratch.
+    pub fn preallocate_render_scratch(&mut self, block_frames: usize) {
+        let len = block_frames.saturating_mul(2);
+        if self.scratch.len() != len {
+            self.scratch.resize(len, 0.0);
         }
     }
 
@@ -170,6 +205,7 @@ impl SamplerBlock {
             pan_l,
             pan_r,
             scratch: Vec::new(),
+            resize_events: 0,
         })
     }
 
@@ -178,6 +214,11 @@ impl SamplerBlock {
     pub fn note_on(&mut self, note: u8, velocity: u8) {
         let n = transposed(note, self.params.transpose);
         self.engine.note_on(n, velocity);
+    }
+
+    pub fn warm_note_samples(&self, note: u8, velocity: u8) -> crate::engine::cache::PreloadStats {
+        let n = transposed(note, self.params.transpose);
+        self.engine.warm_note_samples(n, velocity)
     }
 
     pub fn note_off(&mut self, note: u8) {
@@ -190,8 +231,39 @@ impl SamplerBlock {
         self.engine.note_off_with_velocity(n, velocity);
     }
 
+    pub fn all_notes_off(&mut self) {
+        self.engine.all_notes_off();
+    }
+
+    pub fn panic(&mut self) {
+        self.engine.panic();
+    }
+
     pub fn cc(&mut self, controller: u8, value: u8) {
         self.engine.cc(controller, value);
+    }
+
+    pub fn channel_aftertouch(&mut self, value: u8) {
+        self.engine.channel_aftertouch(value);
+    }
+
+    pub fn poly_aftertouch(&mut self, note: u8, value: u8) {
+        let n = transposed(note, self.params.transpose);
+        self.engine.poly_aftertouch(n, value);
+    }
+
+    /// Mic ids exposed by the underlying engine, in declaration order.
+    /// Multi-output renderers index per-mic buffers against this list.
+    pub fn mics(&self) -> &[String] {
+        self.engine.mic_ids()
+    }
+
+    /// Render the block's voices into N per-mic stereo buffers.
+    /// `outputs.len()` should equal `self.mics().len().max(1)`. The block's
+    /// `gain_db`/`pan` are NOT applied here — those live at the Layer level
+    /// in the multi-mic runtime. No allocation.
+    pub fn render_multi(&mut self, outputs: &mut [Vec<f32>]) {
+        self.engine.render_multi(outputs);
     }
 
     /// Mix the block's audio into `output` (interleaved stereo).
@@ -209,6 +281,12 @@ impl SamplerBlock {
         // accumulate with per-channel gain into `output`.
         if self.scratch.len() != output.len() {
             self.scratch.resize(output.len(), 0.0);
+            self.resize_events = self.resize_events.saturating_add(1);
+            tracing::warn!(
+                block = %self.name,
+                frames = output.len() / 2,
+                "SamplerBlock: resized render scratch"
+            );
         }
         for s in self.scratch.iter_mut() {
             *s = 0.0;
@@ -241,6 +319,52 @@ impl SamplerBlock {
         self.pan_r = r * self.gain_lin;
     }
 
+    pub fn set_transpose(&mut self, semitones: i8) {
+        self.params.transpose = semitones;
+    }
+
+    pub fn set_tune_cents(&mut self, cents: i16) {
+        self.params.tune_cents = cents;
+    }
+
+    pub fn apply_voice_config(&mut self, config: &VoiceConfig) {
+        self.engine.set_voice_config(config);
+    }
+
+    /// Apply a single [`ParamOverride`]. Recognized parameter ids:
+    ///
+    /// - `gain_db` / `gain` — block gain in dB (typical -60 … +12)
+    /// - `pan` — stereo pan in [-1.0, 1.0]
+    /// - `transpose` — semitone offset (rounded to nearest i8)
+    /// - `tune_cents` — fine tune in cents (rounded to nearest i16)
+    ///
+    /// Unknown ids are logged and skipped — forward-compat lets a future
+    /// block type add parameters without breaking older callers.
+    pub fn apply_override(&mut self, ov: &ParamOverride) {
+        match ov.param.as_str() {
+            "gain_db" | "gain" => self.set_gain_db(ov.value),
+            "pan" => self.set_pan(ov.value),
+            "transpose" => self.set_transpose(ov.value.round() as i8),
+            "tune_cents" => self.set_tune_cents(ov.value.round() as i16),
+            other => {
+                tracing::warn!(
+                    block = %self.name,
+                    param = other,
+                    value = ov.value,
+                    "SamplerBlock: ignoring unknown parameter override"
+                );
+            }
+        }
+    }
+
+    /// Apply a slice of overrides in order. Used by Module loading to
+    /// apply per-slot tweaks on top of a freshly built block.
+    pub fn apply_overrides(&mut self, overrides: &[ParamOverride]) {
+        for ov in overrides {
+            self.apply_override(ov);
+        }
+    }
+
     // ── Engine pass-throughs ───────────────────────────────────────────────
 
     pub fn cache_handle(&self) -> SampleCache {
@@ -251,8 +375,20 @@ impl SamplerBlock {
         self.engine.sample_paths_centered(center)
     }
 
+    pub fn sample_paths_owned(&self) -> Vec<PathBuf> {
+        self.engine.sample_paths_owned()
+    }
+
     pub fn loaded_sample_count(&self) -> usize {
         self.engine.loaded_sample_count()
+    }
+
+    pub fn loaded_sample_bytes(&self) -> usize {
+        self.engine.loaded_sample_bytes()
+    }
+
+    pub fn evict_cache_until_under_budget(&self, budget_bytes: usize) -> EvictStats {
+        self.engine.evict_cache_until_under_budget(budget_bytes)
     }
 
     pub fn total_sample_count(&self) -> usize {
@@ -265,6 +401,34 @@ impl SamplerBlock {
 
     pub fn active_voices(&self) -> usize {
         self.engine.active_voices()
+    }
+
+    pub fn max_voices(&self) -> usize {
+        self.engine.max_voices()
+    }
+
+    pub fn stolen_voices(&self) -> usize {
+        self.engine.stolen_voices()
+    }
+
+    pub fn cache_misses(&self) -> usize {
+        self.engine.cache_misses()
+    }
+
+    pub fn sample_misses(&self) -> usize {
+        self.engine.sample_misses()
+    }
+
+    pub fn resize_events(&self) -> u64 {
+        self.resize_events
+    }
+
+    pub fn recent_cache_misses(&self) -> Vec<String> {
+        self.engine.recent_cache_misses()
+    }
+
+    pub fn recent_sample_misses(&self) -> Vec<String> {
+        self.engine.recent_sample_misses()
     }
 
     /// Synchronously preload all referenced samples. Used by tests; the

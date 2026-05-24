@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
@@ -18,7 +20,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use signal_sampler::SamplerPlayer;
+use signal_sampler::{AudioStatsSnapshot, PreloadProfile, SamplerPlayer};
 
 use crossbeam_channel::{Receiver, bounded};
 use midir::{MidiInput as MidirInput, MidiInputConnection};
@@ -125,6 +127,18 @@ struct Args {
     /// instead of to the terminal. Defaults to `/tmp/signal-tui.log`.
     #[arg(long, default_value = "/tmp/signal-tui.log")]
     log_file: PathBuf,
+    /// Decoded PCM cache budget in MiB.
+    #[arg(long)]
+    cache_budget_mib: Option<usize>,
+    /// Evict decoded samples when the configured cache budget is exceeded.
+    #[arg(long)]
+    enforce_cache_budget: bool,
+    /// Background preload profile. Defaults to `full` so every key on
+    /// the keyboard makes sound once the pack finishes preloading.
+    /// `performance` (512 closest-to-C4 samples) leaves most notes silent
+    /// on larger libraries.
+    #[arg(long, default_value = "full")]
+    preload_profile: String,
 }
 
 // ── Patch discovery ─────────────────────────────────────────────────────────
@@ -136,9 +150,11 @@ struct Args {
 
 #[derive(Debug, Clone)]
 struct Patch {
+    /// What kind of file this is (drives load dispatch + icon).
+    kind: signal_browser::pack_registry::EntryKind,
     /// `LibrarySpec.name` from the pack header (or filename fallback).
     name: String,
-    /// Path to the `.signalpack` to load.
+    /// Path to the file to load.
     pack: PathBuf,
     /// Folder segments relative to the root, for tree-style display.
     folder: Vec<String>,
@@ -165,6 +181,7 @@ impl Patch {
             (i, c) => Some(format!("{i} · {c}")),
         };
         Self {
+            kind: entry.kind,
             name: entry.name.clone(),
             pack: entry.path.clone(),
             folder: entry.folder.clone(),
@@ -198,11 +215,8 @@ impl LibraryNode {
     }
 }
 
-fn scan(root: &Path) -> Vec<Patch> {
-    signal_browser::pack_registry::scan_packs(root)
-        .iter()
-        .map(Patch::from_entry)
-        .collect()
+fn scan(root: &Path) -> signal_browser::pack_registry::ScanReport {
+    signal_browser::pack_registry::scan_packs_report(root)
 }
 
 /// One Miller column showing the children of a selected node.
@@ -220,18 +234,6 @@ enum Item {
     Folder { name: String, pack_count: usize },
     /// A leaf pack.
     Patch(Patch),
-}
-
-impl Item {
-    fn label(&self) -> &str {
-        match self {
-            Item::Folder { name, .. } => name,
-            Item::Patch(p) => &p.name,
-        }
-    }
-    fn is_folder(&self) -> bool {
-        matches!(self, Item::Folder { .. })
-    }
 }
 
 /// Build a filtered tree from `patches` and `query`.
@@ -314,6 +316,25 @@ fn matches_query(p: &Patch, q: &str) -> bool {
             .any(|t| t.value.to_ascii_lowercase().contains(q))
 }
 
+fn initial_scan_error(report: &signal_browser::pack_registry::ScanReport) -> Option<String> {
+    if report.loaded_count() == 0 {
+        return Some(format!(
+            "no Signal loadables found under {} (.signalpack/.signalengine/.signalpreset/.signalmodule/.signalblock)",
+            report.root.display()
+        ));
+    }
+    if report.has_failures() {
+        return Some(format!(
+            "scan loaded {} of {} loadables; {} failed, {} dirs/files skipped",
+            report.loaded_count(),
+            report.candidate_count,
+            report.failed_loadables,
+            report.skipped_walk_entries
+        ));
+    }
+    None
+}
+
 // ── Keyboard mapping ────────────────────────────────────────────────────────
 
 /// Tracker layout. Offset relative to current octave's C.
@@ -383,15 +404,66 @@ struct App {
     log_path: PathBuf,
     /// All discovered patches; columns view a filtered subset.
     all_patches: Vec<Patch>,
+    /// Diagnostics from the filesystem scan that populated `all_patches`.
+    scan_report: signal_browser::pack_registry::ScanReport,
     /// Free-text filter — matches name / folder / instrument / category / tag values.
     query: String,
     /// True while the user is typing into the filter at the bottom.
     search_mode: bool,
+    /// When true, fire a preview note (~C4) shortly after a pack/preset finishes
+    /// loading. Useful for confirming the audio chain on selection. Toggle: F2.
+    preview_on_load: bool,
+    /// Set of patch file paths the user has starred. Persisted to
+    /// `$XDG_CONFIG_HOME/signal/tui-favorites.txt` (or `~/.config/signal/...`).
+    /// Toggle on the focused patch with `f`.
+    favorites: std::collections::HashSet<PathBuf>,
+    /// Resolved location of the favorites file.
+    favorites_path: PathBuf,
+    preview_epoch: Arc<AtomicU64>,
+}
+
+fn favorites_file() -> PathBuf {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.join("signal").join("tui-favorites.txt")
+}
+
+fn load_favorites(path: &Path) -> std::collections::HashSet<PathBuf> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn save_favorites(path: &Path, favs: &std::collections::HashSet<PathBuf>) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut sorted: Vec<&PathBuf> = favs.iter().collect();
+    sorted.sort();
+    let body = sorted
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let _ = std::fs::write(path, body);
 }
 
 impl App {
     fn new(root: PathBuf) -> Self {
-        let all_patches = scan(&root);
+        let scan_report = scan(&root);
+        let all_patches = scan_report
+            .entries
+            .iter()
+            .map(Patch::from_entry)
+            .collect::<Vec<_>>();
         let tree = filtered_tree(&all_patches, "");
         let root_label = root
             .file_name()
@@ -418,13 +490,18 @@ impl App {
             loaded: None,
             loaded_zones: 0,
             last_note: None,
-            error: None,
+            error: initial_scan_error(&scan_report),
             held: std::collections::HashSet::new(),
             midi_status: String::new(),
             log_path: PathBuf::new(),
             all_patches,
+            scan_report,
             query: String::new(),
             search_mode: false,
+            preview_on_load: true,
+            favorites: load_favorites(&favorites_file()),
+            favorites_path: favorites_file(),
+            preview_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -536,23 +613,91 @@ impl App {
                 return;
             }
         };
-        tracing::info!(pack = %patch.pack.display(), "load_selected: loading patch");
+        use signal_browser::pack_registry::EntryKind;
+        tracing::info!(
+            kind = patch.kind.label(),
+            path = %patch.pack.display(),
+            "load_selected: loading"
+        );
+        self.preview_epoch.fetch_add(1, Ordering::Relaxed);
+        self.held.clear();
+        player.all_notes_off(INSTRUMENT_ID);
         player.unload_instrument(INSTRUMENT_ID);
-        let zones = signal_sampler::read_pack_header(&patch.pack)
-            .map(|h| h.spec.zones.len() + h.spec.grooves.len())
-            .unwrap_or(0);
-        self.loaded_zones = zones;
-        match player.load_pack(INSTRUMENT_ID, &patch.pack) {
-            Ok(_) => {
-                tracing::info!(name = %patch.name, zones, "load_selected: loaded ok");
+
+        let result = match patch.kind {
+            EntryKind::Pack => {
+                self.loaded_zones = signal_sampler::read_pack_header(&patch.pack)
+                    .map(|h| h.spec.zones.len() + h.spec.grooves.len())
+                    .unwrap_or(0);
+                player.load_pack(INSTRUMENT_ID, &patch.pack).map(|_| ())
+            }
+            EntryKind::Block => {
+                self.loaded_zones = 0;
+                player.load_block(INSTRUMENT_ID, &patch.pack).map(|_| ())
+            }
+            EntryKind::Engine => {
+                self.loaded_zones = 0;
+                player.load_engine(INSTRUMENT_ID, &patch.pack).map(|_| ())
+            }
+            EntryKind::Preset => {
+                self.loaded_zones = 0;
+                // Presets register N sub-instruments under "tui:<engine_id>";
+                // MIDI input keyed off "tui" routes via the bank's
+                // note_routing populated by the preset.
+                player.load_preset(INSTRUMENT_ID, &patch.pack).map(|_| ())
+            }
+            EntryKind::Module => Err(eyre::eyre!(
+                "modules can't be loaded standalone — pick an Engine or Preset"
+            )),
+        };
+
+        match result {
+            Ok(()) => {
+                tracing::info!(name = %patch.name, kind = patch.kind.label(), "load_selected: loaded ok");
                 self.error = None;
                 self.loaded = Some(patch);
+                self.schedule_preview(player);
             }
             Err(e) => {
                 tracing::warn!(err = %e, "load_selected: load failed");
                 self.error = Some(format!("load: {e}"));
             }
         }
+    }
+
+    fn schedule_preview(&self, player: &SamplerPlayer) {
+        if !self.preview_on_load {
+            return;
+        }
+        let player = player.clone();
+        let preview_epoch = Arc::clone(&self.preview_epoch);
+        let epoch = preview_epoch.load(Ordering::Relaxed);
+        std::thread::Builder::new()
+            .name("signal-tui-preview".into())
+            .spawn(move || {
+                let start = Instant::now();
+                loop {
+                    if preview_epoch.load(Ordering::Relaxed) != epoch {
+                        return;
+                    }
+                    let (loaded, total) = player.preload_progress(INSTRUMENT_ID);
+                    if total == 0 || loaded > 0 || start.elapsed() >= Duration::from_secs(5) {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                if preview_epoch.load(Ordering::Relaxed) != epoch {
+                    return;
+                }
+                tracing::info!(note = 60, "preview note_on");
+                player.note_on(INSTRUMENT_ID, 60, 100);
+                std::thread::sleep(std::time::Duration::from_millis(900));
+                if preview_epoch.load(Ordering::Relaxed) != epoch {
+                    return;
+                }
+                player.note_off(INSTRUMENT_ID, 60);
+            })
+            .ok();
     }
 
     fn note_for_key(&self, c: char) -> Option<u8> {
@@ -568,7 +713,13 @@ impl App {
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 
-fn ui(f: &mut ratatui::Frame, app: &mut App, voice_count: usize, preload: (usize, usize)) {
+fn ui(
+    f: &mut ratatui::Frame,
+    app: &mut App,
+    voice_count: usize,
+    preload: (usize, usize),
+    audio_stats: AudioStatsSnapshot,
+) {
     let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -596,9 +747,9 @@ fn ui(f: &mut ratatui::Frame, app: &mut App, voice_count: usize, preload: (usize
         height: top[0].height,
     };
     render_columns(f, app, nav_area);
-    render_loaded(f, app, top[2], voice_count, preload);
+    render_loaded(f, app, top[2], voice_count, preload, audio_stats.clone());
     render_keyboard(f, app, chunks[1]);
-    render_status(f, app, chunks[2], voice_count);
+    render_status(f, app, chunks[2], voice_count, audio_stats);
 }
 
 fn focus_style(focused: bool) -> Style {
@@ -616,6 +767,29 @@ fn focus_style(focused: bool) -> Style {
 /// scrolled out — the user can still navigate to them with ←).
 fn render_columns(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
     const MAX_VISIBLE_COLS: usize = 4;
+    if app.all_patches.is_empty() {
+        let message = vec![
+            Line::from(Span::styled(
+                "No Signal loadables found",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(format!("root: {}", app.root.display())),
+            Line::from(".signalpack, .signalengine, .signalpreset, .signalmodule, .signalblock"),
+            Line::from(format!(
+                "scan candidates: {}  failed: {}  skipped: {}",
+                app.scan_report.candidate_count,
+                app.scan_report.failed_loadables,
+                app.scan_report.skipped_walk_entries
+            )),
+        ];
+        let panel = Paragraph::new(message)
+            .block(Block::default().borders(Borders::ALL).title("Library"))
+            .wrap(Wrap { trim: true });
+        f.render_widget(panel, area);
+        return;
+    }
     let total = app.columns.len();
     let visible_start = total.saturating_sub(MAX_VISIBLE_COLS);
     let visible_count = total - visible_start;
@@ -651,7 +825,17 @@ fn render_columns(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     ),
                 ])),
                 Item::Patch(p) => {
-                    ListItem::new(Line::from(vec![Span::raw("  "), Span::raw(p.name.clone())]))
+                    let icon = format!("{}  ", p.kind.icon());
+                    let star = if app.favorites.contains(&p.pack) {
+                        "★ "
+                    } else {
+                        ""
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(icon, Style::default().fg(Color::Cyan)),
+                        Span::styled(star, Style::default().fg(Color::Yellow)),
+                        Span::raw(p.name.clone()),
+                    ]))
                 }
             })
             .collect();
@@ -678,6 +862,7 @@ fn render_loaded(
     area: Rect,
     voice_count: usize,
     preload: (usize, usize),
+    audio_stats: AudioStatsSnapshot,
 ) {
     let mut lines: Vec<Line> = Vec::new();
     if let Some(p) = &app.loaded {
@@ -701,6 +886,51 @@ fn render_loaded(
         }
         lines.push(Line::from(format!("{} zones", app.loaded_zones)));
         lines.push(Line::from(format!("{} voices", voice_count)));
+        lines.push(Line::from(format!(
+            "render: {} us last / {} us max",
+            audio_stats.last_render_us, audio_stats.max_render_us
+        )));
+        lines.push(Line::from(format!(
+            "resize events: {}",
+            audio_stats.resize_events
+        )));
+        lines.push(Line::from(format!(
+            "misses: cache {} / map {}",
+            audio_stats.cache_misses, audio_stats.sample_misses
+        )));
+        if let Some(path) = audio_stats.recent_cache_misses.last() {
+            lines.push(Line::from(Span::styled(
+                format!("last cache miss: {path}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        if let Some(label) = audio_stats.recent_sample_misses.last() {
+            lines.push(Line::from(Span::styled(
+                format!("last map miss: {label}"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        let cache_mib = audio_stats.loaded_sample_bytes as f64 / 1024.0 / 1024.0;
+        if let Some(budget_bytes) = audio_stats.cache_budget_bytes {
+            let budget_mib = budget_bytes as f64 / 1024.0 / 1024.0;
+            let over_mib = audio_stats.cache_over_budget_bytes as f64 / 1024.0 / 1024.0;
+            let cache_label = if audio_stats.cache_over_budget_bytes > 0 {
+                format!("cache: {cache_mib:.1}/{budget_mib:.1} MiB, over {over_mib:.1}")
+            } else {
+                format!("cache: {cache_mib:.1}/{budget_mib:.1} MiB")
+            };
+            let cache_color = if audio_stats.cache_over_budget_bytes > 0 {
+                Color::Yellow
+            } else {
+                Color::Gray
+            };
+            lines.push(Line::from(Span::styled(
+                cache_label,
+                Style::default().fg(cache_color),
+            )));
+        } else {
+            lines.push(Line::from(format!("cache: {cache_mib:.1} MiB decoded")));
+        }
         let (l, t) = preload;
         if t > 0 {
             let pct = if t == 0 { 100 } else { (l * 100) / t };
@@ -748,6 +978,19 @@ fn render_loaded(
             Style::default().fg(Color::DarkGray),
         )));
         lines.push(Line::from("Enter on a patch to load"));
+        lines.push(Line::from(format!(
+            "{} loadables scanned",
+            app.scan_report.loaded_count()
+        )));
+        if app.scan_report.has_failures() {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "{} failed, {} skipped",
+                    app.scan_report.failed_loadables, app.scan_report.skipped_walk_entries
+                ),
+                Style::default().fg(Color::Yellow),
+            )));
+        }
     }
     if !app.midi_status.is_empty() {
         lines.push(Line::from(""));
@@ -797,11 +1040,16 @@ fn render_keyboard(f: &mut ratatui::Frame, app: &App, area: Rect) {
         ])
     } else {
         Line::from(Span::styled(
-            "/: search   [/]: octave   Tab: focus   Enter: load   q/Esc: quit",
+            "/: search   Space: panic   [/]: octave   Tab: focus   Enter: load   f: ★fav   F2: preview   q/Esc: quit",
             Style::default().fg(Color::DarkGray),
         ))
     };
-    let octave_label = format!("octave: {} (C{})", app.octave, app.octave / 12 - 1);
+    let octave_label = format!(
+        "octave: {} (C{})    preview-on-load: {}",
+        app.octave,
+        app.octave / 12 - 1,
+        if app.preview_on_load { "ON" } else { "off" },
+    );
     let row1 = "white: z x c v b n m , . /    upper: q w e r t y u i o p";
     let row2 = "black: s d _ g h j _ l ; _    upper#: 2 3 _ 5 6 7 _ 9 0";
     let lines = vec![
@@ -814,7 +1062,13 @@ fn render_keyboard(f: &mut ratatui::Frame, app: &App, area: Rect) {
     f.render_widget(p, area);
 }
 
-fn render_status(f: &mut ratatui::Frame, app: &App, area: Rect, voice_count: usize) {
+fn render_status(
+    f: &mut ratatui::Frame,
+    app: &App,
+    area: Rect,
+    voice_count: usize,
+    audio_stats: AudioStatsSnapshot,
+) {
     let err = app.error.as_deref().unwrap_or("");
     let last = app
         .last_note
@@ -835,9 +1089,38 @@ fn render_status(f: &mut ratatui::Frame, app: &App, area: Rect, voice_count: usi
     } else {
         format!(" | err: {err}")
     };
+    let audio_part = format!(
+        " | xruns:{} locks:{} resize:{} q:{}/drop:{} miss:{}/{}{}",
+        audio_stats.callback_overruns,
+        audio_stats.lock_misses,
+        audio_stats.resize_events,
+        audio_stats.pending_events,
+        audio_stats.dropped_events,
+        audio_stats.cache_misses,
+        audio_stats.sample_misses,
+        if audio_stats.cache_over_budget_bytes > 0 {
+            format!(
+                " cache-over:{:.1}MiB",
+                audio_stats.cache_over_budget_bytes as f64 / 1024.0 / 1024.0
+            )
+        } else {
+            String::new()
+        }
+    );
+    let scan_part = if app.scan_report.has_failures() {
+        format!(
+            " | scan:{}/{} fail:{} skip:{}",
+            app.scan_report.loaded_count(),
+            app.scan_report.candidate_count,
+            app.scan_report.failed_loadables,
+            app.scan_report.skipped_walk_entries
+        )
+    } else {
+        format!(" | scan:{}", app.scan_report.loaded_count())
+    };
     let txt = format!(
-        " cursor: {cursor} | loaded: {loaded_name} | voices: {voice_count} | last: {last} | oct: {}{err_part}",
-        app.octave
+        " cursor: {cursor} | loaded: {loaded_name} | voices: {voice_count} | steals:{} | last: {last} | oct: {}{scan_part}{audio_part}{err_part}",
+        audio_stats.stolen_voices, app.octave
     );
     let p = Paragraph::new(txt).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(p, area);
@@ -885,14 +1168,7 @@ impl Drop for TerminalGuard {
 }
 
 fn voice_count(player: &SamplerPlayer) -> usize {
-    // Best-effort: the bank may be locked by the audio thread.
-    if let Ok(bank) = player.bank.try_lock() {
-        // We can't reach the engine directly without an accessor; return
-        // instrument count as a stand-in. (Engine agent: please expose
-        // `active_voices(id)` through SamplerBank.)
-        let _ = bank.is_empty();
-    }
-    0
+    player.active_voices(INSTRUMENT_ID)
 }
 
 /// Redirect this process's stderr file descriptor onto an open file.
@@ -947,11 +1223,47 @@ fn run() -> Result<()> {
         .with_ansi(false)
         .try_init();
 
-    let player = SamplerPlayer::new().wrap_err("opening cpal output")?;
+    let cache_budget_bytes = args
+        .cache_budget_mib
+        .map(|mib| mib.saturating_mul(1024 * 1024));
+    let player = SamplerPlayer::with_device_config_and_cache_budget(
+        None,
+        None,
+        // 1024 frames = ~23 ms latency at 44.1 kHz. Larger than the
+        // default 256 (5.8 ms), but on non-RT user threads under PipeWire
+        // the scheduler regularly pushes the audio callback past a 5.8 ms
+        // budget, which produces audible crackling. 23 ms is still
+        // comfortable for a keyboard player.
+        Some(1024),
+        cache_budget_bytes,
+    )
+    .wrap_err("opening cpal output")?;
+    let preload_profile = PreloadProfile::from_name(&args.preload_profile)
+        .ok_or_else(|| eyre::eyre!("unknown --preload-profile: {}", args.preload_profile))?;
+    player.set_preload_profile(preload_profile);
 
     let midi = MidiInput::open_all();
     let mut app = App::new(args.root);
     app.log_path = args.log_file.clone();
+    tracing::info!(
+        root = %app.scan_report.root.display(),
+        loaded = app.scan_report.loaded_count(),
+        candidates = app.scan_report.candidate_count,
+        failed = app.scan_report.failed_loadables,
+        skipped = app.scan_report.skipped_walk_entries,
+        "library scan complete"
+    );
+    for err in &app.scan_report.errors {
+        tracing::warn!(
+            path = err
+                .path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string()),
+            error = %err.message,
+            "library scan skipped entry"
+        );
+    }
     if let Some(m) = midi.as_ref() {
         let names = midi_port_names();
         app.midi_status = format!(
@@ -962,6 +1274,58 @@ fn run() -> Result<()> {
         );
     } else {
         app.midi_status = "MIDI: no ports".into();
+    }
+
+    // Auto-load a sensible default patch so the user doesn't have to navigate
+    // before testing audio. Picks Rhodes - LA Custom if present, else the first
+    // favorite, else nothing. The TUI's preview-on-load thread (F2 toggle)
+    // will fire C4 once preload completes.
+    let default_patch = app
+        .all_patches
+        .iter()
+        .find(|p| p.name.contains("Rhodes - Classic"))
+        .or_else(|| {
+            app.all_patches
+                .iter()
+                .find(|p| p.name.contains("Rhodes - LA Custom"))
+        })
+        .or_else(|| {
+            app.all_patches
+                .iter()
+                .find(|p| app.favorites.contains(&p.pack))
+        })
+        .cloned();
+    if let Some(p) = default_patch {
+        tracing::info!(name = %p.name, path = %p.pack.display(), "auto-loading default patch");
+        app.preview_epoch.fetch_add(1, Ordering::Relaxed);
+        let result = match p.kind {
+            signal_browser::pack_registry::EntryKind::Pack => {
+                app.loaded_zones = signal_sampler::read_pack_header(&p.pack)
+                    .map(|h| h.spec.zones.len() + h.spec.grooves.len())
+                    .unwrap_or(0);
+                player.load_pack(INSTRUMENT_ID, &p.pack).map(|_| ())
+            }
+            signal_browser::pack_registry::EntryKind::Block => {
+                app.loaded_zones = 0;
+                player.load_block(INSTRUMENT_ID, &p.pack).map(|_| ())
+            }
+            signal_browser::pack_registry::EntryKind::Engine => {
+                app.loaded_zones = 0;
+                player.load_engine(INSTRUMENT_ID, &p.pack).map(|_| ())
+            }
+            signal_browser::pack_registry::EntryKind::Preset => {
+                app.loaded_zones = 0;
+                player.load_preset(INSTRUMENT_ID, &p.pack).map(|_| ())
+            }
+            signal_browser::pack_registry::EntryKind::Module => Ok(()),
+        };
+        if let Err(e) = result {
+            tracing::warn!(err = %e, "default load failed");
+        } else {
+            app.held.clear();
+            app.loaded = Some(p);
+            app.schedule_preview(&player);
+        }
     }
 
     let mut guard = TerminalGuard::enter()?;
@@ -990,9 +1354,22 @@ fn run() -> Result<()> {
         if last_draw.elapsed() >= tick {
             let vc = voice_count(&player);
             let preload = player.preload_progress(INSTRUMENT_ID);
+            let audio_stats = player.audio_stats();
+            if args.enforce_cache_budget && audio_stats.cache_over_budget_bytes > 0 {
+                let evicted = player.evict_cache_over_budget();
+                if evicted.evicted > 0 {
+                    tracing::info!(
+                        evicted = evicted.evicted,
+                        freed_mib = evicted.bytes_freed as f64 / 1024.0 / 1024.0,
+                        before_mib = evicted.bytes_before as f64 / 1024.0 / 1024.0,
+                        after_mib = evicted.bytes_after as f64 / 1024.0 / 1024.0,
+                        "signal-tui: enforced sampler cache budget"
+                    );
+                }
+            }
             guard
                 .terminal()
-                .draw(|f| ui(f, &mut app, vc, preload))
+                .draw(|f| ui(f, &mut app, vc, preload, audio_stats))
                 .wrap_err("draw")?;
             last_draw = Instant::now();
         }
@@ -1006,6 +1383,7 @@ fn run() -> Result<()> {
                     if k.modifiers.contains(KeyModifiers::CONTROL)
                         && matches!(k.code, KeyCode::Char('c'))
                     {
+                        player.all_notes_off(INSTRUMENT_ID);
                         break;
                     }
                     // Search mode swallows printable input until Enter / Esc.
@@ -1033,8 +1411,14 @@ fn run() -> Result<()> {
                         continue;
                     }
                     match k.code {
-                        KeyCode::Esc => break,
-                        KeyCode::Char('q') => break,
+                        KeyCode::Esc => {
+                            player.all_notes_off(INSTRUMENT_ID);
+                            break;
+                        }
+                        KeyCode::Char('q') => {
+                            player.all_notes_off(INSTRUMENT_ID);
+                            break;
+                        }
                         KeyCode::Char('/') => {
                             app.search_mode = true;
                             app.query.clear();
@@ -1050,6 +1434,30 @@ fn run() -> Result<()> {
                             None => {}
                         },
                         KeyCode::Backspace => app.ascend(),
+                        KeyCode::F(2) => {
+                            app.preview_on_load = !app.preview_on_load;
+                            tracing::info!(on = app.preview_on_load, "preview toggle");
+                        }
+                        KeyCode::Char(' ') => {
+                            app.preview_epoch.fetch_add(1, Ordering::Relaxed);
+                            app.held.clear();
+                            player.panic(INSTRUMENT_ID);
+                            tracing::info!("panic: all sound off");
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            // Star/unstar the currently focused patch.
+                            // `f` is not in the QWERTY piano map so it's safe
+                            // to claim. Saves immediately so a crash doesn't
+                            // lose the star.
+                            if let Some(Item::Patch(p)) = app.current_item().cloned() {
+                                let pth = p.pack.clone();
+                                let was = app.favorites.remove(&pth);
+                                if !was {
+                                    app.favorites.insert(pth);
+                                }
+                                save_favorites(&app.favorites_path, &app.favorites);
+                            }
+                        }
                         KeyCode::Char('[') => {
                             app.octave = (app.octave - 12).max(0);
                         }

@@ -47,18 +47,32 @@
 pub mod bank;
 pub mod block;
 pub mod engine;
+pub mod engine_spec;
 pub mod midi;
+pub mod module_spec;
 pub mod pack_rewrite;
 pub mod player;
+pub mod preset_spec;
 pub mod retag;
+pub mod runtime;
 pub mod sample_map;
 pub mod spec;
 
-pub use bank::SamplerBank;
+pub use bank::{PreloadProfile, SamplerBank};
 pub use block::{BlockParams, BlockSpec, SamplerBlock};
 pub use engine::SampleEngine;
 pub use engine::cache::SignalPcmPack;
-pub use player::SamplerPlayer;
+pub use engine_spec::{BlockRef, EngineLayerSpec, EngineSpec, FxChainSlot, PortSpec, VoiceConfig};
+pub use module_spec::{ModulePort, ModuleSpec};
+pub use player::{AudioStatsSnapshot, SamplerPlayer};
+pub use preset_spec::{
+    MacroDef, MacroTarget, MasterFxSlot, NoteRoute, PresetEngineRef, PresetModuleRef, PresetSpec,
+    RoutingRule,
+};
+pub use runtime::{
+    BufferRef, EngineInstance, LayerRuntime, ModuleInstance, PortRuntime, PresetRuntime,
+    ResolvedEdge,
+};
 pub use sample_map::{SampleKey, SampleMap};
 pub use spec::LibrarySpec;
 
@@ -271,12 +285,27 @@ impl PlayerPatch {
                     vel_min: 0,
                     vel_max: 127,
                     rr_index: 0,
+                    rr_mode: String::new(),
                     gain_db: 0.0,
+                    pan: 0.0,
                     tune_cents: 0.0,
+                    sample_start: 0,
+                    sample_end: 0,
+                    loop_start: 0,
+                    loop_end: 0,
+                    playback_mode: String::new(),
+                    trigger_mode: String::new(),
+                    trigger_cc: 0,
+                    trigger_value_min: 0,
+                    trigger_value_max: 0,
                     mic: String::new(),
                     articulation: String::new(),
                     dynamic: String::new(),
                     direction: String::new(),
+                    group: String::new(),
+                    group_polyphony: 0,
+                    choke_group: String::new(),
+                    off_by: Vec::new(),
                     section: String::new(),
                     variant: String::new(),
                 });
@@ -308,6 +337,36 @@ impl PlayerPatch {
         } else {
             SampleMap::empty()
         };
+
+        // Re-derive each articulation's dynamic / RR list from the actual
+        // sample map. The spec stored in the pack header is whatever the
+        // importer wrote at pack-build time, which can be stale or wrong
+        // (e.g. Keyscape Classic `clrr10` was authored with a single
+        // "127" dynamic but the v01..v19 velocity-layer samples encode 19
+        // dynamics — the spec list misses 18 of them). Trusting the map
+        // here keeps spec + samples consistent regardless of importer
+        // quirks.
+        {
+            use std::collections::{BTreeMap, BTreeSet};
+            let mut by_artic: BTreeMap<String, (BTreeSet<String>, BTreeSet<usize>)> =
+                BTreeMap::new();
+            for (k, _) in map.iter() {
+                let e = by_artic.entry(k.articulation.clone()).or_default();
+                e.0.insert(k.dynamic.clone());
+                e.1.insert(k.rr);
+            }
+            for a in spec.articulations.iter_mut() {
+                if let Some((dyns, rrs)) = by_artic.get(&a.id) {
+                    if !dyns.is_empty() {
+                        a.dynamics = dyns.iter().cloned().collect();
+                    }
+                    if !rrs.is_empty() {
+                        let max_rr = rrs.iter().max().copied().unwrap_or(0) + 1;
+                        a.rr = max_rr.max(1);
+                    }
+                }
+            }
+        }
 
         Ok(Self {
             spec,

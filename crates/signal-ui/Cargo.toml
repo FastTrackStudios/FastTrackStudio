@@ -21,8 +21,6 @@ audio-controls.workspace = true
 dock-dioxus = { workspace = true, default-features = false }
 dock-proto.workspace = true
 audio-gui.workspace = true
-eq-dsp.workspace = true
-comp-dsp.workspace = true
 nih_plug_dioxus.workspace = true
 
 [features]

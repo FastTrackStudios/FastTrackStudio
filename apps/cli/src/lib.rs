@@ -17,7 +17,7 @@ use signal::SignalController;
 use signal::profile::{Patch, PatchId};
 use signal::traits::Collection;
 use signal_sampler::{
-    LibrarySpec, PlayerPatch, SamplerPlayer,
+    LibrarySpec, PlayerPatch, PreloadProfile, SamplerPlayer,
     engine::cache::{
         create_signal_pack, default_prepared_cache_dir, extract_signal_pack, load_sample,
         prepare_sample_cache,
@@ -202,6 +202,16 @@ pub enum SamplerCommand {
         /// Decode the whole loaded library before listening for MIDI.
         #[arg(long)]
         preload: bool,
+        /// Decoded PCM cache budget in MiB.
+        #[arg(long)]
+        cache_budget_mib: Option<usize>,
+        /// Evict decoded samples when the configured cache budget is exceeded.
+        #[arg(long)]
+        enforce_cache_budget: bool,
+        /// Background preload profile: fast-audition, performance, full,
+        /// drum-kit, piano-center-out, orchestral-articulation.
+        #[arg(long, default_value = "performance")]
+        preload_profile: String,
         /// Print MIDI note/CC events while playing. Off by default to keep the
         /// live playback path low-latency.
         #[arg(long)]
@@ -1154,6 +1164,9 @@ async fn run_sampler(cmd: &SamplerCommand) -> Result<()> {
             sample_rate,
             buffer_size,
             preload,
+            cache_budget_mib,
+            enforce_cache_budget,
+            preload_profile,
             log_midi,
         } => {
             let spec_data = LibrarySpec::from_file(spec)
@@ -1181,8 +1194,16 @@ async fn run_sampler(cmd: &SamplerCommand) -> Result<()> {
             } else {
                 Some(*buffer_size)
             };
-            let player =
-                SamplerPlayer::with_device_config(device.as_deref(), *sample_rate, buffer_size)?;
+            let cache_budget_bytes = cache_budget_mib.map(|mib| mib.saturating_mul(1024 * 1024));
+            let player = SamplerPlayer::with_device_config_and_cache_budget(
+                device.as_deref(),
+                Some(*sample_rate),
+                buffer_size,
+                cache_budget_bytes,
+            )?;
+            let preload_profile = PreloadProfile::from_name(preload_profile)
+                .ok_or_else(|| eyre::eyre!("unknown --preload-profile: {preload_profile}"))?;
+            player.set_preload_profile(preload_profile);
             player.load_instrument(
                 instrument.clone(),
                 spec,
@@ -1202,6 +1223,18 @@ async fn run_sampler(cmd: &SamplerCommand) -> Result<()> {
                     stats.failed,
                     start.elapsed().as_secs_f64()
                 );
+                if *enforce_cache_budget {
+                    let evicted = player.evict_cache_over_budget();
+                    if evicted.evicted > 0 {
+                        println!(
+                            "Cache eviction: {} samples, {:.1} MiB freed ({:.1} -> {:.1} MiB).",
+                            evicted.evicted,
+                            evicted.bytes_freed as f64 / 1024.0 / 1024.0,
+                            evicted.bytes_before as f64 / 1024.0 / 1024.0,
+                            evicted.bytes_after as f64 / 1024.0 / 1024.0
+                        );
+                    }
+                }
             }
 
             if let Some(channel) = channel {
@@ -1258,18 +1291,62 @@ async fn run_sampler(cmd: &SamplerCommand) -> Result<()> {
 
                         if last_audio_stats_log.elapsed() >= std::time::Duration::from_secs(1) {
                             let stats = player.audio_stats();
+                            if *enforce_cache_budget && stats.cache_over_budget_bytes > 0 {
+                                let evicted = player.evict_cache_over_budget();
+                                if evicted.evicted > 0 {
+                                    eprintln!(
+                                        "cache eviction: evicted={} freed_mib={:.1} cache_mib={:.1}->{:.1}",
+                                        evicted.evicted,
+                                        evicted.bytes_freed as f64 / 1024.0 / 1024.0,
+                                        evicted.bytes_before as f64 / 1024.0 / 1024.0,
+                                        evicted.bytes_after as f64 / 1024.0 / 1024.0
+                                    );
+                                }
+                            }
                             if stats.stream_errors != last_audio_stats.stream_errors
                                 || stats.callback_overruns != last_audio_stats.callback_overruns
                                 || stats.lock_misses != last_audio_stats.lock_misses
                                 || stats.midi_messages != last_audio_stats.midi_messages
+                                || stats.dropped_events != last_audio_stats.dropped_events
+                                || stats.cache_misses != last_audio_stats.cache_misses
+                                || stats.sample_misses != last_audio_stats.sample_misses
+                                || stats.resize_events != last_audio_stats.resize_events
+                                || stats.cache_over_budget_bytes
+                                    != last_audio_stats.cache_over_budget_bytes
+                                || stats.recent_cache_misses
+                                    != last_audio_stats.recent_cache_misses
+                                || stats.recent_sample_misses
+                                    != last_audio_stats.recent_sample_misses
                             {
                                 eprintln!(
-                                    "audio diag: stream_errors={} callback_overruns={} lock_misses={} callbacks={} midi_messages={} last_render_us={} max_render_us={} buffer_budget_us={} last_callback_interval_us={} max_callback_interval_us={} last_midi_to_callback_us={} max_midi_to_callback_us={}",
+                                    "audio diag: stream_errors={} callback_overruns={} lock_misses={} callbacks={} midi_messages={} dropped_events={} pending_events={} stolen_voices={} cache_misses={} sample_misses={} resize_events={} recent_cache_misses={} recent_sample_misses={} cache_mib={:.1} cache_budget_mib={} cache_over_mib={:.1} last_render_us={} max_render_us={} buffer_budget_us={} last_callback_interval_us={} max_callback_interval_us={} last_midi_to_callback_us={} max_midi_to_callback_us={}",
                                     stats.stream_errors,
                                     stats.callback_overruns,
                                     stats.lock_misses,
                                     stats.callbacks,
                                     stats.midi_messages,
+                                    stats.dropped_events,
+                                    stats.pending_events,
+                                    stats.stolen_voices,
+                                    stats.cache_misses,
+                                    stats.sample_misses,
+                                    stats.resize_events,
+                                    if stats.recent_cache_misses.is_empty() {
+                                        "none".to_string()
+                                    } else {
+                                        stats.recent_cache_misses.join(" | ")
+                                    },
+                                    if stats.recent_sample_misses.is_empty() {
+                                        "none".to_string()
+                                    } else {
+                                        stats.recent_sample_misses.join(" | ")
+                                    },
+                                    stats.loaded_sample_bytes as f64 / 1024.0 / 1024.0,
+                                    stats
+                                        .cache_budget_bytes
+                                        .map(|bytes| format!("{:.1}", bytes as f64 / 1024.0 / 1024.0))
+                                        .unwrap_or_else(|| "none".to_string()),
+                                    stats.cache_over_budget_bytes as f64 / 1024.0 / 1024.0,
                                     stats.last_render_us,
                                     stats.max_render_us,
                                     stats.buffer_budget_us,

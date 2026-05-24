@@ -1,45 +1,10 @@
-//! FX panel — embedded EQ and Compressor GUI backed by live DSP.
+//! FX panel — embedded EQ and Compressor GUI.
 
 use nih_plug_dioxus::prelude::*;
 
 use audio_gui::meters::GrMeter;
 use audio_gui::viz::{EqBand, EqBandShape, EqGraph};
-use eq_dsp::filter_type::FilterType;
 use signal_audio::ProcessingChain;
-
-// ── Mapping helpers ────────────────────────────────────────────────────────────
-
-fn eq_band_shape_to_filter_type(shape: EqBandShape) -> FilterType {
-    match shape {
-        EqBandShape::Bell => FilterType::Peak,
-        EqBandShape::LowShelf => FilterType::LowShelf,
-        EqBandShape::HighShelf => FilterType::HighShelf,
-        EqBandShape::LowCut => FilterType::Highpass,
-        EqBandShape::HighCut => FilterType::Lowpass,
-        EqBandShape::Notch => FilterType::Notch,
-        EqBandShape::BandPass => FilterType::Bandpass,
-        EqBandShape::TiltShelf => FilterType::TiltShelf,
-        EqBandShape::FlatTilt => FilterType::FlatTilt,
-        EqBandShape::AllPass => FilterType::Allpass,
-    }
-}
-
-fn filter_type_to_eq_band_shape(ft: FilterType) -> EqBandShape {
-    match ft {
-        FilterType::Peak => EqBandShape::Bell,
-        FilterType::LowShelf => EqBandShape::LowShelf,
-        FilterType::HighShelf => EqBandShape::HighShelf,
-        FilterType::Highpass => EqBandShape::LowCut,
-        FilterType::Lowpass => EqBandShape::HighCut,
-        FilterType::Notch => EqBandShape::Notch,
-        FilterType::Bandpass => EqBandShape::BandPass,
-        FilterType::TiltShelf => EqBandShape::TiltShelf,
-        FilterType::FlatTilt => EqBandShape::FlatTilt,
-        FilterType::Allpass => EqBandShape::AllPass,
-        // BandShelf has no direct EqBandShape equivalent — fall back to Bell
-        FilterType::BandShelf => EqBandShape::Bell,
-    }
-}
 
 // ── Top-level FX view ──────────────────────────────────────────────────────────
 
@@ -65,106 +30,56 @@ pub fn FxView() -> Element {
 
 #[component]
 fn EqPanel(chain: ProcessingChain) -> Element {
-    // Initialise EqBand state from the chain's current eq bands.
+    let _ = chain;
     let mut bands: Signal<Vec<EqBand>> = use_signal(|| {
-        if let Ok(eq) = chain.eq.lock() {
-            let n = eq.num_bands();
-            (0..n)
-                .filter_map(|i| {
-                    eq.band(i).map(|b| EqBand {
-                        index: i,
-                        used: true,
-                        enabled: b.enabled,
-                        frequency: b.freq_hz as f32,
-                        gain: b.gain_db as f32,
-                        q: b.q as f32,
-                        shape: filter_type_to_eq_band_shape(b.filter_type),
-                        ..Default::default()
-                    })
-                })
-                .collect()
-        } else {
-            // Fallback default bands if lock fails
-            vec![
-                EqBand {
-                    index: 0,
-                    used: true,
-                    enabled: true,
-                    frequency: 80.0,
-                    gain: 0.0,
-                    q: 0.707,
-                    shape: EqBandShape::LowCut,
-                    ..Default::default()
-                },
-                EqBand {
-                    index: 1,
-                    used: true,
-                    enabled: true,
-                    frequency: 500.0,
-                    gain: 0.0,
-                    q: 1.0,
-                    shape: EqBandShape::Bell,
-                    ..Default::default()
-                },
-                EqBand {
-                    index: 2,
-                    used: true,
-                    enabled: true,
-                    frequency: 8000.0,
-                    gain: 0.0,
-                    q: 0.707,
-                    shape: EqBandShape::HighShelf,
-                    ..Default::default()
-                },
-            ]
-        }
+        vec![
+            EqBand {
+                index: 0,
+                used: true,
+                enabled: true,
+                frequency: 80.0,
+                gain: 0.0,
+                q: 0.707,
+                shape: EqBandShape::LowCut,
+                ..Default::default()
+            },
+            EqBand {
+                index: 1,
+                used: true,
+                enabled: true,
+                frequency: 500.0,
+                gain: 0.0,
+                q: 1.0,
+                shape: EqBandShape::Bell,
+                ..Default::default()
+            },
+            EqBand {
+                index: 2,
+                used: true,
+                enabled: true,
+                frequency: 8000.0,
+                gain: 0.0,
+                q: 0.707,
+                shape: EqBandShape::HighShelf,
+                ..Default::default()
+            },
+        ]
     });
 
-    let chain_on_change = chain.clone();
     let mut on_band_change = move |(idx, band): (usize, EqBand)| {
-        // Update UI state
         let mut bs = bands.write();
         if idx < bs.len() {
             bs[idx] = band.clone();
         }
-        drop(bs);
-
-        // Sync to DSP chain
-        if let Ok(mut eq) = chain_on_change.eq.try_lock() {
-            if let Some(b) = eq.band_mut(idx) {
-                b.filter_type = eq_band_shape_to_filter_type(band.shape);
-                b.freq_hz = band.frequency as f64;
-                b.gain_db = band.gain as f64;
-                b.q = band.q as f64;
-                b.enabled = band.enabled;
-            }
-            eq.update_band(idx);
-        }
     };
 
-    let chain_on_add = chain.clone();
     let mut on_band_add = move |band: EqBand| {
-        if let Ok(mut eq) = chain_on_add.eq.try_lock() {
-            let idx = eq.add_band();
-            if let Some(b) = eq.band_mut(idx) {
-                b.filter_type = eq_band_shape_to_filter_type(band.shape);
-                b.freq_hz = band.frequency as f64;
-                b.gain_db = band.gain as f64;
-                b.q = band.q as f64;
-                b.enabled = band.enabled;
-            }
-            eq.update_band(idx);
-        }
         let mut new_band = band.clone();
         new_band.index = bands.read().len();
         bands.write().push(new_band);
     };
 
-    let chain_on_remove = chain.clone();
     let mut on_band_remove = move |idx: usize| {
-        if let Ok(mut eq) = chain_on_remove.eq.try_lock() {
-            eq.remove_band(idx);
-        }
         let mut bs = bands.write();
         if idx < bs.len() {
             bs.remove(idx);
@@ -205,24 +120,7 @@ fn CompPanel(chain: ProcessingChain) -> Element {
     let mut release = use_signal(|| 100.0f64);
     let mut auto_makeup = use_signal(|| false);
 
-    // Initialise from chain
-    use_hook(|| {
-        if let Ok(comp) = chain.comp.lock() {
-            threshold.set(comp.comp.threshold_db);
-            ratio.set(comp.comp.ratio);
-            attack.set(comp.comp.attack_ms);
-            release.set(comp.comp.release_ms);
-            auto_makeup.set(comp.comp.auto_makeup);
-        }
-    });
-
     let gr = chain.gain_reduction_db();
-
-    let chain_thresh = chain.clone();
-    let chain_ratio = chain.clone();
-    let chain_attack = chain.clone();
-    let chain_release = chain.clone();
-    let chain_makeup = chain.clone();
 
     rsx! {
         div {
@@ -259,9 +157,6 @@ fn CompPanel(chain: ProcessingChain) -> Element {
                         unit: " dB",
                         on_change: move |v: f64| {
                             threshold.set(v);
-                            if let Ok(mut comp) = chain_thresh.comp.try_lock() {
-                                comp.comp.threshold_db = v;
-                            }
                         },
                     }
 
@@ -274,9 +169,6 @@ fn CompPanel(chain: ProcessingChain) -> Element {
                         unit: ":1",
                         on_change: move |v: f64| {
                             ratio.set(v);
-                            if let Ok(mut comp) = chain_ratio.comp.try_lock() {
-                                comp.comp.ratio = v;
-                            }
                         },
                     }
 
@@ -289,9 +181,6 @@ fn CompPanel(chain: ProcessingChain) -> Element {
                         unit: " ms",
                         on_change: move |v: f64| {
                             attack.set(v);
-                            if let Ok(mut comp) = chain_attack.comp.try_lock() {
-                                comp.comp.attack_ms = v;
-                            }
                         },
                     }
 
@@ -304,9 +193,6 @@ fn CompPanel(chain: ProcessingChain) -> Element {
                         unit: " ms",
                         on_change: move |v: f64| {
                             release.set(v);
-                            if let Ok(mut comp) = chain_release.comp.try_lock() {
-                                comp.comp.release_ms = v;
-                            }
                         },
                     }
                 }
@@ -329,9 +215,6 @@ fn CompPanel(chain: ProcessingChain) -> Element {
                     onclick: move |_| {
                         let new_val = !*auto_makeup.read();
                         auto_makeup.set(new_val);
-                        if let Ok(mut comp) = chain_makeup.comp.try_lock() {
-                            comp.comp.auto_makeup = new_val;
-                        }
                     },
                     "Auto Makeup"
                 }
