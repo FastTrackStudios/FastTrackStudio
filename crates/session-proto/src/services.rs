@@ -454,6 +454,126 @@ pub use web_client_service::{
     web_client_service_service_descriptor,
 };
 
+// ─── Mode control ──────────────────────────────────────────────────────
+//
+// FTS session modes (Organize / Write / Produce / Record / …). The data
+// enum lives in the `session` crate (it carries layout / toolbar logic
+// that doesn't belong in -proto). On the wire we use the stable
+// lowercase slug — every implementation calls `Mode::from_slug` to
+// reconstitute.
+
+/// Service for inspecting + switching the active FTS session mode.
+///
+/// Mounted by `fts-extensions` and consumed by the CLI / desktop /
+/// any other Vox peer (e.g. a mobile app). State is host-process-
+/// global; per-project mode is a future extension.
+pub mod session_mode_service {
+    use super::*;
+
+    #[architect::rpc]
+    pub trait SessionModeService {
+        /// Lowercase slug of the currently active mode.
+        /// E.g. `"organize"`, `"record"`.
+        async fn current_mode(&self) -> Result<String, SessionServiceError>;
+
+        /// Switch the active mode by slug. Idempotent if `slug`
+        /// matches the current mode. Errors with `NotFound` if the
+        /// slug doesn't map to a known mode.
+        async fn set_mode(&self, slug: String) -> Result<(), SessionServiceError>;
+
+        /// All known mode slugs in declaration order, for menus / CLI
+        /// completion. Returned even when no mode change has happened
+        /// yet (static set).
+        async fn list_modes(&self) -> Result<Vec<String>, SessionServiceError>;
+    }
+}
+
+pub use session_mode_service::{
+    Service as SessionModeServiceLayer, SessionModeService, SessionModeServiceClient,
+    SessionModeServiceDispatcher, layer as session_mode_service_layer,
+    serve as serve_session_mode_service, session_mode_service_rpc_service_descriptor,
+    session_mode_service_service_descriptor,
+};
+
+// ─── Take ranking ──────────────────────────────────────────────────────
+
+/// Scope for [`TakeRankingService::apply_rank`]. Wire-side mirror of
+/// the `Scope` enum in `session::take_ranking`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum TakeRankScope {
+    /// Active take of each selected item, marker at `(play_pos - 2s)`
+    /// when playing or at edit cursor when stopped.
+    PlayPosMinus2s,
+    /// Active take of each selected item, marker at item start.
+    ItemWide,
+    /// Take under the mouse cursor, marker at mouse project-time.
+    MouseCursor,
+}
+
+/// Rank level: 1..=3 stars (up-rank) or `Down`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum TakeRankLevel {
+    One,
+    Two,
+    Three,
+    Down,
+}
+
+pub mod take_ranking_service {
+    use super::*;
+
+    #[architect::rpc]
+    pub trait TakeRankingService {
+        /// Apply `level` at `scope`. Behavior matches the session
+        /// `take_ranking::apply` semantics: replace-if-near for
+        /// position-based scopes, single marker per take for
+        /// item-wide.
+        async fn apply_rank(
+            &self,
+            scope: TakeRankScope,
+            level: TakeRankLevel,
+        ) -> Result<(), SessionServiceError>;
+    }
+}
+
+pub use take_ranking_service::{
+    Service as TakeRankingServiceLayer, TakeRankingService, TakeRankingServiceClient,
+    TakeRankingServiceDispatcher, layer as take_ranking_service_layer,
+    serve as serve_take_ranking_service, take_ranking_service_rpc_service_descriptor,
+    take_ranking_service_service_descriptor,
+};
+
+// ─── Record control ────────────────────────────────────────────────────
+
+pub mod record_control_service {
+    use super::*;
+
+    #[architect::rpc]
+    pub trait RecordControlService {
+        /// Stop the current recording (DELETE all recorded media this
+        /// pass) and immediately start a fresh recording pass. One
+        /// undo block.
+        async fn restart_recording(&self) -> Result<(), SessionServiceError>;
+
+        /// Toggle record monitor on selected tracks between **on (1)**
+        /// and **off (0)** — skips auto/tape.
+        async fn toggle_monitor_on_off(&self) -> Result<(), SessionServiceError>;
+
+        /// Toggle record monitor on selected tracks between
+        /// **auto/tape (2)** and **off (0)**.
+        async fn toggle_monitor_tape_off(&self) -> Result<(), SessionServiceError>;
+    }
+}
+
+pub use record_control_service::{
+    RecordControlService, RecordControlServiceClient, RecordControlServiceDispatcher,
+    Service as RecordControlServiceLayer, layer as record_control_service_layer,
+    record_control_service_rpc_service_descriptor, record_control_service_service_descriptor,
+    serve as serve_record_control_service,
+};
+
 /// Complete audio latency information for display
 #[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct AudioLatencyInfo {

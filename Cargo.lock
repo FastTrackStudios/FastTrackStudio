@@ -2147,6 +2147,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vox 0.5.0",
+ "vox-stream 0.5.0",
 ]
 
 [[package]]
