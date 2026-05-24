@@ -414,10 +414,12 @@ fn parse_midi_tracks(
             continue;
         }
 
-        // Kind byte at child payload +2: 0x07 = instrument/MIDI track, 0x05 =
-        // master, 0x02 = click/folder divider, 0x00 = audio. Only instrument
-        // tracks carry MIDI note placements; everything else stays empty.
+        // Kind byte at child payload +2: 0x07 = instrument track, 0x01 = pure
+        // MIDI track, 0x05 = master, 0x02 = click/folder divider, 0x00 = audio.
+        // Both 0x07 and 0x01 carry MIDI note placements; everything else stays
+        // empty.
         let kind = data.get(child.offset + 2).copied().unwrap_or(0);
+        let is_note_track = kind == 0x07 || kind == 0x01;
 
         // Active-playlist clips: instrument tracks consume the next 0x1057 group
         // in order; each placement references a windowed region by array index,
@@ -429,7 +431,7 @@ fn parse_midi_tracks(
         // start)` — so overlaps aren't double-counted. The last clip is uncapped
         // (plays to the take end). Gaps are preserved because we also cap by the
         // clip's own length.
-        let track_regions: Vec<TrackRegion> = if kind == 0x07 {
+        let track_regions: Vec<TrackRegion> = if is_note_track {
             let group = placement_groups
                 .get(next_group)
                 .cloned()
