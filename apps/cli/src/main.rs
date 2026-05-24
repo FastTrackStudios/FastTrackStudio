@@ -1388,6 +1388,343 @@ enum WikiCmd {
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
+    /// `Wiki/schema.md` + `Wiki/purpose.md` operations.
+    /// Talks to the server over vox (per-org); these are
+    /// the canonical authoring + bootstrap entry points.
+    #[command(subcommand)]
+    Schema(WikiSchemaCmd),
+    /// `Wiki/index.md` catalog operations.
+    #[command(subcommand)]
+    Catalog(WikiCatalogCmd),
+    /// `Wiki/raw/sources/` — listing + reading + deleting
+    /// raw sources via the server.
+    #[command(subcommand)]
+    Raw(WikiRawCmd),
+    /// LLM ingest queue — list, retry, cancel pending
+    /// ingestion tasks. The actual `enqueue` happens via
+    /// `wiki import` + `wiki rescan` (existing FS verbs).
+    #[command(subcommand)]
+    IngestQueue(WikiIngestCmd),
+    /// Lint findings (RPC) — list + resolve via the server.
+    /// The lint *runner* (LLM pass) is `wiki lint`. This
+    /// sub-tree marks existing findings resolved /
+    /// dismissed / deferred.
+    #[command(subcommand)]
+    LintFindings(WikiFindingsCmd),
+    /// Review queue — LLM-proposed page changes await curator
+    /// approval here. `list` shows pending items; `apply`
+    /// accepts the proposal (rewrite-page / append-note / etc).
+    #[command(subcommand)]
+    Review(WikiReviewCmd),
+    /// Research plans — list + status. The proposer is the
+    /// existing flat `wiki research` (LLM call). This sub-tree
+    /// manages the plans the server tracks.
+    #[command(subcommand)]
+    ResearchPlans(WikiResearchCmd),
+    /// Filesystem watcher — re-ingest on external edits.
+    #[command(subcommand)]
+    Watch(WikiWatchCmd),
+}
+
+#[derive(Subcommand)]
+enum WikiReviewCmd {
+    /// List every open review item.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Accept the LLM's proposed action on a review item.
+    ///
+    /// Actions:
+    /// - `rewrite-page <path> <body|->`  — replace a page's body
+    /// - `append-note <path> <body|->`   — append to the page
+    /// - `research <query>`              — convert to a ResearchPlan
+    ///
+    /// Body args read stdin when given as `-`.
+    Apply {
+        item_id: String,
+        /// `rewrite-page` / `append-note` / `research`.
+        action: String,
+        /// First positional arg: page path (for rewrite/append)
+        /// or query text (for research).
+        arg: String,
+        /// Second positional: markdown body for rewrite /
+        /// append (`-` = stdin). Unused for `research`.
+        #[arg(default_value = "")]
+        body: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiResearchCmd {
+    /// List every research plan and its status.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set the status of a research plan.
+    /// `proposed|running|awaiting|integrated|cancelled`.
+    SetStatus {
+        plan_id: String,
+        status: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiWatchCmd {
+    /// Enable filesystem watch on `Wiki/raw/sources/` so
+    /// dropping a file there auto-enqueues an ingest.
+    On {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Off {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Status {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiSchemaCmd {
+    /// Print `Wiki/schema.md`.
+    Show {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print `Wiki/purpose.md`.
+    Purpose {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replace `Wiki/schema.md`. Read body from `<path>` or
+    /// `-` for stdin.
+    WriteSchema {
+        path: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Replace `Wiki/purpose.md`.
+    WritePurpose {
+        path: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Initialize `Wiki/` if missing. Idempotent.
+    Bootstrap {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Server-side health snapshot (orphan count, lint
+    /// queue depth, last ingest mtime, …).
+    Health {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiCatalogCmd {
+    /// Dump the catalog (`Wiki/index.md` parsed).
+    Show {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Force-rebuild the catalog by re-scanning the vault.
+    Rebuild {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiRawCmd {
+    /// List every raw source the wiki carries.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the raw source bytes to stdout.
+    Read {
+        path: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Delete a raw source. Returns the review items the
+    /// server enqueued for any pages that depended on it.
+    Delete {
+        path: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Rescan `Wiki/raw/sources/`; enqueues fresh ingest
+    /// tasks for any new files since last scan.
+    Rescan {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiIngestCmd {
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Retry a previously-failed ingest task.
+    Retry {
+        task_id: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Cancel a pending or running ingest task.
+    Cancel {
+        task_id: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiFindingsCmd {
+    /// All open lint findings.
+    List {
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark a finding resolved (or `dismiss` / `defer`).
+    Resolve {
+        finding_id: String,
+        /// `resolved` / `dismissed` / `deferred`.
+        action: String,
+        #[arg(long, default_value = "default")]
+        wiki_id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4923,7 +5260,581 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
             }
             Ok(())
         }
+        WikiCmd::Schema(c) => run_wiki_schema(c).await,
+        WikiCmd::Catalog(c) => run_wiki_catalog(c).await,
+        WikiCmd::Raw(c) => run_wiki_raw(c).await,
+        WikiCmd::IngestQueue(c) => run_wiki_ingest(c).await,
+        WikiCmd::LintFindings(c) => run_wiki_lint_findings(c).await,
+        WikiCmd::Review(c) => run_wiki_review(c).await,
+        WikiCmd::ResearchPlans(c) => run_wiki_research_plans(c).await,
+        WikiCmd::Watch(c) => run_wiki_watch(c).await,
     }
+}
+
+// ── Wiki RPC handlers ────────────────────────────────────────────────
+
+async fn run_wiki_schema(cmd: WikiSchemaCmd) -> eyre::Result<()> {
+    use wiki_proto::service::schema::SchemaClient;
+    async fn connect(url: &str) -> eyre::Result<SchemaClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiSchemaCmd::Show {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let doc = c
+                .read_schema(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("read_schema: {e:?}"))?;
+            if json {
+                println!("{doc:#?}");
+            } else {
+                println!("{}", doc.markdown);
+            }
+        }
+        WikiSchemaCmd::Purpose {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let doc = c
+                .read_purpose(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("read_purpose: {e:?}"))?;
+            if json {
+                println!("{doc:#?}");
+            } else {
+                println!("{}", doc.markdown);
+            }
+        }
+        WikiSchemaCmd::WriteSchema {
+            path,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let body = if path == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+                s
+            } else {
+                std::fs::read_to_string(&path)?
+            };
+            c.write_schema(wiki_id, body)
+                .await
+                .map_err(|e| eyre::eyre!("write_schema: {e:?}"))?;
+            println!("wrote schema");
+        }
+        WikiSchemaCmd::WritePurpose {
+            path,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let body = if path == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)?;
+                s
+            } else {
+                std::fs::read_to_string(&path)?
+            };
+            c.write_purpose(wiki_id, body)
+                .await
+                .map_err(|e| eyre::eyre!("write_purpose: {e:?}"))?;
+            println!("wrote purpose");
+        }
+        WikiSchemaCmd::Bootstrap {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.bootstrap(wiki_id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("bootstrap: {e:?}"))?;
+            println!("bootstrapped {wiki_id}");
+        }
+        WikiSchemaCmd::Health {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let h = c
+                .health(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("health: {e:?}"))?;
+            println!("{h:#?}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_catalog(cmd: WikiCatalogCmd) -> eyre::Result<()> {
+    use wiki_proto::service::catalog::CatalogClient;
+    async fn connect(url: &str) -> eyre::Result<CatalogClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiCatalogCmd::Show {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let idx = c
+                .read_index(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("read_index: {e:?}"))?;
+            println!("{idx:#?}");
+        }
+        WikiCatalogCmd::Rebuild {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let idx = c
+                .rebuild_index(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("rebuild_index: {e:?}"))?;
+            if json {
+                println!("{idx:#?}");
+            } else {
+                println!("rebuilt catalog");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
+    use wiki_proto::service::raw_layer::RawLayerClient;
+    async fn connect(url: &str) -> eyre::Result<RawLayerClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiRawCmd::List {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_raw_sources(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_raw_sources: {e:?}"))?;
+            if json {
+                println!("{rows:#?}");
+            } else {
+                for r in &rows {
+                    println!("{r:?}");
+                }
+            }
+        }
+        WikiRawCmd::Read {
+            path,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let bytes = c
+                .read_raw_source(wiki_id, path)
+                .await
+                .map_err(|e| eyre::eyre!("read_raw_source: {e:?}"))?;
+            std::io::Write::write_all(&mut std::io::stdout(), &bytes)?;
+        }
+        WikiRawCmd::Delete {
+            path,
+            yes,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            if !yes && !confirm(&format!("delete raw source `{path}`?"))? {
+                println!("aborted");
+                return Ok(());
+            }
+            let reviews = c
+                .delete_raw_source(wiki_id, path.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete_raw_source: {e:?}"))?;
+            println!("deleted {path} ({} review items enqueued)", reviews.len());
+        }
+        WikiRawCmd::Rescan {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let tasks = c
+                .rescan_sources(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("rescan_sources: {e:?}"))?;
+            println!("enqueued {} ingest task(s)", tasks.len());
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_ingest(cmd: WikiIngestCmd) -> eyre::Result<()> {
+    use wiki_proto::service::ingest::IngestClient;
+    async fn connect(url: &str) -> eyre::Result<IngestClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiIngestCmd::List {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_ingest(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_ingest: {e:?}"))?;
+            if json {
+                println!("{rows:#?}");
+            } else {
+                for t in &rows {
+                    println!("{t:#?}");
+                }
+            }
+        }
+        WikiIngestCmd::Retry {
+            task_id,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let t = c
+                .retry_ingest(wiki_id, task_id)
+                .await
+                .map_err(|e| eyre::eyre!("retry_ingest: {e:?}"))?;
+            println!("retrying {t:#?}");
+        }
+        WikiIngestCmd::Cancel {
+            task_id,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.cancel_ingest(wiki_id, task_id.clone())
+                .await
+                .map_err(|e| eyre::eyre!("cancel_ingest: {e:?}"))?;
+            println!("cancelled {task_id}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_lint_findings(cmd: WikiFindingsCmd) -> eyre::Result<()> {
+    use wiki_proto::service::lint::LintClient;
+    async fn connect(url: &str) -> eyre::Result<LintClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiFindingsCmd::List {
+            wiki_id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_findings(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_findings: {e:?}"))?;
+            if json {
+                println!("{rows:#?}");
+            } else {
+                for f in &rows {
+                    println!("{f:#?}");
+                }
+            }
+        }
+        WikiFindingsCmd::Resolve {
+            finding_id,
+            action,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let parsed = match action.as_str() {
+                "resolve" | "resolved" => wiki_proto::lint::FindingAction::Resolve,
+                "dismiss" | "dismissed" => wiki_proto::lint::FindingAction::Dismiss {
+                    reason: String::new(),
+                },
+                "promote-review" | "review" => wiki_proto::lint::FindingAction::PromoteToReview,
+                "promote-research" | "research" => {
+                    wiki_proto::lint::FindingAction::PromoteToResearch
+                }
+                other => {
+                    return Err(eyre::eyre!(
+                        "unknown action `{other}` — try resolve / dismiss / promote-review / promote-research"
+                    ));
+                }
+            };
+            c.resolve_finding(wiki_id, finding_id.clone(), parsed)
+                .await
+                .map_err(|e| eyre::eyre!("resolve_finding: {e:?}"))?;
+            println!("{finding_id} → {action}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_review(cmd: WikiReviewCmd) -> eyre::Result<()> {
+    use wiki_proto::review::{ReviewAction, ReviewItem};
+    use wiki_proto::service::review::ReviewClient;
+    async fn connect(url: &str) -> eyre::Result<ReviewClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    let read_body = |s: String| -> eyre::Result<String> {
+        if s == "-" {
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
+            Ok(buf)
+        } else if std::path::Path::new(&s).exists() {
+            Ok(std::fs::read_to_string(&s)?)
+        } else {
+            Ok(s)
+        }
+    };
+    match cmd {
+        WikiReviewCmd::List {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows: Vec<ReviewItem> = c
+                .list_review(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_review: {e:?}"))?;
+            if rows.is_empty() {
+                println!("(no pending review items)");
+            }
+            for r in &rows {
+                println!("{r:#?}");
+            }
+        }
+        WikiReviewCmd::Apply {
+            item_id,
+            action,
+            arg,
+            body,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let parsed = match action.as_str() {
+                "rewrite-page" => ReviewAction::RewritePage {
+                    path: arg.clone(),
+                    markdown: read_body(body)?,
+                },
+                "append-note" => ReviewAction::AppendNote {
+                    path: arg.clone(),
+                    body: read_body(body)?,
+                },
+                "research" => ReviewAction::Research { query: arg.clone() },
+                other => {
+                    return Err(eyre::eyre!(
+                        "unknown action `{other}` — try rewrite-page / append-note / research"
+                    ));
+                }
+            };
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.apply_review(wiki_id, item_id.clone(), parsed)
+                .await
+                .map_err(|e| eyre::eyre!("apply_review: {e:?}"))?;
+            println!("applied {action} on {item_id}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_research_plans(cmd: WikiResearchCmd) -> eyre::Result<()> {
+    use wiki_proto::research::ResearchStatus;
+    use wiki_proto::service::research::ResearchClient;
+    async fn connect(url: &str) -> eyre::Result<ResearchClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiResearchCmd::List {
+            wiki_id,
+            org,
+            server,
+            json: _,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let rows = c
+                .list_research(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("list_research: {e:?}"))?;
+            if rows.is_empty() {
+                println!("(no research plans)");
+            }
+            for p in &rows {
+                println!("{p:#?}");
+            }
+        }
+        WikiResearchCmd::SetStatus {
+            plan_id,
+            status,
+            wiki_id,
+            org,
+            server,
+        } => {
+            let parsed = match status.to_ascii_lowercase().as_str() {
+                "proposed" => ResearchStatus::Proposed,
+                "running" => ResearchStatus::Running,
+                "awaiting" => ResearchStatus::Awaiting,
+                "submitted" => ResearchStatus::Submitted,
+                "cancelled" | "canceled" => ResearchStatus::Cancelled,
+                other => {
+                    return Err(eyre::eyre!(
+                        "unknown status `{other}` — try proposed / running / awaiting / submitted / cancelled"
+                    ));
+                }
+            };
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            c.set_research_status(wiki_id, plan_id.clone(), parsed)
+                .await
+                .map_err(|e| eyre::eyre!("set_research_status: {e:?}"))?;
+            println!("{plan_id} → {status}");
+        }
+    }
+    Ok(())
+}
+
+async fn run_wiki_watch(cmd: WikiWatchCmd) -> eyre::Result<()> {
+    use wiki_proto::service::watcher::WatcherClient;
+    async fn connect(url: &str) -> eyre::Result<WatcherClient> {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+    match cmd {
+        WikiWatchCmd::On {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let r = c
+                .set_watch(wiki_id, true)
+                .await
+                .map_err(|e| eyre::eyre!("set_watch: {e:?}"))?;
+            println!("watch enabled: {r}");
+        }
+        WikiWatchCmd::Off {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let r = c
+                .set_watch(wiki_id, false)
+                .await
+                .map_err(|e| eyre::eyre!("set_watch: {e:?}"))?;
+            println!("watch disabled: {r}");
+        }
+        WikiWatchCmd::Status {
+            wiki_id,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let c = connect(&u).await?;
+            let r = c
+                .is_watching(wiki_id)
+                .await
+                .map_err(|e| eyre::eyre!("is_watching: {e:?}"))?;
+            println!("watching: {r}");
+        }
+    }
+    Ok(())
 }
 
 async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {

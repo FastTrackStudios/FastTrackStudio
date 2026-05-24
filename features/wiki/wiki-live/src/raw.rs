@@ -24,7 +24,12 @@ pub(crate) fn bootstrap_dirs(wiki: &WikiLive) -> Result<(), WikiLiveError> {
 
 impl WikiLive {
     /// Persist bytes under `Wiki/raw/sources/<filename>`.
-    /// Collisions get a `-<sha8>` suffix.
+    /// Collisions get a `-<sha8>` suffix. **SHA256 dedupe:**
+    /// if an existing file in `sources/` has byte-for-byte
+    /// identical content, returns the existing `RawSourceRef`
+    /// instead of writing a second copy (matches the
+    /// nashsu/llm_wiki incremental cache — unchanged sources
+    /// are skipped to save LLM tokens).
     pub fn import_raw_source(
         &self,
         source: ImportRawSource,
@@ -33,6 +38,40 @@ impl WikiLive {
         fs::create_dir_all(&sources_dir)?;
 
         let hash = sha256_hex(&source.bytes);
+
+        // Dedupe: scan the sources dir and return early if any
+        // file hashes to the same SHA256 as the incoming bytes.
+        // Walk just the immediate directory (sources are flat by
+        // convention; folder-import is a separate verb).
+        if let Ok(read) = fs::read_dir(&sources_dir) {
+            for entry in read.flatten() {
+                let p = entry.path();
+                if !p.is_file() {
+                    continue;
+                }
+                let Ok(existing_bytes) = fs::read(&p) else {
+                    continue;
+                };
+                if sha256_hex(&existing_bytes) == hash {
+                    let filename = p
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let rel = format!("{}/{}", paths::SOURCES_DIR, filename);
+                    return Ok(RawSourceRef {
+                        path: rel,
+                        filename,
+                        mime: source.mime,
+                        size: existing_bytes.len() as u64,
+                        sha256: hash,
+                        imported_at: Utc::now(),
+                        title: source.title,
+                    });
+                }
+            }
+        }
+
         let safe_name = sanitize_filename(&source.filename);
         let target = unique_path(&sources_dir, &safe_name, &hash);
         let abs = sources_dir.join(&target);

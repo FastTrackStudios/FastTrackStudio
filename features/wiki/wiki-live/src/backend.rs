@@ -25,7 +25,7 @@ use wiki_proto::review::ReviewItem;
 use wiki_proto::schema as stypes;
 use wiki_proto::search::{SearchHits, SearchOpts};
 use wiki_proto::service::{
-    Catalog, Graph, Ingest, Lint, Multimodal, RawLayer, Schema, Search, Watcher,
+    Catalog, Graph, Ingest, Lint, Multimodal, RawLayer, Review, Schema, Search, Watcher,
 };
 
 use crate::WikiLive;
@@ -594,6 +594,76 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     format!("{:x}", h.finalize())
+}
+
+// ────────────────────── Review ──────────────────────
+//
+// Backed by `Wiki/_state/review.json` (see
+// `crate::reviews`). The trait surface accepts a full
+// [`ReviewItem`] on enqueue + an action label on apply; we
+// translate to the local mirror via `WikiLive::enqueue_review`
+// / `list_review` / `mark_review_resolved`.
+impl Review for WikiBackend {
+    fn enqueue_review(&self, wiki_id: &str, item: ReviewItem) -> Result<(), WikiError> {
+        let w = self.resolve(wiki_id)?;
+        w.enqueue_review(item).map_err(map_err)
+    }
+
+    fn list_review(&self, wiki_id: &str) -> Result<Vec<ReviewItem>, WikiError> {
+        let w = self.resolve(wiki_id)?;
+        w.list_review().map_err(map_err)
+    }
+
+    fn apply_review(
+        &self,
+        wiki_id: &str,
+        item_id: &str,
+        action: wiki_proto::review::ReviewAction,
+    ) -> Result<(), WikiError> {
+        let w = self.resolve(wiki_id)?;
+        // Side-effect each action kind, then mark the item
+        // resolved or dismissed. Backends decide the on-disk
+        // convention for `AppendNote` — here we append under a
+        // trailing `## Edit log` section, creating it if missing.
+        match &action {
+            wiki_proto::review::ReviewAction::RewritePage { path, markdown } => {
+                let abs = w.wiki_root().join(path);
+                if let Some(parent) = abs.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| WikiError::Io(format!("mkdir: {e}")))?;
+                }
+                std::fs::write(&abs, markdown)
+                    .map_err(|e| WikiError::Io(format!("write {}: {e}", abs.display())))?;
+                w.mark_review_resolved(item_id).map_err(map_err)?;
+            }
+            wiki_proto::review::ReviewAction::AppendNote { path, body } => {
+                let abs = w.wiki_root().join(path);
+                let existing = std::fs::read_to_string(&abs).unwrap_or_default();
+                let new_body = if existing.contains("\n## Edit log\n") {
+                    format!("{}\n{}\n", existing.trim_end(), body)
+                } else {
+                    format!("{}\n\n## Edit log\n\n{}\n", existing.trim_end(), body)
+                };
+                std::fs::write(&abs, new_body)
+                    .map_err(|e| WikiError::Io(format!("append {}: {e}", abs.display())))?;
+                w.mark_review_resolved(item_id).map_err(map_err)?;
+            }
+            wiki_proto::review::ReviewAction::Research { query: _ } => {
+                // ResearchPlan promotion is the Research
+                // service's job; for now we just mark the
+                // review resolved + the curator can drive a
+                // research plan separately via the CLI.
+                w.mark_review_resolved(item_id).map_err(map_err)?;
+            }
+            wiki_proto::review::ReviewAction::AcceptNoOp => {
+                w.mark_review_resolved(item_id).map_err(map_err)?;
+            }
+            wiki_proto::review::ReviewAction::Dismiss { reason: _ } => {
+                w.mark_review_dismissed(item_id).map_err(map_err)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 // ────────────────────── Multimodal ──────────────────────

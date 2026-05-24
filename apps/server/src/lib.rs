@@ -838,6 +838,13 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
                     connection.handle_with(wiki_proto::service::multimodal::serve(wiki.clone()));
                     Ok(())
                 }
+                name if name
+                    == wiki_proto::service::review::review_rpc_service_descriptor()
+                        .service_name =>
+                {
+                    connection.handle_with(wiki_proto::service::review::serve(wiki.clone()));
+                    Ok(())
+                }
                 // Project + Goal services — file-backed
                 // readers that walk the org's vault on each
                 // request. UI surfaces consume the
