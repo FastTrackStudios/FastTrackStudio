@@ -336,7 +336,7 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         }
         let chunk_idx = regions.len() as u32;
         // Note chunk. zero_ticks == ZERO_TICKS keeps take_offset == 0.
-        chunks.extend_from_slice(&encode_note_chunk(&track.notes, ZERO_TICKS));
+        let mut chunk_bytes = encode_note_chunk(&track.notes, ZERO_TICKS);
         // Staggered terminator record. The decoder pairs note `i` with record
         // `i+1`; the chunk's final iteration therefore reads ONE record past
         // the last note. Without a separator that read would bleed into the
@@ -345,7 +345,17 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         // parser's `dur_bytes[7]` test `continue` (skip) that phantom read.
         let mut sep = [0u8; EVENT_STRIDE];
         sep[8] = 0xff; // duration high byte → "paired note-off / skip"
-        chunks.extend_from_slice(&sep);
+        chunk_bytes.extend_from_slice(&sep);
+
+        // Each MdNLB chunk inside the 0x2000 block is framed by an `MdChun`
+        // container header: `"MdChun" 01 00 <u32 byte-len>` then the chunk.
+        // Pro Tools walks these by length; omitting the header makes PT read
+        // past the data and fail with "end of stream" (our parser is lenient
+        // and only scans for the MdNLB magic, so it tolerated the omission).
+        chunks.extend_from_slice(b"MdChun");
+        chunks.extend_from_slice(&[0x01, 0x00]);
+        chunks.extend_from_slice(&(chunk_bytes.len() as u32).to_le_bytes());
+        chunks.extend_from_slice(&chunk_bytes);
 
         // Region spanning all notes (length = furthest note end).
         let clip_len = track
@@ -365,8 +375,7 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         groups.push(encode_track_map_entry(&name, &[(chunk_idx, 0)]));
     }
 
-    // 0x2000 note chunks: prefix a u32 chunk count so the block still parses
-    // as a sane container; the parser only scans for MdNLB magic, in order.
+    // 0x2000 payload: u32 chunk count, then each MdChun-framed chunk.
     let mut chunk_payload = (regions.len() as u32).to_le_bytes().to_vec();
     chunk_payload.extend_from_slice(&chunks);
     replace_block_payload(session, ContentType::MidiEventsBlock as u16, &chunk_payload);
