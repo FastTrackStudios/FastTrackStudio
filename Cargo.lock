@@ -96,6 +96,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "actions-proto"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#b6ec64fcc5aac39f3054ed38327408c47da32301"
+dependencies = [
+ "convert_case 0.6.0",
+ "facet 0.46.2",
+ "vox 0.4.0",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2261,8 +2271,8 @@ name = "daw-audio-sync"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "serde",
  "socket2 0.5.10",
  "tokio",
@@ -2297,9 +2307,9 @@ dependencies = [
  "eyre",
  "fragile",
  "moire",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "tokio",
  "tracing",
  "vox 0.5.0",
@@ -2318,7 +2328,7 @@ dependencies = [
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0",
  "architect",
  "facet 0.46.2",
  "thiserror 2.0.18",
@@ -2347,9 +2357,9 @@ dependencies = [
  "facet-json",
  "libloading 0.8.9",
  "moire",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "swell-ui 0.1.0 (git+https://github.com/FastTrackStudios/reaper-lib.git?branch=main)",
  "tokio",
  "tracing",
@@ -2380,9 +2390,9 @@ dependencies = [
  "moire",
  "objc",
  "raw-window-handle 0.6.2",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3151,7 +3161,7 @@ dependencies = [
 name = "dynamic-template-proto"
 version = "0.1.0"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0",
  "daw-proto",
  "facet 0.46.2",
  "thiserror 2.0.18",
@@ -4031,11 +4041,11 @@ dependencies = [
  "fts-launcher",
  "fts-ui",
  "reaper-config",
- "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
  "reaper-input",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "reaper-macros",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-medium",
  "reaper-test",
  "session",
  "tokio",
@@ -4056,8 +4066,8 @@ dependencies = [
  "launcher-core",
  "launcher-ui",
  "providers",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-medium",
  "serde",
  "serde_json",
  "tracing",
@@ -8055,9 +8065,9 @@ dependencies = [
  "objc",
  "raw-window-handle 0.6.2",
  "reaper-embed",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "tracing",
  "vello 0.8.0",
  "wgpu 28.0.0",
@@ -8099,35 +8109,8 @@ dependencies = [
  "helgoboss-midi",
  "once_cell",
  "pathdiff",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "ref-cast",
- "regex",
- "tracing",
- "winapi",
-]
-
-[[package]]
-name = "reaper-high"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#ca9d23f231e9a61f972a75ab3b5cde6f10ecffca"
-dependencies = [
- "backtrace",
- "base64 0.13.1",
- "c_str_macro",
- "camino",
- "crossbeam-channel",
- "csv",
- "derivative",
- "either",
- "enumflags2",
- "fragile",
- "futures",
- "helgoboss-midi",
- "once_cell",
- "pathdiff",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "ref-cast",
  "regex",
  "tracing",
@@ -8159,11 +8142,11 @@ dependencies = [
  "reaper-config",
  "reaper-dioxus",
  "reaper-embed",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
  "reaper-hwnd",
  "reaper-kbd",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "swell-ui 0.1.0",
  "tracing",
  "vello 0.6.0",
@@ -8209,22 +8192,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reaper-low"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#ca9d23f231e9a61f972a75ab3b5cde6f10ecffca"
-dependencies = [
- "c_str_macro",
- "cc",
- "derive_more 0.99.20",
- "downcast-rs",
- "fragile",
- "libc",
- "tracing",
- "vst",
- "winapi",
-]
-
-[[package]]
 name = "reaper-macros"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#ca9d23f231e9a61f972a75ab3b5cde6f10ecffca"
@@ -8245,25 +8212,7 @@ dependencies = [
  "helgoboss-midi",
  "libc",
  "reaper-common-types 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "ref-cast",
- "tracing",
- "vst",
- "winapi",
-]
-
-[[package]]
-name = "reaper-medium"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#ca9d23f231e9a61f972a75ab3b5cde6f10ecffca"
-dependencies = [
- "camino",
- "derive_more 0.99.20",
- "enumflags2",
- "helgoboss-midi",
- "libc",
- "reaper-common-types 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
  "ref-cast",
  "tracing",
  "vst",
@@ -8946,7 +8895,7 @@ dependencies = [
 name = "session"
 version = "0.1.0"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
  "chrono",
  "daw",
@@ -8958,9 +8907,9 @@ dependencies = [
  "keyflow",
  "keyflow-daw-analysis",
  "moire",
- "reaper-high 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "rustc-hash 2.1.2",
  "session-proto",
  "smallvec 1.15.1",
@@ -8975,7 +8924,7 @@ dependencies = [
 name = "session-proto"
 version = "0.1.0"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
  "daw",
  "eyre",
@@ -9757,8 +9706,8 @@ dependencies = [
  "palette",
  "raw-window-handle 0.4.3",
  "reaper-common-types 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "rxrust",
  "scopeguard",
  "tracing",
@@ -9777,8 +9726,8 @@ dependencies = [
  "palette",
  "raw-window-handle 0.4.3",
  "reaper-common-types 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "rxrust",
  "scopeguard",
  "tracing",
@@ -10700,7 +10649,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/fts-utils.git?branch=main#5b1508e4c7371269bcce11902c2e89a7af70238c"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-utils.git?branch=main#5b1508e4c7371269bcce11902c2e89a7af70238c"
 dependencies = [
  "facet 0.44.5",
  "serde",
@@ -13367,24 +13316,16 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
-name = "moire-runtime"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "moire-trace-capture"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
+name = "session-ui"
+version = "0.1.0"
 
 [[patch.unused]]
 name = "session-ui"
 version = "0.1.0"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
 
 [[patch.unused]]
 name = "anyrender_svg"
@@ -13507,5 +13448,13 @@ version = "0.1.2"
 source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
 
 [[patch.unused]]
-name = "session-ui"
-version = "0.1.0"
+name = "moire-runtime"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "moire-trace-capture"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"

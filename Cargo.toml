@@ -46,6 +46,16 @@ reaper-config = { path = "../reaper-file/crates/reaper-config" }
 # Keep these active when working from the FastTrackStudio sibling checkout.
 # Comment them out after pushing the pinned side-repo commits if you want to
 # validate the remote-pinned graph.
+# reaper-rs has no local sibling checkout. Redirect any
+# `github.com/.../reaper-rs.git` reference (from daw/input/etc. which
+# still pin github URLs internally) to the same starcommand source we
+# use directly, so cargo unifies on a single checkout.
+[patch."https://github.com/FastTrackStudios/reaper-rs.git"]
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+
 [patch."https://github.com/FastTrackStudios/fts-launcher.git"]
 fts-launcher = { path = "../fts-launcher" }
 
