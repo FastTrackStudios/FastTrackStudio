@@ -598,18 +598,19 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
         build_parents(&blocks, None, &mut parents);
 
-        // Scan a 0x200b block for the `01 <idx> 00 01 00 03` color frame.
-        // Returns the position of the frame's leading `01`.
+        // Locate the color+height frame inside a 0x200b block. Across all PT
+        // versions it has the form `01 <color:i16> 01 .... 01 <height:u16>`,
+        // i.e. an `0x01` byte at relative offsets +0, +3 and +9 (the bytes
+        // between differ by version: `00 03` for PT12+, `c0 00 00 00 00` for
+        // older). We anchor on that three-`01` signature rather than the
+        // version-specific filler, which previously required a special case
+        // per format (and a wrong fixed `+106` fallback). Returns the frame's
+        // leading `01` position.
         fn find_color_frame(data: &[u8], lo: usize, hi: usize) -> Option<usize> {
             let hi = hi.min(data.len());
             let mut p = lo;
-            while p + 6 <= hi {
-                if data[p] == 0x01
-                    && data[p + 2] == 0x00
-                    && data[p + 3] == 0x01
-                    && data[p + 4] == 0x00
-                    && data[p + 5] == 0x03
-                {
+            while p + 12 <= hi {
+                if data[p] == 0x01 && data[p + 3] == 0x01 && data[p + 9] == 0x01 {
                     return Some(p);
                 }
                 p += 1;
@@ -617,42 +618,20 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
             None
         }
 
-        // Track view height (px), a u16 stored just after the color field.
-        fn find_height(data: &[u8], lo: usize, hi: usize, frame: Option<usize>) -> u16 {
-            let hi = hi.min(data.len());
-            if let Some(f) = frame {
-                if f + 12 <= hi {
-                    return u16::from_le_bytes([data[f + 10], data[f + 11]]);
-                }
-            }
-            const OLD: &[u8] = &[0xc0, 0, 0, 0, 0, 0x01];
-            let mut p = lo;
-            while p + OLD.len() + 2 <= hi {
-                if &data[p..p + OLD.len()] == OLD {
-                    return u16::from_le_bytes([data[p + 6], data[p + 7]]);
-                }
-                p += 1;
-            }
-            0
-        }
-
         fn read_color_height(b: &Block, data: &[u8]) -> (u8, u16) {
             let start = b.offset;
             let end = b.offset + 4 + b.block_size as usize;
-            let frame = find_color_frame(data, start, end);
-            let color = match frame {
-                Some(f) => data[f + 1],
-                None => {
-                    let p = b.offset + 108;
-                    if p + 2 <= data.len() {
-                        let val = i16::from_le_bytes([data[p], data[p + 1]]);
-                        if val < 0 { 0 } else { val as u8 }
-                    } else {
-                        0
-                    }
+            match find_color_frame(data, start, end) {
+                Some(f) => {
+                    // Color is an i16 at +1 (-2 / 0xfffe = "no color" → 0).
+                    let raw = i16::from_le_bytes([data[f + 1], data[f + 2]]);
+                    let color = if raw < 0 || raw > 255 { 0 } else { raw as u8 };
+                    // Height is a u16 (pixels) at +10.
+                    let height = u16::from_le_bytes([data[f + 10], data[f + 11]]);
+                    (color, height)
                 }
-            };
-            (color, find_height(data, start, end, frame))
+                None => (0, 0),
+            }
         }
 
         // Walk each 0x2015 (comment) block — 1:1 with the track list in
