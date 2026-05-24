@@ -911,58 +911,58 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                             continue;
                         }
 
-                        t = t.item(position_secs, length_secs, |item| {
-                            // `.midi(...)` adds the MIDI take; do NOT also call
-                            // `.source_midi()` — that would push an empty MIDI take
-                            // first, leaving the real data on take #1 (and REAPER
-                            // would render the item as silent take #0).
-                            item.name(&region.name).midi(|midi| {
-                                // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
-                                // the REAPER builder to use the same PPQN so positions
-                                // and durations don't need numeric rescaling.
-                                let mut midi = midi.ticks_per_qn(960_000);
+                        t =
+                            t.item(position_secs, length_secs, |item| {
+                                // `.midi(...)` adds the MIDI take; do NOT also call
+                                // `.source_midi()` — that would push an empty MIDI take
+                                // first, leaving the real data on take #1 (and REAPER
+                                // would render the item as silent take #0).
+                                item.name(&region.name).midi(|midi| {
+                                    // Pro Tools stores MIDI at 960,000 ticks/quarter; tell
+                                    // the REAPER builder to use the same PPQN so positions
+                                    // and durations don't need numeric rescaling.
+                                    let mut midi = midi.ticks_per_qn(960_000);
 
-                                // Many PT regions store duration=0 for every event
-                                // (a paired note-on/note-off encoding the parser
-                                // doesn't fully reconstruct yet). For those events,
-                                // fall back to "until the next note of the same
-                                // pitch" so notes sustain naturally instead of
-                                // truncating to silence.
-                                const FALLBACK_DUR: u64 = 480_000; // half a quarter
-                                let region_end = region.length.max(FALLBACK_DUR);
+                                    // Many PT regions store duration=0 for every event
+                                    // (a paired note-on/note-off encoding the parser
+                                    // doesn't fully reconstruct yet). For those events,
+                                    // fall back to "until the next note of the same
+                                    // pitch" so notes sustain naturally instead of
+                                    // truncating to silence.
+                                    const FALLBACK_DUR: u64 = 480_000; // half a quarter
+                                    let region_end = region.length.max(FALLBACK_DUR);
 
-                                for (i, event) in region.events.iter().enumerate() {
-                                    if event.velocity == 0
-                                        || event.position < clip_lo
-                                        || event.position >= note_trim
-                                    {
-                                        continue;
+                                    for (i, event) in region.events.iter().enumerate() {
+                                        if event.velocity == 0
+                                            || event.position < clip_lo
+                                            || event.position >= note_trim
+                                        {
+                                            continue;
+                                        }
+                                        let dur = if event.duration > 0 {
+                                            event.duration as u32
+                                        } else {
+                                            // Find the next note of the SAME pitch and
+                                            // end this one just before it. Failing that,
+                                            // use the region end, capped at one quarter.
+                                            let next = region.events[i + 1..]
+                                                .iter()
+                                                .find(|e| e.note == event.note)
+                                                .map(|e| e.position);
+                                            let end = next.unwrap_or(region_end);
+                                            let span = end.saturating_sub(event.position);
+                                            span.clamp(FALLBACK_DUR, 960_000) as u32
+                                        };
+                                        // Emit relative to the clip's kept-window
+                                        // start so notes sit inside the item, which
+                                        // begins `clip_lo` into the take.
+                                        midi = midi
+                                            .at(event.position.saturating_sub(clip_lo))
+                                            .note(0, 0, event.note, event.velocity, dur);
                                     }
-                                    let dur = if event.duration > 0 {
-                                        event.duration as u32
-                                    } else {
-                                        // Find the next note of the SAME pitch and
-                                        // end this one just before it. Failing that,
-                                        // use the region end, capped at one quarter.
-                                        let next = region.events[i + 1..]
-                                            .iter()
-                                            .find(|e| e.note == event.note)
-                                            .map(|e| e.position);
-                                        let end = next.unwrap_or(region_end);
-                                        let span = end.saturating_sub(event.position);
-                                        span.clamp(FALLBACK_DUR, 960_000) as u32
-                                    };
-                                    midi = midi.at(event.position).note(
-                                        0,
-                                        0,
-                                        event.note,
-                                        event.velocity,
-                                        dur,
-                                    );
-                                }
-                                midi
-                            })
-                        });
+                                    midi
+                                })
+                            });
                     }
                     if end_levels > 0 {
                         t = t.folder_end(end_levels);

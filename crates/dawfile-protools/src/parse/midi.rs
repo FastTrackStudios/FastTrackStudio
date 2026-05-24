@@ -489,11 +489,21 @@ fn parse_midi_tracks(
                         (src, src.saturating_add(len).min(comp_hi))
                     };
 
-                    // Item placement so a kept note at chunk_pos lands at
-                    // timeline `take_offset + chunk_pos + (start - src)` — the
-                    // take's recorded position plus the clip's slip.
+                    // Item placement. The take's natural note timeline is
+                    // `take_offset + chunk_pos + (start - src)`. We emit each
+                    // clip's notes RELATIVE to its kept-window start
+                    // (`chunk_pos - clip_lo`, done at emit time) so they sit
+                    // inside the item, so the item itself must begin
+                    // `clip_lo` later — at `take_offset + start - src +
+                    // clip_lo`. For a single clip (`clip_lo == 0`) this is the
+                    // take's recorded position, unchanged; for comp clips it
+                    // spreads each window to its own spot instead of stacking
+                    // every item on the take offset.
                     let take_offset = regions[ri as usize].take_offset_ticks;
-                    let placement_ticks = take_offset.saturating_add(start).saturating_sub(src);
+                    let placement_ticks = take_offset
+                        .saturating_add(start)
+                        .saturating_sub(src)
+                        .saturating_add(clip_lo_ticks);
 
                     TrackRegion {
                         region_index: ri,
