@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use clap::Subcommand;
 use eyre::{Result, WrapErr};
 
-mod connection;
+pub mod connection;
 
 // ============================================================================
 // CLI Definitions
@@ -88,6 +88,12 @@ pub enum SessionCommand {
     /// FTS session mode (Organize / Write / Produce / Record / …)
     #[command(subcommand)]
     Mode(ModeCommand),
+    /// Measure RPC roundtrip latency over one persistent connection.
+    Bench {
+        /// Number of calls to time
+        #[arg(short, long, default_value = "200")]
+        count: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -148,12 +154,20 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             guide,
         } => cmd_organize(input, output.as_deref(), guide),
         SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
+        SessionCommand::Bench { count } => cmd_bench(socket.as_deref(), count).await,
+        SessionCommand::Play => cmd_transport(socket.as_deref(), TransportOp::Play).await,
+        SessionCommand::Pause => cmd_transport(socket.as_deref(), TransportOp::Pause).await,
+        SessionCommand::Stop => cmd_transport(socket.as_deref(), TransportOp::Stop).await,
         other => {
             // Other live commands not yet wired through RPC.
             let cmd_name = match other {
                 SessionCommand::Combine { .. }
                 | SessionCommand::Organize { .. }
-                | SessionCommand::Mode(_) => unreachable!(),
+                | SessionCommand::Mode(_)
+                | SessionCommand::Bench { .. }
+                | SessionCommand::Play
+                | SessionCommand::Pause
+                | SessionCommand::Stop => unreachable!(),
                 SessionCommand::Setlist => "setlist",
                 SessionCommand::Songs => "songs",
                 SessionCommand::Song { .. } => "song",
@@ -428,4 +442,78 @@ fn resolve_track_paths(track: &mut daw::file::types::track::Track, source_dir: &
             item.raw_content = patched.join("\n");
         }
     }
+}
+
+// ============================================================================
+// Transport commands
+// ============================================================================
+
+async fn cmd_bench(socket: Option<&std::path::Path>, count: usize) -> Result<()> {
+    use session_proto::services::SessionModeServiceClient;
+
+    let t_connect = std::time::Instant::now();
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let connect_us = t_connect.elapsed().as_micros();
+    let client = SessionModeServiceClient::new(caller);
+
+    // Warmup so the JIT'd dispatch path is hot.
+    let _ = client.current_mode().await;
+
+    let mut samples = Vec::with_capacity(count);
+    for _ in 0..count {
+        let t0 = std::time::Instant::now();
+        let _ = client
+            .current_mode()
+            .await
+            .map_err(|e| eyre::eyre!("rpc failed: {e:?}"))?;
+        samples.push(t0.elapsed().as_micros() as u64);
+    }
+    samples.sort_unstable();
+    let min = samples[0];
+    let p50 = samples[count / 2];
+    let p95 = samples[(count as f64 * 0.95) as usize];
+    let p99 = samples[(count as f64 * 0.99) as usize];
+    let max = samples[count - 1];
+    let avg: u64 = samples.iter().sum::<u64>() / count as u64;
+    println!("connect+handshake: {} µs", connect_us);
+    println!(
+        "rpc current_mode (n={count}): min {min} p50 {p50} avg {avg} p95 {p95} p99 {p99} max {max} (µs)"
+    );
+    Ok(())
+}
+
+enum TransportOp {
+    Play,
+    Pause,
+    Stop,
+}
+
+async fn cmd_transport(socket: Option<&std::path::Path>, op: TransportOp) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::transport::TransportClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let client = TransportClient::new(caller);
+
+    let label = match op {
+        TransportOp::Play => "play",
+        TransportOp::Pause => "pause",
+        TransportOp::Stop => "stop",
+    };
+
+    let start = std::time::Instant::now();
+    let res = match op {
+        TransportOp::Play => client.play(ProjectContext::Current).await,
+        TransportOp::Pause => client.pause(ProjectContext::Current).await,
+        TransportOp::Stop => client.stop(ProjectContext::Current).await,
+    };
+    let rt = start.elapsed();
+    res.map_err(|e| eyre::eyre!("transport {label} rpc failed: {e:?}"))?
+        .map_err(|e| eyre::eyre!("transport {label} daw error: {e:?}"))?;
+    println!("{label}  rpc roundtrip {rt:?}");
+    Ok(())
 }

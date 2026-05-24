@@ -3125,13 +3125,14 @@ dependencies = [
  "facet 0.46.0",
  "getrandom 0.2.17",
  "helgoboss-midi",
+ "keyflow-midi",
  "keyflow-proto",
+ "keyflow-syntax",
  "keyflow-text",
  "kurbo 0.13.1",
  "lopdf 0.36.0",
  "lyon",
  "macro_rules_attribute",
- "midly",
  "parley",
  "pdf-writer",
  "printpdf",
@@ -5264,6 +5265,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyflow-midi"
+version = "0.1.0"
+dependencies = [
+ "keyflow-proto",
+ "keyflow-text",
+ "midly",
+]
+
+[[package]]
 name = "keyflow-proto"
 version = "0.1.0"
 dependencies = [
@@ -5272,6 +5282,7 @@ dependencies = [
  "daw-proto",
  "facet 0.46.0",
  "helgoboss-midi",
+ "keyflow-syntax",
  "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
  "serde",
  "thiserror 2.0.18",
@@ -5280,11 +5291,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyflow-syntax"
+version = "0.1.0"
+dependencies = [
+ "facet 0.46.0",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "keyflow-text"
 version = "0.1.0"
 dependencies = [
  "keyflow-chordpro",
  "keyflow-proto",
+ "keyflow-syntax",
  "tracing",
 ]
 
@@ -6016,7 +6037,6 @@ name = "moire"
 version = "1.0.0"
 source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
 dependencies = [
- "moire-macros",
  "moire-macros-noop 1.0.0",
  "moire-tokio 1.0.0",
  "moire-wasm 1.0.0",
@@ -6030,16 +6050,6 @@ dependencies = [
  "moire-macros-noop 1.0.1",
  "moire-tokio 1.0.1",
  "moire-wasm 1.0.1",
-]
-
-[[package]]
-name = "moire-macros"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "proc-macro2",
- "quote",
- "unsynn",
 ]
 
 [[package]]
@@ -8764,6 +8774,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "daw",
+ "daw-proto",
  "eyre",
  "moire 1.0.0",
  "serde_json",
