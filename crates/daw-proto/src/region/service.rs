@@ -54,6 +54,14 @@ pub trait Regions {
     /// Set the region's color. `0` clears to the DAW default.
     fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()>;
 
+    /// Pin the region to a specific ruler lane (1-based). `None`
+    /// clears the assignment back to the default region lane. Mirrors
+    /// `Markers::set_lane` for the region half of REAPER's
+    /// region+marker list — needed when callers (e.g. the setlist
+    /// stamper) place a region in a lane other than the project's
+    /// default region lane.
+    fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()>;
+
     /// Subscribe to region changes across all open projects. Subscribers
     /// filter by `project_guid` on the envelope.
     async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionStreamEvent>);

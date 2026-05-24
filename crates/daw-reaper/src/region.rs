@@ -211,6 +211,39 @@ impl Regions for crate::Reaper {
         Ok(())
     }
 
+    fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()> {
+        // Mirror of Markers::set_lane: enum-index lookup filtered to
+        // region entries (`region_end_position.is_some()`), then the
+        // shared `ruler_lanes::set_marker_lane` wrapper (which takes
+        // either markers or regions — REAPER's API treats them as one
+        // indexed list).
+        let ctx = resolve_project_context(&project);
+        let medium = ReaperHigh::get().medium_reaper();
+        let low = medium.low();
+        let total_count = medium.count_project_markers(ctx).total_count;
+        let lane = lane.unwrap_or(0);
+
+        for idx in 0..total_count {
+            let mut found = false;
+            medium.enum_project_markers_3(ctx, idx, |result| {
+                found = result
+                    .as_ref()
+                    .is_some_and(|info| info.region_end_position.is_some() && info.id.get() == id);
+            });
+            if found {
+                if !ruler_lanes::set_marker_lane(low, ctx, idx, lane) {
+                    return Err(DawError::operation_failed(
+                        "REAPER ruler lane API is unavailable",
+                    ));
+                }
+                ruler_lanes::remember_assigned_lane(low, ctx, true, id, lane);
+                return Ok(());
+            }
+        }
+
+        Err(not_found_region())
+    }
+
     async fn subscribe(&self, _project: ProjectContext, tx: vox::Tx<RegionStreamEvent>) {
         let mut rx = crate::event_hub::hub().subscribe_regions();
         tokio::task::spawn(async move {
