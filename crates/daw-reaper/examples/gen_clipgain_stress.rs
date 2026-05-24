@@ -21,11 +21,11 @@ fn main() {
     // 3 tracks, each with all 7 gain steps as sequential clips (2s clip, 2.5s stride)
     for tk in 0..3 {
         let wav = wavs[tk].to_string();
-        b = b.track(&format!("Gain Track {}", tk + 1), move |mut t| {
+        b = b.track(format!("Gain Track {}", tk + 1), move |mut t| {
             for (i, (g, lbl)) in steps.iter().enumerate() {
                 let pos = i as f64 * 2.5;
                 let g = *g;
-                let nm = format!("{}", lbl);
+                let nm = lbl.to_string();
                 let w = wav.clone();
                 t = t.item(pos, 2.0, move |it| it.name(&nm).source_wave(&w).gain(g));
             }

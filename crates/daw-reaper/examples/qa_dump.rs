@@ -17,7 +17,7 @@ fn main() {
                     .takes
                     .first()
                     .and_then(|tk| tk.source.as_ref())
-                    .and_then(|s| Some(s.file_path.clone()))
+                    .map(|s| s.file_path.clone())
                     .unwrap_or_default();
                 println!(
                     "  pos={:.3} len={:.3} src={} '{}' file={}",
@@ -25,7 +25,7 @@ fn main() {
                     it.length,
                     src,
                     it.name,
-                    file.split('/').last().unwrap_or("")
+                    file.split('/').next_back().unwrap_or("")
                 );
             }
         }

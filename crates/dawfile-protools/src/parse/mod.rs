@@ -626,7 +626,11 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                 Some(f) => {
                     // Color is an i16 at +1 (-2 / 0xfffe = "no color" → 0).
                     let raw = i16::from_le_bytes([data[f + 1], data[f + 2]]);
-                    let color = if raw < 0 || raw > 255 { 0 } else { raw as u8 };
+                    let color = if !(0..=255).contains(&raw) {
+                        0
+                    } else {
+                        raw as u8
+                    };
                     // Height is a u16 (pixels) at +10.
                     let height = u16::from_le_bytes([data[f + 10], data[f + 11]]);
                     (color, height)

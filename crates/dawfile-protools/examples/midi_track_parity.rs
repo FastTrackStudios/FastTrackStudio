@@ -147,6 +147,7 @@ fn main() {
     let tpq = smf.division as f64;
 
     // Reference content per track name.
+    #[allow(clippy::type_complexity)]
     let mut refs: Vec<(String, HashMap<(u8, i64), i32>)> = Vec::new();
     for tr in &smf.tracks {
         let name = tr

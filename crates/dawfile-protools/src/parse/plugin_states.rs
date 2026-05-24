@@ -62,7 +62,7 @@ fn read_len_prefixed_name(data: &[u8], at: usize) -> Option<String> {
         return None;
     }
     let bytes = &data[at + 4..at + 4 + len];
-    if !bytes.iter().all(|&b| b >= 0x20 && b < 0x7f) {
+    if !bytes.iter().all(|&b| (0x20..0x7f).contains(&b)) {
         return None;
     }
     Some(String::from_utf8_lossy(bytes).into_owned())

@@ -59,7 +59,7 @@ fn main() {
         for i in 0..5 {
             let p = pos;
             t = t.item(p, 3.0, move |it| {
-                it.name(&format!("xf{i}"))
+                it.name(format!("xf{i}"))
                     .source_wave(WAV)
                     .fade_in(0.5, F::Linear)
                     .fade_out(0.5, F::Linear)

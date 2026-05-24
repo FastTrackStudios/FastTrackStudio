@@ -72,14 +72,14 @@ pub fn apply_mute_automation(
         // Pan envelope lives one level deeper: 0x260d > 0x260c[0] > 0x260a[0].
         // (Two 0x260c sub-wrappers exist for a dual panner; the first carries
         // the pan automation — identical to the second for a mono track.)
-        if let Some(sub) = nth_child_by_raw(wrapper, 0x260c, 0) {
-            if let Some(envelope_block) = nth_child_by_raw(sub, 0x260a, 0) {
-                let bps = decode_pan_envelope(envelope_block, data);
-                if !bps.is_empty() {
-                    apply_to_track(audio_tracks, midi_tracks, name, |t| {
-                        t.pan_automation = bps.clone();
-                    });
-                }
+        if let Some(sub) = nth_child_by_raw(wrapper, 0x260c, 0)
+            && let Some(envelope_block) = nth_child_by_raw(sub, 0x260a, 0)
+        {
+            let bps = decode_pan_envelope(envelope_block, data);
+            if !bps.is_empty() {
+                apply_to_track(audio_tracks, midi_tracks, name, |t| {
+                    t.pan_automation = bps.clone();
+                });
             }
         }
     }
