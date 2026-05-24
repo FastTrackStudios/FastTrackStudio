@@ -154,6 +154,31 @@ fn import_file(
         return Err(format!("Unsupported format: {path}").into());
     };
 
+    // Debug dump: write the converted RPP next to the source file so we can
+    // inspect what REAPER is being asked to parse. Keyed off env var to avoid
+    // littering disk by default.
+    let dump_dir = std::env::var("FTS_IMPORT_DUMP_DIR")
+        .ok()
+        .unwrap_or_else(|| "/tmp".to_string());
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "import".to_string());
+    let dump_path = std::path::Path::new(&dump_dir).join(format!("fts-import-{stem}.rpp"));
+    if let Err(e) = std::fs::write(&dump_path, &rpp_text) {
+        tracing::warn!(
+            dump_path = %dump_path.display(),
+            error = %e,
+            "project_import: could not write RPP dump"
+        );
+    } else {
+        tracing::info!(
+            dump_path = %dump_path.display(),
+            bytes = rpp_text.len(),
+            "project_import: wrote RPP dump"
+        );
+    }
+
     // Feed RPP text to REAPER line by line
     emit_rpp_to_context(genstate, &rpp_text)?;
     Ok(())
