@@ -38,7 +38,9 @@ declare -A REPOS=(
   [monarchy]="$STAR/monarchy.git|main"
   [reaper-file]="$STAR/reaper-file.git|main"
   [reaper-lib]="$STAR/reaper-lib.git|main"
-  [session]="$STAR/session.git|main"
+  # session: starcommand main is branch-protected, so the matching state
+  # for fts-extensions lives on a PR branch until that's merged.
+  [session]="$STAR/session.git|update/initial-import-main"
   [moire]="https://github.com/bearcove/moire|main"
 )
 
@@ -67,6 +69,8 @@ clone_or_update() {
     git -C "$name" fetch --quiet origin "$branch" || true
     git -C "$name" checkout --quiet "$branch" 2>/dev/null || \
       git -C "$name" checkout --quiet -b "$branch" "origin/$branch"
+    # Fast-forward to remote tip if it has moved.
+    git -C "$name" merge --quiet --ff-only "origin/$branch" 2>/dev/null || true
   else
     echo "==> $name (cloning $url, branch $branch)"
     git clone --quiet --branch "$branch" "$url" "$name"
@@ -80,6 +84,48 @@ done
 for name in "${!TOPLEVELS[@]}"; do
   clone_or_update "$name" "${TOPLEVELS[$name]}"
 done
+
+# Repos that live one level above FastTrackStudio (under $PARENT/..) because
+# the workspaces reference them via `../../<name>` relative paths.
+DEV_PARENT="$(dirname "$PARENT")"
+mkdir -p "$DEV_PARENT"
+declare -A DEV_LEVEL=(
+  [architect]="https://git.starcommand.live/codywright/architect.git|main"
+  [Dioxus]=""  # placeholder; see Dioxus note below
+)
+
+(
+  cd "$DEV_PARENT"
+  for name in architect; do
+    clone_or_update "$name" "${DEV_LEVEL[$name]}"
+  done
+)
+
+# Dioxus: starcommand's codywright/dioxus exists but its initial pack
+# exceeds the Cloudflare body limit, so we clone github upstream and
+# apply two custom commits as patches. Patches must already be on disk
+# at /tmp/0001-*.patch and /tmp/0002-*.patch (scp them from a machine
+# that has the source tree).
+if [ ! -d "$DEV_PARENT/Dioxus/dioxus/.git" ]; then
+  echo "==> Dioxus (github upstream + custom patches)"
+  mkdir -p "$DEV_PARENT/Dioxus"
+  (
+    cd "$DEV_PARENT/Dioxus"
+    git clone --no-checkout https://github.com/DioxusLabs/dioxus.git
+    cd dioxus
+    git fetch --depth 1 origin a626d609c1995601215f780431d315cf7c063d1e
+    git checkout a626d609c1995601215f780431d315cf7c063d1e
+    if [ -f /tmp/0001-Expose-embedded-desktop-webview-host.patch ]; then
+      git am --keep-non-patch /tmp/0001-Expose-embedded-desktop-webview-host.patch \
+                              /tmp/0002-feat-desktop-plumb-linux_offscreen-through-EmbeddedD.patch
+    else
+      echo "    WARNING: Dioxus patches not found at /tmp/0001-* and /tmp/0002-*"
+      echo "    Copy them from a machine that has the source tree first."
+    fi
+  )
+else
+  echo "==> Dioxus (already present, skipping)"
+fi
 
 echo
 echo "Done. Workspace ready under: $PARENT"
