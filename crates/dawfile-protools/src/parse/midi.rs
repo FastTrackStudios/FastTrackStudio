@@ -276,17 +276,17 @@ fn parse_midi_regions(
             (0u64, 0u64, u64::MAX)
         };
 
-        // Look up the MIDI chunk and keep only the events whose tick position
-        // falls inside the clip window, rebased to the clip's own start so the
-        // timeline placement (from 0x104f) positions them correctly.
+        // Window the source chunk by source-offset ONLY (keep events from
+        // `clip_src` to the take end), rebased to the clip start. We do NOT cap
+        // by `clip_len` here: PT comps overlap clips, so the upper bound is the
+        // NEXT clip on the track — applied per-placement in `parse_midi_tracks`
+        // (the last clip plays to the take end). Capping by `clip_len` here
+        // would drop the trailing notes single-clip tracks keep.
         let events = if chunk_idx < chunks.len() {
             chunks[chunk_idx]
                 .events
                 .iter()
-                .filter(|e| {
-                    e.position >= clip_src
-                        && (clip_len == u64::MAX || e.position < clip_src.saturating_add(clip_len))
-                })
+                .filter(|e| e.position >= clip_src)
                 .map(|e| {
                     let mut e = e.clone();
                     e.position -= clip_src;
@@ -297,8 +297,7 @@ fn parse_midi_regions(
             Vec::new()
         };
 
-        // Region length in samples: the clip window length when windowed, else
-        // the full chunk extent.
+        // Region length in samples: the clip's nominal extent.
         let region_length_samples = if clip_len != u64::MAX {
             tick_to_sample(clip_len, tempo_segments, target_sample_rate)
         } else if chunk_idx < chunks.len() {
@@ -317,6 +316,8 @@ fn parse_midi_regions(
             start_pos: tick_to_sample(clip_start, tempo_segments, target_sample_rate),
             sample_offset: 0,
             length: region_length_samples,
+            clip_start_ticks: clip_start,
+            clip_len_ticks: if clip_len == u64::MAX { 0 } else { clip_len },
             events,
         });
     }
@@ -421,22 +422,56 @@ fn parse_midi_tracks(
         // Active-playlist clips: instrument tracks consume the next 0x1057 group
         // in order; each placement references a windowed region by array index,
         // placed at that region's own decoded timeline position.
+        //
+        // Comp flatten: a track's clips can overlap on the timeline (the later
+        // clip wins). Sort clips by timeline start and cap each clip's events at
+        // the next clip's start — `note_trim_ticks = min(clip_len, next_start -
+        // start)` — so overlaps aren't double-counted. The last clip is uncapped
+        // (plays to the take end). Gaps are preserved because we also cap by the
+        // clip's own length.
         let track_regions: Vec<TrackRegion> = if kind == 0x07 {
             let group = placement_groups
                 .get(next_group)
                 .cloned()
                 .unwrap_or_default();
             next_group += 1;
-            group
+
+            // Resolve each placement to (region_index, clip_start, clip_len),
+            // then sort by timeline start for the flatten.
+            let mut clips: Vec<(u16, u64, u64)> = group
                 .into_iter()
                 .filter_map(|ri| {
-                    regions.get(ri as usize).map(|r| TrackRegion {
+                    regions
+                        .get(ri as usize)
+                        .map(|r| (ri, r.clip_start_ticks, r.clip_len_ticks))
+                })
+                .collect();
+            clips.sort_by_key(|c| c.1);
+
+            clips
+                .iter()
+                .enumerate()
+                .map(|(i, &(ri, start, len))| {
+                    // Boundary = the next clip whose start is STRICTLY greater
+                    // (clips sharing a start are stacked comp takes, not a
+                    // tiling boundary — capping at an equal start would zero
+                    // them out).
+                    let next_start = clips[i + 1..].iter().map(|c| c.1).find(|&s| s > start);
+                    let note_trim_ticks = match next_start {
+                        // Cap at the next clip's start, but never extend past
+                        // this clip's own length (preserves gaps between clips).
+                        Some(ns) => len.min(ns.saturating_sub(start)),
+                        // Last clip (by timeline): play to the take end.
+                        None => u64::MAX,
+                    };
+                    TrackRegion {
                         region_index: ri,
-                        start_pos: r.start_pos,
+                        start_pos: regions[ri as usize].start_pos,
                         clip_flag_53: false,
                         clip_muted: false,
                         clip_color: None,
-                    })
+                        note_trim_ticks,
+                    }
                 })
                 .collect()
         } else {

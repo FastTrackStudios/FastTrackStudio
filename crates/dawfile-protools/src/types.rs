@@ -184,6 +184,13 @@ pub struct MidiRegion {
     pub sample_offset: u64,
     /// Length of the region (in samples at target rate).
     pub length: u64,
+    /// Clip timeline start in PT ticks (the three-point `start`). Used by the
+    /// comp flatten to order a track's clips and cap overlaps.
+    pub clip_start_ticks: u64,
+    /// Clip length in PT ticks (the three-point `length`). The events are
+    /// windowed by source-offset only (kept to the take end), so this is the
+    /// clip's nominal extent used by the comp flatten, not an events bound.
+    pub clip_len_ticks: u64,
     /// MIDI events in this region.
     pub events: Vec<MidiEvent>,
 }
@@ -437,6 +444,12 @@ pub struct TrackRegion {
     /// of `0x1050` payload. Field locations within `0x104f` partly
     /// verified (+25/+26 read as i16 LE `FE FF` = -2 for default).
     pub clip_color: Option<i16>,
+    /// Upper bound (exclusive, in clip-relative ticks) for MIDI events from
+    /// this placement's region. PT comps overlap clips; the flatten keeps only
+    /// notes before the next clip on the track (`min(clip_len, next_start -
+    /// start)`), the last clip uncapped (`u64::MAX`). Audio placements set
+    /// `u64::MAX` (no trim).
+    pub note_trim_ticks: u64,
 }
 
 /// A single constant-tempo segment on the session timeline.
