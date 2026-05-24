@@ -10,6 +10,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 use uuid::Uuid;
 use vault::Vault;
 
@@ -39,6 +41,13 @@ impl Store {
     pub fn with_vault<R>(&self, f: impl FnOnce(&Vault) -> R) -> R {
         let guard = self.inner.lock().expect("locations store poisoned");
         f(&guard)
+    }
+}
+
+impl HasDispatcher for Store {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
     }
 }
 

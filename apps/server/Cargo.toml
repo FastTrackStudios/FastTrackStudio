@@ -47,6 +47,13 @@ task = { workspace = true, features = ["vox"] }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 milestone = { workspace = true, features = ["vox"] }
+# Entity-CRUD services additionally mounted on `/org/<slug>/vox`.
+# All four expose architect-generated clients agents + the CLI
+# consume directly.
+locations = { workspace = true, features = ["vox"] }
+cookbook = { workspace = true, features = ["vox"] }
+mealplan = { workspace = true, features = ["vox"] }
+pantry = { workspace = true, features = ["vox"] }
 # Org-root layout: this server picks one org's dir at boot
 # and routes all its sqlites + vault through OrgRoot. PR 4
 # will scan + serve every org under <data_root>/orgs/.

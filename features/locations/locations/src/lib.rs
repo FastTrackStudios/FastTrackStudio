@@ -35,6 +35,14 @@ pub mod write;
 pub use model::{Kind, Location};
 pub use parse::{ParseError, looks_like_location, parse_page};
 pub use scan::scan_vault;
-pub use service::{LocationsError, LocationsService};
+pub use service::{LocationsError, LocationsService, LocationsServiceRpc};
 pub use store::Store;
 pub use write::{WriteError, default_location_path, serialize_location, write_location};
+
+#[cfg(feature = "vox")]
+pub use service::{
+    LocationsServiceClient, LocationsServiceRpcDispatcher as LocationsDispatcher,
+    Service as LocationsServiceBridge, layer as locations_service_layer,
+    locations_service_rpc_service_descriptor as locations_service_descriptor,
+    serve as serve_locations_service,
+};

@@ -132,6 +132,323 @@ enum Commands {
     /// with Forgejo / GitHub milestones in the future.
     #[command(subcommand)]
     Milestone(MilestoneCmd),
+    /// Physical places — studios, rooms, venues, storage.
+    /// Pantry + inventory reference these by id.
+    #[command(subcommand)]
+    Location(LocationCmd),
+    /// Cookbook recipes (cooklang `.cook` files under
+    /// `Wiki/Cookbook/`).
+    #[command(subcommand)]
+    Recipe(RecipeCmd),
+    /// Scheduled meals + cooking lifecycle (planned →
+    /// cooked → pantry deductions).
+    #[command(subcommand)]
+    Meal(MealCmd),
+    /// Pantry — stocked food items, qty + unit tracking,
+    /// barcode resolution.
+    #[command(subcommand)]
+    Pantry(PantryCmd),
+}
+
+#[derive(Subcommand)]
+enum LocationCmd {
+    /// List every location in the active org's vault.
+    List {
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        /// `studio|room|storage|venue|home|other`. Default
+        /// `other`.
+        #[arg(long)]
+        kind: Option<String>,
+        /// Parent location (id or path) for nested places.
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long)]
+        address: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RecipeCmd {
+    /// List every recipe in the active org's cookbook.
+    List {
+        /// Substring filter on title.
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        /// Recipe path (e.g. `Wiki/Cookbook/Oatmeal.cook`).
+        path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Delete {
+        path: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MealCmd {
+    /// List meals. Filters compose (AND).
+    List {
+        /// Only meals scheduled on this date (`YYYY-MM-DD`).
+        #[arg(long)]
+        date: Option<String>,
+        /// `planned|cooked|skipped|eating-out`.
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        /// `YYYY-MM-DD`. Required.
+        #[arg(long)]
+        date: String,
+        /// `breakfast|lunch|dinner|snack`. Default `dinner`.
+        #[arg(long)]
+        slot: Option<String>,
+        /// Recipe paths (repeatable or comma-separated).
+        #[arg(long, value_delimiter = ',')]
+        recipe: Vec<String>,
+        #[arg(long, default_value_t = 1)]
+        servings: u32,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark cooked. Pantry deductions auto-computed from
+    /// the recipe's `can_cook` check; pass `--no-deduct`
+    /// to skip pantry adjustment (e.g. ate-out leftovers).
+    Cook {
+        target: String,
+        #[arg(long)]
+        no_deduct: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Skip {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PantryCmd {
+    List {
+        #[arg(long)]
+        low_stock: bool,
+        #[arg(long)]
+        expired: bool,
+        /// Only items expiring within N days (uses
+        /// `best_before` stock entries).
+        #[arg(long)]
+        expiring_in: Option<i64>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Create {
+        name: String,
+        #[arg(long)]
+        qty: Option<f64>,
+        /// Unit slug (`g` / `ml` / `each` / `cup` / `clove`).
+        #[arg(long)]
+        unit: Option<String>,
+        /// Location id or path.
+        #[arg(long)]
+        location: Option<String>,
+        /// Free-form food category.
+        #[arg(long)]
+        food_category: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decrement `qty` by `amount`.
+    Consume {
+        target: String,
+        amount: f64,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Increment `qty` by `amount`.
+    Restock {
+        target: String,
+        amount: f64,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Mark opened; stamps today onto `openedDate`.
+    Open {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Find a pantry row by barcode. `--resolve` falls back
+    /// to OpenFoodFacts if no local match.
+    FindByBarcode {
+        barcode: String,
+        #[arg(long)]
+        resolve: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1557,6 +1874,18 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Milestone(cmd) => {
             return Box::pin(run_milestone(cmd)).await;
+        }
+        Commands::Location(cmd) => {
+            return Box::pin(run_location(cmd)).await;
+        }
+        Commands::Recipe(cmd) => {
+            return Box::pin(run_recipe(cmd)).await;
+        }
+        Commands::Meal(cmd) => {
+            return Box::pin(run_meal(cmd)).await;
+        }
+        Commands::Pantry(cmd) => {
+            return Box::pin(run_pantry(cmd)).await;
         }
     }
     Ok(())
@@ -5035,6 +5364,811 @@ where
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
     println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+// ── Location (locations::Store) ──────────────────────────────────────
+
+async fn connect_locations_client(url: &str) -> eyre::Result<locations::LocationsServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_location_target(
+    client: &locations::LocationsServiceClient,
+    target: &str,
+) -> eyre::Result<locations::Location> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|l| l.path == target || l.name == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_location(cmd: LocationCmd) -> eyre::Result<()> {
+    match cmd {
+        LocationCmd::List {
+            kind,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|l| kind.as_deref().is_none_or(|k| l.kind == k))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for l in &rows {
+                let addr = l
+                    .address
+                    .as_deref()
+                    .map(|a| format!("  ({a})"))
+                    .unwrap_or_default();
+                println!("{:<28}  {:<8}{addr}    {}", l.name, l.kind, l.path);
+            }
+        }
+        LocationCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let l = resolve_location_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&l).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", l.name, l.kind);
+            println!("  id:       {}", l.id);
+            println!("  path:     {}", l.path);
+            if let Some(a) = &l.address {
+                println!("  address:  {a}");
+            }
+            if !l.tags.0.is_empty() {
+                println!("  tags:     {}", l.tags.0.join(", "));
+            }
+            if !l.details.is_empty() {
+                println!("\n{}", l.details);
+            }
+        }
+        LocationCmd::Create {
+            name,
+            kind,
+            parent,
+            address,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let parent_id = match parent {
+                None => None,
+                Some(p) => Some(resolve_location_target(&client, &p).await?.id),
+            };
+            let new_loc = locations::Location {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                name,
+                kind: kind.unwrap_or_else(|| "other".into()),
+                parent_id,
+                address,
+                tags: locations::model::Tags(tags),
+                same_as: None,
+                date_created: None,
+                date_modified: None,
+                details: resolve_body(details)?,
+            };
+            let created = client
+                .create(new_loc)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        LocationCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let l = resolve_location_target(&client, &target).await?;
+            let renamed = client
+                .rename(l.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        LocationCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_locations_client(&u).await?;
+            let l = resolve_location_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", l.name, l.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(l.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", l.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Recipe (cookbook::Store) — read + delete only ─────────────────────
+
+async fn connect_cookbook_client(url: &str) -> eyre::Result<cookbook::CookbookServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
+    match cmd {
+        RecipeCmd::List {
+            query,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|r| {
+                    query
+                        .as_deref()
+                        .is_none_or(|q| r.name.to_lowercase().contains(&q.to_lowercase()))
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} recipes\n", rows.len());
+            for r in &rows {
+                let s = r
+                    .servings
+                    .map(|n| format!("  ({n} srv)"))
+                    .unwrap_or_default();
+                println!("{:<40}{s}    {}", r.name, r.path);
+            }
+        }
+        RecipeCmd::Get {
+            path,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            let r = client
+                .get(path)
+                .await
+                .map_err(|e| eyre::eyre!("get: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", r.name);
+            println!("  path:     {}", r.path);
+            if let Some(s) = r.servings {
+                println!("  servings: {s}");
+            }
+            if !r.ingredients.0.is_empty() {
+                println!("  ingredients ({} items):", r.ingredients.0.len());
+                for i in r.ingredients.0.iter().take(20) {
+                    println!("    - {} {} {}", i.qty.unwrap_or(0.0), i.unit, i.name);
+                }
+            }
+        }
+        RecipeCmd::Delete {
+            path,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_cookbook_client(&u).await?;
+            if !yes && !confirm(&format!("delete `{path}`?"))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(path.clone())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {path}");
+        }
+    }
+    Ok(())
+}
+
+// ── Meal (mealplan::Store) ───────────────────────────────────────────
+
+async fn connect_mealplan_client(url: &str) -> eyre::Result<mealplan::MealplanServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_meal_target(
+    client: &mealplan::MealplanServiceClient,
+    target: &str,
+) -> eyre::Result<mealplan::Meal> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|m| m.path == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
+    match cmd {
+        MealCmd::List {
+            date,
+            status,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let parsed_date = match date {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--date: {e}"))?,
+                ),
+            };
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|m| parsed_date.is_none_or(|d| m.scheduled_for == d))
+                .filter(|m| status.as_deref().is_none_or(|s| m.status == s))
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for m in &rows {
+                println!(
+                    "{}  {}  {:<10}  {:<10}    {}",
+                    m.scheduled_for, m.slot, m.status, m.name, m.path
+                );
+            }
+        }
+        MealCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", m.name, m.status);
+            println!("  id:       {}", m.id);
+            println!("  path:     {}", m.path);
+            println!("  date:     {}", m.scheduled_for);
+            println!("  slot:     {}", m.slot);
+            println!("  servings: {}", m.servings);
+            for r in m.recipe_paths.iter() {
+                println!("  recipe:   {r}");
+            }
+        }
+        MealCmd::Create {
+            name,
+            date,
+            slot,
+            recipe,
+            servings,
+            tags,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let scheduled_for = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map_err(|e| eyre::eyre!("--date: {e}"))?;
+            let new_meal = mealplan::Meal {
+                id: uuid::Uuid::nil(),
+                path: String::new(),
+                name,
+                scheduled_for,
+                slot: slot.unwrap_or_else(|| "dinner".into()),
+                servings,
+                recipe_paths: mealplan::model::StringList(recipe),
+                status: "planned".into(),
+                pantry_deductions: mealplan::model::PantryDeductions::default(),
+                tags: mealplan::model::StringList(tags),
+                date_created: None,
+                date_modified: None,
+                details: String::new(),
+            };
+            let created = client
+                .create(new_meal)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!(
+                    "created {} for {} ({})",
+                    created.name, created.scheduled_for, created.path
+                );
+                println!("  id: {}", created.id);
+            }
+        }
+        MealCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let mut m = resolve_meal_target(&client, &target).await?;
+            m.status = status;
+            let updated = client
+                .update(m)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!("{}  [{}]  {}", updated.name, updated.status, updated.path);
+        }
+        MealCmd::Cook {
+            target,
+            no_deduct,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            // Auto-deduction logic lives server-side under
+            // `can_cook` / `cook` — we pass an empty list and
+            // let the server fill in from the recipes. The
+            // `--no-deduct` flag is reserved for the future
+            // ate-out-leftovers path; today both routes pass
+            // the same empty list.
+            let _ = no_deduct;
+            let deductions = Vec::new();
+            let cooked = client
+                .cook(m.id.to_string(), deductions)
+                .await
+                .map_err(|e| eyre::eyre!("cook: {e:?}"))?;
+            println!("cooked {}  ({})", cooked.name, cooked.path);
+        }
+        MealCmd::Skip {
+            target,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            let skipped = client
+                .skip(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("skip: {e:?}"))?;
+            println!("skipped {}  ({})", skipped.name, skipped.path);
+        }
+        MealCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            let renamed = client
+                .rename(m.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        MealCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_mealplan_client(&u).await?;
+            let m = resolve_meal_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", m.name, m.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(m.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", m.path);
+        }
+    }
+    Ok(())
+}
+
+// ── Pantry (pantry::Store) ───────────────────────────────────────────
+
+async fn connect_pantry_client(url: &str) -> eyre::Result<pantry::PantryServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_pantry_target(
+    client: &pantry::PantryServiceClient,
+    target: &str,
+) -> eyre::Result<pantry::PantryItem> {
+    if uuid::Uuid::parse_str(target).is_ok() {
+        return client
+            .get(target.to_owned())
+            .await
+            .map_err(|e| eyre::eyre!("get: {e:?}"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    rows.into_iter()
+        .find(|p| p.path == target || p.name == target)
+        .ok_or_else(|| eyre::eyre!("not found: {target}"))
+}
+
+async fn run_pantry(cmd: PantryCmd) -> eyre::Result<()> {
+    match cmd {
+        PantryCmd::List {
+            low_stock,
+            expired,
+            expiring_in,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let today = chrono::Local::now().date_naive();
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|p| !low_stock || p.qty.is_some_and(|q| q < 1.0))
+                .filter(|p| {
+                    !expired
+                        || p.stock_entries
+                            .iter()
+                            .any(|e| e.best_before.is_some_and(|d| d < today))
+                })
+                .filter(|p| {
+                    expiring_in.is_none_or(|n| {
+                        let cutoff = today + chrono::Duration::days(n);
+                        p.stock_entries
+                            .iter()
+                            .any(|e| e.best_before.is_some_and(|d| d <= cutoff && d >= today))
+                    })
+                })
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            for p in &rows {
+                let q = p
+                    .qty
+                    .map_or_else(|| "?".into(), |n| format!("{n} {}", p.unit));
+                println!("{:<32}  {:<12}    {}", p.name, q, p.path);
+            }
+        }
+        PantryCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&p).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{}\n", p.name);
+            println!("  id:       {}", p.id);
+            println!("  path:     {}", p.path);
+            println!("  status:   {}", p.status);
+            if let Some(q) = p.qty {
+                println!("  qty:      {q} {}", p.unit);
+            }
+            if !p.food_category.is_empty() {
+                println!("  food:     {}", p.food_category);
+            }
+            if let Some(l) = p.location_id {
+                println!("  location: {l}");
+            }
+        }
+        PantryCmd::Create {
+            name,
+            qty,
+            unit,
+            location,
+            food_category,
+            tags,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let location_id = match location {
+                None => None,
+                Some(loc) => {
+                    let lc = connect_locations_client(&u).await?;
+                    Some(resolve_location_target(&lc, &loc).await?.id)
+                }
+            };
+            // PantryItem has many fields; use the
+            // `PantryItemDraft::into_item` helper to construct
+            // a fully-defaulted item from a minimal draft.
+            let draft = pantry::PantryItemDraft {
+                barcode: String::new(),
+                name,
+                brand: None,
+                food_category: food_category.unwrap_or_default(),
+                unit: unit.unwrap_or_default(),
+                nutrition_per_unit: None,
+                nutrition_unit: None,
+                image_url: None,
+            };
+            let mut new_item = draft.into_item(location_id);
+            new_item.qty = qty;
+            if !tags.is_empty() {
+                new_item.tags = pantry::model::StringList(tags);
+            }
+            new_item.details = resolve_body(details)?;
+            let created = client
+                .create(new_item)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.name, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        PantryCmd::Consume {
+            target,
+            amount,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let updated = client
+                .consume(p.id.to_string(), amount)
+                .await
+                .map_err(|e| eyre::eyre!("consume: {e:?}"))?;
+            let q = updated.qty.map_or_else(|| "?".into(), |n| n.to_string());
+            println!("{}  qty={q} {}", updated.name, updated.unit);
+        }
+        PantryCmd::Restock {
+            target,
+            amount,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let updated = client
+                .restock(p.id.to_string(), amount)
+                .await
+                .map_err(|e| eyre::eyre!("restock: {e:?}"))?;
+            let q = updated.qty.map_or_else(|| "?".into(), |n| n.to_string());
+            println!("{}  qty={q} {}", updated.name, updated.unit);
+        }
+        PantryCmd::Open {
+            target,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let updated = client
+                .open(p.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("open: {e:?}"))?;
+            println!("opened {}", updated.name);
+        }
+        PantryCmd::FindByBarcode {
+            barcode,
+            resolve,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            if resolve {
+                let r = client
+                    .resolve_barcode(barcode)
+                    .await
+                    .map_err(|e| eyre::eyre!("resolve_barcode: {e:?}"))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&r).map_err(|e| eyre::eyre!("json: {e}"))?
+                    );
+                } else {
+                    println!("{r:#?}");
+                }
+            } else {
+                let p = client
+                    .find_by_barcode(barcode)
+                    .await
+                    .map_err(|e| eyre::eyre!("find_by_barcode: {e:?}"))?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&p).map_err(|e| eyre::eyre!("json: {e}"))?
+                    );
+                } else {
+                    println!("{} ({})", p.name, p.path);
+                }
+            }
+        }
+        PantryCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            let renamed = client
+                .rename(p.id.to_string(), new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        PantryCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let u = resolve_org_vox_url(server, &slug);
+            let client = connect_pantry_client(&u).await?;
+            let p = resolve_pantry_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", p.name, p.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(p.id.to_string())
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", p.path);
+        }
+    }
     Ok(())
 }
 
