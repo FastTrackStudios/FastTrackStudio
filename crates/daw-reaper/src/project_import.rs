@@ -130,24 +130,32 @@ pub unsafe extern "C" fn load_project(
 // Import dispatcher
 // ============================================================================
 
+/// Convert any supported project file to REAPER RPP text, dispatching on the
+/// file extension. Supported inputs: Pro Tools (`.ptx`/`.ptf`/`.pts`),
+/// Ableton (`.als`), AAF (`.aaf`), and dawproject (`.dawproject`).
+///
+/// This is the shared entry point behind both the REAPER import hook and the
+/// public [`crate::project_import::convert_to_rpp`]-based file API.
+pub fn convert_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".als") {
+        import_ableton(path)
+    } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
+        import_protools(path, None)
+    } else if lower.ends_with(".aaf") {
+        import_aaf(path)
+    } else if lower.ends_with(".dawproject") {
+        import_dawproject(path)
+    } else {
+        Err(format!("Unsupported input format: {path}").into())
+    }
+}
+
 fn import_file(
     path: &str,
     genstate: *mut reaper_low::raw::ProjectStateContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let lower = path.to_lowercase();
-
-    let rpp_text = if lower.ends_with(".als") {
-        import_ableton(path)?
-    } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
-        import_protools(path, None)?
-    } else if lower.ends_with(".aaf") {
-        import_aaf(path)?
-    } else if lower.ends_with(".dawproject") {
-        import_dawproject(path)?
-    } else {
-        return Err(format!("Unsupported format: {path}").into());
-    };
-
+    let rpp_text = convert_to_rpp(path)?;
     // Feed RPP text to REAPER line by line
     emit_rpp_to_context(genstate, &rpp_text)?;
     Ok(())
