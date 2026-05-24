@@ -694,20 +694,41 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
     // generated PTX where 0x1029 isn't populated.
     mix_aux::fill_vol_pan_from_2624(&blocks, &cursor, &mut audio_tracks, &mut midi_tracks);
 
-    // Step 12d: Decode per-track `is_folder` flag from 0x251a.
+    // Step 12d: Decode folder hierarchy (parent flag + nesting depth).
     //
-    // The byte at offset (`0x251a` payload + 4 + len(name)) is `0x01` for
-    // folder/container tracks (including Master), `0x00` otherwise. PT
-    // groups child tracks under their folder parent in a separate block
-    // we haven't decoded yet, but we can at least surface the flag so
-    // REAPER can model the per-track folder marker.
+    // Pro Tools encodes track folders/nesting across three structures:
+    //
+    //   * `0x251a` (MidiTrackInfo, one per track, document/display order):
+    //     carries a 6-byte track UID at `name_end + <gap> + 4` (after the
+    //     `2a 00 00 00` sentinel). This UID is what folder groups reference.
+    //
+    //   * `0x210b` (one per track, display order): payload `+5` is a role
+    //     byte — `0x02` = FOLDER PARENT, `0x05` = Master, `0x07` = instrument,
+    //     `0x00` = ordinary leaf. Keyed by track name.
+    //
+    //   * `0x210c` (one per session): a flat list of GROUPS. Each group is a
+    //     synthetic group-UID followed by a member count and that many member
+    //     UIDs. A member is either a track UID (a 0x251a UID) or ANOTHER
+    //     group's UID (a nested sub-folder). This fully encodes the tree:
+    //     group order is reverse-display-order of the owning folder track.
+    //
+    // We reconstruct a per-track `folder_depth` (0 = top level) and set
+    // `is_folder` from the `0x210b` role byte. Sessions with an EMPTY 0x210c
+    // (PT users who only make flat "divider" tracks) yield all-zero depth and
+    // no folders — matching the official converter, which also flattens them.
+    //
+    // Verified against authored ground-truth round-trips (folders.ptx,
+    // folders2.ptx) reconstructing the exact nesting written via the RPP
+    // builder. See `crates/daw-reaper/examples/gen_folders*.rs`.
     {
         let data = cursor.data();
+
+        // (a) display order + UID, from the first unique-name 0x251a entry.
         let track_list = collect_blocks_recursive(&blocks, ContentType::MidiTrackList)
             .into_iter()
             .next();
-        let mut folder_by_name: std::collections::HashMap<String, bool> =
-            std::collections::HashMap::new();
+        // (name, uid) in display order; uid is [0;6] if not found.
+        let mut order: Vec<(String, [u8; 6])> = Vec::new();
         if let Some(list) = track_list {
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             for child in list.find_children(ContentType::MidiTrackInfo) {
@@ -715,36 +736,168 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
                 if name_off + 4 > data.len() {
                     continue;
                 }
-                let (name, str_consumed) = cursor.length_prefixed_string(name_off);
-                if name.is_empty() {
+                let (name, consumed) = cursor.length_prefixed_string(name_off);
+                if name.is_empty() || !seen.insert(name.clone()) {
                     continue;
                 }
-                if !seen.insert(name.clone()) {
-                    break;
-                }
-                // is_folder flag is the first byte AFTER the length-
-                // prefixed name within the 0x251a payload.
-                let flag_off = name_off + str_consumed;
-                if flag_off < data.len() {
-                    folder_by_name.insert(name, data[flag_off] != 0);
-                }
-            }
-        }
-        for t in audio_tracks.iter_mut() {
-            if let Some(f) = folder_by_name.get(&t.name) {
-                t.is_folder = *f;
-            } else {
-                for suffix in [".01", ".02", ".03", ".04", ".05"] {
-                    if let Some(f) = folder_by_name.get(&format!("{}{suffix}", t.name)) {
-                        t.is_folder = *f;
+                let after = name_off + consumed;
+                // UID sits just past a `2a 00 00 00` sentinel; search a small
+                // window forward for it (PT inserts a few padding bytes first).
+                let mut uid = [0u8; 6];
+                let mut i = after;
+                while i + 10 <= data.len() && i < after + 24 {
+                    if data[i..i + 4] == [0x2a, 0, 0, 0] {
+                        uid.copy_from_slice(&data[i + 4..i + 10]);
                         break;
                     }
+                    i += 1;
+                }
+                order.push((name, uid));
+            }
+        }
+
+        // (b) folder role byte per track name, from 0x210b `+5`.
+        fn collect_raw<'a>(blocks: &'a [Block], raw: u16, out: &mut Vec<&'a Block>) {
+            for b in blocks {
+                if b.content_type_raw == raw {
+                    out.push(b);
+                }
+                collect_raw(&b.children, raw, out);
+            }
+        }
+        let mut role_by_name: std::collections::HashMap<String, u8> =
+            std::collections::HashMap::new();
+        let mut b210b = Vec::new();
+        collect_raw(&blocks, 0x210b, &mut b210b);
+        for b in &b210b {
+            let p = b.offset;
+            if p + 6 > data.len() {
+                continue;
+            }
+            let role = data[p + 5];
+            let (name, _) = cursor.length_prefixed_string(p + 6);
+            role_by_name.entry(name).or_insert(role);
+        }
+
+        // (c) groups from 0x210c.
+        let mut groups: Vec<([u8; 6], Vec<[u8; 6]>)> = Vec::new();
+        let mut b210c = Vec::new();
+        collect_raw(&blocks, 0x210c, &mut b210c);
+        for b in &b210c {
+            let end = (b.offset + 7 + b.block_size as usize).min(data.len());
+            // Find first group record (`2a 00 00 00 <uid>`).
+            let mut j = b.offset + 3;
+            while j + 10 <= end && data[j..j + 4] != [0x2a, 0, 0, 0] {
+                j += 1;
+            }
+            while j + 13 <= end {
+                if data[j..j + 4] != [0x2a, 0, 0, 0] {
+                    j += 1;
+                    continue;
+                }
+                let mut guid = [0u8; 6];
+                guid.copy_from_slice(&data[j + 4..j + 10]);
+                // member count two bytes past the UID record.
+                let count = data.get(j + 12).copied().unwrap_or(0) as usize;
+                j += 13;
+                let mut members = Vec::new();
+                for _ in 0..count {
+                    while j + 10 <= end && data[j..j + 4] != [0x2a, 0, 0, 0] {
+                        j += 1;
+                    }
+                    if j + 10 > end {
+                        break;
+                    }
+                    let mut m = [0u8; 6];
+                    m.copy_from_slice(&data[j + 4..j + 10]);
+                    members.push(m);
+                    j += 10 + 1; // uid record + 1 trailing byte
+                }
+                groups.push((guid, members));
+            }
+        }
+
+        // (d) reconstruct depth.
+        let group_by_uid: std::collections::HashMap<[u8; 6], usize> = groups
+            .iter()
+            .enumerate()
+            .map(|(i, (g, _))| (*g, i))
+            .collect();
+        let mut depth: std::collections::HashMap<[u8; 6], u32> = std::collections::HashMap::new();
+        // Recursively assign member depths; a member that is itself a group is
+        // a sub-folder whose members live one level deeper.
+        fn assign(
+            gi: usize,
+            d: u32,
+            groups: &[([u8; 6], Vec<[u8; 6]>)],
+            gmap: &std::collections::HashMap<[u8; 6], usize>,
+            depth: &mut std::collections::HashMap<[u8; 6], u32>,
+            guard: usize,
+        ) {
+            if guard > 256 {
+                return; // cycle guard
+            }
+            for m in &groups[gi].1 {
+                if let Some(&child) = gmap.get(m) {
+                    assign(child, d + 1, groups, gmap, depth, guard + 1);
+                } else {
+                    depth.insert(*m, d);
                 }
             }
         }
-        for t in midi_tracks.iter_mut() {
-            if let Some(f) = folder_by_name.get(&t.name) {
-                t.is_folder = *f;
+        let referenced: std::collections::HashSet<[u8; 6]> =
+            groups.iter().flat_map(|(_, m)| m.iter().copied()).collect();
+        for (i, (g, _)) in groups.iter().enumerate() {
+            if !referenced.contains(g) {
+                assign(i, 1, &groups, &group_by_uid, &mut depth, 0);
+            }
+        }
+        // Folder parents themselves aren't group members; their depth is one
+        // less than the children they contain. Groups are listed in reverse
+        // display order of their owning folder track, so zip reversed.
+        let folder_parents: Vec<[u8; 6]> = order
+            .iter()
+            .filter(|(n, _)| role_by_name.get(n).copied().unwrap_or(0) == 0x02)
+            .map(|(_, u)| *u)
+            .collect();
+        for (gi, owner) in folder_parents.iter().rev().enumerate() {
+            if let Some((_, members)) = groups.get(gi)
+                && let Some(m0) = members.first()
+            {
+                let md = depth.get(m0).copied().unwrap_or(1);
+                depth.insert(*owner, md.saturating_sub(1));
+            }
+        }
+
+        // (e) stamp tracks. Match by name → UID → depth + role.
+        let uid_by_name: std::collections::HashMap<String, [u8; 6]> =
+            order.iter().map(|(n, u)| (n.clone(), *u)).collect();
+        let lookup_uid = |name: &str| -> Option<[u8; 6]> {
+            if let Some(u) = uid_by_name.get(name) {
+                return Some(*u);
+            }
+            for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                if let Some(u) = uid_by_name.get(&format!("{name}{suffix}")) {
+                    return Some(*u);
+                }
+            }
+            None
+        };
+        let lookup_role = |name: &str| -> u8 {
+            if let Some(r) = role_by_name.get(name) {
+                return *r;
+            }
+            for suffix in [".01", ".02", ".03", ".04", ".05"] {
+                if let Some(r) = role_by_name.get(&format!("{name}{suffix}")) {
+                    return *r;
+                }
+            }
+            0
+        };
+        for t in audio_tracks.iter_mut().chain(midi_tracks.iter_mut()) {
+            t.is_folder = lookup_role(&t.name) == 0x02;
+            if let Some(uid) = lookup_uid(&t.name) {
+                t.folder_depth = depth.get(&uid).copied().unwrap_or(0);
             }
         }
     }

@@ -385,6 +385,7 @@ fn parse_midi_tracks(
             volume_automation: Vec::new(),
             mute_automation: Vec::new(),
             is_folder: false,
+            folder_depth: 0,
             display_order: u32::MAX,
             comment: String::new(),
         });

@@ -328,9 +328,22 @@ pub struct Track {
     /// folder / stem-bus grouping" rather than strictly "is the container
     /// itself".
     ///
-    /// We surface the raw byte until a `folder-nesting.ptx` ground-truth
-    /// fixture lets us disambiguate `is_folder` vs `is_grouped_child`.
+    /// `true` when this track is a FOLDER PARENT (a container that nests
+    /// other tracks beneath it). Decoded from the per-track `0x210b` block's
+    /// role byte at payload `+5`: `0x02` = folder parent. (`0x05` = Master,
+    /// `0x07` = instrument, `0x00` = ordinary leaf.) See `folder_depth`.
     pub is_folder: bool,
+    /// Nesting depth of this track in PT's folder hierarchy. `0` = top level.
+    /// A folder parent has the same depth as a sibling leaf at its level; its
+    /// children are at `depth + 1`.
+    ///
+    /// Reconstructed from the session's `0x210c` group block, which lists each
+    /// folder's direct children by 6-byte UID (members may themselves be a
+    /// nested group, encoding arbitrary depth). Tracks not in any group are
+    /// depth `0`. When the session has no `0x210c` groups (PT users who only
+    /// create flat "divider" tracks), every track is depth `0` and folders are
+    /// not emitted — matching the official converter's behavior.
+    pub folder_depth: u32,
     /// Zero-based position of this track in PT's on-screen track order,
     /// taken from the `0x2519`/`0x251a` track list (which interleaves audio,
     /// MIDI, master and folder/divider tracks in Edit-window order).

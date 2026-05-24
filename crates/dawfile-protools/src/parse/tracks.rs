@@ -152,6 +152,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
                     volume_automation: Vec::new(),
                     mute_automation: Vec::new(),
                     is_folder: false,
+                    folder_depth: 0,
                     display_order: u32::MAX,
                     comment: String::new(),
                 },
