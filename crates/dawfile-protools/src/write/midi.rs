@@ -332,10 +332,9 @@ fn find_first_raw(blocks: &[RawBlock], ct: u16) -> Option<&RawBlock> {
 /// number + tick position; velocity is parsed from the wrong offset upstream,
 /// so do not assert it).
 pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate::PtResult<()> {
-    let mut chunks: Vec<u8> = Vec::new();
+    let mut chunk_list: Vec<Vec<u8>> = Vec::new();
     let mut regions: Vec<Vec<u8>> = Vec::new();
     let mut groups: Vec<Vec<u8>> = Vec::new();
-    let mut last_mdchun_len_at: Option<usize> = None;
 
     for (ti, track) in tracks.iter().enumerate() {
         if track.notes.is_empty() {
@@ -371,11 +370,9 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         // Pro Tools walks these by length; omitting the header makes PT read
         // past the data and fail with "end of stream" (our parser is lenient
         // and only scans for the MdNLB magic, so it tolerated the omission).
-        chunks.extend_from_slice(b"MdChun");
-        chunks.extend_from_slice(&[0x01, 0x00]);
-        last_mdchun_len_at = Some(chunks.len()); // offset of this chunk's len u32
-        chunks.extend_from_slice(&(chunk_bytes.len() as u32).to_le_bytes());
-        chunks.extend_from_slice(&chunk_bytes);
+        // We collect each chunk separately so slack can be distributed across
+        // all of them later (a single chunk with huge slack is rejected by PT).
+        chunk_list.push(chunk_bytes);
 
         // Region spanning all notes (length = furthest note end).
         let clip_len = track
@@ -395,28 +392,37 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         groups.push(encode_track_map_entry(&name, &[(chunk_idx, 0)]));
     }
 
-    // 0x2000 payload: u32 chunk count, then each MdChun-framed chunk.
-    let mut chunk_payload = (regions.len() as u32).to_le_bytes().to_vec();
-    let len_field_in_payload = last_mdchun_len_at.map(|o| o + 4); // +4 for the count prefix
-    chunk_payload.extend_from_slice(&chunks);
-    // The 0x2000 block keeps its original size (registry-safety), but PT
-    // also validates that the chunk-list data FILLS the block — trailing dead
-    // bytes give "size of header doesn't match amount of data read". So we
-    // absorb the slack into the LAST chunk's MdChun length (PT treats it as
-    // in-chunk free space, exactly as the original sessions do) instead of
-    // leaving raw padding. Compute the target from the existing 0x2000 block.
-    if let (Some(lf), Some((s, e))) = (
-        len_field_in_payload,
-        find_first_raw(&session.blocks, ContentType::MidiEventsBlock as u16)
-            .map(|b| (b.start, b.end)),
-    ) {
-        let target = e - (s + 9);
-        if chunk_payload.len() < target {
-            let slack = (target - chunk_payload.len()) as u32;
-            let cur = u32::from_le_bytes(chunk_payload[lf..lf + 4].try_into().unwrap());
-            chunk_payload[lf..lf + 4].copy_from_slice(&(cur + slack).to_le_bytes());
-            chunk_payload.resize(target, 0);
-        }
+    // Per-chunk slack budget (zero bytes inside each MdChun region beyond the
+    // MdNLB data). PT carries such slack in real sessions; we keep the 0x2000
+    // block at its original size (registry-safety, see replace_block_payload)
+    // and DISTRIBUTE the required filler evenly across chunks so no single
+    // chunk gets a pathologically large slack (PT rejects that). Compute the
+    // target payload size from the existing 0x2000 block.
+    let target_2000 = find_first_raw(&session.blocks, ContentType::MidiEventsBlock as u16)
+        .map(|b| (b.end) - (b.start + 9));
+    // Tight size: u32 count + Σ (12-byte MdChun header + chunk bytes).
+    let tight: usize = 4 + chunk_list.iter().map(|c| 12 + c.len()).sum::<usize>();
+    let per_chunk_slack = match target_2000 {
+        Some(t) if t > tight && !chunk_list.is_empty() => (t - tight) / chunk_list.len(),
+        _ => 0,
+    };
+    let mut chunk_payload = (chunk_list.len() as u32).to_le_bytes().to_vec();
+    for (i, c) in chunk_list.iter().enumerate() {
+        // Last chunk takes any rounding remainder so the block fills exactly.
+        let slack = if let Some(t) = target_2000 {
+            if i + 1 == chunk_list.len() {
+                t.saturating_sub(chunk_payload.len() + 12 + c.len())
+            } else {
+                per_chunk_slack
+            }
+        } else {
+            0
+        };
+        chunk_payload.extend_from_slice(b"MdChun");
+        chunk_payload.extend_from_slice(&[0x01, 0x00]);
+        chunk_payload.extend_from_slice(&((c.len() + slack) as u32).to_le_bytes());
+        chunk_payload.extend_from_slice(c);
+        chunk_payload.resize(chunk_payload.len() + slack, 0);
     }
     replace_block_payload(session, ContentType::MidiEventsBlock as u16, &chunk_payload);
     replace_block_payload(
