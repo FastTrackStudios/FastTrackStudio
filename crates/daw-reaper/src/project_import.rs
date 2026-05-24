@@ -240,6 +240,18 @@ fn import_ableton(path: &str) -> Result<String, Box<dyn std::error::Error>> {
 /// UUID so re-running the conversion on the same PT session produces the
 /// same GUID for the same track (matters for round-trip identity and for
 /// tools that diff converter output).
+/// Map a PT fade-def curve byte to a REAPER fade curve. PT/the converter only
+/// distinguishes linear (`0`) from curved (non-zero); curved fades map to
+/// Bezier, matching the official converter's behaviour.
+fn pt_fade_curve(curve: u8) -> dawfile_reaper::types::item::FadeCurveType {
+    use dawfile_reaper::types::item::FadeCurveType;
+    if curve == 0 {
+        FadeCurveType::Linear
+    } else {
+        FadeCurveType::Bezier
+    }
+}
+
 fn deterministic_guid(seed: &str) -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -898,9 +910,23 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                         //     the fade-in (= the same in_length).
                         let item_start = tr.start_pos;
                         let item_end = item_start.saturating_add(region.length);
-                        let mut fade_in_secs: Option<f64> = None;
-                        let mut fade_out_secs: Option<f64> = None;
+                        // (length_secs, curve_byte) for each fade.
+                        let mut fade_in_secs: Option<(f64, u8)> = None;
+                        let mut fade_out_secs: Option<(f64, u8)> = None;
                         let tolerance: u64 = (sample_rate as u64) / 1000; // ±1 ms
+                        // Does this item start *inside* another clip on the track? If
+                        // so, a fade entry at its start is the incoming half of a
+                        // crossfade — PT stores that as the outgoing clip's fade-out
+                        // (in_length == 0), so the incoming fade-in must be inferred.
+                        let starts_in_crossfade = track.regions.iter().any(|o| {
+                            let os = o.start_pos;
+                            let ol = session
+                                .audio_regions
+                                .get(o.region_index as usize)
+                                .map(|r| r.length)
+                                .unwrap_or(0);
+                            os < item_start && item_start < os.saturating_add(ol)
+                        });
                         for f in &track.fades {
                             let crossfade = f.in_length > 0 && f.out_length > 0;
                             let fade_total = f.in_length.max(f.out_length);
@@ -908,8 +934,17 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                                 continue;
                             }
                             // Fade-IN: the fade's start coincides with this item's start.
-                            if f.start_pos.abs_diff(item_start) <= tolerance && f.in_length > 0 {
-                                fade_in_secs = Some(f.in_length as f64 / sample_rate);
+                            if f.start_pos.abs_diff(item_start) <= tolerance {
+                                if f.in_length > 0 {
+                                    fade_in_secs =
+                                        Some((f.in_length as f64 / sample_rate, f.curve));
+                                } else if f.out_length > 0 && starts_in_crossfade {
+                                    // Crossfade incoming half: PT stored only the
+                                    // outgoing fade-out, but this clip fades in over
+                                    // the same overlap.
+                                    fade_in_secs =
+                                        Some((f.out_length as f64 / sample_rate, f.curve));
+                                }
                             }
                             // Fade-OUT: the fade ends at this item's end. For pure
                             // fade-outs (`in == 0`) PT places start_pos = item_end - out_length.
@@ -924,7 +959,7 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                                 } else {
                                     f.in_length
                                 };
-                                fade_out_secs = Some(out_len as f64 / sample_rate);
+                                fade_out_secs = Some((out_len as f64 / sample_rate, f.curve));
                             }
                         }
 
@@ -952,17 +987,11 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                             if offset_secs > 0.0 {
                                 item = item.slip_offset(offset_secs);
                             }
-                            if let Some(fi) = fade_in_secs {
-                                item = item.fade_in(
-                                    fi,
-                                    dawfile_reaper::types::item::FadeCurveType::Linear,
-                                );
+                            if let Some((fi, c)) = fade_in_secs {
+                                item = item.fade_in(fi, pt_fade_curve(c));
                             }
-                            if let Some(fo) = fade_out_secs {
-                                item = item.fade_out(
-                                    fo,
-                                    dawfile_reaper::types::item::FadeCurveType::Linear,
-                                );
+                            if let Some((fo, c)) = fade_out_secs {
+                                item = item.fade_out(fo, pt_fade_curve(c));
                             }
                             item
                         });

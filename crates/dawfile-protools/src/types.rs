@@ -476,6 +476,11 @@ pub struct FadeRegion {
     pub out_length: u64,
     /// Curve shape: `1` = linear, `2` = equal power, `3` = equal gain.
     pub shape: u8,
+    /// Curve linearity flag (`0x262f` byte after `shape`): `0` = linear,
+    /// non-zero = a non-linear (curved) fade. PT/the converter collapses all
+    /// non-linear Reaper curves to a single value here, so only linear-vs-
+    /// curved is recoverable (map non-linear → Bezier, like the official tool).
+    pub curve: u8,
     /// Index into the per-session fade-definition list (`0x262f` blocks in
     /// document order). Useful for cross-referencing or debugging.
     pub fade_index: u32,

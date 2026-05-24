@@ -364,16 +364,17 @@ fn collect_slot_regions(
                 // session-wide fade-definition list (0x262f blocks), NOT into
                 // `audio_regions`. Look it up and decode the lengths + shape.
                 let fade_index = raw_index_u32;
-                let (in_length, out_length, shape) = fade_defs
+                let (in_length, out_length, shape, curve) = fade_defs
                     .get(fade_index as usize)
                     .and_then(|def| decode_fade_def(def, data))
-                    .unwrap_or((0, 0, 1));
+                    .unwrap_or((0, 0, 1, 0));
 
                 slot_fades.push(FadeRegion {
                     start_pos: start,
                     in_length,
                     out_length,
                     shape,
+                    curve,
                     fade_index,
                 });
             } else {
@@ -404,7 +405,7 @@ fn collect_slot_regions(
 ///
 /// Returns `(in_len_samples, out_len_samples, shape)`. `out_len == 0` denotes a
 /// single-direction fade; `in_len == out_len` denotes a symmetric crossfade.
-fn decode_fade_def(def: &Block, data: &[u8]) -> Option<(u64, u64, u8)> {
+fn decode_fade_def(def: &Block, data: &[u8]) -> Option<(u64, u64, u8, u8)> {
     let base = def.offset;
     if base + 11 > data.len() {
         return None;
@@ -434,7 +435,9 @@ fn decode_fade_def(def: &Block, data: &[u8]) -> Option<(u64, u64, u8)> {
         0
     };
     let shape = data[base + 10 + n_in + n_out];
-    Some((in_len, out_len, shape))
+    // The byte right after `shape` flags non-linear curves (0 = linear).
+    let curve = data.get(base + 10 + n_in + n_out + 1).copied().unwrap_or(0);
+    Some((in_len, out_len, shape, curve))
 }
 
 /// Walk the block tree and collect every `0x262f` fade-definition block in
