@@ -14,15 +14,35 @@ pub fn register_reaper_tags(tags: &mut TagRegistry) {
         .register("audio/effects/reverb", "Reverb", "Reverb effects")
         .register("audio/effects/delay", "Delay", "Delay effects")
         .register("audio/effects/eq", "EQ", "Equalizers")
-        .register("audio/effects/dynamics", "Dynamics", "Compressors, gates, limiters")
-        .register("audio/effects/distortion", "Distortion", "Distortion and saturation")
+        .register(
+            "audio/effects/dynamics",
+            "Dynamics",
+            "Compressors, gates, limiters",
+        )
+        .register(
+            "audio/effects/distortion",
+            "Distortion",
+            "Distortion and saturation",
+        )
         .set_color("audio/effects/distortion", "#f38ba8")
-        .register("audio/effects/modulation", "Modulation", "Chorus, flanger, phaser")
+        .register(
+            "audio/effects/modulation",
+            "Modulation",
+            "Chorus, flanger, phaser",
+        )
         .set_color("audio/effects/modulation", "#74c7ec")
         .register("audio/effects/filter", "Filter", "Filter effects")
         .register("audio/effects/stereo", "Stereo", "Stereo width and imaging")
-        .register("audio/effects/pitch", "Pitch", "Pitch shifting and correction")
-        .register("audio/effects/utility", "Utility", "Utility effects (gain, phase, etc.)");
+        .register(
+            "audio/effects/pitch",
+            "Pitch",
+            "Pitch shifting and correction",
+        )
+        .register(
+            "audio/effects/utility",
+            "Utility",
+            "Utility effects (gain, phase, etc.)",
+        );
 
     // Plugin formats
     tags.register("audio/effects/plugin", "Plugins", "Plugin formats")
@@ -52,13 +72,21 @@ pub fn register_reaper_tags(tags: &mut TagRegistry) {
         .set_color("reaper/actions", "#fab387")
         .register("reaper/actions/file", "File", "File operations")
         .register("reaper/actions/edit", "Edit", "Edit operations")
-        .register("reaper/actions/transport", "Transport", "Transport controls")
+        .register(
+            "reaper/actions/transport",
+            "Transport",
+            "Transport controls",
+        )
         .register("reaper/actions/view", "View", "View/UI actions")
         .register("reaper/actions/insert", "Insert", "Insert operations")
         .register("reaper/actions/item", "Item", "Media item actions")
         .register("reaper/actions/track", "Track", "Track actions")
         .register("reaper/actions/options", "Options", "Options/preferences")
-        .register("reaper/actions/extensions", "Extensions", "Extension actions")
+        .register(
+            "reaper/actions/extensions",
+            "Extensions",
+            "Extension actions",
+        )
         .register("reaper/actions/scripts", "Scripts", "ReaScript actions");
 
     // Tracks
@@ -80,18 +108,38 @@ pub fn register_reaper_tags(tags: &mut TagRegistry) {
         .register("reaper/markers/region", "Region", "Project regions");
 
     // Templates
-    tags.register("reaper/templates", "Templates", "Project and track templates")
-        .register("reaper/templates/project", "Project Templates", "Project templates")
-        .register("reaper/templates/track", "Track Templates", "Track templates");
+    tags.register(
+        "reaper/templates",
+        "Templates",
+        "Project and track templates",
+    )
+    .register(
+        "reaper/templates/project",
+        "Project Templates",
+        "Project templates",
+    )
+    .register(
+        "reaper/templates/track",
+        "Track Templates",
+        "Track templates",
+    );
 
     // Visibility
-    tags.register("reaper/visibility", "Visibility", "Track visibility controls")
-        .set_color("reaper/visibility", "#cba6f7");
+    tags.register(
+        "reaper/visibility",
+        "Visibility",
+        "Track visibility controls",
+    )
+    .set_color("reaper/visibility", "#cba6f7");
 
     // ── Desktop (blue) ─────────────────────────────────────
     tags.register("desktop", "Desktop", "Desktop environment")
         .set_color("desktop", "#89b4fa")
-        .register("desktop/applications", "Applications", "Desktop applications");
+        .register(
+            "desktop/applications",
+            "Applications",
+            "Desktop applications",
+        );
 
     // ── Tools (yellow) ─────────────────────────────────────
     tags.register("tools", "Tools", "Utility tools")

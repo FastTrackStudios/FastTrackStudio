@@ -29,7 +29,7 @@ impl DawMarkersProvider {
             let project = daw.current_project().await?;
             let markers = project.markers().all().await?;
             let regions = project.regions().all().await?;
-            Ok::<_, daw::Error>((markers, regions))
+            Ok::<_, daw::rpc::Error>((markers, regions))
         })
         .and_then(|r| r.ok());
 

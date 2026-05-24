@@ -15,7 +15,7 @@
 //! // The Launcher Dioxus component can be embedded in a reaper-dioxus panel:
 //! use fts_launcher::ui::{Launcher, LauncherState};
 //! let state = engine.into_state();
-//! // Render: Launcher { state, theme: LauncherEngine::theme(), on_close: ... }
+//! // Render: Launcher { state, on_close: ... }
 //! ```
 
 pub mod daw_module;
@@ -27,15 +27,14 @@ use launcher_core::{FilterState, QueryEngine};
 use providers::{CalcProvider, ExtensionProvider, WorkflowProvider};
 
 // Re-export everything consumers need
+pub use dioxus_native;
 pub use launcher_core;
 pub use launcher_ui;
-pub use dioxus_native;
 
 /// Re-export the UI components under a convenient path.
 pub mod ui {
     pub use launcher_ui::components::Launcher;
     pub use launcher_ui::state::LauncherState;
-    pub use launcher_ui::theme::Theme;
 }
 
 /// Action handler type: (command_id, display_name, handler).
@@ -68,7 +67,10 @@ impl LauncherEngine {
         ext_registry.scan_dir(&bundled_ext);
         let user_ext = launcher_core::extension::default_extensions_dir();
         ext_registry.scan_dir(&user_ext);
-        tracing::info!(extensions = ext_registry.extensions().len(), "Loaded extensions");
+        tracing::info!(
+            extensions = ext_registry.extensions().len(),
+            "Loaded extensions"
+        );
 
         let engine = QueryEngine::builder()
             .max_results(50)
@@ -134,7 +136,10 @@ impl LauncherEngine {
             }
         }
 
-        tracing::info!(providers = engine.provider_names().len(), "FTS Launcher ready");
+        tracing::info!(
+            providers = engine.provider_names().len(),
+            "FTS Launcher ready"
+        );
 
         Self {
             engine,
@@ -155,15 +160,6 @@ impl LauncherEngine {
     /// Create a LauncherState for the Dioxus UI.
     pub fn into_state(self) -> ui::LauncherState {
         ui::LauncherState::new(self.engine)
-    }
-
-    /// The FTS dark theme (Catppuccin Mocha + pink accent).
-    pub fn theme() -> ui::Theme {
-        let mut theme = ui::Theme::dark();
-        theme.name = "fts-dark".into();
-        theme.accent = "#f5c2e7".into();
-        theme.accent_hover = "#f5c2e7".into();
-        theme
     }
 
     /// Action definitions for REAPER registration.

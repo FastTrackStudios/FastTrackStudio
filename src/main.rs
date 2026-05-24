@@ -5,28 +5,25 @@
 fn main() {
     use dioxus_native::prelude::*;
     use fts_launcher::LauncherEngine;
+    use fts_ui::prelude::{ThemeMode, ThemeProvider, ThemeState, default_theme_preset};
     use launcher_ui::components::Launcher;
 
     tracing_subscriber::fmt()
         .with_env_filter("info,wgpu_hal=error,wgpu_core=error")
         .init();
 
-    let engine = LauncherEngine::new();
-    let theme = LauncherEngine::theme();
-    let state = use_signal_in_runtime(engine.into_state);
-
     fn app() -> Element {
-        let state = use_signal(|| {
-            fts_launcher::LauncherEngine::new().into_state()
-        });
+        let state = use_signal(|| fts_launcher::LauncherEngine::new().into_state());
+        let theme_state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
         let on_close = |_: ()| std::process::exit(0);
 
         rsx! {
             Stylesheet { href: asset!("/assets/tailwind.css") }
-            Launcher {
-                state,
-                theme: fts_launcher::LauncherEngine::theme(),
-                on_close: on_close,
+            ThemeProvider { state: theme_state,
+                Launcher {
+                    state,
+                    on_close: on_close,
+                }
             }
         }
     }

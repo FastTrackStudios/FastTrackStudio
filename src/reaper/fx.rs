@@ -154,7 +154,7 @@ impl Provider for DawFxProvider {
                 }
                 _ => {}
             }
-            Ok::<(), daw::Error>(())
+            Ok::<(), daw::rpc::Error>(())
         });
 
         Ok(ActivationResult::Close)

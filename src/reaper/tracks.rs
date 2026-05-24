@@ -123,7 +123,7 @@ impl Provider for DawTracksProvider {
             let project = daw.current_project().await?;
             let track = project.tracks().by_guid(guid).await?;
             let Some(track) = track else {
-                return Ok::<bool, daw::Error>(false);
+                return Ok::<bool, daw::rpc::Error>(false);
             };
             match cmd {
                 "track-select" => {

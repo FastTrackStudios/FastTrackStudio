@@ -64,7 +64,10 @@ impl Provider for DawTransportProvider {
                 .with_sub("Move cursor to project start")
                 .with_icon("\u{23EE}")
                 .with_search_fields(vec!["start".into(), "beginning".into(), "rewind".into()])
-                .with_actions(vec![ItemAction::new("Go to start", "daw:transport:goto-start")]),
+                .with_actions(vec![ItemAction::new(
+                    "Go to start",
+                    "daw:transport:goto-start",
+                )]),
             Item::new("transport-goto-end", "Go to End", "transport")
                 .with_sub("Move cursor to project end")
                 .with_icon("\u{23ED}")
@@ -74,7 +77,10 @@ impl Provider for DawTransportProvider {
                 .with_sub("Toggle loop/repeat mode")
                 .with_icon("\u{1F501}")
                 .with_search_fields(vec!["repeat".into(), "loop".into(), "cycle".into()])
-                .with_actions(vec![ItemAction::new("Toggle", "daw:transport:toggle-repeat")]),
+                .with_actions(vec![ItemAction::new(
+                    "Toggle",
+                    "daw:transport:toggle-repeat",
+                )]),
         ])
     }
 
@@ -111,7 +117,7 @@ impl Provider for DawTransportProvider {
                 }
                 _ => {}
             }
-            Ok::<(), daw::Error>(())
+            Ok::<(), daw::rpc::Error>(())
         });
 
         Ok(ActivationResult::Close)

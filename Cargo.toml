@@ -17,8 +17,8 @@ required-features = ["standalone"]
 
 [features]
 default = ["native"]
-native = ["launcher-ui/native"]
-desktop = ["launcher-ui/desktop"]
+native = ["daw/reaper-ui"]
+desktop = []
 standalone = ["native", "dep:winit", "dep:tracing-subscriber"]
 
 [dependencies]
@@ -26,12 +26,15 @@ standalone = ["native", "dep:winit", "dep:tracing-subscriber"]
 launcher-core = { path = "../dioxus-launcher/crates/launcher-core" }
 launcher-ui = { path = "../dioxus-launcher/crates/launcher-ui", default-features = false }
 providers = { path = "../dioxus-launcher/crates/providers" }
+fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
-# Dioxus native renderer (Blitz) — pulled in via launcher-ui/native feature
+# Dioxus native renderer (Blitz)
 dioxus-native = { git = "https://github.com/FastTrackStudios/blitz", features = ["prelude"] }
 
 # DAW API (safe Rust, async, generic)
 daw = { path = "../daw/crates/daw" }
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Standalone binary deps (optional)
 winit = { version = "=0.31.0-beta.2", optional = true }
@@ -40,7 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-facet = "0.44"
+facet = "0.46"
 facet-styx = "3.0"
 
 # Logging
