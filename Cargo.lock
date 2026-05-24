@@ -14473,18 +14473,6 @@ version = "0.5.0"
 source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
 
 [[patch.unused]]
-name = "audio-controls"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "daw-cli"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "daw-extension-runtime"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "actions-keybindings"
 version = "0.1.0"
 
@@ -14502,4 +14490,16 @@ version = "0.1.0"
 
 [[patch.unused]]
 name = "input-dioxus"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "audio-controls"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "daw-cli"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "daw-extension-runtime"
 version = "0.1.0"
