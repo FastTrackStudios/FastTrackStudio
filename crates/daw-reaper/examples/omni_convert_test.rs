@@ -20,11 +20,20 @@ const SEG2_B64: &str = "AFByb2dyYW0gMQAAAAAA";
 
 /// Extract the first Omnisphere XML state document from decrypted PTX bytes.
 /// Returns the bytes from `<SynthMaster` through `</SynthMaster>\n ` inclusive.
-fn extract_omni_xml(data: &[u8]) -> Option<&[u8]> {
-    let start = find(data, b"<SynthMaster", 0)?;
-    // The XML document ends exactly at the close tag; the trailing "\n " that
-    // follows in both PTX and RPP belongs to the host (JUCE) trailer framing,
-    // which our template supplies as a constant.
+fn extract_omni_xml(data: &[u8], instance: usize) -> Option<&[u8]> {
+    // The real root tag is `<SynthMaster vers=` — `<SynthMaster` alone also
+    // matches the nested `<SynthMasterEngineParamBlock`.
+    let mut from = 0;
+    let mut start = None;
+    for _ in 0..=instance {
+        let p = find(data, b"<SynthMaster vers=", from)?;
+        start = Some(p);
+        from = p + 1;
+    }
+    let start = start?;
+    // The XML document ends at the single `</SynthMaster>` close; the trailing
+    // "\n " that follows belongs to the host (JUCE) trailer framing, which our
+    // template supplies as a constant.
     let end = find(data, b"</SynthMaster>", start)? + b"</SynthMaster>".len();
     Some(&data[start..end])
 }
@@ -35,7 +44,7 @@ fn find(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
 
 /// Build the Reaper VST3 chunk (3 base64 segments) from an Omnisphere XML blob.
 fn synth_vst3_chunk(xml: &[u8]) -> String {
-    let seg0 = B64.decode(SEG0_B64).unwrap();
+    let mut seg0 = B64.decode(SEG0_B64).unwrap();
     let hdr_mid = B64.decode(SEG1_HDR_MID_B64).unwrap();
     let hdr_tail = B64.decode(SEG1_HDR_TAIL_B64).unwrap();
     let trailer = B64.decode(SEG1_TRAILER_B64).unwrap();
@@ -50,6 +59,12 @@ fn synth_vst3_chunk(xml: &[u8]) -> String {
     seg1.extend_from_slice(&hdr_tail);
     seg1.extend_from_slice(xml);
     seg1.extend_from_slice(&trailer);
+
+    // CRITICAL: seg0 (the VST3 component header) embeds the seg1/state length
+    // at byte offset 160. If left at the template's value, Reaper reads a
+    // truncated state and the plugin loads blank/silent. Patch it to OUR
+    // seg1 length.
+    seg0[160..164].copy_from_slice(&(seg1.len() as u32).to_le_bytes());
 
     // Each segment base64-encoded independently, wrapped at 128 chars, each
     // starting on a fresh line (matches Reaper's writer).
@@ -66,14 +81,22 @@ fn synth_vst3_chunk(xml: &[u8]) -> String {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::args().nth(1).ok_or("usage: <in.ptx> <out.rpp>")?;
-    let output = std::env::args().nth(2).ok_or("usage: <in.ptx> <out.rpp>")?;
+    let input = std::env::args()
+        .nth(1)
+        .ok_or("usage: <in.ptx> <out.rpp> [instance]")?;
+    let output = std::env::args()
+        .nth(2)
+        .ok_or("usage: <in.ptx> <out.rpp> [instance]")?;
+    let instance: usize = std::env::args()
+        .nth(3)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     let raw = std::fs::read(&input)?;
     let session = dawfile_protools::parse_raw(raw).map_err(|e| format!("{e:?}"))?;
     let data = session.cursor().data();
 
-    let xml = extract_omni_xml(data).ok_or("no Omnisphere <SynthMaster> state found")?;
+    let xml = extract_omni_xml(data, instance).ok_or("no Omnisphere <SynthMaster> state found")?;
     eprintln!("extracted Omnisphere XML: {} bytes", xml.len());
     eprintln!(
         "  head: {}",
