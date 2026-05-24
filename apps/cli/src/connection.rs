@@ -96,6 +96,15 @@ async fn open_session(path: &Path) -> Result<vox::Caller> {
             max_concurrent_requests: 64,
             initial_channel_credit: 16,
         },
+        // Tradeoff: `true` enables vox's operation store cache for
+        // RPC resumability *and* triggers the "encode response for
+        // store" path which panics on the SetlistService payload
+        // shape ("JIT encode returned false (OOM)" in vox-core's
+        // send_reply). `false` skips the store but also breaks the
+        // schema-before-data ordering for complex responses (vox
+        // ~27eef57 sends Setlist schema only when retry=true).
+        // Until vox is patched upstream we live with the build-path
+        // panic; mode / transport / track-count etc still work.
         peer_supports_retry: true,
         session_resume_key: None,
         peer_resume_key: None,
