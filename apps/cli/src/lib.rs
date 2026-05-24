@@ -137,6 +137,19 @@ pub enum SessionCommand {
     /// FTS session mode (Organize / Write / Produce / Record / …)
     #[command(subcommand)]
     Mode(ModeCommand),
+    /// Trigger any REAPER named command by ID — works for native
+    /// commands (numeric or `_REAPER_*`) and for any registered
+    /// extension action including the FTS session actions
+    /// (`_FTS_SESSION_BUILD_SETLIST`, `_FTS_SESSION_LOAD_DEMO_SETLIST`,
+    /// …). Bypasses the broken-on-complex-types vox RPC read paths —
+    /// the response is just a bool (succeeded/failed).
+    Action {
+        /// Command ID. Accepts the upper-snake form
+        /// (`FTS_SESSION_BUILD_SETLIST`), with or without the leading
+        /// underscore. Also accepts a numeric REAPER command id
+        /// (e.g. 40044 for transport play/pause) as a string.
+        command_id: String,
+    },
     /// Measure RPC roundtrip latency over one persistent connection.
     ///
     /// Reports min / p50 / p95 / p99 / max for each target. Use
@@ -212,6 +225,7 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             guide,
         } => cmd_organize(input, output.as_deref(), guide),
         SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
+        SessionCommand::Action { command_id } => cmd_action(socket.as_deref(), &command_id).await,
         SessionCommand::Bench { count, target } => {
             cmd_bench(socket.as_deref(), count, target).await
         }
@@ -900,5 +914,48 @@ fn is_not_found(e: &vox::VoxError<session_proto::SessionServiceError>) -> bool {
 fn print_json<T: facet::Facet<'static>>(value: &T) -> Result<()> {
     let json = facet_json::to_string(value).map_err(|e| eyre::eyre!("encode json: {e:?}"))?;
     println!("{json}");
+    Ok(())
+}
+
+// ============================================================================
+// Generic REAPER action invocation
+// ============================================================================
+
+async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
+
+    // Normalise the command id: REAPER's named commands always start
+    // with `_` (e.g. `_FTS_SESSION_BUILD_SETLIST`). Accept the bare
+    // form too so users don't have to remember the leading underscore
+    // when typing on the shell.
+    let normalized: String =
+        if command_id.starts_with('_') || command_id.chars().all(|c| c.is_ascii_digit()) {
+            command_id.to_string()
+        } else {
+            format!("_{}", command_id)
+        };
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let projects = ProjectsClient::new(caller);
+
+    let start = std::time::Instant::now();
+    let result = projects
+        .run_command(ProjectContext::Current, normalized.clone())
+        .await
+        .map_err(|e| eyre::eyre!("run_command rpc failed: {e:?}"))?;
+    let rt = start.elapsed();
+
+    if result {
+        println!("{normalized}  ok   ({rt:?})");
+    } else {
+        eyre::bail!(
+            "{normalized}  failed — REAPER returned false. Command may not be \
+             registered, or REAPER refused to run it (no project, wrong context, \
+             etc.). Check the extension log for handler-side errors."
+        );
+    }
     Ok(())
 }
