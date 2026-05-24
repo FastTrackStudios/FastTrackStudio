@@ -354,16 +354,14 @@ pub fn inject_midi(session: &mut RawSession, tracks: &[MidiTrackInput]) -> crate
         // session tick origin; the chunk's zero_ticks header and every event
         // position field must include it (top byte 0x40) or PT can't parse the
         // records. take_offset == 0 (notes are already chunk-relative).
-        let mut chunk_bytes = encode_note_chunk(&track.notes, BASELINE + ZERO_TICKS);
-        // Staggered terminator record. The decoder pairs note `i` with record
-        // `i+1`; the chunk's final iteration therefore reads ONE record past
-        // the last note. Without a separator that read would bleed into the
-        // next chunk's "MdNLB" header and surface as a spurious note. A 35-byte
-        // record whose duration-marker byte (record +8) is 0xff makes the
-        // parser's `dur_bytes[7]` test `continue` (skip) that phantom read.
-        let mut sep = [0u8; EVENT_STRIDE];
-        sep[8] = 0xff; // duration high byte → "paired note-off / skip"
-        chunk_bytes.extend_from_slice(&sep);
+        //
+        // No explicit terminator record. The staggered decode reads one record
+        // past the last note (record N+1); real sessions let that land in the
+        // chunk's trailing SLACK (zeros → velocity 0 → skipped), which we also
+        // provide below. A non-standard 0xff terminator made PT choke once it
+        // started parsing events, so we match the original layout: N+1 records
+        // followed by zero slack.
+        let chunk_bytes = encode_note_chunk(&track.notes, BASELINE + ZERO_TICKS);
 
         // Each MdNLB chunk inside the 0x2000 block is framed by an `MdChun`
         // container header: `"MdChun" 01 00 <u32 byte-len>` then the chunk.
@@ -580,14 +578,20 @@ mod tests {
         for (i, src) in [&track0, &track1].iter().enumerate() {
             let region = &parsed.midi_regions[i];
             assert_eq!(region.name, src.name, "region {i} name");
+            // Match PT's layout (no terminator): the staggered decode reads one
+            // record past the last note into the chunk's trailing slack zeros,
+            // producing a harmless velocity-0 phantom the converter drops. Real
+            // notes carry velocity 64 (parser reads the +10 marker byte); filter
+            // on that to compare the actual notes.
+            let real: Vec<_> = region.events.iter().filter(|e| e.velocity > 0).collect();
             assert_eq!(
-                region.events.len(),
+                real.len(),
                 src.notes.len(),
                 "region {i} note count (parsed {} vs injected {})",
-                region.events.len(),
+                real.len(),
                 src.notes.len()
             );
-            for (ev, want) in region.events.iter().zip(src.notes.iter()) {
+            for (ev, want) in real.iter().zip(src.notes.iter()) {
                 assert_eq!(ev.note, want.note, "region {i} note number");
                 assert_eq!(ev.position, want.position, "region {i} note position");
                 // velocity intentionally NOT asserted (parser reads +10).
@@ -632,8 +636,10 @@ mod tests {
         let parsed = crate::read_session_from_bytes(session.encrypt(), 48000).unwrap();
         assert_eq!(parsed.midi_regions.len(), 1);
         let region = &parsed.midi_regions[0];
-        assert_eq!(region.events.len(), notes.len());
-        for (ev, want) in region.events.iter().zip(notes.iter()) {
+        // Filter the trailing velocity-0 phantom (see inject_midi_round_trips).
+        let real: Vec<_> = region.events.iter().filter(|e| e.velocity > 0).collect();
+        assert_eq!(real.len(), notes.len());
+        for (ev, want) in real.iter().zip(notes.iter()) {
             assert_eq!(ev.note, want.note);
             assert_eq!(ev.position, want.position);
         }
