@@ -172,10 +172,10 @@ fn match_review_opener(line: &str) -> Option<(String, String)> {
         .trim_end()
         .trim_end_matches('-')
         .trim();
-    let (kind, title) = after_review
-        .split_once('|')
-        .map(|(k, t)| (k.trim().to_string(), t.trim().to_string()))
-        .unwrap_or_else(|| (after_review.to_string(), String::new()));
+    let (kind, title) = after_review.split_once('|').map_or_else(
+        || (after_review.to_string(), String::new()),
+        |(k, t)| (k.trim().to_string(), t.trim().to_string()),
+    );
     Some((kind, title))
 }
 
