@@ -283,7 +283,22 @@ fn replace_block_payload(session: &mut RawSession, ct: u16, new_payload: &[u8]) 
     };
     let payload_start = start + 9;
     let old_len = end - payload_start;
-    splice(session, payload_start, old_len, new_payload);
+    // Keep the block's total size CONSTANT by padding the new payload up to the
+    // original length with zeros. PT stores every block's absolute file offset
+    // in a registry table (a `0x0002` block near EOF); changing any block's
+    // size shifts every later block and invalidates those stored offsets, which
+    // makes PT fail loading with "end of stream". Padding avoids the shift so
+    // the registry stays valid. (The container's leading count means PT reads
+    // exactly the entries we wrote and ignores the zero tail.) If the new
+    // payload is larger than the original, we cannot keep size constant without
+    // rewriting the registry — fall back to a splice and let the caller know.
+    if new_payload.len() <= old_len {
+        let mut padded = new_payload.to_vec();
+        padded.resize(old_len, 0);
+        splice(session, payload_start, old_len, &padded);
+    } else {
+        splice(session, payload_start, old_len, new_payload);
+    }
     true
 }
 
