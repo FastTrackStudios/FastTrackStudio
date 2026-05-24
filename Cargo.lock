@@ -8776,6 +8776,8 @@ dependencies = [
  "daw",
  "daw-proto",
  "eyre",
+ "facet 0.46.0",
+ "facet-json",
  "moire 1.0.0",
  "serde_json",
  "session-proto",
