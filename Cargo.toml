@@ -83,7 +83,7 @@ fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", branch = "mai
 utils = { git = "https://github.com/FastTrackStudios/fts-utils.git", branch = "main" }
 
 # ── Instrumentation ─────────────────────────────────────────────────
-moire = { version = "1.0", features = ["diagnostics"] }
+moire = { version = "1.0" }  # diagnostics disabled — dladdr panics inside REAPER-loaded .so
 
 # ── UI framework ─────────────────────────────────────────────────────
 dioxus = "0.7.2"
