@@ -558,21 +558,20 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
         }
     }
 
-    // Step 12c: Decode per-track color palette index from 0x200b +106..+107.
+    // Step 12c: Decode per-track color palette index from 0x200b.
     //
-    // The color is a 2-byte LE i16: -2 (= 0xfffe) means "default / no
-    // color", any non-negative value is a palette index (mapped to RGB
-    // via the table in `docs/pt-color-palette-ground-truth.md`).
+    // The palette index is a single byte framed by the marker bytes
+    // `01 <idx> 00 01 00 03` inside the TrackAuxState (0x200b) block. The
+    // byte offset of this frame varies per track (the block holds
+    // variable-length data — pan/automation/name — before it), so we scan
+    // for the frame rather than read a fixed offset. A fixed `+106` read
+    // was previously used and was wrong for most tracks because the field
+    // is not at a constant offset.
     //
-    // Verified via RPP→PTX probe + plaintext-diff: a track with
-    // `color(0xd86e41)` set in RPP produces +106..+107 = `18 00` (=24)
-    // in PTX while baseline (no color) shows `fe ff` (=-2). See
-    // `docs/pt-field-map.md`.
-    //
-    // We previously read `+163` which was a different field that
-    // happened to correlate with palette index on Color Testing
-    // (probably a per-track ordinal counter). The +163 reading was
-    // wrong on LotF and other fixtures.
+    // The index maps to an RGB color via the PT color palette (see
+    // `daw_reaper::project_import::pt_color_to_rgb`), which was derived by
+    // sweeping every index 0..=255 through the official converter. idx 0
+    // is the "no color" default.
     //
     // To resolve which track each 0x200b belongs to, walk upward from
     // the block through its ancestors and find the nearest `0x2619`
@@ -619,18 +618,40 @@ pub fn parse_session(data: &mut [u8], target_sample_rate: u32) -> PtResult<ProTo
 
         let mut color_by_name: std::collections::HashMap<String, u8> =
             std::collections::HashMap::new();
+        // Scan a 0x200b block for the `01 <idx> 00 01 00 03` color frame.
+        fn find_color_index(data: &[u8], lo: usize, hi: usize) -> Option<u8> {
+            let hi = hi.min(data.len());
+            let mut p = lo;
+            while p + 6 <= hi {
+                if data[p] == 0x01
+                    && data[p + 2] == 0x00
+                    && data[p + 3] == 0x01
+                    && data[p + 4] == 0x00
+                    && data[p + 5] == 0x03
+                {
+                    return Some(data[p + 1]);
+                }
+                p += 1;
+            }
+            None
+        }
+
         let aux_blocks = collect_blocks_recursive(&blocks, ContentType::TrackAuxState);
         for b in &aux_blocks {
-            // Color is i16 LE at +106..+107 (verified by RPP→PTX diff).
-            // We expose it as a u8 (`color_byte`) since palette indices
-            // observed so far are all < 256; -2/0xfffe (default) maps to 0.
-            let p = b.offset + 2 + 106;
-            let color = if p + 2 <= data.len() {
-                let val = i16::from_le_bytes([data[p], data[p + 1]]);
-                if val < 0 { 0 } else { val as u8 }
-            } else {
-                0
-            };
+            let start = b.offset;
+            let end = b.offset + 4 + b.block_size as usize;
+            // Newer sessions (PT 12+) frame the index as `01 <idx> 00 01 00 03`.
+            // Older sessions store a 2-byte LE i16 at +106 (relative to the
+            // block payload, i.e. `b.offset + 108`), where -2 = "no color".
+            let color = find_color_index(data, start, end).unwrap_or_else(|| {
+                let p = b.offset + 108;
+                if p + 2 <= data.len() {
+                    let val = i16::from_le_bytes([data[p], data[p + 1]]);
+                    if val < 0 { 0 } else { val as u8 }
+                } else {
+                    0
+                }
+            });
 
             // Walk up to 10 ancestors looking for a 0x2619 name anywhere
             // in the subtree.

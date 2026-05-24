@@ -1274,76 +1274,288 @@ fn parse_hex_color(hex: &str) -> Option<u32> {
 
 // ── Color mapping ──────────────────────────────────────────────────────────
 
-/// Convert a Pro Tools color palette byte to a REAPER-compatible color
+// PT track-color palette: index -> (r,g,b). Derived empirically by sweeping
+// every index 0..=255 through the official PT→Reaper converter (47-track
+// unanimous agreement per index). idx 0 is Reaper's default "no color".
+pub const PT_TRACK_PALETTE: [(u8, u8, u8); 256] = [
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (65, 110, 216),
+    (65, 110, 216),
+    (65, 75, 216),
+    (105, 65, 216),
+    (163, 65, 216),
+    (216, 65, 209),
+    (216, 65, 153),
+    (216, 65, 120),
+    (216, 65, 77),
+    (216, 65, 80),
+    (216, 102, 65),
+    (216, 148, 65),
+    (216, 211, 65),
+    (151, 216, 65),
+    (90, 216, 65),
+    (65, 216, 85),
+    (65, 216, 105),
+    (65, 216, 135),
+    (65, 216, 171),
+    (65, 216, 214),
+    (65, 181, 216),
+    (65, 148, 216),
+    (65, 120, 216),
+    (65, 110, 216),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+    (56, 102, 68),
+    (56, 102, 77),
+    (56, 102, 88),
+    (56, 102, 101),
+    (56, 91, 102),
+    (56, 81, 102),
+    (56, 72, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 69, 102),
+    (56, 59, 102),
+    (68, 56, 102),
+    (85, 56, 102),
+    (102, 56, 99),
+    (102, 56, 82),
+    (102, 56, 72),
+    (102, 56, 59),
+    (102, 56, 60),
+    (102, 67, 56),
+    (102, 81, 56),
+    (102, 100, 56),
+    (82, 102, 56),
+    (63, 102, 56),
+    (56, 102, 62),
+];
+
+/// Convert a Pro Tools track color palette index to a REAPER `COLOR`/`PEAKCOL`
 /// integer (`0x01000000 | (B << 16) | (G << 8) | R`).
 ///
-/// The byte is the raw value of `0x200b +163` per the dawfile-protools
-/// decoder. Encoding (user-confirmed against the 23×3 Color Testing
-/// fixture):
+/// `index` is the palette byte parsed from the track's `0x200b` block (framed
+/// by `01 <idx> 00 01 00 03`). The index→RGB mapping is PT's genuine palette,
+/// recovered by sweeping every index 0..=255 through the official PT→Reaper
+/// converter and reading back the emitted `PEAKCOL` (47-track unanimous
+/// agreement per index). It is therefore exact and complete: change a track's
+/// color in Pro Tools and the parsed index — and hence this color — follows.
 ///
-/// - byte `0x00..0x01` = no color / default (returns `None`)
-/// - byte `>= 0x02`: `(byte - 2) / 24` is the row (0..2), `(byte - 2) % 24`
-///   is the column (0..22). PT's palette has 23 hues sweeping the color
-///   wheel starting at dark blue.
-///
-/// Each subsequent row is a darker variant of the same column hue.
-/// REAPER's `COLOR` field needs the high bit (`0x01000000`) set for the
-/// custom color to be honored; without it REAPER falls back to default.
-pub fn pt_color_to_rgb(byte: u8) -> Option<u32> {
-    if byte < 2 {
+/// Returns `None` only when the lookup would yield Reaper's plain default
+/// (index 0/1), so no explicit color is emitted and the track keeps Reaper's
+/// own default.
+pub fn pt_color_to_rgb(index: u8) -> Option<u32> {
+    // idx 0/1 map to Reaper's default track color (56, 69, 102) — treat as
+    // "no custom color" so we don't override Reaper's default needlessly.
+    if index <= 1 {
         return None;
     }
-    let pos = (byte - 2) as usize;
-    let row = pos / 24;
-    let col = pos % 24;
-    if col >= 23 || row >= 3 {
-        return None;
-    }
-
-    // 23-hue palette at row 0 (lightest / most-saturated row).
-    // Approximations based on PT's stock palette ordering described by the
-    // user: dark blue → purple → magenta → pink → fuchsia → light red →
-    // red → red-orange → orange → light orange → yellow → yellow-green →
-    // light green → green → green-with-some-blue → cyan → teal → light
-    // blue → blue → darker blue → very dark blue → (wraps to blue) → blue.
-    const ROW0: [(u8, u8, u8); 23] = [
-        (0x4A, 0x5C, 0xBE), // 0  dark blue
-        (0x7D, 0x5A, 0xC2), // 1  purple
-        (0xB0, 0x4A, 0xB8), // 2  magenta
-        (0xCF, 0x66, 0xA7), // 3  pink
-        (0xD1, 0x4C, 0x8E), // 4  fuchsia
-        (0xE0, 0x6B, 0x6B), // 5  light red
-        (0xD9, 0x3D, 0x3D), // 6  red
-        (0xE0, 0x55, 0x2A), // 7  red-orange
-        (0xE6, 0x7E, 0x22), // 8  orange
-        (0xEF, 0xA8, 0x4A), // 9  light orange
-        (0xEC, 0xCB, 0x3D), // 10 yellow
-        (0xC4, 0xCB, 0x3D), // 11 yellow-green
-        (0x9B, 0xCB, 0x4E), // 12 light green
-        (0x68, 0xB0, 0x4C), // 13 green
-        (0x4F, 0xB0, 0x80), // 14 green-with-blue
-        (0x42, 0xB6, 0xB0), // 15 cyan
-        (0x35, 0x97, 0xA8), // 16 teal
-        (0x52, 0x9F, 0xC2), // 17 light blue
-        (0x42, 0x7D, 0xC2), // 18 blue
-        (0x36, 0x5F, 0xA8), // 19 darker blue
-        (0x2A, 0x46, 0x8C), // 20 very dark blue
-        (0x36, 0x5F, 0xA8), // 21 wrap (≈ darker blue)
-        (0x42, 0x7D, 0xC2), // 22 wrap (≈ blue)
-    ];
-
-    let (r0, g0, b0) = ROW0[col];
-    // Row 1: ~70% brightness, Row 2: ~45% brightness.
-    let scale = match row {
-        0 => 100,
-        1 => 70,
-        _ => 45,
-    };
-    let r = ((r0 as u32) * scale / 100) as u8;
-    let g = ((g0 as u32) * scale / 100) as u8;
-    let b = ((b0 as u32) * scale / 100) as u8;
-
-    // REAPER COLOR field: high byte 0x01 = "use this color".
+    let (r, g, b) = PT_TRACK_PALETTE[index as usize];
     Some(0x01_00_00_00 | ((b as u32) << 16) | ((g as u32) << 8) | (r as u32))
 }
 

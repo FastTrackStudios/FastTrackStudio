@@ -1007,20 +1007,39 @@ fn rename_all_track_name_occurrences(session: &mut RawSession, old_name: &str, n
 }
 
 fn patch_color(session: &mut RawSession, color: u8) {
-    let color_i16 = if color == 0 { -2i16 } else { color as i16 };
-    let bytes = color_i16.to_le_bytes();
-    // 0x200b +106..+107
-    for ct in [0x200b, 0x200a, 0x2015] {
-        let offset_in_payload = match ct {
-            0x200b => 106,
-            0x200a => 97,
-            0x2015 => 88,
-            _ => continue,
-        };
-        for b in collect_by_raw_ct(&session.blocks, ct) {
-            let p = b.start + 9 + offset_in_payload;
-            if p + 2 <= session.data.len() {
-                session.data[p..p + 2].copy_from_slice(&bytes);
+    // The track color palette index lives in each TrackAuxState (0x200b)
+    // block, framed by the marker bytes `01 <idx> 00 01 00 03`. The byte
+    // offset of the frame varies per block, so scan for it rather than
+    // writing a fixed offset. (idx 0 = Reaper's "no color" default.)
+    let ranges: Vec<(usize, usize)> = collect_by_raw_ct(&session.blocks, 0x200b)
+        .iter()
+        .map(|b| (b.start, b.start + 11 + b.block_size as usize))
+        .collect();
+    for (lo, hi) in ranges {
+        let hi = hi.min(session.data.len());
+        let mut p = lo;
+        let mut found = false;
+        while p + 6 <= hi {
+            let d = &session.data;
+            if d[p] == 0x01
+                && d[p + 2] == 0x00
+                && d[p + 3] == 0x01
+                && d[p + 4] == 0x00
+                && d[p + 5] == 0x03
+            {
+                session.data[p + 1] = color;
+                found = true;
+                break;
+            }
+            p += 1;
+        }
+        if !found {
+            // Older format: 2-byte LE i16 at +106 in the block payload
+            // (block raw start + 9 + 106). -2 (= 0xfffe) means "no color".
+            let color_i16 = if color == 0 { -2i16 } else { color as i16 };
+            let q = lo + 9 + 106;
+            if q + 2 <= session.data.len() {
+                session.data[q..q + 2].copy_from_slice(&color_i16.to_le_bytes());
             }
         }
     }

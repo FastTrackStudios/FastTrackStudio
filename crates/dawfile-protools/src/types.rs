@@ -300,17 +300,16 @@ pub struct Track {
     /// unassigned or the block omits a destination (the 61-byte variant
     /// — payload begins `ff ff 01 01 ...`).
     pub output: String,
-    /// Pro Tools color palette byte from `0x200b +163`.
+    /// Pro Tools track color palette index.
     ///
-    /// Encodes a (column, row) position in PT's 23-column × 3-row color
-    /// palette. `0` means "no color" / default. Otherwise:
+    /// Parsed from the `0x200b` (TrackAuxState) block: newer sessions frame
+    /// it as `01 <idx> 00 01 00 03`; older sessions store it as an i16 at
+    /// payload `+106` (`0xfffe` / -2 = no color, normalized to `0` here).
+    /// `0` means "no color" / Reaper default.
     ///
-    /// - `(byte - 2) / 24` = row (0 = lightest, 2 = darkest)
-    /// - `(byte - 2) % 24` = hue column (0..22, sweeping the color wheel
-    ///   starting from dark blue)
-    ///
-    /// See `daw_reaper::project_import::pt_color_to_rgb` for conversion
-    /// to REAPER's u32 RGB.
+    /// The index→RGB mapping is PT's genuine palette (recovered by sweeping
+    /// every index 0..=255 through the official converter). See
+    /// `daw_reaper::project_import::pt_color_to_rgb` and `PT_TRACK_PALETTE`.
     pub color_byte: u8,
     /// Volume-automation breakpoints decoded from this track's `0x260a[0]`
     /// (the first `0x260a` child of the per-track `0x260d` wrapper).
@@ -451,7 +450,7 @@ pub struct TrackRegion {
     /// Per-clip color palette index from the inner `0x104f` sub-block
     /// at payload `+16..+17` (i16 LE). `None` = no `0x104f` child
     /// present. `Some(-2)` = default/no color. Other values map to
-    /// the same 23×3 PT palette as `Track.color_byte`.
+    /// the same PT palette as `Track.color_byte`.
     ///
     /// Discovered via Frida byte-read trace; `0x104f` lives at start
     /// of `0x1050` payload. Field locations within `0x104f` partly
