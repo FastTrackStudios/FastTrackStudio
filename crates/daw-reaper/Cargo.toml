@@ -49,6 +49,7 @@ swell-ui.workspace = true
 [dev-dependencies]
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
+base64 = "0.22.1"
 reaper-test.workspace = true
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
