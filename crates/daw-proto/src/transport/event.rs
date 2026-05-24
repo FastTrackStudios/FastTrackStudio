@@ -14,7 +14,7 @@
 //! accumulate hundreds of position samples in its queue. See
 //! `docs/streaming-design.md`.
 
-use crate::primitives::{Tempo, TimeSignature};
+use crate::primitives::{MusicalPosition, Tempo, TimeSignature};
 use crate::transport::transport::{LoopRegion, PlayState, RecordMode, Transport};
 use facet::Facet;
 
@@ -77,8 +77,12 @@ pub enum TransportEvent {
 /// `qn_position` is the same cursor in quarter notes — provided so
 /// musical-time UIs don't need to do their own time-map conversion
 /// on every tick.
-#[derive(Clone, Copy, Debug, Facet)]
+#[derive(Clone, Debug, Facet)]
 pub struct PositionTick {
+    /// Project this tick refers to. The streaming hub emits one tick
+    /// per open project per cycle; subscribers that only care about
+    /// the active project filter on this field.
+    pub project_guid: String,
     /// Cursor position in seconds.
     pub playhead_seconds: f64,
     /// Cursor position in quarter notes.
@@ -87,14 +91,33 @@ pub struct PositionTick {
     /// can stop drawing the playhead when stopped without subscribing
     /// to `TransportEvent` separately).
     pub is_playing: bool,
+    /// Edit cursor position in seconds — independent of playhead.
+    /// While stopped these match; while playing the playhead moves
+    /// and the edit cursor stays put (unless `Options: Edit cursor
+    /// follows playback` is on).
+    pub edit_cursor_seconds: f64,
+    /// Edit cursor position in quarter notes.
+    pub edit_cursor_qn: f64,
+    /// Playhead position in measures/beats/subdivisions, computed by
+    /// the DAW with `projmeasoffs` applied. Clients should display
+    /// this directly rather than recomputing from `playhead_qn`.
+    pub playhead_musical: MusicalPosition,
+    /// Edit cursor position in measures/beats/subdivisions, with
+    /// `projmeasoffs` applied. Same caveat as `playhead_musical`.
+    pub edit_cursor_musical: MusicalPosition,
 }
 
 impl PositionTick {
     pub fn stopped_at_origin() -> Self {
         Self {
+            project_guid: String::new(),
             playhead_seconds: 0.0,
             playhead_qn: 0.0,
             is_playing: false,
+            edit_cursor_seconds: 0.0,
+            edit_cursor_qn: 0.0,
+            playhead_musical: MusicalPosition::ZERO,
+            edit_cursor_musical: MusicalPosition::ZERO,
         }
     }
 }

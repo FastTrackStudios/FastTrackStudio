@@ -12,6 +12,7 @@
 //! about exactly one domain.
 
 use crate::marker::MarkerStreamEvent;
+use crate::project::ProjectStreamEvent;
 use crate::region::RegionStreamEvent;
 use crate::tempo_map::TempoMapStreamEvent;
 use crate::track::TrackStreamEvent;
@@ -30,6 +31,7 @@ pub enum DawEvent {
     TempoMap(TempoMapStreamEvent),
     TransportState(TransportEvent),
     TransportPosition(PositionTick),
+    Project(ProjectStreamEvent),
 }
 
 /// Per-subscriber filter. Every flag defaults to off; callers opt in
@@ -44,6 +46,7 @@ pub struct BusFilter {
     pub tempo_map: bool,
     pub transport_state: bool,
     pub transport_position: bool,
+    pub projects: bool,
 }
 
 impl BusFilter {
@@ -55,6 +58,7 @@ impl BusFilter {
             tempo_map: true,
             transport_state: true,
             transport_position: true,
+            projects: true,
         }
     }
 
@@ -66,6 +70,7 @@ impl BusFilter {
             tempo_map: true,
             transport_state: true,
             transport_position: false,
+            projects: true,
         }
     }
 
@@ -77,6 +82,7 @@ impl BusFilter {
             || self.tempo_map
             || self.transport_state
             || self.transport_position
+            || self.projects
     }
 }
 

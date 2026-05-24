@@ -23,6 +23,7 @@ impl EventBus for crate::Reaper {
             .transport_state
             .then(|| hub.subscribe_transport_state());
         let mut position_rx = filter.transport_position.then(|| hub.subscribe_position());
+        let mut project_rx = filter.projects.then(|| hub.subscribe_projects());
 
         tokio::task::spawn(async move {
             loop {
@@ -53,6 +54,11 @@ impl EventBus for crate::Reaper {
                             return;
                         }
                     }
+                    res = async { project_rx.as_mut().unwrap().recv().await }, if project_rx.is_some() => {
+                        if !forward(&tx, res, "projects", DawEvent::Project, &mut project_rx).await {
+                            return;
+                        }
+                    }
                     res = async { position_rx.as_mut().unwrap().recv().await }, if position_rx.is_some() => {
                         // Position is continuous — drop on lag without
                         // logging, otherwise treat like the others.
@@ -73,6 +79,7 @@ impl EventBus for crate::Reaper {
                     && tempo_rx.is_none()
                     && state_rx.is_none()
                     && position_rx.is_none()
+                    && project_rx.is_none()
                 {
                     return;
                 }

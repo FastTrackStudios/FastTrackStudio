@@ -10,7 +10,7 @@ mod event;
 mod service;
 mod types;
 
-pub use event::ProjectEvent;
+pub use event::{ProjectEvent, ProjectStreamEvent};
 pub use service::{Projects, ProjectsRpc};
 pub use types::{ProjectContext, ProjectInfo};
 

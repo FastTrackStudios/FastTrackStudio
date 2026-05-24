@@ -19,3 +19,23 @@ pub enum ProjectEvent {
     /// Full project list refresh (e.g., after reconnection).
     ProjectsChanged(Vec<ProjectInfo>),
 }
+
+/// Streaming envelope — sibling shape to MarkerStreamEvent et al.
+/// No project_guid field because the events themselves carry the
+/// relevant guid (or `None` for `CurrentChanged(None)`).
+#[derive(Debug, Clone, Facet)]
+pub struct ProjectStreamEvent {
+    pub event: ProjectEvent,
+}
+
+#[cfg(feature = "vox")]
+#[allow(unsafe_code)]
+mod reborrow_impls {
+    use super::{ProjectEvent, ProjectStreamEvent};
+    unsafe impl vox_types::Reborrow for ProjectEvent {
+        type Ref<'a> = ProjectEvent;
+    }
+    unsafe impl vox_types::Reborrow for ProjectStreamEvent {
+        type Ref<'a> = ProjectStreamEvent;
+    }
+}

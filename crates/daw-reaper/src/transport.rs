@@ -505,6 +505,12 @@ fn transport_cache() -> &'static Mutex<HashMap<String, TransportState>> {
     TRANSPORT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+static ACTIVE_PROJECT_GUID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn active_project_guid() -> &'static Mutex<Option<String>> {
+    ACTIVE_PROJECT_GUID.get_or_init(|| Mutex::new(None))
+}
+
 /// Poll REAPER transport state for ALL open projects and broadcast
 /// changes through the [`crate::event_hub`] hub.
 ///
@@ -515,7 +521,8 @@ pub fn poll_and_broadcast_transport() {
     let hub = crate::event_hub::hub();
     let want_state = hub.transport_state_subscriber_count() > 0;
     let want_position = hub.position_subscriber_count() > 0;
-    if !want_state && !want_position {
+    let want_projects = hub.projects_subscriber_count() > 0;
+    if !want_state && !want_position && !want_projects {
         return;
     }
 
@@ -524,6 +531,34 @@ pub fn poll_and_broadcast_transport() {
     let mut cache = transport_cache()
         .lock()
         .expect("transport cache mutex poisoned");
+
+    // Detect active-project switch by comparing the current tab's GUID
+    // against last-seen. Cheap (one extra `enum_projects` call per
+    // tick) and lets clients drop a `Projects::current()` RPC entirely.
+    if want_projects {
+        if let Some(active) = medium.enum_projects(ProjectRef::Current, 0) {
+            let active_guid = project_guid_from(&Project::new(active.project));
+            let mut slot = active_project_guid()
+                .lock()
+                .expect("active project guid mutex poisoned");
+            if slot.as_deref() != Some(active_guid.as_str()) {
+                *slot = Some(active_guid.clone());
+                hub.publish_project(daw_proto::project::ProjectStreamEvent {
+                    event: daw_proto::project::ProjectEvent::CurrentChanged(Some(active_guid)),
+                });
+            }
+        } else {
+            let mut slot = active_project_guid()
+                .lock()
+                .expect("active project guid mutex poisoned");
+            if slot.is_some() {
+                *slot = None;
+                hub.publish_project(daw_proto::project::ProjectStreamEvent {
+                    event: daw_proto::project::ProjectEvent::CurrentChanged(None),
+                });
+            }
+        }
+    }
 
     for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
@@ -542,11 +577,35 @@ pub fn poll_and_broadcast_transport() {
                 .time
                 .map(|t| t.as_seconds())
                 .unwrap_or(0.0);
+            let edit_cursor_seconds = state
+                .edit_position
+                .time
+                .map(|t| t.as_seconds())
+                .unwrap_or(0.0);
             let qn = position_qn(medium, result.project, playhead_seconds);
+            let edit_qn = position_qn(medium, result.project, edit_cursor_seconds);
+            // Reuse the already-computed musical positions from the
+            // transport-state read; those apply `projmeasoffs` via
+            // `time_to_musical_position`. Falling back to ZERO is fine —
+            // it just means the conversion failed (e.g. invalid time),
+            // and the subscriber will see a stale bar/beat for that tick.
+            let playhead_musical = state
+                .playhead_position
+                .musical
+                .unwrap_or(daw_proto::primitives::MusicalPosition::ZERO);
+            let edit_cursor_musical = state
+                .edit_position
+                .musical
+                .unwrap_or(daw_proto::primitives::MusicalPosition::ZERO);
             hub.publish_position(PositionTick {
+                project_guid: project_guid.clone(),
                 playhead_seconds,
                 playhead_qn: qn,
                 is_playing: state.is_playing(),
+                edit_cursor_seconds,
+                edit_cursor_qn: edit_qn,
+                playhead_musical,
+                edit_cursor_musical,
             });
         }
 

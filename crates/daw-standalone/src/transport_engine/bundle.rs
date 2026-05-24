@@ -244,9 +244,14 @@ pub fn spawn_subscriber_pump(
                 }
                 .snapshot();
                 let tick = daw_proto::transport::PositionTick {
+                    project_guid: String::new(),
                     playhead_seconds: snap.seconds.0,
                     playhead_qn: snap.musical.0,
                     is_playing: snap.play_state.is_advancing(),
+                    edit_cursor_seconds: snap.seconds.0,
+                    edit_cursor_qn: snap.musical.0,
+                    playhead_musical: daw_proto::primitives::MusicalPosition::ZERO,
+                    edit_cursor_musical: daw_proto::primitives::MusicalPosition::ZERO,
                 };
                 if tx.send(TransportStreamEvent::Position(tick)).await.is_err() {
                     return;
