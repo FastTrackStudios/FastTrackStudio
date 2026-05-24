@@ -191,6 +191,79 @@ pub fn relation_counts(g: &AnalyzedGraph) -> HashMap<Relation, usize> {
     out
 }
 
+/// **Affected subgraph** — given a set of changed files,
+/// return the nodes defined in those files plus every node
+/// that references them (1-hop callers) and every node those
+/// changed nodes call (1-hop dependencies). The graphify-style
+/// "what does this change touch?" query.
+///
+/// Paths are compared by `source_file` exactly — pass them
+/// relative to whatever root `analyze` was run against.
+#[must_use]
+pub fn affected_by<'a, P: AsRef<std::path::Path>>(
+    g: &'a AnalyzedGraph,
+    changed_files: &[P],
+) -> AffectedResult<'a> {
+    let changed_set: HashSet<&std::path::Path> =
+        changed_files.iter().map(AsRef::as_ref).collect();
+    let in_changed: Vec<&CodeNode> = g
+        .nodes
+        .iter()
+        .filter(|n| changed_set.contains(n.source_file.as_path()))
+        .collect();
+    let in_changed_ids: HashSet<&str> = in_changed.iter().map(|n| n.id.as_str()).collect();
+    let by_id: HashMap<&str, &CodeNode> = g.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+    let mut callers: HashSet<&str> = HashSet::new();
+    let mut deps: HashSet<&str> = HashSet::new();
+    for e in &g.edges {
+        if in_changed_ids.contains(e.target.as_str())
+            && !in_changed_ids.contains(e.source.as_str())
+        {
+            callers.insert(e.source.as_str());
+        }
+        if in_changed_ids.contains(e.source.as_str())
+            && !in_changed_ids.contains(e.target.as_str())
+        {
+            deps.insert(e.target.as_str());
+        }
+    }
+
+    AffectedResult {
+        in_changed,
+        callers: callers
+            .iter()
+            .filter_map(|id| by_id.get(id).copied())
+            .collect(),
+        dependencies_internal: deps
+            .iter()
+            .filter_map(|id| by_id.get(id).copied())
+            .collect(),
+        dependencies_external: deps
+            .iter()
+            .filter(|id| !by_id.contains_key(*id))
+            .map(|s| (*s).to_string())
+            .collect(),
+    }
+}
+
+/// Output of [`affected_by`] — what a code change touches.
+#[derive(Debug, Clone)]
+pub struct AffectedResult<'a> {
+    /// Nodes whose `source_file` is in the changed set.
+    pub in_changed: Vec<&'a CodeNode>,
+    /// In-tree nodes (outside the changed files) that
+    /// reference any changed node — i.e. would need to
+    /// re-test / be re-reviewed after this change.
+    pub callers: Vec<&'a CodeNode>,
+    /// In-tree nodes that the changed nodes call — useful
+    /// to know what abstractions the change depends on.
+    pub dependencies_internal: Vec<&'a CodeNode>,
+    /// External targets (stdlib / other crates) — kept as
+    /// raw `ext:` / `name:` ids for caller inspection.
+    pub dependencies_external: Vec<String>,
+}
+
 /// Render a deterministic markdown report — drop-in for
 /// graphify's `GRAPH_REPORT.md`. No LLM (the augmented form
 /// with "suggested questions" lives in `agent-wiki`).
@@ -337,6 +410,38 @@ mod tests {
         let g = analyze(&[ex]);
         let top = god_nodes(&g, 1);
         assert_eq!(top[0].label, "target");
+    }
+
+    #[test]
+    fn affected_by_finds_callers_and_deps() {
+        // Two files: `a.rs` defines `a_main`, `b.rs` defines
+        // `b_helper`. `a_main` calls `b_helper`. Changing
+        // `b.rs` → callers = [a_main]; changing `a.rs` →
+        // deps include b_helper.
+        let a_ex = crate::code_extract::extract_source(
+            Path::new("a.rs"),
+            "pub fn a_main() { b_helper(); }",
+            crate::code_extract::CodeLang::Rust,
+        )
+        .unwrap();
+        let b_ex = crate::code_extract::extract_source(
+            Path::new("b.rs"),
+            "pub fn b_helper() {}",
+            crate::code_extract::CodeLang::Rust,
+        )
+        .unwrap();
+        let g = analyze(&[a_ex, b_ex]);
+        let aff = affected_by(&g, &[Path::new("b.rs")]);
+        assert!(
+            aff.callers.iter().any(|n| n.label == "a_main"),
+            "expected a_main as caller, got: {:?}",
+            aff.callers.iter().map(|n| &n.label).collect::<Vec<_>>()
+        );
+        let aff2 = affected_by(&g, &[Path::new("a.rs")]);
+        assert!(
+            aff2.dependencies_internal.iter().any(|n| n.label == "b_helper"),
+            "expected b_helper as dep"
+        );
     }
 
     #[test]
