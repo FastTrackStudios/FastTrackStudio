@@ -20,7 +20,9 @@
 use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::Cursor;
-use crate::types::{MuteAutomationBreakpoint, Track, VolumeAutomationBreakpoint};
+use crate::types::{
+    MuteAutomationBreakpoint, PanAutomationBreakpoint, Track, VolumeAutomationBreakpoint,
+};
 
 /// Walk every per-track `0x260d` wrapper, find its second `0x260a`
 /// child, and decode the envelope. Apply to `tracks` by positional
@@ -67,7 +69,41 @@ pub fn apply_mute_automation(
                 });
             }
         }
+        // Pan envelope lives one level deeper: 0x260d > 0x260c[0] > 0x260a[0].
+        // (Two 0x260c sub-wrappers exist for a dual panner; the first carries
+        // the pan automation — identical to the second for a mono track.)
+        if let Some(sub) = nth_child_by_raw(wrapper, 0x260c, 0) {
+            if let Some(envelope_block) = nth_child_by_raw(sub, 0x260a, 0) {
+                let bps = decode_pan_envelope(envelope_block, data);
+                if !bps.is_empty() {
+                    apply_to_track(audio_tracks, midi_tracks, name, |t| {
+                        t.pan_automation = bps.clone();
+                    });
+                }
+            }
+        }
     }
+}
+
+fn decode_pan_envelope(block: &Block, data: &[u8]) -> Vec<PanAutomationBreakpoint> {
+    let payload_start = block.offset + 2;
+    if payload_start + 28 > data.len() {
+        return Vec::new();
+    }
+    let user_count = data[payload_start + 16] as usize;
+    let bp_start = payload_start + 28;
+    if user_count == 0 || bp_start + user_count * 6 > data.len() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(user_count);
+    for i in 0..user_count {
+        let p = bp_start + i * 6;
+        out.push(PanAutomationBreakpoint {
+            time_samples: u32::from_le_bytes([data[p], data[p + 1], data[p + 2], data[p + 3]]),
+            value: i16::from_le_bytes([data[p + 4], data[p + 5]]),
+        });
+    }
+    out
 }
 
 fn apply_to_track<F: FnMut(&mut Track)>(

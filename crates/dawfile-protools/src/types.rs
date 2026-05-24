@@ -337,6 +337,12 @@ pub struct Track {
     ///
     /// Empty when the track has no automation envelope.
     pub mute_automation: Vec<MuteAutomationBreakpoint>,
+    /// Pan-automation breakpoints decoded from `0x260d > 0x260c[0] >
+    /// 0x260a[0]` (pan lives one level deeper than volume/mute, under a
+    /// `0x260c` sub-wrapper). Same 6-byte layout as volume: `u32 LE
+    /// time_samples + i16 LE value`, where `value` is pan × 100 (−100..100,
+    /// left→right). Empty when the track has no pan envelope.
+    pub pan_automation: Vec<PanAutomationBreakpoint>,
     /// Hierarchy / grouping marker decoded from `0x251a` payload byte
     /// (immediately after the length-prefixed track name).
     ///
@@ -383,6 +389,15 @@ pub struct VolumeAutomationBreakpoint {
     pub time_samples: u32,
     /// Volume in 0.1 dB units (centibel). `0` = unity; `-60` = -6 dB.
     pub value_centibel: i16,
+}
+
+/// A single breakpoint in a pan-automation envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PanAutomationBreakpoint {
+    /// Position in samples (at session sample rate).
+    pub time_samples: u32,
+    /// Pan × 100 (−100 = full left, 0 = center, 100 = full right).
+    pub value: i16,
 }
 
 /// A single breakpoint in a mute-automation envelope.

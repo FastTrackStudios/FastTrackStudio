@@ -735,6 +735,18 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                             e
                         });
                     }
+                    // Pan automation (0x260d > 0x260c[0] > 0x260a[0]) → PANENV2.
+                    // Stored value is pan × 100; Reaper pan is -1..1.
+                    if !track.pan_automation.is_empty() {
+                        t = t.envelope("PANENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.pan_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                e = e.linear(secs, (bp.value as f64 / 100.0).clamp(-1.0, 1.0));
+                            }
+                            e
+                        });
+                    }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.audio_regions.len() {
                             continue;
@@ -940,6 +952,18 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                                 let secs = bp.time_samples as f64 / sample_rate;
                                 let v = if bp.muted { 1.0 } else { 0.0 };
                                 e = e.square(secs, v);
+                            }
+                            e
+                        });
+                    }
+                    // Pan automation (0x260d > 0x260c[0] > 0x260a[0]) → PANENV2.
+                    // Stored value is pan × 100; Reaper pan is -1..1.
+                    if !track.pan_automation.is_empty() {
+                        t = t.envelope("PANENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.pan_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                e = e.linear(secs, (bp.value as f64 / 100.0).clamp(-1.0, 1.0));
                             }
                             e
                         });
