@@ -558,6 +558,219 @@ pub fn vision_caption_prompt(before: &str, after: &str) -> String {
     }
 }
 
+// ────────────────────── Deepen page ──────────────────────
+
+/// Result of a [`run_deepen`] call.
+#[derive(Debug, Clone)]
+pub struct DeepenResult {
+    /// Page that was rewritten.
+    pub page_path: String,
+    /// Word count before.
+    pub before_words: usize,
+    /// Word count after.
+    pub after_words: usize,
+}
+
+/// Rewrite a thin wiki page into a proper reference article.
+/// Reads the existing page + the raw sources listed in its
+/// `sources:` frontmatter, prompts the LLM to expand with code
+/// examples + sharper structure, then overwrites the page.
+///
+/// Idempotent in the sense that re-running on an already-deep
+/// page just makes it slightly better (or no-op if the LLM
+/// considers it complete). Unsafe to invoke concurrently on
+/// the same page from two callers.
+pub async fn run_deepen(
+    backend: &CodexBackend,
+    wiki: &WikiLive,
+    page_path: &str,
+    model: Option<String>,
+    timeout: Duration,
+    language: &str,
+) -> Result<DeepenResult, AgentWikiError> {
+    let abs = wiki.vault_root().join(page_path);
+    let existing = std::fs::read_to_string(&abs)
+        .map_err(|e| AgentWikiError::Bridge(format!("read {page_path}: {e}")))?;
+    let before_words = existing.split_whitespace().count();
+
+    // Pull `sources:` from the frontmatter so we can include
+    // the original source material in the prompt.
+    let source_paths = extract_sources_field(&existing);
+    let mut source_content = String::new();
+    for src in &source_paths {
+        // Sources live under `raw/sources/<name>` relative to
+        // the wiki root.
+        let src_abs = wiki.vault_root().join("raw/sources").join(src);
+        if let Ok(bytes) = std::fs::read(&src_abs) {
+            // Best-effort UTF-8; binary sources (PDFs) get a
+            // marker so the LLM knows they're skipped.
+            if let Ok(s) = std::str::from_utf8(&bytes) {
+                source_content.push_str(&format!("\n\n--- source: {src} ---\n\n"));
+                source_content.push_str(s);
+            } else {
+                source_content
+                    .push_str(&format!("\n\n--- source: {src} (binary, skipped) ---\n\n"));
+            }
+        }
+    }
+    if source_content.is_empty() {
+        source_content
+            .push_str("(no raw source content available; rewrite from the existing page alone)");
+    }
+
+    let lang = language_directive(language);
+    let mut vars = HashMap::new();
+    vars.insert("language_directive", lang.as_str());
+    vars.insert("existing_page", existing.as_str());
+    vars.insert("source_content", source_content.as_str());
+    let system = prompts::render(prompts::DEEPEN_PAGE_SYSTEM, &vars);
+
+    // `read-only` so Codex CAN'T write the page via tool-use
+    // — forces text-only output so we always get a parseable
+    // FILE block back. With `current`, tool-use was non-
+    // deterministic: sometimes Codex wrote the page,
+    // sometimes it chatted, sometimes both. Read-only routes
+    // every write through `parse_ingest_blocks` → on-disk
+    // write below.
+    let opts = ChatOpts {
+        codex_bin: None,
+        codex_args: None,
+        codex_home: None,
+        model,
+        effort: None,
+        access_mode: Some("read-only".to_string()),
+    };
+    // Snapshot the file's pre-turn state — kept as a safety
+    // net in case Codex ignores `read-only` (which has
+    // happened) and writes anyway. If the file changed
+    // during the turn, treat that as the canonical result and
+    // don't insist on a FILE block.
+    let before_mtime = std::fs::metadata(&abs).and_then(|m| m.modified()).ok();
+    let before_size = existing.len();
+
+    let resp = drive_turn_text(backend, wiki, &system, &opts, timeout).await?;
+
+    // Two success paths:
+    //   1. Codex wrote the file directly (tool-use). Detect by
+    //      mtime/size change. Trust the on-disk content.
+    //   2. The LLM emitted a FILE block. Parse + write.
+    // If neither happened, surface the prose response as an
+    // error so the caller knows nothing landed.
+    let after_existing = std::fs::read_to_string(&abs)
+        .map_err(|e| AgentWikiError::Bridge(format!("re-read {page_path}: {e}")))?;
+    let after_mtime = std::fs::metadata(&abs).and_then(|m| m.modified()).ok();
+    let codex_wrote_directly = match (before_mtime, after_mtime) {
+        (Some(b), Some(a)) => a > b,
+        _ => after_existing.len() != before_size,
+    } && after_existing != existing;
+
+    let final_content = if codex_wrote_directly {
+        after_existing
+    } else {
+        // Fall back to FILE-block parse. Errors here surface
+        // when the LLM chatted but didn't actually write.
+        let blocks = parse_ingest_blocks(&resp)?;
+        let file = blocks.files.into_iter().next().ok_or_else(|| {
+            AgentWikiError::Bridge("deepen: response had no FILE block".to_string())
+        })?;
+        // Path-match by basename — Codex often returns just the
+        // file's basename (`object-safety.md`) rather than the
+        // full canonical path (`wiki/concepts/object-safety.md`).
+        // Accept anything whose basename matches; the WRITE
+        // target is always the expected (canonical) location.
+        let expected_basename = std::path::Path::new(page_path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let returned_basename = std::path::Path::new(&file.path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if expected_basename != returned_basename {
+            return Err(AgentWikiError::Bridge(format!(
+                "deepen: LLM returned path `{}`, expected basename `{expected_basename}`",
+                file.path
+            )));
+        }
+        let target = wiki.vault_root().join(canonicalize_path(page_path));
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AgentWikiError::Bridge(format!("mkdir: {e}")))?;
+        }
+        std::fs::write(&target, &file.content)
+            .map_err(|e| AgentWikiError::Bridge(format!("write {page_path}: {e}")))?;
+        file.content
+    };
+
+    let after_words = final_content.split_whitespace().count();
+
+    wiki.append_log(wiki_live::log_md::LogEntry {
+        at: Utc::now(),
+        op: wiki_live::log_md::LogOp::Ingest,
+        title: format!("Deepen: {page_path}"),
+        body: format!("Rewrote {page_path}: {before_words}w → {after_words}w"),
+        pages_touched: vec![page_path.to_string()],
+    })
+    .map_err(|e| AgentWikiError::Bridge(format!("append_log: {e}")))?;
+
+    Ok(DeepenResult {
+        page_path: page_path.to_string(),
+        before_words,
+        after_words,
+    })
+}
+
+/// Pull the `sources:` array value out of a page's YAML
+/// frontmatter. Returns the filenames (e.g. `apollo-ch01.md`).
+fn extract_sources_field(markdown: &str) -> Vec<String> {
+    let Some(rest) = markdown.strip_prefix("---\n") else {
+        return Vec::new();
+    };
+    let Some(end) = rest.find("\n---\n") else {
+        return Vec::new();
+    };
+    let fm = &rest[..end];
+    for line in fm.lines() {
+        let trimmed = line.trim_start();
+        if let Some(after) = trimmed.strip_prefix("sources:") {
+            let v = after.trim();
+            if let Some(inner) = v.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                return inner
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Normalize `wiki/concepts/X.md` ↔ `concepts/X.md` ↔
+/// `Wiki/concepts/X.md` to one canonical form for comparison.
+fn canonicalize_path(p: &str) -> String {
+    let lower_pref = if let Some(rest) = p.strip_prefix("Wiki/") {
+        format!("wiki/{rest}")
+    } else {
+        p.to_string()
+    };
+    if lower_pref.starts_with("wiki/")
+        || matches!(
+            lower_pref.as_str(),
+            "index.md" | "log.md" | "overview.md" | "schema.md" | "purpose.md"
+        )
+    {
+        lower_pref
+    } else if lower_pref.starts_with("concepts/")
+        || lower_pref.starts_with("entities/")
+        || lower_pref.starts_with("sources/")
+    {
+        format!("wiki/{lower_pref}")
+    } else {
+        lower_pref
+    }
+}
+
 // ────────────────────── Shared helpers ──────────────────────
 
 /// Drive one turn with an LLM and return its full text

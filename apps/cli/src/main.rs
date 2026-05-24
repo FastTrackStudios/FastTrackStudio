@@ -1388,6 +1388,25 @@ enum WikiCmd {
         #[arg(long, default_value_t = 300)]
         timeout_secs: u64,
     },
+    /// Rewrite a thin wiki page into a proper reference
+    /// article. Reads the existing page + its `sources:`,
+    /// prompts the LLM to expand with code examples + sharper
+    /// structure, overwrites the page in place.
+    Deepen {
+        /// Vault root (the `Wiki/Knowledge/` parent).
+        #[arg(short, long, default_value = "examples/vault")]
+        vault: std::path::PathBuf,
+        /// Page path relative to the wiki root, e.g.
+        /// `wiki/concepts/borrowing-over-cloning.md`.
+        #[arg(short, long)]
+        page: String,
+        #[arg(short, long)]
+        model: Option<String>,
+        #[arg(long, default_value_t = 600)]
+        timeout_secs: u64,
+        #[arg(long, default_value = "English")]
+        language: String,
+    },
     /// `Wiki/schema.md` + `Wiki/purpose.md` operations.
     /// Talks to the server over vox (per-org); these are
     /// the canonical authoring + bootstrap entry points.
@@ -5258,6 +5277,42 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
                     println!("    - {r}");
                 }
             }
+            Ok(())
+        }
+        WikiCmd::Deepen {
+            vault,
+            page,
+            model,
+            timeout_secs,
+            language,
+        } => {
+            let vault = vault
+                .canonicalize()
+                .map_err(|e| eyre::eyre!("vault {}: {e}", vault.display()))?;
+            let wiki = WikiLive::open(&vault);
+            let backend = CodexBackend::new();
+            eprintln!(
+                "› deepen@{} page={page}",
+                model.as_deref().unwrap_or("default")
+            );
+            let result = agent_wiki::bridge::run_deepen(
+                &backend,
+                &wiki,
+                &page,
+                model,
+                Duration::from_secs(timeout_secs),
+                &language,
+            )
+            .await
+            .map_err(|e| eyre::eyre!("deepen: {e}"))?;
+            println!("Deepen done.");
+            println!("  page:  {}", result.page_path);
+            println!(
+                "  words: {} → {} ({:+})",
+                result.before_words,
+                result.after_words,
+                result.after_words as i64 - result.before_words as i64
+            );
             Ok(())
         }
         WikiCmd::Schema(c) => run_wiki_schema(c).await,
