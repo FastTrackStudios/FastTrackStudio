@@ -1,10 +1,14 @@
-//! Solo + solo-defeat decoder.
+//! Solo + solo-defeat decoder — gated to converter/writer-authored PTX.
 //!
-//! - Solo: `0x102d +162` (u8 0/1). Verified by RPP→PTX probe.
-//! - Solo-defeat: `0x200b +268` (u8 0/1), mirror at `0x200a +259`.
-//!   Verified by RPP→PTX probe (`.solo_defeated()`).
-//!
-//! See `docs/pt-field-map.md`.
+//! The `0x102d +162` (solo) and `0x200b +268` (solo-defeat) offsets were found
+//! via an RPP→PTX probe on converter-authored PTX. They hold there, but on real
+//! PT-authored sessions those bytes mean something else and over-fire (every
+//! click "Shake" reads soloed; the user confirmed none of the PNG Worship
+//! sessions actually have soloed tracks). So `apply_solo_state` only reads them
+//! when the file is converter-authored (≥ 8 `0x1029` per `0x261c`, the same
+//! shape test the mute decoder uses); PT-authored sessions keep `solo =
+//! solo_defeat = false` until their real offsets are found. See
+//! `docs/pt-field-map.md`.
 
 use crate::block::Block;
 use crate::content_type::ContentType;
@@ -121,13 +125,30 @@ fn collect_solo_defeat_by_name(blocks: &[Block], data: &[u8]) -> HashMap<String,
     out
 }
 
-/// Apply solo + solo-defeat to every audio + MIDI track.
+/// Apply per-track solo / solo-defeat state.
+///
+/// The `0x102d +162` (solo) and `0x200b +268` (solo-defeat) offsets hold only
+/// for *converter/writer-authored* PTX (where they were probe-verified). On
+/// real *PT-authored* sessions those bytes mean something else and over-fire
+/// (every click "Shake" reads soloed; the user confirmed none of the PNG
+/// Worship sessions have any soloed track). So we only read them when the file
+/// has the converter-authored shape — detected exactly as the mute decoder
+/// does: ≥ 8 `0x1029` mix blocks per `0x261c` track container. PT-authored
+/// sessions keep `solo = solo_defeat = false` until their real offsets are
+/// found. (Mute, from `0x1029 +5`, is accurate on both and is unaffected.)
 pub fn apply_solo_state(
     blocks: &[Block],
     cursor: &Cursor<'_>,
     audio_tracks: &mut [Track],
     midi_tracks: &mut [Track],
 ) {
+    let containers = crate::parse::collect_blocks_recursive(blocks, ContentType::TrackContainer);
+    let mix_blocks = crate::parse::collect_blocks_recursive(blocks, ContentType::TrackMixSettings);
+    let converter_authored = !containers.is_empty() && mix_blocks.len() >= containers.len() * 8;
+    if !converter_authored {
+        return; // PT-authored: +162/+268 are unreliable, leave solo state false.
+    }
+
     let data = cursor.data();
     let solo_by_name = collect_solo_by_name(blocks, data);
     let defeat_by_name = collect_solo_defeat_by_name(blocks, data);
@@ -137,26 +158,18 @@ pub fn apply_solo_state(
             return Some(v);
         }
         for suffix in [".01", ".02", ".03", ".04", ".05"] {
-            if let Some(v) = map.get(&format!("{}{suffix}", name)).copied() {
+            if let Some(v) = map.get(&format!("{name}{suffix}")).copied() {
                 return Some(v);
             }
         }
         None
     };
 
-    for t in audio_tracks.iter_mut() {
+    for t in audio_tracks.iter_mut().chain(midi_tracks.iter_mut()) {
         if let Some(s) = lookup(&solo_by_name, &t.name) {
             t.solo = s;
         }
         if let Some(d) = lookup(&defeat_by_name, &t.name) {
-            t.solo_defeat = d;
-        }
-    }
-    for t in midi_tracks.iter_mut() {
-        if let Some(s) = solo_by_name.get(&t.name).copied() {
-            t.solo = s;
-        }
-        if let Some(d) = defeat_by_name.get(&t.name).copied() {
             t.solo_defeat = d;
         }
     }
