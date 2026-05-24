@@ -32,7 +32,7 @@ use dioxus_router::{
     components::{Link, Outlet, Router},
     hooks::{use_navigator, use_route},
 };
-use fts_story_runtime::{KnobKind, KnobSource, KnobValue, STORIES, Story, render_fn};
+use fts_story_runtime::{render_fn, KnobKind, KnobSource, KnobValue, Story, STORIES};
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use anyrender::{PaintScene as _, render_to_buffer};
+use anyrender::{render_to_buffer, PaintScene as _};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_dom::util::Color;
 use blitz_dom::{Document as _, DocumentConfig};
@@ -21,8 +21,8 @@ use dioxus::prelude::*;
 use dioxus_native_dom::DioxusDocument;
 use fts_story_runtime::{KnobValue, Story};
 use fts_story_shell::Lookbook;
-use peniko::Fill;
 use peniko::kurbo::Rect;
+use peniko::Fill;
 
 /// Configuration for a single render.
 #[derive(Clone, Debug)]

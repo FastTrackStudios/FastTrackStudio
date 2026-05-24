@@ -1,7 +1,7 @@
 //! Cross-renderer DSSIM diff + side-by-side composite.
 
 use dssim_core::Dssim;
-use fts_story_snapshots::{DiffError, compare};
+use fts_story_snapshots::{compare, DiffError};
 
 #[derive(Debug, Clone)]
 pub struct ParityReport {

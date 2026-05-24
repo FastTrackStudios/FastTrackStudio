@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use fts_story_runtime::{KnobValue, Story};
 
-use crate::{RenderConfig, compare, render_story};
+use crate::{compare, render_story, RenderConfig};
 
 /// Where to find baselines + where to write candidates on failure.
 #[derive(Clone, Debug)]

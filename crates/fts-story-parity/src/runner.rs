@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use fts_story_runtime::{KnobValue, Story};
-use fts_story_snapshots::{RenderConfig, render_story};
+use fts_story_snapshots::{render_story, RenderConfig};
 
-use crate::capture::{WryCaptureConfig, WryCaptureError, capture_wry_via_xvfb, write_png};
-use crate::diff::{ParityReport, diff_renderers};
+use crate::capture::{capture_wry_via_xvfb, write_png, WryCaptureConfig, WryCaptureError};
+use crate::diff::{diff_renderers, ParityReport};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParityError {

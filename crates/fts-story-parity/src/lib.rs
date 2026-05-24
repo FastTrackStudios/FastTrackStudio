@@ -44,6 +44,6 @@ pub mod capture;
 pub mod diff;
 pub mod runner;
 
-pub use capture::{WryCaptureConfig, WryCaptureError, capture_wry_via_xvfb};
-pub use diff::{ParityReport, diff_renderers};
+pub use capture::{capture_wry_via_xvfb, WryCaptureConfig, WryCaptureError};
+pub use diff::{diff_renderers, ParityReport};
 pub use runner::{ParityConfig, ParityError, ParityRunner};
