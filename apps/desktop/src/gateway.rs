@@ -19,12 +19,94 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
-use vox::{Backing, DriverReplySink, Handler, Link, LinkRx, LinkTx, ReplySink};
+use vox::{Backing, Caller, DriverReplySink, Handler, Link, LinkRx, LinkTx, ReplySink};
 
 static WEB_CLIENT_REGISTRY: OnceLock<WebClientRegistry> = OnceLock::new();
 
 pub fn web_client_registry() -> &'static WebClientRegistry {
     WEB_CLIENT_REGISTRY.get_or_init(WebClientRegistry::new)
+}
+
+// ============================================================================
+// Remote connection (to the REAPER-hosted fts-extensions)
+// ============================================================================
+
+/// Late-bound handle to the vox `Caller` for the REAPER connection.
+///
+/// The gateway starts before REAPER is reachable, so browser RPC arrives
+/// before there is anything to forward to. The connection task installs the
+/// caller here once `session_cli::connection::connect` succeeds (and replaces
+/// it on reconnect); the forwarding handler reads it per call.
+pub type RemoteConn = Arc<std::sync::Mutex<Option<Caller>>>;
+
+static REMOTE_CONN: OnceLock<RemoteConn> = OnceLock::new();
+
+/// Shared handle to the REAPER connection. Cloning is cheap (`Arc`).
+pub fn remote_conn() -> RemoteConn {
+    REMOTE_CONN
+        .get_or_init(|| Arc::new(std::sync::Mutex::new(None)))
+        .clone()
+}
+
+/// A `Handler` that forwards every browser RPC over the shared vox connection
+/// to the REAPER-hosted `fts-extensions` and relays the response back.
+///
+/// This is a generic request/response proxy: it re-borrows the incoming
+/// call's payload and re-issues it on the remote caller, then relays the
+/// remote response bytes verbatim. Push streams to browsers do not go through
+/// here — those are delivered out-of-band via [`WebClientRegistry`].
+#[derive(Clone)]
+pub struct ForwardingHandler {
+    remote: RemoteConn,
+}
+
+impl ForwardingHandler {
+    pub fn new(remote: RemoteConn) -> Self {
+        Self { remote }
+    }
+}
+
+impl Handler<DriverReplySink> for ForwardingHandler {
+    async fn handle(
+        &self,
+        call: vox::SelfRef<vox::RequestCall<'static>>,
+        reply: DriverReplySink,
+        _schemas: Arc<vox::SchemaRecvTracker>,
+    ) {
+        // Clone the caller out from under the std mutex so we never hold the
+        // lock across an await.
+        let remote = self.remote.lock().expect("remote conn poisoned").clone();
+        let Some(remote) = remote else {
+            // REAPER not connected yet — surface a retryable error to the browser.
+            reply
+                .send_error(vox::VoxError::<core::convert::Infallible>::ConnectionClosed)
+                .await;
+            return;
+        };
+
+        let incoming = call.get();
+        let forwarded = vox::RequestCall {
+            method_id: incoming.method_id,
+            metadata: incoming.metadata.clone(),
+            args: incoming.args.reborrow(),
+            schemas: incoming.schemas.clone(),
+        };
+
+        match remote.call(forwarded).await {
+            Ok(response) => {
+                let response = response.value;
+                let r = response.get();
+                reply
+                    .send_reply(vox::RequestResponse {
+                        metadata: r.metadata.clone(),
+                        ret: r.ret.reborrow(),
+                        schemas: r.schemas.clone(),
+                    })
+                    .await;
+            }
+            Err(e) => reply.send_error(e).await,
+        }
+    }
 }
 
 // ============================================================================

@@ -14463,26 +14463,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-keybindings"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-registry"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-standalone"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input-dioxus"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "audio-controls"
 version = "0.1.0"
 
@@ -14503,3 +14483,23 @@ source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd5914
 name = "vox-inprocess"
 version = "0.5.0"
 source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+
+[[patch.unused]]
+name = "actions-keybindings"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "actions-registry"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "actions-standalone"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "input"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "input-dioxus"
+version = "0.1.0"
