@@ -44,9 +44,21 @@ impl CoreLane {
         &[CoreLane::Song, CoreLane::Sections, CoreLane::Marks]
     }
 
-    /// REAPER ruler lane index (1-based).
+    /// 1-based ruler lane index — what users see in REAPER's UI and
+    /// what `I_LANENUMBER` on a marker/region uses. SONG=1,
+    /// SECTIONS=2, MARKS=3.
     pub const fn lane_index(&self) -> u32 {
         *self as u32 + 1
+    }
+
+    /// 0-based index for REAPER's `RULER_LANE_NAME:N` /
+    /// `RULER_LANE_FLAGS:N` / `RULER_LANE_ORDER:N` project-info keys.
+    /// REAPER uses N=0 for the leftmost lane (what the UI labels
+    /// "1"), so we have to subtract one from `lane_index`. Calling
+    /// `set_ruler_lane_name(1, ...)` named lane *2* in the UI, which
+    /// is what left an empty unnamed "1" lane above SONG.
+    pub const fn name_key_index(&self) -> u32 {
+        *self as u32
     }
 
     /// Display name shown in the REAPER ruler.
@@ -197,13 +209,13 @@ pub fn classify_marker_lane(name: &str) -> FtsLane {
     let trimmed = name.trim();
     let upper = trimmed.to_uppercase();
 
+    // SONG lane is reserved for the song-bounded REGION (named after
+    // the song). *All* structural markers — song bounds, count-ins,
+    // render bounds — collapse into MARKS so the SONG lane reads as
+    // "here is one named row per song" without bracket-marker noise.
     match upper.as_str() {
-        // SONG lane: song-level bounds/anchors
-        "SONGSTART" | "SONGEND" => FtsLane::Core(CoreLane::Song),
-
-        // MARKS lane: structural cues
+        "SONGSTART" | "SONGEND" => FtsLane::Core(CoreLane::Marks),
         "COUNT-IN" | "COUNT IN" | "COUNTIN" => FtsLane::Core(CoreLane::Marks),
-        // MARKS lane: render/release bounds
         "=START" | "=END" | "PREROLL" | "=PREROLL" => FtsLane::Core(CoreLane::Marks),
         _ => FtsLane::Core(CoreLane::Marks),
     }
