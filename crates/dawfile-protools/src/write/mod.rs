@@ -25,6 +25,7 @@ pub mod from_rpp;
 pub mod internal_tracks;
 pub mod midi;
 pub mod native;
+pub mod registry;
 pub mod splice;
 
 // Re-export the shared error type under both its native name and the
