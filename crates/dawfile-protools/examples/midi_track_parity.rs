@@ -133,62 +133,87 @@ fn parse_smf(data: &[u8]) -> Smf {
     Smf { division, tracks }
 }
 
+use std::collections::HashMap;
+
+// Content key: (note, position rounded to 1/16 quarter).
+fn bucket(note: u8, q: f64) -> (u8, i64) {
+    (note, (q * 16.0).round() as i64)
+}
+
 fn main() {
     let ptx = std::env::args().nth(1).unwrap();
     let mid = std::env::args().nth(2).unwrap();
     let smf = parse_smf(&fs::read(&mid).unwrap());
-    let mut refs: Vec<(String, usize)> = Vec::new();
+    let tpq = smf.division as f64;
+
+    // Reference content per track name.
+    let mut refs: Vec<(String, HashMap<(u8, i64), i32>)> = Vec::new();
     for tr in &smf.tracks {
-        let name = tr.iter().find_map(|e| {
-            if let SmfEvent::TrackName { text } = e {
-                Some(text.clone())
-            } else {
-                None
-            }
-        });
-        let n = tr
+        let name = tr
             .iter()
-            .filter(|e| matches!(e, SmfEvent::NoteOn { .. }))
-            .count();
-        if n > 0 {
-            refs.push((name.unwrap_or_default(), n));
+            .find_map(|e| match e {
+                SmfEvent::TrackName { text } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut m: HashMap<(u8, i64), i32> = HashMap::new();
+        for e in tr {
+            if let SmfEvent::NoteOn { tick, note, .. } = e {
+                *m.entry(bucket(*note, *tick as f64 / tpq)).or_default() += 1;
+            }
+        }
+        if !m.is_empty() {
+            refs.push((name, m));
         }
     }
+
     let s = dawfile_protools::read_session(&ptx, 0).unwrap();
-    let mut ours: Vec<(String, usize)> = Vec::new();
-    for t in &s.midi_tracks {
-        let n: usize = t
-            .regions
-            .iter()
-            .map(|r| {
-                let (lo, hi) = (r.clip_lo_ticks, r.note_trim_ticks);
-                s.midi_regions
-                    .get(r.region_index as usize)
-                    .map(|reg| {
-                        reg.events
-                            .iter()
-                            .filter(|e| e.velocity > 0 && e.position >= lo && e.position < hi)
-                            .count()
-                    })
-                    .unwrap_or(0)
-            })
-            .sum();
-        ours.push((t.name.clone(), n));
-    }
+    let our: HashMap<String, HashMap<(u8, i64), i32>> = s
+        .midi_tracks
+        .iter()
+        .map(|t| {
+            let mut m: HashMap<(u8, i64), i32> = HashMap::new();
+            for r in &t.regions {
+                if let Some(reg) = s.midi_regions.get(r.region_index as usize) {
+                    for e in &reg.events {
+                        if e.velocity == 0
+                            || e.position < r.clip_lo_ticks
+                            || e.position >= r.note_trim_ticks
+                        {
+                            continue;
+                        }
+                        let tl = reg.take_offset_ticks as i64
+                            + e.position as i64
+                            + (reg.clip_start_ticks as i64 - reg.clip_src_ticks as i64);
+                        *m.entry(bucket(e.note, tl as f64 / 960_000.0)).or_default() += 1;
+                    }
+                }
+            }
+            (t.name.clone(), m)
+        })
+        .collect();
+
     let mut ok = 0;
-    let mut tot = 0;
-    for (rn, rc) in &refs {
-        tot += 1;
-        let oc = ours
-            .iter()
-            .find(|(on, _)| on == rn)
-            .map(|(_, c)| *c)
-            .unwrap_or(0);
-        let mark = if oc == *rc { "OK  " } else { "DIFF" };
-        if oc == *rc {
+    for (rn, rm) in &refs {
+        let om = our.get(rn).cloned().unwrap_or_default();
+        let refn: i32 = rm.values().sum();
+        let mut missing = 0;
+        for (k, &c) in rm {
+            missing += (c - om.get(k).copied().unwrap_or(0)).max(0);
+        }
+        let mut extra = 0;
+        for (k, &c) in &om {
+            extra += (c - rm.get(k).copied().unwrap_or(0)).max(0);
+        }
+        let mark = if missing == 0 && extra == 0 {
+            "OK  "
+        } else {
+            "DIFF"
+        };
+        if mark == "OK  " {
             ok += 1;
         }
-        println!("  [{mark}] {:<26} ref={:<5} ours={}", rn, rc, oc);
+        println!("  [{mark}] {rn:<26} ref={refn:<5} missing={missing} extra={extra}");
     }
-    println!("=> {ok}/{tot} tracks exact");
+    println!("=> {ok}/{} tracks exact content", refs.len());
 }
