@@ -69,6 +69,7 @@ pub const DEDUP_MERGE_SYSTEM: &str = include_str!("templates/dedup_merge_system.
 pub const VISION_CAPTION_PINNED: &str = include_str!("templates/vision_caption_pinned.txt");
 pub const VISION_CAPTION_CONTEXTUAL: &str = include_str!("templates/vision_caption_contextual.txt");
 pub const LANGUAGE_DIRECTIVE: &str = include_str!("templates/language_directive.txt");
+pub const DEEPEN_PAGE_SYSTEM: &str = include_str!("templates/deepen_page_system.txt");
 
 /// Helper: build the language directive block.
 #[must_use]
