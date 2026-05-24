@@ -188,7 +188,7 @@ fn wait_for_window(
                 return Err(WryCaptureError::SpawnFailed {
                     tool: "xdotool",
                     source: e,
-                })
+                });
             }
         }
         sleep(Duration::from_millis(120));

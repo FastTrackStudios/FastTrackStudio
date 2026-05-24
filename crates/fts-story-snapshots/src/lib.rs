@@ -22,10 +22,10 @@ pub mod diff;
 pub mod harness;
 pub mod render;
 
-pub use diff::{compare, DiffError};
-pub use harness::{assert_snapshot, SnapshotConfig};
-pub use render::{clear_wrapper, install_wrapper, render_story, RenderConfig};
+pub use diff::{DiffError, compare};
+pub use harness::{SnapshotConfig, assert_snapshot};
+pub use render::{RenderConfig, clear_wrapper, install_wrapper, render_story};
 
 /// Re-exported so consumers can build a knob snapshot without depending
 /// on `fts-story-runtime` directly.
-pub use fts_story_runtime::{KnobSource, KnobValue, NoKnobs, Story, STORIES};
+pub use fts_story_runtime::{KnobSource, KnobValue, NoKnobs, STORIES, Story};

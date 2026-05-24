@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use fts_story_runtime::{KnobValue, Story};
 
-use crate::{compare, render_story, RenderConfig};
+use crate::{RenderConfig, compare, render_story};
 
 /// Where to find baselines + where to write candidates on failure.
 #[derive(Clone, Debug)]
@@ -121,7 +121,9 @@ fn snapshot_label(story: &Story) -> String {
 }
 
 fn sanitise(s: &str) -> std::borrow::Cow<'_, str> {
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         std::borrow::Cow::Borrowed(s)
     } else {
         std::borrow::Cow::Owned(

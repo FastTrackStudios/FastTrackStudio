@@ -1,7 +1,7 @@
 //! Cross-renderer DSSIM diff + side-by-side composite.
 
 use dssim_core::Dssim;
-use fts_story_snapshots::{compare, DiffError};
+use fts_story_snapshots::{DiffError, compare};
 
 #[derive(Debug, Clone)]
 pub struct ParityReport {
@@ -132,16 +132,7 @@ fn map_png_err(e: png::DecodingError) -> DiffError {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn blit(
-    src: &[u8],
-    sw: u32,
-    sh: u32,
-    dst: &mut [u8],
-    dw: u32,
-    _dh: u32,
-    x: u32,
-    y: u32,
-) {
+fn blit(src: &[u8], sw: u32, sh: u32, dst: &mut [u8], dw: u32, _dh: u32, x: u32, y: u32) {
     for row in 0..sh {
         let src_off = (row * sw * 4) as usize;
         let dst_off = (((y + row) * dw + x) * 4) as usize;
@@ -151,16 +142,7 @@ fn blit(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn fill_rect(
-    dst: &mut [u8],
-    dw: u32,
-    _dh: u32,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-    rgba: [u8; 4],
-) {
+fn fill_rect(dst: &mut [u8], dw: u32, _dh: u32, x: u32, y: u32, w: u32, h: u32, rgba: [u8; 4]) {
     for row in 0..h {
         for col in 0..w {
             let off = (((y + row) * dw + (x + col)) * 4) as usize;

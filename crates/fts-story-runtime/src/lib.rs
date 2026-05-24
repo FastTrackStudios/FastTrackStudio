@@ -44,7 +44,11 @@ pub trait KnobSource {
 }
 
 /// Convenience — read a knob with a fallback default.
-pub fn knob<'a>(src: &'a dyn KnobSource, name: &'static str, fallback: &'a KnobValue) -> &'a KnobValue {
+pub fn knob<'a>(
+    src: &'a dyn KnobSource,
+    name: &'static str,
+    fallback: &'a KnobValue,
+) -> &'a KnobValue {
     src.get(name).unwrap_or(fallback)
 }
 

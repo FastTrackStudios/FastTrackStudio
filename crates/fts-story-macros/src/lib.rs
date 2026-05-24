@@ -36,8 +36,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, spanned::Spanned, Attribute, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat,
-    Type,
+    Attribute, Expr, ExprLit, FnArg, ItemFn, Lit, Meta, Pat, Type, parse_macro_input,
+    spanned::Spanned,
 };
 
 #[proc_macro_attribute]
@@ -377,6 +377,11 @@ fn story_impl(args: TokenStream2, item_fn: ItemFn) -> TokenStream2 {
                 ..::fts_story_runtime::StoryDef::DEFAULT
             });
 
+        // linkme 0.3 doesn't compile on wasm32-unknown-unknown. Skip
+        // the registration there — STORIES is an empty stub on wasm32
+        // (see fts-story-core). The const-evaluated story_static
+        // above still exists and can be referenced directly.
+        #[cfg(not(target_arch = "wasm32"))]
         #[::linkme::distributed_slice(::fts_story_runtime::STORIES)]
         #[allow(non_upper_case_globals)]
         static #reg_ident: &::fts_story_runtime::Story = &#story_static;

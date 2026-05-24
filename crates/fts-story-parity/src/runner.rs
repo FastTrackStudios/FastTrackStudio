@@ -5,10 +5,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use fts_story_runtime::{KnobValue, Story};
-use fts_story_snapshots::{render_story, RenderConfig};
+use fts_story_snapshots::{RenderConfig, render_story};
 
-use crate::capture::{capture_wry_via_xvfb, write_png, WryCaptureConfig, WryCaptureError};
-use crate::diff::{diff_renderers, ParityReport};
+use crate::capture::{WryCaptureConfig, WryCaptureError, capture_wry_via_xvfb, write_png};
+use crate::diff::{ParityReport, diff_renderers};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParityError {
@@ -87,7 +87,10 @@ impl ParityRunner {
         let dir = &self.cfg.output_dir;
         write_png(&report.blitz_png, dir.join(format!("{label}.blitz.png")))?;
         write_png(&report.wry_png, dir.join(format!("{label}.wry.png")))?;
-        write_png(&report.composite_png, dir.join(format!("{label}.composite.png")))?;
+        write_png(
+            &report.composite_png,
+            dir.join(format!("{label}.composite.png")),
+        )?;
         Ok(report)
     }
 }
@@ -100,7 +103,9 @@ fn label_for(story: &Story) -> String {
 }
 
 fn sanitise(s: &str) -> std::borrow::Cow<'_, str> {
-    if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         std::borrow::Cow::Borrowed(s)
     } else {
         std::borrow::Cow::Owned(

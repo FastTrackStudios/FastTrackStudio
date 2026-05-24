@@ -9,7 +9,10 @@ description = "Interactive Lookbook-style shell for fts-story."
 [dependencies]
 fts-story-core    = { workspace = true }
 fts-story-runtime = { workspace = true }
-dioxus = { workspace = true }
+# `router` feature enables `Router`, `Routable`, `use_navigator`, etc. —
+# the shell uses this for URL-based component selection so that
+# refresh / share-link / back-button preserve the selected component.
+dioxus = { workspace = true, features = ["router"] }
 
 [lints]
 workspace = true

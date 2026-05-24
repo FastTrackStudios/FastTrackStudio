@@ -17,6 +17,12 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// linkme 0.3 doesn't support `target_os = "unknown"` (i.e.
+// wasm32-unknown-unknown). Apps that consume `fts-ui` from a browser
+// wasm target still need the rest of fts-ui to compile, so on wasm32
+// the registry collapses to an empty array. Story enumeration only
+// runs in the native shell / VRT runner anyway.
+#[cfg(not(target_arch = "wasm32"))]
 use linkme::distributed_slice;
 
 /// The compile-time story registry.
@@ -30,8 +36,12 @@ use linkme::distributed_slice;
 ///     println!("{}/{}", story.category, story.name);
 /// }
 /// ```
+#[cfg(not(target_arch = "wasm32"))]
 #[distributed_slice]
 pub static STORIES: [&'static Story] = [..];
+
+#[cfg(target_arch = "wasm32")]
+pub static STORIES: [&'static Story; 0] = [];
 
 /// Metadata + render entry point for a single story.
 ///
@@ -159,11 +169,7 @@ pub enum Interaction {
     /// Type a string into the currently-focused node.
     Type(&'static str),
     /// Scroll the matching node by (dx, dy) pixels.
-    Scroll {
-        target: Selector,
-        dx: f32,
-        dy: f32,
-    },
+    Scroll { target: Selector, dx: f32, dy: f32 },
     /// Wait for a condition before continuing.
     Wait(WaitCondition),
     /// Take a named snapshot at this point in the script.
@@ -210,5 +216,9 @@ pub struct InteractionScript {
     pub steps: &'static [Interaction],
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[distributed_slice]
 pub static INTERACTION_SCRIPTS: [&'static InteractionScript] = [..];
+
+#[cfg(target_arch = "wasm32")]
+pub static INTERACTION_SCRIPTS: [&'static InteractionScript; 0] = [];

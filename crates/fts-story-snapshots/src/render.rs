@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use anyrender::{render_to_buffer, PaintScene as _};
+use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use blitz_dom::util::Color;
 use blitz_dom::{Document as _, DocumentConfig};
@@ -21,8 +21,8 @@ use dioxus::prelude::*;
 use dioxus_native_dom::DioxusDocument;
 use fts_story_runtime::{KnobValue, Story};
 use fts_story_shell::Lookbook;
-use peniko::kurbo::Rect;
 use peniko::Fill;
+use peniko::kurbo::Rect;
 
 /// Configuration for a single render.
 #[derive(Clone, Debug)]
@@ -87,9 +87,7 @@ pub fn render_story(
     }
 
     install_snapshot(story.name.to_string(), knobs);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        render_inner(cfg)
-    }));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render_inner(cfg)));
     clear_snapshot();
     match result {
         Ok(png) => png,
@@ -191,9 +189,7 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
             unit: png::Unit::Meter,
         }));
         let mut writer = encoder.write_header().expect("png header write");
-        writer
-            .write_image_data(rgba)
-            .expect("png pixel data write");
+        writer.write_image_data(rgba).expect("png pixel data write");
         writer.finish().expect("png finish");
     }
     out
@@ -264,7 +260,7 @@ fn snapshot_component() -> Element {
         None => {
             return rsx! {
                 div { "fts-story-snapshots: no snapshot installed; this is a bug." }
-            }
+            };
         }
     };
     let element = rsx! {
@@ -279,4 +275,3 @@ fn snapshot_component() -> Element {
         None => element,
     }
 }
-

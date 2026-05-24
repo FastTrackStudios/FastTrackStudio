@@ -92,11 +92,7 @@ fn build_image(
 
 /// Compare `candidate` against `baseline`. Returns the dssim score on
 /// success so callers can log near-threshold failures.
-pub fn compare(
-    baseline: &[u8],
-    candidate: &[u8],
-    threshold: f64,
-) -> Result<f64, DiffError> {
+pub fn compare(baseline: &[u8], candidate: &[u8], threshold: f64) -> Result<f64, DiffError> {
     let (a, aw, ah) = decode_rgba(baseline)?;
     let (b, bw, bh) = decode_rgba(candidate)?;
 
