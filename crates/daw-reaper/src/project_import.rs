@@ -709,6 +709,32 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     if track.height_px > 0 {
                         t = t.height(track.height_px as i32);
                     }
+                    // Volume / mute automation envelopes (parsed from 0x260a[0]
+                    // / 0x260a[1]). Volume points are centibel → linear gain
+                    // (1.0 = 0 dB). Mute points are step/square (Reaper MUTEENV:
+                    // 0 = muted, 1 = audible).
+                    if !track.volume_automation.is_empty() {
+                        t = t.envelope("VOLENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.volume_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let lin = 10f64.powf(bp.value_centibel as f64 / 200.0);
+                                e = e.linear(secs, lin);
+                            }
+                            e
+                        });
+                    }
+                    if !track.mute_automation.is_empty() {
+                        t = t.envelope("MUTEENV", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.mute_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let v = if bp.muted { 1.0 } else { 0.0 };
+                                e = e.square(secs, v);
+                            }
+                            e
+                        });
+                    }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.audio_regions.len() {
                             continue;
@@ -891,6 +917,32 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
                     // shape on round-trip. 0 = not parsed → leave Reaper default.
                     if track.height_px > 0 {
                         t = t.height(track.height_px as i32);
+                    }
+                    // Volume / mute automation envelopes (parsed from 0x260a[0]
+                    // / 0x260a[1]). Volume points are centibel → linear gain
+                    // (1.0 = 0 dB). Mute points are step/square (Reaper MUTEENV:
+                    // 0 = muted, 1 = audible).
+                    if !track.volume_automation.is_empty() {
+                        t = t.envelope("VOLENV2", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.volume_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let lin = 10f64.powf(bp.value_centibel as f64 / 200.0);
+                                e = e.linear(secs, lin);
+                            }
+                            e
+                        });
+                    }
+                    if !track.mute_automation.is_empty() {
+                        t = t.envelope("MUTEENV", |mut e| {
+                            e = e.active().visible();
+                            for bp in &track.mute_automation {
+                                let secs = bp.time_samples as f64 / sample_rate;
+                                let v = if bp.muted { 1.0 } else { 0.0 };
+                                e = e.square(secs, v);
+                            }
+                            e
+                        });
                     }
                     for tr in &track.regions {
                         if tr.region_index as usize >= session.midi_regions.len() {
