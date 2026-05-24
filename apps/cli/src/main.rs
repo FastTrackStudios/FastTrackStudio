@@ -126,6 +126,12 @@ enum Commands {
     /// generated `GoalServiceClient`.
     #[command(subcommand)]
     Goal(GoalCmd),
+    /// Project milestones — GitHub-Projects-style checkpoints.
+    /// Tasks roll up via `milestoneId`; milestones can ladder
+    /// up to life-goals via `goalId`. Designed to sync 1:1
+    /// with Forgejo / GitHub milestones in the future.
+    #[command(subcommand)]
+    Milestone(MilestoneCmd),
 }
 
 #[derive(Subcommand)]
@@ -804,50 +810,321 @@ enum AgentCmd {
 
 #[derive(Subcommand)]
 enum TaskCmd {
-    /// Create a new task from a natural-language line. Extracts
-    /// `#tag`s, `@context`s, `[[Project]]`s, `!priority`, and
-    /// date keywords (`today`, `tomorrow`, `next monday`, `mon`,
-    /// `YYYY-MM-DD`). Title = the remaining text.
-    ///
-    /// Examples:
-    ///   task task capture "Buy milk tomorrow #errands @shopping"
-    ///   task task capture "Ship vault-graph !high next friday"
+    /// Create a new task from a natural-language line.
+    /// Extracts `#tag`s, `@context`s, `[[Project]]`s,
+    /// `!priority`, and date keywords (`today`, `tomorrow`,
+    /// `next monday`, `mon`, `YYYY-MM-DD`). Title = the
+    /// remaining text. Pushes the result through the
+    /// per-org RPC.
     Capture {
-        /// The task line. Quote the whole thing.
         text: String,
-        /// Vault root. Defaults to `examples/vault`.
-        #[arg(long, default_value = "examples/vault")]
-        vault: std::path::PathBuf,
-        /// Override folder. Default: `tasks/`.
+        /// Project id or vault-relative path. Sets
+        /// `projectId` on the resulting task.
         #[arg(long)]
-        folder: Option<String>,
+        project: Option<String>,
+        /// Milestone id or path. Sets `milestoneId`. If both
+        /// `--project` and `--milestone` are passed they must
+        /// agree (CLI-side check).
+        #[arg(long)]
+        milestone: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
-    /// List tasks in the vault. Filters compose (AND).
+    /// List tasks. Filters compose (AND).
     List {
-        #[arg(long, default_value = "examples/vault")]
-        vault: std::path::PathBuf,
-        /// Restrict to one status (e.g. `open`, `done`).
+        /// Status slug (`open`, `in-progress`, `done`, …).
         #[arg(long)]
         status: Option<String>,
-        /// Restrict to tasks with this tag (without `#`).
         #[arg(long)]
         tag: Option<String>,
-        /// Restrict to tasks with this context (with or without `@`).
+        /// `@`-prefix optional.
         #[arg(long)]
         context: Option<String>,
+        /// Restrict to one project (id or path).
+        #[arg(long)]
+        project: Option<String>,
+        /// Restrict to one milestone (id or path). `none`
+        /// lists tasks with no milestone.
+        #[arg(long)]
+        milestone: Option<String>,
+        /// Only tasks whose status is not done.
+        #[arg(long)]
+        open: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
-    /// Mark a task done. Sets `status: done` and `completedDate`
-    /// to today. `task_id` matches a unique basename prefix.
+    /// Fetch one task by id or path.
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a task with explicit fields (no NLP parsing).
+    /// Use `capture` for the conversational form.
+    Create {
+        title: String,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        priority: Option<String>,
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        scheduled: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        contexts: Vec<String>,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        milestone: Option<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark done. Sets `status: done` + `completedDate`.
     Done {
-        /// Task identifier — basename, prefix, or full
-        /// `tasks/foo.md` path.
-        task_id: String,
-        #[arg(long, default_value = "examples/vault")]
-        vault: std::path::PathBuf,
-        /// Re-open the task (clear `completedDate`, set status
-        /// to `open`).
+        target: String,
+        /// Reopen instead (clears `completedDate`, status
+        /// = `open`).
         #[arg(long)]
         undo: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    SetPriority {
+        target: String,
+        priority: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the due date.
+    SetDue {
+        target: String,
+        due: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the scheduled date.
+    SetScheduled {
+        target: String,
+        scheduled: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the owning project.
+    SetProject {
+        target: String,
+        project: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the milestone link.
+    SetMilestone {
+        target: String,
+        milestone: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Replace the tag list.
+    SetTags {
+        target: String,
+        #[arg(value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Move backing markdown file. `id` preserved.
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum MilestoneCmd {
+    /// List every milestone in the active org's vault.
+    List {
+        /// Restrict to one project (id or path).
+        #[arg(long)]
+        project: Option<String>,
+        /// Restrict to one goal (id or path).
+        #[arg(long)]
+        goal: Option<String>,
+        /// Only milestones whose status is not closed.
+        #[arg(long)]
+        open: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    Get {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create a milestone. `--project` is required.
+    Create {
+        title: String,
+        /// Project id or path. Required.
+        #[arg(long)]
+        project: String,
+        /// Optional life-goal link (id or path).
+        #[arg(long)]
+        goal: Option<String>,
+        #[arg(long)]
+        path: Option<String>,
+        /// `open` / `closed`. Default `open`.
+        #[arg(long)]
+        status: Option<String>,
+        /// YYYY-MM-DD.
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        /// External reference for future Forgejo / GitHub
+        /// sync (e.g. `forgejo:starcommand.live/foo/bar#7`).
+        #[arg(long)]
+        forge_ref: Option<String>,
+        #[arg(long)]
+        details: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// `open` or `closed`. Convenience over `update`.
+    SetStatus {
+        target: String,
+        status: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the due date.
+    SetDue {
+        target: String,
+        due: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the life-goal link.
+    SetGoal {
+        target: String,
+        goal: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Set or clear (`none`) the forge sync ref.
+    SetForgeRef {
+        target: String,
+        forge_ref: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// `closed`. Just `set-status <target> closed`.
+    Close {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Reopen (status = open).
+    Reopen {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Rename {
+        target: String,
+        new_path: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    Delete {
+        target: String,
+        #[arg(long, short = 'y')]
+        yes: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
     },
 }
 
@@ -1246,7 +1523,7 @@ async fn main() -> eyre::Result<()> {
             }
         },
         Commands::Task(cmd) => {
-            return run_task(cmd);
+            return Box::pin(run_task(cmd)).await;
         }
         Commands::Agent(cmd) => {
             return run_agent(cmd).await;
@@ -1277,6 +1554,9 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Goal(cmd) => {
             return Box::pin(run_goal(cmd)).await;
+        }
+        Commands::Milestone(cmd) => {
+            return Box::pin(run_milestone(cmd)).await;
         }
     }
     Ok(())
@@ -3994,41 +4274,70 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
     }
 }
 
-fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
+async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
     match cmd {
         TaskCmd::Capture {
             text,
-            vault,
-            folder,
+            project,
+            milestone,
+            org,
+            server,
+            json,
         } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
             let mut info = task::capture(&text);
-            info.path = task::write::default_task_path(&info.title, folder.as_deref());
-            let abs = task::write_task(&vault, &mut info, false)
-                .map_err(|e| eyre::eyre!("write task: {e}"))?;
-            println!("Created {}", abs.display());
-            println!("  title:    {}", info.title);
-            println!("  status:   {}", info.status);
-            println!("  priority: {}", info.priority);
-            if let Some(d) = &info.due {
+            info.path = task::write::default_task_path(&info.title, None);
+            if let Some(p) = project {
+                let pc = connect_project_client(&url).await?;
+                info.project_id = Some(resolve_project_target(&pc, &p).await?.id);
+            }
+            if let Some(m) = milestone {
+                let mc = connect_milestone_client(&url).await?;
+                let ms = resolve_milestone_target(&mc, &m).await?;
+                info.milestone_id = Some(ms.id);
+                if info.project_id.is_none() {
+                    info.project_id = Some(ms.project_id);
+                }
+            }
+            let client = connect_task_client(&url).await?;
+            let created = client
+                .create(info)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("captured {} ({})", created.title, created.path);
+            println!("  id:       {}", created.id);
+            println!("  status:   {}", created.status);
+            println!("  priority: {}", created.priority);
+            if let Some(d) = &created.due {
                 println!("  due:      {d}");
-            }
-            if !info.tags.is_empty() {
-                println!("  tags:     {}", info.tags.join(", "));
-            }
-            if !info.contexts.is_empty() {
-                println!("  contexts: {}", info.contexts.join(", "));
-            }
-            if !info.projects.is_empty() {
-                println!("  projects: {}", info.projects.join(", "));
             }
         }
         TaskCmd::List {
-            vault,
             status,
             tag,
             context,
+            project,
+            milestone,
+            open,
+            org,
+            server,
+            json,
         } => {
-            let v = vault::Vault::open(&vault).map_err(|e| eyre::eyre!("open: {e}"))?;
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
             let ctx_filter = context.map(|c| {
                 if c.starts_with('@') {
                     c
@@ -4036,7 +4345,23 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     format!("@{c}")
                 }
             });
-            let mut tasks: Vec<_> = task::scan_vault(&v)
+            let project_id = match project {
+                Some(p) => {
+                    let pc = connect_project_client(&url).await?;
+                    Some(resolve_project_target(&pc, &p).await?.id)
+                }
+                None => None,
+            };
+            let milestone_filter = match milestone.as_deref() {
+                Some("none" | "null") => Some(None),
+                Some(m) => {
+                    let mc = connect_milestone_client(&url).await?;
+                    Some(Some(resolve_milestone_target(&mc, m).await?.id))
+                }
+                None => None,
+            };
+
+            let mut rows: Vec<_> = rows
                 .into_iter()
                 .filter(|t| {
                     status
@@ -4052,10 +4377,16 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                         .as_deref()
                         .is_none_or(|c| t.contexts.iter().any(|x| x == c))
                 })
+                .filter(|t| project_id.is_none_or(|pid| t.project_id == Some(pid)))
+                .filter(|t| match &milestone_filter {
+                    None => true,
+                    Some(want) => &t.milestone_id == want,
+                })
+                .filter(|t| {
+                    !open || !task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
+                })
                 .collect();
-            tasks.sort_by(|a, b| {
-                // Open before done; then by due date ascending
-                // (None last); then by title.
+            rows.sort_by(|a, b| {
                 let a_done = task::Status::from_str(&a.status).is_some_and(task::Status::is_done);
                 let b_done = task::Status::from_str(&b.status).is_some_and(task::Status::is_done);
                 a_done
@@ -4064,11 +4395,19 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     .then_with(|| a.due.cmp(&b.due))
                     .then_with(|| a.title.cmp(&b.title))
             });
-            if tasks.is_empty() {
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
                 println!("(no tasks)");
                 return Ok(());
             }
-            for t in &tasks {
+            for t in &rows {
                 let marker = if task::Status::from_str(&t.status).is_some_and(task::Status::is_done)
                 {
                     "[x]"
@@ -4085,51 +4424,617 @@ fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                     "high" => " !",
                     _ => "",
                 };
-                println!("{marker} {}{prio}{due}    {}", t.title, t.path);
+                let ms = if t.milestone_id.is_some() { " *" } else { "" };
+                println!("{marker} {}{prio}{due}{ms}    {}", t.title, t.path);
+            }
+        }
+        TaskCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_task_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&t).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", t.title, t.status);
+            println!("  id:       {}", t.id);
+            println!("  path:     {}", t.path);
+            println!("  priority: {}", t.priority);
+            if let Some(d) = &t.due {
+                println!("  due:      {d}");
+            }
+            if let Some(s) = &t.scheduled {
+                println!("  sched:    {s}");
+            }
+            if let Some(p) = t.project_id {
+                println!("  project:  {p}");
+            }
+            if let Some(m) = t.milestone_id {
+                println!("  milestone:{m}");
+            }
+            if !t.tags.is_empty() {
+                println!("  tags:     {}", t.tags.join(", "));
+            }
+            if !t.contexts.is_empty() {
+                println!("  contexts: {}", t.contexts.join(", "));
+            }
+            if !t.details.is_empty() {
+                println!("\n{}", t.details);
+            }
+        }
+        TaskCmd::Create {
+            title,
+            path,
+            status,
+            priority,
+            due,
+            scheduled,
+            tags,
+            contexts,
+            project,
+            milestone,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let project_id = match project {
+                Some(p) => {
+                    let pc = connect_project_client(&url).await?;
+                    Some(resolve_project_target(&pc, &p).await?.id)
+                }
+                None => None,
+            };
+            let (milestone_id, project_id) = match milestone {
+                Some(m) => {
+                    let mc = connect_milestone_client(&url).await?;
+                    let ms = resolve_milestone_target(&mc, &m).await?;
+                    (Some(ms.id), project_id.or(Some(ms.project_id)))
+                }
+                None => (None, project_id),
+            };
+            let details = resolve_body(details)?;
+            let new_task = task::TaskInfo {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                status: status.unwrap_or_else(|| "open".into()),
+                priority: priority.unwrap_or_else(|| "normal".into()),
+                due,
+                scheduled,
+                tags: task::model::StringList(tags),
+                contexts: task::model::StringList(contexts),
+                projects: task::model::StringList::default(),
+                project_id,
+                milestone_id,
+                time_estimate: None,
+                time_entries: task::model::TimeEntries::default(),
+                recurrence: None,
+                recurrence_anchor: None,
+                complete_instances: task::model::StringList::default(),
+                completed_date: None,
+                agent_profile: String::new(),
+                dispatched_agent_tasks: task::model::StringList::default(),
+                date_created: None,
+                date_modified: None,
+                details,
+            };
+            let client = connect_task_client(&url).await?;
+            let created = client
+                .create(new_task)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
             }
         }
         TaskCmd::Done {
-            task_id,
-            vault,
+            target,
             undo,
+            org,
+            server,
         } => {
-            let v = vault::Vault::open(&vault).map_err(|e| eyre::eyre!("open: {e}"))?;
-            let tasks = task::scan_vault(&v);
-            let needle = task_id.trim_end_matches(".md").to_ascii_lowercase();
-            let matches: Vec<_> = tasks
-                .iter()
-                .filter(|t| {
-                    t.path.eq_ignore_ascii_case(&task_id)
-                        || std::path::Path::new(&t.path)
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .is_some_and(|s| s.to_ascii_lowercase().starts_with(&needle))
-                })
-                .collect();
-            let matched = match matches.as_slice() {
-                [] => return Err(eyre::eyre!("no task matched {task_id:?}")),
-                [t] => *t,
-                multi => {
-                    return Err(eyre::eyre!(
-                        "{} tasks matched {task_id:?} (be more specific)",
-                        multi.len()
-                    ));
+            mutate_task(target, org, server, |t| {
+                if undo {
+                    t.status = "open".into();
+                    t.completed_date = None;
+                } else {
+                    t.status = "done".into();
+                    t.completed_date = Some(chrono::Local::now().date_naive());
                 }
-            };
-            let mut info = matched.clone();
-            if undo {
-                info.status = "open".into();
-                info.completed_date = None;
+            })
+            .await?;
+        }
+        TaskCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => mutate_task(target, org, server, |t| t.status = status).await?,
+        TaskCmd::SetPriority {
+            target,
+            priority,
+            org,
+            server,
+        } => mutate_task(target, org, server, |t| t.priority = priority).await?,
+        TaskCmd::SetDue {
+            target,
+            due,
+            org,
+            server,
+        } => {
+            let v = if matches!(due.as_str(), "none" | "null" | "") {
+                None
             } else {
-                info.status = "done".into();
-                info.completed_date = Some(chrono::Local::now().date_naive());
+                Some(due)
+            };
+            mutate_task(target, org, server, |t| t.due = v).await?;
+        }
+        TaskCmd::SetScheduled {
+            target,
+            scheduled,
+            org,
+            server,
+        } => {
+            let v = if matches!(scheduled.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(scheduled)
+            };
+            mutate_task(target, org, server, |t| t.scheduled = v).await?;
+        }
+        TaskCmd::SetProject {
+            target,
+            project,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let new_proj = if matches!(project.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                let pc = connect_project_client(&url).await?;
+                Some(resolve_project_target(&pc, &project).await?.id)
+            };
+            mutate_task(target, org, server, |t| t.project_id = new_proj).await?;
+        }
+        TaskCmd::SetMilestone {
+            target,
+            milestone,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let (new_ms, new_proj) = if matches!(milestone.as_str(), "none" | "null" | "") {
+                (None, None)
+            } else {
+                let mc = connect_milestone_client(&url).await?;
+                let ms = resolve_milestone_target(&mc, &milestone).await?;
+                (Some(ms.id), Some(ms.project_id))
+            };
+            mutate_task(target, org, server, |t| {
+                t.milestone_id = new_ms;
+                if let Some(p) = new_proj {
+                    // Auto-fix project link when it's missing or
+                    // points elsewhere — milestone is the
+                    // narrower truth.
+                    t.project_id = Some(p);
+                }
+            })
+            .await?;
+        }
+        TaskCmd::SetTags {
+            target,
+            tags,
+            org,
+            server,
+        } => {
+            mutate_task(target, org, server, |t| {
+                t.tags = task::model::StringList(tags);
+            })
+            .await?;
+        }
+        TaskCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_task_target(&client, &target).await?;
+            let renamed = client
+                .rename(t.id, new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        TaskCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_task_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", t.title, t.path))? {
+                println!("aborted");
+                return Ok(());
             }
-            task::write_task(&vault, &mut info, true)
-                .map_err(|e| eyre::eyre!("write task: {e}"))?;
-            let verb = if undo { "Reopened" } else { "Done" };
-            println!("{verb} {}    {}", info.title, info.path);
+            client
+                .delete(t.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", t.path);
         }
     }
+    Ok(())
+}
+
+async fn connect_task_client(url: &str) -> eyre::Result<task::TaskServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_task_target(
+    client: &task::TaskServiceClient,
+    target: &str,
+) -> eyre::Result<task::TaskInfo> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_task<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut task::TaskInfo),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_task_client(&url).await?;
+    let mut t = resolve_task_target(&client, &target).await?;
+    apply(&mut t);
+    let updated = client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
+    match cmd {
+        MilestoneCmd::List {
+            project,
+            goal,
+            open,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let project_id = match project {
+                Some(p) => {
+                    let pc = connect_project_client(&url).await?;
+                    Some(resolve_project_target(&pc, &p).await?.id)
+                }
+                None => None,
+            };
+            let goal_id = match goal {
+                Some(g) => {
+                    let gc = connect_goal_client(&url).await?;
+                    Some(resolve_goal_target(&gc, &g).await?.id)
+                }
+                None => None,
+            };
+            let rows: Vec<_> = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?
+                .into_iter()
+                .filter(|m| project_id.is_none_or(|pid| m.project_id == pid))
+                .filter(|m| goal_id.is_none_or(|gid| m.goal_id == Some(gid)))
+                .filter(|m| !open || m.status != "closed")
+                .collect();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!("(no milestones)");
+                return Ok(());
+            }
+            println!("{} milestones\n", rows.len());
+            for m in &rows {
+                let due = m
+                    .due_date
+                    .map(|d| format!("  (due {d})"))
+                    .unwrap_or_default();
+                let goal = m.goal_id.map(|_| "  →goal".to_string()).unwrap_or_default();
+                println!("{:<32}  {:<8}{due}{goal}    {}", m.title, m.status, m.path);
+            }
+        }
+        MilestoneCmd::Get {
+            target,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let m = resolve_milestone_target(&client, &target).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&m).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", m.title, m.status);
+            println!("  id:       {}", m.id);
+            println!("  path:     {}", m.path);
+            println!("  project:  {}", m.project_id);
+            if let Some(g) = m.goal_id {
+                println!("  goal:     {g}");
+            }
+            if let Some(d) = m.due_date {
+                println!("  due:      {d}");
+            }
+            if let Some(r) = &m.forge_ref {
+                println!("  forge:    {r}");
+            }
+            if !m.tags.is_empty() {
+                println!("  tags:     {}", m.tags.0.join(", "));
+            }
+            if !m.details.is_empty() {
+                println!("\n{}", m.details);
+            }
+        }
+        MilestoneCmd::Create {
+            title,
+            project,
+            goal,
+            path,
+            status,
+            due,
+            tags,
+            forge_ref,
+            details,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let pc = connect_project_client(&url).await?;
+            let project_id = resolve_project_target(&pc, &project).await?.id;
+            let goal_id = match goal {
+                None => None,
+                Some(g) => {
+                    let gc = connect_goal_client(&url).await?;
+                    Some(resolve_goal_target(&gc, &g).await?.id)
+                }
+            };
+            let due_date = match due {
+                None => None,
+                Some(s) => Some(
+                    chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--due: {e}"))?,
+                ),
+            };
+            let details = resolve_body(details)?;
+            let new_ms = milestone::Milestone {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                project_id,
+                goal_id,
+                status: status.unwrap_or_else(|| "open".into()),
+                due_date,
+                tags: milestone::Tags(tags),
+                forge_ref,
+                date_created: None,
+                date_modified: None,
+                details,
+            };
+            let client = connect_milestone_client(&url).await?;
+            let created = client
+                .create(new_ms)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
+            }
+        }
+        MilestoneCmd::SetStatus {
+            target,
+            status,
+            org,
+            server,
+        } => mutate_milestone(target, org, server, |m| m.status = status).await?,
+        MilestoneCmd::SetDue {
+            target,
+            due,
+            org,
+            server,
+        } => {
+            let v = if matches!(due.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(
+                    chrono::NaiveDate::parse_from_str(&due, "%Y-%m-%d")
+                        .map_err(|e| eyre::eyre!("--due: {e}"))?,
+                )
+            };
+            mutate_milestone(target, org, server, |m| m.due_date = v).await?;
+        }
+        MilestoneCmd::SetGoal {
+            target,
+            goal,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org.clone())?;
+            let url = resolve_org_vox_url(server.clone(), &slug);
+            let new_goal = if matches!(goal.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                let gc = connect_goal_client(&url).await?;
+                Some(resolve_goal_target(&gc, &goal).await?.id)
+            };
+            mutate_milestone(target, org, server, |m| m.goal_id = new_goal).await?;
+        }
+        MilestoneCmd::SetForgeRef {
+            target,
+            forge_ref,
+            org,
+            server,
+        } => {
+            let v = if matches!(forge_ref.as_str(), "none" | "null" | "") {
+                None
+            } else {
+                Some(forge_ref)
+            };
+            mutate_milestone(target, org, server, |m| m.forge_ref = v).await?;
+        }
+        MilestoneCmd::Close {
+            target,
+            org,
+            server,
+        } => mutate_milestone(target, org, server, |m| m.status = "closed".into()).await?,
+        MilestoneCmd::Reopen {
+            target,
+            org,
+            server,
+        } => mutate_milestone(target, org, server, |m| m.status = "open".into()).await?,
+        MilestoneCmd::Rename {
+            target,
+            new_path,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let m = resolve_milestone_target(&client, &target).await?;
+            let renamed = client
+                .rename(m.id, new_path)
+                .await
+                .map_err(|e| eyre::eyre!("rename: {e:?}"))?;
+            println!("renamed → {}", renamed.path);
+        }
+        MilestoneCmd::Delete {
+            target,
+            yes,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_milestone_client(&url).await?;
+            let m = resolve_milestone_target(&client, &target).await?;
+            if !yes && !confirm(&format!("delete `{}` ({})?", m.title, m.path))? {
+                println!("aborted");
+                return Ok(());
+            }
+            client
+                .delete(m.id)
+                .await
+                .map_err(|e| eyre::eyre!("delete: {e:?}"))?;
+            println!("deleted {}", m.path);
+        }
+    }
+    Ok(())
+}
+
+async fn connect_milestone_client(url: &str) -> eyre::Result<milestone::MilestoneServiceClient> {
+    Box::pin(vox::connect(url).establish())
+        .await
+        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+}
+
+async fn resolve_milestone_target(
+    client: &milestone::MilestoneServiceClient,
+    target: &str,
+) -> eyre::Result<milestone::Milestone> {
+    if let Ok(id) = uuid::Uuid::parse_str(target) {
+        return client
+            .get(id)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    client
+        .get_by_path(target.to_owned())
+        .await
+        .map_err(|e| eyre::eyre!("get(path): {e:?}"))
+}
+
+async fn mutate_milestone<F>(
+    target: String,
+    org: Option<String>,
+    server: Option<String>,
+    apply: F,
+) -> eyre::Result<()>
+where
+    F: FnOnce(&mut milestone::Milestone),
+{
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let client = connect_milestone_client(&url).await?;
+    let mut m = resolve_milestone_target(&client, &target).await?;
+    apply(&mut m);
+    let updated = client
+        .update(m)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
     Ok(())
 }
 

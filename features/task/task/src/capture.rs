@@ -101,6 +101,8 @@ pub fn capture(input: &str) -> TaskInfo {
         tags: crate::model::StringList(tags),
         contexts: crate::model::StringList(contexts),
         projects: crate::model::StringList(projects),
+        project_id: None,
+        milestone_id: None,
         time_estimate: None,
         time_entries: crate::model::TimeEntries::default(),
         recurrence: None,

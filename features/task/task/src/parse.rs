@@ -164,6 +164,8 @@ fn parse_page_impl(page: &ParsePageRef<'_>) -> Result<TaskInfo, ParseError> {
         tags: crate::model::StringList(tags),
         contexts: crate::model::StringList(contexts),
         projects: crate::model::StringList(projects),
+        project_id: take_str(&map, "projectId").and_then(|s| uuid::Uuid::parse_str(&s).ok()),
+        milestone_id: take_str(&map, "milestoneId").and_then(|s| uuid::Uuid::parse_str(&s).ok()),
         time_estimate,
         time_entries: crate::model::TimeEntries(time_entries),
         recurrence,

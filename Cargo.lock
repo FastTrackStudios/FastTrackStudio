@@ -9524,6 +9524,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "milestone"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+ "vault",
+ "vault-proto",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14164,6 +14186,8 @@ dependencies = [
  "tracing",
  "uuid",
  "vault",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -14209,6 +14233,7 @@ dependencies = [
  "finance-proto",
  "futures",
  "goal",
+ "milestone",
  "mount",
  "org-proto",
  "project",
@@ -14256,6 +14281,7 @@ dependencies = [
  "finance-proto",
  "futures",
  "goal",
+ "milestone",
  "org-proto",
  "project",
  "rand 0.8.6",

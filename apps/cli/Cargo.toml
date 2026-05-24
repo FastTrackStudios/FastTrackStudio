@@ -23,8 +23,11 @@ vault.workspace = true
 vault-proto.workspace = true
 vault-live = { workspace = true }
 vault-obsidian = { workspace = true }
-# `task-cli task …` subcommands — first-party task feature.
-task.workspace = true
+# `task-cli task …` subcommands — first-party task feature
+# (RPC client; vox feature enabled to import `TaskServiceClient`).
+task = { workspace = true, features = ["vox"] }
+# `task-cli milestone …` — project-scoped checkpoints.
+milestone = { workspace = true, features = ["vox"] }
 # `task-cli agent …` subcommands — drives `codex app-server`
 # via agent-codex (vendored CodexMonitor control plane).
 agent-codex.workspace = true

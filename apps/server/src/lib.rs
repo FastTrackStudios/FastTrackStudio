@@ -87,6 +87,12 @@ pub struct OrgAppState {
     pub projects: project::ProjectBackend,
     /// Goal list / get backend — walks `vault/Goals/**/*.md`.
     pub goals: goal::GoalBackend,
+    /// Milestone backend — project-scoped checkpoints, walks
+    /// `vault/Projects/<slug>/milestones/*.md`.
+    pub milestones: milestone::MilestoneBackend,
+    /// Task backend — walks every `type: task` page in the
+    /// vault.
+    pub tasks: task::TaskBackend,
     pub agent_tasks: agent_tasks::Store,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
@@ -398,6 +404,8 @@ pub(crate) async fn build_org_state(
         // wrappers, no shared mutable state.
         let projects = project::ProjectBackend::new(vault_root.clone());
         let goals = goal::GoalBackend::new(vault_root.clone());
+        let milestones = milestone::MilestoneBackend::new(vault_root.clone());
+        let tasks = task::TaskBackend::new(vault_root.clone());
 
         Ok(OrgAppState {
             slug: org_root.slug().to_owned(),
@@ -407,6 +415,8 @@ pub(crate) async fn build_org_state(
             wiki,
             projects,
             goals,
+            milestones,
+            tasks,
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
             timer,
@@ -645,6 +655,8 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
         let wiki = org.wiki.clone();
         let projects_backend = org.projects.clone();
         let goals_backend = org.goals.clone();
+        let milestones_backend = org.milestones.clone();
+        let tasks_backend = org.tasks.clone();
         let agent_tasks_store = org.agent_tasks.clone();
         let timer_store = org.timer.clone();
         let acceptor =
@@ -773,6 +785,16 @@ fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Resp
                 }
                 name if name == goal::goal_service_descriptor().service_name => {
                     connection.handle_with(goal::serve_goal_service(goals_backend.clone()));
+                    Ok(())
+                }
+                name if name == milestone::milestone_service_descriptor().service_name => {
+                    connection.handle_with(milestone::serve_milestone_service(
+                        milestones_backend.clone(),
+                    ));
+                    Ok(())
+                }
+                name if name == task::task_service_descriptor().service_name => {
+                    connection.handle_with(task::serve_task_service(tasks_backend.clone()));
                     Ok(())
                 }
                 other => {

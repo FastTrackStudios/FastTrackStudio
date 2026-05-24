@@ -31,7 +31,20 @@ pub enum WriteError {
 /// map to a `TaskInfo` field is *not* preserved (use
 /// `vault_obsidian::set_property` for surgical edits).
 pub fn serialize_task(task: &TaskInfo) -> Result<String, WriteError> {
-    let yaml = serde_yaml::to_string(task).map_err(|e| WriteError::Yaml(e.to_string()))?;
+    // `type: task` is the scanner's discriminator. Emit it
+    // first so freshly written tasks round-trip through
+    // `looks_like_task` without depending on a `task` tag.
+    // Mirrors `project::serialize_project` / `goal::serialize_goal`.
+    let mut wrapper = serde_yaml::Mapping::new();
+    wrapper.insert("type".into(), "task".into());
+    let body_yaml = serde_yaml::to_value(task).map_err(|e| WriteError::Yaml(e.to_string()))?;
+    if let serde_yaml::Value::Mapping(map) = body_yaml {
+        for (k, v) in map {
+            wrapper.insert(k, v);
+        }
+    }
+    let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(wrapper))
+        .map_err(|e| WriteError::Yaml(e.to_string()))?;
     // Always end the close fence with `\n` so consumers that
     // detect frontmatter via the `\n---\n` pattern (vault-obsidian,
     // task::parse, anything else) see the boundary cleanly. For

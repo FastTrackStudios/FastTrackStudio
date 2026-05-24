@@ -43,9 +43,10 @@ wiki-live = { workspace = true }
 agent-proto = { workspace = true, features = ["server", "vox"] }
 agent-tasks = { workspace = true }
 agent-dispatch = { workspace = true }
-task = { workspace = true }
+task = { workspace = true, features = ["vox"] }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
+milestone = { workspace = true, features = ["vox"] }
 # Org-root layout: this server picks one org's dir at boot
 # and routes all its sqlites + vault through OrgRoot. PR 4
 # will scan + serve every org under <data_root>/orgs/.
