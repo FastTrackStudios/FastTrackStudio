@@ -139,7 +139,7 @@ fn import_file(
     let rpp_text = if lower.ends_with(".als") {
         import_ableton(path)?
     } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
-        import_protools(path)?
+        import_protools(path, None)?
     } else if lower.ends_with(".aaf") {
         import_aaf(path)?
     } else if lower.ends_with(".dawproject") {
@@ -467,20 +467,43 @@ fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
 /// Public so that command-line tools and tests can run the conversion without
 /// going through the REAPER plugin entry point.
 pub fn protools_to_rpp(path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    import_protools(path)
+    import_protools(path, None)
 }
 
-fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+/// Like [`protools_to_rpp`], but emit audio-file paths relative to
+/// `audio_base` instead of the `.ptx`'s own directory. Use this when the
+/// `.ptx` is read from one location but the resulting `.rpp` will be opened
+/// somewhere else (e.g. converting locally for a session that lives on another
+/// machine): pass the session folder as it exists on the target machine.
+pub fn protools_to_rpp_with_audio_base(
+    path: &str,
+    audio_base: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    import_protools(path, Some(audio_base))
+}
+
+fn import_protools(
+    path: &str,
+    audio_base: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
     let session = dawfile_protools::read_session(path, 48000)?;
     let sample_rate = session.session_sample_rate as f64;
 
     // Pro Tools stores audio files in `Audio Files/` next to the .ptx.
     // Resolve a bare filename ("kick.wav") to the on-disk absolute path so
     // REAPER items point at real audio instead of dangling-source stubs.
-    let session_dir = std::path::Path::new(path)
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // `audio_base` overrides the .ptx directory for path emission (used when
+    // the .rpp will be opened on a different machine than the .ptx was read).
+    let session_dir = match audio_base {
+        Some(b) => std::path::PathBuf::from(b),
+        None => std::path::Path::new(path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from(".")),
+    };
+    // When a base override is given the files aren't local, so skip the
+    // `.exists()` probes and always emit `<base>/Audio Files/<file>`.
+    let force_emit = audio_base.is_some();
     let audio_files_dir = session_dir.join("Audio Files");
     let resolve_audio_path = |filename: &str| -> String {
         if filename.is_empty() {
@@ -493,7 +516,7 @@ fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
         }
         // Try Audio Files/ subdir first (the standard layout).
         let in_audio = audio_files_dir.join(filename);
-        if in_audio.exists() {
+        if force_emit || in_audio.exists() {
             return in_audio.to_string_lossy().into_owned();
         }
         // Fall back to session dir.
