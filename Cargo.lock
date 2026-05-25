@@ -2549,6 +2549,7 @@ dependencies = [
 [[package]]
 name = "fts-story-core"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "linkme",
 ]
@@ -2556,6 +2557,7 @@ dependencies = [
 [[package]]
 name = "fts-story-macros"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2566,6 +2568,7 @@ dependencies = [
 [[package]]
 name = "fts-story-parity"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "dssim-core",
  "fts-story-core",
@@ -2579,6 +2582,7 @@ dependencies = [
 [[package]]
 name = "fts-story-runtime"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "dioxus",
  "fts-story-core",
@@ -2589,6 +2593,7 @@ dependencies = [
 [[package]]
 name = "fts-story-shell"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "dioxus",
  "fts-story-core",
@@ -2598,6 +2603,7 @@ dependencies = [
 [[package]]
 name = "fts-story-snapshots"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "anyrender 0.8.0",
  "anyrender_vello_cpu 0.10.0",
