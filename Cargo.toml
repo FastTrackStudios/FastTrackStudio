@@ -35,7 +35,7 @@ daw = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", bra
 daw-extension-runtime = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 daw-reaper = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 daw-proto = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-synchronization = { path = "../daw/crates/daw-synchronization" }
+daw-synchronization = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 
 # ── REAPER bindings (reaper-rs) ──────────────────────────────────────
 # Needed by REAPER-touching action modules (e.g. take_ranking) that
@@ -57,7 +57,7 @@ vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bdd
 vox-websocket = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # ── Architect service framework ─────────────────────────────────────
-architect = { path = "../../architect/macros/architect" }
+architect = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
 
 # ── Facet reflection ────────────────────────────────────────────────
 facet = { version = "0.46" }
@@ -68,7 +68,7 @@ keyflow = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.g
 keyflow-daw-analysis = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
 
 # ── Dynamic session templates ───────────────────────────────────────
-dynamic-template = { path = "../dynamic-template/crates/dynamic-template" }
+dynamic-template = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # ── Actions / Input (sibling repo) ──────────────────────────────────
 actions-proto = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
@@ -113,13 +113,13 @@ eyre = "0.6"
 # `github.com/.../reaper-rs.git` reference (from sibling crates that
 # haven't migrated yet) to the same starcommand source we use directly,
 # so cargo unifies on a single checkout instead of pulling two copies.
-[patch."https://github.com/FastTrackStudios/reaper-rs.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/reaper-rs.git"]
 reaper-high = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-low = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
-[patch."https://github.com/FastTrackStudios/daw.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
 daw-proto = { path = "../daw/crates/daw-proto" }
 daw-control = { path = "../daw/crates/daw-control" }
@@ -129,7 +129,7 @@ reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 fts-devtools = { path = "../daw/crates/fts-devtools" }
 reaper-test = { path = "../daw/crates/reaper-test" }
 #
-[patch."https://github.com/FastTrackStudios/keyflow.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
 keyflow = { path = "../keyflow/crates/keyflow" }
 keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
 keyflow-text = { path = "../keyflow/crates/keyflow-text" }
@@ -137,14 +137,14 @@ keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
 engraver = { path = "../keyflow/crates/engraver" }
 engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 #
-[patch."https://github.com/FastTrackStudios/input_actions.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }
 #
-[patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/dock-dioxus.git"]
 dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 #
-[patch."https://github.com/FastTrackStudios/fts-ui.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/fts-ui.git"]
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
 # fts-utils: no local sibling checkout; fetch straight from starcommand.
