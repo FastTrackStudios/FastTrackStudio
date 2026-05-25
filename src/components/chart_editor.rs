@@ -103,11 +103,12 @@ Hits 4
 /// Default chart content - start with an example
 const DEFAULT_CHART: &str = EXAMPLE_THRILLER;
 
-/// Preview mode - Snippet (content-sized) or Page (A4)
+/// Preview mode - Snippet (content-sized), Page (A4), or Responsive (iReal Pro breakpoint)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewMode {
     Snippet,
     Page,
+    Responsive,
 }
 
 /// Chart editor with live preview.
@@ -119,6 +120,8 @@ pub fn ChartEditor() -> Element {
     let mut preview_mode = use_signal(|| PreviewMode::Page);
 
     let is_snippet = *preview_mode.read() == PreviewMode::Snippet;
+    let is_page = *preview_mode.read() == PreviewMode::Page;
+    let is_responsive = *preview_mode.read() == PreviewMode::Responsive;
 
     rsx! {
         div {
@@ -225,13 +228,26 @@ pub fn ChartEditor() -> Element {
                             }
 
                             Button {
-                                variant: if !is_snippet { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                                variant: if is_page { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                                 size: ButtonSize::Small,
                                 class: "text-xs".to_string(),
                                 on_click: move |_| preview_mode.set(PreviewMode::Page),
                                 lucide_dioxus::FileText { class: "w-3.5 h-3.5" }
                                 "Page (A4)"
                             }
+
+                            Button {
+                                variant: if is_responsive { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                                size: ButtonSize::Small,
+                                class: "text-xs".to_string(),
+                                on_click: move |_| preview_mode.set(PreviewMode::Responsive),
+                                lucide_dioxus::Smartphone { class: "w-3.5 h-3.5" }
+                                "Responsive"
+                            }
+                        }
+
+                        if is_responsive {
+                            BreakpointLabel {}
                         }
 
                         // Export button
@@ -250,6 +266,49 @@ pub fn ChartEditor() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Shows the current responsive breakpoint based on viewport width.
+///
+/// Polls `window.innerWidth` whenever the parent re-renders (which it does
+/// on resize via the existing ResizeObserver). Mirrors the breakpoint
+/// thresholds in `engraver::layout::chart::Breakpoint`.
+#[component]
+fn BreakpointLabel() -> Element {
+    let (label, badge_class) = {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let width_px = web_sys::window()
+                .and_then(|w| w.inner_width().ok())
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1200.0);
+            // Match site renderer: DPI_SCALE = 96/72. viewport_pt = px / DPI_SCALE.
+            let width_pt = width_px / (96.0 / 72.0);
+            if width_pt < 480.0 {
+                ("Phone", "bg-pink-500/15 text-pink-300 border-pink-500/30")
+            } else if width_pt < 900.0 {
+                ("Tablet", "bg-amber-500/15 text-amber-300 border-amber-500/30")
+            } else {
+                (
+                    "Desktop",
+                    "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+                )
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            (
+                "Desktop",
+                "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+            )
+        }
+    };
+    rsx! {
+        span {
+            class: "text-xs px-2 py-0.5 rounded-md border {badge_class}",
+            "{label}"
         }
     }
 }
@@ -941,6 +1000,11 @@ fn DynamicChartCanvas(
             let source_text = source.read().clone();
             let current_mode = *mode.read();
             let is_snippet = current_mode == PreviewMode::Snippet;
+            let layout_mode = match current_mode {
+                PreviewMode::Snippet => crate::components::LayoutMode::Snippet,
+                PreviewMode::Page => crate::components::LayoutMode::Page,
+                PreviewMode::Responsive => crate::components::LayoutMode::Responsive,
+            };
 
             // Debug: log what triggered the effect
             let first_line = source_text.lines().next().unwrap_or("(empty)");
@@ -1018,7 +1082,7 @@ fn DynamicChartCanvas(
                         let chart = chart_result.unwrap();
 
                         // Use appropriate layout mode based on preview setting
-                        manager.layout_chart_with_mode(&chart, css_width, is_snippet);
+                        manager.layout_chart_with_layout_mode(&chart, css_width, layout_mode);
 
                         if let Err(e) = manager
                             .render_to_canvas_with_transform(

@@ -12,6 +12,10 @@ pub enum LayoutMode {
     Snippet,
     /// A4 page layout with Master Rhythm preset (measures fill line)
     Page,
+    /// iReal Pro-style responsive layout: page width snaps to viewport,
+    /// staff/chord sizing picked from a Phone/Tablet/Desktop breakpoint.
+    /// Vertical scroll only — no horizontal overflow at any width.
+    Responsive,
 }
 
 /// Chart renderer component that displays a keyflow chart.

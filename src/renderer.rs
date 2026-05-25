@@ -7,7 +7,9 @@ use anyrender_vello::VelloScenePainter;
 use keyflow::Chart;
 use keyflow::engraver::fonts::ChartFontBundle;
 use keyflow::engraver::layout::ChartLayoutMode;
-use keyflow::engraver::layout::chart::{ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult};
+use keyflow::engraver::layout::chart::{
+    Breakpoint, ChartLayoutConfig, ChartLayoutEngine, ChartLayoutResult,
+};
 use keyflow::engraver::renderer::scene_renderer::SceneRenderBuilder;
 use keyflow::engraver::style::MStyle;
 use vello::Scene;
@@ -83,7 +85,22 @@ impl ChartLayoutManager {
         viewport_width: f64,
         snippet_mode: bool,
     ) {
-        self.layout_chart_with_options(chart, viewport_width, snippet_mode, true);
+        let mode = if snippet_mode {
+            crate::components::LayoutMode::Snippet
+        } else {
+            crate::components::LayoutMode::Page
+        };
+        self.layout_chart_with_options(chart, viewport_width, mode, true);
+    }
+
+    /// Layout a chart with explicit layout mode (Snippet / Page / Responsive).
+    pub fn layout_chart_with_layout_mode(
+        &mut self,
+        chart: &Chart,
+        viewport_width: f64,
+        layout_mode: crate::components::LayoutMode,
+    ) {
+        self.layout_chart_with_options(chart, viewport_width, layout_mode, true);
     }
 
     /// Layout a chart for export (no page offsets, positioned at origin).
@@ -98,7 +115,12 @@ impl ChartLayoutManager {
         viewport_width: f64,
         snippet_mode: bool,
     ) {
-        self.layout_chart_with_options(chart, viewport_width, snippet_mode, false);
+        let mode = if snippet_mode {
+            crate::components::LayoutMode::Snippet
+        } else {
+            crate::components::LayoutMode::Page
+        };
+        self.layout_chart_with_options(chart, viewport_width, mode, false);
     }
 
     /// Layout a chart with full control over options.
@@ -106,43 +128,48 @@ impl ChartLayoutManager {
     /// # Arguments
     /// * `chart` - The parsed chart to layout
     /// * `viewport_width` - Width of the viewport in CSS pixels
-    /// * `snippet_mode` - If true, use snippet mode (content-sized). If false, use A4 paginated mode.
+    /// * `layout_mode` - Snippet (content-sized), Page (A4 paginated), or Responsive (iReal Pro breakpoint).
     /// * `use_page_offsets` - If true, add 20pt offset for multi-page viewing. If false, position at origin.
     fn layout_chart_with_options(
         &mut self,
         chart: &Chart,
         viewport_width: f64,
-        snippet_mode: bool,
+        layout_mode: crate::components::LayoutMode,
         use_page_offsets: bool,
     ) {
         // Simple hash based on chart data, mode, and offset setting
         let chart_hash =
-            self.compute_chart_hash_with_options(chart, snippet_mode, use_page_offsets);
+            self.compute_chart_hash_with_options(chart, layout_mode, use_page_offsets);
 
         // Skip if already laid out
         if self.layout_result.is_some() && chart_hash == self.last_chart_hash {
             return;
         }
 
-        // A4 dimensions in points (72 points per inch)
-        const A4_WIDTH: f64 = 595.0; // 210mm = 8.27" = 595 points
-        const A4_HEIGHT: f64 = 842.0; // 297mm = 11.69" = 842 points
+        let viewport_pt = (viewport_width / DPI_SCALE).max(240.0);
 
-        let (mode, config) = if snippet_mode {
-            // Snippet mode: content-sized, minimal margins
-            let config = ChartLayoutConfig::snippet().with_page_offsets(use_page_offsets);
-            let mode = ChartLayoutMode::Snippet {
-                page_width: viewport_width / DPI_SCALE,
-            };
-            (mode, config)
-        } else {
-            // Page mode: A4 paginated with Master Rhythm preset
-            let config = ChartLayoutConfig::master_rhythm().with_page_offsets(use_page_offsets);
-            let mode = ChartLayoutMode::Paginated {
-                page_width: A4_WIDTH,
-                page_height: A4_HEIGHT,
-            };
-            (mode, config)
+        let (mode, config) = match layout_mode {
+            crate::components::LayoutMode::Snippet => {
+                let config = ChartLayoutConfig::snippet().with_page_offsets(use_page_offsets);
+                let mode = ChartLayoutMode::Snippet {
+                    page_width: viewport_pt,
+                };
+                (mode, config)
+            }
+            crate::components::LayoutMode::Page => {
+                let config =
+                    ChartLayoutConfig::master_rhythm().with_page_offsets(use_page_offsets);
+                let mode = ChartLayoutMode::paginated_a4();
+                (mode, config)
+            }
+            crate::components::LayoutMode::Responsive => {
+                // Vertical-only scroll: width snaps to viewport, height grows.
+                // Breakpoint picks per-class spatium/chord sizing.
+                let breakpoint = Breakpoint::from_viewport_pt(viewport_pt);
+                let config = ChartLayoutConfig::responsive_for(breakpoint);
+                let mode = ChartLayoutMode::ContinuousScroll { width: viewport_pt };
+                (mode, config)
+            }
         };
 
         // Perform layout
@@ -157,7 +184,12 @@ impl ChartLayoutManager {
     /// Compute a hash of the chart including layout mode (legacy, for backward compatibility).
     #[allow(dead_code)]
     fn compute_chart_hash_with_mode(&self, chart: &Chart, snippet_mode: bool) -> u64 {
-        self.compute_chart_hash_with_options(chart, snippet_mode, true)
+        let mode = if snippet_mode {
+            crate::components::LayoutMode::Snippet
+        } else {
+            crate::components::LayoutMode::Page
+        };
+        self.compute_chart_hash_with_options(chart, mode, true)
     }
 
     /// Compute a hash of the chart including all layout options.
@@ -167,11 +199,12 @@ impl ChartLayoutManager {
     fn compute_chart_hash_with_options(
         &self,
         chart: &Chart,
-        snippet_mode: bool,
+        layout_mode: crate::components::LayoutMode,
         use_page_offsets: bool,
     ) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (layout_mode as u8).hash(&mut hasher);
 
         // Hash key chart fields for cache invalidation.
         // Chart doesn't derive Debug, so we hash its accessible sub-fields.
@@ -186,7 +219,6 @@ impl ChartLayoutManager {
         for section in &chart.sections {
             format!("{:?}", section).hash(&mut hasher);
         }
-        snippet_mode.hash(&mut hasher);
         use_page_offsets.hash(&mut hasher);
 
         hasher.finish()

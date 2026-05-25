@@ -8,10 +8,10 @@ resolver = "2"
 
 [workspace.dependencies]
 # Keyflow/Engraver
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
+keyflow = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
 
 # DAW / audio-controls
-audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 
 # FTS design system
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
@@ -143,7 +143,7 @@ desktop = ["dioxus/desktop"]
 [lints]
 workspace = true
 
-[patch."https://github.com/FastTrackStudios/keyflow.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
 keyflow = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow" }
 engraver = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver" }
 engraver-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/engraver-proto" }
@@ -151,6 +151,6 @@ keyflow-proto = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/
 keyflow-text = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-text" }
 keyflow-ui = { path = "/home/cody/Development/FastTrackStudio/keyflow/crates/keyflow-ui" }
 
-[patch."https://github.com/FastTrackStudios/daw.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
 daw-proto = { path = "vendor/daw-proto" }
 daw-module = { path = "vendor/daw-module" }

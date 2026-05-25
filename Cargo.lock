@@ -195,6 +195,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "approx"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -666,6 +675,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
+name = "by_address"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64fa3c856b712db6612c019f14756e64e4bcea13337a6b33b696333a9eaa2d06"
+
+[[package]]
 name = "bytecount"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -957,7 +972,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1546,7 +1561,7 @@ dependencies = [
 [[package]]
 name = "dioxus-attributes"
 version = "0.1.0"
-source = "git+https://github.com/DioxusLabs/components?rev=733874bb35ab8a360813d841dde8353997246f09#733874bb35ab8a360813d841dde8353997246f09"
+source = "git+https://github.com/DioxusLabs/components?rev=837c9d4c1c9f99b19de7a3f087d8af1b0538dcae#837c9d4c1c9f99b19de7a3f087d8af1b0538dcae"
 dependencies = [
  "dioxus-rsx",
  "proc-macro2",
@@ -1650,7 +1665,7 @@ dependencies = [
  "image",
  "infer",
  "jni 0.21.1",
- "lazy-js-bundle 0.7.9",
+ "lazy-js-bundle",
  "libc",
  "muda",
  "ndk",
@@ -1719,7 +1734,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "generational-box",
- "lazy-js-bundle 0.7.9",
+ "lazy-js-bundle",
  "serde",
  "serde_json",
  "tracing",
@@ -1869,7 +1884,7 @@ dependencies = [
  "futures-util",
  "generational-box",
  "keyboard-types",
- "lazy-js-bundle 0.7.9",
+ "lazy-js-bundle",
  "rustversion",
  "serde",
  "serde_json",
@@ -1899,7 +1914,7 @@ dependencies = [
  "dioxus-core-types",
  "dioxus-html",
  "js-sys",
- "lazy-js-bundle 0.7.9",
+ "lazy-js-bundle",
  "rustc-hash 2.1.2",
  "serde",
  "sledgehammer_bindgen",
@@ -1924,13 +1939,14 @@ dependencies = [
 [[package]]
 name = "dioxus-primitives"
 version = "0.0.1"
-source = "git+https://github.com/DioxusLabs/components?rev=733874bb35ab8a360813d841dde8353997246f09#733874bb35ab8a360813d841dde8353997246f09"
+source = "git+https://github.com/DioxusLabs/components?rev=837c9d4c1c9f99b19de7a3f087d8af1b0538dcae#837c9d4c1c9f99b19de7a3f087d8af1b0538dcae"
 dependencies = [
  "dioxus",
  "dioxus-attributes",
  "dioxus-sdk-time",
- "lazy-js-bundle 0.6.2",
+ "lazy-js-bundle",
  "num-integer",
+ "palette",
  "serde",
  "time",
  "tracing",
@@ -2056,7 +2072,7 @@ dependencies = [
  "generational-box",
  "gloo-timers",
  "js-sys",
- "lazy-js-bundle 0.7.9",
+ "lazy-js-bundle",
  "rustc-hash 2.1.2",
  "send_wrapper",
  "serde",
@@ -2087,7 +2103,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2119,7 +2135,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -2232,6 +2248,7 @@ dependencies = [
  "getrandom 0.2.17",
  "helgoboss-midi",
  "keyflow-proto",
+ "keyflow-syntax",
  "keyflow-text",
  "kurbo 0.13.1",
  "lopdf 0.36.0",
@@ -2308,7 +2325,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2438,6 +2455,12 @@ dependencies = [
  "regex",
  "smallvec 2.0.0-alpha.12",
 ]
+
+[[package]]
+name = "fast-srgb8"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd2e7510819d6fbf51a5545c8f922716ecfb14df168a3242f7d33e0239efe6a1"
 
 [[package]]
 name = "fastrand"
@@ -2732,6 +2755,7 @@ dependencies = [
  "linkme",
  "lucide-dioxus",
  "nucleo-matcher",
+ "palette",
  "time",
  "tracing",
  "tw_merge",
@@ -3255,7 +3279,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.61.3",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -3594,7 +3618,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3925,7 +3949,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4094,6 +4118,7 @@ dependencies = [
  "daw-proto",
  "facet",
  "helgoboss-midi",
+ "keyflow-syntax",
  "music-catalog",
  "serde",
  "thiserror 2.0.18",
@@ -4102,11 +4127,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyflow-syntax"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "keyflow-text"
 version = "0.1.0"
 dependencies = [
  "keyflow-chordpro",
  "keyflow-proto",
+ "keyflow-syntax",
  "tracing",
 ]
 
@@ -4199,12 +4234,6 @@ dependencies = [
  "polycool",
  "smallvec 1.15.1",
 ]
-
-[[package]]
-name = "lazy-js-bundle"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e49596223b9d9d4947a14a25c142a6e7d8ab3f27eb3ade269d238bb8b5c267e2"
 
 [[package]]
 name = "lazy-js-bundle"
@@ -4983,7 +5012,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5376,6 +5405,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
+name = "palette"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cbf71184cc5ecc2e4e1baccdb21026c20e5fc3dcf63028a086131b3ab00b6e6"
+dependencies = [
+ "approx",
+ "fast-srgb8",
+ "palette_derive",
+ "phf 0.11.3",
+]
+
+[[package]]
+name = "palette_derive"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5030daf005bface118c096f510ffb781fc28f9ab6a32ab224d8631be6851d30"
+dependencies = [
+ "by_address",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5534,6 +5587,7 @@ version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
+ "phf_macros 0.11.3",
  "phf_shared 0.11.3",
 ]
 
@@ -5613,6 +5667,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f84ac04429c13a7ff43785d75ad27569f2951ce0ffd30a3321230db2fc727216"
+dependencies = [
+ "phf_generator 0.11.3",
+ "phf_shared 0.11.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -6510,7 +6577,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7031,7 +7098,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7350,7 +7417,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8685,7 +8752,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
