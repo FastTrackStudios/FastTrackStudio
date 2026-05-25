@@ -8,8 +8,8 @@
 //! - [`PluginType`] → [`daw_proto::fx::FxType`]
 
 use daw_proto::fx::{
-    Fx, FxType,
     tree::{FxContainerChannelConfig, FxNode, FxNodeId, FxNodeKind, FxRoutingMode, FxTree},
+    Fx, FxType,
 };
 use daw_proto::track::Track as DawTrack;
 use std::collections::HashSet;
@@ -350,7 +350,11 @@ pub fn rpp_tracks_to_daw_tracks(tracks: &[ReaperTrack]) -> Vec<DawTrack> {
 /// Serialize a daw-proto [`DawTrack`] into a minimal REAPER `<TRACK ...>` chunk.
 pub fn daw_track_to_rpp_track_chunk(track: &DawTrack) -> String {
     fn b(v: bool) -> i32 {
-        if v { 1 } else { 0 }
+        if v {
+            1
+        } else {
+            0
+        }
     }
     fn esc(s: &str) -> String {
         s.replace('\\', "\\\\").replace('"', "\\\"")

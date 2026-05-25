@@ -9,8 +9,8 @@
 //!
 //! Run with: `cargo xtask reaper-test -- reaper_toolbar`
 
-use daw_proto::{ToolbarButton, ToolbarTarget};
 use daw::test::reaper_test;
+use daw_proto::{ToolbarButton, ToolbarTarget};
 
 const TEST_WORKFLOW: &str = "fts.test.toolbar";
 

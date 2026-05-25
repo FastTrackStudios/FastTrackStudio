@@ -10,7 +10,7 @@
 //! changes to the setlist.
 
 use dawfile_reaper::builder::{MarkerBuilder, ReaperProjectBuilder};
-use dawfile_reaper::diff::{ChangeKind, DiffOptions, diff_projects_with_options};
+use dawfile_reaper::diff::{diff_projects_with_options, ChangeKind, DiffOptions};
 use dawfile_reaper::setlist_rpp::{
     build_song_infos_from_projects, concatenate_projects, measures_to_seconds,
 };

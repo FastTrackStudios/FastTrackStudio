@@ -7,8 +7,8 @@
 //!
 //!   cargo xtask reaper-test -- reaper_action_registry
 
-use daw_proto::{ActionListFilter, ActionListRequest, ActionOrigin, ActionSection};
 use daw::test::reaper_test;
+use daw_proto::{ActionListFilter, ActionListRequest, ActionOrigin, ActionSection};
 
 #[reaper_test(isolated)]
 async fn register_and_lookup_action(ctx: &ReaperTestContext) -> eyre::Result<()> {

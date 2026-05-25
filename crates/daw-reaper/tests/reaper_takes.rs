@@ -8,8 +8,8 @@
 //!
 //! Run with: `cargo xtask reaper-test -- reaper_takes`
 
-use daw_proto::SourceType;
 use daw::test::reaper_test;
+use daw_proto::SourceType;
 use std::fs;
 use std::path::PathBuf;
 

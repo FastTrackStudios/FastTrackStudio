@@ -84,9 +84,7 @@ async fn remove_point_drops_from_list(ctx: &daw::test::ReaperTestContext) -> eyr
 }
 
 #[reaper_test(isolated)]
-async fn time_signature_at_returns_default(
-    ctx: &daw::test::ReaperTestContext,
-) -> eyre::Result<()> {
+async fn time_signature_at_returns_default(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let project = ctx.project().clone();
     let tempo_map = project.tempo_map();
 

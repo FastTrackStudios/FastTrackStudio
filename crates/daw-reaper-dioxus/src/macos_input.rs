@@ -17,7 +17,7 @@ use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString, NSUInteger};
 use objc::declare::ClassDecl;
 use objc::rc::StrongPtr;
 use objc::runtime::{Class, Object, Sel};
-use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
+use objc::{Encode, Encoding, class, msg_send, sel, sel_impl};
 use reaper_low::raw;
 use std::ffi::c_void;
 use std::sync::Once;
@@ -112,10 +112,7 @@ unsafe impl Encode for NSRange {
         // NSRange is `struct _NSRange { NSUInteger location; NSUInteger length; }`.
         // Hand-roll the Objective-C type encoding since cocoa 0.x's NSRange
         // doesn't implement `objc::Encode`.
-        let s = format!(
-            "{{_NSRange={0}{0}}}",
-            NSUInteger::encode().as_str()
-        );
+        let s = format!("{{_NSRange={0}{0}}}", NSUInteger::encode().as_str());
         unsafe { Encoding::from_str(&s) }
     }
 }

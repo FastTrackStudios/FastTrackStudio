@@ -6,9 +6,9 @@
 //!
 //! Run with: `cargo test -p daw-reaper --test reaper_batch_stress -- --ignored --nocapture`
 
+use daw::test::reaper_test;
 use daw_control::{BatchBuilder, BatchResponseExt};
 use daw_proto::batch::*;
-use daw::test::reaper_test;
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------

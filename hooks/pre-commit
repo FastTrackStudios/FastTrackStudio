@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# FTS pre-commit gate — capn fmt (rustfmt staged, Cargo.lock, edition-2024,
+# external-path-deps). capn comes from the fts-repo dev shell (`nix develop`);
+# override with CAPN_BIN for a local build.
 set -euo pipefail
-CAPN_BIN="${CAPN_BIN:-/home/cody/Development/capn/target/debug/capn}"
+CAPN_BIN="${CAPN_BIN:-capn}"
 exec "$CAPN_BIN" fmt

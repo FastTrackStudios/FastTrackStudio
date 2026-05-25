@@ -14,8 +14,8 @@
 //!
 //!   cargo xtask reaper-test
 
-use eyre::Result;
 use daw::test::{DawInstanceConfig, run_multi_reaper_test};
+use eyre::Result;
 
 // ---------------------------------------------------------------------------
 // Two-instance: independent connections and project isolation

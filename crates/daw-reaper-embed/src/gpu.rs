@@ -332,17 +332,17 @@ impl GpuState {
         let surface_texture = match surface.get_current_texture() {
             CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,
             CurrentSurfaceTexture::Timeout => {
-                return Err(GpuError::SurfaceTexture("timeout".into()))
+                return Err(GpuError::SurfaceTexture("timeout".into()));
             }
             CurrentSurfaceTexture::Occluded => {
-                return Err(GpuError::SurfaceTexture("occluded".into()))
+                return Err(GpuError::SurfaceTexture("occluded".into()));
             }
             CurrentSurfaceTexture::Outdated => {
-                return Err(GpuError::SurfaceTexture("outdated".into()))
+                return Err(GpuError::SurfaceTexture("outdated".into()));
             }
             CurrentSurfaceTexture::Lost => return Err(GpuError::SurfaceTexture("lost".into())),
             CurrentSurfaceTexture::Validation => {
-                return Err(GpuError::SurfaceTexture("validation".into()))
+                return Err(GpuError::SurfaceTexture("validation".into()));
             }
         };
 
