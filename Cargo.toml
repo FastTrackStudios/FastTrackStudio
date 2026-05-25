@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["FastTrack Studio"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/FastTrackStudios/fts-story"
+repository = "https://git.starcommand.live/FastTrackStudios/fts-story"
 
 [workspace.dependencies]
 # Internal
