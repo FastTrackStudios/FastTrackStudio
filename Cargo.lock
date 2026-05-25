@@ -1548,7 +1548,16 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#48be2a2acaf74e56430c266880e98dc67ffe3426"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+dependencies = [
+ "facet 0.46.4",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "color-palette"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#2940ba3c85c758a10b196f4b6f56a74d1763c2b1"
 dependencies = [
  "facet 0.46.4",
  "thiserror 2.0.18",
@@ -2414,7 +2423,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "daw"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "architect",
  "daw-control",
@@ -2432,7 +2441,7 @@ dependencies = [
 [[package]]
 name = "daw-audio-sync"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "bincode",
  "reaper-low",
@@ -2447,7 +2456,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "daw-proto",
  "eyre",
@@ -2463,7 +2472,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "tokio",
  "tracing",
@@ -2472,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "actions-proto",
  "architect",
@@ -2485,7 +2494,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "architect",
  "base64 0.22.1",
@@ -2519,7 +2528,7 @@ dependencies = [
 [[package]]
 name = "daw-synchronization"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "daw",
  "daw-reaper",
@@ -2532,7 +2541,7 @@ dependencies = [
 [[package]]
 name = "dawfile-aaf"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "cfb 0.10.0",
  "daw-proto",
@@ -2542,7 +2551,7 @@ dependencies = [
 [[package]]
 name = "dawfile-ableton"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "daw-proto",
  "flate2",
@@ -2554,7 +2563,7 @@ dependencies = [
 [[package]]
 name = "dawfile-dawproject"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "daw-proto",
  "roxmltree 0.20.0",
@@ -2565,7 +2574,7 @@ dependencies = [
 [[package]]
 name = "dawfile-protools"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "daw-proto",
  "thiserror 2.0.18",
@@ -2574,7 +2583,7 @@ dependencies = [
 [[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3524,10 +3533,10 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "dynamic-template"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#48be2a2acaf74e56430c266880e98dc67ffe3426"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
  "anyhow",
- "color-palette",
+ "color-palette 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main)",
  "daw",
  "daw-proto",
  "daw-reaper",
@@ -3535,7 +3544,7 @@ dependencies = [
  "eyre",
  "facet 0.46.4",
  "monarchy",
- "music-catalog",
+ "music-catalog 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main)",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3546,7 +3555,7 @@ dependencies = [
 [[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#48be2a2acaf74e56430c266880e98dc67ffe3426"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
  "actions-proto",
  "daw-proto",
@@ -4567,6 +4576,7 @@ dependencies = [
 [[package]]
 name = "fts-story-core"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "linkme",
 ]
@@ -4574,6 +4584,7 @@ dependencies = [
 [[package]]
 name = "fts-story-macros"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4584,6 +4595,7 @@ dependencies = [
 [[package]]
 name = "fts-story-runtime"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "dioxus",
  "fts-story-core",
@@ -6236,12 +6248,12 @@ name = "keyflow-proto"
 version = "0.1.0"
 dependencies = [
  "architect",
- "color-palette",
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
  "daw-proto",
  "facet 0.46.4",
  "helgoboss-midi",
  "keyflow-syntax",
- "music-catalog",
+ "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -7282,9 +7294,17 @@ checksum = "bb41311b1064dea78399acd92ca903b13be1120eef0a8555803da792e2c50511"
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#48be2a2acaf74e56430c266880e98dc67ffe3426"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
- "color-palette",
+ "color-palette 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main)",
+]
+
+[[package]]
+name = "music-catalog"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#2940ba3c85c758a10b196f4b6f56a74d1763c2b1"
+dependencies = [
+ "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
 ]
 
 [[package]]
@@ -9288,7 +9308,7 @@ dependencies = [
 [[package]]
 name = "reaper-launcher"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -9337,7 +9357,7 @@ dependencies = [
 [[package]]
 name = "reaper-test"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "daw",
  "eyre",
@@ -9353,7 +9373,7 @@ dependencies = [
 [[package]]
 name = "reaper-test-macro"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11186,7 +11206,7 @@ dependencies = [
 [[package]]
 name = "swell-ui"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#68e38c488596565ae34e0db8523db7dfd73ce40c"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#78b5af0a26d6836ade8ff21ec1c95b6bcd34ca23"
 dependencies = [
  "fragile",
  "libloading 0.9.0",
@@ -12210,7 +12230,7 @@ dependencies = [
 [[package]]
 name = "utils"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/FastTrackStudio.git?branch=main#31a379b30cb6f3aa32876a6c8bc07f9806cbedc0"
+source = "git+https://git.starcommand.live/FastTrackStudios/FastTrackStudio.git?branch=main#c42e31b5a7d0b7d3c39d8bc0a28404421e7aff4f"
 dependencies = [
  "facet 0.46.4",
  "serde",
@@ -14587,29 +14607,29 @@ name = "input-dioxus"
 version = "0.1.0"
 
 [[patch.unused]]
+name = "reaper-macros"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+
+[[patch.unused]]
 name = "audio-controls"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 
 [[patch.unused]]
 name = "daw-cli"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 
 [[patch.unused]]
 name = "daw-extension-runtime"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 
 [[patch.unused]]
 name = "daw-standalone"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#b92d02688bf0f88cd6518d1e153e6bb7c2bf61be"
-
-[[patch.unused]]
-name = "reaper-macros"
-version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 
 [[patch.unused]]
 name = "reaper-macros"
