@@ -3,15 +3,15 @@
 //! Discovers a running REAPER instance via its Unix socket, connects via vox,
 //! initializes the DAW singleton, and builds the setlist from open projects.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use daw::sync::LocalCaller;
-use daw::{Daw, ErasedCaller};
-use eyre::{bail, Result};
+use daw::rpc::{Caller, Daw};
+use daw_reaper::{LocalCaller, Reaper};
+use eyre::{Result, bail};
 use session::{
-    SetlistServiceClient, SetlistServiceDispatcher, SetlistServiceImpl,
-    SongServiceDispatcher, SongServiceImpl,
-    setlist_service_service_descriptor, song_service_service_descriptor,
+    SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
+    serve_setlist_service, setlist_service_service_descriptor, song_service_service_descriptor,
 };
 use session_ui::Session;
 
@@ -27,21 +27,20 @@ const SOCKET_SUFFIX: &str = ".sock";
 /// The gateway serves the web app and accepts WebSocket RPC connections
 /// regardless of whether REAPER is connected.
 pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
-    let setlist = SetlistServiceImpl::new();
+    let setlist = SetlistServiceImpl::with_daw(Reaper);
     let song = SongServiceImpl::new();
 
     let handler = gateway::RoutedHandler::new()
         .with(
             &setlist_service_service_descriptor(),
-            SetlistServiceDispatcher::new(setlist),
+            serve_setlist_service(setlist),
         )
         .with(
             &song_service_service_descriptor(),
             SongServiceDispatcher::new(song),
         );
 
-    let bind_addr = std::env::var("GATEWAY_WS_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:3030".to_string());
+    let bind_addr = std::env::var("GATEWAY_WS_ADDR").unwrap_or_else(|_| "0.0.0.0:3030".to_string());
     let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR")
         .ok()
         .or_else(discover_web_static_dir);
@@ -51,13 +50,8 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
 
     let (info_tx, info_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
-        if let Err(e) = gateway::start_gateway(
-            handler,
-            &bind_addr,
-            static_dir.as_deref(),
-            info_tx,
-        )
-        .await
+        if let Err(e) =
+            gateway::start_gateway(handler, &bind_addr, static_dir.as_deref(), info_tx).await
         {
             tracing::error!("WebSocket gateway error: {e}");
         }
@@ -78,10 +72,10 @@ pub async fn connect_to_reaper() -> Result<()> {
     Daw::init(caller)?;
     tracing::info!("DAW initialized");
 
-    let setlist = SetlistServiceImpl::new();
+    let setlist = SetlistServiceImpl::with_daw(Reaper);
 
-    let local = LocalCaller::new(SetlistServiceDispatcher::new(setlist)).await?;
-    let client = SetlistServiceClient::new(local.erased_caller());
+    let local = LocalCaller::new(serve_setlist_service(setlist)).await?;
+    let client = SetlistServiceClient::new(local.caller());
 
     // Build setlist from whatever's open in REAPER
     client
@@ -96,7 +90,7 @@ pub async fn connect_to_reaper() -> Result<()> {
 }
 
 /// Scan `/tmp` for `fts-daw-*.sock` sockets, connect to the first live one.
-async fn discover_and_connect() -> Result<ErasedCaller> {
+async fn discover_and_connect() -> Result<Caller> {
     let sockets = discover_sockets();
     if sockets.is_empty() {
         bail!(
@@ -165,14 +159,17 @@ fn is_process_alive(pid: u32) -> bool {
 ///
 /// Opens a virtual connection on the session (matching what daw-bridge expects)
 /// so that the RoutedHandler can properly dispatch service calls.
-async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
+async fn connect_to_daw(path: &Path) -> eyre::Result<Caller> {
     let stream = tokio::net::UnixStream::connect(path).await?;
     let link = vox_stream::StreamLink::unix(stream);
     let handshake_result = initiator_handshake_result(64);
-    let (_root_caller, session) =
-        vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
-            .establish::<vox::DriverCaller>(())
-            .await?;
+    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake_result)
+        .establish::<vox::NoopClient>()
+        .await?;
+    let session = root
+        .session
+        .clone()
+        .ok_or_else(|| eyre::eyre!("DAW root session missing handle"))?;
 
     // Open a virtual connection for DAW services — the daw-bridge's RoutedHandler
     // dispatches service calls on virtual connections, not the root session.
@@ -181,17 +178,18 @@ async fn connect_to_daw(path: &Path) -> eyre::Result<ErasedCaller> {
             vox::ConnectionSettings {
                 parity: vox::Parity::Odd,
                 max_concurrent_requests: 64,
+                initial_channel_credit: 16,
             },
             vec![vox::MetadataEntry {
-                key: "role",
-                value: vox::MetadataValue::String("session-desktop"),
+                key: Cow::Borrowed("role"),
+                value: vox::MetadataValue::String(Cow::Borrowed("session-desktop")),
                 flags: vox::MetadataFlags::NONE,
             }],
         )
         .await?;
 
     let mut driver = vox::Driver::new(conn, ());
-    let caller = ErasedCaller::new(driver.caller());
+    let caller = Caller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
 
     Ok(caller)
@@ -204,16 +202,19 @@ fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeRes
         our_settings: vox::ConnectionSettings {
             parity: vox::Parity::Odd,
             max_concurrent_requests,
+            initial_channel_credit: 16,
         },
         peer_settings: vox::ConnectionSettings {
             parity: vox::Parity::Even,
             max_concurrent_requests,
+            initial_channel_credit: 16,
         },
         peer_supports_retry: true,
         session_resume_key: None,
         peer_resume_key: None,
         our_schema: vec![],
         peer_schema: vec![],
+        peer_metadata: vec![],
     }
 }
 
@@ -225,9 +226,7 @@ fn initiator_handshake_result(max_concurrent_requests: u32) -> vox::HandshakeRes
 ///
 /// Paths are resolved relative to the cargo workspace root.
 fn discover_web_static_dir() -> Option<String> {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .parent()?;
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?.parent()?;
 
     let candidates = [
         workspace_root.join("target/dx/session-web/release/web/public"),

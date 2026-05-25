@@ -13,11 +13,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Router;
 use session::{SetlistEvent, WebClientServiceClient};
 use std::sync::OnceLock;
 use tokio::net::TcpListener;
@@ -25,10 +25,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tower_http::services::ServeDir;
 use tracing::{debug, info, warn};
-use vox::{
-    Backing, DriverCaller, DriverReplySink, ErasedCaller, Handler, Link, LinkRx, LinkTx,
-    LinkTxPermit, ReplySink, WriteSlot,
-};
+use vox::{Backing, DriverReplySink, Handler, Link, LinkRx, LinkTx, ReplySink};
 
 /// Global web client registry, accessible from both the gateway and event tasks.
 static WEB_CLIENT_REGISTRY: OnceLock<WebClientRegistry> = OnceLock::new();
@@ -117,52 +114,19 @@ struct AxumWsLinkTx {
     io_task: JoinHandle<()>,
 }
 
-struct AxumWsLinkTxPermit {
-    permit: mpsc::OwnedPermit<Vec<u8>>,
-}
-
-struct AxumWsWriteSlot {
-    buf: Vec<u8>,
-    permit: mpsc::OwnedPermit<Vec<u8>>,
-}
-
 impl LinkTx for AxumWsLinkTx {
-    type Permit = AxumWsLinkTxPermit;
-
-    async fn reserve(&self) -> io::Result<Self::Permit> {
-        let permit = self.tx.clone().reserve_owned().await.map_err(|_| {
+    async fn send(&self, bytes: Vec<u8>) -> io::Result<()> {
+        self.tx.send(bytes).await.map_err(|_| {
             io::Error::new(
                 io::ErrorKind::ConnectionReset,
                 "websocket writer task stopped",
             )
-        })?;
-        Ok(AxumWsLinkTxPermit { permit })
+        })
     }
 
     async fn close(self) -> io::Result<()> {
         drop(self.tx);
         self.io_task.await.map_err(io::Error::other)
-    }
-}
-
-impl LinkTxPermit for AxumWsLinkTxPermit {
-    type Slot = AxumWsWriteSlot;
-
-    fn alloc(self, len: usize) -> io::Result<Self::Slot> {
-        Ok(AxumWsWriteSlot {
-            buf: vec![0u8; len],
-            permit: self.permit,
-        })
-    }
-}
-
-impl WriteSlot for AxumWsWriteSlot {
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        &mut self.buf
-    }
-
-    fn commit(self) {
-        drop(self.permit.send(self.buf));
     }
 }
 
@@ -338,7 +302,7 @@ impl Handler<DriverReplySink> for RoutedHandler {
         reply: DriverReplySink,
         schemas: std::sync::Arc<vox::SchemaRecvTracker>,
     ) {
-        let method_id = call.method_id;
+        let method_id = call.get().method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
@@ -449,28 +413,32 @@ async fn handle_socket(socket: WebSocket, gateway: Arc<Gateway>) {
         our_settings: vox::ConnectionSettings {
             parity: vox::Parity::Even,
             max_concurrent_requests: 64,
+            initial_channel_credit: 16,
         },
         peer_settings: vox::ConnectionSettings {
             parity: vox::Parity::Odd,
             max_concurrent_requests: 64,
+            initial_channel_credit: 16,
         },
         peer_supports_retry: true,
         session_resume_key: None,
         peer_resume_key: None,
         our_schema: vec![],
         peer_schema: vec![],
+        peer_metadata: vec![],
     };
 
     match vox::acceptor_conduit(vox::BareConduit::new(link), handshake_result)
-        .establish::<DriverCaller>(gateway.handler.clone())
+        .on_connection(gateway.handler.clone())
+        .establish::<vox::NoopClient>()
         .await
     {
-        Ok((caller, session_handle)) => {
+        Ok(root) => {
             debug!("WebSocket client connected");
-            let client = WebClientServiceClient::new(ErasedCaller::new(caller));
+            let client = WebClientServiceClient::new(root.caller);
             web_client_registry().register(client).await;
             // Keep session alive until connection drops
-            drop(session_handle);
+            std::future::pending::<()>().await;
         }
         Err(e) => warn!("WebSocket handshake failed: {:?}", e),
     }

@@ -7,8 +7,6 @@
 //!
 //! For UI components, see the `session-ui` crate.
 
-use vox::service;
-
 // ─── Typed IDs ─────────────────────────────────────────────────
 
 utils::typed_uuid_id!(
@@ -43,8 +41,9 @@ pub use services::{
     AudioLatencyInfo, MeasureInfo, SessionServiceError, SetlistEvent, SetlistService,
     SetlistServiceClient, SetlistServiceDispatcher, SongService, SongServiceClient,
     SongServiceDispatcher, SongTransportState, WebClientService, WebClientServiceClient,
-    WebClientServiceDispatcher, setlist_service_service_descriptor,
-    song_service_service_descriptor, web_client_service_service_descriptor,
+    WebClientServiceDispatcher, serve_setlist_service, serve_song_service,
+    serve_web_client_service, setlist_service_service_descriptor, song_service_service_descriptor,
+    web_client_service_service_descriptor,
 };
 pub use setlist::{ActiveIndices, AdvanceMode, QueuedTarget, Setlist};
 pub use song::{Comment, Section, SectionType, Song, SongChartHydration, SongDetectedChord};
@@ -59,7 +58,7 @@ pub use track_structure::{
 pub use daw::service::MusicalPosition;
 
 /// Session service - provides session-specific functionality
-#[service]
+#[architect::rpc]
 pub trait SessionService {
     /// Get session cell status
     async fn get_status(&self) -> String;
