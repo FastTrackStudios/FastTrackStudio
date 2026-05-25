@@ -2472,6 +2472,7 @@ name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "base64 0.22.1",
  "camino",
  "crossbeam-channel",
  "daw-audio-sync",
@@ -2487,7 +2488,7 @@ dependencies = [
  "eyre",
  "facet-json",
  "libloading 0.8.9",
- "moire 1.0.0",
+ "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -4120,7 +4121,8 @@ dependencies = [
  "daw",
  "dioxus",
  "eyre",
- "moire 1.0.0",
+ "keyflow",
+ "moire",
  "rfd",
  "session",
  "session-cli",
@@ -4442,7 +4444,7 @@ dependencies = [
  "facet 0.46.0",
  "facet-postcard",
  "libc",
- "moire 1.0.0",
+ "moire",
  "ratatui",
  "session-cli",
  "session-proto",
@@ -6998,29 +7000,19 @@ dependencies = [
 
 [[package]]
 name = "moire"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "moire-macros",
- "moire-macros-noop 1.0.0",
- "moire-tokio 1.0.0",
- "moire-wasm 1.0.0",
-]
-
-[[package]]
-name = "moire"
 version = "1.0.1"
 source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 dependencies = [
- "moire-macros-noop 1.0.1",
- "moire-tokio 1.0.1",
- "moire-wasm 1.0.1",
+ "moire-macros",
+ "moire-macros-noop",
+ "moire-tokio",
+ "moire-wasm",
 ]
 
 [[package]]
 name = "moire-macros"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+version = "1.0.1"
+source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7029,29 +7021,8 @@ dependencies = [
 
 [[package]]
 name = "moire-macros-noop"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-
-[[package]]
-name = "moire-macros-noop"
 version = "1.0.1"
 source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-
-[[package]]
-name = "moire-runtime"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "ctor",
- "facet 0.46.0",
- "facet-json",
- "facet-value",
- "moire-trace-capture 1.0.0",
- "moire-trace-types 1.0.0",
- "moire-types 1.0.0",
- "moire-wire 1.0.0",
- "tokio",
-]
 
 [[package]]
 name = "moire-runtime"
@@ -7062,21 +7033,10 @@ dependencies = [
  "facet 0.46.0",
  "facet-json",
  "facet-value",
- "moire-trace-capture 1.0.1",
- "moire-trace-types 1.0.1",
- "moire-types 1.0.1",
- "moire-wire 1.0.1",
- "tokio",
-]
-
-[[package]]
-name = "moire-tokio"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "moire-runtime 1.0.0",
- "moire-types 1.0.0",
- "parking_lot",
+ "moire-trace-capture",
+ "moire-trace-types",
+ "moire-types",
+ "moire-wire",
  "tokio",
 ]
 
@@ -7085,19 +7045,10 @@ name = "moire-tokio"
 version = "1.0.1"
 source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 dependencies = [
- "moire-runtime 1.0.1",
- "moire-types 1.0.1",
+ "moire-runtime",
+ "moire-types",
  "parking_lot",
  "tokio",
-]
-
-[[package]]
-name = "moire-trace-capture"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "libc",
- "moire-trace-types 1.0.0",
 ]
 
 [[package]]
@@ -7106,15 +7057,7 @@ version = "1.0.1"
 source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 dependencies = [
  "libc",
- "moire-trace-types 1.0.1",
-]
-
-[[package]]
-name = "moire-trace-types"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "facet 0.46.0",
+ "moire-trace-types",
 ]
 
 [[package]]
@@ -7127,37 +7070,12 @@ dependencies = [
 
 [[package]]
 name = "moire-types"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "facet 0.46.0",
- "facet-value",
- "moire-trace-types 1.0.0",
-]
-
-[[package]]
-name = "moire-types"
 version = "1.0.1"
 source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 dependencies = [
  "facet 0.46.0",
  "facet-value",
- "moire-trace-types 1.0.1",
-]
-
-[[package]]
-name = "moire-wasm"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "async-channel 2.5.0",
- "async-lock",
- "event-listener 5.4.1",
- "futures-channel",
- "futures-util",
- "gloo-timers",
- "moire-types 1.0.0",
- "wasm-bindgen-futures",
+ "moire-trace-types",
 ]
 
 [[package]]
@@ -7171,19 +7089,8 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-timers",
- "moire-types 1.0.1",
+ "moire-types",
  "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "moire-wire"
-version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
-dependencies = [
- "facet 0.46.0",
- "facet-json",
- "moire-trace-types 1.0.0",
- "moire-types 1.0.0",
 ]
 
 [[package]]
@@ -7193,8 +7100,8 @@ source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a2231
 dependencies = [
  "facet 0.46.0",
  "facet-json",
- "moire-trace-types 1.0.1",
- "moire-types 1.0.1",
+ "moire-trace-types",
+ "moire-types",
 ]
 
 [[package]]
@@ -9344,7 +9251,7 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "eyre",
- "moire 1.0.0",
+ "moire",
  "reaper-launcher",
  "reaper-test-macro",
  "tokio",
@@ -10176,7 +10083,7 @@ dependencies = [
  "eyre",
  "keyflow",
  "keyflow-daw-analysis",
- "moire 1.0.0",
+ "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -10200,7 +10107,7 @@ dependencies = [
  "eyre",
  "facet 0.46.0",
  "facet-json",
- "moire 1.0.0",
+ "moire",
  "serde_json",
  "session-proto",
  "tokio",
@@ -10296,7 +10203,7 @@ name = "signal"
 version = "0.1.0"
 source = "git+https://github.com/FastTrackStudios/signal.git?branch=main#75505314af45eb5a4ba140055eb2f8286915af4f"
 dependencies = [
- "moire 1.0.0",
+ "moire",
  "nam-manager",
  "signal-controller",
  "signal-daw-bridge",
@@ -10387,7 +10294,7 @@ dependencies = [
  "eyre",
  "futures",
  "macromod",
- "moire 1.0.0",
+ "moire",
  "nam-manager",
  "serde",
  "serde_json",
@@ -12335,7 +12242,7 @@ dependencies = [
  "facet 0.46.0",
  "facet-pretty",
  "facet-reflect",
- "moire 1.0.1",
+ "moire",
  "tokio",
  "tracing",
  "vox-core 0.5.0",
@@ -12358,7 +12265,7 @@ dependencies = [
  "facet-reflect",
  "futures-util",
  "getrandom 0.4.2",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -12381,7 +12288,7 @@ dependencies = [
  "facet-reflect",
  "futures-util",
  "getrandom 0.4.2",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -12570,7 +12477,7 @@ version = "0.5.0"
 source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "libc",
- "moire 1.0.1",
+ "moire",
  "tokio",
  "vox-core 0.5.0",
  "vox-types 0.5.0",
@@ -12592,7 +12499,7 @@ dependencies = [
  "futures-channel",
  "heck 0.5.0",
  "indexmap",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -12617,7 +12524,7 @@ dependencies = [
  "futures-channel",
  "heck 0.5.0",
  "indexmap",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -14548,6 +14455,60 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "ur-taking-me-with-you"
+version = "8.0.0"
+source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+
+[[patch.unused]]
+name = "vox-inprocess"
+version = "0.5.0"
+source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+
+[[patch.unused]]
+name = "audio-controls"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "daw-cli"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "daw-extension-runtime"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "actions-keybindings"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "actions-registry"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "actions-standalone"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "input"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "input-dioxus"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "audio-controls"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "daw-cli"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "daw-extension-runtime"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "actions-keybindings"
 version = "0.1.0"
 
@@ -14571,57 +14532,3 @@ version = "0.1.0"
 name = "reaper-macros"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#ca9d23f231e9a61f972a75ab3b5cde6f10ecffca"
-
-[[patch.unused]]
-name = "audio-controls"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "daw-cli"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "daw-extension-runtime"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "ur-taking-me-with-you"
-version = "8.0.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-
-[[patch.unused]]
-name = "vox-inprocess"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-
-[[patch.unused]]
-name = "actions-keybindings"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-registry"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-standalone"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input-dioxus"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "audio-controls"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "daw-cli"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "daw-extension-runtime"
-version = "0.1.0"
