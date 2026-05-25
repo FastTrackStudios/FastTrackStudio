@@ -16,7 +16,7 @@ dynamic-template-proto = { path = "crates/dynamic-template-proto" }
 dynamic-template = { path = "crates/dynamic-template" }
 
 # Monarchy hierarchy framework
-monarchy = { git = "https://github.com/FastTrackStudios/monarchy.git", branch = "main" }
+monarchy = { git = "https://git.starcommand.live/FastTrackStudios/monarchy.git", branch = "main" }
 
 # Facet reflection framework — matches monarchy's facet version
 facet = "0.46"
@@ -29,15 +29,15 @@ facet-value = "0.46"
 vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # Sibling repos
-daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-reaper = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-standalone = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-standalone = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+actions-proto = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
 
 # Testing
-reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -51,19 +51,6 @@ tokio = { version = "1.48", features = ["full"] }
 tracing = { version = "0.1", features = ["std"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eyre = "0.6"
-
-# ── Local development overrides ──────────────────────────────────────
-# Uncomment for local development:
-[patch."https://github.com/FastTrackStudios/daw.git"]
-daw = { path = "../daw/crates/daw" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-control = { path = "../daw/crates/daw-control" }
-daw-reaper = { path = "../daw/crates/daw-reaper" }
-daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-fts-devtools = { path = "../daw/crates/fts-devtools" }
-
-# [patch."https://github.com/FastTrackStudios/input_actions.git"]
-# actions-proto = { path = "../input_actions/crates/actions-proto" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,
