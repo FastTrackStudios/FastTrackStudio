@@ -4,7 +4,7 @@
 //! into semantic categories. The lanes are split into two groups:
 //!
 //! **Core lanes** (always present):
-//! - SECTIONS, MARKS, SONG, START/END, KEY, MODE, CHORDS, NOTES
+//! - SONG, SECTIONS, MARKS, KEY
 //!
 //! **Instrument note lanes** (created on demand per instrument):
 //! - Drums, Bass, Guitar, Guitar 2, Keys, Keys 2, Lead, BGVs, etc.
@@ -13,61 +13,74 @@ use facet::Facet;
 
 // ── Core Ruler Lanes ─────────────────────────────────────────────────────────
 
-/// Core FTS ruler lanes — always present in every project.
+/// Core FTS ruler lanes, in user-facing display order:
+/// SONG → SECTIONS → MARKS.
+///
+/// REAPER's intrinsic per-position flags still apply:
+/// - lane 1 (first row) gets flag=4 ("default marker lane")
+/// - lane 2 (second row) gets flag=8 ("default region lane")
+///
+/// With this ordering SECTIONS is the default region lane, which is
+/// what we want — fresh section regions auto-route there. SONG is
+/// the default marker lane, but we don't want markers there, so
+/// COUNT-IN / SONGSTART / SONGEND / =END all get explicit
+/// `set_lane(MARKS)` via `classify_marker_lane`. The song-bounded
+/// region also gets explicit `set_lane(SONG)` since the default
+/// region lane would otherwise put it on SECTIONS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
 #[repr(u8)]
 pub enum CoreLane {
-    /// Regions for song sections (Verse, Chorus, Bridge, Outro, etc.).
-    /// **Default region lane** — new regions go here.
-    Sections = 0,
-    /// Structural markers: Count-In, SONGSTART, SONGEND.
-    /// **Default marker lane** — new markers go here.
-    Marks = 1,
-    /// A single region spanning the entire song.
-    Song = 2,
-    /// Render/release bounds: =START, =END, PREROLL.
-    StartEnd = 3,
-    /// Key signature markers (e.g., "Eb", "F#m").
-    Key = 4,
-    /// Mode/scale markers (e.g., "Dorian", "Mixolydian").
-    Mode = 5,
-    /// Chord markers (e.g., "Cm", "Ab", "Eb7").
-    Chords = 6,
-    /// General notes (instrument-agnostic).
-    Notes = 7,
+    /// Song-bounded region only — named after the song.
+    /// Pinned explicitly (default region lane is SECTIONS).
+    Song = 0,
+    /// Section regions: VS / CH / BR / OUT / etc. Default region
+    /// lane (flag=8), so fresh regions land here automatically.
+    Sections = 1,
+    /// Structural markers: COUNT-IN, SONGSTART, SONGEND, =END.
+    /// Pinned explicitly via `classify_marker_lane`.
+    Marks = 2,
+    /// Reserved historical slot — see the enum doc.
+    #[deprecated(note = "KEY lane retired; key signatures are encoded separately now")]
+    Key = 3,
 }
 
+#[allow(deprecated)]
 impl CoreLane {
-    /// All core lanes in display order.
+    /// All core lanes that should be created in every project, in
+    /// the user-visible order SONG → SECTIONS → MARKS.
     pub const fn all() -> &'static [CoreLane] {
-        &[
-            CoreLane::Sections,
-            CoreLane::Marks,
-            CoreLane::Song,
-            CoreLane::StartEnd,
-            CoreLane::Key,
-            CoreLane::Mode,
-            CoreLane::Chords,
-            CoreLane::Notes,
-        ]
+        &[CoreLane::Song, CoreLane::Sections, CoreLane::Marks]
     }
 
-    /// REAPER ruler lane index (1-based).
+    /// 0-based lane index. Same value used for **both** REAPER's
+    /// project-info name-table keys (`RULER_LANE_NAME:N`,
+    /// `RULER_LANE_FLAGS:N`, `RULER_LANE_ORDER:N`) **and** for
+    /// `I_LANENUMBER` on a marker / region.
+    ///
+    /// Empirical evidence (saved RPP grep against what we wrote):
+    /// passing `I_LANENUMBER=1` for SONG-bounded regions made REAPER
+    /// serialise them on file row 2 (SECTIONS), not row 1 (SONG).
+    /// So `I_LANENUMBER` is the same 0-based index — REAPER's docs
+    /// reading "0 = automatic" appears to be wrong or version-
+    /// dependent here.
     pub const fn lane_index(&self) -> u32 {
-        *self as u32 + 1
+        *self as u32
+    }
+
+    /// Same as `lane_index`. Kept as a separate name so call sites
+    /// targeting the project-info name table read self-documenting
+    /// (we used to need a 0/1-based offset between them).
+    pub const fn name_key_index(&self) -> u32 {
+        *self as u32
     }
 
     /// Display name shown in the REAPER ruler.
     pub const fn display_name(&self) -> &'static str {
         match self {
+            Self::Song => "SONG",
             Self::Sections => "SECTIONS",
             Self::Marks => "MARKS",
-            Self::Song => "SONG",
-            Self::StartEnd => "START/END",
             Self::Key => "KEY",
-            Self::Mode => "MODE",
-            Self::Chords => "CHORDS",
-            Self::Notes => "NOTES",
         }
     }
 
@@ -75,17 +88,30 @@ impl CoreLane {
     /// - `8` = default region lane
     /// - `4` = default marker lane
     /// - `0` = normal
+    ///
+    /// Observed reality: `RULER_LANE_FLAGS:N` project-info writes do
+    /// **not** actually apply at the REAPER side (the saved RPP keeps
+    /// `RULERLANE` flags wherever REAPER's position-based defaults
+    /// put them, regardless of what we wrote). So these values are
+    /// documentation of intent: which slot REAPER will treat as
+    /// default-marker (slot 0) vs default-region (slot 1). We arrange
+    /// `all()` so MARKS occupies slot 0 and SONG occupies slot 1,
+    /// and let REAPER's intrinsic defaults do the routing.
     pub const fn flags(&self) -> i32 {
         match self {
-            Self::Sections => 8, // default region lane
-            Self::Song => 4,     // default marker lane (matches real RPP)
+            Self::Marks => 4, // documented: default marker lane (slot 0)
+            Self::Song => 8,  // documented: default region lane (slot 1)
             _ => 0,
         }
     }
 
-    /// Number of core lanes.
+    /// Reserved core-lane slot count. Stays at 4 even though Key is
+    /// no longer auto-created — `InstrumentLane::lane_index` and the
+    /// rest of the numbering offset off this value, and shifting it
+    /// would silently renumber every existing project's instrument
+    /// lanes.
     pub const fn count() -> u32 {
-        8
+        4
     }
 
     pub fn from_index(index: u32) -> Option<Self> {
@@ -205,22 +231,15 @@ pub fn classify_marker_lane(name: &str) -> FtsLane {
     let trimmed = name.trim();
     let upper = trimmed.to_uppercase();
 
+    // SONG lane is reserved for the song-bounded REGION (named after
+    // the song). *All* structural markers — song bounds, count-ins,
+    // render bounds — collapse into MARKS so the SONG lane reads as
+    // "here is one named row per song" without bracket-marker noise.
     match upper.as_str() {
-        // MARKS lane: structural markers
-        "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => {
-            FtsLane::Core(CoreLane::Marks)
-        }
-        // START/END lane: render bounds
-        "=START" | "=END" | "PREROLL" | "=PREROLL" => FtsLane::Core(CoreLane::StartEnd),
-        _ => {
-            // Markers starting with "=" are bounds
-            if trimmed.starts_with('=') {
-                FtsLane::Core(CoreLane::StartEnd)
-            } else {
-                // Default: general NOTES lane for unclassified markers
-                FtsLane::Core(CoreLane::Notes)
-            }
-        }
+        "SONGSTART" | "SONGEND" => FtsLane::Core(CoreLane::Marks),
+        "COUNT-IN" | "COUNT IN" | "COUNTIN" => FtsLane::Core(CoreLane::Marks),
+        "=START" | "=END" | "PREROLL" | "=PREROLL" => FtsLane::Core(CoreLane::Marks),
+        _ => FtsLane::Core(CoreLane::Marks),
     }
 }
 
@@ -282,28 +301,29 @@ mod tests {
 
     #[test]
     fn instrument_lanes_start_after_core() {
-        assert_eq!(InstrumentLane::Drums.lane_index(), 9);
-        assert_eq!(InstrumentLane::Bass.lane_index(), 10);
-        assert_eq!(InstrumentLane::Guitar.lane_index(), 11);
-        assert_eq!(InstrumentLane::BGVs.lane_index(), 16);
+        assert_eq!(InstrumentLane::Drums.lane_index(), 5);
+        assert_eq!(InstrumentLane::Bass.lane_index(), 6);
+        assert_eq!(InstrumentLane::Guitar.lane_index(), 7);
+        assert_eq!(InstrumentLane::BGVs.lane_index(), 12);
     }
 
     #[test]
     fn fts_lane_unified_index() {
-        assert_eq!(FtsLane::Core(CoreLane::Sections).lane_index(), 1);
-        assert_eq!(FtsLane::Core(CoreLane::Notes).lane_index(), 8);
-        assert_eq!(FtsLane::Instrument(InstrumentLane::Drums).lane_index(), 9);
+        assert_eq!(FtsLane::Core(CoreLane::Song).lane_index(), 1);
+        assert_eq!(FtsLane::Core(CoreLane::Sections).lane_index(), 2);
+        assert_eq!(FtsLane::Core(CoreLane::Marks).lane_index(), 3);
+        assert_eq!(FtsLane::Instrument(InstrumentLane::Drums).lane_index(), 5);
     }
 
     #[test]
     fn classify_structural_markers() {
         assert_eq!(
             classify_marker_lane("SONGSTART"),
-            FtsLane::Core(CoreLane::Marks)
+            FtsLane::Core(CoreLane::Song)
         );
         assert_eq!(
             classify_marker_lane("SONGEND"),
-            FtsLane::Core(CoreLane::Marks)
+            FtsLane::Core(CoreLane::Song)
         );
         assert_eq!(
             classify_marker_lane("Count-In"),
@@ -315,15 +335,12 @@ mod tests {
     fn classify_bound_markers() {
         assert_eq!(
             classify_marker_lane("=START"),
-            FtsLane::Core(CoreLane::StartEnd)
+            FtsLane::Core(CoreLane::Marks)
         );
-        assert_eq!(
-            classify_marker_lane("=END"),
-            FtsLane::Core(CoreLane::StartEnd)
-        );
+        assert_eq!(classify_marker_lane("=END"), FtsLane::Core(CoreLane::Marks));
         assert_eq!(
             classify_marker_lane("PREROLL"),
-            FtsLane::Core(CoreLane::StartEnd)
+            FtsLane::Core(CoreLane::Marks)
         );
     }
 
@@ -340,37 +357,29 @@ mod tests {
         assert_eq!(region_defaults.len(), 1);
         assert_eq!(marker_defaults.len(), 1);
         assert_eq!(region_defaults[0].display_name(), "SECTIONS");
-        assert_eq!(marker_defaults[0].display_name(), "MARKS");
+        assert_eq!(marker_defaults[0].display_name(), "SONG");
     }
 
     #[test]
     fn lane_layout_matches_reaper_rpp() {
-        // Verify our layout matches the reference regions-testing.RPP:
-        // RULERLANE 1 8 SECTIONS 0 -1
-        // RULERLANE 2 0 MARKS 0 -1       (was COUNT-IN in test RPP, renamed)
-        // RULERLANE 3 4 SONG 0 -1         (note: flags differ — see below)
-        // RULERLANE 4 0 START/END 0 -1
-        // RULERLANE 5 0 KEY 0 -1
-        // RULERLANE 6 0 MODE 0 -1
-        // RULERLANE 7 0 CHORDS 0 -1
-        // RULERLANE 8 0 NOTES 0 -1
-        // RULERLANE 9 0 Drums 0 -1
+        // FTS lane convention:
+        // RULERLANE 1 4 SONG 0 -1
+        // RULERLANE 2 8 SECTIONS 0 -1
+        // RULERLANE 3 0 MARKS 0 -1
+        // RULERLANE 4 0 KEY 0 -1
+        // RULERLANE 5 0 Drums 0 -1
         // ...
-        assert_eq!(CoreLane::Sections.lane_index(), 1);
-        assert_eq!(CoreLane::Marks.lane_index(), 2);
-        assert_eq!(CoreLane::Song.lane_index(), 3);
-        assert_eq!(CoreLane::StartEnd.lane_index(), 4);
-        assert_eq!(CoreLane::Key.lane_index(), 5);
-        assert_eq!(CoreLane::Mode.lane_index(), 6);
-        assert_eq!(CoreLane::Chords.lane_index(), 7);
-        assert_eq!(CoreLane::Notes.lane_index(), 8);
-        assert_eq!(InstrumentLane::Drums.lane_index(), 9);
-        assert_eq!(InstrumentLane::Bass.lane_index(), 10);
-        assert_eq!(InstrumentLane::Guitar.lane_index(), 11);
-        assert_eq!(InstrumentLane::Guitar2.lane_index(), 12);
-        assert_eq!(InstrumentLane::Keys.lane_index(), 13);
-        assert_eq!(InstrumentLane::Keys2.lane_index(), 14);
-        assert_eq!(InstrumentLane::Lead.lane_index(), 15);
-        assert_eq!(InstrumentLane::BGVs.lane_index(), 16);
+        assert_eq!(CoreLane::Song.lane_index(), 1);
+        assert_eq!(CoreLane::Sections.lane_index(), 2);
+        assert_eq!(CoreLane::Marks.lane_index(), 3);
+        assert_eq!(CoreLane::Key.lane_index(), 4);
+        assert_eq!(InstrumentLane::Drums.lane_index(), 5);
+        assert_eq!(InstrumentLane::Bass.lane_index(), 6);
+        assert_eq!(InstrumentLane::Guitar.lane_index(), 7);
+        assert_eq!(InstrumentLane::Guitar2.lane_index(), 8);
+        assert_eq!(InstrumentLane::Keys.lane_index(), 9);
+        assert_eq!(InstrumentLane::Keys2.lane_index(), 10);
+        assert_eq!(InstrumentLane::Lead.lane_index(), 11);
+        assert_eq!(InstrumentLane::BGVs.lane_index(), 12);
     }
 }

@@ -9,11 +9,11 @@
 
 use std::rc::Rc;
 
-use dock_dioxus::{DockProvider, DockRoot, PanelRenderer, PanelRendererRegistry, DOCK_WORKSPACE};
+use dock_dioxus::{DOCK_WORKSPACE, DockProvider, DockRoot, PanelRenderer, PanelRendererRegistry};
+use dock_proto::PanelRegistry;
 use dock_proto::builder::DockLayoutBuilder as B;
 use dock_proto::panel::PanelId;
 use dock_proto::workspace::{DockWorkspace, WindowBounds};
-use dock_proto::PanelRegistry;
 
 use crate::layouts::top_bar::{ConnectionState, VERSION};
 use crate::prelude::*;
@@ -179,10 +179,7 @@ fn handle_hotkey(evt: KeyboardEvent) {
 
 /// Connection status badge with spinner for connecting state.
 #[component]
-pub fn ConnectionBadge(
-    state: ConnectionState,
-    on_click: EventHandler,
-) -> Element {
+pub fn ConnectionBadge(state: ConnectionState, on_click: EventHandler) -> Element {
     let (bg_class, text_class, dot_class, label) = match state {
         ConnectionState::Connected => (
             "bg-green-500/20",
@@ -227,10 +224,7 @@ pub fn ConnectionBadge(
 
 /// Connection info panel — shown when clicking the connection badge.
 #[component]
-fn ConnectionInfoPanel(
-    state: ConnectionState,
-    on_close: EventHandler,
-) -> Element {
+fn ConnectionInfoPanel(state: ConnectionState, on_close: EventHandler) -> Element {
     // Get local network info
     let hostname = std::env::var("HOSTNAME")
         .or_else(|_| std::env::var("HOST"))

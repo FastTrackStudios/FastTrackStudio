@@ -211,6 +211,7 @@ mod tests {
             detected_chords: vec![],
             chart_fingerprint: None,
             advance_mode: None,
+            color: None,
         }
     }
 

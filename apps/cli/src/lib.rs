@@ -7,8 +7,53 @@
 
 use std::path::PathBuf;
 
-use clap::Subcommand;
-use eyre::Result;
+use clap::{Subcommand, ValueEnum};
+use eyre::{Result, WrapErr};
+
+/// Which RPC the bench should probe. `All` is a convenience that
+/// expands to the full set; CLI parsing keeps it as one variant so
+/// the user can pass `-t all` without listing them.
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
+pub enum BenchTarget {
+    All,
+    Mode,
+    Project,
+    Tempo,
+    #[clap(name = "time-sig")]
+    TimeSig,
+    #[clap(name = "play-state")]
+    PlayState,
+    #[clap(name = "track-count")]
+    TrackCount,
+}
+
+impl BenchTarget {
+    /// Concrete targets `All` expands to (ordered for stable output).
+    fn expanded() -> &'static [BenchTarget] {
+        &[
+            BenchTarget::Mode,
+            BenchTarget::Project,
+            BenchTarget::Tempo,
+            BenchTarget::TimeSig,
+            BenchTarget::PlayState,
+            BenchTarget::TrackCount,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            BenchTarget::All => "all",
+            BenchTarget::Mode => "mode",
+            BenchTarget::Project => "project",
+            BenchTarget::Tempo => "tempo",
+            BenchTarget::TimeSig => "time-sig",
+            BenchTarget::PlayState => "play-state",
+            BenchTarget::TrackCount => "track-count",
+        }
+    }
+}
+
+pub mod connection;
 
 // ============================================================================
 // CLI Definitions
@@ -46,6 +91,12 @@ pub enum SessionCommand {
     },
     /// Show current setlist
     Setlist,
+    /// (Re)build the setlist by scanning every open REAPER project
+    /// tab for SONGSTART / SONGEND markers and section regions.
+    /// Subsequent `setlist` / `songs` / `song` calls hit the cached
+    /// build; rerun this after opening, closing, or editing project
+    /// structure.
+    BuildSetlist,
     /// List songs in the setlist
     Songs,
     /// Show song detail
@@ -83,6 +134,73 @@ pub enum SessionCommand {
         /// Position in seconds
         seconds: f64,
     },
+    /// FTS session mode (Organize / Write / Produce / Record / …)
+    #[command(subcommand)]
+    Mode(ModeCommand),
+    /// Trigger any REAPER named command by ID — works for native
+    /// commands (numeric or `_REAPER_*`) and for any registered
+    /// extension action including the FTS session actions
+    /// (`_FTS_SESSION_BUILD_SETLIST`, `_FTS_SESSION_LOAD_DEMO_SETLIST`,
+    /// …). Bypasses the broken-on-complex-types vox RPC read paths —
+    /// the response is just a bool (succeeded/failed).
+    Action {
+        /// Command ID. Accepts the upper-snake form
+        /// (`FTS_SESSION_BUILD_SETLIST`), with or without the leading
+        /// underscore. Also accepts a numeric REAPER command id
+        /// (e.g. 40044 for transport play/pause) as a string.
+        command_id: String,
+    },
+    /// Set the display name of a ruler lane in the current project.
+    /// Direct primitive over `Projects::set_ruler_lane_name` — useful
+    /// for debugging why a lane didn't pick up its convention name
+    /// (e.g. `fts session rename-lane 1 SONG`). Lane index is
+    /// 1-based; REAPER will auto-create the lane if it doesn't exist
+    /// yet.
+    RenameLane {
+        /// 1-based ruler lane index.
+        index: u32,
+        /// New display name. Pass an empty string to clear.
+        name: String,
+    },
+    /// Set a numeric project-info key on the current project. Direct
+    /// access to `Projects::set_project_info` — useful for poking
+    /// REAPER's internal ruler-lane configuration directly. Example:
+    /// `fts session set-project-info RULER_LANE_FLAGS:2 8` marks lane
+    /// 2 as the default region lane.
+    SetProjectInfo {
+        /// Project-info key (e.g. `RULER_LANE_FLAGS:2`, `RULER_LANE_ORDER:1`).
+        key: String,
+        /// Numeric value.
+        value: f64,
+    },
+    /// Measure RPC roundtrip latency over one persistent connection.
+    ///
+    /// Reports min / p50 / p95 / p99 / max for each target. Use
+    /// `--target all` (default) to see every probe side-by-side so
+    /// you can spot which RPCs are slow.
+    Bench {
+        /// Number of calls per target.
+        #[arg(short, long, default_value = "200")]
+        count: usize,
+        /// Which RPC(s) to probe. Repeat or comma-separate for several;
+        /// `all` runs the full set. Targets: mode, project, tempo,
+        /// time-sig, play-state, track-count.
+        #[arg(short, long, default_value = "all", value_delimiter = ',')]
+        target: Vec<BenchTarget>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ModeCommand {
+    /// Print the currently active mode slug.
+    Get,
+    /// Switch the active mode by slug.
+    Set {
+        /// One of: organize, write, produce, record, edit, mix, master, live, video, minimal.
+        slug: String,
+    },
+    /// List all known mode slugs (declaration order).
+    List,
 }
 
 #[derive(Subcommand)]
@@ -129,38 +247,113 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             ref output,
             guide,
         } => cmd_organize(input, output.as_deref(), guide),
-        other => {
-            // Live commands require Phase 3 RPC connection
-            let cmd_name = match other {
-                SessionCommand::Combine { .. } | SessionCommand::Organize { .. } => {
-                    unreachable!()
-                }
-                SessionCommand::Setlist => "setlist",
-                SessionCommand::Songs => "songs",
-                SessionCommand::Song { .. } => "song",
-                SessionCommand::Sections { .. } => "sections",
-                SessionCommand::Goto(GotoCommand::Song { .. }) => "goto song",
-                SessionCommand::Goto(GotoCommand::Section { .. }) => "goto section",
-                SessionCommand::Next => "next",
-                SessionCommand::Previous => "previous",
-                SessionCommand::NextSection => "next-section",
-                SessionCommand::PrevSection => "prev-section",
-                SessionCommand::Play => "play",
-                SessionCommand::Pause => "pause",
-                SessionCommand::Stop => "stop",
-                SessionCommand::Loop(LoopCommand::Song) => "loop song",
-                SessionCommand::Loop(LoopCommand::Section) => "loop section",
-                SessionCommand::Loop(LoopCommand::Clear) => "loop clear",
-                SessionCommand::Seek { .. } => "seek",
-            };
-            let _ = (socket, as_json); // suppress unused warnings
-            eyre::bail!(
-                "Session command '{}' not yet implemented. \
-                 Session CLI requires RPC connection to the session cell running in REAPER.",
-                cmd_name
-            )
+        SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
+        SessionCommand::Action { command_id } => cmd_action(socket.as_deref(), &command_id).await,
+        SessionCommand::RenameLane { index, name } => {
+            cmd_rename_lane(socket.as_deref(), index, &name).await
+        }
+        SessionCommand::SetProjectInfo { key, value } => {
+            cmd_set_project_info(socket.as_deref(), &key, value).await
+        }
+        SessionCommand::Bench { count, target } => {
+            cmd_bench(socket.as_deref(), count, target).await
+        }
+        SessionCommand::Play => cmd_transport(socket.as_deref(), TransportOp::Play).await,
+        SessionCommand::Pause => cmd_transport(socket.as_deref(), TransportOp::Pause).await,
+        SessionCommand::Stop => cmd_transport(socket.as_deref(), TransportOp::Stop).await,
+        // Setlist / song views — read-only, print human-readable
+        // unless --json. Connect once per call (cold-start is the
+        // price for one-shot CLI; use the daemon for fast paths).
+        SessionCommand::Setlist => cmd_setlist(socket.as_deref(), as_json).await,
+        SessionCommand::BuildSetlist => cmd_build_setlist(socket.as_deref()).await,
+        SessionCommand::Songs => cmd_songs(socket.as_deref(), as_json).await,
+        SessionCommand::Song { index } => cmd_song(socket.as_deref(), index, as_json).await,
+        SessionCommand::Sections { song_index } => {
+            cmd_sections(socket.as_deref(), song_index, as_json).await
+        }
+        // Navigation — single async call, no output unless --json.
+        SessionCommand::Goto(GotoCommand::Song { index }) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::GoSong(index)).await
+        }
+        SessionCommand::Goto(GotoCommand::Section { index }) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::GoSection(index)).await
+        }
+        SessionCommand::Next => cmd_setlist_nav(socket.as_deref(), SetlistNav::NextSong).await,
+        SessionCommand::Previous => cmd_setlist_nav(socket.as_deref(), SetlistNav::PrevSong).await,
+        SessionCommand::NextSection => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::NextSection).await
+        }
+        SessionCommand::PrevSection => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::PrevSection).await
+        }
+        SessionCommand::Seek { seconds } => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::Seek(seconds)).await
+        }
+        SessionCommand::Loop(LoopCommand::Song) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopSong).await
+        }
+        SessionCommand::Loop(LoopCommand::Section) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopSection).await
+        }
+        SessionCommand::Loop(LoopCommand::Clear) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopClear).await
         }
     }
+}
+
+// ============================================================================
+// Mode commands
+// ============================================================================
+
+async fn cmd_mode(socket: Option<&std::path::Path>, cmd: ModeCommand, as_json: bool) -> Result<()> {
+    use session_proto::services::SessionModeServiceClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let client = SessionModeServiceClient::new(caller);
+
+    match cmd {
+        ModeCommand::Get => {
+            let slug = client
+                .current_mode()
+                .await
+                .wrap_err("current_mode RPC failed")?;
+            print_value(&slug, as_json)
+        }
+        ModeCommand::Set { slug } => {
+            client
+                .set_mode(slug.clone())
+                .await
+                .wrap_err_with(|| format!("set_mode({slug}) RPC failed"))?;
+            print_value(&format!("set mode = {slug}"), as_json)
+        }
+        ModeCommand::List => {
+            let modes = client
+                .list_modes()
+                .await
+                .wrap_err("list_modes RPC failed")?;
+            if as_json {
+                let json = serde_json::to_string(&modes)?;
+                println!("{json}");
+            } else {
+                for m in modes {
+                    println!("{m}");
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn print_value(value: &str, as_json: bool) -> Result<()> {
+    if as_json {
+        let json = serde_json::to_string(value)?;
+        println!("{json}");
+    } else {
+        println!("{value}");
+    }
+    Ok(())
 }
 
 // ============================================================================
@@ -354,4 +547,488 @@ fn resolve_track_paths(track: &mut daw::file::types::track::Track, source_dir: &
             item.raw_content = patched.join("\n");
         }
     }
+}
+
+// ============================================================================
+// Transport commands
+// ============================================================================
+
+async fn cmd_bench(
+    socket: Option<&std::path::Path>,
+    count: usize,
+    targets: Vec<BenchTarget>,
+) -> Result<()> {
+    use daw_proto::project::ProjectsClient;
+    use daw_proto::track::TracksClient;
+    use daw_proto::transport::TransportClient;
+    use session_proto::services::SessionModeServiceClient;
+
+    let t_connect = std::time::Instant::now();
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let connect_us = t_connect.elapsed().as_micros();
+
+    // Build every client we might need — cheap, each is just a wrapper
+    // around the same `Caller` clone. Easier than a per-target match.
+    let mode = SessionModeServiceClient::new(caller.clone());
+    let projects = ProjectsClient::new(caller.clone());
+    let transport = TransportClient::new(caller.clone());
+    let tracks = TracksClient::new(caller.clone());
+
+    // Expand `All` once; deduplicate so `--target mode,mode` doesn't
+    // double-run.
+    let mut wanted: Vec<BenchTarget> = if targets.iter().any(|t| *t == BenchTarget::All) {
+        BenchTarget::expanded().to_vec()
+    } else {
+        targets
+    };
+    wanted.sort_by_key(|t| t.label());
+    wanted.dedup();
+
+    println!("connect+handshake: {} µs", connect_us);
+    println!(
+        "{:<12}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
+        "target", "min", "p50", "avg", "p95", "p99", "max"
+    );
+    println!("{}", "─".repeat(64));
+
+    for target in wanted {
+        // Warmup so first-call schema/cache costs don't poison the
+        // sample. Same one-shot path the timed loop will hit.
+        run_probe(target, &mode, &projects, &transport, &tracks).await?;
+        let mut samples = Vec::with_capacity(count);
+        for _ in 0..count {
+            let t0 = std::time::Instant::now();
+            run_probe(target, &mode, &projects, &transport, &tracks).await?;
+            samples.push(t0.elapsed().as_micros() as u64);
+        }
+        samples.sort_unstable();
+        let n = samples.len();
+        let min = samples[0];
+        let p50 = samples[n / 2];
+        let p95 = samples[(n as f64 * 0.95) as usize];
+        let p99 = samples[((n as f64 * 0.99) as usize).min(n - 1)];
+        let max = samples[n - 1];
+        let avg: u64 = samples.iter().sum::<u64>() / n as u64;
+        println!(
+            "{:<12}  {:>5}µs  {:>5}µs  {:>5}µs  {:>5}µs  {:>5}µs  {:>5}µs",
+            target.label(),
+            min,
+            p50,
+            avg,
+            p95,
+            p99,
+            max
+        );
+    }
+    println!("(n={count} per target)");
+    Ok(())
+}
+
+/// Fire one RPC for the given target, swallow the value (we only care
+/// about timing) and surface RPC errors. Per-call ProjectContext is
+/// `Current` since the user almost always wants the active tab's
+/// numbers — no benefit from a per-project parameter for a bench.
+async fn run_probe(
+    target: BenchTarget,
+    mode: &session_proto::services::SessionModeServiceClient,
+    projects: &daw_proto::project::ProjectsClient,
+    transport: &daw_proto::transport::TransportClient,
+    tracks: &daw_proto::track::TracksClient,
+) -> Result<()> {
+    use daw_proto::ProjectContext;
+    match target {
+        BenchTarget::All => unreachable!("expanded before reaching run_probe"),
+        BenchTarget::Mode => {
+            mode.current_mode()
+                .await
+                .map_err(|e| eyre::eyre!("mode rpc failed: {e:?}"))?;
+        }
+        BenchTarget::Project => {
+            projects
+                .current()
+                .await
+                .map_err(|e| eyre::eyre!("project rpc failed: {e:?}"))?;
+        }
+        BenchTarget::Tempo => {
+            transport
+                .get_tempo(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("tempo rpc failed: {e:?}"))?;
+        }
+        BenchTarget::TimeSig => {
+            transport
+                .get_time_signature(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("time-sig rpc failed: {e:?}"))?;
+        }
+        BenchTarget::PlayState => {
+            transport
+                .get_play_state(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("play-state rpc failed: {e:?}"))?;
+        }
+        BenchTarget::TrackCount => {
+            tracks
+                .count(ProjectContext::Current)
+                .await
+                .map_err(|e| eyre::eyre!("track-count rpc failed: {e:?}"))?;
+        }
+    }
+    Ok(())
+}
+
+enum TransportOp {
+    Play,
+    Pause,
+    Stop,
+}
+
+async fn cmd_transport(socket: Option<&std::path::Path>, op: TransportOp) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::transport::TransportClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let client = TransportClient::new(caller);
+
+    let label = match op {
+        TransportOp::Play => "play",
+        TransportOp::Pause => "pause",
+        TransportOp::Stop => "stop",
+    };
+
+    let start = std::time::Instant::now();
+    let res = match op {
+        TransportOp::Play => client.play(ProjectContext::Current).await,
+        TransportOp::Pause => client.pause(ProjectContext::Current).await,
+        TransportOp::Stop => client.stop(ProjectContext::Current).await,
+    };
+    let rt = start.elapsed();
+    res.map_err(|e| eyre::eyre!("transport {label} rpc failed: {e:?}"))?
+        .map_err(|e| eyre::eyre!("transport {label} daw error: {e:?}"))?;
+    println!("{label}  rpc roundtrip {rt:?}");
+    Ok(())
+}
+
+// ============================================================================
+// Setlist / Song commands
+//
+// The setlist + per-song detail come from `SetlistService` mounted by
+// fts-extensions. Implementation in `session::setlist_service` builds
+// the setlist by enumerating REAPER project tabs and parsing each
+// project's PREROLL / SONGSTART / SONGEND markers + section regions.
+//
+// CLI output: human-readable by default (one line per row), JSON when
+// `--json` is set so other tools can pipe results.
+// ============================================================================
+
+async fn cmd_build_setlist(socket: Option<&std::path::Path>) -> Result<()> {
+    let client = setlist_client(socket).await?;
+    let start = std::time::Instant::now();
+    client
+        .build_from_open_projects()
+        .await
+        .map_err(rpc_err("build_from_open_projects"))?;
+    let setlist = client.setlist().await.map_err(rpc_err("setlist"))?;
+    println!(
+        "built setlist '{}' with {} song(s) in {:?}",
+        setlist.name,
+        setlist.songs.len(),
+        start.elapsed()
+    );
+    Ok(())
+}
+
+async fn cmd_setlist(socket: Option<&std::path::Path>, as_json: bool) -> Result<()> {
+    let client = setlist_client(socket).await?;
+    // Don't auto-build: build_from_open_projects walks every open
+    // REAPER tab, hydrates per-song MIDI charts via keyflow, and can
+    // take many seconds on a real session. Prompt the user to run
+    // `fts session build-setlist` explicitly so they know they're
+    // paying that cost.
+    let setlist = match client.setlist().await {
+        Ok(s) => s,
+        Err(e) if is_not_found(&e) => {
+            println!(
+                "(no setlist cached yet — run `fts session build-setlist` to scan open projects)"
+            );
+            return Ok(());
+        }
+        Err(e) => return Err(rpc_err("setlist")(e)),
+    };
+    if as_json {
+        print_json(&setlist)?;
+    } else {
+        println!("Setlist: {}", setlist.name);
+        println!("  songs: {}", setlist.songs.len());
+        if let Some(id) = &setlist.id {
+            println!("  id:    {id}");
+        }
+        for (i, song) in setlist.songs.iter().enumerate() {
+            let dur = song.end_seconds - song.start_seconds;
+            println!(
+                "  [{i:>2}] {:<32}  {:6.2}s  ({} sections)",
+                song.name,
+                dur.max(0.0),
+                song.sections.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_songs(socket: Option<&std::path::Path>, as_json: bool) -> Result<()> {
+    let songs = setlist_client(socket)
+        .await?
+        .songs()
+        .await
+        .map_err(rpc_err("songs"))?;
+    if as_json {
+        print_json(&songs)?;
+    } else if songs.is_empty() {
+        println!("(no songs in current setlist)");
+    } else {
+        for (i, s) in songs.iter().enumerate() {
+            println!("[{i:>2}] {}", s.name);
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_song(socket: Option<&std::path::Path>, index: usize, as_json: bool) -> Result<()> {
+    let song = setlist_client(socket)
+        .await?
+        .song(index)
+        .await
+        .map_err(rpc_err("song"))?;
+    if as_json {
+        print_json(&song)?;
+    } else {
+        println!("Song [{index}] {}", song.name);
+        println!("  project_guid : {}", song.project_guid);
+        println!(
+            "  range        : {:.3}s → {:.3}s ({:.3}s)",
+            song.start_seconds,
+            song.end_seconds,
+            song.end_seconds - song.start_seconds
+        );
+        if let Some(co) = song.count_in_seconds {
+            println!("  count-in     : {co:.3}s");
+        }
+        if let Some(t) = song.tempo {
+            println!("  tempo        : {t:.2} BPM");
+        }
+        if let Some(ts) = song.time_signature {
+            println!("  time sig     : {}/{}", ts.numerator(), ts.denominator());
+        }
+        println!("  sections     : {}", song.sections.len());
+        for (i, sec) in song.sections.iter().enumerate() {
+            println!("    [{i:>2}] {}", sec.name);
+        }
+        if !song.comments.is_empty() {
+            println!("  comments     : {}", song.comments.len());
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_sections(
+    socket: Option<&std::path::Path>,
+    song_index: usize,
+    as_json: bool,
+) -> Result<()> {
+    let sections = setlist_client(socket)
+        .await?
+        .sections(song_index)
+        .await
+        .map_err(rpc_err("sections"))?;
+    if as_json {
+        print_json(&sections)?;
+    } else if sections.is_empty() {
+        println!("(no sections in song {song_index})");
+    } else {
+        for (i, sec) in sections.iter().enumerate() {
+            println!("[{i:>2}] {}", sec.name);
+        }
+    }
+    Ok(())
+}
+
+/// Discriminator for navigation-style setlist commands. They all
+/// share the same shape (one async call, no output unless --json)
+/// and the same dispatch — collapsing them into one match keeps the
+/// adding-a-new-nav-verb cost at one variant + one arm.
+enum SetlistNav {
+    GoSong(usize),
+    GoSection(usize),
+    NextSong,
+    PrevSong,
+    NextSection,
+    PrevSection,
+    Seek(f64),
+    LoopSong,
+    LoopSection,
+    LoopClear,
+}
+
+async fn cmd_setlist_nav(socket: Option<&std::path::Path>, nav: SetlistNav) -> Result<()> {
+    let client = setlist_client(socket).await?;
+    match nav {
+        SetlistNav::GoSong(i) => client.go_to_song(i).await.map_err(rpc_err("go_to_song"))?,
+        SetlistNav::GoSection(i) => client
+            .go_to_section(i)
+            .await
+            .map_err(rpc_err("go_to_section"))?,
+        SetlistNav::NextSong => client.next_song().await.map_err(rpc_err("next_song"))?,
+        SetlistNav::PrevSong => client
+            .previous_song()
+            .await
+            .map_err(rpc_err("previous_song"))?,
+        SetlistNav::NextSection => client
+            .next_section()
+            .await
+            .map_err(rpc_err("next_section"))?,
+        SetlistNav::PrevSection => client
+            .previous_section()
+            .await
+            .map_err(rpc_err("previous_section"))?,
+        SetlistNav::Seek(s) => client.seek_to(s).await.map_err(rpc_err("seek_to"))?,
+        SetlistNav::LoopSong | SetlistNav::LoopSection | SetlistNav::LoopClear => {
+            // No matching trait method yet — keep the CLI flag for
+            // forward compatibility but tell the user it's unwired
+            // instead of pretending to work.
+            eyre::bail!(
+                "loop {} not yet wired on the server — `SetlistService` exposes \
+                 navigation + seek but no `set_loop` method.",
+                match nav {
+                    SetlistNav::LoopSong => "song",
+                    SetlistNav::LoopSection => "section",
+                    SetlistNav::LoopClear => "clear",
+                    _ => unreachable!(),
+                }
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn setlist_client(
+    socket: Option<&std::path::Path>,
+) -> Result<session_proto::services::SetlistServiceClient> {
+    use session_proto::services::SetlistServiceClient;
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    Ok(SetlistServiceClient::new(caller))
+}
+
+fn rpc_err(
+    label: &'static str,
+) -> impl FnOnce(vox::VoxError<session_proto::SessionServiceError>) -> eyre::Report {
+    move |e| eyre::eyre!("setlist.{label}: {e:?}")
+}
+
+/// True when the server reported "no setlist cached yet". The CLI
+/// uses this to decide whether to auto-build before retrying.
+fn is_not_found(e: &vox::VoxError<session_proto::SessionServiceError>) -> bool {
+    matches!(
+        e,
+        vox::VoxError::User(session_proto::SessionServiceError::NotFound { .. })
+    )
+}
+
+fn print_json<T: facet::Facet<'static>>(value: &T) -> Result<()> {
+    let json = facet_json::to_string(value).map_err(|e| eyre::eyre!("encode json: {e:?}"))?;
+    println!("{json}");
+    Ok(())
+}
+
+// ============================================================================
+// Generic REAPER action invocation
+// ============================================================================
+
+async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
+
+    // Normalise the command id: REAPER's named commands always start
+    // with `_` (e.g. `_FTS_SESSION_BUILD_SETLIST`). Accept the bare
+    // form too so users don't have to remember the leading underscore
+    // when typing on the shell.
+    let normalized: String =
+        if command_id.starts_with('_') || command_id.chars().all(|c| c.is_ascii_digit()) {
+            command_id.to_string()
+        } else {
+            format!("_{}", command_id)
+        };
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let projects = ProjectsClient::new(caller);
+
+    let start = std::time::Instant::now();
+    let result = projects
+        .run_command(ProjectContext::Current, normalized.clone())
+        .await
+        .map_err(|e| eyre::eyre!("run_command rpc failed: {e:?}"))?;
+    let rt = start.elapsed();
+
+    if result {
+        println!("{normalized}  ok   ({rt:?})");
+    } else {
+        eyre::bail!(
+            "{normalized}  failed — REAPER returned false. Command may not be \
+             registered, or REAPER refused to run it (no project, wrong context, \
+             etc.). Check the extension log for handler-side errors."
+        );
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Ruler lane primitives — direct pokes for debugging convention drift
+// ============================================================================
+
+async fn cmd_rename_lane(socket: Option<&std::path::Path>, index: u32, name: &str) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let projects = ProjectsClient::new(caller);
+
+    let start = std::time::Instant::now();
+    projects
+        .set_ruler_lane_name(ProjectContext::Current, index, name.to_string())
+        .await
+        .map_err(|e| eyre::eyre!("set_ruler_lane_name rpc failed: {e:?}"))?;
+    println!("lane {index} → {:?}   ({:?})", name, start.elapsed());
+    Ok(())
+}
+
+async fn cmd_set_project_info(
+    socket: Option<&std::path::Path>,
+    key: &str,
+    value: f64,
+) -> Result<()> {
+    use daw_proto::ProjectContext;
+    use daw_proto::project::ProjectsClient;
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    let projects = ProjectsClient::new(caller);
+
+    let start = std::time::Instant::now();
+    projects
+        .set_project_info(ProjectContext::Current, key.to_string(), value)
+        .await
+        .map_err(|e| eyre::eyre!("set_project_info rpc failed: {e:?}"))?;
+    println!("{key} = {value}   ({:?})", start.elapsed());
+    Ok(())
 }

@@ -3,10 +3,15 @@ name = "session-proto"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["vox"]
+vox = []
+
 [dependencies]
 vox.workspace = true
 vox-types.workspace = true
 actions-proto.workspace = true
+architect = { workspace = true, features = ["vox"] }
 facet.workspace = true
 daw.workspace = true
 keyflow.workspace = true

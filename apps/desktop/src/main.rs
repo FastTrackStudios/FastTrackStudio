@@ -3,7 +3,7 @@
 //! Provides the session UI (performance view, transport, setlist navigation) without
 //! the full fts-control app. Runs session services in-process via LocalServices.
 
-use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::desktop::{Config, tao::window::WindowBuilder};
 use dioxus::prelude::*;
 
 use session_ui::{ConnectionState, Session, SessionShell};
@@ -115,8 +115,9 @@ fn DesktopSessionShell() -> Element {
             let web_registry = gateway::web_client_registry();
 
             while let Ok(Some(event_ref)) = rx.recv().await {
-                web_registry.broadcast(&event_ref).await;
-                session_ui::apply_setlist_event(&event_ref);
+                let event = event_ref.get();
+                web_registry.broadcast(event).await;
+                session_ui::apply_setlist_event(event);
             }
 
             poll_handle.abort();

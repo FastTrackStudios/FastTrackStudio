@@ -22,7 +22,7 @@ use vox_websocket::WsLink;
 
 use crate::web_client_handler::WebClientHandler;
 use session_ui::{
-    ConnectionState, Session, ACTIVE_INDICES, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS,
+    ACTIVE_INDICES, ConnectionState, PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, Session,
 };
 use wasm_bindgen::prelude::*;
 
@@ -187,9 +187,9 @@ async fn fetch_setlist() -> Result<(), String> {
         .map_err(|e| format!("build_from_open_projects: {e:?}"))?;
 
     let setlist = client
-        .get_setlist()
+        .setlist()
         .await
-        .map_err(|e| format!("get_setlist: {e:?}"))?;
+        .map_err(|e| format!("setlist: {e:?}"))?;
 
     log(&format!(
         "[session-web] Setlist '{}' with {} songs",
@@ -201,7 +201,7 @@ async fn fetch_setlist() -> Result<(), String> {
     *SETLIST_STRUCTURE.write() = setlist;
 
     // Set initial active song
-    match client.get_active_song().await {
+    match client.active_song().await {
         Ok(active) => {
             if let Some(idx) = songs
                 .iter()
