@@ -18,7 +18,7 @@ PARENT="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 mkdir -p "$PARENT"
 cd "$PARENT"
 
-STAR="https://git.starcommand.live/FastTrackStudios"
+STAR="ssh://forgejo@git.starcommand.live/FastTrackStudios"
 
 # Sibling -> "url|branch". Most live on starcommand; a couple use upstream.
 # Branch hints exist because some workspaces expect crates that only live on
