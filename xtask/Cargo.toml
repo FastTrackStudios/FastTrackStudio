@@ -13,7 +13,7 @@ reaper-test = { workspace = true, features = ["runner"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 signal.workspace = true
-signal-storage = { git = "https://github.com/FastTrackStudios/signal.git", branch = "main" }
+signal-storage = { git = "https://git.starcommand.live/FastTrackStudios/signal.git", branch = "main" }
 tokio.workspace = true
 uuid.workspace = true
 utils.workspace = true

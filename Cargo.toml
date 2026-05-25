@@ -28,7 +28,7 @@ edition = "2024"
 rust-version = "1.85"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/FastTrackStudios/FastTrackStudio"
+repository = "https://git.starcommand.live/FastTrackStudios/FastTrackStudio"
 authors = ["FastTrack Studio"]
 
 [workspace.dependencies]
@@ -81,9 +81,9 @@ moire = { version = "1.0", features = ["diagnostics"] }
 # Keyflow/Engraver crates (sibling repo — facade pattern)
 # NOTE: keyflow-proto, keyflow-text, keyflow-midi, engraver-proto are INTERNAL.
 # Access them through the `keyflow` or `engraver` facade crates.
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
-engraver = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
-keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main", default-features = false }
+keyflow = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
+engraver = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
+keyflow-ui = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main", default-features = false }
 
 # DAW domain
 # `daw` is the facade. `daw-cli` is a public sibling crate of CLI
@@ -91,70 +91,70 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow.git", branch =
 # sibling crate for in-process REAPER extension hosting (folding it
 # into `daw` would cycle through daw-reaper → keyflow → daw, see daw
 # a823b67).
-daw = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-cli = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-cli = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 # `daw-proto` is listed here so the fts-cli TUI can build typed
 # service clients (TransportClient, TracksClient, ProjectsClient) on
 # top of the Vox connection it shares with session-cli.
-daw-proto = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 
 # Dock UI (sibling repo)
-dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
-dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
+dock-proto = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main" }
+dock-dioxus = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main" }
 
 # Actions / Input (sibling repo)
-actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-actions-registry = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-actions-standalone = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-actions-keybindings = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-input-dioxus = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-input = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
+actions-proto = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
+actions-registry = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
+actions-standalone = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
+actions-keybindings = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
+input-dioxus = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
+input = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
 
 # Dynamic template (sibling repo)
-color-palette = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
-music-catalog = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
-dynamic-template-proto = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
-dynamic-template = { git = "https://github.com/FastTrackStudios/dynamic-template.git", branch = "main" }
+color-palette = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
+music-catalog = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
+dynamic-template-proto = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
+dynamic-template = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # Shared infrastructure
-audio-controls = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 vox-discover = { path = "crates/shared/vox-discover" }
 installer-core = { path = "crates/shared/installer-core" }
 
 # Signal (sibling repo)
-signal = { git = "https://github.com/FastTrackStudios/signal.git", branch = "main" }
-signal-ui = { git = "https://github.com/FastTrackStudios/signal.git", branch = "main", default-features = false }
-signal-cli = { git = "https://github.com/FastTrackStudios/signal.git", branch = "main" }
-macromod = { git = "https://github.com/FastTrackStudios/signal.git", branch = "main" }
+signal = { git = "https://git.starcommand.live/FastTrackStudios/signal.git", branch = "main" }
+signal-ui = { git = "https://git.starcommand.live/FastTrackStudios/signal.git", branch = "main", default-features = false }
+signal-cli = { git = "https://git.starcommand.live/FastTrackStudios/signal.git", branch = "main" }
+macromod = { git = "https://git.starcommand.live/FastTrackStudios/signal.git", branch = "main" }
 
 # Session (sibling repo)
 # NOTE: session-proto is listed here for use by session-ui (internal domain crate only).
 # App crates must NOT depend on session-proto directly — use the `session` facade instead.
-session = { git = "https://github.com/FastTrackStudios/session.git", branch = "main" }
-session-proto = { git = "https://github.com/FastTrackStudios/session.git", branch = "main" }
-session-ui = { git = "https://github.com/FastTrackStudios/session.git", branch = "main" }
-session-cli = { git = "https://github.com/FastTrackStudios/session.git", branch = "main" }
+session = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "main" }
+session-proto = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "main" }
+session-ui = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "main" }
+session-cli = { git = "https://git.starcommand.live/FastTrackStudios/session.git", branch = "main" }
 
 # Sync (sibling repo)
-sync = { git = "https://github.com/FastTrackStudios/sync.git", branch = "main" }
-sync-proto = { git = "https://github.com/FastTrackStudios/sync.git", branch = "main" }
-sync-ui = { git = "https://github.com/FastTrackStudios/sync.git", branch = "main" }
+sync = { git = "https://git.starcommand.live/FastTrackStudios/sync.git", branch = "main" }
+sync-proto = { git = "https://git.starcommand.live/FastTrackStudios/sync.git", branch = "main" }
+sync-ui = { git = "https://git.starcommand.live/FastTrackStudios/sync.git", branch = "main" }
 
 utils = { path = "crates/shared/utils" }
 
 # REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
-reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-common-types = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
 # FTS REAPER crates (shared reaper-lib repo)
 swell-ui = { path = "../reaper-lib/crates/swell-ui" }
 reaper-embed = { path = "../reaper-lib/crates/reaper-embed" }
-reaper-test = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-reaper-test-macro = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
-reaper-launcher = { git = "https://github.com/FastTrackStudios/daw.git", branch = "main" }
+reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 fragile = "2.0.1"
 crossbeam-channel = "0.5"
 scopeguard = "1.1.0"
@@ -162,7 +162,7 @@ raw-window-handle = "0.4.2"
 palette = "0.7.3"
 
 # FTS design system (wraps lumen-blocks, lucide-dioxus, layout, typography)
-fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", branch = "main" }
 
 # Lumen blocks (Dioxus shadcn-inspired components)
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
@@ -206,25 +206,18 @@ pollster = "0.4"
 # any of the domain repos. Comment out a section to fall back to the
 # pinned GitHub `main` rev.
 
-[patch."https://github.com/FastTrackStudios/session.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/session.git"]
 session = { path = "../session/crates/session" }
 session-proto = { path = "../session/crates/session-proto" }
 session-ui = { path = "../session/crates/session-ui" }
 session-cli = { path = "../session/apps/cli" }
 
-[patch."https://github.com/FastTrackStudios/daw.git"]
-daw = { path = "../daw/crates/daw" }
-daw-cli = { path = "../daw/apps/daw" }
-daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-control = { path = "../daw/crates/daw-control" }
-daw-reaper = { path = "../daw/crates/daw-reaper" }
-audio-controls = { path = "../daw/crates/audio-controls" }
-reaper-test = { path = "../daw/crates/reaper-test" }
-reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
-reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+# daw is consumed from git.starcommand.live (canonical — daw main carries the
+# full PT→RPP work + architect-git, PR #7). The https-starcommand URL is the
+# source of truth and needs no patch; the ssh-starcommand block below only
+# redirects session's ssh refs onto it so the graph resolves to one daw.
 
-[patch."https://github.com/FastTrackStudios/keyflow.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
 keyflow = { path = "../keyflow/crates/keyflow" }
 keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
 keyflow-text = { path = "../keyflow/crates/keyflow-text" }
@@ -245,16 +238,19 @@ session-ui = { path = "../session/crates/session-ui" }
 session-cli = { path = "../session/apps/cli" }
 
 [patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git"]
-daw = { path = "../daw/crates/daw" }
-daw-cli = { path = "../daw/apps/daw" }
-daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-control = { path = "../daw/crates/daw-control" }
-daw-reaper = { path = "../daw/crates/daw-reaper" }
-audio-controls = { path = "../daw/crates/audio-controls" }
-reaper-test = { path = "../daw/crates/reaper-test" }
-reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
-reaper-launcher = { path = "../daw/crates/reaper-launcher" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-cli = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-control = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-module = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-standalone = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+dawfile-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 
 [patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git"]
 keyflow = { path = "../keyflow/crates/keyflow" }
@@ -275,11 +271,16 @@ actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
 input-dioxus = { path = "../input_actions/crates/input-dioxus" }
 input = { path = "../input_actions/crates/input" }
 
-[patch."https://github.com/FastTrackStudios/reaper-rs.git"]
-reaper-high = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-low = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+# reaper-rs is referenced via github / https-starcommand / ssh-starcommand
+# across the graph (daw uses https-starcommand). Unify everything onto the
+# https-starcommand remote — two URL schemes for the same repo otherwise
+# produce two reaper-low crates and HWND/RECT type mismatches in daw-reaper.
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git"]
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Signal patched out for now — local signal pins an older vox rev
 # (Codys-Wright/vox@2a2f793b) that drags facet 0.44 into the
@@ -287,13 +288,13 @@ reaper-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/rea
 # Re-enable when signal bumps to bearcove/vox@27eef573 (or matches
 # whatever rev daw/session settle on).
 #
-# [patch."https://github.com/FastTrackStudios/signal.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/signal.git"]
 # signal = { path = "../signal/crates/signal" }
 # signal-ui = { path = "../signal/crates/signal-ui" }
 # signal-cli = { path = "../signal/apps/cli" }
 # macromod = { path = "../signal/crates/macromod" }
 
-[patch."https://github.com/FastTrackStudios/input_actions.git"]
+[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }
 actions-registry = { path = "../input_actions/crates/actions-registry" }
 actions-standalone = { path = "../input_actions/crates/actions-standalone" }
