@@ -2525,6 +2525,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "daw",
+ "eyre",
+ "fts-xtask",
  "reaper-launcher",
  "serde_json",
 ]
@@ -3765,6 +3767,15 @@ dependencies = [
  "dioxus",
  "lucide-dioxus",
  "tracing",
+]
+
+[[package]]
+name = "fts-xtask"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-xtask?branch=main#1f9f524e888a544d900fac1a408420c842221052"
+dependencies = [
+ "eyre",
+ "owo-colors",
 ]
 
 [[package]]

@@ -50,6 +50,10 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Canonical CI gate (shared fts-xtask battery): fmt + clippy + check + nextest + doctests.
+    Ci,
+    /// `cargo check --workspace --all-targets` (shared fts-xtask).
+    Check,
 }
 
 fn fts_home() -> String {
@@ -97,6 +101,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Cmd::SetupTestBundles { force } => setup_test_bundles(force),
         Cmd::ReaperTest { filter, keep_open } => reaper_test(filter, keep_open),
         Cmd::SetupRigs { force } => setup_rigs(force),
+        Cmd::Ci => {
+            // daw hasn't adopted tracey specs yet; nextest `ci` profile lands
+            // with .config/nextest.toml in the hygiene wiring step.
+            let cfg = fts_xtask::XtaskConfig {
+                nextest_profile: "default".to_string(),
+                run_doctests: true,
+                run_tracey: false,
+                ..fts_xtask::XtaskConfig::default()
+            };
+            fts_xtask::run_ci(&cfg).map_err(|e| e.into())
+        }
+        Cmd::Check => fts_xtask::run_check().map_err(|e| e.into()),
     }
 }
 

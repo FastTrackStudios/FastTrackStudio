@@ -10,3 +10,5 @@ reaper-launcher = { workspace = true, features = ["icon-gen"] }
 # `test-harness` feature (former `reaper-test` crate with its `runner` feature).
 daw = { workspace = true, features = ["test-harness"] }
 serde_json = "1.0"
+fts-xtask = { git = "https://git.starcommand.live/FastTrackStudios/fts-xtask", branch = "main" }
+eyre = "0.6"
