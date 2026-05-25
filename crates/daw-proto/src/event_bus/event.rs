@@ -12,6 +12,7 @@
 //! about exactly one domain.
 
 use crate::marker::MarkerStreamEvent;
+use crate::project::ProjectStreamEvent;
 use crate::region::RegionStreamEvent;
 use crate::tempo_map::TempoMapStreamEvent;
 use crate::track::TrackStreamEvent;
@@ -30,13 +31,21 @@ pub enum DawEvent {
     TempoMap(TempoMapStreamEvent),
     TransportState(TransportEvent),
     TransportPosition(PositionTick),
+    Project(ProjectStreamEvent),
 }
 
 /// Per-subscriber filter. Every flag defaults to off; callers opt in
 /// to the domains they care about. `all()` / `everything_but_position()`
 /// cover the common shapes — OSC bridges typically want everything,
 /// UI inspectors typically skip the 30Hz position firehose.
-#[derive(Clone, Copy, Debug, Default, Facet)]
+///
+/// `project_guid`, when set, scopes per-project domains (track,
+/// marker, region, tempo_map, transport state + position) to a single
+/// project at the publisher. Single-project clients save the wire
+/// traffic of every other open tab. `Project` events always pass
+/// through regardless — clients need them to know when to swap the
+/// scoped guid.
+#[derive(Clone, Debug, Default, Facet)]
 pub struct BusFilter {
     pub tracks: bool,
     pub markers: bool,
@@ -44,6 +53,8 @@ pub struct BusFilter {
     pub tempo_map: bool,
     pub transport_state: bool,
     pub transport_position: bool,
+    pub projects: bool,
+    pub project_guid: Option<String>,
 }
 
 impl BusFilter {
@@ -55,6 +66,8 @@ impl BusFilter {
             tempo_map: true,
             transport_state: true,
             transport_position: true,
+            projects: true,
+            project_guid: None,
         }
     }
 
@@ -66,17 +79,37 @@ impl BusFilter {
             tempo_map: true,
             transport_state: true,
             transport_position: false,
+            projects: true,
+            project_guid: None,
         }
     }
 
+    /// Narrow this filter to a single project — `track`, `marker`,
+    /// `region`, `tempo_map`, transport state and position events
+    /// outside that project are dropped at the publisher.
+    pub fn for_project(mut self, guid: impl Into<String>) -> Self {
+        self.project_guid = Some(guid.into());
+        self
+    }
+
+    /// True when this filter is project-scoped and `guid` doesn't
+    /// match. Per-domain forwarders call this to drop ticks for tabs
+    /// the subscriber doesn't care about.
+    pub fn project_rejects(&self, guid: &str) -> bool {
+        self.project_guid
+            .as_deref()
+            .is_some_and(|want| want != guid)
+    }
+
     /// True when at least one domain is enabled.
-    pub const fn any(&self) -> bool {
+    pub fn any(&self) -> bool {
         self.tracks
             || self.markers
             || self.regions
             || self.tempo_map
             || self.transport_state
             || self.transport_position
+            || self.projects
     }
 }
 

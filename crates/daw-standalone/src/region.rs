@@ -108,6 +108,19 @@ impl Regions for Standalone {
         })?
     }
 
+    fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()> {
+        let guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("Project", "current"))?;
+        self.with_project_mut(&guid, |p| {
+            let r = p
+                .regions
+                .get_mut(&id)
+                .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
+            r.lane = lane;
+            Ok::<(), DawError>(())
+        })?
+    }
+
     async fn subscribe(
         &self,
         _project: ProjectContext,

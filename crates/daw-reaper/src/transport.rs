@@ -151,13 +151,16 @@ fn time_to_musical_position(
     time_seconds: f64,
 ) -> daw_proto::primitives::MusicalPosition {
     let Some(pos) = PositionInSeconds::new(time_seconds).ok() else {
-        return daw_proto::primitives::MusicalPosition::new(1, 1, 0);
+        return daw_proto::primitives::MusicalPosition::ZERO;
     };
     let result = medium.time_map_2_time_to_beats(reaper_ctx, pos);
-    let measure_offset = project.measure_offset();
-    let measure = result.measure_index + measure_offset + 1;
+    // Store 0-based (the proto convention — Display adds +1 to render
+    // REAPER's familiar 1-based bars:beats). `measure_offset` is the
+    // `projmeasoffs` adjustment; it's applied at storage time so any
+    // arithmetic on these MusicalPositions stays correct.
+    let measure = result.measure_index + project.measure_offset();
     let beats_since = result.beats_since_measure.get();
-    let beat = beats_since.floor() as i32 + 1;
+    let beat = beats_since.floor() as i32;
     let subdivision = ((beats_since.fract()) * 1000.0).round() as i32;
     daw_proto::primitives::MusicalPosition::new(measure, beat, subdivision.clamp(0, 999))
 }
@@ -505,6 +508,12 @@ fn transport_cache() -> &'static Mutex<HashMap<String, TransportState>> {
     TRANSPORT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+static ACTIVE_PROJECT_GUID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn active_project_guid() -> &'static Mutex<Option<String>> {
+    ACTIVE_PROJECT_GUID.get_or_init(|| Mutex::new(None))
+}
+
 /// Poll REAPER transport state for ALL open projects and broadcast
 /// changes through the [`crate::event_hub`] hub.
 ///
@@ -515,7 +524,8 @@ pub fn poll_and_broadcast_transport() {
     let hub = crate::event_hub::hub();
     let want_state = hub.transport_state_subscriber_count() > 0;
     let want_position = hub.position_subscriber_count() > 0;
-    if !want_state && !want_position {
+    let want_projects = hub.projects_subscriber_count() > 0;
+    if !want_state && !want_position && !want_projects {
         return;
     }
 
@@ -524,6 +534,34 @@ pub fn poll_and_broadcast_transport() {
     let mut cache = transport_cache()
         .lock()
         .expect("transport cache mutex poisoned");
+
+    // Detect active-project switch by comparing the current tab's GUID
+    // against last-seen. Cheap (one extra `enum_projects` call per
+    // tick) and lets clients drop a `Projects::current()` RPC entirely.
+    if want_projects {
+        if let Some(active) = medium.enum_projects(ProjectRef::Current, 0) {
+            let active_guid = project_guid_from(&Project::new(active.project));
+            let mut slot = active_project_guid()
+                .lock()
+                .expect("active project guid mutex poisoned");
+            if slot.as_deref() != Some(active_guid.as_str()) {
+                *slot = Some(active_guid.clone());
+                hub.publish_project(daw_proto::project::ProjectStreamEvent {
+                    event: daw_proto::project::ProjectEvent::CurrentChanged(Some(active_guid)),
+                });
+            }
+        } else {
+            let mut slot = active_project_guid()
+                .lock()
+                .expect("active project guid mutex poisoned");
+            if slot.is_some() {
+                *slot = None;
+                hub.publish_project(daw_proto::project::ProjectStreamEvent {
+                    event: daw_proto::project::ProjectEvent::CurrentChanged(None),
+                });
+            }
+        }
+    }
 
     for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
@@ -537,15 +575,14 @@ pub fn poll_and_broadcast_transport() {
         let state = read_transport_state_for_project(&project, reaper_ctx, medium);
 
         if want_position {
-            let playhead_seconds = state
-                .playhead_position
-                .time
-                .map(|t| t.as_seconds())
-                .unwrap_or(0.0);
-            let qn = position_qn(medium, result.project, playhead_seconds);
+            // `state` already carries both representations on each
+            // cursor's Position struct — reuse them straight through
+            // (musical is computed by `time_to_musical_position` which
+            // applies `projmeasoffs`).
             hub.publish_position(PositionTick {
-                playhead_seconds,
-                playhead_qn: qn,
+                project_guid: project_guid.clone(),
+                playhead: state.playhead_position.clone(),
+                edit_cursor: state.edit_position.clone(),
                 is_playing: state.is_playing(),
             });
         }
@@ -564,22 +601,6 @@ pub fn poll_and_broadcast_transport() {
             }
         }
     }
-}
-
-/// Quarter-note position for `tpos_seconds` within `project`. Uses
-/// `TimeMap2_timeToBeats` which returns the full-beats value REAPER
-/// considers canonical for the project's tempo map.
-fn position_qn(medium: &reaper_medium::Reaper, project: ReaProject, tpos_seconds: f64) -> f64 {
-    // `PositionInSeconds::new` rejects NaN; fall back to 0 if the
-    // backend hands us something unrepresentable.
-    let Ok(tpos) = PositionInSeconds::new(tpos_seconds) else {
-        return 0.0;
-    };
-    // SAFETY: project came from enum_projects; valid within this tick.
-    let result = unsafe {
-        medium.time_map_2_time_to_beats_unchecked(ReaperProjectContext::Proj(project), tpos)
-    };
-    result.full_beats.get()
 }
 
 /// Cheap equality check tolerating sub-millisecond playhead drift —

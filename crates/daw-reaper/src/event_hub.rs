@@ -19,6 +19,7 @@
 use std::sync::OnceLock;
 
 use daw_proto::marker::MarkerStreamEvent;
+use daw_proto::project::ProjectStreamEvent;
 use daw_proto::region::RegionStreamEvent;
 use daw_proto::tempo_map::TempoMapStreamEvent;
 use daw_proto::track::TrackStreamEvent;
@@ -49,6 +50,8 @@ pub struct DawEventHub {
     tracks_tx: broadcast::Sender<TrackStreamEvent>,
     /// Tempo map point add/remove/modify events.
     tempo_map_tx: broadcast::Sender<TempoMapStreamEvent>,
+    /// Project lifecycle (open/close/active-tab switch).
+    projects_tx: broadcast::Sender<ProjectStreamEvent>,
 
     // ── Continuous ───────────────────────────────────────────────
     /// Position ticks. Pushed at ~30Hz from the REAPER main loop.
@@ -64,6 +67,7 @@ impl DawEventHub {
             regions_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             tracks_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             tempo_map_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
+            projects_tx: broadcast::channel(OCCASIONAL_BUFFER).0,
             position_tx: broadcast::channel(CONTINUOUS_BUFFER).0,
         }
     }
@@ -150,6 +154,20 @@ impl DawEventHub {
 
     pub fn tempo_map_subscriber_count(&self) -> usize {
         self.tempo_map_tx.receiver_count()
+    }
+
+    // ── Projects ─────────────────────────────────────────────────
+
+    pub fn subscribe_projects(&self) -> broadcast::Receiver<ProjectStreamEvent> {
+        self.projects_tx.subscribe()
+    }
+
+    pub fn publish_project(&self, event: ProjectStreamEvent) {
+        let _ = self.projects_tx.send(event);
+    }
+
+    pub fn projects_subscriber_count(&self) -> usize {
+        self.projects_tx.receiver_count()
     }
 }
 

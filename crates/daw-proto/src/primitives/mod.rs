@@ -119,6 +119,116 @@ impl Position {
             midi: Some(PositionInPpq::ZERO),
         }
     }
+
+    /// Build from both time and musical representations — what
+    /// publishers like the REAPER transport poll have ready in hand.
+    pub fn from_time_and_musical(time: PositionInSeconds, musical: MusicalPosition) -> Self {
+        Self {
+            time: Some(time),
+            musical: Some(musical),
+            midi: None,
+        }
+    }
+
+    /// Time component in seconds, or `None` when this position only
+    /// carries a musical / MIDI representation. Returning `Option`
+    /// instead of `0.0` removes a footgun — silently treating
+    /// "missing" as "at the origin" once produced an off-by-zero in
+    /// the offset-map code that took an hour to spot.
+    pub fn seconds(&self) -> Option<f64> {
+        self.time.map(|t| t.as_seconds())
+    }
+
+    /// `self − other` in both seconds and quarter-notes. Returns
+    /// `None` for a component when either side is missing it.
+    pub fn delta_from(&self, other: &Position) -> PositionDelta {
+        let seconds = match (self.time, other.time) {
+            (Some(a), Some(b)) => Some(a.as_seconds() - b.as_seconds()),
+            _ => None,
+        };
+        let quarter_notes = match (self.musical, other.musical) {
+            // Reconstruct beats from measure+beat+subdivision using the
+            // common 4/4 assumption when no time-sig is in scope. Callers
+            // that need accurate bar deltas should call the variant that
+            // takes a TimeSignature.
+            (Some(_), Some(_)) => None,
+            _ => None,
+        };
+        PositionDelta {
+            seconds,
+            quarter_notes,
+        }
+    }
+
+    /// `self − other`, with bar-aware musical delta using the supplied
+    /// time signature. Use this when you have a time-sig in hand (e.g.
+    /// from a TransportEvent::TempoChanged) and want a `bars.beats`
+    /// display.
+    pub fn delta_from_with_ts(&self, other: &Position, ts: TimeSignature) -> PositionDelta {
+        let mut d = self.delta_from(other);
+        if let (Some(a), Some(b)) = (self.musical, other.musical) {
+            let beats_per_measure = ts.numerator().max(1) as f64;
+            let a_qn = a.measure as f64 * beats_per_measure
+                + a.beat as f64
+                + a.subdivision as f64 / 1000.0;
+            let b_qn = b.measure as f64 * beats_per_measure
+                + b.beat as f64
+                + b.subdivision as f64 / 1000.0;
+            d.quarter_notes = Some(a_qn - b_qn);
+        }
+        d
+    }
+}
+
+impl std::fmt::Display for Position {
+    /// `time / musical` if both present, just the non-None one
+    /// otherwise. Single-line, suitable for table cells.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.time, self.musical) {
+            (Some(t), Some(m)) => write!(f, "{t} / {m}"),
+            (Some(t), None) => write!(f, "{t}"),
+            (None, Some(m)) => write!(f, "{m}"),
+            (None, None) => write!(f, "—"),
+        }
+    }
+}
+
+/// Result of [`Position::delta_from`]. Both components are `Option`
+/// because the underlying positions may have only one representation
+/// in common.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PositionDelta {
+    pub seconds: Option<f64>,
+    pub quarter_notes: Option<f64>,
+}
+
+impl PositionDelta {
+    /// Format the musical delta as `±bars.beats.subdivision` given
+    /// the time signature. Returns `None` when the QN delta isn't
+    /// available (e.g. only the time component differed).
+    pub fn musical_string(&self, ts: TimeSignature) -> Option<String> {
+        let qn = self.quarter_notes?;
+        let bpm = ts.numerator().max(1) as f64;
+        let sign = if qn >= 0.0 { "+" } else { "-" };
+        let a = qn.abs();
+        let bars = (a / bpm).floor() as i64;
+        let in_bar = a - bars as f64 * bpm;
+        let beats = in_bar.floor() as i64;
+        let sub = ((in_bar - beats as f64) * 1000.0).round() as i64;
+        let sub = sub.clamp(0, 999);
+        Some(format!("{sign}{bars}.{beats}.{sub:03}"))
+    }
+}
+
+impl std::fmt::Display for PositionDelta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(s) = self.seconds {
+            let sign = if s >= 0.0 { "+" } else { "" };
+            write!(f, "{sign}{s:.3}s")
+        } else {
+            write!(f, "—")
+        }
+    }
 }
 
 impl Default for Position {

@@ -14,7 +14,7 @@
 //! accumulate hundreds of position samples in its queue. See
 //! `docs/streaming-design.md`.
 
-use crate::primitives::{Tempo, TimeSignature};
+use crate::primitives::{Position, Tempo, TimeSignature};
 use crate::transport::transport::{LoopRegion, PlayState, RecordMode, Transport};
 use facet::Facet;
 
@@ -77,23 +77,31 @@ pub enum TransportEvent {
 /// `qn_position` is the same cursor in quarter notes — provided so
 /// musical-time UIs don't need to do their own time-map conversion
 /// on every tick.
-#[derive(Clone, Copy, Debug, Facet)]
+#[derive(Clone, Debug, Facet)]
 pub struct PositionTick {
-    /// Cursor position in seconds.
-    pub playhead_seconds: f64,
-    /// Cursor position in quarter notes.
-    pub playhead_qn: f64,
-    /// Whether transport is currently playing (so a single subscriber
-    /// can stop drawing the playhead when stopped without subscribing
-    /// to `TransportEvent` separately).
+    /// Project this tick refers to. The streaming hub emits one tick
+    /// per open project per cycle; subscribers that only care about
+    /// the active project filter on this field.
+    pub project_guid: String,
+    /// Playback cursor — both `time` (seconds) and `musical` (with
+    /// `projmeasoffs` applied) are populated; clients display
+    /// whichever they want via `Position`'s Display impl.
+    pub playhead: Position,
+    /// Edit cursor — independent of playhead while transport runs
+    /// (unless `Options: Edit cursor follows playback` is on).
+    pub edit_cursor: Position,
+    /// Whether transport is currently playing — denormalized so a
+    /// position-only subscriber can stop drawing the playhead
+    /// without also subscribing to `TransportEvent::PlayStateChanged`.
     pub is_playing: bool,
 }
 
 impl PositionTick {
     pub fn stopped_at_origin() -> Self {
         Self {
-            playhead_seconds: 0.0,
-            playhead_qn: 0.0,
+            project_guid: String::new(),
+            playhead: Position::start(),
+            edit_cursor: Position::start(),
             is_playing: false,
         }
     }

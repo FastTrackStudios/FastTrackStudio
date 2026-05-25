@@ -71,9 +71,11 @@ pub fn register_project_importer(session: &mut ReaperSession) -> Result<(), Reap
 pub unsafe extern "C" fn want_project_file(fn_: *const c_char) -> bool {
     let path = unsafe { CStr::from_ptr(fn_) }.to_string_lossy();
     let lower = path.to_lowercase();
-    EXTENSIONS
+    let want = EXTENSIONS
         .iter()
-        .any(|(ext, _)| lower.ends_with(&format!(".{ext}")))
+        .any(|(ext, _)| lower.ends_with(&format!(".{ext}")));
+    tracing::info!(path = %path, want, "project_import.want_project_file");
+    want
 }
 
 /// Called by REAPER to enumerate supported extensions for the file dialog.
@@ -116,11 +118,15 @@ pub unsafe extern "C" fn load_project(
     genstate: *mut reaper_low::raw::ProjectStateContext,
 ) -> c_int {
     let path = unsafe { CStr::from_ptr(fn_) }.to_string_lossy();
+    tracing::info!(path = %path, "project_import.load_project: begin");
 
     match import_file(&path, genstate) {
-        Ok(()) => 0,
+        Ok(()) => {
+            tracing::info!(path = %path, "project_import.load_project: success");
+            0
+        }
         Err(e) => {
-            tracing::error!("Failed to import {}: {e}", path);
+            tracing::error!(path = %path, error = %e, "project_import.load_project: failed");
             -1
         }
     }
@@ -156,6 +162,32 @@ fn import_file(
     genstate: *mut reaper_low::raw::ProjectStateContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let rpp_text = convert_to_rpp(path)?;
+
+    // Debug dump: write the converted RPP next to the source file so we can
+    // inspect what REAPER is being asked to parse. Keyed off env var to override
+    // the default /tmp location.
+    let dump_dir = std::env::var("FTS_IMPORT_DUMP_DIR")
+        .ok()
+        .unwrap_or_else(|| "/tmp".to_string());
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "import".to_string());
+    let dump_path = std::path::Path::new(&dump_dir).join(format!("fts-import-{stem}.rpp"));
+    if let Err(e) = std::fs::write(&dump_path, &rpp_text) {
+        tracing::warn!(
+            dump_path = %dump_path.display(),
+            error = %e,
+            "project_import: could not write RPP dump"
+        );
+    } else {
+        tracing::info!(
+            dump_path = %dump_path.display(),
+            bytes = rpp_text.len(),
+            "project_import: wrote RPP dump"
+        );
+    }
+
     // Feed RPP text to REAPER line by line
     emit_rpp_to_context(genstate, &rpp_text)?;
     Ok(())
@@ -170,7 +202,17 @@ fn emit_rpp_to_context(
     rpp_text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for line in rpp_text.lines() {
-        let c_line = CString::new(line)?;
+        // ProjectStateContext::AddLine is printf-style — its first argument
+        // is the format string. Any `%` characters in the raw RPP would
+        // be interpreted as format specifiers and at best print garbage,
+        // at worst crash on a missing variadic argument. Pre-escape
+        // (the converter never emits intentional format specifiers).
+        let escaped = if line.contains('%') {
+            line.replace('%', "%%")
+        } else {
+            line.to_string()
+        };
+        let c_line = CString::new(escaped)?;
         unsafe {
             let ctx = &mut *genstate;
             ctx.AddLine(c_line.as_ptr());
