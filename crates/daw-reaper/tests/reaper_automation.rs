@@ -8,9 +8,9 @@
 //!
 //! Run with: `cargo xtask reaper-test -- reaper_automation`
 
+use daw::test::reaper_test;
 use daw_proto::primitives::PositionInSeconds;
 use daw_proto::{EnvelopeShape, EnvelopeType};
-use daw::test::reaper_test;
 
 const POSITION_TOLERANCE_SECS: f64 = 0.001;
 const VALUE_TOLERANCE: f64 = 1e-6;

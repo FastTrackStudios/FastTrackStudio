@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: docker
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Use FTS Cachix
+        uses: cachix/cachix-action@v15
+        with:
+          name: fasttrackstudio
+        continue-on-error: true
+
+      # Same gate developers run via `just ci` / `cargo xtask ci`:
+      # fmt → clippy -D warnings → check → nextest → (doctests/tracey per
+      # xtask config). Runs in the GUI-less `ci` dev shell — REAPER
+      # integration tests (`cargo xtask reaper-test`) need a REAPER-capable
+      # runner and are gated separately.
+      - name: cargo xtask ci
+        run: nix develop .#ci --command cargo xtask ci

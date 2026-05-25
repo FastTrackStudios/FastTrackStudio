@@ -18,8 +18,8 @@
 
 use std::time::Duration;
 
-use eyre::Result;
 use daw::test::{DawInstanceConfig, run_multi_reaper_test};
+use eyre::Result;
 
 const PORT_A: u16 = 17782;
 const PORT_B: u16 = 17783;

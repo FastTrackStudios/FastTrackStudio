@@ -270,6 +270,9 @@ moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", 
 [workspace.lints.rust]
 dead_code = "allow"
 unused = "allow"
+# `unused_unsafe` is a rustc lint (was mis-filed under [lints.clippy], which
+# made clippy::unused_unsafe an unknown-lint error under -D warnings).
+unused_unsafe = "allow"
 
 [workspace.lints.rustdoc]
 # Broken intra-doc links are noisy on a fast-moving codebase. They're
@@ -291,6 +294,4 @@ needless_range_loop = "allow"
 not_unsafe_ptr_arg_deref = "allow"
 only_used_in_recursion = "allow"
 unnecessary_sort_by = "allow"
-unnecessary_unsafe = "allow"
-unused_unsafe = "allow"
 unusual_byte_groupings = "allow"

@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use daw::service::PlayState;
-use eyre::Result;
 use daw::test::{DawInstanceConfig, run_multi_reaper_test};
+use eyre::Result;
 
 /// Maximum allowed position drift during sustained playback (seconds).
 /// Cross-machine LAN adds 1-5ms latency, which the drift corrector handles

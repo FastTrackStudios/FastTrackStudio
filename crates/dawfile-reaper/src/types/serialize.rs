@@ -43,7 +43,11 @@ pub trait RppSerialize {
 // ---------------------------------------------------------------------------
 
 fn b(v: bool) -> i32 {
-    if v { 1 } else { 0 }
+    if v {
+        1
+    } else {
+        0
+    }
 }
 
 fn rpp_escape(s: &str) -> String {

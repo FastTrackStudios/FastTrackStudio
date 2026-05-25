@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dawfile_reaper::{ReaperProject, parse_rpp_file};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use dawfile_reaper::{parse_rpp_file, ReaperProject};
 
 fn candidate_fixtures() -> Vec<(String, PathBuf)> {
     let mut out = vec![(

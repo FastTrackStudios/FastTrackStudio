@@ -102,12 +102,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Cmd::ReaperTest { filter, keep_open } => reaper_test(filter, keep_open),
         Cmd::SetupRigs { force } => setup_rigs(force),
         Cmd::Ci => {
-            // daw hasn't adopted tracey specs yet; nextest `ci` profile lands
-            // with .config/nextest.toml in the hygiene wiring step.
             let cfg = fts_repo::XtaskConfig {
-                nextest_profile: "default".to_string(),
-                run_doctests: true,
-                run_tracey: false,
+                nextest_profile: "ci".to_string(),
+                // daw's workspace lints allow broken intra-doc links during
+                // the stabilization sweep, so doctests stay off (matches
+                // .config/capn/config.styx `doc-tests false`).
+                run_doctests: false,
+                run_tracey: true,
                 ..fts_repo::XtaskConfig::default()
             };
             fts_repo::run_ci(&cfg).map_err(|e| e.into())
