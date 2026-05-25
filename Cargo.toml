@@ -29,7 +29,7 @@ providers = { path = "../dioxus-launcher/crates/providers" }
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
 # Dioxus native renderer (Blitz)
-dioxus-native = { git = "https://git.starcommand.live/FastTrackStudios/blitz", features = ["prelude"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
 
 # DAW API (safe Rust, async, generic)
 daw = { path = "../daw/crates/daw" }
