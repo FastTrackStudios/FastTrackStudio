@@ -12,8 +12,9 @@ use raw_window_handle::{
 use thiserror::Error;
 use vello::{AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions, Scene};
 use wgpu::{
-    Adapter, Device, Extent3d, Features, Instance, MemoryHints, Queue, Surface,
-    SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    Adapter, CurrentSurfaceTexture, Device, Extent3d, Features, Instance, MemoryHints, Queue,
+    Surface, SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages,
 };
 
 #[derive(Debug, Error)]
@@ -30,8 +31,8 @@ pub enum GpuError {
     #[error("Failed to create Vello renderer: {0}")]
     VelloRenderer(#[from] vello::Error),
 
-    #[error("Surface texture error: {0}")]
-    SurfaceTexture(#[from] wgpu::SurfaceError),
+    #[error("Surface texture unavailable: {0}")]
+    SurfaceTexture(String),
 
     #[error("Invalid window handle")]
     InvalidWindowHandle,
@@ -116,11 +117,11 @@ impl GpuState {
             display_handle,
         };
 
-        let instance = Instance::new(&wgpu::InstanceDescriptor {
+        let instance = Instance::new(wgpu::InstanceDescriptor {
             backends: preferred_backends(),
             flags: wgpu::InstanceFlags::from_build_config().with_env(),
             backend_options: wgpu::BackendOptions::from_env_or_default(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let surface = instance.create_surface(handle_wrapper)?;
@@ -224,11 +225,11 @@ impl GpuState {
     /// `StretchBltFromMem` under `WM_PAINT`). Output format is BGRA8 to
     /// match LICE's pixel layout on Linux/macOS SWELL.
     pub fn new_offscreen(width: u32, height: u32) -> Result<Self, GpuError> {
-        let instance = Instance::new(&wgpu::InstanceDescriptor {
+        let instance = Instance::new(wgpu::InstanceDescriptor {
             backends: preferred_backends(),
             flags: wgpu::InstanceFlags::from_build_config().with_env(),
             backend_options: wgpu::BackendOptions::from_env_or_default(),
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -328,7 +329,22 @@ impl GpuState {
             .surface
             .as_ref()
             .expect("render() requires surface mode; use render_offscreen");
-        let surface_texture = surface.get_current_texture()?;
+        let surface_texture = match surface.get_current_texture() {
+            CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,
+            CurrentSurfaceTexture::Timeout => {
+                return Err(GpuError::SurfaceTexture("timeout".into()))
+            }
+            CurrentSurfaceTexture::Occluded => {
+                return Err(GpuError::SurfaceTexture("occluded".into()))
+            }
+            CurrentSurfaceTexture::Outdated => {
+                return Err(GpuError::SurfaceTexture("outdated".into()))
+            }
+            CurrentSurfaceTexture::Lost => return Err(GpuError::SurfaceTexture("lost".into())),
+            CurrentSurfaceTexture::Validation => {
+                return Err(GpuError::SurfaceTexture("validation".into()))
+            }
+        };
 
         let intermediate_view = self
             .intermediate_texture
@@ -597,7 +613,7 @@ impl TextureBlitter {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Blit Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
 

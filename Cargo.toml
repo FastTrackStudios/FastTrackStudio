@@ -161,11 +161,11 @@ tracing = { version = "0.1", features = ["std"] }
 moire = { version = "1.0" }  # diagnostics feature disabled — causes SIGBUS on NixOS
 
 # GPU rendering stack (used by daw-reaper-embed / daw-reaper-dioxus)
-wgpu = { version = "28", features = ["wgsl"] }
-vello = { version = "0.8", features = ["wgpu"] }
+wgpu = { version = "29", features = ["wgsl"] }
+vello = { version = "0.9", features = ["wgpu"] }
 skrifa = "0.37"
 pollster = "0.4"
-anyrender_vello = "0.8"
+anyrender_vello = "0.10"
 
 # Dioxus native rendering (used by daw-reaper-dioxus)
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
@@ -220,20 +220,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid duplicate
 # moire-runtime #[ctor] registrations that crash CLAP plugin scanning.
-# Blitz: redirect upstream DioxusLabs/blitz git refs to local sibling checkout.
-# Local ../blitz tracks DioxusLabs/blitz upstream main; daw-reaper-dioxus uses
-# this to compile against the live blitz API rather than a fixed git rev.
-[patch."https://github.com/DioxusLabs/blitz.git"]
-dioxus-native = { path = "../blitz/packages/dioxus-native" }
-dioxus-native-dom = { path = "../blitz/packages/dioxus-native-dom" }
-blitz = { path = "../blitz/packages/blitz" }
-blitz-dom = { path = "../blitz/packages/blitz-dom" }
-blitz-html = { path = "../blitz/packages/blitz-html" }
-blitz-net = { path = "../blitz/packages/blitz-net" }
-blitz-paint = { path = "../blitz/packages/blitz-paint" }
-blitz-shell = { path = "../blitz/packages/blitz-shell" }
-blitz-traits = { path = "../blitz/packages/blitz-traits" }
-stylo_taffy = { path = "../blitz/packages/stylo_taffy" }
+# Blitz is consumed directly from upstream DioxusLabs/blitz — no local patch.
 
 [patch."https://github.com/bearcove/moire"]
 moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
