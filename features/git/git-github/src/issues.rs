@@ -56,41 +56,119 @@ impl IssueTracker for Backend {
         })
     }
 
-    fn create_issue(
-        &self,
-        repo: &RepoId,
-        _title: String,
-        _body: String,
-    ) -> Result<Issue, GitError> {
+    fn create_issue(&self, repo: &RepoId, title: String, body: String) -> Result<Issue, GitError> {
         Backend::check_forge(repo)?;
-        todo!("create_issue: octo.issues(o, r).create(title).body(body).send()")
+        let backend = self.clone();
+        let repo = repo.clone();
+        self.runtime().block_on(async move {
+            let raw = backend
+                .octo()
+                .issues(&repo.owner, &repo.repo)
+                .create(title)
+                .body(body)
+                .send()
+                .await
+                .map_err(map_err)?;
+            Ok(translate_issue(&repo, raw))
+        })
     }
 
     fn update_issue(
         &self,
         repo: &RepoId,
-        _issue: IssueId,
-        _update: IssueUpdate,
+        issue: IssueId,
+        update: IssueUpdate,
     ) -> Result<Issue, GitError> {
         Backend::check_forge(repo)?;
-        todo!(
-            "update_issue: octo.issues(o, r).update(n).{{title,body,state,labels,assignees,milestone}}()"
-        )
+        let backend = self.clone();
+        let repo = repo.clone();
+        self.runtime().block_on(async move {
+            let handle = backend.octo().issues(&repo.owner, &repo.repo);
+            let mut req = handle.update(issue.0);
+            if let Some(ref t) = update.title {
+                req = req.title(t.as_str());
+            }
+            if let Some(ref b) = update.body {
+                req = req.body(b.as_str());
+            }
+            if let Some(s) = update.state {
+                req = req.state(match s {
+                    IssueState::Open => octocrab::models::IssueState::Open,
+                    IssueState::Closed => octocrab::models::IssueState::Closed,
+                });
+            }
+            if let Some(ref labels) = update.labels {
+                // octocrab takes a slice of String references for labels.
+                req = req.labels(labels.as_slice());
+            }
+            if let Some(ref assignees) = update.assignees {
+                req = req.assignees(assignees.as_slice());
+            }
+            if let Some(milestone_opt) = update.milestone {
+                // octocrab's builder takes `impl Into<u64>` for
+                // the milestone number. `None` clears via `0`
+                // (older octocrab versions; newer expose a
+                // `clear_milestone()` we can switch to once
+                // it's available in our pinned version).
+                req = req.milestone(milestone_opt.unwrap_or(0));
+            }
+            let raw = req.send().await.map_err(map_err)?;
+            Ok(translate_issue(&repo, raw))
+        })
     }
 
-    fn list_comments(&self, repo: &RepoId, _issue: IssueId) -> Result<Vec<Comment>, GitError> {
+    fn list_comments(&self, repo: &RepoId, issue: IssueId) -> Result<Vec<Comment>, GitError> {
         Backend::check_forge(repo)?;
-        todo!("list_comments: octo.issues(o, r).list_comments(n).send()")
+        let backend = self.clone();
+        let repo = repo.clone();
+        self.runtime().block_on(async move {
+            let page = backend
+                .octo()
+                .issues(&repo.owner, &repo.repo)
+                .list_comments(issue.0)
+                .send()
+                .await
+                .map_err(map_err)?;
+            Ok(page
+                .items
+                .into_iter()
+                .map(|c| Comment {
+                    id: c.id.0.to_string(),
+                    author: User {
+                        login: c.user.login.clone(),
+                        display_name: c.user.name.clone(),
+                    },
+                    body: c.body.unwrap_or_default(),
+                })
+                .collect())
+        })
     }
 
     fn add_comment(
         &self,
         repo: &RepoId,
-        _issue: IssueId,
-        _body: String,
+        issue: IssueId,
+        body: String,
     ) -> Result<Comment, GitError> {
         Backend::check_forge(repo)?;
-        todo!("add_comment: octo.issues(o, r).create_comment(n, body)")
+        let backend = self.clone();
+        let repo = repo.clone();
+        self.runtime().block_on(async move {
+            let c = backend
+                .octo()
+                .issues(&repo.owner, &repo.repo)
+                .create_comment(issue.0, body)
+                .await
+                .map_err(map_err)?;
+            Ok(Comment {
+                id: c.id.0.to_string(),
+                author: User {
+                    login: c.user.login.clone(),
+                    display_name: c.user.name.clone(),
+                },
+                body: c.body.unwrap_or_default(),
+            })
+        })
     }
 
     async fn subscribe(&self, _repo: RepoId, _tx: Tx<GitEvent>) {

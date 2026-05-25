@@ -222,8 +222,8 @@ pub fn extract_file(path: &Path) -> Result<CodeExtraction, CodeExtractError> {
         .unwrap_or_default();
     let lang = CodeLang::from_extension(ext)
         .ok_or_else(|| CodeExtractError::UnsupportedLanguage(path.to_path_buf()))?;
-    let src = std::fs::read_to_string(path)
-        .map_err(|e| CodeExtractError::Io(path.to_path_buf(), e))?;
+    let src =
+        std::fs::read_to_string(path).map_err(|e| CodeExtractError::Io(path.to_path_buf(), e))?;
     extract_source(path, &src, lang)
 }
 
@@ -304,8 +304,8 @@ fn visit(
                 pushed_scope = true;
             }
         }
-        "struct_item" | "enum_item" | "trait_item" | "type_item" | "const_item"
-        | "static_item" | "mod_item" => {
+        "struct_item" | "enum_item" | "trait_item" | "type_item" | "const_item" | "static_item"
+        | "mod_item" => {
             let symbol = match kind {
                 "struct_item" => SymbolKind::Struct,
                 "enum_item" => SymbolKind::Enum,
@@ -381,9 +381,10 @@ fn visit(
             // (e.g. `use foo::{bar, baz}`) is a follow-up.
             if let Some(arg) = node.child_by_field_name("argument") {
                 let path_text = node_text(arg, src);
-                let parent = scope.last().cloned().unwrap_or_else(|| {
-                    make_id(rel_path, lang, SymbolKind::Module, "<file>")
-                });
+                let parent = scope
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| make_id(rel_path, lang, SymbolKind::Module, "<file>"));
                 ex.edges.push(CodeEdge {
                     source: parent,
                     target: format!("ext:{path_text}"),
@@ -448,12 +449,8 @@ fn call_target_name(node: Node, src: &[u8]) -> Option<String> {
     let kind = node.kind();
     match kind {
         "identifier" => Some(node_text(node, src)),
-        "field_expression" => node
-            .child_by_field_name("field")
-            .map(|n| node_text(n, src)),
-        "scoped_identifier" => node
-            .child_by_field_name("name")
-            .map(|n| node_text(n, src)),
+        "field_expression" => node.child_by_field_name("field").map(|n| node_text(n, src)),
+        "scoped_identifier" => node.child_by_field_name("name").map(|n| node_text(n, src)),
         _ => {
             // Walk for the last identifier child as a fallback.
             let mut cursor = node.walk();
@@ -525,7 +522,16 @@ fn visit_ts(
         "function_declaration" | "method_definition" | "generator_function_declaration" => {
             if let Some(name) = field_text(node, "name", src) {
                 let id = make_id(rel_path, lang, SymbolKind::Fn, &name);
-                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Fn, lang, rel_path, &node);
+                push_node_and_defines_edge(
+                    ex,
+                    scope,
+                    &id,
+                    &name,
+                    SymbolKind::Fn,
+                    lang,
+                    rel_path,
+                    &node,
+                );
                 scope.push(id);
                 pushed_scope = true;
             }
@@ -533,7 +539,16 @@ fn visit_ts(
         "class_declaration" | "abstract_class_declaration" => {
             if let Some(name) = field_text(node, "name", src) {
                 let id = make_id(rel_path, lang, SymbolKind::Struct, &name);
-                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Struct, lang, rel_path, &node);
+                push_node_and_defines_edge(
+                    ex,
+                    scope,
+                    &id,
+                    &name,
+                    SymbolKind::Struct,
+                    lang,
+                    rel_path,
+                    &node,
+                );
                 scope.push(id);
                 pushed_scope = true;
             }
@@ -541,7 +556,16 @@ fn visit_ts(
         "interface_declaration" => {
             if let Some(name) = field_text(node, "name", src) {
                 let id = make_id(rel_path, lang, SymbolKind::Trait, &name);
-                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Trait, lang, rel_path, &node);
+                push_node_and_defines_edge(
+                    ex,
+                    scope,
+                    &id,
+                    &name,
+                    SymbolKind::Trait,
+                    lang,
+                    rel_path,
+                    &node,
+                );
                 scope.push(id);
                 pushed_scope = true;
             }
@@ -549,13 +573,31 @@ fn visit_ts(
         "enum_declaration" => {
             if let Some(name) = field_text(node, "name", src) {
                 let id = make_id(rel_path, lang, SymbolKind::Enum, &name);
-                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::Enum, lang, rel_path, &node);
+                push_node_and_defines_edge(
+                    ex,
+                    scope,
+                    &id,
+                    &name,
+                    SymbolKind::Enum,
+                    lang,
+                    rel_path,
+                    &node,
+                );
             }
         }
         "type_alias_declaration" => {
             if let Some(name) = field_text(node, "name", src) {
                 let id = make_id(rel_path, lang, SymbolKind::TypeAlias, &name);
-                push_node_and_defines_edge(ex, scope, &id, &name, SymbolKind::TypeAlias, lang, rel_path, &node);
+                push_node_and_defines_edge(
+                    ex,
+                    scope,
+                    &id,
+                    &name,
+                    SymbolKind::TypeAlias,
+                    lang,
+                    rel_path,
+                    &node,
+                );
             }
         }
         "lexical_declaration" => {
@@ -580,7 +622,14 @@ fn visit_ts(
                             };
                             let id = make_id(rel_path, lang, symbol_kind, &name);
                             push_node_and_defines_edge(
-                                ex, scope, &id, &name, symbol_kind, lang, rel_path, &c,
+                                ex,
+                                scope,
+                                &id,
+                                &name,
+                                symbol_kind,
+                                lang,
+                                rel_path,
+                                &c,
                             );
                         }
                     }
@@ -595,9 +644,10 @@ fn visit_ts(
             // `"./foo"`, etc.).
             if let Some(src_node) = node.child_by_field_name("source") {
                 let path_text = node_text(src_node, src);
-                let parent = scope.last().cloned().unwrap_or_else(|| {
-                    make_id(rel_path, lang, SymbolKind::Module, "<file>")
-                });
+                let parent = scope
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| make_id(rel_path, lang, SymbolKind::Module, "<file>"));
                 ex.edges.push(CodeEdge {
                     source: parent,
                     target: format!("ext:{}", path_text.trim_matches(|c| c == '"' || c == '\'')),
@@ -682,18 +732,13 @@ pub fn scan_code_tree(root: &Path) -> Vec<CodeExtraction> {
     // returns false — but the ROOT itself usually has a name
     // like `src` / `task` / `.` (the cwd), so we never test
     // it. We test only descendant entries via depth() > 0.
-    let walker = walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            let name = e.file_name().to_string_lossy();
-            !name.starts_with('.')
-                && name != "target"
-                && name != "node_modules"
-                && name != "vendor"
-        });
+    let walker = walkdir::WalkDir::new(root).into_iter().filter_entry(|e| {
+        if e.depth() == 0 {
+            return true;
+        }
+        let name = e.file_name().to_string_lossy();
+        !name.starts_with('.') && name != "target" && name != "node_modules" && name != "vendor"
+    });
     for entry in walker.filter_map(Result::ok) {
         let p = entry.path();
         if !p.is_file() {
@@ -723,9 +768,7 @@ pub fn scan_code_tree(root: &Path) -> Vec<CodeExtraction> {
             }
             Err(e) => {
                 let mut empty = CodeExtraction::default();
-                empty
-                    .errors
-                    .push(format!("read {}: {e}", p.display()));
+                empty.errors.push(format!("read {}: {e}", p.display()));
                 out.push(empty);
             }
         }
@@ -766,11 +809,7 @@ mod tests {
         );
         // The `baz` trait method + impl method should both be
         // captured as `fn`s.
-        let fn_count = ex
-            .nodes
-            .iter()
-            .filter(|n| n.kind == SymbolKind::Fn)
-            .count();
+        let fn_count = ex.nodes.iter().filter(|n| n.kind == SymbolKind::Fn).count();
         assert!(fn_count >= 3, "expected ≥3 fn nodes, got {fn_count}");
 
         // An `Imports` edge for the `use std::collections::HashMap;`.

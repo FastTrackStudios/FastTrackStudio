@@ -40,6 +40,14 @@ impl Backend {
     /// called from a tokio runtime — the handle is captured and
     /// reused for every `block_on`.
     pub fn from_token(token: impl Into<String>) -> Result<Self, BuildError> {
+        // octocrab's rustls backend needs a process-level
+        // CryptoProvider. reqwest installs one as a side effect;
+        // octocrab does not, so install ring once here. Ignore
+        // the Err when a provider is already installed.
+        static CRYPTO: std::sync::Once = std::sync::Once::new();
+        CRYPTO.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| BuildError::NoRuntime)?;
         let octo = octocrab::OctocrabBuilder::new()
             .personal_token(token.into())

@@ -26,6 +26,19 @@ vault-obsidian = { workspace = true }
 # `task-cli task …` subcommands — first-party task feature
 # (RPC client; vox feature enabled to import `TaskServiceClient`).
 task = { workspace = true, features = ["vox"] }
+# `task-cli issue …` — surfaces the Linear-style workflow
+# attributes on `TaskInfo`. `AgentRef` + friends live here.
+workflows-proto = { workspace = true }
+# `task-cli issue push/pull/sync …` — bidirectional sync between
+# TaskInfo and a forge issue tracker (Forgejo today; GitHub when
+# git-github's todo!() stubs are filled in).
+git-proto = { workspace = true }
+git-config = { workspace = true }
+git-forgejo = { workspace = true }
+git-github = { workspace = true }
+# `task setup forge` registers webhooks via the forge REST API
+# directly (both forges' hook endpoints are near-identical).
+reqwest = { workspace = true }
 # `task-cli milestone …` — project-scoped checkpoints.
 milestone = { workspace = true, features = ["vox"] }
 # Entity-CRUD over RPC for the four file-backed services

@@ -279,6 +279,19 @@ pub struct TaskInfo {
     /// `serialize_task`.
     #[serde(skip)]
     pub details: String,
+
+    /// Linear-style workflow attributes. `None` for tasks that
+    /// aren't part of a tracked workflow (the default — keeps
+    /// existing TaskNotes-shape vaults round-tripping). Set
+    /// when the task is linked to a workspace / cycle / project,
+    /// or claimed by an agent.
+    ///
+    /// Serialized under the `workflow:` frontmatter key as a
+    /// nested mapping so the addition stays scoped (rather than
+    /// scattering ~8 new top-level keys into every task page).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    #[architect(json)]
+    pub workflow: Option<WorkflowAttrs>,
 }
 
 fn default_priority() -> String {
@@ -373,4 +386,139 @@ impl Priority {
             _ => None,
         }
     }
+}
+
+// ---- Linear-style workflow attributes ----------------------------------
+
+/// T-shirt or numeric estimate. Stored alongside other workflow
+/// attributes inside [`WorkflowAttrs`]; the size enum gives you
+/// stable bucketed reporting (XS/S/M/L/XL), the points variant
+/// supports teams that prefer fibonacci-style numbers.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Facet)]
+#[serde(rename_all = "snake_case", tag = "size")]
+#[repr(u8)]
+pub enum Estimate {
+    XS,
+    S,
+    M,
+    L,
+    XL,
+    Points { value: u8 },
+}
+
+/// `Vec<Uuid>` newtype for storing related-task / blocker lists
+/// in a JSON column. Same pattern as [`StringList`].
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Debug, Clone, Default, PartialEq, Eq, Facet, Serialize, Deserialize,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct UuidList(pub Vec<Uuid>);
+
+impl UuidList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<Uuid>> for UuidList {
+    fn from(v: Vec<Uuid>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for UuidList {
+    type Target = Vec<Uuid>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for UuidList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// `Vec<AgentRef>` newtype — JSON column. Lets a task be
+/// owned by N actors (human + agent + agent triple is common
+/// for human-supervised agent work).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct AgentRefList(pub Vec<workflows_proto::AgentRef>);
+
+impl AgentRefList {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<Vec<workflows_proto::AgentRef>> for AgentRefList {
+    fn from(v: Vec<workflows_proto::AgentRef>) -> Self {
+        Self(v)
+    }
+}
+
+impl std::ops::Deref for AgentRefList {
+    type Target = Vec<workflows_proto::AgentRef>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Linear-style work attributes. Nested under a single
+/// `workflow:` frontmatter key on `TaskInfo` so the surface
+/// stays scoped (and so TaskNotes-shape vaults without this
+/// key keep round-tripping).
+///
+/// Every field is optional + skip-if-empty so an empty
+/// `WorkflowAttrs` serializes to `{}` (or is omitted entirely
+/// when `TaskInfo::workflow` is `None`).
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(architect::JsonField, Debug, Clone, Default, PartialEq, Facet, Serialize, Deserialize)]
+pub struct WorkflowAttrs {
+    // NOTE: no `workspace` here. The grouping role workspace
+    // played folds into the org-level Project — tasks group via
+    // `TaskInfo::project_id`, repos bind to a Project via
+    // RepoBinding, and the triage queue is just
+    // `tasks in project where status = triage`. There is no
+    // separate Workspace entity.
+    /// Active cycle / sprint. `None` = un-scoped / backlog.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cycle: Option<Uuid>,
+
+    // NOTE: project membership is NOT here — it lives on
+    // `TaskInfo::project_id`, which already points at the
+    // org-level Project (= the Linear-sense Project, now that
+    // we collapsed the two). Don't reintroduce a `project`
+    // field here; it would duplicate `project_id`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub estimate: Option<Estimate>,
+
+    /// Who owns this task. Human + agent + agent triple is the
+    /// common pattern for supervised agent work.
+    #[serde(skip_serializing_if = "AgentRefList::is_empty", default)]
+    pub assignees: AgentRefList,
+
+    /// Hard dependencies — this task is blocked until each
+    /// listed task closes. Sub-issue / parent relations are
+    /// modelled the same way (parent task blocks children's
+    /// completion implicitly via the workflow rules).
+    #[serde(skip_serializing_if = "UuidList::is_empty", default)]
+    pub blockers: UuidList,
+
+    /// Soft links (e.g. "see also"). No completion enforcement.
+    #[serde(skip_serializing_if = "UuidList::is_empty", default)]
+    pub relates_to: UuidList,
+
+    /// Currently-active `WorkSession` id from `workflows-proto`,
+    /// if work is in progress. Cleared on Finish/Cancel.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub session: Option<Uuid>,
 }

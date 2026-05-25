@@ -20,6 +20,7 @@
 pub mod attachments;
 pub mod capability;
 pub mod server_mgmt;
+pub mod webhooks;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -562,6 +563,10 @@ pub fn router(state: AppState) -> Router {
     let per_org = Router::new()
         .route("/org/{slug}/health", get(per_org_health_handler))
         .route("/org/{slug}/vox", any(per_org_vox_handler))
+        .route(
+            "/org/{slug}/webhooks/forge",
+            axum::routing::post(webhooks::forge_webhook_handler),
+        )
         .with_state(state.clone());
 
     // Server-management vox: `OrgManagementService` mounted on

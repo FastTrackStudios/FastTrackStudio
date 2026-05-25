@@ -195,3 +195,261 @@ impl BindingStore for MemoryStore {
             .collect())
     }
 }
+
+// ---- File-backed store -----------------------------------------------
+
+/// JSON-backed `BindingStore` for the CLI / single-process server.
+/// State persists across restarts at the configured path.
+///
+/// File layout — one `.json` per store, encoded shape:
+///
+/// ```json
+/// {
+///   "repo_bindings": [ { ... }, ... ],
+///   "issue_links":   [ { ... }, ... ]
+/// }
+/// ```
+///
+/// Atomic writes: render to a sibling temp file, `fsync`, rename
+/// into place. Cheap for the tens-to-hundreds-of-rows scale this
+/// store is sized for. Swap to `SQLite` when the row count or
+/// concurrent-writer surface justifies it (tracked as a roadmap
+/// issue).
+#[derive(Clone)]
+pub struct FileStore {
+    path: std::path::PathBuf,
+    inner: Arc<Mutex<FileInner>>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct FileInner {
+    #[serde(default)]
+    repo_bindings: Vec<RepoBinding>,
+    #[serde(default)]
+    issue_links: Vec<IssueLink>,
+}
+
+impl FileStore {
+    /// Open (or create) a store at `path`. Missing file → empty
+    /// store. Existing file is parsed; corrupt JSON returns an
+    /// error rather than silently dropping state.
+    pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, ConfigError> {
+        let path = path.into();
+        let inner = if path.exists() {
+            let bytes = std::fs::read(&path).map_err(|e| ConfigError::Storage(e.to_string()))?;
+            serde_json::from_slice::<FileInner>(&bytes)
+                .map_err(|e| ConfigError::Storage(format!("parse {}: {e}", path.display())))?
+        } else {
+            FileInner::default()
+        };
+        Ok(Self {
+            path,
+            inner: Arc::new(Mutex::new(inner)),
+        })
+    }
+
+    /// Find the task linked to a forge issue identified by
+    /// `(owner, repo, number)`, ignoring the forge host /
+    /// base-url. Useful for the webhook receiver, which gets a
+    /// `repository.full_name` but not the exact base-url the
+    /// link was stored under. Returns the first match's
+    /// `task_id` (links are unique per `(repo, number, kind)`).
+    pub fn find_task_by_owner_repo_number(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Option<String>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .issue_links
+            .iter()
+            .find(|l| l.repo.owner == owner && l.repo.repo == repo && l.number == number)
+            .map(|l| l.task_id.clone()))
+    }
+
+    /// Distinct repos that appear in the issue-link store —
+    /// every forge repo this org has at least one linked issue
+    /// on. Used by `task issue sync-all` to know what to reconcile.
+    pub fn distinct_repos(&self) -> Result<Vec<RepoId>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        let mut out: Vec<RepoId> = Vec::new();
+        for l in &inner.issue_links {
+            if !out.contains(&l.repo) {
+                out.push(l.repo.clone());
+            }
+        }
+        // Also include repos that only have a binding (no issues yet).
+        for b in &inner.repo_bindings {
+            if !out.contains(&b.repo) {
+                out.push(b.repo.clone());
+            }
+        }
+        Ok(out)
+    }
+
+    fn flush_locked(&self, inner: &FileInner) -> Result<(), ConfigError> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| ConfigError::Storage(e.to_string()))?;
+        }
+        let tmp = self.path.with_extension("json.tmp");
+        let json = serde_json::to_vec_pretty(inner)
+            .map_err(|e| ConfigError::Storage(format!("encode: {e}")))?;
+        std::fs::write(&tmp, json).map_err(|e| ConfigError::Storage(e.to_string()))?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| ConfigError::Storage(e.to_string()))?;
+        Ok(())
+    }
+}
+
+impl BindingStore for FileStore {
+    fn add_repo_binding(&self, binding: RepoBinding) -> Result<(), ConfigError> {
+        let mut inner = self.inner.lock().unwrap();
+        // De-dup: same (project_id, repo) tuple already present?
+        // Replacing is a no-op; we don't carry extra metadata.
+        if !inner
+            .repo_bindings
+            .iter()
+            .any(|b| b.project_id == binding.project_id && b.repo == binding.repo)
+        {
+            inner.repo_bindings.push(binding);
+            self.flush_locked(&inner)?;
+        }
+        Ok(())
+    }
+
+    fn remove_repo_binding(&self, project_id: &str, repo: &RepoId) -> Result<(), ConfigError> {
+        let mut inner = self.inner.lock().unwrap();
+        let before = inner.repo_bindings.len();
+        inner
+            .repo_bindings
+            .retain(|b| !(b.project_id == project_id && &b.repo == repo));
+        if inner.repo_bindings.len() != before {
+            self.flush_locked(&inner)?;
+        }
+        Ok(())
+    }
+
+    fn repos_for_project(&self, project_id: &str) -> Result<Vec<RepoId>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .repo_bindings
+            .iter()
+            .filter(|b| b.project_id == project_id)
+            .map(|b| b.repo.clone())
+            .collect())
+    }
+
+    fn projects_for_repo(&self, repo: &RepoId) -> Result<Vec<String>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .repo_bindings
+            .iter()
+            .filter(|b| &b.repo == repo)
+            .map(|b| b.project_id.clone())
+            .collect())
+    }
+
+    fn add_issue_link(&self, link: IssueLink) -> Result<(), ConfigError> {
+        let mut inner = self.inner.lock().unwrap();
+        // Same de-dup rule: (task_id, repo, number, kind) tuple
+        // is unique. Re-adding is a no-op.
+        if !inner.issue_links.iter().any(|l| {
+            l.task_id == link.task_id
+                && l.repo == link.repo
+                && l.number == link.number
+                && l.kind == link.kind
+        }) {
+            inner.issue_links.push(link);
+            self.flush_locked(&inner)?;
+        }
+        Ok(())
+    }
+
+    fn remove_issue_link(&self, task_id: &str, number: u64) -> Result<(), ConfigError> {
+        let mut inner = self.inner.lock().unwrap();
+        let before = inner.issue_links.len();
+        inner
+            .issue_links
+            .retain(|l| !(l.task_id == task_id && l.number == number));
+        if inner.issue_links.len() != before {
+            self.flush_locked(&inner)?;
+        }
+        Ok(())
+    }
+
+    fn issues_for_task(&self, task_id: &str) -> Result<Vec<IssueLink>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .issue_links
+            .iter()
+            .filter(|l| l.task_id == task_id)
+            .cloned()
+            .collect())
+    }
+
+    fn tasks_for_issue(&self, repo: &RepoId, number: u64) -> Result<Vec<String>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .issue_links
+            .iter()
+            .filter(|l| &l.repo == repo && l.number == number)
+            .map(|l| l.task_id.clone())
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use git_proto::Forge;
+
+    fn repo(host: &str, owner: &str, repo: &str) -> RepoId {
+        RepoId {
+            forge: Forge::Forgejo {
+                base_url: format!("https://{host}"),
+            },
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+        }
+    }
+
+    #[test]
+    fn file_store_round_trips_through_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("links.json");
+        let r = repo("git.example.org", "acme", "widgets");
+
+        // Write some state.
+        {
+            let s = FileStore::open(&path).unwrap();
+            s.add_repo_binding(RepoBinding {
+                project_id: "proj-1".into(),
+                repo: r.clone(),
+            })
+            .unwrap();
+            s.add_issue_link(IssueLink {
+                task_id: "task-42".into(),
+                repo: r.clone(),
+                number: 7,
+                kind: LinkKind::Issue,
+            })
+            .unwrap();
+            // Same link twice — should de-dup.
+            s.add_issue_link(IssueLink {
+                task_id: "task-42".into(),
+                repo: r.clone(),
+                number: 7,
+                kind: LinkKind::Issue,
+            })
+            .unwrap();
+        }
+
+        // Re-open and read.
+        let s = FileStore::open(&path).unwrap();
+        assert_eq!(s.repos_for_project("proj-1").unwrap(), vec![r.clone()]);
+        let links = s.issues_for_task("task-42").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].number, 7);
+        assert_eq!(s.tasks_for_issue(&r, 7).unwrap(), vec!["task-42"]);
+    }
+}

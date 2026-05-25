@@ -5696,6 +5696,7 @@ dependencies = [
 [[package]]
 name = "fts-story-core"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "linkme",
 ]
@@ -5703,6 +5704,7 @@ dependencies = [
 [[package]]
 name = "fts-story-macros"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5713,6 +5715,7 @@ dependencies = [
 [[package]]
 name = "fts-story-runtime"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
 dependencies = [
  "dioxus",
  "fts-story-core",
@@ -6127,7 +6130,25 @@ dependencies = [
  "facet",
  "git-proto",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "git-forgejo"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "git-proto",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
@@ -6137,6 +6158,7 @@ dependencies = [
  "architect",
  "git-proto",
  "octocrab",
+ "rustls",
  "thiserror 2.0.18",
  "tokio",
  "vox",
@@ -7920,6 +7942,19 @@ dependencies = [
  "euclid",
  "polycool",
  "smallvec 1.15.1",
+]
+
+[[package]]
+name = "label-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "sea-orm",
+ "serde",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -14188,6 +14223,7 @@ dependencies = [
  "vault",
  "vox",
  "vox-types",
+ "workflows-proto",
 ]
 
 [[package]]
@@ -14235,6 +14271,10 @@ dependencies = [
  "finance-db",
  "finance-proto",
  "futures",
+ "git-config",
+ "git-forgejo",
+ "git-github",
+ "git-proto",
  "goal",
  "intake",
  "locations",
@@ -14244,6 +14284,7 @@ dependencies = [
  "org-proto",
  "pantry",
  "project",
+ "reqwest 0.12.28",
  "sea-orm",
  "sea-orm-migration",
  "serde",
@@ -14266,6 +14307,7 @@ dependencies = [
  "wiki-live",
  "wiki-proto",
  "wiki-search",
+ "workflows-proto",
  "workouts",
 ]
 
@@ -14291,7 +14333,10 @@ dependencies = [
  "finance-db",
  "finance-proto",
  "futures",
+ "git-config",
  "goal",
+ "hex",
+ "hmac",
  "intake",
  "locations",
  "mealplan",
@@ -17353,6 +17398,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "workflows-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "facet",
+ "fake",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "workouts"
 version = "0.1.0"
 dependencies = [
@@ -17896,10 +17956,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-proto"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "moire-macros"
 version = "1.0.1"
 source = "git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624#aea86f91f84cdf6052e4310e8a0541d87f37c624"
+
+[[patch.unused]]
+name = "actions-proto"
+version = "0.1.0"

@@ -594,19 +594,36 @@ pub async fn run_deepen(
     let before_words = existing.split_whitespace().count();
 
     // Pull `sources:` from the frontmatter so we can include
-    // the original source material in the prompt.
+    // the original source material in the prompt — but **cap
+    // each source at ~6KB**. Earlier versions dumped entire
+    // raw sources (17KB Apollo chapters), which pushed the
+    // prompt past Codex's output budget and the response got
+    // stream-truncated mid-FILE-block (we'd see "missing close
+    // marker" errors every time). 6KB per source is enough
+    // for the LLM to pull a few code examples + API signatures
+    // while leaving room in the output budget for a 300-800
+    // word page.
+    const SOURCE_CAP_BYTES: usize = 6_000;
     let source_paths = extract_sources_field(&existing);
     let mut source_content = String::new();
     for src in &source_paths {
-        // Sources live under `raw/sources/<name>` relative to
-        // the wiki root.
         let src_abs = wiki.vault_root().join("raw/sources").join(src);
         if let Ok(bytes) = std::fs::read(&src_abs) {
-            // Best-effort UTF-8; binary sources (PDFs) get a
-            // marker so the LLM knows they're skipped.
             if let Ok(s) = std::str::from_utf8(&bytes) {
                 source_content.push_str(&format!("\n\n--- source: {src} ---\n\n"));
-                source_content.push_str(s);
+                if s.len() > SOURCE_CAP_BYTES {
+                    // Take the head of the source — usually
+                    // the most representative chunk (intro +
+                    // first sections). Add a marker so the
+                    // LLM knows it's not the full text.
+                    source_content.push_str(&s[..SOURCE_CAP_BYTES]);
+                    source_content.push_str(&format!(
+                        "\n\n…[truncated; original was {} bytes, capped at {SOURCE_CAP_BYTES} for prompt budget]\n",
+                        s.len()
+                    ));
+                } else {
+                    source_content.push_str(s);
+                }
             } else {
                 source_content
                     .push_str(&format!("\n\n--- source: {src} (binary, skipped) ---\n\n"));

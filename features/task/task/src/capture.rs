@@ -114,6 +114,7 @@ pub fn capture(input: &str) -> TaskInfo {
         date_created: None,
         date_modified: None,
         details: String::new(),
+        workflow: None,
     }
 }
 

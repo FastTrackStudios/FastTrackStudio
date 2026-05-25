@@ -22,6 +22,8 @@ eyre.workspace = true
 uuid.workspace = true
 async-trait.workspace = true
 sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 base64 = { workspace = true }
@@ -44,6 +46,9 @@ agent-proto = { workspace = true, features = ["server", "vox"] }
 agent-tasks = { workspace = true }
 agent-dispatch = { workspace = true }
 task = { workspace = true, features = ["vox"] }
+# Forge webhook receiver — IssueLink lookup maps an inbound
+# forge issue/PR event back to the local TaskInfo to mutate.
+git-config = { workspace = true }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 milestone = { workspace = true, features = ["vox"] }

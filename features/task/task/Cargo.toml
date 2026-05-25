@@ -18,8 +18,9 @@ indexmap = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"] }
+uuid = { workspace = true, features = ["v4", "v7", "serde"] }
 vault.workspace = true
+workflows-proto.workspace = true
 
 vox = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
@@ -30,7 +31,7 @@ fake = { version = "4", optional = true, features = ["derive", "chrono", "uuid"]
 default = ["vox"]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 server = ["architect/server-seaorm", "dep:sea-orm"]
-fake = ["dep:fake", "architect/fake"]
+fake = ["dep:fake", "architect/fake", "workflows-proto/fake"]
 full = ["vox", "server", "fake"]
 
 [dev-dependencies]

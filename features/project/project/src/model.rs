@@ -12,7 +12,7 @@
 //! synthetic `Create`/`Update` payloads by the architect
 //! derive (it filters serde out of `forward_attrs`).
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -120,6 +120,28 @@ pub struct ProjectInfo {
     #[architect(filterable)]
     pub same_as: Option<String>,
 
+    // ── Roadmap (Linear-style) ──────────────────────────────
+    /// Target completion date (YYYY-MM-DD). `None` = open-ended.
+    /// This + `progress_percent` are what make a Project a
+    /// Linear-style roadmap initiative — no separate entity
+    /// needed, the org-level Project already carried status,
+    /// lead, and task/milestone rollup.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        rename = "targetDate"
+    )]
+    #[architect(filterable, sortable)]
+    pub target_date: Option<NaiveDate>,
+
+    /// Completion percentage, `0..=100`, or `-1` when undefined
+    /// (no tracked tasks yet). Set by the rollup job from the
+    /// ratio of done to total linked tasks. Stored signed so the
+    /// `-1` sentinel survives.
+    #[serde(default = "default_progress", rename = "progressPercent")]
+    #[architect(filterable, sortable)]
+    pub progress_percent: i16,
+
     /// Free-text description / body. Same convention as
     /// `task::TaskInfo::details`: everything after the
     /// frontmatter close fence lives here. Persisted in the
@@ -214,6 +236,11 @@ fn default_status() -> String {
 
 fn default_priority() -> String {
     "normal".to_string()
+}
+
+/// `-1` = "no tracked tasks yet, progress undefined".
+fn default_progress() -> i16 {
+    -1
 }
 
 /// Built-in status values. Parsing accepts any string; these

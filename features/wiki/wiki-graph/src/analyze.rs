@@ -56,8 +56,7 @@ pub fn analyze(extractions: &[CodeExtraction]) -> AnalyzedGraph {
     // resolving `name:foo` placeholders). The label map is
     // 1-to-many — store all candidates so we can mark
     // multi-match resolutions as Ambiguous.
-    let by_id: HashMap<&str, &CodeNode> =
-        nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let by_id: HashMap<&str, &CodeNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let mut by_label: HashMap<&str, Vec<&CodeNode>> = HashMap::new();
     for n in &nodes {
         by_label.entry(n.label.as_str()).or_default().push(n);
@@ -115,7 +114,11 @@ pub fn analyze(extractions: &[CodeExtraction]) -> AnalyzedGraph {
 fn compute_centrality(
     nodes: &[CodeNode],
     edges: &[CodeEdge],
-) -> (HashMap<String, u32>, HashMap<String, u32>, HashMap<String, f64>) {
+) -> (
+    HashMap<String, u32>,
+    HashMap<String, u32>,
+    HashMap<String, f64>,
+) {
     let node_ids: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let mut in_deg: HashMap<String, u32> = HashMap::new();
     let mut out_deg: HashMap<String, u32> = HashMap::new();
@@ -204,8 +207,7 @@ pub fn affected_by<'a, P: AsRef<std::path::Path>>(
     g: &'a AnalyzedGraph,
     changed_files: &[P],
 ) -> AffectedResult<'a> {
-    let changed_set: HashSet<&std::path::Path> =
-        changed_files.iter().map(AsRef::as_ref).collect();
+    let changed_set: HashSet<&std::path::Path> = changed_files.iter().map(AsRef::as_ref).collect();
     let in_changed: Vec<&CodeNode> = g
         .nodes
         .iter()
@@ -217,13 +219,11 @@ pub fn affected_by<'a, P: AsRef<std::path::Path>>(
     let mut callers: HashSet<&str> = HashSet::new();
     let mut deps: HashSet<&str> = HashSet::new();
     for e in &g.edges {
-        if in_changed_ids.contains(e.target.as_str())
-            && !in_changed_ids.contains(e.source.as_str())
+        if in_changed_ids.contains(e.target.as_str()) && !in_changed_ids.contains(e.source.as_str())
         {
             callers.insert(e.source.as_str());
         }
-        if in_changed_ids.contains(e.source.as_str())
-            && !in_changed_ids.contains(e.target.as_str())
+        if in_changed_ids.contains(e.source.as_str()) && !in_changed_ids.contains(e.target.as_str())
         {
             deps.insert(e.target.as_str());
         }
@@ -439,7 +439,9 @@ mod tests {
         );
         let aff2 = affected_by(&g, &[Path::new("a.rs")]);
         assert!(
-            aff2.dependencies_internal.iter().any(|n| n.label == "b_helper"),
+            aff2.dependencies_internal
+                .iter()
+                .any(|n| n.label == "b_helper"),
             "expected b_helper as dep"
         );
     }

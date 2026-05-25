@@ -108,6 +108,12 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         lead,
         tags: crate::model::Tags(tags),
         same_as,
+        target_date: take_str(&map, "targetDate").and_then(|s| s.parse().ok()),
+        progress_percent: map
+            .get("progressPercent")
+            .and_then(serde_yaml::Value::as_i64)
+            .and_then(|n| i16::try_from(n).ok())
+            .unwrap_or(-1),
         parent_id,
         details: body.to_string(),
         client_id,

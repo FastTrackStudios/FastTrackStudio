@@ -262,6 +262,24 @@ agent-codex = { path = "features/agent/agent-codex" }
 # `agent-dispatch` crate (slice 2) layers task-note ↔ agent-task
 # bridging on top.
 agent-tasks = { path = "features/agent/agent-tasks" }
+
+# Cross-domain workflow primitives — WorkSession / Transition /
+# Activity / Handoff entities + AgentRef. Per-domain workflows
+# (coding, writing, music, …) depend on this for the shared
+# state-machine + audit-log shape. See `plans/workflows-orchestrator.md`.
+workflows-proto = { path = "features/workflows/workflows-proto" }
+
+# Linear-style work primitives.
+#
+# - `label-proto` — colored tag scoped to a workspace/project.
+#
+# NOTE: there is no separate "Linear Project" type. The existing
+# org-level `project` crate IS the Linear-sense Project — it has
+# status/lead/parent_id, tasks roll up via TaskInfo.project_id,
+# milestones roll up to it, and repos bind via RepoBinding. We
+# added target_date + progress_percent to it rather than fork a
+# second type. See `plans/issue-tracker-integration.md`.
+label-proto = { path = "features/label/label-proto" }
 # Bridge between task notes (file-backed) and agent-tasks (DB-backed).
 # Writes both sides of the dispatch link on create; folds the agent
 # result back into the source task note on completion.
@@ -450,6 +468,11 @@ architect-auth = { path = "../architect-auth/crates/architect-auth" }
 # `plans/git-feature.md`.
 git-proto = { path = "features/git/git-proto" }
 git-github = { path = "features/git/git-github" }
+# Forgejo (Gitea-compatible) backend — same three-trait surface
+# as `git-github`, talks to a self-hosted server via REST
+# (`reqwest` + `serde_json`). PAT auth, polling-based event
+# stream stubbed until Phase 2.
+git-forgejo = { path = "features/git/git-forgejo" }
 git-config = { path = "features/git/git-config" }
 octocrab = "0.46"
 

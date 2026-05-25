@@ -121,6 +121,18 @@ enum Commands {
     /// `ProjectServiceClient`.
     #[command(subcommand)]
     Project(ProjectCmd),
+    /// Linear-style issue surface over TaskInfo's
+    /// `WorkflowAttrs` (workspace / cycle / project / estimate /
+    /// assignees / blockers). The data still lives in TaskInfo —
+    /// `task issue *` is just the workflow-aware view of it.
+    /// `task work *` is an alias for ergonomic typing.
+    #[command(subcommand, alias = "work")]
+    Issue(IssueCmd),
+    /// One-shot integration setup — connect a forge repo to a
+    /// workspace: generate the webhook secret, register the
+    /// webhook on the forge, record the repo binding.
+    #[command(subcommand)]
+    Setup(SetupCmd),
     /// Goals (with cycle anchoring) served by the active
     /// org. Talks to `/org/<slug>/vox` via the architect-
     /// generated `GoalServiceClient`.
@@ -888,6 +900,455 @@ enum ProjectCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+    },
+}
+
+/// Linear-style issue surface over TaskInfo's WorkflowAttrs.
+///
+/// **Why this exists alongside `task task *`.** TaskInfo is the
+/// canonical unit of work in Task — the same row underpins both
+/// `task task *` (the TaskNotes-shape personal-task surface)
+/// and `task issue *` (the Linear-shape work-tracking surface).
+/// `issue` verbs operate through `WorkflowAttrs`: filter / show
+/// / patch the workspace + cycle + project + estimate +
+/// assignees + blockers triplet.
+#[derive(Subcommand)]
+enum IssueCmd {
+    /// List tasks filtered by their workflow attributes.
+    List {
+        /// Filter by `workflow.cycle = <uuid>`.
+        #[arg(long)]
+        cycle: Option<uuid::Uuid>,
+        /// Filter by `project_id = <uuid>`.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Filter by an `AgentRef` in `workflow.assignees`.
+        /// Accepts `agent:name`, `agent:name@version`,
+        /// `human:user_id`, or a bare name (defaults to `agent:`).
+        #[arg(long)]
+        assignee: Option<String>,
+        /// Filter by `TaskInfo::status` (e.g. `open`, `in-progress`).
+        #[arg(long)]
+        status: Option<String>,
+        /// Only show tasks with `workflow: Some(_)` set. Useful
+        /// while migrating — keeps unmigrated personal tasks
+        /// out of the issue view.
+        #[arg(long)]
+        has_workflow: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        /// Emit JSON instead of the tabular default.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show a single issue. Accepts a full UUID or the first
+    /// 8+ chars of one (`resolve_issue_id` does the prefix match).
+    Show {
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Patch the issue's `WorkflowAttrs` in place. Repeatable
+    /// `--add-assignee` / `--add-blocker` for set operations.
+    /// Pass `--clear` to drop the workflow block entirely (the
+    /// task becomes a plain TaskNotes-shape task again).
+    SetWorkflow {
+        id: String,
+        /// UUID, or `"none"` / `""` to clear.
+        #[arg(long)]
+        cycle: Option<String>,
+        /// UUID, or `"none"` / `""` to clear.
+        #[arg(long)]
+        project: Option<String>,
+        /// `xs`, `s`, `m`, `l`, `xl`, or a plain integer for
+        /// `Estimate::Points`.
+        #[arg(long)]
+        estimate: Option<String>,
+        #[arg(long = "add-assignee", value_name = "AGENT")]
+        add_assignee: Vec<String>,
+        #[arg(long = "remove-assignee", value_name = "AGENT")]
+        remove_assignee: Vec<String>,
+        #[arg(long = "add-blocker", value_name = "TASK_ID")]
+        add_blocker: Vec<uuid::Uuid>,
+        #[arg(long = "remove-blocker", value_name = "TASK_ID")]
+        remove_blocker: Vec<uuid::Uuid>,
+        /// Drop the workflow block entirely.
+        #[arg(long)]
+        clear: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Convenience: claim an issue for an agent.
+    /// Equivalent to `set-workflow --add-assignee agent:<name>`.
+    Claim {
+        id: String,
+        /// `name[@version]` — version omitted means "any version".
+        #[arg(long = "as-agent")]
+        as_agent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// List the current assignees on an issue.
+    Assignees {
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Create a new issue. Workflow attrs can be set inline.
+    /// Equivalent to `task task create` + `task issue
+    /// set-workflow` in one call.
+    Create {
+        /// Title (positional). Body can be passed via --body.
+        title: String,
+        /// Vault-relative path; defaults to `Task/<slug>.md`.
+        #[arg(long)]
+        path: Option<String>,
+        /// Initial status. Default `open`.
+        #[arg(long)]
+        status: Option<String>,
+        /// Initial priority. Default `normal`.
+        #[arg(long)]
+        priority: Option<String>,
+        /// Cycle UUID. Sets `workflow.cycle`.
+        #[arg(long)]
+        cycle: Option<uuid::Uuid>,
+        /// Project UUID. Sets `project_id`.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Estimate (`xs` / `s` / `m` / `l` / `xl` / integer).
+        #[arg(long)]
+        estimate: Option<String>,
+        /// Repeatable assignee. `agent:name[@ver]` or
+        /// `human:user_id`. Bare names default to agent.
+        #[arg(long = "assignee", value_name = "AGENT")]
+        assignees: Vec<String>,
+        /// Repeatable blocker — `task issue ready` won't
+        /// surface this issue until each blocker closes.
+        #[arg(long = "blocker", value_name = "TASK_ID")]
+        blockers: Vec<uuid::Uuid>,
+        /// Repeatable tag.
+        #[arg(long = "tag", value_name = "TAG")]
+        tags: Vec<String>,
+        /// Body (markdown). Pass `-` for stdin, or a file path.
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show issues ready to work — open, not done, with no
+    /// unresolved blockers. The beads-equivalent of `bd ready`.
+    Ready {
+        #[arg(long)]
+        cycle: Option<uuid::Uuid>,
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Show only issues claimable by this agent (no
+        /// assignee yet, OR this agent is already listed).
+        #[arg(long)]
+        as_agent: Option<String>,
+        /// Max rows to show.
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Claim an issue and flip its status to `in-progress`.
+    /// The combined `bd update --claim` equivalent.
+    Start {
+        id: String,
+        /// Agent to claim as — `name[@version]`. If omitted,
+        /// only the status is changed (existing assignees
+        /// are preserved).
+        #[arg(long = "as-agent")]
+        as_agent: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Close an issue — flips status to `done` and stamps
+    /// `completedDate`. Pass `--undo` to reopen.
+    Close {
+        id: String,
+        #[arg(long)]
+        undo: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Project-level overview — counts grouped by status,
+    /// priority, workspace, and assignee. Beads-equivalent of
+    /// `bd stats`.
+    Stats {
+        /// Restrict to one project.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Record an existing forge issue as the upstream of a
+    /// local TaskInfo. Doesn't create either — just adds the
+    /// IssueLink to the per-org link store. Use this when an
+    /// issue already exists on both sides.
+    LinkForge {
+        /// Local TaskInfo id (UUID or prefix).
+        id: String,
+        /// `owner/repo` on the forge.
+        repo: String,
+        /// Forge-assigned issue number (or PR number with --kind pull).
+        number: u64,
+        /// Forge host base URL (e.g. `https://git.starcommand.live`).
+        /// Defaults to the value in `TASK_FORGEJO_BASE_URL`.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// `issue` or `pull`. Default `issue`.
+        #[arg(long, default_value = "issue")]
+        kind: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Push a local TaskInfo upstream — creates a Forgejo issue
+    /// from `title` + `details`, records the link, exits. If the
+    /// task already has a link to this repo, prints the existing
+    /// link and exits without re-creating.
+    Push {
+        id: String,
+        /// `owner/repo` on the forge.
+        #[arg(long)]
+        repo: String,
+        /// Target GitHub instead of Forgejo. Uses TASK_GITHUB_TOKEN.
+        #[arg(long)]
+        github: bool,
+        /// Forgejo host base URL. Falls back to `TASK_FORGEJO_BASE_URL`.
+        /// Ignored when --github is set.
+        #[arg(long)]
+        base_url: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// On-demand bidirectional reconcile — no webhook needed.
+    /// For every locally-linked issue in the repo, fetch its
+    /// current forge state and apply it (forge wins for
+    /// open/closed); then pull any new forge issues we don't
+    /// track yet. Run manually or on a cron for third-party
+    /// repos where you can't install a webhook.
+    Sync {
+        /// `owner/repo` on the forge.
+        #[arg(long)]
+        repo: String,
+        /// Sync against GitHub instead of Forgejo.
+        #[arg(long)]
+        github: bool,
+        /// Forgejo host base URL. Falls back to `TASK_FORGEJO_BASE_URL`.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Optional project UUID to stamp on newly-pulled tasks.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Don't create local tasks for forge issues we don't
+        /// track — only reconcile state of already-linked ones.
+        #[arg(long)]
+        no_pull: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Sync every linked repo in the org in one pass — one
+    /// cron line keeps all your tracked repos fresh without
+    /// webhooks.
+    SyncAll {
+        /// Optional project UUID to stamp on newly-pulled tasks.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Only reconcile existing links; don't pull new issues.
+        #[arg(long)]
+        no_pull: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// List open pull requests on a repo.
+    PrList {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        github: bool,
+        #[arg(long)]
+        base_url: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Open a pull request.
+    PrCreate {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        github: bool,
+        #[arg(long)]
+        base_url: Option<String>,
+        #[arg(long)]
+        title: String,
+        /// Source branch.
+        #[arg(long)]
+        head: String,
+        /// Target branch. Default `main`.
+        #[arg(long, default_value = "main")]
+        base: String,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        draft: bool,
+        /// Forge issue number this PR closes. Injects
+        /// `Closes #N` into the body so the forge auto-closes
+        /// the issue when the PR merges.
+        #[arg(long)]
+        closes: Option<u64>,
+        /// Local task whose linked forge issue this PR closes.
+        /// Resolves the issue number from the link store and
+        /// injects `Closes #N` — and records a PR link on the
+        /// task so `pr-merge`/sync can finish the loop.
+        #[arg(long)]
+        close_task: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Merge a pull request by number. With `--close-task`,
+    /// closes the linked task afterward (which propagates the
+    /// close back to its own forge issue) — the `task code
+    /// merge` chain: merge PR → close task → done everywhere.
+    PrMerge {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        github: bool,
+        #[arg(long)]
+        base_url: Option<String>,
+        number: u64,
+        /// `merge` (default), `squash`, or `rebase`.
+        #[arg(long, default_value = "merge")]
+        method: String,
+        /// After merging, close this task (UUID or prefix). Its
+        /// own linked forge issue gets closed too via the normal
+        /// close-propagation path.
+        #[arg(long)]
+        close_task: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Fetch all issues from a Forgejo repo and create local
+    /// TaskInfos for ones we don't already have linked. Existing
+    /// linked issues are left alone (use `sync` to update).
+    Pull {
+        /// `owner/repo` on the forge.
+        #[arg(long)]
+        repo: String,
+        /// Pull from GitHub instead of Forgejo. Uses TASK_GITHUB_TOKEN.
+        #[arg(long)]
+        github: bool,
+        /// Forgejo host base URL. Falls back to `TASK_FORGEJO_BASE_URL`.
+        /// Ignored when --github is set.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Optional project UUID to stamp on pulled-in tasks.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        /// Filter by issue state: `open` (default), `closed`, or `all`.
+        #[arg(long, default_value = "open")]
+        state: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+/// `task setup *` — guided integration setup.
+#[derive(Subcommand)]
+enum SetupCmd {
+    /// Connect a forge repo to this org: ensure a webhook
+    /// secret exists, register the webhook on the forge, and
+    /// record the repo binding. Idempotent — re-running updates
+    /// the existing webhook rather than duplicating it.
+    Forge {
+        /// `owner/repo` on the forge.
+        #[arg(long)]
+        repo: String,
+        /// Target GitHub instead of Forgejo.
+        #[arg(long)]
+        github: bool,
+        /// Forgejo host base URL. Falls back to `TASK_FORGEJO_BASE_URL`.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Public URL the forge should POST events to. Should end
+        /// in `/org/<slug>/webhooks/forge`. If omitted, derived
+        /// from `--public-base` + the active org slug.
+        #[arg(long)]
+        webhook_url: Option<String>,
+        /// Public base of the task-server (e.g.
+        /// `https://tasks.example.com`). Used to build
+        /// `<base>/org/<slug>/webhooks/forge` when `--webhook-url`
+        /// isn't given.
+        #[arg(long)]
+        public_base: Option<String>,
+        /// Optional project UUID to associate this repo with.
+        #[arg(long)]
+        project: Option<uuid::Uuid>,
+        #[arg(long)]
+        org: Option<String>,
     },
 }
 
@@ -2660,6 +3121,12 @@ async fn main() -> eyre::Result<()> {
         Commands::Auth(cmd) => {
             return run_auth(cmd, cli.org.as_deref()).await;
         }
+        Commands::Issue(cmd) => {
+            return Box::pin(run_issue(cmd)).await;
+        }
+        Commands::Setup(cmd) => {
+            return Box::pin(run_setup(cmd)).await;
+        }
         Commands::Org(cmd) => {
             return Box::pin(run_org(cmd)).await;
         }
@@ -2845,6 +3312,8 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 tags: project::model::Tags(tags),
                 parent_id,
                 same_as: None,
+                target_date: None,
+                progress_percent: -1,
                 details,
                 client_id: None,
                 billable_default: false,
@@ -6432,6 +6901,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
                 date_created: None,
                 date_modified: None,
                 details,
+                workflow: None,
             };
             let client = connect_task_client(&url).await?;
             let created = client
@@ -6637,6 +7107,1880 @@ where
         .await
         .map_err(|e| eyre::eyre!("update: {e:?}"))?;
     println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+    Ok(())
+}
+
+/// Parse an `AgentRef` from CLI input. Accepted forms:
+/// `agent:name`, `agent:name@version`, `human:user_id`, or
+/// a bare `name` (defaults to an unversioned agent).
+fn parse_agent_ref(s: &str) -> eyre::Result<workflows_proto::AgentRef> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(eyre::eyre!("empty agent ref"));
+    }
+    if let Some(rest) = s.strip_prefix("human:") {
+        let rest = rest.trim();
+        if rest.is_empty() {
+            return Err(eyre::eyre!("human: prefix requires a user id"));
+        }
+        return Ok(workflows_proto::AgentRef::human(rest));
+    }
+    let body = s.strip_prefix("agent:").unwrap_or(s);
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(eyre::eyre!("agent: prefix requires a name"));
+    }
+    if let Some((name, ver)) = body.split_once('@') {
+        let name = name.trim();
+        let ver = ver.trim();
+        if name.is_empty() {
+            return Err(eyre::eyre!("agent name is empty"));
+        }
+        if ver.is_empty() {
+            return Ok(workflows_proto::AgentRef::agent(name));
+        }
+        return Ok(workflows_proto::AgentRef::agent_versioned(name, ver));
+    }
+    Ok(workflows_proto::AgentRef::agent(body))
+}
+
+/// Parse `xs|s|m|l|xl` or a numeric points value into an
+/// [`task::model::Estimate`].
+fn parse_estimate(s: &str) -> eyre::Result<task::model::Estimate> {
+    use task::model::Estimate;
+    match s.trim().to_ascii_lowercase().as_str() {
+        "xs" => Ok(Estimate::XS),
+        "s" => Ok(Estimate::S),
+        "m" => Ok(Estimate::M),
+        "l" => Ok(Estimate::L),
+        "xl" => Ok(Estimate::XL),
+        other => {
+            let value: u8 = other
+                .parse()
+                .map_err(|e| eyre::eyre!("bad estimate `{other}`: {e}"))?;
+            Ok(Estimate::Points { value })
+        }
+    }
+}
+
+/// Resolve an issue id — accepts a full UUID or an 8-char
+/// (or longer) prefix. Falls back to a list-scan for the
+/// prefix case since the server only exposes exact lookups.
+async fn resolve_issue_id(
+    client: &task::TaskServiceClient,
+    id: &str,
+) -> eyre::Result<task::TaskInfo> {
+    if let Ok(uuid) = uuid::Uuid::parse_str(id) {
+        return client
+            .get(uuid)
+            .await
+            .map_err(|e| eyre::eyre!("get(id): {e:?}"));
+    }
+    let prefix = id.trim().to_ascii_lowercase();
+    if prefix.is_empty() {
+        return Err(eyre::eyre!("empty id"));
+    }
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    let mut hits: Vec<task::TaskInfo> = rows
+        .into_iter()
+        .filter(|t| t.id.to_string().to_ascii_lowercase().starts_with(&prefix))
+        .collect();
+    match hits.len() {
+        0 => Err(eyre::eyre!("no issue matches `{id}`")),
+        1 => Ok(hits.remove(0)),
+        n => Err(eyre::eyre!(
+            "`{id}` matches {n} issues — disambiguate with the full UUID"
+        )),
+    }
+}
+
+fn short_uuid(u: &uuid::Uuid) -> String {
+    let s = u.to_string();
+    s.chars().take(8).collect()
+}
+
+#[allow(clippy::ref_option)] // ergonomic: callers pass `&t.workflow` directly
+fn workflow_summary(w: &Option<task::model::WorkflowAttrs>) -> String {
+    let Some(w) = w else {
+        return "—".into();
+    };
+    let cy = w.cycle.as_ref().map_or("—".into(), short_uuid);
+    format!("cy={cy}")
+}
+
+fn print_workflow_block(w: &task::model::WorkflowAttrs) {
+    use task::model::Estimate;
+    println!("  workflow:");
+    if let Some(cy) = w.cycle {
+        println!("    cycle:     {cy}");
+    }
+    if let Some(est) = &w.estimate {
+        let rendered = match est {
+            Estimate::XS => "xs".to_string(),
+            Estimate::S => "s".to_string(),
+            Estimate::M => "m".to_string(),
+            Estimate::L => "l".to_string(),
+            Estimate::XL => "xl".to_string(),
+            Estimate::Points { value } => format!("{value} pts"),
+        };
+        println!("    estimate:  {rendered}");
+    }
+    if let Some(sid) = w.session {
+        println!("    session:   {sid}");
+    }
+    if !w.assignees.is_empty() {
+        println!("    assignees:");
+        for a in w.assignees.iter() {
+            println!("      - {}", a.short_label());
+        }
+    }
+    if !w.blockers.is_empty() {
+        println!("    blockers:");
+        for b in w.blockers.iter() {
+            println!("      - {b}");
+        }
+    }
+    if !w.relates_to.is_empty() {
+        println!("    relates_to:");
+        for r in w.relates_to.iter() {
+            println!("      - {r}");
+        }
+    }
+}
+
+/// Apply `set-workflow` style edits to a `TaskInfo` in-place.
+#[allow(clippy::too_many_arguments)]
+fn apply_workflow_patch(
+    t: &mut task::TaskInfo,
+    cycle: Option<String>,
+    project: Option<String>,
+    estimate: Option<String>,
+    add_assignee: Vec<workflows_proto::AgentRef>,
+    remove_assignee: Vec<workflows_proto::AgentRef>,
+    add_blocker: Vec<uuid::Uuid>,
+    remove_blocker: Vec<uuid::Uuid>,
+) -> eyre::Result<()> {
+    fn parse_uuid_field(field: &str, raw: &str) -> eyre::Result<Option<uuid::Uuid>> {
+        let r = raw.trim();
+        if matches!(r, "" | "none" | "null") {
+            return Ok(None);
+        }
+        uuid::Uuid::parse_str(r)
+            .map(Some)
+            .map_err(|e| eyre::eyre!("--{field} `{raw}`: {e}"))
+    }
+
+    // Project membership lives on TaskInfo.project_id (the
+    // canonical Project link), not in WorkflowAttrs.
+    if let Some(v) = project {
+        t.project_id = parse_uuid_field("project", &v)?;
+    }
+
+    let w = t
+        .workflow
+        .get_or_insert_with(task::model::WorkflowAttrs::default);
+
+    if let Some(v) = cycle {
+        w.cycle = parse_uuid_field("cycle", &v)?;
+    }
+    if let Some(v) = estimate {
+        w.estimate = Some(parse_estimate(&v)?);
+    }
+    for a in remove_assignee {
+        w.assignees.0.retain(|x| x != &a);
+    }
+    for a in add_assignee {
+        if !w.assignees.iter().any(|x| x == &a) {
+            w.assignees.0.push(a);
+        }
+    }
+    for b in remove_blocker {
+        w.blockers.0.retain(|x| x != &b);
+    }
+    for b in add_blocker {
+        if !w.blockers.iter().any(|x| x == &b) {
+            w.blockers.0.push(b);
+        }
+    }
+    Ok(())
+}
+
+async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
+    match cmd {
+        IssueCmd::List {
+            cycle,
+            project,
+            assignee,
+            status,
+            has_workflow,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let assignee_ref = assignee.as_deref().map(parse_agent_ref).transpose()?;
+
+            let mut rows: Vec<task::TaskInfo> = rows
+                .into_iter()
+                .filter(|t| {
+                    status
+                        .as_deref()
+                        .is_none_or(|s| t.status.eq_ignore_ascii_case(s))
+                })
+                .filter(|t| !has_workflow || t.workflow.is_some())
+                .filter(|t| match cycle {
+                    None => true,
+                    Some(c) => t.workflow.as_ref().and_then(|x| x.cycle) == Some(c),
+                })
+                .filter(|t| match project {
+                    None => true,
+                    Some(p) => t.project_id == Some(p),
+                })
+                .filter(|t| match &assignee_ref {
+                    None => true,
+                    Some(a) => t
+                        .workflow
+                        .as_ref()
+                        .is_some_and(|w| w.assignees.iter().any(|x| x == a)),
+                })
+                .collect();
+            rows.sort_by(|a, b| {
+                let a_done = task::Status::from_str(&a.status).is_some_and(task::Status::is_done);
+                let b_done = task::Status::from_str(&b.status).is_some_and(task::Status::is_done);
+                a_done.cmp(&b_done).then_with(|| a.title.cmp(&b.title))
+            });
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&rows).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if rows.is_empty() {
+                println!("(no issues)");
+                return Ok(());
+            }
+            for t in &rows {
+                println!(
+                    "{}  {:<10}  {:<8}  {}  {}",
+                    short_uuid(&t.id),
+                    t.status,
+                    t.priority,
+                    workflow_summary(&t.workflow),
+                    t.title,
+                );
+            }
+        }
+        IssueCmd::Show {
+            id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&t).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            println!("{} [{}]\n", t.title, t.status);
+            println!("  id:       {}", t.id);
+            println!("  path:     {}", t.path);
+            println!("  priority: {}", t.priority);
+            if let Some(p) = t.project_id {
+                println!("  project:  {p}");
+            }
+            if let Some(m) = t.milestone_id {
+                println!("  milestone:{m}");
+            }
+            match &t.workflow {
+                Some(w) => print_workflow_block(w),
+                None => println!("  workflow: (none)"),
+            }
+        }
+        IssueCmd::SetWorkflow {
+            id,
+            cycle,
+            project,
+            estimate,
+            add_assignee,
+            remove_assignee,
+            add_blocker,
+            remove_blocker,
+            clear,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut t = resolve_issue_id(&client, &id).await?;
+            if clear {
+                t.workflow = None;
+            } else {
+                let add: Vec<_> = add_assignee
+                    .iter()
+                    .map(|s| parse_agent_ref(s))
+                    .collect::<eyre::Result<_>>()?;
+                let rm: Vec<_> = remove_assignee
+                    .iter()
+                    .map(|s| parse_agent_ref(s))
+                    .collect::<eyre::Result<_>>()?;
+                apply_workflow_patch(
+                    &mut t,
+                    cycle,
+                    project,
+                    estimate,
+                    add,
+                    rm,
+                    add_blocker,
+                    remove_blocker,
+                )?;
+            }
+            let updated = client
+                .update(t)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!("{}  [{}]  {}", updated.title, updated.status, updated.path);
+            if let Some(w) = &updated.workflow {
+                print_workflow_block(w);
+            } else {
+                println!("  workflow: (none)");
+            }
+        }
+        IssueCmd::Claim {
+            id,
+            as_agent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut t = resolve_issue_id(&client, &id).await?;
+            // Accept bare `name[@ver]` here; `parse_agent_ref`
+            // also handles both forms via the `agent:` prefix.
+            let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
+            apply_workflow_patch(
+                &mut t,
+                None,
+                None,
+                None,
+                vec![agent.clone()],
+                vec![],
+                vec![],
+                vec![],
+            )?;
+            let updated = client
+                .update(t)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!(
+                "claimed {} by {}",
+                short_uuid(&updated.id),
+                agent.short_label()
+            );
+        }
+        IssueCmd::Assignees {
+            id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let assignees: Vec<workflows_proto::AgentRef> = t
+                .workflow
+                .as_ref()
+                .map(|w| w.assignees.0.clone())
+                .unwrap_or_default();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&assignees)
+                        .map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if assignees.is_empty() {
+                println!("(no assignees)");
+                return Ok(());
+            }
+            for a in &assignees {
+                let kind = if a.is_agent() { "agent" } else { "human" };
+                println!("{kind:<6}  {}", a.short_label());
+            }
+        }
+        IssueCmd::Create {
+            title,
+            path,
+            status,
+            priority,
+            cycle,
+            project,
+            estimate,
+            assignees,
+            blockers,
+            tags,
+            body,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let body = resolve_body(body)?;
+
+            // Build the WorkflowAttrs from inline flags. Skip if
+            // nothing was set — leaves `workflow: None`, preserving
+            // the TaskNotes-shape round-trip for plain tasks.
+            let assignee_refs: Vec<workflows_proto::AgentRef> = assignees
+                .iter()
+                .map(|s| parse_agent_ref(s))
+                .collect::<eyre::Result<_>>()?;
+            let any_workflow = cycle.is_some()
+                || estimate.is_some()
+                || !assignee_refs.is_empty()
+                || !blockers.is_empty();
+            let workflow = if any_workflow {
+                let estimate = match estimate {
+                    Some(e) => Some(parse_estimate(&e)?),
+                    None => None,
+                };
+                Some(task::model::WorkflowAttrs {
+                    cycle,
+                    estimate,
+                    assignees: task::model::AgentRefList(assignee_refs),
+                    blockers: task::model::UuidList(blockers),
+                    ..Default::default()
+                })
+            } else {
+                None
+            };
+
+            let new_task = task::TaskInfo {
+                id: uuid::Uuid::nil(),
+                path: path.unwrap_or_default(),
+                title,
+                status: status.unwrap_or_else(|| "open".into()),
+                priority: priority.unwrap_or_else(|| "normal".into()),
+                due: None,
+                scheduled: None,
+                tags: task::model::StringList(tags),
+                contexts: task::model::StringList::default(),
+                projects: task::model::StringList::default(),
+                project_id: project,
+                milestone_id: None,
+                time_estimate: None,
+                time_entries: task::model::TimeEntries::default(),
+                recurrence: None,
+                recurrence_anchor: None,
+                complete_instances: task::model::StringList::default(),
+                completed_date: None,
+                agent_profile: String::new(),
+                dispatched_agent_tasks: task::model::StringList::default(),
+                date_created: None,
+                date_modified: None,
+                details: body,
+                workflow,
+            };
+            let created = client
+                .create(new_task)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&created).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+            } else {
+                println!("created {} ({})", created.title, created.path);
+                println!("  id: {}", created.id);
+                if let Some(w) = &created.workflow {
+                    print_workflow_block(w);
+                }
+            }
+        }
+        IssueCmd::Ready {
+            cycle,
+            project,
+            as_agent,
+            limit,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            // Index id → status so we can resolve blockers cheaply.
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                rows.iter().map(|t| (t.id, t)).collect();
+            let agent_ref = as_agent
+                .as_deref()
+                .map(|s| parse_agent_ref(&format!("agent:{s}")))
+                .transpose()?;
+
+            let mut ready: Vec<&task::TaskInfo> = rows
+                .iter()
+                .filter(|t| {
+                    // Status check — not done / cancelled.
+                    let s = task::Status::from_str(&t.status);
+                    !matches!(s, Some(task::Status::Done | task::Status::Cancelled))
+                })
+                .filter(|t| match cycle {
+                    None => true,
+                    Some(c) => t.workflow.as_ref().and_then(|x| x.cycle) == Some(c),
+                })
+                .filter(|t| match project {
+                    None => true,
+                    Some(p) => t.project_id == Some(p),
+                })
+                .filter(|t| match &agent_ref {
+                    None => true,
+                    Some(a) => {
+                        // Available to this agent: either no
+                        // assignees yet, or this agent is in the list.
+                        let assignees = t.workflow.as_ref().map_or(&[][..], |w| &w.assignees.0[..]);
+                        assignees.is_empty() || assignees.iter().any(|x| x == a)
+                    }
+                })
+                .filter(|t| {
+                    // No unresolved blockers — every blocker task
+                    // must exist AND be in `done` / `cancelled`.
+                    let blockers = t.workflow.as_ref().map_or(&[][..], |w| &w.blockers.0[..]);
+                    blockers.iter().all(|bid| {
+                        by_id.get(bid).is_some_and(|b| {
+                            matches!(
+                                task::Status::from_str(&b.status),
+                                Some(task::Status::Done | task::Status::Cancelled)
+                            )
+                        })
+                    })
+                })
+                .collect();
+
+            // Priority desc, then title.
+            ready.sort_by(|a, b| {
+                let prio = |t: &task::TaskInfo| match task::Priority::from_str(&t.priority) {
+                    Some(task::Priority::Critical) => 0,
+                    Some(task::Priority::High) => 1,
+                    Some(task::Priority::Normal) => 2,
+                    Some(task::Priority::Low) => 3,
+                    _ => 4,
+                };
+                prio(a).cmp(&prio(b)).then_with(|| a.title.cmp(&b.title))
+            });
+            ready.truncate(limit);
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&ready).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if ready.is_empty() {
+                println!("(no ready issues)");
+                return Ok(());
+            }
+            for t in &ready {
+                println!(
+                    "{}  {:<10}  {:<8}  {}  {}",
+                    short_uuid(&t.id),
+                    t.status,
+                    t.priority,
+                    workflow_summary(&t.workflow),
+                    t.title,
+                );
+            }
+        }
+        IssueCmd::Start {
+            id,
+            as_agent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut t = resolve_issue_id(&client, &id).await?;
+            // Flip status; preserve completedDate semantics: if
+            // re-opening from done, clear the date.
+            t.status = "in-progress".into();
+            t.completed_date = None;
+            if let Some(name) = as_agent {
+                let agent = parse_agent_ref(&format!("agent:{name}"))?;
+                let w = t
+                    .workflow
+                    .get_or_insert_with(task::model::WorkflowAttrs::default);
+                if !w.assignees.0.iter().any(|a| a == &agent) {
+                    w.assignees.0.push(agent);
+                }
+            }
+            let updated = client
+                .update(t)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!(
+                "started {}  [{}]  {}",
+                short_uuid(&updated.id),
+                updated.status,
+                updated.title
+            );
+            if let Some(w) = &updated.workflow {
+                print_workflow_block(w);
+            }
+        }
+        IssueCmd::Stats {
+            project,
+            org,
+            server,
+            json,
+        } => {
+            use std::collections::BTreeMap;
+
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let rows = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+
+            let mut filtered: Vec<&task::TaskInfo> = rows
+                .iter()
+                .filter(|t| match project {
+                    None => true,
+                    Some(p) => t.project_id == Some(p),
+                })
+                .collect();
+
+            let total = filtered.len();
+            let mut by_status: BTreeMap<String, usize> = BTreeMap::new();
+            let mut by_priority: BTreeMap<String, usize> = BTreeMap::new();
+            let mut by_project: BTreeMap<String, usize> = BTreeMap::new();
+            let mut by_assignee: BTreeMap<String, usize> = BTreeMap::new();
+            let mut blocked: usize = 0;
+            let mut with_workflow: usize = 0;
+
+            let by_id: std::collections::HashMap<uuid::Uuid, &task::TaskInfo> =
+                rows.iter().map(|t| (t.id, t)).collect();
+
+            for t in filtered.drain(..) {
+                *by_status.entry(t.status.clone()).or_default() += 1;
+                *by_priority.entry(t.priority.clone()).or_default() += 1;
+                let p_label = t
+                    .project_id
+                    .map_or_else(|| "—".to_string(), |id| short_uuid(&id));
+                *by_project.entry(p_label).or_default() += 1;
+                if let Some(wf) = &t.workflow {
+                    with_workflow += 1;
+                    for a in &wf.assignees.0 {
+                        *by_assignee.entry(a.short_label()).or_default() += 1;
+                    }
+                    // Blocked = has at least one blocker that
+                    // is not done/cancelled (or that we can't
+                    // resolve, which means it's still open).
+                    let is_blocked = wf.blockers.0.iter().any(|bid| {
+                        by_id.get(bid).is_none_or(|b| {
+                            !matches!(
+                                task::Status::from_str(&b.status),
+                                Some(task::Status::Done | task::Status::Cancelled)
+                            )
+                        })
+                    });
+                    if is_blocked {
+                        blocked += 1;
+                    }
+                }
+            }
+
+            if json {
+                let payload = serde_json::json!({
+                    "total": total,
+                    "with_workflow": with_workflow,
+                    "blocked": blocked,
+                    "by_status": by_status,
+                    "by_priority": by_priority,
+                    "by_project": by_project,
+                    "by_assignee": by_assignee,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+
+            println!("total:        {total}");
+            println!("with workflow: {with_workflow}");
+            println!("blocked:      {blocked}");
+            println!();
+            println!("by status:");
+            for (k, v) in &by_status {
+                println!("  {k:<14} {v}");
+            }
+            println!();
+            println!("by priority:");
+            for (k, v) in &by_priority {
+                println!("  {k:<14} {v}");
+            }
+            if !by_project.is_empty() {
+                println!();
+                println!("by project:");
+                for (k, v) in &by_project {
+                    println!("  {k:<14} {v}");
+                }
+            }
+            if !by_assignee.is_empty() {
+                println!();
+                println!("by assignee:");
+                for (k, v) in &by_assignee {
+                    println!("  {k:<28} {v}");
+                }
+            }
+        }
+        IssueCmd::Close {
+            id,
+            undo,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut t = resolve_issue_id(&client, &id).await?;
+            if undo {
+                t.status = "open".into();
+                t.completed_date = None;
+            } else {
+                t.status = "done".into();
+                t.completed_date = Some(chrono::Local::now().date_naive());
+            }
+            // Clear the active session pointer on close — work is
+            // over; resume of this task starts a new session.
+            if let Some(w) = t.workflow.as_mut() {
+                w.session = None;
+            }
+            let updated = client
+                .update(t)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            let verb = if undo { "reopened" } else { "closed" };
+            println!(
+                "{verb} {}  [{}]  {}",
+                short_uuid(&updated.id),
+                updated.status,
+                updated.title
+            );
+
+            // Propagate to any linked forge issues. Best-effort:
+            // a forge that's unreachable / unauthenticated logs
+            // a warning but doesn't fail the local close.
+            let new_state = if undo {
+                git_proto::IssueState::Open
+            } else {
+                git_proto::IssueState::Closed
+            };
+            match propagate_state_to_forge(&slug, &updated.id, new_state).await {
+                Ok(0) => {}
+                Ok(n) => println!("  propagated to {n} linked forge issue(s)"),
+                Err(e) => eprintln!("  warning: forge propagation failed: {e}"),
+            }
+        }
+        IssueCmd::LinkForge {
+            id,
+            repo,
+            number,
+            base_url,
+            kind,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let (owner, repo_name) = parse_repo_slug(&repo)?;
+            let base = forgejo_base_url(base_url)?;
+            let link_kind = match kind.to_ascii_lowercase().as_str() {
+                "issue" => git_config::LinkKind::Issue,
+                "pull" | "pr" => git_config::LinkKind::Pull,
+                _ => return Err(eyre::eyre!("--kind must be `issue` or `pull`")),
+            };
+            let store = forge_link_store(&slug)?;
+            use git_config::BindingStore as _;
+            store
+                .add_issue_link(git_config::IssueLink {
+                    task_id: t.id.to_string(),
+                    repo: git_proto::RepoId {
+                        forge: git_proto::Forge::Forgejo { base_url: base },
+                        owner,
+                        repo: repo_name,
+                    },
+                    number,
+                    kind: link_kind,
+                })
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            println!(
+                "linked {} -> {}#{} ({:?})",
+                short_uuid(&t.id),
+                repo,
+                number,
+                link_kind,
+            );
+        }
+        IssueCmd::Push {
+            id,
+            repo,
+            github,
+            base_url,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+
+            // Skip if we already have a link to this repo.
+            let store = forge_link_store(&slug)?;
+            use git_config::BindingStore as _;
+            let existing = store
+                .issues_for_task(&t.id.to_string())
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            if let Some(l) = existing.iter().find(|l| l.repo == repo_id) {
+                println!(
+                    "already linked: {} -> {}/{}#{} ({:?})",
+                    short_uuid(&t.id),
+                    l.repo.owner,
+                    l.repo.repo,
+                    l.number,
+                    l.kind,
+                );
+                return Ok(());
+            }
+
+            // `IssueTracker` methods are sync but internally `block_on`
+            // their HTTP call — we're inside tokio::main, so push them
+            // onto the blocking pool to avoid the runtime-in-runtime
+            // panic. `forge_backend_for` picks Forgejo/GitHub + token.
+            let repo_c = repo_id.clone();
+            let title = t.title.clone();
+            let body = t.details.clone();
+            let created = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .create_issue(&repo_c, title, body)
+                    .map_err(|e| eyre::eyre!("create_issue: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+            store
+                .add_issue_link(git_config::IssueLink {
+                    task_id: t.id.to_string(),
+                    repo: repo_id.clone(),
+                    number: created.id.0,
+                    kind: git_config::LinkKind::Issue,
+                })
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            println!(
+                "pushed {} -> {}#{}: {}",
+                short_uuid(&t.id),
+                repo,
+                created.id.0,
+                created.title,
+            );
+        }
+        IssueCmd::Pull {
+            repo,
+            github,
+            base_url,
+            project,
+            state,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+            let filter_state = match state.to_ascii_lowercase().as_str() {
+                "open" => Some(git_proto::IssueState::Open),
+                "closed" => Some(git_proto::IssueState::Closed),
+                "all" => None,
+                _ => return Err(eyre::eyre!("--state must be `open`, `closed`, or `all`")),
+            };
+
+            let filter = git_proto::issues::IssueFilter {
+                state: filter_state,
+                ..Default::default()
+            };
+            let repo_c = repo_id.clone();
+            let issues = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .list_issues(&repo_c, filter)
+                    .map_err(|e| eyre::eyre!("list_issues: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+
+            let store = forge_link_store(&slug)?;
+            use git_config::BindingStore as _;
+            let mut created_n = 0usize;
+            let mut skipped_n = 0usize;
+
+            for ext in issues {
+                let already = store
+                    .tasks_for_issue(&repo_id, ext.id.0)
+                    .map_err(|e| eyre::eyre!("link store: {e}"))?;
+                if !already.is_empty() {
+                    skipped_n += 1;
+                    continue;
+                }
+                // Translate forge issue → TaskInfo (status derived
+                // from the forge state inside build_pulled_task).
+                let mut new_task = build_pulled_task(&ext, None::<task::model::WorkflowAttrs>);
+                new_task.project_id = project;
+                let created = client
+                    .create(new_task)
+                    .await
+                    .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+                store
+                    .add_issue_link(git_config::IssueLink {
+                        task_id: created.id.to_string(),
+                        repo: repo_id.clone(),
+                        number: ext.id.0,
+                        kind: git_config::LinkKind::Issue,
+                    })
+                    .map_err(|e| eyre::eyre!("link store: {e}"))?;
+                created_n += 1;
+                println!(
+                    "pulled {}#{}: {}  -> {}",
+                    repo,
+                    ext.id.0,
+                    ext.title,
+                    short_uuid(&created.id),
+                );
+            }
+            println!("\n{created_n} new, {skipped_n} already linked");
+        }
+        IssueCmd::Sync {
+            repo,
+            github,
+            base_url,
+            project,
+            no_pull,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+            let store = forge_link_store(&slug)?;
+            let (reconciled, pulled) =
+                sync_repo(&client, &store, &repo_id, project, no_pull).await?;
+            println!("\nsync: {reconciled} reconciled, {pulled} pulled");
+        }
+        IssueCmd::SyncAll {
+            project,
+            no_pull,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let store = forge_link_store(&slug)?;
+            let repos = store
+                .distinct_repos()
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            if repos.is_empty() {
+                println!("(no linked repos — run `task issue push` or `task setup forge` first)");
+                return Ok(());
+            }
+            let mut total_r = 0usize;
+            let mut total_p = 0usize;
+            for repo_id in &repos {
+                let label = format!("{}/{}", repo_id.owner, repo_id.repo);
+                println!("=== {label} ===");
+                match sync_repo(&client, &store, repo_id, project, no_pull).await {
+                    Ok((r, p)) => {
+                        total_r += r;
+                        total_p += p;
+                    }
+                    // One unreachable / unauthorized repo shouldn't
+                    // abort the whole sweep.
+                    Err(e) => eprintln!("  skipped {label}: {e}"),
+                }
+            }
+            println!(
+                "\nsync-all: {} repo(s), {total_r} reconciled, {total_p} pulled",
+                repos.len()
+            );
+        }
+        IssueCmd::PrList {
+            repo,
+            github,
+            base_url,
+            json,
+        } => {
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+            let repo_c = repo_id.clone();
+            let prs = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .list_pull_requests(&repo_c)
+                    .map_err(|e| eyre::eyre!("list_pull_requests: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&prs).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            if prs.is_empty() {
+                println!("(no open PRs)");
+                return Ok(());
+            }
+            for pr in &prs {
+                println!(
+                    "#{:<5} [{:?}] {} ({} <- {})",
+                    pr.id.0, pr.state, pr.title, pr.base, pr.head
+                );
+            }
+        }
+        IssueCmd::PrCreate {
+            repo,
+            github,
+            base_url,
+            title,
+            head,
+            base,
+            body,
+            draft,
+            closes,
+            close_task,
+            org,
+            server,
+        } => {
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+            let mut body = resolve_body(body)?;
+
+            // Resolve the issue number this PR should close:
+            // explicit --closes wins; else look up the linked
+            // forge issue for --close-task. Capture the task id
+            // so we can record a PR link afterward.
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let store = forge_link_store(&slug)?;
+            use git_config::BindingStore as _;
+            let mut closes_number = closes;
+            let mut linked_task: Option<uuid::Uuid> = None;
+            if let Some(ref tid) = close_task {
+                let client = connect_task_client(&url).await?;
+                let t = resolve_issue_id(&client, tid).await?;
+                linked_task = Some(t.id);
+                let links = store
+                    .issues_for_task(&t.id.to_string())
+                    .map_err(|e| eyre::eyre!("link store: {e}"))?;
+                match links
+                    .iter()
+                    .find(|l| l.repo == repo_id && l.kind == git_config::LinkKind::Issue)
+                {
+                    Some(l) => closes_number = Some(l.number),
+                    None => {
+                        return Err(eyre::eyre!(
+                            "task {} has no linked issue on {}/{} — push it first (task issue push)",
+                            short_uuid(&t.id),
+                            repo_id.owner,
+                            repo_id.repo
+                        ));
+                    }
+                }
+            }
+
+            // Inject the forge's close-on-merge keyword if not
+            // already present.
+            if let Some(n) = closes_number {
+                let kw = format!("Closes #{n}");
+                if !body.contains(&kw) {
+                    if body.is_empty() {
+                        body = kw.clone();
+                    } else {
+                        body = format!("{body}\n\n{kw}");
+                    }
+                }
+            }
+
+            let repo_c = repo_id.clone();
+            let pr = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                let new = git_proto::reviews::NewPullRequest {
+                    title,
+                    body,
+                    base,
+                    head,
+                    draft,
+                };
+                backend
+                    .create_pull_request(&repo_c, new)
+                    .map_err(|e| eyre::eyre!("create_pull_request: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+
+            // Record a PR-kind link on the task so pr-merge/sync
+            // can finish the loop.
+            if let Some(tid) = linked_task {
+                store
+                    .add_issue_link(git_config::IssueLink {
+                        task_id: tid.to_string(),
+                        repo: repo_id.clone(),
+                        number: pr.id.0,
+                        kind: git_config::LinkKind::Pull,
+                    })
+                    .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            }
+
+            println!(
+                "opened PR #{}: {} ({} <- {})",
+                pr.id.0, pr.title, pr.base, pr.head
+            );
+            if let Some(n) = closes_number {
+                println!("  will close #{n} on merge (Closes #{n} in body)");
+            }
+        }
+        IssueCmd::PrMerge {
+            repo,
+            github,
+            base_url,
+            number,
+            method,
+            close_task,
+            org,
+            server,
+        } => {
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+            let merge_method = match method.to_ascii_lowercase().as_str() {
+                "merge" => git_proto::reviews::MergeMethod::Merge,
+                "squash" => git_proto::reviews::MergeMethod::Squash,
+                "rebase" => git_proto::reviews::MergeMethod::Rebase,
+                _ => return Err(eyre::eyre!("--method must be merge, squash, or rebase")),
+            };
+            let repo_c = repo_id.clone();
+            let sha = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .merge_pull_request(&repo_c, git_proto::PullRequestId(number), merge_method)
+                    .map_err(|e| eyre::eyre!("merge_pull_request: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+            match sha {
+                Some(s) => println!("merged PR #{number} ({s})"),
+                None => println!("merged PR #{number}"),
+            }
+
+            // The `task code merge` chain: close the linked task,
+            // which propagates the close to its own forge issue.
+            if let Some(tid) = close_task {
+                let slug = resolve_active_org(org)?;
+                let url = resolve_org_vox_url(server, &slug);
+                let client = connect_task_client(&url).await?;
+                let mut t = resolve_issue_id(&client, &tid).await?;
+                t.status = "done".into();
+                t.completed_date = Some(chrono::Local::now().date_naive());
+                if let Some(w) = t.workflow.as_mut() {
+                    w.session = None;
+                }
+                let updated = client
+                    .update(t)
+                    .await
+                    .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+                println!(
+                    "  closed task {} ({})",
+                    short_uuid(&updated.id),
+                    updated.title
+                );
+                match propagate_state_to_forge(&slug, &updated.id, git_proto::IssueState::Closed)
+                    .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => println!("  propagated close to {n} linked forge issue(s)"),
+                    Err(e) => eprintln!("  warning: forge propagation failed: {e}"),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reconcile one repo's linked tasks against the forge, then
+/// pull new issues. Returns `(reconciled, pulled)`. Shared by
+/// `task issue sync` and `sync-all`.
+async fn sync_repo(
+    client: &task::TaskServiceClient,
+    store: &git_config::FileStore,
+    repo_id: &git_proto::RepoId,
+    project: Option<uuid::Uuid>,
+    no_pull: bool,
+) -> eyre::Result<(usize, usize)> {
+    use git_config::BindingStore as _;
+
+    // 1. Reconcile already-linked issues (forge wins for open/closed).
+    let local = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    let mut reconciled = 0usize;
+    for t in &local {
+        let links = store
+            .issues_for_task(&t.id.to_string())
+            .map_err(|e| eyre::eyre!("link store: {e}"))?;
+        let Some(link) = links.iter().find(|l| &l.repo == repo_id) else {
+            continue;
+        };
+        let number = link.number;
+        let repo_c = repo_id.clone();
+        let ext = tokio::task::spawn_blocking(move || {
+            let backend = forge_backend_for(&repo_c)?;
+            backend
+                .get_issue(&repo_c, git_proto::IssueId(number))
+                .map_err(|e| eyre::eyre!("get_issue #{number}: {e:?}"))
+        })
+        .await
+        .map_err(|e| eyre::eyre!("join: {e}"))??;
+
+        let forge_done = matches!(ext.state, git_proto::IssueState::Closed);
+        let local_done = t.status == "done";
+        if forge_done != local_done {
+            let mut t2 = t.clone();
+            if forge_done {
+                t2.status = "done".into();
+                t2.completed_date = Some(chrono::Local::now().date_naive());
+                if let Some(w) = t2.workflow.as_mut() {
+                    w.session = None;
+                }
+            } else {
+                t2.status = "open".into();
+                t2.completed_date = None;
+            }
+            client
+                .update(t2)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            reconciled += 1;
+            let s = if forge_done { "done" } else { "open" };
+            println!("  reconciled {} #{number} -> {s}", short_uuid(&t.id));
+        }
+    }
+
+    // 2. Pull new forge issues (unless suppressed).
+    let mut pulled = 0usize;
+    if !no_pull {
+        let repo_c = repo_id.clone();
+        let issues = tokio::task::spawn_blocking(move || {
+            let backend = forge_backend_for(&repo_c)?;
+            let filter = git_proto::issues::IssueFilter {
+                state: Some(git_proto::IssueState::Open),
+                ..Default::default()
+            };
+            backend
+                .list_issues(&repo_c, filter)
+                .map_err(|e| eyre::eyre!("list_issues: {e:?}"))
+        })
+        .await
+        .map_err(|e| eyre::eyre!("join: {e}"))??;
+        for ext in issues {
+            let already = store
+                .tasks_for_issue(repo_id, ext.id.0)
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            if !already.is_empty() {
+                continue;
+            }
+            let mut new_task = build_pulled_task(&ext, None::<task::model::WorkflowAttrs>);
+            new_task.project_id = project;
+            let created = client
+                .create(new_task)
+                .await
+                .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+            store
+                .add_issue_link(git_config::IssueLink {
+                    task_id: created.id.to_string(),
+                    repo: repo_id.clone(),
+                    number: ext.id.0,
+                    kind: git_config::LinkKind::Issue,
+                })
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            pulled += 1;
+            println!(
+                "  pulled {} #{}: {}",
+                short_uuid(&created.id),
+                ext.id.0,
+                ext.title
+            );
+        }
+    }
+    Ok((reconciled, pulled))
+}
+
+/// Build a `TaskInfo` from a forge issue (used by pull + sync).
+fn build_pulled_task(
+    ext: &git_proto::issues::Issue,
+    workflow: Option<task::model::WorkflowAttrs>,
+) -> task::TaskInfo {
+    let status = match ext.state {
+        git_proto::IssueState::Open => "open",
+        git_proto::IssueState::Closed => "done",
+    };
+    task::TaskInfo {
+        id: uuid::Uuid::nil(),
+        path: String::new(),
+        title: ext.title.clone(),
+        status: status.into(),
+        priority: "normal".into(),
+        due: None,
+        scheduled: None,
+        tags: task::model::StringList(vec!["task".into(), "from-forge".into()]),
+        contexts: task::model::StringList::default(),
+        projects: task::model::StringList::default(),
+        project_id: None,
+        milestone_id: None,
+        time_estimate: None,
+        time_entries: task::model::TimeEntries::default(),
+        recurrence: None,
+        recurrence_anchor: None,
+        complete_instances: task::model::StringList::default(),
+        completed_date: None,
+        agent_profile: String::new(),
+        dispatched_agent_tasks: task::model::StringList::default(),
+        date_created: None,
+        date_modified: None,
+        details: ext.body.clone(),
+        workflow,
+    }
+}
+
+/// Build a `RepoId` for a forge from an `owner/repo` slug.
+/// `github=true` → GitHub; else Forgejo with the resolved base
+/// URL.
+fn build_repo_id(
+    repo_slug: &str,
+    github: bool,
+    base_url: Option<String>,
+) -> eyre::Result<git_proto::RepoId> {
+    let (owner, repo) = parse_repo_slug(repo_slug)?;
+    let forge = if github {
+        git_proto::Forge::Github
+    } else {
+        git_proto::Forge::Forgejo {
+            base_url: forgejo_base_url(base_url)?,
+        }
+    };
+    Ok(git_proto::RepoId { forge, owner, repo })
+}
+
+/// Parse `owner/repo` into a tuple.
+fn parse_repo_slug(s: &str) -> eyre::Result<(String, String)> {
+    let (owner, repo) = s
+        .split_once('/')
+        .ok_or_else(|| eyre::eyre!("expected `owner/repo`, got `{s}`"))?;
+    if owner.is_empty() || repo.is_empty() {
+        return Err(eyre::eyre!("owner/repo: empty part in `{s}`"));
+    }
+    Ok((owner.to_string(), repo.to_string()))
+}
+
+/// Resolve the Forgejo base URL: flag > env `TASK_FORGEJO_BASE_URL`
+/// > error. Trims trailing slash.
+fn forgejo_base_url(flag: Option<String>) -> eyre::Result<String> {
+    let raw = flag
+        .or_else(|| std::env::var("TASK_FORGEJO_BASE_URL").ok())
+        .ok_or_else(|| {
+            eyre::eyre!("no Forgejo base URL — pass --base-url or set TASK_FORGEJO_BASE_URL")
+        })?;
+    Ok(raw.trim_end_matches('/').to_string())
+}
+
+/// A constructed forge backend, picked by the repo's `Forge`
+/// variant. `IssueTracker` carries an `async fn subscribe`, so
+/// the trait isn't object-safe — enum dispatch instead of
+/// `Box<dyn>`. Each method forwards to the matching backend's
+/// sync `IssueTracker` impl.
+enum ForgeBackend {
+    Forgejo(git_forgejo::Backend),
+    Github(git_github::Backend),
+}
+
+impl ForgeBackend {
+    fn create_issue(
+        &self,
+        repo: &git_proto::RepoId,
+        title: String,
+        body: String,
+    ) -> Result<git_proto::issues::Issue, git_proto::GitError> {
+        use git_proto::issues::IssueTracker;
+        match self {
+            Self::Forgejo(b) => b.create_issue(repo, title, body),
+            Self::Github(b) => b.create_issue(repo, title, body),
+        }
+    }
+
+    fn update_issue(
+        &self,
+        repo: &git_proto::RepoId,
+        issue: git_proto::IssueId,
+        update: git_proto::issues::IssueUpdate,
+    ) -> Result<git_proto::issues::Issue, git_proto::GitError> {
+        use git_proto::issues::IssueTracker;
+        match self {
+            Self::Forgejo(b) => b.update_issue(repo, issue, update),
+            Self::Github(b) => b.update_issue(repo, issue, update),
+        }
+    }
+
+    fn list_issues(
+        &self,
+        repo: &git_proto::RepoId,
+        filter: git_proto::issues::IssueFilter,
+    ) -> Result<Vec<git_proto::issues::Issue>, git_proto::GitError> {
+        use git_proto::issues::IssueTracker;
+        match self {
+            Self::Forgejo(b) => b.list_issues(repo, filter),
+            Self::Github(b) => b.list_issues(repo, filter),
+        }
+    }
+
+    fn get_issue(
+        &self,
+        repo: &git_proto::RepoId,
+        issue: git_proto::IssueId,
+    ) -> Result<git_proto::issues::Issue, git_proto::GitError> {
+        use git_proto::issues::IssueTracker;
+        match self {
+            Self::Forgejo(b) => b.get_issue(repo, issue),
+            Self::Github(b) => b.get_issue(repo, issue),
+        }
+    }
+
+    fn list_pull_requests(
+        &self,
+        repo: &git_proto::RepoId,
+    ) -> Result<Vec<git_proto::PullRequest>, git_proto::GitError> {
+        use git_proto::reviews::ReviewSurface;
+        match self {
+            Self::Forgejo(b) => b.list_pull_requests(repo),
+            Self::Github(b) => b.list_pull_requests(repo),
+        }
+    }
+
+    fn create_pull_request(
+        &self,
+        repo: &git_proto::RepoId,
+        new: git_proto::reviews::NewPullRequest,
+    ) -> Result<git_proto::PullRequest, git_proto::GitError> {
+        use git_proto::reviews::ReviewSurface;
+        match self {
+            Self::Forgejo(b) => b.create_pull_request(repo, new),
+            Self::Github(b) => b.create_pull_request(repo, new),
+        }
+    }
+
+    fn merge_pull_request(
+        &self,
+        repo: &git_proto::RepoId,
+        pr: git_proto::PullRequestId,
+        method: git_proto::reviews::MergeMethod,
+    ) -> Result<Option<String>, git_proto::GitError> {
+        use git_proto::reviews::ReviewSurface;
+        match self {
+            Self::Forgejo(b) => b.merge_pull_request(repo, pr, method),
+            Self::Github(b) => b.merge_pull_request(repo, pr, method),
+        }
+    }
+}
+
+/// Build the right backend for a repo, reading the matching
+/// token. Forgejo → `forgejo_token()`; GitHub → `github_token()`.
+fn forge_backend_for(repo: &git_proto::RepoId) -> eyre::Result<ForgeBackend> {
+    match &repo.forge {
+        git_proto::Forge::Forgejo { base_url } => {
+            let tok = forgejo_token()?;
+            let base = if base_url.is_empty() {
+                forgejo_base_url(None)?
+            } else {
+                base_url.clone()
+            };
+            let b = git_forgejo::Backend::from_token(&base, &tok)
+                .map_err(|e| eyre::eyre!("forgejo backend: {e:?}"))?;
+            Ok(ForgeBackend::Forgejo(b))
+        }
+        git_proto::Forge::Github => {
+            let tok = github_token()?;
+            let b = git_github::Backend::from_token(&tok)
+                .map_err(|e| eyre::eyre!("github backend: {e:?}"))?;
+            Ok(ForgeBackend::Github(b))
+        }
+    }
+}
+
+/// Resolve a GitHub personal-access token: env `TASK_GITHUB_TOKEN`
+/// then `GITHUB_TOKEN`, then `~/.config/task/github-token`, then
+/// error.
+fn github_token() -> eyre::Result<String> {
+    for var in ["TASK_GITHUB_TOKEN", "GITHUB_TOKEN"] {
+        if let Ok(v) = std::env::var(var) {
+            if !v.is_empty() {
+                return Ok(v);
+            }
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| eyre::eyre!("HOME not set; can't resolve fallback token path"))?;
+    let p = std::path::Path::new(&home)
+        .join(".config")
+        .join("task")
+        .join("github-token");
+    if p.exists() {
+        let s =
+            std::fs::read_to_string(&p).map_err(|e| eyre::eyre!("read {}: {e}", p.display()))?;
+        let t = s.trim();
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    Err(eyre::eyre!(
+        "no GitHub token — set TASK_GITHUB_TOKEN (or GITHUB_TOKEN) or write one to ~/.config/task/github-token"
+    ))
+}
+
+/// Resolve a Forgejo personal-access token: env `TASK_FORGEJO_TOKEN`
+/// then `FORGEJO_TOKEN`, then `~/.config/task/forgejo-token`, then
+/// error.
+fn forgejo_token() -> eyre::Result<String> {
+    if let Ok(v) = std::env::var("TASK_FORGEJO_TOKEN") {
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    if let Ok(v) = std::env::var("FORGEJO_TOKEN") {
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| eyre::eyre!("HOME not set; can't resolve fallback token path"))?;
+    let p = std::path::Path::new(&home)
+        .join(".config")
+        .join("task")
+        .join("forgejo-token");
+    if p.exists() {
+        let s =
+            std::fs::read_to_string(&p).map_err(|e| eyre::eyre!("read {}: {e}", p.display()))?;
+        let t = s.trim();
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    Err(eyre::eyre!(
+        "no Forgejo token — set TASK_FORGEJO_TOKEN (or FORGEJO_TOKEN) or write one to ~/.config/task/forgejo-token"
+    ))
+}
+
+/// Push an `Open`/`Closed` state change to every forge issue
+/// linked to `task_id`. Returns the number of links touched.
+///
+/// Best-effort per-link: a forge that's unreachable or that we
+/// have no token for is logged + skipped, not propagated as an
+/// error. The local close already landed; one flaky forge
+/// shouldn't break it.
+async fn propagate_state_to_forge(
+    org_slug: &str,
+    task_id: &uuid::Uuid,
+    new_state: git_proto::IssueState,
+) -> eyre::Result<usize> {
+    use git_config::BindingStore as _;
+    let store = forge_link_store(org_slug)?;
+    let links = store
+        .issues_for_task(&task_id.to_string())
+        .map_err(|e| eyre::eyre!("link store: {e}"))?;
+    if links.is_empty() {
+        return Ok(0);
+    }
+    let mut touched = 0usize;
+    for link in links {
+        // Only issue links get state-propagated. PR links exist
+        // for traceability, but "closing" a PR is a different
+        // operation than closing an issue (and a merged PR is
+        // already closed) — never route a PR number through
+        // update_issue.
+        if link.kind != git_config::LinkKind::Issue {
+            continue;
+        }
+        let repo_c = link.repo.clone();
+        let number = link.number;
+        // Best-effort: a missing token for this forge family is a
+        // skip-with-warning, not a hard error.
+        let result = tokio::task::spawn_blocking(move || {
+            let backend = forge_backend_for(&repo_c)?;
+            let update = git_proto::issues::IssueUpdate {
+                state: Some(new_state),
+                ..Default::default()
+            };
+            backend
+                .update_issue(&repo_c, git_proto::IssueId(number), update)
+                .map_err(|e| eyre::eyre!("update_issue: {e:?}"))
+        })
+        .await
+        .map_err(|e| eyre::eyre!("join: {e}"))?;
+        match result {
+            Ok(_) => touched += 1,
+            Err(e) => eprintln!(
+                "  skipping {}/{}#{}: {e}",
+                link.repo.owner, link.repo.repo, link.number
+            ),
+        }
+    }
+    Ok(touched)
+}
+
+/// Open the per-org issue-link `FileStore` at
+/// `~/.task/orgs/<slug>/issue-links.json`.
+fn forge_link_store(org_slug: &str) -> eyre::Result<git_config::FileStore> {
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| eyre::eyre!("HOME not set; can't resolve issue-link store path"))?;
+    let p = std::path::Path::new(&home)
+        .join(".task")
+        .join("orgs")
+        .join(org_slug)
+        .join("issue-links.json");
+    git_config::FileStore::open(p).map_err(|e| eyre::eyre!("open link store: {e}"))
+}
+
+async fn run_setup(cmd: SetupCmd) -> eyre::Result<()> {
+    use git_config::BindingStore as _;
+    match cmd {
+        SetupCmd::Forge {
+            repo,
+            github,
+            base_url,
+            webhook_url,
+            public_base,
+            project,
+            org,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let repo_id = build_repo_id(&repo, github, base_url.clone())?;
+            let (owner, repo_name) = parse_repo_slug(&repo)?;
+
+            // 1. Ensure a webhook secret exists for this org.
+            let secret = ensure_webhook_secret(&slug)?;
+
+            // 2. Resolve the webhook URL.
+            let hook_url = if let Some(u) = webhook_url {
+                u
+            } else {
+                let base = public_base.ok_or_else(|| {
+                    eyre::eyre!(
+                        "pass --webhook-url, or --public-base to derive <base>/org/{slug}/webhooks/forge"
+                    )
+                })?;
+                format!("{}/org/{slug}/webhooks/forge", base.trim_end_matches('/'))
+            };
+
+            // 3. Register (or update) the webhook via the forge API.
+            let token = if github {
+                github_token()?
+            } else {
+                forgejo_token()?
+            };
+            let api_base = if github {
+                "https://api.github.com".to_string()
+            } else {
+                forgejo_base_url(base_url)?
+            };
+            register_webhook(
+                &api_base, github, &owner, &repo_name, &token, &hook_url, &secret,
+            )
+            .await?;
+
+            // 4. Record the repo binding (project/org -> repo).
+            let store = forge_link_store(&slug)?;
+            let project_id = project.map_or_else(|| slug.clone(), |p| p.to_string());
+            store
+                .add_repo_binding(git_config::RepoBinding {
+                    project_id,
+                    repo: repo_id,
+                })
+                .map_err(|e| eyre::eyre!("repo binding: {e}"))?;
+
+            let forge_label = if github { "github" } else { "forgejo" };
+            println!("✓ {forge_label} integration ready for {repo}");
+            println!("  webhook → {hook_url}");
+            println!("  events: issues, pull_request (signed with the org webhook secret)");
+            println!("  secret: ~/.task/orgs/{slug}/webhook-secret");
+            if let Some(p) = project {
+                println!("  bound to project {p}");
+            }
+            println!(
+                "\nClosing an issue/PR on the forge will now close the linked task\n\
+                 (once the task-server is reachable at the webhook URL)."
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Read the per-org webhook secret, generating + persisting one
+/// (64 hex chars) if it doesn't exist yet.
+fn ensure_webhook_secret(org_slug: &str) -> eyre::Result<String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
+    let path = std::path::Path::new(&home)
+        .join(".task")
+        .join("orgs")
+        .join(org_slug)
+        .join("webhook-secret");
+    if path.exists() {
+        let s = std::fs::read_to_string(&path).map_err(|e| eyre::eyre!("read secret: {e}"))?;
+        let t = s.trim();
+        if !t.is_empty() {
+            return Ok(t.to_string());
+        }
+    }
+    // Generate 32 bytes of entropy as hex via two v4 UUIDs.
+    let secret = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(&path, &secret).map_err(|e| eyre::eyre!("write secret: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(secret)
+}
+
+/// Register (or update if one already targets the same URL) a
+/// webhook on a forge repo. Forgejo + GitHub hook APIs differ
+/// only in the `type`/`name` field.
+async fn register_webhook(
+    api_base: &str,
+    github: bool,
+    owner: &str,
+    repo: &str,
+    token: &str,
+    hook_url: &str,
+    secret: &str,
+) -> eyre::Result<()> {
+    let client = reqwest::Client::builder()
+        .user_agent("task/setup")
+        .build()
+        .map_err(|e| eyre::eyre!("http client: {e}"))?;
+    let hooks_url = format!("{api_base}/api/v1/repos/{owner}/{repo}/hooks");
+    let hooks_url = if github {
+        format!("{api_base}/repos/{owner}/{repo}/hooks")
+    } else {
+        hooks_url
+    };
+
+    // Common config block both forges accept.
+    let config = serde_json::json!({
+        "url": hook_url,
+        "content_type": "json",
+        "secret": secret,
+    });
+    let mut body = serde_json::json!({
+        "active": true,
+        "events": ["issues", "pull_request"],
+        "config": config,
+    });
+    // Forgejo wants `type`; GitHub wants `name: "web"`.
+    if github {
+        body["name"] = serde_json::json!("web");
+    } else {
+        body["type"] = serde_json::json!("forgejo");
+    }
+
+    // Idempotency: if a hook already targets this URL, PATCH it.
+    let existing: Vec<serde_json::Value> = client
+        .get(&hooks_url)
+        .header("Authorization", format!("token {token}"))
+        .send()
+        .await
+        .map_err(|e| eyre::eyre!("list hooks: {e}"))?
+        .json()
+        .await
+        .unwrap_or_default();
+    let existing_id = existing.iter().find_map(|h| {
+        let url = h
+            .get("config")
+            .and_then(|c| c.get("url"))
+            .and_then(|v| v.as_str());
+        if url == Some(hook_url) {
+            h.get("id").and_then(serde_json::Value::as_u64)
+        } else {
+            None
+        }
+    });
+
+    let resp = if let Some(id) = existing_id {
+        client
+            .patch(format!("{hooks_url}/{id}"))
+            .header("Authorization", format!("token {token}"))
+            .json(&body)
+            .send()
+            .await
+    } else {
+        client
+            .post(&hooks_url)
+            .header("Authorization", format!("token {token}"))
+            .json(&body)
+            .send()
+            .await
+    }
+    .map_err(|e| eyre::eyre!("register hook: {e}"))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(eyre::eyre!("forge rejected webhook ({status}): {text}"));
+    }
     Ok(())
 }
 

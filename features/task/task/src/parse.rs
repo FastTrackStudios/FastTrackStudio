@@ -180,7 +180,18 @@ fn parse_page_impl(page: &ParsePageRef<'_>) -> Result<TaskInfo, ParseError> {
         date_created,
         date_modified,
         details: body.to_string(),
+        workflow: take_workflow_attrs(&map),
     })
+}
+
+/// Parse the optional nested `workflow:` mapping into a
+/// `WorkflowAttrs`. Returns `None` when the key is absent or
+/// has an empty mapping (so an unparseable / empty block doesn't
+/// stamp `Some(default)` and dirty round-trips).
+fn take_workflow_attrs(map: &serde_yaml::Mapping) -> Option<crate::model::WorkflowAttrs> {
+    let value = map.get(serde_yaml::Value::String("workflow".into()))?;
+    let attrs: crate::model::WorkflowAttrs = serde_yaml::from_value(value.clone()).ok()?;
+    Some(attrs)
 }
 
 /// Split a markdown source into `(frontmatter_yaml, body)`. The

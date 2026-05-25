@@ -146,4 +146,105 @@ mod tests {
             "Projects/groceries/buy-milk.md"
         );
     }
+
+    #[test]
+    fn workflow_attrs_round_trip_through_yaml() {
+        use crate::model::{AgentRefList, Estimate, UuidList, WorkflowAttrs};
+        use workflows_proto::AgentRef;
+
+        let cycle = uuid::Uuid::new_v4();
+        let blocker = uuid::Uuid::new_v4();
+
+        let attrs = WorkflowAttrs {
+            cycle: Some(cycle),
+            estimate: Some(Estimate::M),
+            assignees: AgentRefList(vec![
+                AgentRef::human("cody"),
+                AgentRef::agent_versioned("claude", "opus-4-7"),
+            ]),
+            blockers: UuidList(vec![blocker]),
+            relates_to: UuidList::default(),
+            session: None,
+        };
+
+        let task = TaskInfo {
+            id: uuid::Uuid::new_v4(),
+            path: "tasks/example.md".into(),
+            title: "example".into(),
+            status: "open".into(),
+            priority: "normal".into(),
+            due: None,
+            scheduled: None,
+            tags: crate::model::StringList(vec!["task".into()]),
+            contexts: crate::model::StringList::default(),
+            projects: crate::model::StringList::default(),
+            project_id: None,
+            milestone_id: None,
+            time_estimate: None,
+            time_entries: crate::model::TimeEntries::default(),
+            recurrence: None,
+            recurrence_anchor: None,
+            complete_instances: crate::model::StringList::default(),
+            completed_date: None,
+            agent_profile: String::new(),
+            dispatched_agent_tasks: crate::model::StringList::default(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+            workflow: Some(attrs.clone()),
+        };
+
+        let yaml = serialize_task(&task).expect("serialize");
+        assert!(
+            yaml.contains("workflow:"),
+            "yaml missing workflow key:\n{yaml}"
+        );
+        assert!(yaml.contains("cycle:"), "yaml missing cycle key");
+        assert!(
+            yaml.contains(&format!("{cycle}")),
+            "yaml missing cycle uuid"
+        );
+
+        // Round-trip back through the parser. Build a fake VaultPage.
+        let parsed = crate::parse::parse_str("tasks/example.md", "example", &yaml).expect("parse");
+        let parsed_attrs = parsed.workflow.expect("workflow attrs present");
+        assert_eq!(parsed_attrs.cycle, Some(cycle));
+        assert_eq!(parsed_attrs.assignees.len(), 2);
+        assert_eq!(parsed_attrs.blockers.0, vec![blocker]);
+    }
+
+    #[test]
+    fn workflow_omitted_when_none() {
+        let task = TaskInfo {
+            id: uuid::Uuid::new_v4(),
+            path: "tasks/plain.md".into(),
+            title: "plain".into(),
+            status: "open".into(),
+            priority: "normal".into(),
+            due: None,
+            scheduled: None,
+            tags: crate::model::StringList(vec!["task".into()]),
+            contexts: crate::model::StringList::default(),
+            projects: crate::model::StringList::default(),
+            project_id: None,
+            milestone_id: None,
+            time_estimate: None,
+            time_entries: crate::model::TimeEntries::default(),
+            recurrence: None,
+            recurrence_anchor: None,
+            complete_instances: crate::model::StringList::default(),
+            completed_date: None,
+            agent_profile: String::new(),
+            dispatched_agent_tasks: crate::model::StringList::default(),
+            date_created: None,
+            date_modified: None,
+            details: String::new(),
+            workflow: None,
+        };
+        let yaml = serialize_task(&task).expect("serialize");
+        assert!(
+            !yaml.contains("workflow:"),
+            "expected 'workflow' key to be omitted when None:\n{yaml}"
+        );
+    }
 }

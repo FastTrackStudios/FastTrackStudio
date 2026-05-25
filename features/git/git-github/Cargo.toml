@@ -16,6 +16,9 @@ vox-types = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 octocrab = { workspace = true }
 thiserror = { workspace = true }
+# octocrab uses rustls but doesn't install a process-level
+# CryptoProvider; we install ring once in `from_token`.
+rustls = { version = "0.23", features = ["ring"] }
 
 [lints]
 workspace = true

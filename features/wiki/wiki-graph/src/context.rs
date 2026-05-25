@@ -110,10 +110,8 @@ pub fn build_context(vault_root: &Path, opts: ContextOpts) -> Result<ContextResu
     let pages = scan_wiki(vault_root)?;
     let by_path: HashMap<String, &crate::parse::Page> =
         pages.iter().map(|p| (p.rel_path.clone(), p)).collect();
-    let by_title: HashMap<String, &crate::parse::Page> = pages
-        .iter()
-        .map(|p| (p.title.to_lowercase(), p))
-        .collect();
+    let by_title: HashMap<String, &crate::parse::Page> =
+        pages.iter().map(|p| (p.title.to_lowercase(), p)).collect();
 
     // Build the (already-filtered) graph.
     let idx = Indices::build(&pages);
@@ -196,11 +194,7 @@ pub fn build_context(vault_root: &Path, opts: ContextOpts) -> Result<ContextResu
     })
 }
 
-fn format_entry(
-    n: &wiki_proto::graph::GraphNode,
-    summary: &str,
-    connects: &[String],
-) -> String {
+fn format_entry(n: &wiki_proto::graph::GraphNode, summary: &str, connects: &[String]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "## [[{}]] · {}{}\n",
