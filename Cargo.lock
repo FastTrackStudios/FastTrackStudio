@@ -21,6 +21,17 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#1a647fb218c9a9364f7e25384f91fc1194581c63"
+dependencies = [
+ "convert_case 0.6.0",
+ "facet 0.46.4",
+ "vox",
+]
+
+[[package]]
+name = "actions-proto"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#1a647fb218c9a9364f7e25384f91fc1194581c63"
 dependencies = [
  "convert_case 0.6.0",
  "facet 0.46.4",
@@ -1555,15 +1566,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "color-palette"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#2940ba3c85c758a10b196f4b6f56a74d1763c2b1"
-dependencies = [
- "facet 0.46.4",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "color-spantrace"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2483,7 +2485,7 @@ name = "daw-proto"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
  "facet 0.46.4",
  "thiserror 2.0.18",
@@ -3536,7 +3538,7 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
  "anyhow",
- "color-palette 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main)",
+ "color-palette",
  "daw",
  "daw-proto",
  "daw-reaper",
@@ -3544,7 +3546,7 @@ dependencies = [
  "eyre",
  "facet 0.46.4",
  "monarchy",
- "music-catalog 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main)",
+ "music-catalog",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3557,7 +3559,7 @@ name = "dynamic-template-proto"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "daw-proto",
  "facet 0.46.4",
  "thiserror 2.0.18",
@@ -3594,13 +3596,61 @@ dependencies = [
 [[package]]
 name = "engraver"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
- "engraver-proto",
+ "engraver-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+]
+
+[[package]]
+name = "engraver"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+dependencies = [
+ "engraver-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
 ]
 
 [[package]]
 name = "engraver-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+dependencies = [
+ "anyrender",
+ "bitflags 2.11.1",
+ "bytemuck",
+ "color-eyre",
+ "colored",
+ "derive_more 1.0.0",
+ "facet 0.46.4",
+ "getrandom 0.2.17",
+ "helgoboss-midi",
+ "keyflow-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-syntax 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-text 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "kurbo 0.13.1",
+ "lopdf 0.36.0",
+ "lyon",
+ "macro_rules_attribute",
+ "parley",
+ "pdf-writer",
+ "printpdf",
+ "regex",
+ "serde",
+ "serde_json",
+ "skrifa 0.26.6",
+ "smufl",
+ "svg2pdf",
+ "thiserror 2.0.18",
+ "tracing",
+ "usvg",
+ "uuid",
+ "vello",
+ "wgpu",
+]
+
+[[package]]
+name = "engraver-proto"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
  "anyrender",
  "bitflags 2.11.1",
@@ -3612,9 +3662,9 @@ dependencies = [
  "getrandom 0.2.17",
  "helgoboss-midi",
  "keyflow-midi",
- "keyflow-proto",
- "keyflow-syntax",
- "keyflow-text",
+ "keyflow-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-syntax 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-text 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "kurbo 0.13.1",
  "lopdf 0.36.0",
  "lyon",
@@ -4223,7 +4273,7 @@ dependencies = [
  "daw",
  "dioxus",
  "eyre",
- "keyflow",
+ "keyflow 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "moire",
  "rfd",
  "session",
@@ -4606,6 +4656,7 @@ dependencies = [
 [[package]]
 name = "fts-ui"
 version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-ui.git?branch=main#9a19778e16127a7254a5223c46193ce53517396d"
 dependencies = [
  "chrono",
  "clsx",
@@ -6200,18 +6251,40 @@ dependencies = [
 [[package]]
 name = "keyflow"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
  "color-eyre",
  "colored",
  "daw-module",
  "daw-proto",
  "derive_more 1.0.0",
- "engraver",
+ "engraver 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "facet 0.46.4",
  "getrandom 0.2.17",
  "helgoboss-midi",
- "keyflow-proto",
- "keyflow-text",
+ "keyflow-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-text 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "regex",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "keyflow"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+dependencies = [
+ "color-eyre",
+ "colored",
+ "daw-module",
+ "daw-proto",
+ "derive_more 1.0.0",
+ "engraver 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "facet 0.46.4",
+ "getrandom 0.2.17",
+ "helgoboss-midi",
+ "keyflow-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-text 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "regex",
  "tracing",
  "uuid",
@@ -6220,16 +6293,23 @@ dependencies = [
 [[package]]
 name = "keyflow-chordpro"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+
+[[package]]
+name = "keyflow-chordpro"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 
 [[package]]
 name = "keyflow-daw-analysis"
 version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
  "architect",
  "daw",
  "eyre",
  "facet 0.46.4",
- "keyflow",
+ "keyflow 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "tracing",
  "vox",
 ]
@@ -6237,23 +6317,43 @@ dependencies = [
 [[package]]
 name = "keyflow-midi"
 version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
- "keyflow-proto",
- "keyflow-text",
+ "keyflow-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-text 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "midly",
 ]
 
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
  "architect",
- "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
+ "color-palette",
  "daw-proto",
  "facet 0.46.4",
  "helgoboss-midi",
- "keyflow-syntax",
- "music-catalog 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
+ "keyflow-syntax 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "music-catalog",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "keyflow-proto"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+dependencies = [
+ "architect",
+ "color-palette",
+ "daw-proto",
+ "facet 0.46.4",
+ "helgoboss-midi",
+ "keyflow-syntax 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "music-catalog",
  "serde",
  "thiserror 2.0.18",
  "tracing",
@@ -6263,6 +6363,17 @@ dependencies = [
 [[package]]
 name = "keyflow-syntax"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+dependencies = [
+ "facet 0.46.4",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "keyflow-syntax"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
  "facet 0.46.4",
  "serde",
@@ -6272,10 +6383,22 @@ dependencies = [
 [[package]]
 name = "keyflow-text"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
- "keyflow-chordpro",
- "keyflow-proto",
- "keyflow-syntax",
+ "keyflow-chordpro 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-syntax 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "tracing",
+]
+
+[[package]]
+name = "keyflow-text"
+version = "0.1.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
+dependencies = [
+ "keyflow-chordpro 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
+ "keyflow-syntax 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "tracing",
 ]
 
@@ -7296,15 +7419,7 @@ name = "music-catalog"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
- "color-palette 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main)",
-]
-
-[[package]]
-name = "music-catalog"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main#2940ba3c85c758a10b196f4b6f56a74d1763c2b1"
-dependencies = [
- "color-palette 0.1.0 (git+https://github.com/FastTrackStudios/dynamic-template.git?branch=main)",
+ "color-palette",
 ]
 
 [[package]]
@@ -10182,8 +10297,9 @@ dependencies = [
 [[package]]
 name = "session"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#61f5c5b6e7c4f2b8a735afa83edb4e4383bda713"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
  "chrono",
  "daw",
@@ -10192,7 +10308,7 @@ dependencies = [
  "daw-synchronization",
  "dynamic-template",
  "eyre",
- "keyflow",
+ "keyflow 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "keyflow-daw-analysis",
  "moire",
  "reaper-high",
@@ -10211,6 +10327,7 @@ dependencies = [
 [[package]]
 name = "session-cli"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#61f5c5b6e7c4f2b8a735afa83edb4e4383bda713"
 dependencies = [
  "clap",
  "daw",
@@ -10231,15 +10348,16 @@ dependencies = [
 [[package]]
 name = "session-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#61f5c5b6e7c4f2b8a735afa83edb4e4383bda713"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
  "daw",
  "eyre",
  "facet 0.46.4",
  "futures",
  "gloo-timers",
- "keyflow",
+ "keyflow 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -10253,6 +10371,7 @@ dependencies = [
 [[package]]
 name = "session-ui"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#61f5c5b6e7c4f2b8a735afa83edb4e4383bda713"
 dependencies = [
  "daw",
  "dioxus",
@@ -10421,7 +10540,7 @@ name = "signal-proto"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/signal.git?branch=main#5f7cd22e95cb82b567604465338080b59de80e77"
 dependencies = [
- "actions-proto",
+ "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "facet 0.44.5",
  "macromod",
  "serde",
@@ -14587,29 +14706,19 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "actions-keybindings"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-registry"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-standalone"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input-dioxus"
-version = "0.1.0"
-
-[[patch.unused]]
 name = "reaper-macros"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+
+[[patch.unused]]
+name = "ur-taking-me-with-you"
+version = "8.0.0"
+source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+
+[[patch.unused]]
+name = "vox-inprocess"
+version = "0.5.0"
+source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
 
 [[patch.unused]]
 name = "audio-controls"
@@ -14635,33 +14744,3 @@ source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#
 name = "reaper-macros"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-
-[[patch.unused]]
-name = "ur-taking-me-with-you"
-version = "8.0.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-
-[[patch.unused]]
-name = "vox-inprocess"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
-
-[[patch.unused]]
-name = "actions-keybindings"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-registry"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "actions-standalone"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "input-dioxus"
-version = "0.1.0"

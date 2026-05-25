@@ -149,9 +149,6 @@ reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs
 reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
-# FTS REAPER crates (shared reaper-lib repo)
-swell-ui = { path = "../reaper-lib/crates/swell-ui" }
-reaper-embed = { path = "../reaper-lib/crates/reaper-embed" }
 reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
@@ -200,42 +197,15 @@ color = "0.3"
 wgpu = "27"
 pollster = "0.4"
 
-# ── Sibling FTS repo overrides ────────────────────────────────────────
-# Point the umbrella at the local sibling checkouts so a single
-# `cargo build` in this repo picks up uncommitted / unpushed work from
-# any of the domain repos. Comment out a section to fall back to the
-# pinned GitHub `main` rev.
-
-[patch."https://git.starcommand.live/FastTrackStudios/session.git"]
-session = { path = "../session/crates/session" }
-session-proto = { path = "../session/crates/session-proto" }
-session-ui = { path = "../session/crates/session-ui" }
-session-cli = { path = "../session/apps/cli" }
-
-# daw is consumed from git.starcommand.live (canonical — daw main carries the
-# full PT→RPP work + architect-git, PR #7). The https-starcommand URL is the
-# source of truth and needs no patch; the ssh-starcommand block below only
-# redirects session's ssh refs onto it so the graph resolves to one daw.
-
-[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
-keyflow = { path = "../keyflow/crates/keyflow" }
-keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
-keyflow-text = { path = "../keyflow/crates/keyflow-text" }
-keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
-engraver = { path = "../keyflow/crates/engraver" }
-engraver-proto = { path = "../keyflow/crates/engraver-proto" }
-
-# ── starcommand.live mirrors ───────────────────────────────────────────
-# Sibling repos (session in particular) now declare git deps via
-# git.starcommand.live URLs. Cargo matches [patch] by exact URL, so the
-# github-keyed blocks above don't fire for transitive deps that resolve
-# through starcommand. Duplicate the path redirects keyed to the
-# starcommand URL too.
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/session.git"]
-session = { path = "../session/crates/session" }
-session-proto = { path = "../session/crates/session-proto" }
-session-ui = { path = "../session/crates/session-ui" }
-session-cli = { path = "../session/apps/cli" }
+# ── Sibling FTS repo deps ─────────────────────────────────────────────
+# All sibling domain crates are consumed from their git.starcommand.live
+# remotes (no local-path overrides) so the workspace builds on any machine
+# / in CI from a bare checkout. The only [patch] blocks below redirect
+# alternate URL schemes (ssh-starcommand, leftover github) onto the
+# canonical https-starcommand remotes so the graph resolves a single copy
+# of daw / reaper-rs. To iterate on a sibling locally, add a temporary
+# `[patch."<url>"] crate = { path = "../<repo>/..." }` block (and don't
+# commit it).
 
 [patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git"]
 daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
@@ -251,25 +221,6 @@ audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git"
 reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git"]
-keyflow = { path = "../keyflow/crates/keyflow" }
-keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
-keyflow-text = { path = "../keyflow/crates/keyflow-text" }
-keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
-engraver = { path = "../keyflow/crates/engraver" }
-engraver-proto = { path = "../keyflow/crates/engraver-proto" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-ui.git"]
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../input_actions/crates/actions-proto" }
-actions-registry = { path = "../input_actions/crates/actions-registry" }
-actions-standalone = { path = "../input_actions/crates/actions-standalone" }
-actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
-input-dioxus = { path = "../input_actions/crates/input-dioxus" }
-input = { path = "../input_actions/crates/input" }
 
 # reaper-rs is referenced via https-starcommand (canonical), ssh-starcommand
 # (session), and still github by a couple of daw crates (daw-reaper-dioxus-ext*
@@ -302,13 +253,6 @@ reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/rea
 # signal-cli = { path = "../signal/apps/cli" }
 # macromod = { path = "../signal/crates/macromod" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../input_actions/crates/actions-proto" }
-actions-registry = { path = "../input_actions/crates/actions-registry" }
-actions-standalone = { path = "../input_actions/crates/actions-standalone" }
-actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
-input-dioxus = { path = "../input_actions/crates/input-dioxus" }
-input = { path = "../input_actions/crates/input" }
 
 # Pin every transitive vox reference to the same bearcove rev that the
 # sibling domain repos (daw, session, keyflow, …) use. Without this,
