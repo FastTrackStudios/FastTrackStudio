@@ -81,10 +81,10 @@ facet-json = { version = "0.46" }
 
 # architect framework — defines #[architect::rpc] for sync-trait → vox
 # bridge generation plus the Entity derive for CRUD-shaped data.
-# Path dep onto the local checkout; vox refs inside architect get
-# redirected to the Codys-Wright fork via the [patch] section below.
-architect = { path = "../../../Development/architect/macros/architect" }
-architect-rpc-derive = { path = "../../../Development/architect/macros/architect-rpc-derive" }
+# Consumed from git.starcommand.live so daw is usable as a git dependency
+# (a local path dep escapes the repo and breaks downstream `cargo metadata`).
+architect = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
+architect-rpc-derive = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
 
 # VOX service framework (pinned to FastTrackStudios fork)
 vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
