@@ -271,10 +271,18 @@ actions-keybindings = { path = "../input_actions/crates/actions-keybindings" }
 input-dioxus = { path = "../input_actions/crates/input-dioxus" }
 input = { path = "../input_actions/crates/input" }
 
-# reaper-rs is referenced via github / https-starcommand / ssh-starcommand
-# across the graph (daw uses https-starcommand). Unify everything onto the
-# https-starcommand remote — two URL schemes for the same repo otherwise
-# produce two reaper-low crates and HWND/RECT type mismatches in daw-reaper.
+# reaper-rs is referenced via https-starcommand (canonical), ssh-starcommand
+# (session), and still github by a couple of daw crates (daw-reaper-dioxus-ext*
+# — the daw URL migration missed them). Redirect github + ssh onto the
+# https-starcommand remote so the whole graph resolves to one reaper-low —
+# otherwise two URL schemes produce HWND/RECT type mismatches in daw-reaper.
+[patch."https://github.com/FastTrackStudios/reaper-rs.git"]
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+
 [patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git"]
 reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
