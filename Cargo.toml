@@ -29,7 +29,7 @@ facet-value = "0.46"
 vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
 
 # Sibling repos
-daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main", features = ["reaper"] }
 daw-proto = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 daw-standalone = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
