@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "FastTrackStudios launcher for Reaper — audio production workflow launcher"
-repository = "https://github.com/FastTrackStudios/fts-launcher"
+repository = "https://git.starcommand.live/FastTrackStudios/fts-launcher"
 
 [lib]
 name = "fts_launcher"
@@ -29,12 +29,12 @@ providers = { path = "../dioxus-launcher/crates/providers" }
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
 # Dioxus native renderer (Blitz)
-dioxus-native = { git = "https://github.com/FastTrackStudios/blitz", features = ["prelude"] }
+dioxus-native = { git = "https://git.starcommand.live/FastTrackStudios/blitz", features = ["prelude"] }
 
 # DAW API (safe Rust, async, generic)
 daw = { path = "../daw/crates/daw" }
-reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Standalone binary deps (optional)
 winit = { version = "=0.31.0-beta.2", optional = true }
