@@ -16,8 +16,12 @@ session-cli.workspace = true
 # Vox RPC (gateway link/dispatch + connection)
 vox.workspace = true
 
-# DAW facade — Tools page uses daw::reaper::project_import for PTX→RPP conversion
-daw = { workspace = true, features = ["reaper"] }
+# DAW facade — Tools page uses daw::file::convert for cross-format
+# session import (PTX/ALS/AAF/DAWproject → RPP).
+daw = { workspace = true, features = ["reaper", "convert"] }
+# Keyflow chart rendering (.kf → SVG) for the Tools page's chart card.
+# `text` parses .kf source; `engraver` lays out + serializes SVG.
+keyflow = { workspace = true, features = ["text", "engraver"] }
 
 # Native file dialogs for the Tools page
 rfd = "0.17"
