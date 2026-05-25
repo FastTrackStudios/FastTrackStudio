@@ -16089,6 +16089,19 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "anyrender_vello_hybrid"
+version = "0.1.1"
+source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+
+[[patch.unused]]
+name = "eq-dsp"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "fts-dsp"
+version = "0.1.0"
+
+[[patch.unused]]
 name = "shm-primitives"
 version = "0.2.2"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
@@ -16117,16 +16130,3 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b2
 name = "vox-websocket"
 version = "0.2.2"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
-
-[[patch.unused]]
-name = "eq-dsp"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "fts-dsp"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "anyrender_vello_hybrid"
-version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"

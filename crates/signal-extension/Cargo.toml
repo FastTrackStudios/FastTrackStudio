@@ -15,8 +15,8 @@ daw-extension-runtime.workspace = true
 macromod.workspace = true
 signal.workspace = true
 fragile = "2"
-reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre.workspace = true
 serde_json.workspace = true
