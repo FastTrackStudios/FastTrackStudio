@@ -238,13 +238,13 @@ engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 # github-keyed blocks above don't fire for transitive deps that resolve
 # through starcommand. Duplicate the path redirects keyed to the
 # starcommand URL too.
-[patch."https://git.starcommand.live/FastTrackStudios/session.git"]
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/session.git"]
 session = { path = "../session/crates/session" }
 session-proto = { path = "../session/crates/session-proto" }
 session-ui = { path = "../session/crates/session-ui" }
 session-cli = { path = "../session/apps/cli" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git"]
 daw = { path = "../daw/crates/daw" }
 daw-cli = { path = "../daw/apps/daw" }
 daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
@@ -256,7 +256,7 @@ reaper-test = { path = "../daw/crates/reaper-test" }
 reaper-test-macro = { path = "../daw/crates/reaper-test-macro" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git"]
 keyflow = { path = "../keyflow/crates/keyflow" }
 keyflow-proto = { path = "../keyflow/crates/keyflow-proto" }
 keyflow-text = { path = "../keyflow/crates/keyflow-text" }
@@ -264,10 +264,10 @@ keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
 engraver = { path = "../keyflow/crates/engraver" }
 engraver-proto = { path = "../keyflow/crates/engraver-proto" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/fts-ui.git"]
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-ui.git"]
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
-[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../input_actions/crates/actions-proto" }
 actions-registry = { path = "../input_actions/crates/actions-registry" }
 actions-standalone = { path = "../input_actions/crates/actions-standalone" }
@@ -276,10 +276,10 @@ input-dioxus = { path = "../input_actions/crates/input-dioxus" }
 input = { path = "../input_actions/crates/input" }
 
 [patch."https://github.com/FastTrackStudios/reaper-rs.git"]
-reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Signal patched out for now — local signal pins an older vox rev
 # (Codys-Wright/vox@2a2f793b) that drags facet 0.44 into the
