@@ -30,8 +30,8 @@ blitz-traits      = { git = "https://github.com/DioxusLabs/blitz.git" }
 
 # Vello CPU rasteriser — matches what blitz's `examples/screenshot.rs`
 # uses. CPU only so snapshots don't need a GPU in CI.
-anyrender           = "0.8"
-anyrender_vello_cpu = "0.10"
+anyrender           = "0.10"
+anyrender_vello_cpu = "0.12"
 futures-util        = "0.3"
 peniko              = "0.6"
 rgb                 = "0.8"

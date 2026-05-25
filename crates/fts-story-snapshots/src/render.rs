@@ -158,7 +158,7 @@ fn render_inner(cfg: &RenderConfig) -> Vec<u8> {
             );
             paint_scene(
                 scene,
-                &*doc.inner.borrow(),
+                &mut *doc.inner.borrow_mut(),
                 cfg.scale as f64,
                 render_w,
                 render_h,
