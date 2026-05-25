@@ -15,28 +15,28 @@ version = "0.1.0"
 # FTS side repos are declared as pinned git dependencies for reproducible
 # manifests. The local-development patch sections below redirect these packages
 # back to sibling checkouts while iterating across repos.
-fts-launcher = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-launcher.git", rev = "698a29121c2d20c24cba5a58d608c6f5da0f56a0", features = ["native"] }
-session = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/session.git", rev = "189f942bd9fc07513ed913c488b36871f661849d" }
-reaper-input = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/input.git", rev = "7f06a6acf027956c94b6fa2cab5b50c425ca1067" }
+fts-launcher = { git = "https://git.starcommand.live/FastTrackStudios/fts-launcher.git", rev = "698a29121c2d20c24cba5a58d608c6f5da0f56a0", features = ["native"] }
+session = { git = "https://git.starcommand.live/FastTrackStudios/session.git", rev = "189f942bd9fc07513ed913c488b36871f661849d" }
+reaper-input = { git = "https://git.starcommand.live/FastTrackStudios/input.git", rev = "7f06a6acf027956c94b6fa2cab5b50c425ca1067" }
 crossbeam-channel = "0.5"
 once_cell = "1"
 eyre = "0.6"
 fragile = "2"
-reaper-high = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-low = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-daw = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-reaper = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-extension-runtime = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-daw-synchronization = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
-keyflow-daw-analysis = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
-fts-ui = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-synchronization = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+keyflow-daw-analysis = { git = "https://git.starcommand.live/FastTrackStudios/keyflow.git", branch = "main" }
+fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
 tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-reaper-test = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git", rev = "273dbaa1ef5e4dfac9cd35988e13d2b4b954ab6e" }
+reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", rev = "273dbaa1ef5e4dfac9cd35988e13d2b4b954ab6e" }
 # `reaper-config` from reaper-file gives us the typed parser/serializer
 # for `reaper-menu.ini` so we can rename floating toolbars per session
 # mode at extension startup.
@@ -50,11 +50,6 @@ reaper-config = { path = "../reaper-file/crates/reaper-config" }
 # `github.com/.../reaper-rs.git` reference (from daw/input/etc. which
 # still pin github URLs internally) to the same starcommand source we
 # use directly, so cargo unifies on a single checkout.
-[patch."https://git.starcommand.live/FastTrackStudios/reaper-rs.git"]
-reaper-high = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-low = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 [patch."https://git.starcommand.live/FastTrackStudios/fts-launcher.git"]
 fts-launcher = { path = "../fts-launcher" }
@@ -101,43 +96,6 @@ session-ui = { path = "../session/crates/session-ui" }
 [patch."https://git.starcommand.live/FastTrackStudios/fts-ui.git"]
 fts-ui = { path = "../fts-ui/crates/fts-ui" }
 
-# ── starcommand.live mirrors of the same patches ──────────────────────────
-# fts-extensions [dependencies] now point at git.starcommand.live; cargo
-# matches [patch] sections by exact URL, so we duplicate each block above
-# keyed to the starcommand URL too. The github-keyed blocks above still
-# fire for transitive deps in sibling repos that haven't migrated yet.
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-launcher.git"]
-fts-launcher = { path = "../fts-launcher" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git"]
-daw = { path = "../daw/crates/daw" }
-daw-proto = { path = "../daw/crates/daw-proto" }
-daw-control = { path = "../daw/crates/daw-control" }
-daw-extension-runtime = { path = "../daw/crates/daw-extension-runtime" }
-daw-module = { path = "../daw/crates/daw-module" }
-daw-reaper = { path = "../daw/crates/daw-reaper" }
-daw-reaper-dioxus = { path = "../daw/crates/daw-reaper-dioxus" }
-daw-reaper-embed = { path = "../daw/crates/daw-reaper-embed" }
-daw-synchronization = { path = "../daw/crates/daw-synchronization" }
-dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
-dawfile-ableton = { path = "../daw/crates/dawfile-ableton" }
-reaper-test = { path = "../daw/crates/reaper-test" }
-reaper-launcher = { path = "../daw/crates/reaper-launcher" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git"]
-keyflow = { path = "../keyflow/crates/keyflow" }
-keyflow-daw-analysis = { path = "../keyflow/crates/keyflow-daw-analysis" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/input.git"]
-reaper-input = { path = "../input/crates/reaper-input" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/session.git"]
-session = { path = "../session/crates/session" }
-session-ui = { path = "../session/crates/session-ui" }
-
-[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-ui.git"]
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
-
 [patch."https://github.com/bearcove/moire"]
 moire = { path = "../moire/crates/moire" }
 moire-macros-noop = { path = "../moire/crates/moire-macros-noop" }
@@ -174,9 +132,9 @@ moire-macros-noop = { path = "../moire/crates/moire-macros-noop" }
 moire-runtime = { path = "../moire/crates/moire-runtime" }
 moire-tokio = { path = "../moire/crates/moire-tokio" }
 moire-trace-capture = { path = "../moire/crates/moire-trace-capture" }
-anyrender = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_vello = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_vello_cpu = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_vello_hybrid = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_svg = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-wgpu_context = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender = { git = "https://git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello = { git = "https://git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello_cpu = { git = "https://git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello_hybrid = { git = "https://git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_svg = { git = "https://git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+wgpu_context = { git = "https://git.starcommand.live/FastTrackStudios/anyrender.git", rev = "422b5d0" }
