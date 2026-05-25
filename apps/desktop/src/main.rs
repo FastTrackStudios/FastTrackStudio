@@ -20,14 +20,56 @@ enum Tab {
     Tools,
 }
 
+/// Path of the desktop log file. Override with `FTS_DESKTOP_LOG`.
+fn log_path() -> std::path::PathBuf {
+    std::env::var_os("FTS_DESKTOP_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("fasttrackstudio-desktop.log"))
+}
+
+/// Send tracing to a grep-able logfile (truncated each launch) instead of
+/// stdout, and silence the cranelift JIT IR firehose. The file is written
+/// unbuffered (a fresh `File` handle per line) so the tail survives an abort.
+fn init_logging() {
+    let default = "info,vox_core=warn,schema_deser=off,\
+                   cranelift=off,cranelift_jit=off,cranelift_codegen=off,\
+                   regalloc2=off,vox_jit=warn,cranelift_frontend=off";
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default));
+
+    let path = log_path();
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+    {
+        Ok(file) => {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_ansi(false)
+                .with_writer(move || file.try_clone().expect("clone desktop log file"))
+                .init();
+            eprintln!("FastTrackStudio: logging to {}", path.display());
+        }
+        Err(e) => {
+            eprintln!("FastTrackStudio: could not open {} ({e}); logging to stderr", path.display());
+            tracing_subscriber::fmt().with_env_filter(filter).init();
+        }
+    }
+
+    // Capture panic messages into the logfile too (the default hook only
+    // writes to stderr). Critical for the abort-on-panic JIT path, where the
+    // reason is otherwise lost from the grep-able log.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!(target: "panic", "{info}");
+        default_hook(info);
+    }));
+}
+
 fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("info,vox_core=warn,schema_deser=off")
-            }),
-        )
-        .init();
+    init_logging();
 
     tracing::info!("Starting FastTrackStudio");
 
