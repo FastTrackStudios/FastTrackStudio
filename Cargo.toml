@@ -36,8 +36,8 @@ facet-value = { version = "0.46" }
 facet-yaml = { version = "0.46" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
-reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # Dioxus UI framework (for input-dioxus)
 dioxus = "0.7.2"
