@@ -219,6 +219,34 @@ reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs
 reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
+# session references daw + reaper-rs via the ssh-starcommand URL; our workspace
+# uses the https-starcommand URL. Cargo treats the two URL schemes as distinct
+# sources, so without these redirects the graph resolves TWO copies of daw /
+# reaper-rs (→ daw_control::Daw vs daw::rpc::Daw, duplicate reaper-low, etc.).
+# Redirect ssh-starcommand onto the canonical https-starcommand remote.
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git"]
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-cli = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-extension-runtime = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-proto = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-control = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-module = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-standalone = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+daw-synchronization = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+dawfile-reaper = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+audio-controls = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-test-macro = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+reaper-launcher = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+
+[patch."ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git"]
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+
 # Signal patched out for now — local signal pins an older vox rev
 # (Codys-Wright/vox@2a2f793b) that drags facet 0.44 into the
 # workspace and conflicts with the rest of FTS on facet 0.46.

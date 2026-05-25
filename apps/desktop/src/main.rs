@@ -8,6 +8,7 @@ use dioxus::prelude::*;
 
 use session_ui::{ConnectionState, Session, SessionShell};
 
+mod daw_status;
 mod gateway;
 mod services;
 mod tools;
@@ -15,6 +16,7 @@ mod tools;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Session,
+    Daw,
     Tools,
 }
 
@@ -130,6 +132,29 @@ fn DesktopShell() -> Element {
         }
     });
 
+    // Subscribe to the DAW EventBus once connected — drives the live DAW
+    // status panel (transport / counts / events) from the same fts-extensions
+    // connection. Reuses the caller published by connect_to_reaper.
+    let _daw_subscription = use_future(move || async move {
+        loop {
+            if connection_state() == ConnectionState::Connected {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        loop {
+            let caller = gateway::remote_conn()
+                .lock()
+                .expect("remote conn poisoned")
+                .clone();
+            if let Some(caller) = caller {
+                daw_status::run_daw_event_bus(caller).await;
+            }
+            // Stream ended or not connected yet — retry.
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+    });
+
     let mut tab = use_signal(|| Tab::Session);
     let tab_class = |active: bool| {
         if active {
@@ -149,6 +174,11 @@ fn DesktopShell() -> Element {
                     "Session"
                 }
                 button {
+                    class: tab_class(tab() == Tab::Daw),
+                    onclick: move |_| tab.set(Tab::Daw),
+                    "DAW"
+                }
+                button {
                     class: tab_class(tab() == Tab::Tools),
                     onclick: move |_| tab.set(Tab::Tools),
                     "Tools"
@@ -156,9 +186,12 @@ fn DesktopShell() -> Element {
             }
             div { class: "flex-1 min-h-0 overflow-auto",
                 // SessionShell stays mounted across tab switches so its
-                // connection/event state isn't torn down; Tools is shown on top.
+                // connection/event state isn't torn down; other tabs render on top.
                 div { class: if tab() == Tab::Session { "h-full" } else { "hidden" },
                     SessionShell { connection_state }
+                }
+                if tab() == Tab::Daw {
+                    daw_status::DawStatusPanel {}
                 }
                 if tab() == Tab::Tools {
                     tools::ToolsPage {}

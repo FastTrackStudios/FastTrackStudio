@@ -2428,30 +2428,12 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "architect",
- "daw-control 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-ableton 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "facet 0.46.4",
- "tokio",
- "tracing",
- "vox",
-]
-
-[[package]]
-name = "daw"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "architect",
- "daw-control 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-module 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-reaper 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-ableton 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-reaper 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-control",
+ "daw-module",
+ "daw-proto",
+ "daw-reaper",
+ "dawfile-ableton",
+ "dawfile-reaper",
  "facet 0.46.4",
  "tokio",
  "tracing",
@@ -2464,23 +2446,8 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "bincode",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "serde",
- "socket2 0.5.10",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "daw-audio-sync"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "bincode",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "serde",
  "socket2 0.5.10",
  "tokio",
@@ -2493,23 +2460,7 @@ name = "daw-control"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "eyre",
- "facet 0.46.4",
- "facet-json",
- "futures",
- "serde",
- "serde_json",
- "tracing",
- "vox",
-]
-
-[[package]]
-name = "daw-control"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "eyre",
  "facet 0.46.4",
  "facet-json",
@@ -2530,31 +2481,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-module"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "daw-proto"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
- "architect",
- "facet 0.46.4",
- "thiserror 2.0.18",
- "vox",
- "vox-types 0.5.0",
-]
-
-[[package]]
-name = "daw-proto"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
@@ -2573,57 +2502,23 @@ dependencies = [
  "base64 0.22.1",
  "camino",
  "crossbeam-channel",
- "daw-audio-sync 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-control 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-aaf 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-ableton 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-dawproject 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-protools 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-audio-sync",
+ "daw-control",
+ "daw-proto",
+ "dawfile-aaf",
+ "dawfile-ableton",
+ "dawfile-dawproject",
+ "dawfile-protools",
+ "dawfile-reaper",
  "display-info",
  "enumflags2",
  "eyre",
  "facet-json",
  "libloading 0.8.9",
  "moire",
- "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "swell-ui",
- "tokio",
- "tracing",
- "uuid",
- "vox",
- "vox-stream",
-]
-
-[[package]]
-name = "daw-reaper"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "architect",
- "base64 0.22.1",
- "camino",
- "crossbeam-channel",
- "daw-audio-sync 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-control 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-aaf 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-ableton 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-dawproject 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-protools 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "dawfile-reaper 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "display-info",
- "enumflags2",
- "eyre",
- "facet-json",
- "libloading 0.8.9",
- "moire",
- "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "swell-ui",
  "tokio",
  "tracing",
@@ -2637,8 +2532,8 @@ name = "daw-synchronization"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "daw-reaper",
  "facet 0.46.4",
  "tokio",
  "tokio-util",
@@ -2651,17 +2546,7 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
  "cfb 0.10.0",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "dawfile-aaf"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "cfb 0.10.0",
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2670,19 +2555,7 @@ name = "dawfile-ableton"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "flate2",
- "quick-xml 0.37.5",
- "roxmltree 0.20.0",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "dawfile-ableton"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "flate2",
  "quick-xml 0.37.5",
  "roxmltree 0.20.0",
@@ -2694,18 +2567,7 @@ name = "dawfile-dawproject"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "roxmltree 0.20.0",
- "thiserror 2.0.18",
- "zip",
-]
-
-[[package]]
-name = "dawfile-dawproject"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "roxmltree 0.20.0",
  "thiserror 2.0.18",
  "zip",
@@ -2716,16 +2578,7 @@ name = "dawfile-protools"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "dawfile-protools"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "thiserror 2.0.18",
 ]
 
@@ -2736,21 +2589,7 @@ source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "nom 8.0.0",
- "rayon",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "dawfile-reaper"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "nom 8.0.0",
  "rayon",
  "serde",
@@ -3700,9 +3539,9 @@ source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git
 dependencies = [
  "anyhow",
  "color-palette",
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "daw-proto",
+ "daw-reaper",
  "dynamic-template-proto",
  "eyre",
  "facet 0.46.4",
@@ -3721,7 +3560,7 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
 dependencies = [
  "actions-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet 0.46.4",
  "thiserror 2.0.18",
  "vox",
@@ -4431,7 +4270,8 @@ name = "fasttrackstudio-desktop"
 version = "0.1.0"
 dependencies = [
  "axum",
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "daw-proto",
  "dioxus",
  "eyre",
  "keyflow 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
@@ -4458,7 +4298,7 @@ dependencies = [
 name = "fasttrackstudio-web"
 version = "0.1.0"
 dependencies = [
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "dioxus",
  "gloo-timers",
  "session",
@@ -4752,7 +4592,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "crossterm 0.28.1",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "eyre",
  "facet 0.46.4",
  "facet-postcard",
@@ -6416,8 +6256,8 @@ source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=m
 dependencies = [
  "color-eyre",
  "colored",
- "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-module",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "facet 0.46.4",
@@ -6437,8 +6277,8 @@ source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?br
 dependencies = [
  "color-eyre",
  "colored",
- "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-module",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "facet 0.46.4",
@@ -6467,7 +6307,7 @@ version = "0.1.0"
 source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#8e4989bb61ea1f5c6ee64c23cf8f93f9e88baaee"
 dependencies = [
  "architect",
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "eyre",
  "facet 0.46.4",
  "keyflow 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
@@ -6492,7 +6332,7 @@ source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=m
 dependencies = [
  "architect",
  "color-palette",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet 0.46.4",
  "helgoboss-midi",
  "keyflow-syntax 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
@@ -6510,7 +6350,7 @@ source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?br
 dependencies = [
  "architect",
  "color-palette",
- "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet 0.46.4",
  "helgoboss-midi",
  "keyflow-syntax 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
@@ -9555,15 +9395,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reaper-common-types"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-dependencies = [
- "nutype",
- "serde",
-]
-
-[[package]]
 name = "reaper-high"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
@@ -9582,35 +9413,8 @@ dependencies = [
  "helgoboss-midi",
  "once_cell",
  "pathdiff",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "ref-cast",
- "regex",
- "tracing",
- "winapi",
-]
-
-[[package]]
-name = "reaper-high"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-dependencies = [
- "backtrace",
- "base64 0.13.1",
- "c_str_macro",
- "camino",
- "crossbeam-channel",
- "csv",
- "derivative",
- "either",
- "enumflags2",
- "fragile",
- "futures",
- "helgoboss-midi",
- "once_cell",
- "pathdiff",
- "reaper-low 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-low",
+ "reaper-medium",
  "ref-cast",
  "regex",
  "tracing",
@@ -9649,22 +9453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reaper-low"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-dependencies = [
- "c_str_macro",
- "cc",
- "derive_more 0.99.20",
- "downcast-rs",
- "fragile",
- "libc",
- "tracing",
- "vst",
- "winapi",
-]
-
-[[package]]
 name = "reaper-medium"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
@@ -9674,26 +9462,8 @@ dependencies = [
  "enumflags2",
  "helgoboss-midi",
  "libc",
- "reaper-common-types 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "ref-cast",
- "tracing",
- "vst",
- "winapi",
-]
-
-[[package]]
-name = "reaper-medium"
-version = "0.1.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-dependencies = [
- "camino",
- "derive_more 0.99.20",
- "enumflags2",
- "helgoboss-midi",
- "libc",
- "reaper-common-types 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-common-types",
+ "reaper-low",
  "ref-cast",
  "tracing",
  "vst",
@@ -9705,7 +9475,7 @@ name = "reaper-test"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
 dependencies = [
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "eyre",
  "moire",
  "reaper-launcher",
@@ -10533,18 +10303,18 @@ dependencies = [
  "actions-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
  "chrono",
- "daw 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-reaper 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "daw-proto",
+ "daw-reaper",
  "daw-synchronization",
  "dynamic-template",
  "eyre",
  "keyflow 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/keyflow.git?branch=main)",
  "keyflow-daw-analysis",
  "moire",
- "reaper-high 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
  "rustc-hash 2.1.2",
  "session-proto",
  "smallvec 1.15.1",
@@ -10561,8 +10331,8 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#61f5c5b6e7c4f2b8a735afa83edb4e4383bda713"
 dependencies = [
  "clap",
- "daw 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
- "daw-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
+ "daw-proto",
  "eyre",
  "facet 0.46.4",
  "facet-json",
@@ -10583,7 +10353,7 @@ source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=m
 dependencies = [
  "actions-proto 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/input_actions.git?branch=main)",
  "architect",
- "daw 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "eyre",
  "facet 0.46.4",
  "futures",
@@ -10604,7 +10374,7 @@ name = "session-ui"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#61f5c5b6e7c4f2b8a735afa83edb4e4383bda713"
 dependencies = [
- "daw 0.1.0 (git+ssh://forgejo@git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
@@ -10694,7 +10464,7 @@ name = "signal-daw-bridge"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/signal.git?branch=main#5f7cd22e95cb82b567604465338080b59de80e77"
 dependencies = [
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "serde",
  "signal-import",
  "signal-proto",
@@ -10751,7 +10521,7 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/signal.git?branch=main#5f7cd22e95cb82b567604465338080b59de80e77"
 dependencies = [
  "base64 0.22.1",
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "eyre",
  "futures",
  "macromod",
@@ -11564,9 +11334,9 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "palette",
  "raw-window-handle 0.4.3",
- "reaper-common-types 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-common-types",
+ "reaper-low",
+ "reaper-medium",
  "rxrust",
  "scopeguard",
  "tracing",
@@ -13218,7 +12988,7 @@ dependencies = [
 name = "wasm-tests"
 version = "0.1.0"
 dependencies = [
- "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw",
  "dioxus",
  "futures",
  "gloo-timers",
@@ -14942,6 +14712,26 @@ version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
 
 [[patch.unused]]
+name = "audio-controls"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
+
+[[patch.unused]]
+name = "daw-cli"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
+
+[[patch.unused]]
+name = "daw-extension-runtime"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
+
+[[patch.unused]]
+name = "daw-standalone"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
+
+[[patch.unused]]
 name = "ur-taking-me-with-you"
 version = "8.0.0"
 source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
@@ -14950,3 +14740,8 @@ source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd5914
 name = "vox-inprocess"
 version = "0.5.0"
 source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+
+[[patch.unused]]
+name = "reaper-macros"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
