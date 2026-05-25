@@ -2199,7 +2199,7 @@ dependencies = [
  "daw-audio-sync",
  "daw-network",
  "daw-proto 0.1.0",
- "daw-reaper-dioxus 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
+ "daw-reaper-dioxus 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
  "daw-synchronization",
  "dawfile-aaf",
  "dawfile-ableton",
@@ -2212,7 +2212,7 @@ dependencies = [
  "notify",
  "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-macros 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-macros",
  "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-test",
  "tempfile",
@@ -2302,7 +2302,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
 dependencies = [
  "tokio",
  "tracing",
@@ -2334,7 +2334,7 @@ dependencies = [
  "moire",
  "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-macros 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-macros",
  "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "tokio",
  "tracing",
@@ -2358,7 +2358,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
 dependencies = [
  "actions-proto 0.1.0 (git+https://github.com/FastTrackStudios/input_actions.git?branch=main)",
  "facet 0.44.5",
@@ -2439,7 +2439,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper-dioxus"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
 dependencies = [
  "anyrender_vello",
  "blitz-dom",
@@ -2447,9 +2447,9 @@ dependencies = [
  "blitz-traits",
  "cocoa",
  "crossbeam",
- "daw-module 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
- "daw-reaper-embed 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
+ "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
+ "daw-reaper-embed 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469)",
  "dioxus-devtools",
  "dioxus-native",
  "futures-util",
@@ -2484,7 +2484,7 @@ dependencies = [
  "fragile",
  "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-macros 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-macros",
  "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "tracing",
  "tracing-subscriber",
@@ -2499,7 +2499,7 @@ dependencies = [
  "daw-reaper-dioxus 0.1.0",
  "reaper-high 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-macros 0.1.0 (git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-macros",
  "reaper-medium 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
  "tracing",
  "tracing-subscriber",
@@ -2524,7 +2524,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper-embed"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?rev=de70e73ef0919a01bc28faf3f18d5aa390629469#de70e73ef0919a01bc28faf3f18d5aa390629469"
 dependencies = [
  "cocoa",
  "objc",
@@ -3362,7 +3362,7 @@ dependencies = [
  "eyre",
  "fragile",
  "reaper-low 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
- "reaper-macros 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes)",
+ "reaper-macros",
  "tracing",
  "tracing-subscriber",
 ]
@@ -7117,16 +7117,6 @@ dependencies = [
 name = "reaper-macros"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
-dependencies = [
- "darling 0.10.2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "reaper-macros"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
 dependencies = [
  "darling 0.10.2",
  "quote",

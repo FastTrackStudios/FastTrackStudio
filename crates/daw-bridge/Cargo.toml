@@ -14,7 +14,7 @@ path = "src/lib.rs"
 daw = { workspace = true, features = ["reaper"] }
 # Direct dep so we can construct ReaperDockHost in plugin_main. Pinned to
 # isolate daw-bridge from local daw-reaper-dioxus development work.
-daw-reaper-dioxus = { git = "https://github.com/FastTrackStudios/daw.git", rev = "de70e73ef0919a01bc28faf3f18d5aa390629469" }
+daw-reaper-dioxus = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", rev = "de70e73ef0919a01bc28faf3f18d5aa390629469" }
 daw-proto = { path = "../daw-proto" }
 daw-audio-sync = { path = "../daw-audio-sync" }
 uuid = { workspace = true }
