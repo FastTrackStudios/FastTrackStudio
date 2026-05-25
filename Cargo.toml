@@ -100,7 +100,7 @@ crossbeam-channel = "0.5"
 midir = "0.10"
 
 # ── UI ────────────────────────────────────────────────────────────────
-dioxus = "=0.7.3"
+dioxus = "=0.7.9"
 fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", branch = "main" }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 
@@ -158,17 +158,6 @@ fts-plugin-core = { path = "../Plugins/FTS-Audiocore/crates/fts-plugin-core" }
 # ── nih-plug unification ────────────────────────────────────────────────
 [patch."https://git.starcommand.live/FastTrackStudios/nih-plug.git"]
 nih_plug = { path = "../forks/nih-plug" }
-
-# ── Blitz patches (FTS fork with post-processing support) ──────────────
-# Required by nih_plug_dioxus / audio-gui for embedded plugin UIs.
-[patch."https://github.com/DioxusLabs/blitz.git"]
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git" }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-net = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
 
 # Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).
 [patch."https://github.com/bearcove/vox.git"]
