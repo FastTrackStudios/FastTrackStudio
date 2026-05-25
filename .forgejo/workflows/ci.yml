@@ -7,15 +7,16 @@ on:
 
 jobs:
   ci:
-    runs-on: docker
-    container:
-      image: ghcr.io/catthehacker/ubuntu:act-latest
+    # `ubuntu-latest` is the label this forgejo instance's runners advertise.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@v30
         with:
+          nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
             experimental-features = nix-command flakes
             accept-flake-config = true
@@ -27,9 +28,9 @@ jobs:
         continue-on-error: true
 
       # Same gate developers run via `just ci` / `cargo xtask ci`:
-      # fmt → clippy -D warnings → check → nextest → (doctests/tracey per
-      # xtask config). Runs in the GUI-less `ci` dev shell — REAPER
-      # integration tests (`cargo xtask reaper-test`) need a REAPER-capable
-      # runner and are gated separately.
+      # fmt → clippy -D warnings → check → nextest → tracey. Runs in the
+      # slim `.#ci` dev shell (build deps + hygiene tools, no REAPER).
+      # REAPER integration tests (`cargo xtask reaper-test`) use `.#reaper-ci`
+      # in a separate, gated workflow.
       - name: cargo xtask ci
-        run: nix develop .#ci --command cargo xtask ci
+        run: nix develop .#ci --impure --command cargo xtask ci
