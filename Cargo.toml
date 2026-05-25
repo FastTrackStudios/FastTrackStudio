@@ -71,7 +71,7 @@ daw-link = { path = "crates/daw-link" }
 fts-devtools = { path = "crates/fts-devtools" }
 # FTS design system — used by `daw-ui`'s `reaper-test-panels` feature so the
 # Native vs Desktop renderer demo panels can ship from this repo.
-fts-ui = { git = "https://github.com/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
+fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
@@ -81,10 +81,8 @@ facet-json = { version = "0.46" }
 
 # architect framework — defines #[architect::rpc] for sync-trait → vox
 # bridge generation plus the Entity derive for CRUD-shaped data.
-# Path dep onto the local checkout; vox refs inside architect get
-# redirected to the Codys-Wright fork via the [patch] section below.
-architect = { path = "../../../Development/architect/macros/architect" }
-architect-rpc-derive = { path = "../../../Development/architect/macros/architect-rpc-derive" }
+architect = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
+architect-rpc-derive = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
 
 # VOX service framework (pinned to FastTrackStudios fork)
 vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
@@ -97,7 +95,7 @@ ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef5
 clap = { version = "4", features = ["derive"] }
 
 # Plugin framework
-nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
+nih_plug = { git = "https://git.starcommand.live/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
 
 # CLAP plugin hosting (Rust-native CLAP host + extension bindings).
 # Pinned to the prokopyl/clack upstream — same revs as fts-analyzer
@@ -124,23 +122,23 @@ vst3 = "0.3"
 libloading = "0.8"
 
 # Sibling repos
-actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
-dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
-dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
+actions-proto = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }
+dock-dioxus = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
+dock-proto = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main" }
 
 # Testing
 reaper-test = { path = "crates/reaper-test" }
 reaper-launcher = { path = "crates/reaper-launcher" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)
-reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # swell-ui from FTS reaper-lib — typed Window/Hwnd wrappers around SWELL.
 # Used by daw-reaper for nudge / resize / center geometry actions.
-swell-ui = { git = "https://github.com/FastTrackStudios/reaper-lib.git", branch = "main" }
+swell-ui = { git = "https://git.starcommand.live/FastTrackStudios/reaper-lib.git", branch = "main" }
 
 # UI
 dioxus = "0.7.2"
@@ -193,39 +191,27 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # ── Local development overrides ──────────────────────────────────────
 # Uncomment to use local checkouts instead of GitHub.
 
-# [patch."https://github.com/FastTrackStudios/input_actions.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
 # actions-proto = { path = "../input_actions/crates/actions-proto" }
 
-# [patch."https://github.com/FastTrackStudios/keyflow.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
 # keyflow = { path = "../keyflow/crates/keyflow" }
 
-# [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/dock-dioxus.git"]
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
-# [patch."https://github.com/FastTrackStudios/dynamic-template.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/dynamic-template.git"]
 # color-palette = { path = "../dynamic-template/crates/color-palette" }
 # music-catalog = { path = "../dynamic-template/crates/music-catalog" }
 # dynamic-template-proto = { path = "../dynamic-template/crates/dynamic-template-proto" }
 
-# [patch."https://github.com/FastTrackStudios/session.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/session.git"]
 # session = { path = "../session/crates/session" }
 # session-ui = { path = "../session/crates/session-ui" }
 
-# [patch."https://github.com/FastTrackStudios/monarchy.git"]
+# [patch."https://git.starcommand.live/FastTrackStudios/monarchy.git"]
 # monarchy = { path = "../monarchy/crates/monarchy" }
-
-[patch."https://github.com/FastTrackStudios/fts-ui.git"]
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
-
-# ── Patch remote daw.git refs from transitive deps (e.g. keyflow) ────
-[patch."https://github.com/FastTrackStudios/daw.git"]
-daw-proto = { path = "crates/daw-proto" }
-daw-module = { path = "crates/daw-module" }
-daw-reaper-embed = { path = "crates/daw-reaper-embed" }
-daw-reaper-dioxus = { path = "crates/daw-reaper-dioxus" }
-daw-control = { path = "crates/daw-control" }
-dawfile-reaper = { path = "crates/dawfile-reaper" }
 
 # (vox patch block removed — all pins now point at bearcove/vox directly)
 
@@ -248,15 +234,15 @@ blitz-traits = { path = "../blitz/packages/blitz-traits" }
 stylo_taffy = { path = "../blitz/packages/stylo_taffy" }
 
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [patch.crates-io]
 dioxus = { path = "/home/cody/Development/Dioxus/dioxus/packages/dioxus" }
@@ -282,15 +268,15 @@ manganis = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/mang
 manganis-core = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-core" }
 manganis-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-macro" }
 
-moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
-moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-capture = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 [workspace.lints.rust]
 dead_code = "allow"
