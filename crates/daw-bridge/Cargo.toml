@@ -69,7 +69,9 @@ sync = ["dep:daw-synchronization", "dep:daw-network"]
 
 [dev-dependencies]
 eyre = "0.6"
-reaper-test.workspace = true
+# Integration-test harness via the daw facade's `test-harness` feature
+# (replaces the former `reaper-test` crate).
+daw = { workspace = true, features = ["reaper", "test-harness"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

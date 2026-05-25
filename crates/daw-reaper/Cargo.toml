@@ -52,7 +52,9 @@ swell-ui.workspace = true
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
 base64 = "0.22.1"
-reaper-test.workspace = true
+# Integration-test harness — now folded into the `daw` facade behind the
+# `test-harness` feature (replaces the former `reaper-test` crate).
+daw = { path = "../daw", features = ["test-harness"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-util = "0.7"

@@ -15,8 +15,7 @@ members = [
     "crates/dawfile-logic",
     "crates/dawfile-dawproject",
     "crates/daw-ui",
-    "crates/reaper-test",
-    "crates/reaper-test-macro",
+    "crates/daw-test-macro",
     "crates/reaper-launcher",
     "crates/daw-allocator",
     "crates/daw-audio-sync",
@@ -128,8 +127,9 @@ actions-proto = { git = "https://git.starcommand.live/FastTrackStudios/input_act
 dock-dioxus = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
 dock-proto = { git = "https://git.starcommand.live/FastTrackStudios/dock-dioxus.git", branch = "main" }
 
-# Testing
-reaper-test = { path = "crates/reaper-test" }
+# Testing — the harness now lives inside the `daw` facade behind the
+# `test-harness` feature; consumers enable that feature instead of
+# depending on a standalone `reaper-test` crate.
 reaper-launcher = { path = "crates/reaper-launcher" }
 
 # REAPER bindings (FTS fork with v7.63 ruler lane APIs)

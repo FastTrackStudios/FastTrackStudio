@@ -18,7 +18,7 @@
 //!   cargo xtask reaper-test -- audio_sync_snapshot
 
 use eyre::Result;
-use reaper_test::{DawInstanceConfig, run_multi_reaper_test};
+use daw::test::{DawInstanceConfig, run_multi_reaper_test};
 
 #[test]
 #[ignore]

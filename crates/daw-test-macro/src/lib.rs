@@ -86,7 +86,18 @@ use syn::{ItemFn, parse_macro_input};
 /// }
 /// ```
 #[proc_macro_attribute]
+pub fn daw_test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    daw_test_impl(attr, item)
+}
+
+/// Alias for [`daw_test`] — kept for source compatibility with existing
+/// `#[reaper_test]` call sites. Forwards to the same implementation.
+#[proc_macro_attribute]
 pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    daw_test_impl(attr, item)
+}
+
+fn daw_test_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
 
     let mut isolated = false;
@@ -189,7 +200,7 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             .map(|l| {
                 let socket = format!("/tmp/fts-daw-test-{l}.sock");
                 quote! {
-                    reaper_test::DawInstanceConfig::new(#l)
+                    daw::test::DawInstanceConfig::new(#l)
                         .with_env("DISPLAY", "")
                         .with_env("FTS_SYNC_NO_LINK", "1")
                         .with_env("FTS_SYNC_ENABLED", "1")
@@ -204,7 +215,7 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[test]
             #[ignore = "reaper-test: run with `cargo xtask reaper-test`"]
             #fn_vis fn #fn_name() -> eyre::Result<()> {
-                reaper_test::run_multi_reaper_test(
+                daw::test::run_multi_daw_test(
                     #fn_name_str,
                     vec![#(#label_tokens),*],
                     |#ctx_ident| Box::pin(async move #fn_block),
@@ -220,7 +231,7 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[test]
             #[ignore = "reaper-test: run with `cargo xtask reaper-test`"]
             #fn_vis fn #fn_name() -> eyre::Result<()> {
-                reaper_test::run_reaper_test(
+                daw::test::run_daw_test(
                     #fn_name_str,
                     #isolated,
                     |#ctx_ident| Box::pin(async move #fn_block),

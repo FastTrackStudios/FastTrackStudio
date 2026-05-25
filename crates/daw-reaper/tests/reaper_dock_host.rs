@@ -14,7 +14,7 @@
 //!   cargo xtask reaper-test -- reaper_dock_host
 
 use daw_proto::dock_host::DockKind;
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 
 #[reaper_test(isolated)]
 async fn register_dock_returns_stable_handle(ctx: &ReaperTestContext) -> eyre::Result<()> {

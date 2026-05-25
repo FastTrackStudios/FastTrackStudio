@@ -8,12 +8,12 @@
 //!
 //! Run with: `cargo xtask reaper-test -- reaper_ext_state`
 
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 
 const TEST_SECTION: &str = "fts.test.ext_state";
 
 #[reaper_test(isolated)]
-async fn set_then_get_returns_value(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn set_then_get_returns_value(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let ext = ctx.daw.ext_state();
 
     ext.set(TEST_SECTION, "color", "blue", false).await?;
@@ -28,7 +28,7 @@ async fn set_then_get_returns_value(ctx: &reaper_test::ReaperTestContext) -> eyr
 }
 
 #[reaper_test(isolated)]
-async fn has_reflects_presence(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn has_reflects_presence(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let ext = ctx.daw.ext_state();
 
     let before = ext.has(TEST_SECTION, "tempo").await?;
@@ -42,7 +42,7 @@ async fn has_reflects_presence(ctx: &reaper_test::ReaperTestContext) -> eyre::Re
 }
 
 #[reaper_test(isolated)]
-async fn delete_removes_value(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn delete_removes_value(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let ext = ctx.daw.ext_state();
 
     ext.set(TEST_SECTION, "transient", "1", false).await?;
@@ -59,7 +59,7 @@ async fn delete_removes_value(ctx: &reaper_test::ReaperTestContext) -> eyre::Res
 }
 
 #[reaper_test(isolated)]
-async fn overwrite_replaces_value(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn overwrite_replaces_value(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let ext = ctx.daw.ext_state();
 
     ext.set(TEST_SECTION, "mode", "manual", false).await?;

@@ -8,7 +8,7 @@
 
 use daw_control::{BatchBuilder, BatchResponseExt};
 use daw_proto::batch::*;
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
@@ -30,16 +30,16 @@ fn fmt_dur(d: std::time::Duration) -> String {
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_create_tracks_100(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_create_tracks_100(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     bench_create_tracks(ctx, 100).await
 }
 
 #[reaper_test(isolated)]
-async fn batch_create_tracks_500(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_create_tracks_500(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     bench_create_tracks(ctx, 500).await
 }
 
-async fn bench_create_tracks(ctx: &reaper_test::ReaperTestContext, n: u32) -> eyre::Result<()> {
+async fn bench_create_tracks(ctx: &daw::test::ReaperTestContext, n: u32) -> eyre::Result<()> {
     let daw = &ctx.daw;
     let project = ctx.project().clone();
     let tracks = project.tracks();
@@ -113,11 +113,11 @@ async fn bench_create_tracks(ctx: &reaper_test::ReaperTestContext, n: u32) -> ey
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_mutate_tracks_200(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_mutate_tracks_200(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     bench_mutate_tracks(ctx, 200).await
 }
 
-async fn bench_mutate_tracks(ctx: &reaper_test::ReaperTestContext, n: u32) -> eyre::Result<()> {
+async fn bench_mutate_tracks(ctx: &daw::test::ReaperTestContext, n: u32) -> eyre::Result<()> {
     let daw = &ctx.daw;
     let project = ctx.project().clone();
     let tracks_svc = project.tracks();
@@ -202,7 +202,7 @@ async fn bench_mutate_tracks(ctx: &reaper_test::ReaperTestContext, n: u32) -> ey
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_chained_reads(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_chained_reads(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let daw = &ctx.daw;
     let project = ctx.project().clone();
     let tracks_svc = project.tracks();
@@ -264,7 +264,7 @@ async fn batch_chained_reads(ctx: &reaper_test::ReaperTestContext) -> eyre::Resu
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_mixed_ops_500(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_mixed_ops_500(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let daw = &ctx.daw;
     let project = ctx.project().clone();
     let tracks_svc = project.tracks();
@@ -358,7 +358,7 @@ async fn batch_mixed_ops_500(ctx: &reaper_test::ReaperTestContext) -> eyre::Resu
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_add_markers_200(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_add_markers_200(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let daw = &ctx.daw;
     let project = ctx.project().clone();
 
@@ -423,7 +423,7 @@ async fn batch_add_markers_200(ctx: &reaper_test::ReaperTestContext) -> eyre::Re
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_fail_fast(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_fail_fast(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let daw = &ctx.daw;
 
     ctx.log("=== Test: Fail-fast stops execution on first error ===");
@@ -489,7 +489,7 @@ async fn batch_fail_fast(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<(
 // ===========================================================================
 
 #[reaper_test(isolated)]
-async fn batch_dependency_chain(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn batch_dependency_chain(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let daw = &ctx.daw;
     let project = ctx.project().clone();
     let tracks_svc = project.tracks();

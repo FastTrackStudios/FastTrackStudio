@@ -10,7 +10,7 @@
 //! Run with: `cargo xtask reaper-test -- reaper_toolbar`
 
 use daw_proto::{ToolbarButton, ToolbarTarget};
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 
 const TEST_WORKFLOW: &str = "fts.test.toolbar";
 
@@ -24,7 +24,7 @@ fn make_button(name: &str, label: &str) -> ToolbarButton {
 
 #[reaper_test(isolated)]
 async fn add_button_succeeds_and_returns_command_id(
-    ctx: &reaper_test::ReaperTestContext,
+    ctx: &daw::test::ReaperTestContext,
 ) -> eyre::Result<()> {
     // Register a backing action first so the toolbar has something to
     // bind to. Toolbar add_button accepts any command_name but a
@@ -54,7 +54,7 @@ async fn add_button_succeeds_and_returns_command_id(
 }
 
 #[reaper_test(isolated)]
-async fn workflow_remove_cleans_up_batch(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn workflow_remove_cleans_up_batch(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
     let toolbar = ctx.daw.toolbar();
 
@@ -82,7 +82,7 @@ async fn workflow_remove_cleans_up_batch(ctx: &reaper_test::ReaperTestContext) -
 }
 
 #[reaper_test(isolated)]
-async fn remove_button_succeeds(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn remove_button_succeeds(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
     let cmd = "fts.test.toolbar.remove_target";
     let _ = actions.register(cmd, "FTS Test: Remove Target").await?;

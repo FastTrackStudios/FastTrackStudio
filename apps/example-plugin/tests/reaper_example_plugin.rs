@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 
 const EXAMPLE_PLUGIN_NAMES: &[&str] = &[
     "CLAP: DAW Example Plugin (FastTrackStudio)",
@@ -32,7 +32,7 @@ async fn add_example_plugin(
 // ---------------------------------------------------------------------------
 
 #[reaper_test(isolated)]
-async fn example_plugin_loads_on_track(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn example_plugin_loads_on_track(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let project = ctx.project().clone();
     let track = project.tracks().add("Plugin Load Test", None).await?;
 
@@ -66,7 +66,7 @@ async fn example_plugin_loads_on_track(ctx: &reaper_test::ReaperTestContext) -> 
 // ---------------------------------------------------------------------------
 
 #[reaper_test(isolated)]
-async fn example_plugin_calls_reaper_api(ctx: &reaper_test::ReaperTestContext) -> eyre::Result<()> {
+async fn example_plugin_calls_reaper_api(ctx: &daw::test::ReaperTestContext) -> eyre::Result<()> {
     let project = ctx.project().clone();
 
     // Add a few tracks so the plugin has something to count

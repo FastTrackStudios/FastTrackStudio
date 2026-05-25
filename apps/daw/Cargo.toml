@@ -33,7 +33,9 @@ default = []
 
 [dev-dependencies]
 daw-proto = { path = "../../crates/daw-proto" }
-reaper-test.workspace = true
+# Integration-test harness via the daw facade's `test-harness` feature
+# (replaces the former `reaper-test` crate).
+daw = { workspace = true, features = ["test-harness"] }
 eyre.workspace = true
 
 [lints]

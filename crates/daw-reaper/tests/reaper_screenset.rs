@@ -9,7 +9,7 @@
 //!   cargo xtask reaper-test -- reaper_screenset
 
 use daw_proto::{ScreensetKind, ScreensetOptions, ScreensetScope};
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 
 #[reaper_test(isolated)]
 async fn capture_records_main_window_geometry(ctx: &ReaperTestContext) -> eyre::Result<()> {

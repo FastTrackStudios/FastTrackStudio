@@ -9,7 +9,7 @@
 //!   cargo xtask reaper-test -- reaper_transport
 
 use daw_proto::PlayState;
-use reaper_test::reaper_test;
+use daw::test::reaper_test;
 
 // ─── Playback Control ───────────────────────────────────────────────────
 

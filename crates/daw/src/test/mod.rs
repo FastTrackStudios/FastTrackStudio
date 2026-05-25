@@ -1,16 +1,25 @@
-//! Runtime library for REAPER integration tests.
+//! DAW integration-test harness (feature `test-harness`).
+//!
+//! Spawns a DAW backend, drives it over the `daw` RPC surface, and runs
+//! `#[daw_test]` / `#[reaper_test]` bodies. The backend is abstracted behind
+//! the [`DawBackend`] trait; [`ReaperBackend`] is the single concrete impl.
+//!
+//! Canonical (DAW-generic) names — with source-compat aliases:
+//! - [`DawTestContext`] (alias [`ReaperTestContext`])
+//! - [`run_daw_test`] (alias [`run_reaper_test`])
+//! - [`run_multi_daw_test`] (alias [`run_multi_reaper_test`])
+//! - [`DawBackend`] / [`ReaperBackend`]
 //!
 //! Provides:
-//! - [`ReaperTestContext`] — wraps shared `Daw` + project handle + per-test logging
-//! - [`run_reaper_test`] — assigns a project tab, runs test, cleans up
+//! - [`DawTestContext`] — wraps shared `Daw` + project handle + per-test logging
+//! - [`run_daw_test`] — assigns a project tab, runs test, cleans up
 //! - [`ReaperProcess`] — spawn/wait/kill-on-drop guard
 //! - [`connect_daw`] — connection + polling logic
-//! - Re-exports `#[reaper_test]` from `reaper-test-macro`
+//! - Re-exports `#[daw_test]` / `#[reaper_test]` from `daw-test-macro`
 
-#[cfg(feature = "runner")]
 pub mod runner;
 
-use daw::rpc::{Daw, Project, TrackHandle};
+use crate::rpc::{Daw, Project, TrackHandle};
 use eyre::Result;
 use std::{
     borrow::Cow,
@@ -29,8 +38,8 @@ use std::{
 };
 use tokio::runtime::Runtime;
 
-// Re-export the proc-macro so users can `use reaper_test::reaper_test;`
-pub use reaper_test_macro::reaper_test;
+// Re-export the proc-macros so users can `use daw::test::{daw_test, reaper_test};`
+pub use daw_test_macro::{daw_test, reaper_test};
 
 // ─────────────────────────────────────────────────────────────
 //  Constants
@@ -334,6 +343,99 @@ impl Drop for ReaperProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.socket_path);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  DawBackend — the DAW-agnostic seam
+// ─────────────────────────────────────────────────────────────
+
+/// Abstraction over the DAW-coupled bits of the harness: locating the
+/// executable / resources dir, launching an instance from a
+/// [`DawInstanceConfig`], installing a bridge cdylib, discovering the
+/// control socket, and tearing the instance down.
+///
+/// The harness orchestration (`run_daw_test` / `run_multi_daw_test`) goes
+/// through this trait so the same tests can later target other DAWs. Today
+/// the only concrete impl is [`ReaperBackend`]; do not add others until a
+/// non-REAPER target exists.
+///
+/// The launched handle owns the process lifecycle — dropping it tears the
+/// instance down (kills the process, removes the socket).
+pub trait DawBackend {
+    /// A spawned, not-yet-connected DAW instance. Dropping it tears down.
+    type Process: DawProcess;
+
+    /// Path to the DAW executable.
+    fn executable(&self) -> String;
+
+    /// Path to the DAW resources / config directory.
+    fn resources(&self) -> String;
+
+    /// Launch an instance described by `config`.
+    fn launch(&self, config: &DawInstanceConfig) -> Result<Self::Process>;
+
+    /// Install a built bridge cdylib so the launched DAW exposes the
+    /// control socket. `lib_path` is the built library; `lib_name` is the
+    /// filename to install under the DAW's plugin directory.
+    fn install_bridge(&self, lib_path: &Path, lib_name: &str) -> Result<()>;
+
+    /// Discover an already-running control socket (used when connecting to
+    /// an externally-launched DAW), or `None` to fall back to env/PID rules.
+    fn discover_socket(&self) -> Option<PathBuf>;
+}
+
+/// A spawned DAW instance handle used by [`DawBackend`].
+pub trait DawProcess {
+    /// Control socket path for this instance.
+    fn socket_path(&self) -> &Path;
+    /// Process id.
+    fn pid(&self) -> u32;
+    /// Block until the control socket appears.
+    fn wait_for_socket(&self) -> Result<()>;
+}
+
+impl DawProcess for ReaperProcess {
+    fn socket_path(&self) -> &Path {
+        ReaperProcess::socket_path(self)
+    }
+    fn pid(&self) -> u32 {
+        ReaperProcess::pid(self)
+    }
+    fn wait_for_socket(&self) -> Result<()> {
+        ReaperProcess::wait_for_socket(self)
+    }
+}
+
+/// The single concrete [`DawBackend`] — wraps the existing `ReaperProcess`
+/// spawn/teardown logic and the runner's plugin-install helper verbatim.
+#[derive(Default)]
+pub struct ReaperBackend;
+
+impl DawBackend for ReaperBackend {
+    type Process = ReaperProcess;
+
+    fn executable(&self) -> String {
+        reaper_executable()
+    }
+
+    fn resources(&self) -> String {
+        reaper_resources()
+    }
+
+    fn launch(&self, config: &DawInstanceConfig) -> Result<Self::Process> {
+        ReaperProcess::spawn_config(config)
+    }
+
+    fn install_bridge(&self, lib_path: &Path, lib_name: &str) -> Result<()> {
+        let resources = PathBuf::from(self.resources());
+        let plugins_dir = resources.join("UserPlugins");
+        runner::install_plugin(lib_path, lib_name, &plugins_dir)
+            .map_err(|e| eyre::eyre!("install_bridge failed: {e}"))
+    }
+
+    fn discover_socket(&self) -> Option<PathBuf> {
+        runner::find_fts_daw_socket().map(PathBuf::from)
     }
 }
 
@@ -699,7 +801,7 @@ async fn discover_socket() -> Result<PathBuf> {
 /// For batched tests, this wraps a project tab shared with up to
 /// `BATCH_SIZE` other tests — cleanup happens when the whole batch
 /// finishes, not per-test.
-pub struct ReaperTestContext {
+pub struct DawTestContext {
     /// Connected DAW handle (shared across all tests).
     pub daw: Daw,
     /// This test's project (isolated tab or batch-shared tab).
@@ -712,7 +814,7 @@ pub struct ReaperTestContext {
     log_file: Mutex<File>,
 }
 
-impl ReaperTestContext {
+impl DawTestContext {
     /// Find a track by exact name in this test's project, returning an error if not found.
     pub async fn track_by_name(&self, name: &str) -> Result<TrackHandle> {
         self.project
@@ -743,8 +845,8 @@ impl ReaperTestContext {
         &self,
         id: &str,
         title: &str,
-        kind: daw::service::dock_host::DockKind,
-    ) -> eyre::Result<daw::service::dock_host::DockHandle> {
+        kind: crate::service::dock_host::DockKind,
+    ) -> eyre::Result<crate::service::dock_host::DockHandle> {
         Ok(self.daw.dock_host().register_dock(id, title, kind).await?)
     }
 
@@ -755,7 +857,7 @@ impl ReaperTestContext {
         let handle = self
             .daw
             .dock_host()
-            .register_dock(id, id, daw::service::dock_host::DockKind::Tabbed)
+            .register_dock(id, id, crate::service::dock_host::DockKind::Tabbed)
             .await?;
         let visible = self.daw.dock_host().is_visible(handle).await?;
         if !visible {
@@ -769,7 +871,7 @@ impl ReaperTestContext {
         let handle = self
             .daw
             .dock_host()
-            .register_dock(id, id, daw::service::dock_host::DockKind::Tabbed)
+            .register_dock(id, id, crate::service::dock_host::DockKind::Tabbed)
             .await?;
         let visible = self.daw.dock_host().is_visible(handle).await?;
         if visible {
@@ -897,7 +999,7 @@ async fn load_template(project: &Project, template_path: &Path) -> Result<()> {
 // ─────────────────────────────────────────────────────────────
 
 /// The function type that `#[reaper_test]` generates for test bodies.
-pub type TestBodyFn = dyn Fn(&ReaperTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>;
+pub type TestBodyFn = dyn Fn(&DawTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>;
 
 /// Run a single REAPER integration test.
 ///
@@ -914,10 +1016,10 @@ pub type TestBodyFn = dyn Fn(&ReaperTestContext) -> Pin<Box<dyn Future<Output = 
 /// This function is **synchronous** — it runs all async work on the shared
 /// runtime via `block_on_shared`. This prevents `DriverGone` errors from
 /// each `#[test]` getting a separate tokio runtime.
-pub fn run_reaper_test(
+pub fn run_daw_test(
     test_name: &str,
     isolated: bool,
-    body: impl Fn(&ReaperTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>,
+    body: impl Fn(&DawTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>,
 ) -> Result<()> {
     // Ensure log directory exists
     let log_dir = Path::new(LOG_DIR);
@@ -969,7 +1071,7 @@ pub fn run_reaper_test(
             .map(|d| PathBuf::from(d).join("tests").join("reaper-assets"))
             .unwrap_or_else(|_| PathBuf::from("tests/reaper-assets"));
 
-        let ctx = ReaperTestContext {
+        let ctx = DawTestContext {
             daw: daw.clone(),
             project: project.clone(),
             asset_dir,
@@ -1489,13 +1591,26 @@ impl MultiDawTestContext {
 ///     )
 /// }
 /// ```
-pub fn run_multi_reaper_test(
+pub fn run_multi_daw_test(
+    test_name: &str,
+    configs: Vec<DawInstanceConfig>,
+    body: impl Fn(&MultiDawTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>,
+) -> Result<()> {
+    run_multi_daw_test_with(&ReaperBackend, test_name, configs, body)
+}
+
+/// Backend-generic core of [`run_multi_daw_test`]. Spawns one instance per
+/// config through `backend`, waits for sockets, connects to each, then calls
+/// the test body with a [`MultiDawTestContext`]. All instances are torn down
+/// on exit (success or failure).
+pub fn run_multi_daw_test_with<B: DawBackend>(
+    backend: &B,
     test_name: &str,
     configs: Vec<DawInstanceConfig>,
     body: impl Fn(&MultiDawTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>,
 ) -> Result<()> {
     println!(
-        "\n=== {test_name} — spawning {} REAPER instance(s) ===",
+        "\n=== {test_name} — spawning {} DAW instance(s) ===",
         configs.len()
     );
 
@@ -1504,7 +1619,8 @@ pub fn run_multi_reaper_test(
     // and REAPER's per-instance lock files are created before the next instance starts.
     let mut processes = Vec::with_capacity(configs.len());
     for config in &configs {
-        let process = ReaperProcess::spawn_config(config)
+        let process = backend
+            .launch(config)
             .map_err(|e| eyre::eyre!("[{test_name}] Failed to spawn '{}': {e}", config.label))?;
 
         println!(
@@ -1570,6 +1686,20 @@ pub fn run_multi_reaper_test(
 
     result
 }
+
+// ─────────────────────────────────────────────────────────────
+//  Source-compat aliases (REAPER-named → DAW-generic canonical)
+// ─────────────────────────────────────────────────────────────
+
+/// Alias for [`DawTestContext`] — kept so existing `#[reaper_test]` call
+/// sites referencing `ReaperTestContext` keep compiling.
+pub type ReaperTestContext = DawTestContext;
+
+/// Alias for [`run_daw_test`].
+pub use run_daw_test as run_reaper_test;
+
+/// Alias for [`run_multi_daw_test`].
+pub use run_multi_daw_test as run_multi_reaper_test;
 
 #[cfg(test)]
 mod tests {

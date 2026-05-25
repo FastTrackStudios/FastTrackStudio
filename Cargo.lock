@@ -2132,12 +2132,17 @@ dependencies = [
  "daw-reaper",
  "daw-reaper-dioxus",
  "daw-standalone",
+ "daw-test-macro",
  "dawfile-ableton",
  "dawfile-reaper",
+ "eyre",
  "facet",
+ "moire",
+ "reaper-launcher",
  "tokio",
  "tracing",
  "vox 0.5.0",
+ "vox-stream 0.5.0",
 ]
 
 [[package]]
@@ -2192,7 +2197,6 @@ dependencies = [
  "reaper-low",
  "reaper-macros",
  "reaper-medium",
- "reaper-test",
  "tempfile",
  "tokio",
  "tracing",
@@ -2215,7 +2219,6 @@ dependencies = [
  "facet-json",
  "libc",
  "moire",
- "reaper-test",
  "serde",
  "serde_json",
  "tokio",
@@ -2332,6 +2335,7 @@ dependencies = [
  "base64 0.22.1",
  "camino",
  "crossbeam-channel",
+ "daw",
  "daw-audio-sync",
  "daw-control",
  "daw-proto",
@@ -2349,7 +2353,6 @@ dependencies = [
  "reaper-high",
  "reaper-low",
  "reaper-medium",
- "reaper-test",
  "swell-ui",
  "tokio",
  "tokio-util",
@@ -2484,10 +2487,18 @@ dependencies = [
  "daw-reaper",
  "eyre",
  "facet",
- "reaper-test",
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "daw-test-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -2513,8 +2524,8 @@ name = "daw-xtask"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "daw",
  "reaper-launcher",
- "reaper-test",
  "serde_json",
 ]
 
@@ -3286,7 +3297,6 @@ dependencies = [
  "daw",
  "eyre",
  "nih_plug",
- "reaper-test",
  "tokio",
 ]
 
@@ -6863,30 +6873,6 @@ dependencies = [
  "tracing",
  "vst",
  "winapi",
-]
-
-[[package]]
-name = "reaper-test"
-version = "0.1.0"
-dependencies = [
- "daw",
- "eyre",
- "moire",
- "reaper-launcher",
- "reaper-test-macro",
- "tokio",
- "tracing",
- "vox 0.5.0",
- "vox-stream 0.5.0",
-]
-
-[[package]]
-name = "reaper-test-macro"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

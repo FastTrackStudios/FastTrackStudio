@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use daw_proto::track::TrackEvent;
 use eyre::Result;
-use reaper_test::{DawInstanceConfig, run_multi_reaper_test};
+use daw::test::{DawInstanceConfig, run_multi_reaper_test};
 
 /// Upper bound for end-to-end "mutate → event observed" latency.
 ///

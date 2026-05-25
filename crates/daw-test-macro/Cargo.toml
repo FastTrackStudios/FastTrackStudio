@@ -1,8 +1,8 @@
 [package]
-name = "reaper-test-macro"
+name = "daw-test-macro"
 version = "0.1.0"
 edition = "2021"
-description = "Proc-macro for #[reaper_test] attribute"
+description = "Proc-macro for #[daw_test] / #[reaper_test] attributes"
 
 [lib]
 proc-macro = true

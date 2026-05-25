@@ -15,8 +15,9 @@ nih_plug.workspace = true
 daw = { path = "../../crates/daw", features = ["reaper"] }
 
 [dev-dependencies]
-daw = { path = "../../crates/daw", features = ["reaper"] }
-reaper-test.workspace = true
+# Integration-test harness folded into the daw facade's `test-harness`
+# feature (replaces the former `reaper-test` crate).
+daw = { path = "../../crates/daw", features = ["reaper", "test-harness"] }
 tokio = { workspace = true, features = ["time"] }
 eyre = "0.6"
 
