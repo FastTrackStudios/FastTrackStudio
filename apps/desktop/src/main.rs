@@ -24,7 +24,9 @@ enum Tab {
 fn log_path() -> std::path::PathBuf {
     std::env::var_os("FTS_DESKTOP_LOG")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("fasttrackstudio-desktop.log"))
+        // Fixed /tmp path (not std::env::temp_dir(), which honors the
+        // nix-shell $TMPDIR and lands somewhere unpredictable).
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp/fasttrackstudio-desktop.log"))
 }
 
 /// Send tracing to a grep-able logfile (truncated each launch) instead of

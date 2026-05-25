@@ -76,7 +76,11 @@ subject-rust = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd
 ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9", features = ["tokio"] }
 
 # Instrumentation
-moire = { version = "1.0", features = ["diagnostics"] }
+# diagnostics feature disabled — moire's backtrace capture panics on NixOS
+# (broken frame pointers / dladdr inside REAPER-loaded .so), and cargo
+# feature-unification would force it on across the whole graph (incl vox's
+# JIT encode path → abort). Matches daw/session.
+moire = { version = "1.0" }
 
 # Keyflow/Engraver crates (sibling repo — facade pattern)
 # NOTE: keyflow-proto, keyflow-text, keyflow-midi, engraver-proto are INTERNAL.
