@@ -165,5 +165,78 @@ fn DesktopShell() -> Element {
                 }
             }
         }
+        // Connection/gateway info popover, overlaid on top of everything.
+        DesktopConnectionOverlay { connection_state, gateway_info }
+    }
+}
+
+/// Desktop-only connection overlay — a click-to-open popover (top-right) that
+/// reports REAPER connection state and the web gateway URLs. Ported from
+/// session's own desktop app for parity.
+#[component]
+fn DesktopConnectionOverlay(
+    connection_state: Signal<ConnectionState>,
+    gateway_info: Signal<Option<gateway::GatewayInfo>>,
+) -> Element {
+    let mut show_popover = use_signal(|| false);
+
+    if gateway_info.read().is_none() {
+        return rsx! {};
+    }
+
+    rsx! {
+        div { class: "fixed top-0 right-0 h-10 z-30 flex items-center pr-4",
+            button {
+                class: "w-32 h-8 cursor-pointer opacity-0",
+                onclick: move |_| show_popover.toggle(),
+            }
+        }
+
+        if show_popover() {
+            div {
+                class: "fixed inset-0 z-40",
+                onclick: move |_| show_popover.set(false),
+            }
+            div {
+                class: "fixed right-4 top-12 z-50 w-72 rounded-lg border border-neutral-300 bg-white shadow-xl p-3 text-sm",
+                div { class: "font-medium mb-3", "Connection Info" }
+                div { class: "flex items-center justify-between py-1.5",
+                    span { class: "opacity-60", "REAPER" }
+                    match connection_state() {
+                        ConnectionState::Connected => rsx! { span { class: "text-green-600 font-medium", "Connected" } },
+                        ConnectionState::Connecting => rsx! { span { class: "text-yellow-600 font-medium", "Connecting…" } },
+                        ConnectionState::Disconnected => rsx! { span { class: "text-red-600 font-medium", "Disconnected" } },
+                    }
+                }
+                div { class: "border-t border-neutral-200 my-2" }
+                if let Some(ref info) = *gateway_info.read() {
+                    div { class: "space-y-1.5",
+                        div { class: "text-xs font-medium opacity-60 uppercase tracking-wider mb-1", "Web Gateway" }
+                        div { class: "flex items-center justify-between py-0.5",
+                            span { class: "opacity-60", "Port" }
+                            span { class: "font-mono", "{info.port}" }
+                        }
+                        div { class: "flex items-center justify-between py-0.5",
+                            span { class: "opacity-60", "Local" }
+                            span { class: "font-mono text-blue-600 text-xs", "{info.local_url()}" }
+                        }
+                        if let Some(url) = info.network_url() {
+                            div { class: "flex items-center justify-between py-0.5",
+                                span { class: "opacity-60", "Network" }
+                                span { class: "font-mono text-blue-600 text-xs", "{url}" }
+                            }
+                        }
+                        div { class: "flex items-center justify-between py-0.5",
+                            span { class: "opacity-60", "Web App" }
+                            if info.serving_web_app {
+                                span { class: "text-green-600", "Serving" }
+                            } else {
+                                span { class: "text-yellow-600", "Not built" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
