@@ -19,7 +19,7 @@ dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
 # `docs/blitz-fork-workflow.md` for the contribution flow.
 # Re-exported as `dioxus` (via `package = "dioxus-native"`) inside the
 # native app so component code can keep `use dioxus::prelude::*` unchanged.
-dioxus-native = { git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
+dioxus-native = { git = "https://git.starcommand.live/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", default-features = false }
 lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
@@ -28,7 +28,7 @@ tw_merge = "0.1.21"
 
 # fts-story — story registry / Lookbook shell / VRT runner. Currently
 # pulled via path dep against a sibling checkout for fast iteration; swap
-# to `git = "ssh://git@github.com/FastTrackStudios/fts-story", rev = "<sha>"`
+# to `git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-story", rev = "<sha>"`
 # once the API stabilises.
 fts-story-runtime   = { path = "../fts-story/crates/fts-story-runtime" }
 fts-story-shell     = { path = "../fts-story/crates/fts-story-shell" }
@@ -48,30 +48,18 @@ unused = "warn"
 # TEMP: local primitives + Blitz checkouts for Select-trace investigation. Remove before commit.
 [patch."https://github.com/DioxusLabs/components"]
 dioxus-primitives = { path = "/home/cody/Development/FastTrackStudio/forks/components/primitives" }
-[patch."https://github.com/FastTrackStudios/blitz"]
-dioxus-native = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/dioxus-native" }
-dioxus-native-dom = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/dioxus-native-dom" }
-blitz-dom = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-dom" }
-blitz-paint = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-paint" }
-blitz-html = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-html" }
-blitz-net = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-net" }
-blitz-shell = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-shell" }
-blitz-traits = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/blitz-traits" }
-stylo_taffy = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/stylo_taffy" }
-debug_timer = { path = "/home/cody/Development/FastTrackStudio/forks/blitz/packages/debug_timer" }
-
 [patch.crates-io]
 # Our fork of Stylo with the `hover` / `pointer` / `any-hover` /
 # `any-pointer` interaction-media features registered for the Servo
 # embedder. Without this, every Tailwind v4 `hover:*` utility (which
 # wraps in `@media (hover: hover) { … }`) is silently dropped on the
 # native renderer. See `docs/blitz-diagnosis.md` and the upstream PR
-# in <https://github.com/FastTrackStudios/stylo/tree/fts/interaction-media-features>.
-stylo = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo" }
-stylo_traits = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_traits" }
-stylo_atoms = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_atoms" }
-stylo_static_prefs = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_static_prefs" }
-stylo_dom = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_dom" }
-selectors = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "selectors" }
-servo_arc = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "servo_arc" }
-to_shmem = { git = "https://github.com/FastTrackStudios/stylo", branch = "fts/integration", package = "to_shmem" }
+# in <https://git.starcommand.live/FastTrackStudios/stylo/tree/fts/interaction-media-features>.
+stylo = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo" }
+stylo_traits = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_traits" }
+stylo_atoms = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_atoms" }
+stylo_static_prefs = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_static_prefs" }
+stylo_dom = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_dom" }
+selectors = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "selectors" }
+servo_arc = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "servo_arc" }
+to_shmem = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "to_shmem" }

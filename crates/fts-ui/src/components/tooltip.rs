@@ -2,11 +2,11 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::{
+    ContentAlign, ContentSide,
     tooltip::{
         Tooltip as PrimitiveTooltip, TooltipContent as PrimitiveTooltipContent,
         TooltipTrigger as PrimitiveTooltipTrigger,
     },
-    ContentAlign, ContentSide,
 };
 use fts_story_runtime::story;
 

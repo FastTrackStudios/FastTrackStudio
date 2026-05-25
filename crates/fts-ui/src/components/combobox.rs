@@ -15,8 +15,8 @@ use dioxus_primitives::combobox::{
 use fts_story_runtime::story;
 use lucide_dioxus::Check;
 use nucleo_matcher::{
-    pattern::{CaseMatching, Normalization, Pattern},
     Matcher, Utf32Str,
+    pattern::{CaseMatching, Normalization, Pattern},
 };
 
 /// Fuzzy-match `query` against any of `candidates`. Returns `Some(score)`
@@ -126,11 +126,7 @@ pub fn Combobox(props: ComboboxProps) -> Element {
     let mut value = props.value;
     let selected: ReadSignal<Option<String>> = use_memo(move || {
         let v = value();
-        if v.is_empty() {
-            None
-        } else {
-            Some(v)
-        }
+        if v.is_empty() { None } else { Some(v) }
     })
     .into();
 

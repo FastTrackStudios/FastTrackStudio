@@ -1,6 +1,6 @@
 //! Vertical slider (iced_audio `VSlider` parity). Drag vertically; up = increase.
 
-use crate::drag::{begin_drag, DragState};
+use crate::drag::{DragState, begin_drag};
 use crate::marks::{TextMarkGroup, TickMarkGroup};
 use crate::param::ParamHandle;
 use crate::theme::*;

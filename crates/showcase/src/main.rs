@@ -1,7 +1,7 @@
 //! fts-ui Showcase — visual verification of all components.
 //! Run: `dx serve --platform desktop`
 
-use dioxus::desktop::{tao::window::WindowBuilder, Config};
+use dioxus::desktop::{Config, tao::window::WindowBuilder};
 use dioxus::prelude::*;
 use fts_ui::showcase::Showcase;
 
