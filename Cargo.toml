@@ -81,6 +81,8 @@ facet-json = { version = "0.46" }
 
 # architect framework — defines #[architect::rpc] for sync-trait → vox
 # bridge generation plus the Entity derive for CRUD-shaped data.
+# Consumed from git.starcommand.live so daw is usable as a git dependency
+# (a local path dep escapes the repo and breaks downstream `cargo metadata`).
 architect = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
 architect-rpc-derive = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
 
