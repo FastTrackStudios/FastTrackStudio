@@ -13,13 +13,10 @@ fts-ui = { path = "crates/fts-ui" }
 fts-ui-audio = { path = "crates/fts-ui-audio" }
 clsx = "0.1.1"
 dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
-# Blitz / dioxus-native pulled from our fork's `fts/integration` branch.
-# That branch is rebased on upstream `DioxusLabs/blitz` main and stacks any
-# in-flight bug-fix branches we have not yet upstreamed. See
-# `docs/blitz-fork-workflow.md` for the contribution flow.
+# Blitz / dioxus-native — upstream DioxusLabs/blitz.
 # Re-exported as `dioxus` (via `package = "dioxus-native"`) inside the
 # native app so component code can keep `use dioxus::prelude::*` unchanged.
-dioxus-native = { git = "https://git.starcommand.live/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude", "system-fonts"] }
 lumen-blocks = { git = "https://github.com/Leaf-Computer/lumen-blocks.git", tag = "v0.2.0" }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "837c9d4c1c9f99b19de7a3f087d8af1b0538dcae", default-features = false }
 lucide-dioxus = { git = "https://github.com/Leaf-Computer/lucide.git", rev = "e3e509d5855324e893aef838747cccb2d115dc15", features = ["all-icons"] }
@@ -45,21 +42,3 @@ palette             = "0.7.6"
 [workspace.lints.rust]
 unused = "warn"
 
-# TEMP: local primitives + Blitz checkouts for Select-trace investigation. Remove before commit.
-[patch."https://github.com/DioxusLabs/components"]
-dioxus-primitives = { path = "/home/cody/Development/FastTrackStudio/forks/components/primitives" }
-[patch.crates-io]
-# Our fork of Stylo with the `hover` / `pointer` / `any-hover` /
-# `any-pointer` interaction-media features registered for the Servo
-# embedder. Without this, every Tailwind v4 `hover:*` utility (which
-# wraps in `@media (hover: hover) { … }`) is silently dropped on the
-# native renderer. See `docs/blitz-diagnosis.md` and the upstream PR
-# in <https://git.starcommand.live/FastTrackStudios/stylo/tree/fts/interaction-media-features>.
-stylo = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo" }
-stylo_traits = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_traits" }
-stylo_atoms = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_atoms" }
-stylo_static_prefs = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_static_prefs" }
-stylo_dom = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "stylo_dom" }
-selectors = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "selectors" }
-servo_arc = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "servo_arc" }
-to_shmem = { git = "https://git.starcommand.live/FastTrackStudios/stylo", branch = "fts/integration", package = "to_shmem" }

@@ -8,7 +8,7 @@ edition.workspace = true
 # it to `dioxus` so app code can keep `use dioxus::prelude::*`. The fts-ui
 # library crate independently depends on the real crates.io `dioxus`; both
 # unify on dioxus-core 0.7.x at link time.
-dioxus = { package = "dioxus-native", git = "https://github.com/FastTrackStudios/blitz", branch = "fts/integration", features = ["prelude", "system-fonts"] }
+dioxus = { package = "dioxus-native", git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude", "system-fonts"] }
 fts-ui = { workspace = true }
 fts-story-shell.workspace = true
 
