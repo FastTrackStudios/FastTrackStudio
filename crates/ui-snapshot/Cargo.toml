@@ -18,10 +18,10 @@ blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
 
 # Deterministic (CPU) image rendering — no GPU dependency, reproducible
 # pixel output across machines.
-anyrender = "0.6"
-anyrender_vello_cpu = "0.8"
-peniko = "0.5"
-kurbo = "0.12"
+anyrender = "0.10"
+anyrender_vello_cpu = "0.12"
+peniko = "0.6"
+kurbo = "0.13"
 
 # Component under test + dioxus for VirtualDom driving.
 fts-ui = { workspace = true }

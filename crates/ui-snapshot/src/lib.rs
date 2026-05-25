@@ -83,7 +83,7 @@ pub fn render_scene(scene: &Scene) -> Vec<u8> {
                 Default::default(),
                 &Rect::new(0.0, 0.0, width as f64, height as f64),
             );
-            paint_scene(canvas, &*doc.inner(), 1.0, width, height);
+            paint_scene(canvas, &mut doc.inner_mut(), 1.0, width, height, 0, 0);
         },
         width,
         height,
