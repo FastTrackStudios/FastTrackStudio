@@ -8,3 +8,6 @@ description = "Canonical music production taxonomy — instrument groups, song s
 
 [dependencies]
 color-palette = { workspace = true }
+
+[lints]
+workspace = true

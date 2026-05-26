@@ -12,7 +12,6 @@ pub mod steel_guitar;
 pub use acoustic_guitar::AcousticGuitar;
 pub use banjo::Banjo;
 pub use electric_guitar::ElectricGuitar;
-pub use mandolin::Mandolin;
 pub use steel_guitar::SteelGuitar;
 
 /// Top-level guitars group containing all guitar types

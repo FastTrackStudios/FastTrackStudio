@@ -11,8 +11,8 @@ use daw_reaper::track::{
 };
 
 use crate::{
-    ItemMetadata, OrganizeIntoTracks, Structure, auto_color, default_config, monarchy_sort,
-    track_schema,
+    auto_color, default_config, monarchy_sort, track_schema, ItemMetadata, OrganizeIntoTracks,
+    Structure,
 };
 use dynamic_template_proto::{
     actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
@@ -237,12 +237,11 @@ fn project() -> ProjectContext {
 }
 
 fn selected_or_all_tracks(selected_only: bool) -> Vec<daw::service::Track> {
-    let source = if selected_only {
+    if selected_only {
         daw_reaper::Reaper.selected(project())
     } else {
         daw_reaper::Reaper.all(project())
-    };
-    source
+    }
 }
 
 fn sort_tracks(selected_only: bool) -> eyre::Result<()> {
