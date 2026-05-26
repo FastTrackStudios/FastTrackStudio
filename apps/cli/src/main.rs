@@ -2828,6 +2828,27 @@ enum GoalLoopCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Manage the active session's subgoals — extra acceptance
+    /// criteria the worker sees and the judge must also satisfy.
+    ///
+    ///   goal subgoal "<text>"   append a criterion
+    ///   goal subgoal            list them (alias: `goal subgoal list`)
+    ///   goal subgoal remove <N> drop the Nth (1-based)
+    ///   goal subgoal clear      drop all
+    ///
+    /// A running loop in another process folds the current set into
+    /// its next worker prompt and evaluator gate — no restart needed.
+    Subgoal {
+        /// The subverb + text. With no args: list. A bare string:
+        /// append it as a criterion. `remove <N>`: drop the Nth.
+        /// `clear`: drop all. `list`: list.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -7195,6 +7216,9 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
                 org,
                 server,
             } => Box::pin(run_goal_update(condition, org, server)).await,
+            GoalLoopCmd::Subgoal { args, org, server } => {
+                Box::pin(run_goal_subgoal(args, org, server)).await
+            }
         },
     }
 }
@@ -7316,7 +7340,8 @@ async fn run_agent_goal(
         format!("{preamble}{subtasks_md}")
     };
     if dry_run {
-        println!("{}", goal_prompt(&static_preamble, &condition, ""));
+        // No session yet at dry-run time, so no subgoals to fold in.
+        println!("{}", goal_prompt(&static_preamble, &condition, &[], ""));
         return Ok(());
     }
 
@@ -7372,7 +7397,12 @@ async fn run_agent_goal(
 /// PRD with its subtask checklist, or empty), the live completion
 /// condition, and the evaluator's last reason. Kept in one place so
 /// `goal run`, `goal resume`, the per-turn loop, and `--dry-run` agree.
-fn goal_prompt(static_preamble: &str, condition: &str, reason: &str) -> String {
+fn goal_prompt(
+    static_preamble: &str,
+    condition: &str,
+    subgoals: &[String],
+    reason: &str,
+) -> String {
     let mut p = if static_preamble.is_empty() {
         format!(
             "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
@@ -7382,6 +7412,14 @@ fn goal_prompt(static_preamble: &str, condition: &str, reason: &str) -> String {
             "{static_preamble}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above; complete the subtasks in order."
         )
     };
+    // Subgoals are extra acceptance criteria added mid-run — the
+    // worker must satisfy every one in addition to the condition.
+    if !subgoals.is_empty() {
+        p.push_str("\n\nAdditional acceptance criteria (ALL must also be met):");
+        for (i, sg) in subgoals.iter().enumerate() {
+            p.push_str(&format!("\n  {}. {sg}", i + 1));
+        }
+    }
     if !reason.is_empty() {
         p.push_str(&format!(
             "\n\nThe goal is NOT yet met. Evaluator feedback:\n{reason}\n\nContinue."
@@ -7407,13 +7445,13 @@ fn drive_goal_loop(
     let last_condition = std::cell::RefCell::new(String::new());
 
     let run = wf.run_session(session_id, agent.clone(), budget, |iter| {
-        // Re-read the condition from the store every turn so an
-        // out-of-band `goal update` steers the loop in real time
-        // (#174). The store is the steering channel — no IPC.
-        let condition = wf
+        // Re-read the condition + subgoals from the store every turn
+        // so an out-of-band `goal update` / `goal subgoal` steers the
+        // loop in real time (#174). The store is the steering channel.
+        let (condition, subgoals) = wf
             .store()
             .goal(session_id)
-            .map(|g| g.condition)
+            .map(|g| (g.condition, g.subgoals.0))
             .unwrap_or_default();
         {
             let mut lc = last_condition.borrow_mut();
@@ -7426,7 +7464,7 @@ fn drive_goal_loop(
         // 1. Worker turn — prompt assembled from the static preamble
         //    + the (possibly just-updated) condition + last reason.
         let reason = last_reason.borrow().clone();
-        let prompt = goal_prompt(static_preamble, &condition, &reason);
+        let prompt = goal_prompt(static_preamble, &condition, &subgoals, &reason);
         println!("▶ turn {iter} — worker running…");
         let work = run_subprocess(worker, &prompt, iter, &condition)
             .map_err(|e| workflows_proto::WorkflowError::Backend(format!("worker: {e}")))?;
@@ -7436,6 +7474,19 @@ fn drive_goal_loop(
         let verdict = match evaluator {
             Some(ev) => {
                 println!("⧖ turn {iter} — judging…");
+                // Fold any subgoals into the condition block so the
+                // judge must verify them too — they're extra acceptance
+                // criteria, equal in weight to the condition.
+                let criteria = if subgoals.is_empty() {
+                    condition.clone()
+                } else {
+                    let mut c = condition.clone();
+                    c.push_str("\n\nALSO required (every one must be met):");
+                    for (i, sg) in subgoals.iter().enumerate() {
+                        c.push_str(&format!("\n  {}. {sg}", i + 1));
+                    }
+                    c
+                };
                 // Lead with the strict judge directive so a raw LLM
                 // evaluator (`claude -p`, `hermes -p`) emits the
                 // verdict instead of prose — otherwise parsing fails
@@ -7446,7 +7497,7 @@ fn drive_goal_loop(
                      {{\"done\": true|false, \"reason\": \"<one sentence>\"}}. Mark done:true \
                      ONLY if the WORKER OUTPUT shows the CONDITION is fully and verifiably met; \
                      when in doubt, done:false with the gap as the reason.\n\n\
-                     CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}",
+                     CONDITION:\n{criteria}\n\nWORKER OUTPUT:\n{}",
                     work.stdout
                 );
                 let r = run_subprocess(ev, &eval_in, iter, &condition)
@@ -7582,6 +7633,12 @@ async fn run_goal_status(org: Option<String>, _server: Option<String>) -> eyre::
             if let SubjectRef::Task { id } = s.subject {
                 println!("  task:      {}", short_uuid(&id));
             }
+            if !g.subgoals.0.is_empty() {
+                println!("  subgoals:");
+                for (i, sg) in g.subgoals.0.iter().enumerate() {
+                    println!("    {}. {sg}", i + 1);
+                }
+            }
             if g.last_reason.is_empty() {
                 println!("  last eval: (none yet)");
             } else {
@@ -7694,6 +7751,94 @@ async fn run_goal_update(
         }
     }
     Ok(())
+}
+
+/// `task agent goal subgoal *` — manage the active session's subgoals
+/// (extra acceptance criteria appended mid-run). Dispatches on the
+/// first token: `remove <N>` / `clear` / `list`, else the joined text
+/// is appended as a new criterion (bare = list). Mutations persist on
+/// the `GoalSession` row, so a running loop folds them into its next
+/// worker prompt + evaluator gate at the top of its next turn.
+async fn run_goal_subgoal(
+    args: Vec<String>,
+    org: Option<String>,
+    _server: Option<String>,
+) -> eyre::Result<()> {
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
+
+    let slug = resolve_active_org(org)?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
+    let Some((s, mut g)) = active_goal_session(&wf)? else {
+        println!("no active goal session");
+        return Ok(());
+    };
+
+    // Dispatch on the first token. `remove`/`clear`/`list` are
+    // subverbs; anything else is the criterion text to append.
+    match args.first().map(String::as_str) {
+        None => {
+            print_subgoals(&s.id, &g.subgoals.0);
+        }
+        Some("list") if args.len() == 1 => {
+            print_subgoals(&s.id, &g.subgoals.0);
+        }
+        Some("clear") if args.len() == 1 => {
+            let n = g.subgoals.0.len();
+            g.subgoals.0.clear();
+            g.updated_at = chrono::Utc::now();
+            wf.store().put_goal(&g)?;
+            println!("⌫ cleared {n} subgoal(s) on {}", short_uuid(&s.id));
+        }
+        Some("remove") => {
+            // `remove <N>` — N is 1-based, matching the `list` display.
+            let n: usize = match args.get(1).and_then(|a| a.parse().ok()) {
+                Some(n) if n >= 1 && n <= g.subgoals.0.len() => n,
+                _ => {
+                    println!(
+                        "remove takes a number 1..={} (the index shown by `goal subgoal`)",
+                        g.subgoals.0.len()
+                    );
+                    return Ok(());
+                }
+            };
+            let dropped = g.subgoals.0.remove(n - 1);
+            g.updated_at = chrono::Utc::now();
+            wf.store().put_goal(&g)?;
+            println!("⌫ removed subgoal {n} on {}: {dropped}", short_uuid(&s.id));
+            print_subgoals(&s.id, &g.subgoals.0);
+        }
+        Some(_) => {
+            // No subverb matched: treat the whole arg list as the
+            // criterion text (so unquoted multi-word input still works).
+            let text = args.join(" ");
+            let text = text.trim();
+            if text.is_empty() {
+                print_subgoals(&s.id, &g.subgoals.0);
+                return Ok(());
+            }
+            g.subgoals.0.push(text.to_owned());
+            g.updated_at = chrono::Utc::now();
+            wf.store().put_goal(&g)?;
+            println!(
+                "＋ added subgoal {} on {}: {text}",
+                g.subgoals.0.len(),
+                short_uuid(&s.id)
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Print the numbered subgoal list (1-based, matching `remove <N>`).
+fn print_subgoals(session_id: &uuid::Uuid, subgoals: &[String]) {
+    if subgoals.is_empty() {
+        println!("no subgoals on goal session {}", short_uuid(session_id));
+        return;
+    }
+    println!("subgoals on goal session {}:", short_uuid(session_id));
+    for (i, sg) in subgoals.iter().enumerate() {
+        println!("  {}. {sg}", i + 1);
+    }
 }
 
 /// `task agent goal resume` — reset the parked session's turn counter

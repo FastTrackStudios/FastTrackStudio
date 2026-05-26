@@ -39,7 +39,7 @@ pub mod transition;
 pub use activity::{Activity, ActivityId, ActivityKind};
 pub use agent::AgentRef;
 pub use error::WorkflowError;
-pub use goal::GoalSession;
+pub use goal::{GoalSession, Subgoals};
 pub use handoff::{Handoff, HandoffId, HandoffReason, HandoffStatus};
 pub use resume::{RelatedRef, ResumeContext, TransitionState};
 pub use session::{SessionId, SessionStatus, SubjectRef, WorkSession, WorkflowKind};

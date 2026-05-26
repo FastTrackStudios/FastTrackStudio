@@ -21,6 +21,30 @@ use facet::Facet;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Newtype around the list of subgoal strings — extra acceptance
+/// criteria appended mid-run via `goal subgoal`. Wrapped so we can
+/// derive `architect::JsonField` on it (orphan rules forbid
+/// implementing the conversions for a bare `Vec<String>`), letting it
+/// persist as a JSON column. Mirrors `Labels` in `agent-proto`.
+#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[derive(
+    architect::JsonField, Facet, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq,
+)]
+#[repr(transparent)]
+pub struct Subgoals(pub Vec<String>);
+
+impl From<Vec<String>> for Subgoals {
+    fn from(v: Vec<String>) -> Self {
+        Self(v)
+    }
+}
+
+impl From<Subgoals> for Vec<String> {
+    fn from(v: Subgoals) -> Self {
+        v.0
+    }
+}
+
 /// The goal-loop state attached to one [`WorkSession`](crate::WorkSession).
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
 #[derive(architect::Entity, Debug, Clone, PartialEq, Facet, Serialize, Deserialize)]
@@ -46,6 +70,13 @@ pub struct GoalSession {
     #[serde(default)]
     pub last_reason: String,
 
+    /// Extra acceptance criteria appended mid-run via `goal subgoal`.
+    /// They are folded into the worker prompt and judged alongside the
+    /// `condition`. Cleared whenever a fresh goal is set (`goal run`).
+    #[serde(default)]
+    #[architect(json)]
+    pub subgoals: Subgoals,
+
     #[architect(filterable, sortable)]
     pub updated_at: DateTime<Utc>,
 }
@@ -60,6 +91,7 @@ impl GoalSession {
             budget,
             turns_used: 0,
             last_reason: String::new(),
+            subgoals: Subgoals::default(),
             updated_at: Utc::now(),
         }
     }
