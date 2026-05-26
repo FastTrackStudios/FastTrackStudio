@@ -2816,6 +2816,18 @@ enum GoalLoopCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Steer a running loop: replace the active session's completion
+    /// condition. A loop in another process re-reads it at the top of
+    /// its next turn and re-steers — no restart needed.
+    Update {
+        /// The new completion condition.
+        #[arg(long)]
+        condition: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -7178,6 +7190,11 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
                 .await
             }
             GoalLoopCmd::Clear { org, server } => Box::pin(run_goal_clear(org, server)).await,
+            GoalLoopCmd::Update {
+                condition,
+                org,
+                server,
+            } => Box::pin(run_goal_update(condition, org, server)).await,
         },
     }
 }
@@ -7289,17 +7306,17 @@ async fn run_agent_goal(
         .as_ref()
         .map(|t| render_task_prompt(t, parent_info.as_ref()))
         .unwrap_or_default();
-    let base_prompt = if preamble.is_empty() {
-        format!(
-            "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
-        )
+    // Static preamble (task PRD + subtask checklist, or empty) — the
+    // part of the prompt that doesn't change turn to turn. The
+    // condition is read live from the store each turn so `goal update`
+    // can steer the loop, so it's not baked in here.
+    let static_preamble = if preamble.is_empty() {
+        String::new()
     } else {
-        format!(
-            "{preamble}{subtasks_md}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above; complete the subtasks in order."
-        )
+        format!("{preamble}{subtasks_md}")
     };
     if dry_run {
-        println!("{base_prompt}");
+        println!("{}", goal_prompt(&static_preamble, &condition, ""));
         return Ok(());
     }
 
@@ -7336,10 +7353,9 @@ async fn run_agent_goal(
         &wf,
         session.id,
         &agent,
-        &condition,
+        &static_preamble,
         &worker,
         evaluator.as_deref(),
-        &base_prompt,
         max_iters,
     )?;
 
@@ -7352,36 +7368,71 @@ async fn run_agent_goal(
 /// `goal status` reads live state. Shared by `goal run` and
 /// `goal resume`.
 #[allow(clippy::too_many_arguments)]
+/// Assemble a turn's worker prompt from the static preamble (the task
+/// PRD with its subtask checklist, or empty), the live completion
+/// condition, and the evaluator's last reason. Kept in one place so
+/// `goal run`, `goal resume`, the per-turn loop, and `--dry-run` agree.
+fn goal_prompt(static_preamble: &str, condition: &str, reason: &str) -> String {
+    let mut p = if static_preamble.is_empty() {
+        format!(
+            "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
+        )
+    } else {
+        format!(
+            "{static_preamble}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above; complete the subtasks in order."
+        )
+    };
+    if !reason.is_empty() {
+        p.push_str(&format!(
+            "\n\nThe goal is NOT yet met. Evaluator feedback:\n{reason}\n\nContinue."
+        ));
+    }
+    p
+}
+
 fn drive_goal_loop(
     wf: &workflows_orchestrator::CodingWorkflow,
     session_id: uuid::Uuid,
     agent: &workflows_proto::AgentRef,
-    condition: &str,
+    static_preamble: &str,
     worker: &str,
     evaluator: Option<&str>,
-    base_prompt: &str,
     budget: u32,
 ) -> eyre::Result<workflows_orchestrator::SessionRun> {
     use workflows_orchestrator::IterationOutcome;
 
     // The evaluator's latest reason, carried into the next worker turn.
     let last_reason = std::cell::RefCell::new(String::new());
+    // The condition seen on the previous turn — to detect live edits.
+    let last_condition = std::cell::RefCell::new(String::new());
 
     let run = wf.run_session(session_id, agent.clone(), budget, |iter| {
-        // 1. Worker turn.
-        let mut prompt = base_prompt.to_owned();
-        let reason = last_reason.borrow().clone();
-        if !reason.is_empty() {
-            prompt.push_str(&format!(
-                "\n\nThe goal is NOT yet met. Evaluator feedback:\n{reason}\n\nContinue."
-            ));
+        // Re-read the condition from the store every turn so an
+        // out-of-band `goal update` steers the loop in real time
+        // (#174). The store is the steering channel — no IPC.
+        let condition = wf
+            .store()
+            .goal(session_id)
+            .map(|g| g.condition)
+            .unwrap_or_default();
+        {
+            let mut lc = last_condition.borrow_mut();
+            if !lc.is_empty() && *lc != condition {
+                println!("  ◎ goal updated — re-steering toward: {condition}");
+            }
+            *lc = condition.clone();
         }
+
+        // 1. Worker turn — prompt assembled from the static preamble
+        //    + the (possibly just-updated) condition + last reason.
+        let reason = last_reason.borrow().clone();
+        let prompt = goal_prompt(static_preamble, &condition, &reason);
         println!("▶ turn {iter} — worker running…");
-        let work = run_subprocess(worker, &prompt, iter, condition)
+        let work = run_subprocess(worker, &prompt, iter, &condition)
             .map_err(|e| workflows_proto::WorkflowError::Backend(format!("worker: {e}")))?;
 
         // 2. Evaluator gate — judge the worker's output against the
-        //    condition. Built-in done-check if no eval command.
+        //    current condition. Built-in done-check if no eval command.
         let verdict = match evaluator {
             Some(ev) => {
                 println!("⧖ turn {iter} — judging…");
@@ -7398,7 +7449,7 @@ fn drive_goal_loop(
                      CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}",
                     work.stdout
                 );
-                let r = run_subprocess(ev, &eval_in, iter, condition)
+                let r = run_subprocess(ev, &eval_in, iter, &condition)
                     .map_err(|e| workflows_proto::WorkflowError::Backend(format!("eval: {e}")))?;
                 // Prefer a structured verdict — the judge convention
                 // Hermes / Claude / Codex `/goal` all share:
@@ -7618,6 +7669,33 @@ async fn run_goal_clear(org: Option<String>, _server: Option<String>) -> eyre::R
     Ok(())
 }
 
+/// `task agent goal update --condition` — live-steer the active loop
+/// by replacing its completion condition. The running loop re-reads
+/// the `GoalSession` row at the top of each turn (#174), so the next
+/// turn re-steers toward the new condition without a restart.
+async fn run_goal_update(
+    condition: String,
+    org: Option<String>,
+    _server: Option<String>,
+) -> eyre::Result<()> {
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
+
+    let slug = resolve_active_org(org)?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
+    match active_goal_session(&wf)? {
+        None => println!("no active goal session to update"),
+        Some((s, mut g)) => {
+            g.condition = condition.clone();
+            g.updated_at = chrono::Utc::now();
+            wf.store().put_goal(&g)?;
+            println!("◎ updated goal session {} condition:", short_uuid(&s.id));
+            println!("  {condition}");
+            println!("  (a running loop re-steers on its next turn)");
+        }
+    }
+    Ok(())
+}
+
 /// `task agent goal resume` — reset the parked session's turn counter
 /// to 0 and continue the loop toward its stored condition.
 async fn run_goal_resume(
@@ -7666,7 +7744,7 @@ async fn run_goal_resume(
         ));
     }
 
-    let base_prompt = build_goal_resume_prompt(&url, task_id, &goal.condition).await?;
+    let static_preamble = build_goal_preamble(&url, task_id).await?;
     let budget = max_iters.unwrap_or(goal.budget);
 
     // Resume the session (→ Active) and reset the turn counter — the
@@ -7688,23 +7766,19 @@ async fn run_goal_resume(
         &wf,
         session.id,
         &agent,
-        &goal.condition,
+        &static_preamble,
         &worker,
         evaluator.as_deref(),
-        &base_prompt,
         budget,
     )?;
     finalize_goal_run(&run, budget, task_id, &url, &wf, session.id).await
 }
 
-/// Rebuild the loop's base prompt on resume: the rendered task PRD +
-/// subtask checklist when the session is task-linked, else a bare
-/// goal directive. Mirrors `goal run`'s prompt assembly.
-async fn build_goal_resume_prompt(
-    url: &str,
-    task_id: Option<uuid::Uuid>,
-    condition: &str,
-) -> eyre::Result<String> {
+/// Rebuild the loop's static preamble on resume: the rendered task
+/// PRD + subtask checklist when the session is task-linked, else
+/// empty. The condition is read live from the store per turn, so it's
+/// deliberately not part of the preamble. Mirrors `goal run`.
+async fn build_goal_preamble(url: &str, task_id: Option<uuid::Uuid>) -> eyre::Result<String> {
     if let Some(id) = task_id {
         let client = connect_task_client(url).await?;
         if let Ok(t) = client.get(id).await {
@@ -7715,14 +7789,10 @@ async fn build_goal_resume_prompt(
             let children = subtasks_of(&client, t.id).await.unwrap_or_default();
             let preamble = render_task_prompt(&t, parent.as_ref());
             let subtasks_md = render_subtask_checklist(&children);
-            return Ok(format!(
-                "{preamble}{subtasks_md}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above; complete the subtasks in order."
-            ));
+            return Ok(format!("{preamble}{subtasks_md}"));
         }
     }
-    Ok(format!(
-        "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
-    ))
+    Ok(String::new())
 }
 
 /// Verdict from one evaluator pass.
