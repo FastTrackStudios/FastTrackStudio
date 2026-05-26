@@ -276,6 +276,7 @@ pub mod layout {
             "Bass" => Some(bass()),
             "Electric Gtr" => Some(electric_gtr()),
             "Acoustic Gtr" => Some(acoustic_gtr()),
+            "Keys" => Some(keys()),
             _ => None,
         }
     }
@@ -354,17 +355,21 @@ pub mod layout {
         .in_group("Drums")
     }
 
-    /// Shared guitar chain — the most dynamic shape. A run of variadic
+    /// The most dynamic shape, shared by guitars and keys: a run of variadic
     /// structural levels (Performer → Arrangement → Layer → Channel) bottoming
-    /// out in the multi-mic captures. Every level collapses when singular, so
-    /// the same template renders a one-off DI as `<name> / DI` and a fully
-    /// tracked, multi-performer part as the full nested tree. Electric and
-    /// acoustic guitars share this exactly; only the display name, canonical
-    /// sub-path, and slot-band category differ.
-    fn guitar(name: &str, sub: &str, category: &str) -> TemplateNode {
+    /// out in the per-performance multi-mic `captures`. Every level collapses
+    /// when singular, so the same template renders a one-off capture as
+    /// `<name> / DI` and a fully tracked, multi-performer part as the full
+    /// nested tree.
+    fn performance_chain(
+        name: &str,
+        path: &[&str],
+        category: &str,
+        captures: &[&str],
+    ) -> TemplateNode {
         folder(
             name,
-            &["Guitars", sub],
+            path,
             vec![level(
                 "Performer",
                 vec![level(
@@ -373,12 +378,7 @@ pub mod layout {
                         "Layer",
                         vec![level(
                             "Channel",
-                            vec![
-                                track("DI"),
-                                track("DI-Pedalboard"),
-                                track("Amp 1"),
-                                track("Amp 2"),
-                            ],
+                            captures.iter().map(|c| track(*c)).collect(),
                         )],
                     )],
                 )],
@@ -387,14 +387,34 @@ pub mod layout {
         .in_group(category)
     }
 
-    /// Electric guitar. See [`guitar`].
+    /// Guitar multi-mic captures (DI box, pedalboard DI, two amp mics).
+    const GUITAR_CAPTURES: &[&str] = &["DI", "DI-Pedalboard", "Amp 1", "Amp 2"];
+
+    /// Electric guitar. See [`performance_chain`].
     pub fn electric_gtr() -> TemplateNode {
-        guitar("GTR E", "Electric", "Electric Gtr")
+        performance_chain(
+            "GTR E",
+            &["Guitars", "Electric"],
+            "Electric Gtr",
+            GUITAR_CAPTURES,
+        )
     }
 
-    /// Acoustic guitar — same dynamic chain as electric. See [`guitar`].
+    /// Acoustic guitar — same dynamic chain as electric. See [`performance_chain`].
     pub fn acoustic_gtr() -> TemplateNode {
-        guitar("GTR A", "Acoustic", "Acoustic Gtr")
+        performance_chain(
+            "GTR A",
+            &["Guitars", "Acoustic"],
+            "Acoustic Gtr",
+            GUITAR_CAPTURES,
+        )
+    }
+
+    /// Keys — same dynamic chain as guitars. Captures are DI plus an amped
+    /// pair (Rhodes / organ / Leslie through an amp). Adjust if your keys
+    /// rigs capture differently.
+    pub fn keys() -> TemplateNode {
+        performance_chain("Keys", &["Keys"], "Keys", &["DI", "Amp 1", "Amp 2"])
     }
 }
 
@@ -427,9 +447,9 @@ mod tests {
     #[test]
     fn golden_resolves_canonical_colors() {
         let t = IdealFullSessionTemplate::golden();
-        // Keys (a stub band) resolves a color via its canonical path.
-        let keys = t.root.iter().find(|n| n.name == "Keys").unwrap();
-        assert!(keys.defaults.color_hex.is_some());
+        // Synths (a stub band) resolves a color via its canonical path.
+        let synths = t.root.iter().find(|n| n.name == "Synths").unwrap();
+        assert!(synths.defaults.color_hex.is_some());
     }
 
     #[test]
