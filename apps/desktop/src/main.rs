@@ -159,17 +159,12 @@ fn DesktopShell() -> Element {
                 tracing::warn!("build_from_open_projects failed: {e:?}");
             }
 
+            // The subscribe handler runs its loop in-flight (never returns until
+            // the stream ends), so poll the receiver CONCURRENTLY with the
+            // subscribe future rather than awaiting subscribe() first.
             let (tx, mut rx) = vox::channel::<session::SetlistEvent>();
-
-            if let Err(e) = setlist.subscribe(tx).await {
-                tracing::error!("Failed to subscribe to setlist events: {e:?}");
-                // Likely a dead transport; the connection manager will flip the
-                // state. Back off to avoid a hot loop, then re-gate.
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                continue;
-            }
-
-            tracing::info!("Subscribed to setlist events");
+            let mut sub = std::pin::pin!(setlist.subscribe(tx));
+            tracing::info!("Subscribing to setlist events");
 
             // Periodic rescan while subscribed — rebuilds the client each tick
             // so it always uses the live caller.
@@ -190,11 +185,25 @@ fn DesktopShell() -> Element {
             });
 
             let web_registry = gateway::web_client_registry();
-
-            while let Ok(Some(event_ref)) = rx.recv().await {
-                let event = event_ref.get();
-                web_registry.broadcast(event).await;
-                session_ui::apply_setlist_event(event);
+            loop {
+                tokio::select! {
+                    res = &mut sub => {
+                        if let Err(e) = res {
+                            tracing::error!("Setlist subscribe error: {e:?}");
+                        }
+                        break;
+                    }
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(Some(event_ref)) => {
+                                let event = event_ref.get();
+                                web_registry.broadcast(event).await;
+                                session_ui::apply_setlist_event(event);
+                            }
+                            _ => break,
+                        }
+                    }
+                }
             }
 
             poll_handle.abort();

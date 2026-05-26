@@ -79,13 +79,12 @@ async fn main() -> eyre::Result<()> {
                 tracing::warn!("build_from_open_projects failed: {e:?}");
             }
 
+            // The subscribe handler runs its event loop in-flight (it doesn't
+            // return until the stream ends), so poll the receiver CONCURRENTLY
+            // with the subscribe future rather than awaiting it first.
             let (tx, mut rx) = vox::channel::<session::SetlistEvent>();
-            if let Err(e) = setlist.subscribe(tx).await {
-                tracing::error!("Failed to subscribe to setlist events: {e:?}");
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                continue;
-            }
-            tracing::info!("Subscribed to setlist events; rebroadcasting to web clients");
+            let mut sub = std::pin::pin!(setlist.subscribe(tx));
+            tracing::info!("Subscribing to setlist events; rebroadcasting to web clients");
 
             // Periodic rescan while subscribed (rebuild against the live caller).
             let poll = tokio::spawn(async move {
@@ -105,8 +104,22 @@ async fn main() -> eyre::Result<()> {
             });
 
             let web_registry = gateway::web_client_registry();
-            while let Ok(Some(event_ref)) = rx.recv().await {
-                web_registry.broadcast(event_ref.get()).await;
+            loop {
+                tokio::select! {
+                    res = &mut sub => {
+                        match res {
+                            Ok(()) => tracing::info!("Setlist subscription closed"),
+                            Err(e) => tracing::error!("Setlist subscribe error: {e:?}"),
+                        }
+                        break;
+                    }
+                    ev = rx.recv() => {
+                        match ev {
+                            Ok(Some(event_ref)) => web_registry.broadcast(event_ref.get()).await,
+                            _ => break,
+                        }
+                    }
+                }
             }
 
             poll.abort();
