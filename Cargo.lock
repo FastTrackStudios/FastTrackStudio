@@ -78,7 +78,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.1.1"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -90,6 +90,7 @@ dependencies = [
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#1a647fb218c9a9364f7e25384f91fc1194581c63"
 dependencies = [
  "convert_case 0.6.0",
  "facet 0.46.4",
@@ -347,7 +348,7 @@ dependencies = [
 [[package]]
 name = "anyrender"
 version = "0.10.0"
-source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#2dc40e1d43c1a67cc00a029de2d553c949472f8d"
+source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#7d60908c35f8df168888a66fe1ee5507cc6402ab"
 dependencies = [
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -403,9 +404,9 @@ dependencies = [
 
 [[package]]
 name = "anyrender_vello_hybrid"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61b6de3eb188f15d7782e37d086b1a06bc835043e52c2f836e64a1de0e1a2ee6"
+checksum = "c29d7d94f31a211293ec18341a2768e5bdae16b5207dcfcf6817f1359396f0b1"
 dependencies = [
  "anyrender 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -914,7 +915,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
  "anyrender 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -957,7 +958,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -968,7 +969,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -980,7 +981,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "anyrender 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "anyrender_svg",
@@ -999,7 +1000,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -1021,7 +1022,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "bitflags 2.11.1",
  "bytes",
@@ -1476,6 +1477,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
 dependencies = [
  "facet 0.46.4",
  "thiserror 2.0.18",
@@ -2124,6 +2126,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "cty"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2255,18 +2267,39 @@ name = "daw"
 version = "0.1.0"
 dependencies = [
  "architect",
- "daw-control",
- "daw-module",
- "daw-proto",
- "daw-reaper",
- "daw-reaper-dioxus",
- "daw-test-macro",
- "dawfile-ableton",
- "dawfile-reaper",
+ "daw-control 0.1.0",
+ "daw-module 0.1.0",
+ "daw-proto 0.1.0",
+ "daw-reaper 0.1.0",
+ "daw-test-macro 0.1.0",
  "eyre",
  "facet 0.46.4",
  "moire",
- "reaper-launcher",
+ "reaper-launcher 0.1.0",
+ "tokio",
+ "tracing",
+ "vox 0.5.0",
+ "vox-stream 0.5.0",
+]
+
+[[package]]
+name = "daw"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "architect",
+ "daw-control 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-reaper-dioxus",
+ "daw-test-macro 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-ableton 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "eyre",
+ "facet 0.46.4",
+ "moire",
+ "reaper-launcher 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "tokio",
  "tracing",
  "vox 0.5.0",
@@ -2288,10 +2321,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-audio-sync"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "bincode",
+ "reaper-low",
+ "reaper-medium",
+ "serde",
+ "socket2 0.5.10",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "daw-proto",
+ "daw-proto 0.1.0",
+ "eyre",
+ "facet 0.46.4",
+ "facet-json",
+ "futures",
+ "serde",
+ "serde_json",
+ "tracing",
+ "vox 0.5.0",
+]
+
+[[package]]
+name = "daw-control"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "eyre",
  "facet 0.46.4",
  "facet-json",
@@ -2305,12 +2369,13 @@ dependencies = [
 [[package]]
 name = "daw-extension-runtime"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "crossbeam-channel",
- "daw-control",
- "daw-module",
- "daw-proto",
- "daw-reaper",
+ "daw-control 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "eyre",
  "fragile",
  "moire",
@@ -2332,8 +2397,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-module"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "daw-proto"
 version = "0.1.0"
+dependencies = [
+ "actions-proto",
+ "architect",
+ "facet 0.46.4",
+ "thiserror 2.0.18",
+ "vox 0.5.0",
+ "vox-types 0.5.0",
+]
+
+[[package]]
+name = "daw-proto"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "actions-proto",
  "architect",
@@ -2351,14 +2438,48 @@ dependencies = [
  "base64 0.22.1",
  "camino",
  "crossbeam-channel",
- "daw-audio-sync",
- "daw-control",
- "daw-proto",
- "dawfile-aaf",
- "dawfile-ableton",
- "dawfile-dawproject",
- "dawfile-protools",
- "dawfile-reaper",
+ "daw-audio-sync 0.1.0",
+ "daw-control 0.1.0",
+ "daw-proto 0.1.0",
+ "dawfile-aaf 0.1.0",
+ "dawfile-ableton 0.1.0",
+ "dawfile-dawproject 0.1.0",
+ "dawfile-protools 0.1.0",
+ "dawfile-reaper 0.1.0",
+ "display-info",
+ "enumflags2",
+ "eyre",
+ "facet-json",
+ "libloading 0.8.9",
+ "moire",
+ "reaper-high",
+ "reaper-low",
+ "reaper-medium",
+ "swell-ui",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox 0.5.0",
+ "vox-stream 0.5.0",
+]
+
+[[package]]
+name = "daw-reaper"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "architect",
+ "base64 0.22.1",
+ "camino",
+ "crossbeam-channel",
+ "daw-audio-sync 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-control 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-aaf 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-ableton 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-dawproject 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-protools 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "dawfile-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "display-info",
  "enumflags2",
  "eyre",
@@ -2379,6 +2500,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper-dioxus"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "anyrender_vello",
  "architect",
@@ -2387,8 +2509,8 @@ dependencies = [
  "blitz-traits",
  "cocoa",
  "crossbeam",
- "daw-module",
- "daw-proto",
+ "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "daw-reaper-embed",
  "dioxus-devtools",
  "dioxus-native",
@@ -2413,6 +2535,7 @@ dependencies = [
 [[package]]
 name = "daw-reaper-embed"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "cocoa",
  "objc",
@@ -2429,9 +2552,10 @@ dependencies = [
 [[package]]
 name = "daw-synchronization"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
- "daw",
- "daw-reaper",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "facet 0.46.4",
  "tokio",
  "tokio-util",
@@ -2448,11 +2572,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-test-macro"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "dawfile-aaf"
 version = "0.1.0"
 dependencies = [
  "cfb 0.10.0",
- "daw-proto",
+ "daw-proto 0.1.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dawfile-aaf"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "cfb 0.10.0",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "thiserror 2.0.18",
 ]
 
@@ -2460,7 +2604,19 @@ dependencies = [
 name = "dawfile-ableton"
 version = "0.1.0"
 dependencies = [
- "daw-proto",
+ "daw-proto 0.1.0",
+ "flate2",
+ "quick-xml 0.37.5",
+ "roxmltree 0.20.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dawfile-ableton"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "flate2",
  "quick-xml 0.37.5",
  "roxmltree 0.20.0",
@@ -2471,7 +2627,18 @@ dependencies = [
 name = "dawfile-dawproject"
 version = "0.1.0"
 dependencies = [
- "daw-proto",
+ "daw-proto 0.1.0",
+ "roxmltree 0.20.0",
+ "thiserror 2.0.18",
+ "zip",
+]
+
+[[package]]
+name = "dawfile-dawproject"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "roxmltree 0.20.0",
  "thiserror 2.0.18",
  "zip",
@@ -2481,7 +2648,16 @@ dependencies = [
 name = "dawfile-protools"
 version = "0.1.0"
 dependencies = [
- "daw-proto",
+ "daw-proto 0.1.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dawfile-protools"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "thiserror 2.0.18",
 ]
 
@@ -2491,7 +2667,21 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
- "daw-proto",
+ "daw-proto 0.1.0",
+ "nom 8.0.0",
+ "rayon",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dawfile-reaper"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "nom 8.0.0",
  "rayon",
  "serde",
@@ -2507,7 +2697,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 
 [[package]]
 name = "deflate"
@@ -2895,7 +3085,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "android-activity",
  "anyrender 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2933,7 +3123,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native-dom"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -3108,7 +3298,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -3162,12 +3352,13 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "dynamic-template"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
 dependencies = [
  "anyhow",
  "color-palette",
- "daw",
- "daw-proto",
- "daw-reaper",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "dynamic-template-proto",
  "eyre",
  "facet 0.46.4",
@@ -3183,10 +3374,12 @@ dependencies = [
 [[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
 dependencies = [
  "actions-proto",
- "daw-proto",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "facet 0.46.4",
+ "music-catalog",
  "thiserror 2.0.18",
  "vox 0.4.0",
 ]
@@ -3218,6 +3411,7 @@ dependencies = [
 [[package]]
 name = "engraver"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "engraver-proto",
 ]
@@ -3225,6 +3419,7 @@ dependencies = [
 [[package]]
 name = "engraver-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "anyrender 0.10.0 (git+https://github.com/DioxusLabs/anyrender.git?branch=main)",
  "bitflags 2.11.1",
@@ -3456,7 +3651,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -4056,15 +4251,15 @@ name = "fts-extensions"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "daw",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "daw-extension-runtime",
- "daw-reaper",
+ "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "daw-synchronization",
  "eyre",
  "fragile",
  "fts-launcher",
  "fts-ui",
- "reaper-config 0.1.0",
+ "reaper-config",
  "reaper-high",
  "reaper-input",
  "reaper-low",
@@ -4080,8 +4275,9 @@ dependencies = [
 [[package]]
 name = "fts-launcher"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-launcher.git?branch=main#aa0c9d719f581a2edce5ab0168c10000e4aeca87"
 dependencies = [
- "daw",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "dioxus-native",
  "facet 0.46.4",
  "facet-styx",
@@ -4129,6 +4325,7 @@ dependencies = [
 [[package]]
 name = "fts-ui"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-ui.git?branch=main#5d3430dca1ea0280100dffffc9b1ddd9446e6840"
 dependencies = [
  "chrono",
  "clsx",
@@ -4657,9 +4854,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
+checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
 dependencies = [
  "bytes",
  "itoa 1.0.18",
@@ -4747,7 +4944,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -4765,7 +4962,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5082,6 +5279,7 @@ dependencies = [
 [[package]]
 name = "input"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#1a647fb218c9a9364f7e25384f91fc1194581c63"
 dependencies = [
  "serde",
  "serde_json",
@@ -5170,9 +5368,9 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
-version = "0.2.25"
+version = "0.2.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6835eea34fb6321b9b3aa7b685c2b433948c09447e389dc017fdf687d5d11e65"
+checksum = "30457d51cb0e68ee18184b30cd9eb8e1602a20837c321f6ea9706b94f1c681c3"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
@@ -5180,14 +5378,14 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-link",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.25"
+version = "0.2.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c22e04db9c58f5136eb1757f3d5c49a7b187f49e52185228cbd2f5acdfcc08c"
+checksum = "05f86e4f0326c61ae6c00b04d9009aaeda644d0b5bdfbf6c67247f492f42b3f3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5335,11 +5533,12 @@ dependencies = [
 [[package]]
 name = "keyflow"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "color-eyre",
  "colored 3.1.1",
- "daw-module",
- "daw-proto",
+ "daw-module 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "derive_more 1.0.0",
  "engraver",
  "facet 0.46.4",
@@ -5355,13 +5554,15 @@ dependencies = [
 [[package]]
 name = "keyflow-chordpro"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 
 [[package]]
 name = "keyflow-daw-analysis"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "architect",
- "daw",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "eyre",
  "facet 0.46.4",
  "keyflow",
@@ -5372,6 +5573,7 @@ dependencies = [
 [[package]]
 name = "keyflow-midi"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "keyflow-proto",
  "keyflow-text",
@@ -5381,10 +5583,11 @@ dependencies = [
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "architect",
  "color-palette",
- "daw-proto",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "facet 0.46.4",
  "helgoboss-midi",
  "keyflow-syntax",
@@ -5398,6 +5601,7 @@ dependencies = [
 [[package]]
 name = "keyflow-syntax"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "facet 0.46.4",
  "serde",
@@ -5407,6 +5611,7 @@ dependencies = [
 [[package]]
 name = "keyflow-text"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/keyflow.git?branch=main#aa9fe94987e6ee892701cbcfc98261febe71cdd3"
 dependencies = [
  "keyflow-chordpro",
  "keyflow-proto",
@@ -6088,6 +6293,7 @@ dependencies = [
 [[package]]
 name = "moire"
 version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "moire-macros-noop",
  "moire-tokio",
@@ -6097,19 +6303,48 @@ dependencies = [
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
+
+[[package]]
+name = "moire-runtime"
+version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
+dependencies = [
+ "ctor",
+ "facet 0.46.4",
+ "facet-json",
+ "facet-value",
+ "moire-trace-capture",
+ "moire-trace-types",
+ "moire-types",
+ "moire-wire",
+ "tokio",
+]
 
 [[package]]
 name = "moire-tokio"
 version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
+ "moire-runtime",
  "moire-types",
  "parking_lot",
  "tokio",
 ]
 
 [[package]]
+name = "moire-trace-capture"
+version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
+dependencies = [
+ "libc",
+ "moire-trace-types",
+]
+
+[[package]]
 name = "moire-trace-types"
 version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "facet 0.46.4",
 ]
@@ -6117,6 +6352,7 @@ dependencies = [
 [[package]]
 name = "moire-types"
 version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "facet 0.46.4",
  "facet-value",
@@ -6126,6 +6362,7 @@ dependencies = [
 [[package]]
 name = "moire-wasm"
 version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "async-channel 2.5.0",
  "async-lock",
@@ -6138,8 +6375,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "moire-wire"
+version = "1.0.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
+dependencies = [
+ "facet 0.46.4",
+ "facet-json",
+ "moire-trace-types",
+ "moire-types",
+]
+
+[[package]]
 name = "monarchy"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/monarchy.git?branch=main#62731ec6f4ed4d2bbdce71854a2d7d5c521806fb"
 dependencies = [
  "facet 0.46.4",
  "facet-json",
@@ -6154,6 +6403,7 @@ dependencies = [
 [[package]]
 name = "monarchy_derive"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/monarchy.git?branch=main#62731ec6f4ed4d2bbdce71854a2d7d5c521806fb"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -6170,6 +6420,7 @@ checksum = "bb41311b1064dea78399acd92ca903b13be1120eef0a8555803da792e2c50511"
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
 dependencies = [
  "color-palette",
 ]
@@ -6435,7 +6686,7 @@ version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcbff9bc912032c62bf65ef1d5aea88983b420f4f839db1e9b0c281a25c9c799"
 dependencies = [
- "proc-macro-crate",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -6447,7 +6698,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -7503,6 +7754,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-crate"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
+dependencies = [
+ "toml_edit 0.25.11+spec-1.1.0",
+]
+
+[[package]]
 name = "proc-macro-error"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7919,16 +8179,6 @@ dependencies = [
 [[package]]
 name = "reaper-config"
 version = "0.1.0"
-dependencies = [
- "bitflags 2.11.1",
- "facet 0.46.4",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "reaper-config"
-version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-file.git?branch=main#ab350b48bc17181a9f9138f82f9792c591af4bf5"
 dependencies = [
  "bitflags 2.11.1",
@@ -7948,7 +8198,7 @@ dependencies = [
  "blitz-traits",
  "cocoa",
  "crossbeam",
- "daw",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "dioxus-devtools",
  "dioxus-native",
  "futures-util",
@@ -8023,7 +8273,7 @@ name = "reaper-input"
 version = "0.1.0"
 dependencies = [
  "camino",
- "daw",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "enumflags2",
  "facet 0.46.4",
  "facet-json",
@@ -8033,7 +8283,7 @@ dependencies = [
  "helgoboss-midi",
  "input",
  "once_cell",
- "reaper-config 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-file.git?branch=main)",
+ "reaper-config",
  "reaper-dioxus",
  "reaper-embed",
  "reaper-high",
@@ -8059,6 +8309,21 @@ dependencies = [
 [[package]]
 name = "reaper-launcher"
 version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "anyhow",
+ "icns",
+ "image",
+ "libc",
+ "serde",
+ "serde_json",
+ "tiny-skia",
+]
+
+[[package]]
+name = "reaper-launcher"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -8215,9 +8480,9 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "reqwest"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
+checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -8683,13 +8948,14 @@ dependencies = [
 [[package]]
 name = "session"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#71437cc42b33b50f85193f603fb582919359b1e7"
 dependencies = [
  "actions-proto",
  "architect",
  "chrono",
- "daw",
- "daw-proto",
- "daw-reaper",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
+ "daw-reaper 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "daw-synchronization",
  "dynamic-template",
  "eyre",
@@ -8712,10 +8978,11 @@ dependencies = [
 [[package]]
 name = "session-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/session.git?branch=main#71437cc42b33b50f85193f603fb582919359b1e7"
 dependencies = [
  "actions-proto",
  "architect",
- "daw",
+ "daw 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main)",
  "eyre",
  "facet 0.46.4",
  "futures",
@@ -9287,7 +9554,7 @@ checksum = "850ac3401667d004d4a13f9c93dc6d9fe67044c9bfdaf5f1519ff136ed68fbab"
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "stylo",
  "stylo_atoms",
@@ -9899,7 +10166,7 @@ checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
  "serde",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.6.11",
  "toml_edit 0.22.27",
 ]
 
@@ -9913,13 +10180,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "1.1.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
 name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap",
- "toml_datetime",
+ "toml_datetime 0.6.11",
  "winnow 0.5.40",
 ]
 
@@ -9932,9 +10208,21 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_spanned",
- "toml_datetime",
+ "toml_datetime 0.6.11",
  "toml_write",
  "winnow 0.7.15",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.25.11+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b59c4d22ed448339746c59b905d24568fcbb3ab65a500494f7b8c3e97739f2b"
+dependencies = [
+ "indexmap",
+ "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_parser",
+ "winnow 1.0.3",
 ]
 
 [[package]]
@@ -10609,7 +10897,7 @@ dependencies = [
 [[package]]
 name = "vox"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-pretty",
@@ -10651,7 +10939,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-cbor 0.3.4",
@@ -10674,7 +10962,7 @@ dependencies = [
 [[package]]
 name = "vox-ffi"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "tracing",
  "vox-types 0.5.0",
@@ -10704,7 +10992,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -10736,7 +11024,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "facet-core 0.46.4",
@@ -10756,7 +11044,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10777,7 +11065,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -10798,7 +11086,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -10820,7 +11108,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10845,7 +11133,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "blake3",
  "facet 0.46.4",
@@ -10866,7 +11154,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "vox-macros-core 0.5.0",
@@ -10887,7 +11175,7 @@ dependencies = [
 [[package]]
 name = "vox-stream"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "libc",
  "moire",
@@ -10924,7 +11212,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -12255,6 +12543,9 @@ name = "winnow"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "wit-bindgen"
@@ -12488,7 +12779,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "daw",
+ "daw 0.1.0",
 ]
 
 [[package]]
@@ -12685,146 +12976,119 @@ dependencies = [
 [[patch.unused]]
 name = "vox-websocket"
 version = "0.5.0"
-source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
-
-[[patch.unused]]
-name = "session-ui"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "moire-runtime"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "moire-trace-capture"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "anyrender"
-version = "0.6.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_svg"
-version = "0.6.3"
-source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello"
-version = "0.6.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello_cpu"
-version = "0.8.1"
-source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "anyrender_vello_hybrid"
-version = "0.1.1"
-source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 
 [[patch.unused]]
 name = "dioxus"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-asset-resolver"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-cli-config"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-config-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-config-macros"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-core"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-core-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-core-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-devtools"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-devtools-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-document"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-history"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-hooks"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-html"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-html-internal-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-rsx"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-signals"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-stores"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "dioxus-stores-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "generational-box"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "manganis"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "manganis-core"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[patch.unused]]
 name = "manganis-macro"
 version = "0.7.6"
-
-[[patch.unused]]
-name = "moire-runtime"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "moire-trace-capture"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "wgpu_context"
-version = "0.1.2"
-source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
