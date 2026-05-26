@@ -22,8 +22,9 @@ actions-reaper = { path = "crates/actions-reaper" }
 input = { path = "crates/input" }
 input-dioxus = { path = "crates/input-dioxus" }
 
-# Roam RPC framework (pinned to the current FTS fork)
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+# Roam RPC framework — FTS fork (carries the vox-jit-abi __rust_alloc-scan fix;
+# without it the encode worker hangs on complex/allocating RPC returns).
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", branch = "main" }
 
 # Facet reflection — align the whole stack to the current 0.46 line.
 facet = { version = "0.46" }
