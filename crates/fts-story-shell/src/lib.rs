@@ -572,13 +572,7 @@ fn KnobControl(
 }
 
 fn clone_knob(v: &KnobValue) -> KnobValue {
-    match *v {
-        KnobValue::Bool(b) => KnobValue::Bool(b),
-        KnobValue::Int(i) => KnobValue::Int(i),
-        KnobValue::Float(f) => KnobValue::Float(f),
-        KnobValue::Str(s) => KnobValue::Str(s),
-        KnobValue::EnumVariant(s) => KnobValue::EnumVariant(s),
-    }
+    v.clone()
 }
 
 #[component]
