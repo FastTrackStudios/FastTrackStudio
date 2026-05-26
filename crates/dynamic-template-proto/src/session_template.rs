@@ -46,6 +46,10 @@ pub struct TemplateNode {
     pub group_membership: Option<GroupMembership>,
     /// How this node routes its output.
     pub routing: NodeRouting,
+    /// When true, `children` are an **exemplar** of a per-project repeated
+    /// pattern (e.g. synth layers, BGV stacks) rather than a fixed list — the
+    /// engine instantiates as many as the project needs, naming them per take.
+    pub variadic: bool,
 }
 
 impl TemplateNode {
@@ -58,6 +62,7 @@ impl TemplateNode {
             defaults: TrackDefaults::default(),
             group_membership: None,
             routing: NodeRouting::default(),
+            variadic: false,
         }
     }
 
@@ -71,6 +76,7 @@ impl TemplateNode {
             defaults: TrackDefaults::default(),
             group_membership: None,
             routing: NodeRouting::default(),
+            variadic: false,
         }
     }
 
@@ -89,6 +95,13 @@ impl TemplateNode {
     /// Set the canonical group path from string slices (builder-style).
     pub fn with_path(mut self, path: &[&str]) -> Self {
         self.group_path = path.iter().map(|s| (*s).to_string()).collect();
+        self
+    }
+
+    /// Mark this folder's children as a per-project repeated pattern (the
+    /// listed children are exemplars). Builder-style. See [`TemplateNode::variadic`].
+    pub fn variadic(mut self) -> Self {
+        self.variadic = true;
         self
     }
 
@@ -249,8 +262,26 @@ pub mod layout {
     pub fn authored(label: &str) -> Option<TemplateNode> {
         match label {
             "Drums" => Some(drums()),
+            "Bass" => Some(bass()),
             _ => None,
         }
+    }
+
+    /// Bass — the maximal form: a Guitar source (DI) and a Synth source
+    /// (variadic per-project layers). When only one source is present the
+    /// engine collapses this down (e.g. just `Bass / DI`).
+    pub fn bass() -> TemplateNode {
+        folder(
+            "Bass",
+            &["Bass"],
+            vec![
+                folder("Guitar", &["Bass", "Guitar"], vec![track("DI")]),
+                // Synth layers are named per take, so this folder is variadic;
+                // the single child is an exemplar layer.
+                folder("Synth", &["Bass", "Synth"], vec![track("Layer")]).variadic(),
+            ],
+        )
+        .in_group("Bass")
     }
 
     /// Drums — Kick / Snare / Toms / Cymbals / Rooms.
@@ -378,5 +409,25 @@ mod tests {
             .find(|c| c.name == "Hi-Hat")
             .unwrap();
         assert_eq!(hat.group_path, vec!["Drums", "Hi-Hat"]);
+    }
+
+    #[test]
+    fn bass_layout_splits_guitar_and_synth() {
+        let bass = layout::bass();
+        assert_eq!(bass.name, "Bass");
+        assert_eq!(
+            bass.group_membership.as_ref().map(|g| g.category.as_str()),
+            Some("Bass")
+        );
+
+        let guitar = bass.children.iter().find(|c| c.name == "Guitar").unwrap();
+        assert_eq!(guitar.group_path, vec!["Bass", "Guitar"]);
+        assert!(guitar.children.iter().any(|c| c.name == "DI"));
+        assert!(!guitar.variadic);
+
+        // Synth is variadic — its children are per-project exemplar layers.
+        let synth = bass.children.iter().find(|c| c.name == "Synth").unwrap();
+        assert_eq!(synth.group_path, vec!["Bass", "Synth"]);
+        assert!(synth.variadic);
     }
 }
