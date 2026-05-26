@@ -242,6 +242,17 @@ pub mod layout {
             .with_children(children)
     }
 
+    /// A variadic *structural* folder — a per-project organizational level
+    /// (Performer / Arrangement / Layer / Channel) whose name is a placeholder
+    /// filled per instance and which collapses away when it has a single
+    /// child. Carries no canonical path of its own (inherits its color from
+    /// the nearest instrument ancestor).
+    fn level(name: &str, children: Vec<TemplateNode>) -> TemplateNode {
+        TemplateNode::folder(name, Vec::new())
+            .with_children(children)
+            .variadic()
+    }
+
     /// Top-level folder stub for a band that isn't authored in detail yet —
     /// carries the canonical path, resolved color, and group-slot membership
     /// straight from the slot partition.
@@ -263,6 +274,7 @@ pub mod layout {
         match label {
             "Drums" => Some(drums()),
             "Bass" => Some(bass()),
+            "Electric Gtr" => Some(electric_gtr()),
             _ => None,
         }
     }
@@ -340,6 +352,37 @@ pub mod layout {
         )
         .in_group("Drums")
     }
+
+    /// Electric guitar — the most dynamic group. A chain of variadic structural
+    /// levels (Performer → Arrangement → Layer → Channel) bottoming out in the
+    /// multi-mic captures. Every level collapses when singular, so the same
+    /// template renders a one-off DI as `GTR E / DI` and a fully tracked,
+    /// multi-performer part as the full nested tree.
+    pub fn electric_gtr() -> TemplateNode {
+        folder(
+            "GTR E",
+            &["Guitars", "Electric"],
+            vec![level(
+                "Performer",
+                vec![level(
+                    "Arrangement",
+                    vec![level(
+                        "Layer",
+                        vec![level(
+                            "Channel",
+                            vec![
+                                track("DI"),
+                                track("DI-Pedalboard"),
+                                track("Amp 1"),
+                                track("Amp 2"),
+                            ],
+                        )],
+                    )],
+                )],
+            )],
+        )
+        .in_group("Electric Gtr")
+    }
 }
 
 #[cfg(test)]
@@ -371,9 +414,9 @@ mod tests {
     #[test]
     fn golden_resolves_canonical_colors() {
         let t = IdealFullSessionTemplate::golden();
-        // Electric Gtr (a stub band) resolves a color via the Guitars/Electric path.
-        let electric = t.root.iter().find(|n| n.name == "Electric Gtr").unwrap();
-        assert!(electric.defaults.color_hex.is_some());
+        // Acoustic Gtr (a stub band) resolves a color via the Guitars/Acoustic path.
+        let acoustic = t.root.iter().find(|n| n.name == "Acoustic Gtr").unwrap();
+        assert!(acoustic.defaults.color_hex.is_some());
     }
 
     #[test]
@@ -429,5 +472,32 @@ mod tests {
         let synth = bass.children.iter().find(|c| c.name == "Synth").unwrap();
         assert_eq!(synth.group_path, vec!["Bass", "Synth"]);
         assert!(synth.variadic);
+    }
+
+    #[test]
+    fn electric_gtr_nests_variadic_levels_down_to_mics() {
+        let gtr = layout::electric_gtr();
+        assert_eq!(gtr.name, "GTR E");
+        assert_eq!(gtr.group_path, vec!["Guitars", "Electric"]);
+        assert!(!gtr.variadic, "the GTR E anchor itself is not variadic");
+
+        // Walk the structural chain: Performer > Arrangement > Layer > Channel,
+        // each a variadic level, then the multi-mic leaf captures.
+        let chain = ["Performer", "Arrangement", "Layer", "Channel"];
+        let mut node = &gtr;
+        for level_name in chain {
+            node = &node.children[0];
+            assert_eq!(node.name, level_name);
+            assert!(node.variadic, "{level_name} should be variadic");
+            assert!(
+                node.group_path.is_empty(),
+                "{level_name} inherits its color"
+            );
+        }
+
+        // Channel holds the multi-mic captures as leaf tracks.
+        let mics: Vec<&str> = node.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(mics, ["DI", "DI-Pedalboard", "Amp 1", "Amp 2"]);
+        assert!(node.children.iter().all(|c| c.children.is_empty()));
     }
 }
