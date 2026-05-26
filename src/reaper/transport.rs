@@ -6,6 +6,12 @@ pub struct DawTransportProvider {
     config: ProviderConfig,
 }
 
+impl Default for DawTransportProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DawTransportProvider {
     pub fn new() -> Self {
         Self {

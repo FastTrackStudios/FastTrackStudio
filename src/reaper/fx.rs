@@ -7,6 +7,12 @@ pub struct DawFxProvider {
     plugins: Vec<Item>,
 }
 
+impl Default for DawFxProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DawFxProvider {
     pub fn new() -> Self {
         Self {
@@ -20,6 +26,7 @@ impl DawFxProvider {
         }
     }
 
+    #[allow(dead_code)]
     fn refresh(&mut self) {
         let Some(daw) = daw::get() else {
             return;
@@ -53,13 +60,10 @@ impl DawFxProvider {
                     _ => "audio/effects/plugin",
                 };
 
-                let id = format!(
-                    "fx-{}",
-                    fx.ident.replace(' ', "-").replace(':', "-").to_lowercase()
-                );
+                let id = format!("fx-{}", fx.ident.replace([' ', ':'], "-").to_lowercase());
 
                 Item::new(&id, &fx.name, "fx")
-                    .with_sub(&format!("{developer} ({format})"))
+                    .with_sub(format!("{developer} ({format})"))
                     .with_icon("F")
                     .with_tags(&[base_tag, format_tag])
                     .with_search_fields(vec![fx.name.clone(), developer.clone(), format.clone()])
@@ -161,6 +165,7 @@ impl Provider for DawFxProvider {
     }
 }
 
+#[allow(dead_code)]
 fn parse_fx_ident(ident: &str) -> (String, String, String) {
     let (format, rest) = ident.split_once(": ").unwrap_or(("Unknown", ident));
     let (name, developer) = if let Some(paren_start) = rest.rfind('(') {

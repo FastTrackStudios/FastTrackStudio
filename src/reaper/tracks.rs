@@ -7,6 +7,12 @@ pub struct DawTracksProvider {
     tracks: Vec<Item>,
 }
 
+impl Default for DawTracksProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DawTracksProvider {
     pub fn new() -> Self {
         Self {
@@ -21,6 +27,7 @@ impl DawTracksProvider {
         }
     }
 
+    #[allow(dead_code)]
     fn refresh(&mut self) {
         let Some(daw) = daw::get() else {
             return;

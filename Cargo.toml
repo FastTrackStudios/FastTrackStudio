@@ -1,3 +1,15 @@
+[workspace]
+members = ["xtask"]
+
+# Stylistic clippy lints allowed during stabilization (same policy as daw/fts-ui):
+# they're churn, not bugs. Tighten in a later cleanup sweep.
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+
 [package]
 name = "fts-launcher"
 version = "0.1.0"
@@ -22,17 +34,19 @@ desktop = []
 standalone = ["native", "dep:winit", "dep:tracing-subscriber"]
 
 [dependencies]
-# Core launcher engine and UI — always included
-launcher-core = { path = "../dioxus-launcher/crates/launcher-core" }
-launcher-ui = { path = "../dioxus-launcher/crates/launcher-ui", default-features = false }
-providers = { path = "../dioxus-launcher/crates/providers" }
-fts-ui = { path = "../fts-ui/crates/fts-ui" }
+# Core launcher engine and UI — always included. Git deps (not local paths)
+# so the repo resolves on a clean CI runner; uncomment the [patch] block at
+# the bottom for local cross-repo development.
+launcher-core = { git = "https://git.starcommand.live/FastTrackStudios/dioxus-launcher.git", branch = "main" }
+launcher-ui = { git = "https://git.starcommand.live/FastTrackStudios/dioxus-launcher.git", branch = "main", default-features = false }
+providers = { git = "https://git.starcommand.live/FastTrackStudios/dioxus-launcher.git", branch = "main" }
+fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", branch = "main" }
 
 # Dioxus native renderer (Blitz)
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
 
 # DAW API (safe Rust, async, generic)
-daw = { path = "../daw/crates/daw" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
 reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
@@ -48,3 +62,33 @@ facet-styx = "3.0"
 
 # Logging
 tracing = "0.1"
+
+[lints]
+workspace = true
+
+# dioxus: fts-launcher pulls daw with `native` (reaper-ui) → daw-reaper-dioxus
+# → patched dioxus. Replicate daw's dioxus-git patch ([patch] only applies at
+# the building workspace root).
+[patch.crates-io]
+dioxus = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus" }
+dioxus-asset-resolver = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-asset-resolver" }
+dioxus-cli-config = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-cli-config" }
+dioxus-config-macros = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-config-macros" }
+dioxus-core = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core" }
+dioxus-core-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core-macro" }
+dioxus-core-types = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core-types" }
+dioxus-devtools = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-devtools" }
+dioxus-devtools-types = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-devtools-types" }
+dioxus-document = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-document" }
+dioxus-history = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-history" }
+dioxus-hooks = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-hooks" }
+dioxus-html = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-html" }
+dioxus-html-internal-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-html-internal-macro" }
+dioxus-rsx = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-rsx" }
+dioxus-signals = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-signals" }
+dioxus-stores = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-stores" }
+dioxus-stores-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-stores-macro" }
+generational-box = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "generational-box" }
+manganis = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis" }
+manganis-core = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis-core" }
+manganis-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis-macro" }

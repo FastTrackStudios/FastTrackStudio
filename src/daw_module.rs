@@ -10,8 +10,7 @@ use launcher_ui::components::Launcher;
 use crate::LauncherEngine;
 
 const LAUNCHER_PANEL_ID: &str = "FTS_LAUNCHER";
-const LAUNCHER_CSS: &str =
-    include_str!("../../dioxus-launcher/apps/standalone/assets/tailwind.css");
+const LAUNCHER_CSS: &str = include_str!("../assets/tailwind.css");
 
 pub struct LauncherModule;
 

@@ -13,6 +13,12 @@ pub struct DawActionsProvider {
     actions: Vec<Item>,
 }
 
+impl Default for DawActionsProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DawActionsProvider {
     pub fn new() -> Self {
         Self {
@@ -214,6 +220,7 @@ fn action_provider(command_name: &str, description: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn normalize_tag(input: &str) -> String {
     input
         .trim()
@@ -260,8 +267,8 @@ fn common_actions() -> Vec<Item> {
         .iter()
         .map(|(id, name, section, cmd_id)| {
             let tag = format!("reaper/actions/{}", section.to_lowercase());
-            Item::new(&format!("action-{id}"), *name, "actions")
-                .with_sub(&format!("Action: {section} > {name}"))
+            Item::new(format!("action-{id}"), *name, "actions")
+                .with_sub(format!("Action: {section} > {name}"))
                 .with_icon("A")
                 .with_tags(&["reaper/actions", &tag])
                 .with_search_fields(vec![name.to_string(), section.to_string()])
