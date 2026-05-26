@@ -9569,18 +9569,36 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
 
             if worktree {
                 // Isolated worktree → parallel agents don't collide.
+                // CRITICAL: place it as a SIBLING of the main repo,
+                // not nested inside it. The workspace has relative
+                // path-deps that point outside the repo (`../architect`,
+                // `../FastTrackStudio/...`); a sibling worktree resolves
+                // `../` to the same parent, so those deps still work. A
+                // nested worktree would break them.
                 let repo_root = git(&["rev-parse", "--show-toplevel"])?;
-                let wt_rel = format!(".task-worktrees/{short}-{title_slug}");
-                let wt_path = std::path::Path::new(&repo_root).join(&wt_rel);
+                let root = std::path::Path::new(&repo_root);
+                let parent = root
+                    .parent()
+                    .ok_or_else(|| eyre::eyre!("repo has no parent dir"))?;
+                let repo_name = root
+                    .file_name()
+                    .map_or_else(|| "repo".to_string(), |s| s.to_string_lossy().to_string());
+                let wt_path = parent.join(format!("{repo_name}-wt-{short}-{title_slug}"));
                 if wt_path.exists() {
                     return Err(eyre::eyre!(
-                        "worktree already exists at {wt_rel} — `task code cleanup {short}` to remove it"
+                        "worktree already exists at {} — `task code cleanup {short}` to remove it",
+                        wt_path.display()
                     ));
                 }
                 git(&["worktree", "add", "-b", &branch, &wt_path.to_string_lossy()])?;
-                println!("started {short} in worktree {wt_rel} (branch {branch})");
+                println!("started {short} in worktree (branch {branch})");
                 println!("  work in: {}", wt_path.display());
                 println!("  then: cd into it and run `task code commit` / `task code push` there");
+                // Share the main repo's build cache so cargo in the
+                // worktree doesn't compile from scratch. The git
+                // hooks set this automatically; print it for the
+                // agent's own `cargo` invocations.
+                println!("  for fast builds: export CARGO_TARGET_DIR={repo_root}/target");
             } else {
                 git(&["switch", "-c", &branch])?;
                 println!("started {short} on branch {branch}");
