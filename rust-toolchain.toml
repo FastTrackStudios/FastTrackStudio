@@ -1,0 +1,6 @@
+# Pins the toolchain for rustup users + CI. The Nix dev shell uses
+# rust-overlay's stable pin (see flake.nix), kept in step with this channel.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy", "rust-src"]
+profile = "minimal"
