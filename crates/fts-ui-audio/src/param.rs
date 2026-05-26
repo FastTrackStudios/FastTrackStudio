@@ -16,8 +16,8 @@
 //! prop memoization works correctly.
 
 use std::sync::{
-    Arc,
     atomic::{AtomicU64, Ordering},
+    Arc,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);

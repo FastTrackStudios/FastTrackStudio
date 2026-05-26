@@ -4,7 +4,7 @@
 //! drag vertically to reshape it. Normalized value 0.5 = linear, <0.5 = ease
 //! out, >0.5 = ease in. Direction selects which diagonal the curve follows.
 
-use crate::drag::{DragState, begin_drag};
+use crate::drag::{begin_drag, DragState};
 use crate::param::ParamHandle;
 use crate::theme::*;
 use dioxus::prelude::*;

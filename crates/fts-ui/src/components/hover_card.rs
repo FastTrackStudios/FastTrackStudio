@@ -2,11 +2,11 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::{
-    ContentAlign, ContentSide,
     hover_card::{
         HoverCard as PrimitiveHoverCard, HoverCardContent as PrimitiveHoverCardContent,
         HoverCardTrigger as PrimitiveHoverCardTrigger,
     },
+    ContentAlign, ContentSide,
 };
 use fts_story_runtime::story;
 

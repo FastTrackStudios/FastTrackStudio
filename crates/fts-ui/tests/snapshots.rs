@@ -10,7 +10,7 @@
 //! To accept current renders as new baselines:
 //! `FTS_STORY_UPDATE_SNAPSHOTS=1 cargo test --release -p fts-ui`.
 
-use fts_story_snapshots::{SnapshotConfig, assert_snapshot};
+use fts_story_snapshots::{assert_snapshot, SnapshotConfig};
 use fts_ui::stories;
 
 fn cfg() -> SnapshotConfig {

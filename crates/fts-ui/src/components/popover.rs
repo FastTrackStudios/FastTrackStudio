@@ -2,11 +2,11 @@
 
 use dioxus::prelude::*;
 use dioxus_primitives::{
-    ContentAlign, ContentSide,
     popover::{
         PopoverContent as PrimitivePopoverContent, PopoverRoot as PrimitivePopover,
         PopoverTrigger as PrimitivePopoverTrigger,
     },
+    ContentAlign, ContentSide,
 };
 use fts_story_runtime::story;
 
