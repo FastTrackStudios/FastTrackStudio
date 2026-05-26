@@ -1480,6 +1480,53 @@ enum CodeCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Park the current branch's task — record a "where I left
+    /// off" handoff, release the claim so another agent can pick
+    /// it up. The branch + commits stay; resume picks up there.
+    Park {
+        /// Summary of where things stand (markdown).
+        summary: String,
+        /// Why parking: blocked / needs-input / context-limit /
+        /// out-of-scope / end-of-chunk. Free-form.
+        #[arg(long, default_value = "end-of-chunk")]
+        reason: String,
+        /// Open questions for the next agent (markdown bullets).
+        #[arg(long)]
+        open: Option<String>,
+        /// Attribute the handoff to this agent.
+        #[arg(long = "as-agent")]
+        as_agent: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Resume a parked task: atomically claim it, print the
+    /// handoff context (summary + open questions + recent
+    /// commits), and switch to its branch.
+    Resume {
+        /// Task id (UUID or 8-char prefix). Omit to resume the
+        /// current branch's task.
+        id: Option<String>,
+        /// Claim as this agent.
+        #[arg(long = "as-agent")]
+        as_agent: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// List parked tasks (open handoffs) available to pick up —
+    /// the cross-agent work queue.
+    Inbox {
+        /// Only show handoffs addressed to (or open to) this agent.
+        #[arg(long = "as-agent")]
+        as_agent: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 /// `task label *` — org-scoped colored tags.
@@ -9651,7 +9698,209 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 println!("  {kind:<5} {}/{}#{}", l.repo.owner, l.repo.repo, l.number);
             }
         }
+        CodeCmd::Park {
+            summary,
+            reason,
+            open,
+            as_agent,
+            org,
+            server,
+        } => {
+            let branch = current_branch()?;
+            let short = task_short_from_branch(&branch).ok_or_else(|| {
+                eyre::eyre!("current branch `{branch}` isn't a task/<id>-… branch")
+            })?;
+            let slug = resolve_active_org(org)?;
+            let vox = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&vox).await?;
+            let mut t = resolve_issue_id(&client, &short).await?;
+            let agent = parse_agent_ref(&format!(
+                "agent:{}",
+                as_agent.as_deref().unwrap_or("claude")
+            ))?;
+
+            // Record the handoff (one active per task; supersede prior open ones).
+            let mut hs = load_handoffs(&slug)?;
+            for h in hs.iter_mut().filter(|h| {
+                h.session_id == t.id && h.status == workflows_proto::HandoffStatus::Open
+            }) {
+                h.status = workflows_proto::HandoffStatus::Cancelled;
+                h.resolved_at = Some(chrono::Utc::now());
+            }
+            let mut handoff = workflows_proto::Handoff::post(
+                t.id, // session_id repurposed as the task id (no separate WorkSession yet)
+                agent.clone(),
+                workflows_proto::HandoffReason::Custom {
+                    tag: reason.clone(),
+                },
+                summary,
+            );
+            handoff.open_questions = open.unwrap_or_default();
+            hs.push(handoff);
+            save_handoffs(&slug, &hs)?;
+
+            // Release the claim + return to the ready queue.
+            if let Some(w) = t.workflow.as_mut() {
+                w.assignees = task::model::AgentRefList(vec![]);
+            }
+            t.status = "open".into();
+            client
+                .update(t)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!("parked {short} (reason: {reason}) — claim released, branch {branch} kept");
+            println!("another agent: `task code resume {short} --as-agent <name>`");
+        }
+        CodeCmd::Resume {
+            id,
+            as_agent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let vox = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&vox).await?;
+            let target = match id {
+                Some(i) => i,
+                None => task_short_from_branch(&current_branch()?).ok_or_else(|| {
+                    eyre::eyre!("no task id given and current branch isn't a task branch")
+                })?,
+            };
+            let t = resolve_issue_id(&client, &target).await?;
+            let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
+            // Atomically claim it.
+            if let ClaimOutcome::Lost(holder) = try_claim(&client, &t.id, &agent, false).await? {
+                return Err(eyre::eyre!(
+                    "{} is held by {holder} — can't resume",
+                    short_uuid(&t.id)
+                ));
+            }
+            // Flip to in-progress.
+            let mut t2 = client
+                .get(t.id)
+                .await
+                .map_err(|e| eyre::eyre!("get: {e:?}"))?;
+            t2.status = "in-progress".into();
+            client
+                .update(t2)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+
+            // Surface the latest open handoff context + mark it claimed.
+            let mut hs = load_handoffs(&slug)?;
+            let short = &t.id.simple().to_string()[..8];
+            println!("resumed {short}: {}\n", t.title);
+            if let Some(h) = hs
+                .iter_mut()
+                .filter(|h| {
+                    h.session_id == t.id && h.status == workflows_proto::HandoffStatus::Open
+                })
+                .max_by_key(|h| h.created_at)
+            {
+                println!(
+                    "── handoff from {} ({:?}) ──",
+                    h.from_actor.short_label(),
+                    h.reason
+                );
+                println!("{}", h.summary);
+                if !h.open_questions.trim().is_empty() {
+                    println!("\nopen questions:\n{}", h.open_questions);
+                }
+                h.status = workflows_proto::HandoffStatus::Claimed;
+                save_handoffs(&slug, &hs)?;
+            } else {
+                println!("(no handoff note recorded)");
+            }
+            // Switch to the work branch if it exists locally.
+            let want = format!("task/{short}-");
+            let branches = git(&["branch", "--list", &format!("{want}*")]).unwrap_or_default();
+            if let Some(line) = branches.lines().next() {
+                let b = line.trim_start_matches('*').trim();
+                if !b.is_empty() {
+                    let _ = git(&["switch", b]);
+                    println!("\nswitched to {b}");
+                    if let Ok(log) = git(&["log", "--oneline", "-5"]) {
+                        println!("recent commits:\n{log}");
+                    }
+                }
+            } else {
+                println!(
+                    "\n(no local branch {want}* — `git fetch` then switch, or `task code start` to recreate)"
+                );
+            }
+        }
+        CodeCmd::Inbox {
+            as_agent,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let vox = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&vox).await?;
+            let me = as_agent
+                .as_deref()
+                .map(|s| parse_agent_ref(&format!("agent:{s}")))
+                .transpose()?;
+            let hs = load_handoffs(&slug)?;
+            let open: Vec<&workflows_proto::Handoff> = hs
+                .iter()
+                .filter(|h| h.status == workflows_proto::HandoffStatus::Open)
+                .filter(|h| match (&me, &h.to_actor) {
+                    (Some(m), Some(to)) => to == m, // addressed to me
+                    (_, None) => true,              // open to anyone
+                    _ => true,
+                })
+                .collect();
+            if open.is_empty() {
+                println!("(no parked tasks)");
+                return Ok(());
+            }
+            println!("{} parked task(s):", open.len());
+            for h in open {
+                let title = client
+                    .get(h.session_id)
+                    .await
+                    .map_or_else(|_| "(task?)".into(), |t| t.title);
+                println!(
+                    "  {}  from {:<16} {:?}  {}",
+                    &h.session_id.simple().to_string()[..8],
+                    h.from_actor.short_label(),
+                    h.reason,
+                    title
+                );
+            }
+        }
     }
+    Ok(())
+}
+
+/// Per-org handoff store path.
+fn handoff_store_path(org_slug: &str) -> eyre::Result<std::path::PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
+    Ok(std::path::Path::new(&home)
+        .join(".task")
+        .join("orgs")
+        .join(org_slug)
+        .join("handoffs.json"))
+}
+
+fn load_handoffs(org_slug: &str) -> eyre::Result<Vec<workflows_proto::Handoff>> {
+    let p = handoff_store_path(org_slug)?;
+    if !p.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(&p).map_err(|e| eyre::eyre!("read {}: {e}", p.display()))?;
+    serde_json::from_slice(&bytes).map_err(|e| eyre::eyre!("parse handoffs.json: {e}"))
+}
+
+fn save_handoffs(org_slug: &str, hs: &[workflows_proto::Handoff]) -> eyre::Result<()> {
+    let p = handoff_store_path(org_slug)?;
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| eyre::eyre!("mkdir: {e}"))?;
+    }
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(hs)?).map_err(|e| eyre::eyre!("write: {e}"))?;
+    std::fs::rename(&tmp, &p).map_err(|e| eyre::eyre!("rename: {e}"))?;
     Ok(())
 }
 
