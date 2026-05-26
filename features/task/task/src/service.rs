@@ -29,6 +29,18 @@ pub enum TaskError {
     Io(String),
 }
 
+/// Outcome of an atomic [`TaskService::try_claim`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Facet)]
+#[repr(u8)]
+pub enum ClaimResult {
+    /// The caller now holds the claim (was unclaimed, or stolen).
+    Won,
+    /// The caller already held it — no-op.
+    AlreadyMine,
+    /// Another actor holds it; `holder` is their short label.
+    Lost { holder: String },
+}
+
 #[architect::rpc]
 pub trait TaskService {
     /// Every task page under the org's vault.
@@ -45,6 +57,15 @@ pub trait TaskService {
     /// Replace the task whose `id` matches. Path mutations
     /// ignored — use [`Self::rename`].
     fn update(&self, task: TaskInfo) -> Result<TaskInfo, TaskError>;
+
+    /// Atomically claim a task for an agent. The backend
+    /// serializes the read-check-write under a process lock, so
+    /// concurrent callers can't both win the same task — exactly
+    /// one gets [`ClaimResult::Won`]. `agent` is a JSON-encoded
+    /// `workflows_proto::AgentRef`. `force` steals an existing
+    /// claim. This is the parallel-agent primitive: no TOCTOU
+    /// window like the client-side optimistic version.
+    fn try_claim(&self, id: Uuid, agent: String, force: bool) -> Result<ClaimResult, TaskError>;
 
     /// Move the backing markdown file. `id` preserved.
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError>;

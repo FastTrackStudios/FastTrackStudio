@@ -7530,50 +7530,27 @@ enum ClaimOutcome {
     Lost(String),
 }
 
-/// Optimistic atomic claim: read the task; if unclaimed (or
-/// already ours, or `force`), write our claim then **re-read**
-/// to confirm we won the race. Under last-write-wins, if two
-/// agents claim concurrently the re-read disambiguates — both
-/// see the final writer, so only one reports `Won`.
+/// Atomic claim via the server-side `try_claim` RPC. The backend
+/// serializes the read-check-write under a process lock, so two
+/// agents racing for the same task can't both win — no TOCTOU
+/// window (unlike the old client-side optimistic version). The
+/// agent is sent as a JSON-encoded `AgentRef`.
 async fn try_claim(
     client: &task::TaskServiceClient,
     task_id: &uuid::Uuid,
     agent: &workflows_proto::AgentRef,
     force: bool,
 ) -> eyre::Result<ClaimOutcome> {
-    let mut t = client
-        .get(*task_id)
+    let agent_json = serde_json::to_string(agent).map_err(|e| eyre::eyre!("encode agent: {e}"))?;
+    let res = client
+        .try_claim(*task_id, agent_json, force)
         .await
-        .map_err(|e| eyre::eyre!("get: {e:?}"))?;
-    let holder = t
-        .workflow
-        .as_ref()
-        .and_then(|w| w.assignees.0.first())
-        .cloned();
-    match &holder {
-        Some(h) if h == agent => return Ok(ClaimOutcome::AlreadyMine),
-        Some(h) if !force => return Ok(ClaimOutcome::Lost(h.short_label())),
-        _ => {}
-    }
-    // Write our claim (sole assignee).
-    let w = t
-        .workflow
-        .get_or_insert_with(task::model::WorkflowAttrs::default);
-    w.assignees = task::model::AgentRefList(vec![agent.clone()]);
-    client
-        .update(t)
-        .await
-        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-    // Re-read to confirm we won (someone else may have written between).
-    let after = client
-        .get(*task_id)
-        .await
-        .map_err(|e| eyre::eyre!("get: {e:?}"))?;
-    match after.workflow.as_ref().and_then(|w| w.assignees.0.first()) {
-        Some(a) if a == agent => Ok(ClaimOutcome::Won),
-        Some(a) => Ok(ClaimOutcome::Lost(a.short_label())),
-        None => Ok(ClaimOutcome::Lost("(none)".into())),
-    }
+        .map_err(|e| eyre::eyre!("try_claim: {e:?}"))?;
+    Ok(match res {
+        task::service::ClaimResult::Won => ClaimOutcome::Won,
+        task::service::ClaimResult::AlreadyMine => ClaimOutcome::AlreadyMine,
+        task::service::ClaimResult::Lost { holder } => ClaimOutcome::Lost(holder),
+    })
 }
 
 /// Apply `set-workflow` style edits to a `TaskInfo` in-place.

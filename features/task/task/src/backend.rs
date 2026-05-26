@@ -5,6 +5,7 @@
 //! Cheap to `Clone`.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use architect::HasDispatcher;
 use architect::dispatch::TokioBlockingDispatcher;
@@ -14,12 +15,16 @@ use vault::Vault;
 
 use crate::model::TaskInfo;
 use crate::parse::{looks_like_task, parse_page};
-use crate::service::{TaskError, TaskService};
+use crate::service::{ClaimResult, TaskError, TaskService};
 use crate::write::{default_task_path, write_task};
 
 #[derive(Debug, Clone)]
 pub struct TaskBackend {
     vault_root: PathBuf,
+    /// Serializes `try_claim` read-check-write so two concurrent
+    /// claims on the same task can't both win. One server process
+    /// per org, so a process-local mutex is the whole story.
+    claim_lock: Arc<Mutex<()>>,
 }
 
 impl TaskBackend {
@@ -27,6 +32,7 @@ impl TaskBackend {
     pub fn new(vault_root: impl Into<PathBuf>) -> Self {
         Self {
             vault_root: vault_root.into(),
+            claim_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -116,6 +122,43 @@ impl TaskService for TaskBackend {
         write_task(&self.vault_root, &mut next, true)
             .map_err(|e| TaskError::Io(format!("write: {e}")))?;
         Ok(next)
+    }
+
+    fn try_claim(&self, id: Uuid, agent: String, force: bool) -> Result<ClaimResult, TaskError> {
+        let agent: workflows_proto::AgentRef = serde_json::from_str(&agent)
+            .map_err(|e| TaskError::BadRequest(format!("agent ref json: {e}")))?;
+        // Hold the lock across read → check → write so no other
+        // claim can interleave. Truly atomic within the process.
+        let _guard = self
+            .claim_lock
+            .lock()
+            .map_err(|_| TaskError::Io("claim lock poisoned".into()))?;
+        let mut t = self
+            .list_inner()?
+            .into_iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| TaskError::NotFound(id.to_string()))?;
+        let w = t
+            .workflow
+            .get_or_insert_with(crate::model::WorkflowAttrs::default);
+        if let Some(holder) = w.assignees.0.first() {
+            if holder == &agent {
+                return Ok(ClaimResult::AlreadyMine);
+            }
+            if !force {
+                return Ok(ClaimResult::Lost {
+                    holder: holder.short_label(),
+                });
+            }
+        }
+        w.assignees = crate::model::AgentRefList(vec![agent]);
+        // Inline the write (we already hold the claim lock; calling
+        // self.update would re-list but that's fine — keep it simple
+        // and write directly).
+        t.date_modified = Some(Utc::now());
+        write_task(&self.vault_root, &mut t, true)
+            .map_err(|e| TaskError::Io(format!("write: {e}")))?;
+        Ok(ClaimResult::Won)
     }
 
     fn rename(&self, id: Uuid, new_path: &str) -> Result<TaskInfo, TaskError> {
