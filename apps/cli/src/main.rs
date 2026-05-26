@@ -1191,6 +1191,23 @@ enum IssueCmd {
         server: Option<String>,
     },
 
+    /// Migrate beads issues into Task. Reads a `bd list --json`
+    /// export and creates a TaskInfo per issue (status + priority
+    /// mapped, tagged `from-beads`). The "replace beads" step.
+    ImportBeads {
+        /// Source: `bd` (shell `bd list --json`), a file path, or
+        /// `-` for stdin. Default `bd`.
+        #[arg(long, default_value = "bd")]
+        from: String,
+        /// Parse + report what would be created without writing.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
     /// Project-level overview — counts grouped by status,
     /// priority, workspace, and assignee. Beads-equivalent of
     /// `bd stats`.
@@ -8229,6 +8246,142 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             if let Some(w) = &updated.workflow {
                 print_workflow_block(w);
             }
+        }
+        IssueCmd::ImportBeads {
+            from,
+            dry_run,
+            org,
+            server,
+        } => {
+            // 1. Get the beads JSON.
+            let raw = match from.as_str() {
+                "bd" => {
+                    let out = std::process::Command::new("bd")
+                        .args(["list", "--json"])
+                        .output()
+                        .map_err(|e| eyre::eyre!("run `bd list --json`: {e}"))?;
+                    if !out.status.success() {
+                        return Err(eyre::eyre!(
+                            "bd list --json failed: {}",
+                            String::from_utf8_lossy(&out.stderr).trim()
+                        ));
+                    }
+                    String::from_utf8_lossy(&out.stdout).to_string()
+                }
+                "-" => {
+                    use std::io::Read as _;
+                    let mut s = String::new();
+                    std::io::stdin().read_to_string(&mut s)?;
+                    s
+                }
+                path => {
+                    std::fs::read_to_string(path).map_err(|e| eyre::eyre!("read {path}: {e}"))?
+                }
+            };
+
+            // 2. Parse — beads `list --json` is either an array of
+            //    issues or `{ "issues": [...] }`. Be lenient.
+            let val: serde_json::Value =
+                serde_json::from_str(&raw).map_err(|e| eyre::eyre!("parse beads json: {e}"))?;
+            let items = val
+                .get("issues")
+                .and_then(|v| v.as_array())
+                .or_else(|| val.as_array())
+                .cloned()
+                .ok_or_else(|| eyre::eyre!("beads json: expected an array or {{issues:[…]}}"))?;
+
+            let map_status = |s: &str| match s.to_ascii_lowercase().as_str() {
+                "closed" | "done" | "completed" => "done",
+                "in_progress" | "in-progress" | "doing" => "in-progress",
+                "blocked" | "waiting" => "waiting",
+                _ => "open",
+            };
+            let map_priority = |p: &serde_json::Value| -> String {
+                // beads priority is 0..4 (0=critical) or a string.
+                if let Some(n) = p.as_u64() {
+                    match n {
+                        0 => "critical",
+                        1 => "high",
+                        2 => "normal",
+                        3 => "low",
+                        _ => "none",
+                    }
+                    .to_string()
+                } else {
+                    p.as_str().unwrap_or("normal").to_string()
+                }
+            };
+
+            println!("{} beads issue(s) to import", items.len());
+            if dry_run {
+                for it in &items {
+                    let title = it
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(untitled)");
+                    let st = it.get("status").and_then(|v| v.as_str()).unwrap_or("open");
+                    println!("  [{}] {title}", map_status(st));
+                }
+                println!("\n(dry run — nothing written)");
+                return Ok(());
+            }
+
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut created = 0usize;
+            for it in &items {
+                let title = match it.get("title").and_then(|v| v.as_str()) {
+                    Some(t) if !t.is_empty() => t.to_string(),
+                    _ => continue,
+                };
+                let status =
+                    map_status(it.get("status").and_then(|v| v.as_str()).unwrap_or("open"));
+                let priority = it
+                    .get("priority")
+                    .map_or_else(|| "normal".to_string(), map_priority);
+                let body = it
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let new_task = task::TaskInfo {
+                    id: uuid::Uuid::nil(),
+                    path: String::new(),
+                    title,
+                    status: status.into(),
+                    priority,
+                    due: None,
+                    scheduled: None,
+                    tags: task::model::StringList(vec!["task".into(), "from-beads".into()]),
+                    contexts: task::model::StringList::default(),
+                    projects: task::model::StringList::default(),
+                    project_id: None,
+                    milestone_id: None,
+                    time_estimate: None,
+                    time_entries: task::model::TimeEntries::default(),
+                    recurrence: None,
+                    recurrence_anchor: None,
+                    complete_instances: task::model::StringList::default(),
+                    completed_date: None,
+                    agent_profile: String::new(),
+                    dispatched_agent_tasks: task::model::StringList::default(),
+                    date_created: None,
+                    date_modified: None,
+                    details: body,
+                    workflow: None,
+                };
+                client
+                    .create(new_task)
+                    .await
+                    .map_err(|e| eyre::eyre!("create: {e:?}"))?;
+                created += 1;
+            }
+            println!("imported {created} task(s) (tagged `from-beads`)");
+            println!(
+                "note: beads dependencies aren't mapped to blockers yet — \
+                 the beads ids don't survive into TaskInfo uuids. Re-link by hand if needed."
+            );
         }
         IssueCmd::Stats {
             project,
