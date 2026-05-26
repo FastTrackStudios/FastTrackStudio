@@ -72,6 +72,9 @@ keyflow-daw-analysis = { git = "https://git.starcommand.live/FastTrackStudios/ke
 
 # ── Dynamic session templates ───────────────────────────────────────
 dynamic-template = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
+# Canonical music-production taxonomy (instrument groups + the REAPER 128-slot
+# group partition). Single source of truth shared with dynamic-template.
+music-catalog = { git = "https://git.starcommand.live/FastTrackStudios/dynamic-template.git", branch = "main" }
 
 # ── Actions / Input (sibling repo) ──────────────────────────────────
 actions-proto = { git = "https://git.starcommand.live/FastTrackStudios/input_actions.git", branch = "main" }

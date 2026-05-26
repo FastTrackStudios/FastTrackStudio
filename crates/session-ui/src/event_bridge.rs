@@ -8,8 +8,8 @@ use crate::prelude::*;
 use session_proto::{SetlistEvent, SongTransportState};
 
 use crate::signals::{
-    TransportState, ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL,
-    PLAYBACK_STATE, SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT,
+    ACTIVE_INDICES, ACTIVE_PLAYBACK_IS_PLAYING, ACTIVE_PLAYBACK_MUSICAL, PLAYBACK_STATE,
+    SETLIST_STRUCTURE, SONG_CHARTS, SONG_TRANSPORT, TransportState,
 };
 
 /// Apply a single `SetlistEvent` to the global UI signals.
