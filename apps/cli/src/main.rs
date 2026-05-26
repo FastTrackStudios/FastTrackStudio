@@ -7522,13 +7522,15 @@ fn drive_goal_loop(
             }
         };
 
-        // Persist progress so `goal status` reflects this turn.
-        if let Ok(mut g) = wf.store().goal(session_id) {
+        // Persist progress so `goal status` reflects this turn. Atomic
+        // read-modify-write under the session lock so a concurrent
+        // `goal update`/`subgoal` (live steering) can't lose-update
+        // against this write.
+        let _ = wf.store().mutate_goal(session_id, |g| {
             g.turns_used = iter + 1;
             g.last_reason = verdict.reason.clone();
             g.updated_at = chrono::Utc::now();
-            let _ = wf.store().put_goal(&g);
-        }
+        });
 
         if verdict.met {
             Ok(IterationOutcome::Done)
@@ -7741,10 +7743,13 @@ async fn run_goal_update(
     let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
     match active_goal_session(&wf)? {
         None => println!("no active goal session to update"),
-        Some((s, mut g)) => {
-            g.condition = condition.clone();
-            g.updated_at = chrono::Utc::now();
-            wf.store().put_goal(&g)?;
+        Some((s, _g)) => {
+            // Atomic RMW so we don't clobber the loop's concurrent
+            // per-turn progress write.
+            wf.store().mutate_goal(s.id, |g| {
+                g.condition = condition.clone();
+                g.updated_at = chrono::Utc::now();
+            })?;
             println!("◎ updated goal session {} condition:", short_uuid(&s.id));
             println!("  {condition}");
             println!("  (a running loop re-steers on its next turn)");
@@ -7768,7 +7773,10 @@ async fn run_goal_subgoal(
 
     let slug = resolve_active_org(org)?;
     let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
-    let Some((s, mut g)) = active_goal_session(&wf)? else {
+    // `g` is a read-only snapshot for validation/display; every write
+    // goes through the store's atomic `mutate_goal` (locked RMW) so a
+    // concurrent loop turn or another steering command can't lose it.
+    let Some((s, g)) = active_goal_session(&wf)? else {
         println!("no active goal session");
         return Ok(());
     };
@@ -7783,11 +7791,11 @@ async fn run_goal_subgoal(
             print_subgoals(&s.id, &g.subgoals.0);
         }
         Some("clear") if args.len() == 1 => {
-            let n = g.subgoals.0.len();
-            g.subgoals.0.clear();
-            g.updated_at = chrono::Utc::now();
-            wf.store().put_goal(&g)?;
-            println!("⌫ cleared {n} subgoal(s) on {}", short_uuid(&s.id));
+            wf.store().mutate_goal(s.id, |g| {
+                g.subgoals.0.clear();
+                g.updated_at = chrono::Utc::now();
+            })?;
+            println!("⌫ cleared subgoal(s) on {}", short_uuid(&s.id));
         }
         Some("remove") => {
             // `remove <N>` — N is 1-based, matching the `list` display.
@@ -7801,11 +7809,14 @@ async fn run_goal_subgoal(
                     return Ok(());
                 }
             };
-            let dropped = g.subgoals.0.remove(n - 1);
-            g.updated_at = chrono::Utc::now();
-            wf.store().put_goal(&g)?;
-            println!("⌫ removed subgoal {n} on {}: {dropped}", short_uuid(&s.id));
-            print_subgoals(&s.id, &g.subgoals.0);
+            let updated = wf.store().mutate_goal(s.id, |g| {
+                if n - 1 < g.subgoals.0.len() {
+                    g.subgoals.0.remove(n - 1);
+                    g.updated_at = chrono::Utc::now();
+                }
+            })?;
+            println!("⌫ removed subgoal {n} on {}", short_uuid(&s.id));
+            print_subgoals(&s.id, &updated.subgoals.0);
         }
         Some(_) => {
             // No subverb matched: treat the whole arg list as the
@@ -7816,12 +7827,13 @@ async fn run_goal_subgoal(
                 print_subgoals(&s.id, &g.subgoals.0);
                 return Ok(());
             }
-            g.subgoals.0.push(text.to_owned());
-            g.updated_at = chrono::Utc::now();
-            wf.store().put_goal(&g)?;
+            let updated = wf.store().mutate_goal(s.id, |g| {
+                g.subgoals.0.push(text.to_owned());
+                g.updated_at = chrono::Utc::now();
+            })?;
             println!(
                 "＋ added subgoal {} on {}: {text}",
-                g.subgoals.0.len(),
+                updated.subgoals.0.len(),
                 short_uuid(&s.id)
             );
         }
