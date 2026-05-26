@@ -77,6 +77,14 @@ pub struct GoalSession {
     #[architect(json)]
     pub subgoals: Subgoals,
 
+    /// The worker's most recent observed step this run — e.g.
+    /// `Edit apps/cli/src/main.rs` or `Bash: cargo build`, parsed from
+    /// a `--output-format stream-json` worker. Empty for opaque
+    /// workers. Surfaced by `goal status` so you can see what the loop
+    /// is doing right now, not just that it's busy.
+    #[serde(default)]
+    pub current_activity: String,
+
     #[architect(filterable, sortable)]
     pub updated_at: DateTime<Utc>,
 }
@@ -92,6 +100,7 @@ impl GoalSession {
             turns_used: 0,
             last_reason: String::new(),
             subgoals: Subgoals::default(),
+            current_activity: String::new(),
             updated_at: Utc::now(),
         }
     }

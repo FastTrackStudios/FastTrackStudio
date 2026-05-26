@@ -7526,9 +7526,13 @@ fn drive_goal_loop(
         // read-modify-write under the session lock so a concurrent
         // `goal update`/`subgoal` (live steering) can't lose-update
         // against this write.
+        let activity = work.last_activity.clone();
         let _ = wf.store().mutate_goal(session_id, |g| {
             g.turns_used = iter + 1;
             g.last_reason = verdict.reason.clone();
+            if let Some(a) = &activity {
+                g.current_activity = a.clone();
+            }
             g.updated_at = chrono::Utc::now();
         });
 
@@ -7645,6 +7649,9 @@ async fn run_goal_status(org: Option<String>, _server: Option<String>) -> eyre::
                 println!("  last eval: (none yet)");
             } else {
                 println!("  last eval: {}", g.last_reason);
+            }
+            if !g.current_activity.is_empty() {
+                println!("  doing:     {}", g.current_activity);
             }
             // Heartbeat + a peek at recent activity — so a running
             // loop's liveness ("how long since the last turn") and
@@ -8028,6 +8035,65 @@ fn parse_eval_verdict(stdout: &str, code: i32) -> EvalVerdict {
 struct SubprocOut {
     code: i32,
     stdout: String,
+    /// The most recent normalized step parsed from a stream-json
+    /// worker (e.g. `Edit src/foo.rs`), if any — what it was last
+    /// doing. `None` for opaque (non-stream-json) workers.
+    last_activity: Option<String>,
+}
+
+/// Turn one line of a Claude `--output-format stream-json` worker into
+/// a short, human-readable "current step" — a tool call (`Edit
+/// <file>`, `Bash: <cmd>`) or an assistant message. Returns `None` for
+/// lines that aren't a recognized event (the caller then streams them
+/// raw), so plain workers are unaffected. Mirrors how t3code
+/// normalizes agent events into a content-stream.
+fn parse_stream_event(line: &str) -> Option<String> {
+    fn clip(s: &str, n: usize) -> String {
+        let s = s.trim();
+        if s.chars().count() > n {
+            format!("{}…", s.chars().take(n).collect::<String>())
+        } else {
+            s.to_owned()
+        }
+    }
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    match v.get("type")?.as_str()? {
+        "assistant" => {
+            let content = v.get("message")?.get("content")?.as_array()?;
+            // Prefer a tool call (the concrete action).
+            for b in content {
+                if b.get("type").and_then(serde_json::Value::as_str) == Some("tool_use") {
+                    let name = b
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("tool");
+                    let arg = b.get("input").and_then(|i| {
+                        ["file_path", "path", "command", "pattern", "query"]
+                            .iter()
+                            .find_map(|k| i.get(*k).and_then(serde_json::Value::as_str))
+                    });
+                    return Some(match arg {
+                        Some(a) => format!("{name}: {}", clip(a, 80)),
+                        None => name.to_owned(),
+                    });
+                }
+            }
+            // Else the assistant's message text.
+            for b in content {
+                if b.get("type").and_then(serde_json::Value::as_str) == Some("text") {
+                    if let Some(t) = b.get("text").and_then(serde_json::Value::as_str) {
+                        let first = t.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                        if !first.is_empty() {
+                            return Some(format!("\u{1f4ac} {}", clip(first, 80)));
+                        }
+                    }
+                }
+            }
+            None
+        }
+        "result" => Some("✓ turn result".to_owned()),
+        _ => None,
+    }
 }
 
 /// Run `command` via `sh -c`, piping `prompt` to its stdin and
@@ -8086,12 +8152,20 @@ fn run_subprocess(
         })
     };
 
-    // Stream + capture stdout line by line.
+    // Stream + capture stdout line by line. Stream-json events are
+    // rendered as normalized steps (`→ Edit foo.rs`); everything else
+    // streams raw (`│ <line>`).
     let mut captured = String::new();
+    let mut last_activity: Option<String> = None;
     if let Some(out) = child.stdout.take() {
         for line in BufReader::new(out).lines() {
             let line = line.map_err(|e| eyre::eyre!("read stdout: {e}"))?;
-            println!("    │ {line}");
+            if let Some(step) = parse_stream_event(&line) {
+                println!("    → {step}");
+                last_activity = Some(step);
+            } else {
+                println!("    │ {line}");
+            }
             captured.push_str(&line);
             captured.push('\n');
         }
@@ -8104,6 +8178,7 @@ fn run_subprocess(
     Ok(SubprocOut {
         code: status.code().unwrap_or(-1),
         stdout: captured,
+        last_activity,
     })
 }
 
