@@ -525,7 +525,9 @@ mod tests {
         // -- Check
         // Structure should be:
         // Bass
-        //   Guitar: [bass_guitar_di.wav, electric_bass_amp.wav]
+        //   Guitar
+        //     DI:  [bass_guitar_di.wav]      ← bass guitar now splits into
+        //     Amp: [electric_bass_amp.wav]     its DI / Amp multi-mic captures
         //   Synth: [synth_bass_sub.wav, sub_bass.wav]
         //   Upright Bass: [upright_pizz.wav, acoustic_bass.wav]
         // Note: Group names are "Guitar", "Synth", "Upright Bass" (not prefixed with "Bass")
@@ -537,7 +539,14 @@ mod tests {
             .group("Bass")
             .has_groups(3)
             .group("Guitar") // The group name is "Guitar", display name is "Bass Guitar"
-            .contains_exactly(&["bass_guitar_di.wav", "electric_bass_amp.wav"])
+            .has_groups(2)
+            .group("DI")
+            .contains_exactly(&["bass_guitar_di.wav"])
+            .done()
+            .group("Bass")
+            .group("Guitar")
+            .group("Amp")
+            .contains_exactly(&["electric_bass_amp.wav"])
             .done()
             .group("Bass")
             .group("Synth") // The group name is "Synth", display name is "Bass Synth"

@@ -1,6 +1,7 @@
 //! Synth lead group definition
 
 use crate::item_metadata::ItemMetadata;
+use crate::item_metadata::prelude::ItemMetadataGroupExt;
 use monarchy::Group;
 
 /// Lead synth group
@@ -20,6 +21,8 @@ impl From<Lead> for Group<ItemMetadata> {
             // This is a child of Synths, so requires_parent_match ensures
             // items only match if they already matched Synths
             .requires_parent_match()
+            .layers(super::layers_dimension())
+            .channel(super::channel_dimension())
             .build()
     }
 }

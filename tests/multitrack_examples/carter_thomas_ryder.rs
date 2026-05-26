@@ -154,7 +154,7 @@ fn carter_thomas_ryder() -> Result<()> {
         .track("Pad")
         .item("PADS.wav")
         .folder("Arp")
-        .track("Arp")
+        .track("Arp 1")
         .item("ARP 1.wav")
         .track("Transition")
         .item("ARP TRANSITION.wav")
