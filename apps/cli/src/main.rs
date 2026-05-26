@@ -848,6 +848,26 @@ enum ProjectCmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Set the project's target completion date (YYYY-MM-DD, or
+    /// `none`/`clear` to unset). The Linear-style roadmap field.
+    SetTarget {
+        target: String,
+        date: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Recompute + show the project's progress from its tasks
+    /// (done / total of tasks whose `projectId` is this project).
+    /// Writes the rolled-up `progress_percent` back.
+    Progress {
+        target: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
     /// Set the project priority. Convenience over `update`.
     SetPriority {
         target: String,
@@ -3475,6 +3495,71 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             server,
         } => {
             mutate_project(target, org, server, |p| p.status = status).await?;
+        }
+        ProjectCmd::SetTarget {
+            target,
+            date,
+            org,
+            server,
+        } => {
+            let parsed = if matches!(
+                date.trim().to_ascii_lowercase().as_str(),
+                "none" | "clear" | "null" | ""
+            ) {
+                None
+            } else {
+                Some(
+                    date.parse::<chrono::NaiveDate>()
+                        .map_err(|e| eyre::eyre!("target date `{date}` (want YYYY-MM-DD): {e}"))?,
+                )
+            };
+            mutate_project(target, org, server, |p| p.target_date = parsed).await?;
+        }
+        ProjectCmd::Progress {
+            target,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let pc = connect_project_client(&url).await?;
+            let proj = resolve_project_target(&pc, &target).await?;
+            // Count tasks whose project_id == this project.
+            let tc = connect_task_client(&url).await?;
+            let tasks = tc
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list tasks: {e:?}"))?;
+            let mine: Vec<&task::TaskInfo> = tasks
+                .iter()
+                .filter(|t| t.project_id == Some(proj.id))
+                .collect();
+            let total = mine.len();
+            let done = mine
+                .iter()
+                .filter(|t| matches!(task::Status::from_str(&t.status), Some(task::Status::Done)))
+                .count();
+            let pct: i16 = if total == 0 {
+                -1
+            } else {
+                i16::try_from((done * 100) / total).unwrap_or(100)
+            };
+            // Persist the rollup.
+            let mut p = proj.clone();
+            p.progress_percent = pct;
+            pc.update(p)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            let shown = if pct < 0 {
+                "—".to_string()
+            } else {
+                format!("{pct}%")
+            };
+            println!("{}  {}", proj.title, shown);
+            println!("  {done}/{total} tasks done");
+            if let Some(d) = proj.target_date {
+                println!("  target: {d}");
+            }
         }
         ProjectCmd::SetPriority {
             target,
