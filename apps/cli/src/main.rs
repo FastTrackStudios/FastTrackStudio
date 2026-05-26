@@ -1015,6 +1015,35 @@ enum IssueCmd {
         server: Option<String>,
     },
 
+    /// Triage an issue (PRD) into agent-sized subtasks — the
+    /// "it's time to start this" step. Creates one subtask per
+    /// title under the parent, flips the parent to in-progress,
+    /// and prints the board. Titles come from repeated
+    /// `--subtask` flags and/or `--from` (one per line, `-` for
+    /// stdin). After this, parallel agents `claim` + `code start`.
+    Triage {
+        /// Parent issue id (UUID or 8-char prefix).
+        id: String,
+        /// A subtask title. Repeatable.
+        #[arg(long = "subtask", value_name = "TITLE")]
+        subtasks: Vec<String>,
+        /// Read additional subtask titles, one per line, from a
+        /// file or `-` for stdin.
+        #[arg(long)]
+        from: Option<String>,
+        /// Status to set on the parent after triage. Default
+        /// `in-progress`.
+        #[arg(long, default_value = "in-progress")]
+        parent_status: String,
+        /// Priority applied to every created subtask.
+        #[arg(long, default_value = "normal")]
+        priority: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
     /// List the subtasks of a parent task with their claim +
     /// status, so you can see who's working what at a glance.
     Subtasks {
@@ -7648,6 +7677,117 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     ));
                 }
             }
+        }
+        IssueCmd::Triage {
+            id,
+            subtasks,
+            from,
+            parent_status,
+            priority,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut parent = resolve_issue_id(&client, &id).await?;
+
+            // Collect subtask titles: --subtask flags + --from lines.
+            let mut titles: Vec<String> = subtasks;
+            if let Some(src) = from {
+                let raw = if src == "-" {
+                    use std::io::Read as _;
+                    let mut s = String::new();
+                    std::io::stdin()
+                        .read_to_string(&mut s)
+                        .map_err(|e| eyre::eyre!("stdin: {e}"))?;
+                    s
+                } else {
+                    std::fs::read_to_string(&src).map_err(|e| eyre::eyre!("read {src}: {e}"))?
+                };
+                titles.extend(
+                    raw.lines()
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty())
+                        .map(String::from),
+                );
+            }
+            if titles.is_empty() {
+                return Err(eyre::eyre!(
+                    "no subtasks — pass --subtask <title> (repeatable) and/or --from <file|->"
+                ));
+            }
+
+            // Create each subtask under the parent.
+            for title in &titles {
+                let sub = task::TaskInfo {
+                    id: uuid::Uuid::nil(),
+                    path: String::new(),
+                    title: title.clone(),
+                    status: "open".into(),
+                    priority: priority.clone(),
+                    due: None,
+                    scheduled: None,
+                    tags: task::model::StringList(vec!["task".into(), "subtask".into()]),
+                    contexts: task::model::StringList::default(),
+                    projects: task::model::StringList::default(),
+                    project_id: parent.project_id,
+                    milestone_id: None,
+                    time_estimate: None,
+                    time_entries: task::model::TimeEntries::default(),
+                    recurrence: None,
+                    recurrence_anchor: None,
+                    complete_instances: task::model::StringList::default(),
+                    completed_date: None,
+                    agent_profile: String::new(),
+                    dispatched_agent_tasks: task::model::StringList::default(),
+                    date_created: None,
+                    date_modified: None,
+                    details: String::new(),
+                    workflow: Some(task::model::WorkflowAttrs {
+                        parent: Some(parent.id),
+                        ..Default::default()
+                    }),
+                };
+                client
+                    .create(sub)
+                    .await
+                    .map_err(|e| eyre::eyre!("create subtask: {e:?}"))?;
+            }
+
+            // Flip the parent into the working state.
+            parent.status = parent_status.clone();
+            parent.completed_date = None;
+            let parent_id = parent.id;
+            client
+                .update(parent)
+                .await
+                .map_err(|e| eyre::eyre!("update parent: {e:?}"))?;
+
+            println!(
+                "triaged {} into {} subtask(s) [parent → {parent_status}]\n",
+                short_uuid(&parent_id),
+                titles.len()
+            );
+            // Show the resulting board.
+            let all = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            for t in all
+                .iter()
+                .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent_id))
+            {
+                println!(
+                    "  {}  {:<10} unclaimed   {}",
+                    short_uuid(&t.id),
+                    t.status,
+                    t.title
+                );
+            }
+            println!(
+                "\nparallel agents now: `task issue ready --as-agent <name>` → `task issue claim <id> --as-agent <name>`"
+            );
         }
         IssueCmd::Subtasks {
             id,
