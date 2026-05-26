@@ -25,8 +25,9 @@ facet-format = "0.47"
 facet-json = "0.46"
 facet-value = "0.46"
 
-# ROAM service framework (pinned — latest main needs peeps sub-crates not yet published)
-vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "5ce8cdd9" }
+# ROAM service framework — FTS fork (carries the vox-jit-abi __rust_alloc-scan
+# fix; without it the encode worker hangs on complex/allocating RPC returns).
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", branch = "main" }
 
 # Sibling repos
 daw = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main", features = ["reaper"] }
