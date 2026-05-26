@@ -1716,7 +1716,7 @@ dependencies = [
 [[package]]
 name = "fts-repo"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-repo?branch=main#2bedef0c69678d623c8c36428c0bd396f72618ee"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-repo?branch=main#532f2ca9898b148c388e61d1013e83c2faba3ff6"
 dependencies = [
  "eyre",
  "owo-colors",
