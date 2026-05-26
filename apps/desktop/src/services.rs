@@ -22,11 +22,7 @@ use crate::gateway;
 /// retryable `ConnectionClosed` error, and browsers still receive pushed
 /// setlist events via the `WebClientService` registry.
 pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
-    let forward = gateway::ForwardingHandler::new(gateway::remote_conn());
-
-    let handler = gateway::RoutedHandler::new()
-        .with(&setlist_service_service_descriptor(), forward.clone())
-        .with(&song_service_service_descriptor(), forward);
+    let handler = forwarding_handler();
 
     let bind_addr = std::env::var("GATEWAY_WS_ADDR").unwrap_or_else(|_| "0.0.0.0:3030".to_string());
     let static_dir = std::env::var("GATEWAY_WS_STATIC_DIR")
@@ -51,28 +47,52 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
     Ok(gw_info)
 }
 
-/// Connect to the REAPER-hosted `fts-extensions` and point the Session UI at
-/// its remote `SetlistService`.
+/// Build a [`gateway::RoutedHandler`] that forwards `SetlistService` and
+/// `SongService` request/response RPC to the live REAPER connection.
+///
+/// The wrapped [`gateway::ForwardingHandler`] reads `remote_conn` *per call*,
+/// so a single handler keeps working after REAPER restarts and the published
+/// caller is swapped. Shared by the browser gateway and the in-process session
+/// proxy (see [`init_session_proxy`]).
+fn forwarding_handler() -> gateway::RoutedHandler {
+    let forward = gateway::ForwardingHandler::new(gateway::remote_conn());
+    gateway::RoutedHandler::new()
+        .with(&setlist_service_service_descriptor(), forward.clone())
+        .with(&song_service_service_descriptor(), forward)
+}
+
+/// Connect to the REAPER-hosted `fts-extensions` and publish the live caller.
 ///
 /// Uses the shared `session_cli::connection::connect` helper (the same path
 /// the CLI uses): it discovers the newest live `/tmp/fts-daw-*.sock`, performs
 /// the vox handshake, and returns a `vox::Caller`. The setlist is owned and
 /// built by the session module running inside REAPER — the desktop is a pure
-/// client. The caller is also published to the gateway so browser RPC can be
-/// forwarded over the same connection. Can be retried until REAPER is available.
-pub async fn connect_to_reaper() -> Result<()> {
+/// client.
+///
+/// The caller is published to `remote_conn` so both the browser gateway and the
+/// in-process session proxy forward over it, and is returned so the connection
+/// manager can park on [`vox::Caller::closed`] and reconnect when REAPER
+/// restarts. Can be retried until REAPER is available.
+pub async fn connect_to_reaper() -> Result<vox::Caller> {
     let caller = session_cli::connection::connect(None)
         .await
         .wrap_err("connect to fts-extensions socket")?;
     tracing::info!("Connected to fts-extensions in REAPER");
 
-    // Publish the connection so the gateway can forward browser RPC to REAPER.
+    // Publish the live caller. The gateway forwarder reads this per call, so
+    // swapping it here is all the browser path needs for reconnection.
     *gateway::remote_conn().lock().expect("remote conn poisoned") = Some(caller.clone());
 
+    // Point the Session UI at the live caller. `Session::init` is set-once on
+    // native, so this only takes effect on the first connect; later reconnects
+    // log the (ignored) "already initialized" error. Interactive controls thus
+    // reconnect only on the first connection — tracked separately.
     let client = SetlistServiceClient::new(caller.clone());
-    Session::init(client)?;
-    tracing::info!("Session UI initialized against remote SetlistService");
-    Ok(())
+    if let Err(e) = Session::init(client) {
+        tracing::debug!("Session::init skipped (already initialized): {e:?}");
+    }
+
+    Ok(caller)
 }
 
 /// Try to find the web app's `dx build` output directory, relative to the

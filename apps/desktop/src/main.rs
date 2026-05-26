@@ -6,12 +6,9 @@
 use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::*;
 
-use session_ui::{ConnectionState, Session, SessionShell};
+use session_ui::{ConnectionState, SessionShell};
 
-mod daw_status;
-mod gateway;
-mod services;
-mod tools;
+use fasttrackstudio_desktop::{daw_status, gateway, services, tools};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -107,57 +104,87 @@ fn DesktopShell() -> Element {
         }
     });
 
-    // Connect to REAPER in the background — retries until found
+    // Connection manager: connect to REAPER and keep the connection alive,
+    // reconnecting whenever the transport drops (e.g. REAPER restarts with a
+    // new /tmp/fts-daw-*.sock). This is the single source of truth for
+    // `connection_state`; the subscription loops below gate on it.
     let _reaper = use_future(move || async move {
+        let mut backoff = std::time::Duration::from_millis(500);
+        let max_backoff = std::time::Duration::from_secs(5);
         loop {
             connection_state.set(ConnectionState::Connecting);
             match services::connect_to_reaper().await {
-                Ok(()) => {
+                Ok(caller) => {
                     connection_state.set(ConnectionState::Connected);
                     tracing::info!("Connected to REAPER");
-                    return;
+                    backoff = std::time::Duration::from_millis(500);
+                    // Park until the transport closes, then reconnect. The next
+                    // connect() rediscovers the newest socket, so a restarted
+                    // REAPER is picked up automatically.
+                    caller.closed().await;
+                    tracing::warn!("REAPER connection closed — reconnecting");
+                    connection_state.set(ConnectionState::Disconnected);
                 }
                 Err(e) => {
                     tracing::warn!("Waiting for REAPER: {e}");
                     connection_state.set(ConnectionState::Disconnected);
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(max_backoff);
                 }
             }
         }
     });
 
-    // Subscribe to setlist events once connected
+    // Subscribe to setlist events whenever connected; resubscribe on reconnect.
+    // Uses a DIRECT client built from the live caller — streaming RPC can't be
+    // proxied through the gateway forwarder, so this path can't go through the
+    // session proxy.
     let _subscription = use_future(move || async move {
         loop {
-            if connection_state() == ConnectionState::Connected {
-                break;
+            // Gate until the connection manager reports Connected.
+            while connection_state() != ConnectionState::Connected {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
+            let Some(caller) = gateway::remote_conn()
+                .lock()
+                .expect("remote conn poisoned")
+                .clone()
+            else {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                continue;
+            };
+            let setlist = session::SetlistServiceClient::new(caller);
 
-        let session = Session::get();
-
-        loop {
-            if let Err(e) = session.setlist().build_from_open_projects().await {
+            if let Err(e) = setlist.build_from_open_projects().await {
                 tracing::warn!("build_from_open_projects failed: {e:?}");
             }
 
             let (tx, mut rx) = vox::channel::<session::SetlistEvent>();
 
-            if let Err(e) = session.setlist().subscribe(tx).await {
+            if let Err(e) = setlist.subscribe(tx).await {
                 tracing::error!("Failed to subscribe to setlist events: {e:?}");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                // Likely a dead transport; the connection manager will flip the
+                // state. Back off to avoid a hot loop, then re-gate.
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 continue;
             }
 
             tracing::info!("Subscribed to setlist events");
 
-            let poll_session = session.clone();
+            // Periodic rescan while subscribed — rebuilds the client each tick
+            // so it always uses the live caller.
             let poll_handle = tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    if let Err(e) = poll_session.setlist().build_from_open_projects().await {
-                        tracing::debug!("Periodic project scan failed: {e:?}");
+                    let caller = gateway::remote_conn()
+                        .lock()
+                        .expect("remote conn poisoned")
+                        .clone();
+                    if let Some(caller) = caller {
+                        let setlist = session::SetlistServiceClient::new(caller);
+                        if let Err(e) = setlist.build_from_open_projects().await {
+                            tracing::debug!("Periodic project scan failed: {e:?}");
+                        }
                     }
                 }
             });
@@ -171,22 +198,19 @@ fn DesktopShell() -> Element {
             }
 
             poll_handle.abort();
-            tracing::info!("Setlist event subscription ended, will retry...");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            tracing::info!("Setlist subscription ended — will resubscribe on reconnect");
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
     });
 
-    // Subscribe to the DAW EventBus once connected — drives the live DAW
-    // status panel (transport / counts / events) from the same fts-extensions
-    // connection. Reuses the caller published by connect_to_reaper.
+    // Subscribe to the DAW EventBus whenever connected — drives the live DAW
+    // status panel. Reuses the live caller published by the connection manager
+    // and resubscribes on reconnect.
     let _daw_subscription = use_future(move || async move {
         loop {
-            if connection_state() == ConnectionState::Connected {
-                break;
+            while connection_state() != ConnectionState::Connected {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        loop {
             let caller = gateway::remote_conn()
                 .lock()
                 .expect("remote conn poisoned")
@@ -194,8 +218,8 @@ fn DesktopShell() -> Element {
             if let Some(caller) = caller {
                 daw_status::run_daw_event_bus(caller).await;
             }
-            // Stream ended or not connected yet — retry.
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            // Stream ended — re-gate; the manager owns reconnect + state.
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     });
 

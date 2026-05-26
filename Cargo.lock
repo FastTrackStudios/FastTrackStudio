@@ -14592,6 +14592,11 @@ version = "0.5.0"
 source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 
 [[patch.unused]]
+name = "reaper-macros"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
+
+[[patch.unused]]
 name = "audio-controls"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#723712a16d0a8aa6859f19f79f5ad4dd1bb19ebf"
@@ -14620,8 +14625,3 @@ source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6
 name = "vox-inprocess"
 version = "0.5.0"
 source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
-
-[[patch.unused]]
-name = "reaper-macros"
-version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
