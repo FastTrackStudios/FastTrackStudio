@@ -275,6 +275,7 @@ pub mod layout {
             "Drums" => Some(drums()),
             "Bass" => Some(bass()),
             "Electric Gtr" => Some(electric_gtr()),
+            "Acoustic Gtr" => Some(acoustic_gtr()),
             _ => None,
         }
     }
@@ -353,15 +354,17 @@ pub mod layout {
         .in_group("Drums")
     }
 
-    /// Electric guitar — the most dynamic group. A chain of variadic structural
-    /// levels (Performer → Arrangement → Layer → Channel) bottoming out in the
-    /// multi-mic captures. Every level collapses when singular, so the same
-    /// template renders a one-off DI as `GTR E / DI` and a fully tracked,
-    /// multi-performer part as the full nested tree.
-    pub fn electric_gtr() -> TemplateNode {
+    /// Shared guitar chain — the most dynamic shape. A run of variadic
+    /// structural levels (Performer → Arrangement → Layer → Channel) bottoming
+    /// out in the multi-mic captures. Every level collapses when singular, so
+    /// the same template renders a one-off DI as `<name> / DI` and a fully
+    /// tracked, multi-performer part as the full nested tree. Electric and
+    /// acoustic guitars share this exactly; only the display name, canonical
+    /// sub-path, and slot-band category differ.
+    fn guitar(name: &str, sub: &str, category: &str) -> TemplateNode {
         folder(
-            "GTR E",
-            &["Guitars", "Electric"],
+            name,
+            &["Guitars", sub],
             vec![level(
                 "Performer",
                 vec![level(
@@ -381,7 +384,17 @@ pub mod layout {
                 )],
             )],
         )
-        .in_group("Electric Gtr")
+        .in_group(category)
+    }
+
+    /// Electric guitar. See [`guitar`].
+    pub fn electric_gtr() -> TemplateNode {
+        guitar("GTR E", "Electric", "Electric Gtr")
+    }
+
+    /// Acoustic guitar — same dynamic chain as electric. See [`guitar`].
+    pub fn acoustic_gtr() -> TemplateNode {
+        guitar("GTR A", "Acoustic", "Acoustic Gtr")
     }
 }
 
@@ -414,9 +427,9 @@ mod tests {
     #[test]
     fn golden_resolves_canonical_colors() {
         let t = IdealFullSessionTemplate::golden();
-        // Acoustic Gtr (a stub band) resolves a color via the Guitars/Acoustic path.
-        let acoustic = t.root.iter().find(|n| n.name == "Acoustic Gtr").unwrap();
-        assert!(acoustic.defaults.color_hex.is_some());
+        // Keys (a stub band) resolves a color via its canonical path.
+        let keys = t.root.iter().find(|n| n.name == "Keys").unwrap();
+        assert!(keys.defaults.color_hex.is_some());
     }
 
     #[test]
@@ -499,5 +512,30 @@ mod tests {
         let mics: Vec<&str> = node.children.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(mics, ["DI", "DI-Pedalboard", "Amp 1", "Amp 2"]);
         assert!(node.children.iter().all(|c| c.children.is_empty()));
+    }
+
+    #[test]
+    fn acoustic_gtr_mirrors_electric_chain() {
+        let acoustic = layout::acoustic_gtr();
+        assert_eq!(acoustic.name, "GTR A");
+        assert_eq!(acoustic.group_path, vec!["Guitars", "Acoustic"]);
+        assert_eq!(
+            acoustic
+                .group_membership
+                .as_ref()
+                .map(|g| g.category.as_str()),
+            Some("Acoustic Gtr")
+        );
+        // Same structural depth/shape as electric (Performer→…→Channel→mics).
+        let electric = layout::electric_gtr();
+        fn shape(n: &TemplateNode) -> Vec<(String, bool)> {
+            let mut out = vec![(n.name.clone(), n.variadic)];
+            for c in &n.children {
+                out.extend(shape(c));
+            }
+            out
+        }
+        // Identical but for the root name; compare from the first child down.
+        assert_eq!(shape(&acoustic.children[0]), shape(&electric.children[0]));
     }
 }
