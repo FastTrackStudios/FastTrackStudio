@@ -31,6 +31,7 @@ pub mod activity;
 pub mod agent;
 pub mod error;
 pub mod handoff;
+pub mod resume;
 pub mod session;
 pub mod transition;
 
@@ -38,5 +39,6 @@ pub use activity::{Activity, ActivityId, ActivityKind};
 pub use agent::AgentRef;
 pub use error::WorkflowError;
 pub use handoff::{Handoff, HandoffId, HandoffReason, HandoffStatus};
+pub use resume::{RelatedRef, ResumeContext, TransitionState};
 pub use session::{SessionId, SessionStatus, SubjectRef, WorkSession, WorkflowKind};
 pub use transition::{Transition, TransitionId};
