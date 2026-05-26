@@ -21,11 +21,11 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#1a647fb218c9a9364f7e25384f91fc1194581c63"
+source = "git+https://git.starcommand.live/FastTrackStudios/input_actions.git?branch=main#132eb3daa870d99f5d2427fd1095df7fd0cceb92"
 dependencies = [
  "convert_case 0.6.0",
  "facet 0.46.4",
- "vox 0.4.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -228,7 +228,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -239,7 +239,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -297,7 +297,7 @@ dependencies = [
  "facet-core 0.46.4",
  "thiserror 2.0.18",
  "uuid",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
@@ -1287,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#bfd7a151b9240074982250f29467d695c7bda28d"
 dependencies = [
  "facet 0.46.4",
  "thiserror 2.0.18",
@@ -1323,7 +1323,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2053,7 +2053,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "daw"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "architect",
  "daw-control",
@@ -2070,14 +2070,14 @@ dependencies = [
  "reaper-launcher",
  "tokio",
  "tracing",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-stream 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "daw-audio-sync"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "bincode",
  "reaper-low",
@@ -2092,7 +2092,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "daw-proto",
  "eyre",
@@ -2102,13 +2102,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "daw-extension-runtime"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "crossbeam-channel",
  "daw-control",
@@ -2123,14 +2123,14 @@ dependencies = [
  "reaper-medium",
  "tokio",
  "tracing",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "vox-ffi",
 ]
 
 [[package]]
 name = "daw-module"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "tokio",
  "tracing",
@@ -2139,20 +2139,21 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "actions-proto",
  "architect",
  "facet 0.46.4",
+ "futures",
  "thiserror 2.0.18",
- "vox 0.5.0",
- "vox-types 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "daw-reaper"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "architect",
  "base64 0.22.1",
@@ -2179,33 +2180,35 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-stream 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "daw-standalone"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "architect",
  "async-lock",
  "base64 0.22.1",
+ "daw-control",
  "daw-proto",
+ "eyre",
  "gloo-timers",
  "moire",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "web-time",
 ]
 
 [[package]]
 name = "daw-synchronization"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "daw",
  "daw-reaper",
@@ -2218,7 +2221,7 @@ dependencies = [
 [[package]]
 name = "daw-test-macro"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2228,7 +2231,7 @@ dependencies = [
 [[package]]
 name = "dawfile-aaf"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "cfb 0.10.0",
  "daw-proto",
@@ -2238,7 +2241,7 @@ dependencies = [
 [[package]]
 name = "dawfile-ableton"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "daw-proto",
  "flate2",
@@ -2250,7 +2253,7 @@ dependencies = [
 [[package]]
 name = "dawfile-dawproject"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "daw-proto",
  "roxmltree 0.20.0",
@@ -2261,7 +2264,7 @@ dependencies = [
 [[package]]
 name = "dawfile-protools"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "daw-proto",
  "thiserror 2.0.18",
@@ -2270,7 +2273,7 @@ dependencies = [
 [[package]]
 name = "dawfile-reaper"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2949,7 +2952,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3103,7 +3106,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "dynamic-template"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#bfd7a151b9240074982250f29467d695c7bda28d"
 dependencies = [
  "anyhow",
  "color-palette",
@@ -3119,20 +3122,19 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
- "vox 0.4.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#bfd7a151b9240074982250f29467d695c7bda28d"
 dependencies = [
  "actions-proto",
  "daw-proto",
  "facet 0.46.4",
- "music-catalog",
  "thiserror 2.0.18",
- "vox 0.4.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -3281,7 +3283,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3385,8 +3387,8 @@ dependencies = [
 
 [[package]]
 name = "facet-cbor"
-version = "0.3.3"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.3.4"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -3870,7 +3872,7 @@ dependencies = [
 [[package]]
 name = "fts-devtools"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 
 [[package]]
 name = "fts-repo"
@@ -4827,7 +4829,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -5124,7 +5126,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5377,7 +5379,7 @@ dependencies = [
  "facet 0.46.4",
  "keyflow",
  "tracing",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
@@ -6345,7 +6347,7 @@ checksum = "bb41311b1064dea78399acd92ca903b13be1120eef0a8555803da792e2c50511"
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#106ff3ff09620e3ae3b437757fdd4bf3a3393230"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#bfd7a151b9240074982250f29467d695c7bda28d"
 dependencies = [
  "color-palette",
 ]
@@ -6515,7 +6517,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8130,7 +8132,7 @@ dependencies = [
 [[package]]
 name = "reaper-launcher"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw.git?branch=main#a2c9e763ac22a7e221d7c399ff9cb9e92b7243c9"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -8465,7 +8467,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8781,6 +8783,7 @@ dependencies = [
  "daw",
  "daw-proto",
  "daw-reaper",
+ "daw-standalone",
  "daw-synchronization",
  "dynamic-template",
  "eyre",
@@ -8796,9 +8799,10 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "utils",
  "uuid",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
@@ -8818,8 +8822,8 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-stream 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
@@ -8841,8 +8845,8 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "vox 0.5.0",
- "vox-stream 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-stream 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
@@ -8881,8 +8885,8 @@ dependencies = [
  "tracing",
  "utils",
  "uuid",
- "vox 0.5.0",
- "vox-types 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
@@ -8916,7 +8920,7 @@ dependencies = [
  "session-ui",
  "tracing",
  "tracing-wasm",
- "vox 0.5.0",
+ "vox 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "vox-websocket",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -9200,7 +9204,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9581,7 +9585,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10483,8 +10487,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vox"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "facet 0.46.4",
  "facet-pretty",
@@ -10492,12 +10496,12 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox-core 0.4.0",
- "vox-jit 0.4.0",
- "vox-postcard 0.4.0",
- "vox-service-macros 0.4.0",
- "vox-stream 0.4.0",
- "vox-types 0.4.0",
+ "vox-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-jit 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-service-macros 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-stream 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10511,21 +10515,21 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox-core 0.5.0",
- "vox-jit 0.5.0",
- "vox-postcard 0.5.0",
- "vox-service-macros 0.5.0",
- "vox-stream 0.5.0",
- "vox-types 0.5.0",
+ "vox-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-jit 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-service-macros 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-stream 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-core"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "facet 0.46.4",
- "facet-cbor 0.3.3",
+ "facet-cbor 0.3.4 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
  "facet-core 0.46.4",
  "facet-error",
  "facet-reflect",
@@ -10535,9 +10539,9 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-jit 0.4.0",
- "vox-postcard 0.4.0",
- "vox-types 0.4.0",
+ "vox-jit 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
@@ -10548,7 +10552,7 @@ version = "0.5.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
- "facet-cbor 0.3.4",
+ "facet-cbor 0.3.4 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "facet-core 0.46.4",
  "facet-error",
  "facet-reflect",
@@ -10558,9 +10562,9 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-jit 0.5.0",
- "vox-postcard 0.5.0",
- "vox-types 0.5.0",
+ "vox-jit 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
@@ -10571,13 +10575,13 @@ version = "0.5.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "tracing",
- "vox-types 0.5.0",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-jit"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -10589,10 +10593,10 @@ dependencies = [
  "facet-core 0.46.4",
  "libc",
  "museair",
- "vox-jit-abi 0.4.0",
- "vox-jit-cal 0.4.0",
- "vox-postcard 0.4.0",
- "vox-schema 0.4.0",
+ "vox-jit-abi 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-jit-cal 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-schema 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10610,21 +10614,21 @@ dependencies = [
  "facet-core 0.46.4",
  "libc",
  "museair",
- "vox-jit-abi 0.5.0",
- "vox-jit-cal 0.5.0",
- "vox-postcard 0.5.0",
- "vox-schema 0.5.0",
+ "vox-jit-abi 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-jit-cal 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-schema 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-jit-abi"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "arc-swap",
  "facet-core 0.46.4",
  "museair",
- "vox-jit-cal 0.4.0",
+ "vox-jit-cal 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10635,13 +10639,13 @@ dependencies = [
  "arc-swap",
  "facet-core 0.46.4",
  "museair",
- "vox-jit-cal 0.5.0",
+ "vox-jit-cal 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-jit-cal"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10658,14 +10662,14 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-core"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse 0.4.0",
+ "vox-macros-parse 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10677,13 +10681,13 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse 0.5.0",
+ "vox-macros-parse 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-macros-parse"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -10700,15 +10704,15 @@ dependencies = [
 
 [[package]]
 name = "vox-postcard"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
  "facet-reflect",
- "vox-jit-abi 0.4.0",
- "vox-jit-cal 0.4.0",
- "vox-schema 0.4.0",
+ "vox-jit-abi 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-jit-cal 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-schema 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10719,19 +10723,19 @@ dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
  "facet-reflect",
- "vox-jit-abi 0.5.0",
- "vox-jit-cal 0.5.0",
- "vox-schema 0.5.0",
+ "vox-jit-abi 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-jit-cal 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-schema 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-schema"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "blake3",
  "facet 0.46.4",
- "facet-cbor 0.3.3",
+ "facet-cbor 0.3.4 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
  "facet-core 0.46.4",
  "indexmap",
 ]
@@ -10743,18 +10747,18 @@ source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa1597
 dependencies = [
  "blake3",
  "facet 0.46.4",
- "facet-cbor 0.3.4",
+ "facet-cbor 0.3.4 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "facet-core 0.46.4",
  "indexmap",
 ]
 
 [[package]]
 name = "vox-service-macros"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "proc-macro2",
- "vox-macros-core 0.4.0",
+ "vox-macros-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10763,19 +10767,19 @@ version = "0.5.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
- "vox-macros-core 0.5.0",
+ "vox-macros-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-stream"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "libc",
  "moire",
  "tokio",
- "vox-core 0.4.0",
- "vox-types 0.4.0",
+ "vox-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
 ]
 
 [[package]]
@@ -10786,20 +10790,20 @@ dependencies = [
  "libc",
  "moire",
  "tokio",
- "vox-core 0.5.0",
- "vox-types 0.5.0",
+ "vox-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
 ]
 
 [[package]]
 name = "vox-types"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#27eef573efd388bddaad0befdd59143a7e98b830"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
  "bytes",
  "facet 0.46.4",
- "facet-cbor 0.3.3",
+ "facet-cbor 0.3.4 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
  "facet-core 0.46.4",
  "facet-path",
  "facet-reflect",
@@ -10810,9 +10814,10 @@ dependencies = [
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-jit 0.4.0",
- "vox-postcard 0.4.0",
- "vox-schema 0.4.0",
+ "vox-jit 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "vox-schema 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main)",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -10824,7 +10829,7 @@ dependencies = [
  "blake3",
  "bytes",
  "facet 0.46.4",
- "facet-cbor 0.3.4",
+ "facet-cbor 0.3.4 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "facet-core 0.46.4",
  "facet-path",
  "facet-reflect",
@@ -10835,9 +10840,9 @@ dependencies = [
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-jit 0.5.0",
- "vox-postcard 0.5.0",
- "vox-schema 0.5.0",
+ "vox-jit 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-postcard 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-schema 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "wasmtimer",
 ]
 
@@ -10852,8 +10857,8 @@ dependencies = [
  "js-sys",
  "tokio",
  "tokio-tungstenite",
- "vox-core 0.5.0",
- "vox-types 0.5.0",
+ "vox-core 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
+ "vox-types 0.5.0 (git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63)",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -11538,7 +11543,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
