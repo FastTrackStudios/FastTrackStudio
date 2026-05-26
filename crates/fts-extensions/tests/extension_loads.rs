@@ -4,7 +4,7 @@
 //! The FTS Extensions plugin must be installed in REAPER's UserPlugins.
 
 use daw::rpc::Project;
-use reaper_test::{ReaperTestContext, reaper_test};
+use daw::test::{ReaperTestContext, reaper_test};
 use std::time::Duration;
 
 /// Wait for FTS Extensions to finish registering actions.

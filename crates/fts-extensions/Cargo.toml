@@ -86,6 +86,6 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 
 [dev-dependencies]
-reaper-test = { workspace = true }
+daw = { workspace = true, features = ["reaper", "test-harness"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros"] }
