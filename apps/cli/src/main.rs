@@ -1389,6 +1389,40 @@ enum IssueCmd {
         server: Option<String>,
     },
 
+    /// Serialize-merge a queue of open PRs (the parallel-agent
+    /// landing strip). Merges in PR-number order, one at a time, so
+    /// N worktree PRs from one issue land without racing on `main`.
+    /// Each merged PR closes its linked task (and that task's forge
+    /// issue). On a merge that the forge rejects (e.g. now-conflicting
+    /// after an earlier merge) the queue stops — fix the conflict and
+    /// re-run — unless `--keep-going`.
+    MergeQueue {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        github: bool,
+        #[arg(long)]
+        base_url: Option<String>,
+        /// `squash` (default), `merge`, or `rebase`.
+        #[arg(long, default_value = "squash")]
+        method: String,
+        /// Only queue PRs linked to subtasks of this issue (UUID or
+        /// 8-char prefix). Omit to queue every open PR on the repo.
+        #[arg(long)]
+        issue: Option<String>,
+        /// Print the merge plan without merging anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Keep merging the rest of the queue after a failed merge
+        /// instead of stopping at the first conflict.
+        #[arg(long)]
+        keep_going: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
     /// Fetch all issues from a Forgejo repo and create local
     /// TaskInfos for ones we don't already have linked. Existing
     /// linked issues are left alone (use `sync` to update).
@@ -9288,6 +9322,163 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                     Err(e) => eprintln!("  warning: forge propagation failed: {e}"),
                 }
             }
+        }
+        IssueCmd::MergeQueue {
+            repo,
+            github,
+            base_url,
+            method,
+            issue,
+            dry_run,
+            keep_going,
+            org,
+            server,
+        } => {
+            use git_config::BindingStore as _;
+            let repo_id = build_repo_id(&repo, github, base_url)?;
+            let merge_method = match method.to_ascii_lowercase().as_str() {
+                "merge" => git_proto::reviews::MergeMethod::Merge,
+                "squash" => git_proto::reviews::MergeMethod::Squash,
+                "rebase" => git_proto::reviews::MergeMethod::Rebase,
+                _ => return Err(eyre::eyre!("--method must be merge, squash, or rebase")),
+            };
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let store = forge_link_store(&slug)?;
+
+            // Map PR number → task id for this repo, via the link
+            // store (Pull-kind links). Lets us close each PR's task
+            // as it lands, and scope the queue to one issue.
+            let tasks = client
+                .list()
+                .await
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let mut pr_task: std::collections::HashMap<u64, uuid::Uuid> =
+                std::collections::HashMap::new();
+            for t in &tasks {
+                let links = store
+                    .issues_for_task(&t.id.to_string())
+                    .map_err(|e| eyre::eyre!("link store: {e}"))?;
+                for l in links {
+                    if l.repo == repo_id && l.kind == git_config::LinkKind::Pull {
+                        pr_task.insert(l.number, t.id);
+                    }
+                }
+            }
+
+            // When scoped to an issue, the eligible PRs are those
+            // linked to its subtasks (tasks whose workflow.parent is
+            // the issue) — plus the issue itself.
+            let scope: Option<std::collections::HashSet<uuid::Uuid>> = match &issue {
+                None => None,
+                Some(r) => {
+                    let parent = resolve_issue_id(&client, r).await?;
+                    let mut set: std::collections::HashSet<uuid::Uuid> =
+                        std::iter::once(parent.id).collect();
+                    for t in &tasks {
+                        if t.workflow.as_ref().and_then(|w| w.parent) == Some(parent.id) {
+                            set.insert(t.id);
+                        }
+                    }
+                    Some(set)
+                }
+            };
+
+            // Open, non-draft PRs, oldest first (PR number order).
+            let repo_c = repo_id.clone();
+            let mut prs = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .list_pull_requests(&repo_c)
+                    .map_err(|e| eyre::eyre!("list_pull_requests: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+            prs.retain(|pr| {
+                matches!(pr.state, git_proto::PullRequestState::Open)
+                    && !pr.draft
+                    && match &scope {
+                        None => true,
+                        Some(set) => pr_task.get(&pr.id.0).is_some_and(|tid| set.contains(tid)),
+                    }
+            });
+            prs.sort_by_key(|pr| pr.id.0);
+
+            if prs.is_empty() {
+                println!("(no mergeable PRs in the queue)");
+                return Ok(());
+            }
+            println!("merge queue: {} PR(s) on {}", prs.len(), repo);
+            for pr in &prs {
+                let who = pr_task
+                    .get(&pr.id.0)
+                    .map(|t| format!("  → task {}", short_uuid(t)))
+                    .unwrap_or_default();
+                println!(
+                    "  #{:<5} {} ({} <- {}){who}",
+                    pr.id.0, pr.title, pr.base, pr.head
+                );
+            }
+            if dry_run {
+                println!("\n(dry run — nothing merged; method would be {method})");
+                return Ok(());
+            }
+
+            let mut merged = 0usize;
+            for pr in &prs {
+                let number = pr.id.0;
+                let repo_c = repo_id.clone();
+                let res = tokio::task::spawn_blocking(move || {
+                    let backend = forge_backend_for(&repo_c)?;
+                    backend
+                        .merge_pull_request(&repo_c, git_proto::PullRequestId(number), merge_method)
+                        .map_err(|e| eyre::eyre!("merge #{number}: {e:?}"))
+                })
+                .await
+                .map_err(|e| eyre::eyre!("join: {e}"))?;
+                match res {
+                    Ok(sha) => {
+                        merged += 1;
+                        match sha {
+                            Some(s) => println!("✓ merged #{number} ({s})"),
+                            None => println!("✓ merged #{number}"),
+                        }
+                        // Close the PR's linked task + propagate.
+                        if let Some(tid) = pr_task.get(&number) {
+                            if let Ok(mut t) = client.get(*tid).await {
+                                t.status = "done".into();
+                                t.completed_date = Some(chrono::Local::now().date_naive());
+                                if let Some(w) = t.workflow.as_mut() {
+                                    w.session = None;
+                                }
+                                if client.update(t).await.is_ok() {
+                                    println!("    closed task {}", short_uuid(tid));
+                                    let _ = propagate_state_to_forge(
+                                        &slug,
+                                        tid,
+                                        git_proto::IssueState::Closed,
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("✗ #{number} did not merge: {e}");
+                        if keep_going {
+                            println!("    (--keep-going: continuing)");
+                        } else {
+                            println!(
+                                "    stopping — rebase #{number} onto {} and re-run the queue",
+                                pr.base
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+            println!("\nmerged {merged}/{} queued PR(s)", prs.len());
         }
     }
     Ok(())
