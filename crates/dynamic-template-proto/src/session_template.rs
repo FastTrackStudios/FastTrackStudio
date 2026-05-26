@@ -61,9 +61,34 @@ impl TemplateNode {
         }
     }
 
+    /// A leaf track with no canonical group path (inherits color/membership
+    /// from its parent folder).
+    pub fn track(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            group_path: Vec::new(),
+            children: Vec::new(),
+            defaults: TrackDefaults::default(),
+            group_membership: None,
+            routing: NodeRouting::default(),
+        }
+    }
+
     /// Add a child node (builder-style).
     pub fn with_child(mut self, child: TemplateNode) -> Self {
         self.children.push(child);
+        self
+    }
+
+    /// Append several child nodes (builder-style).
+    pub fn with_children(mut self, children: impl IntoIterator<Item = TemplateNode>) -> Self {
+        self.children.extend(children);
+        self
+    }
+
+    /// Set the canonical group path from string slices (builder-style).
+    pub fn with_path(mut self, path: &[&str]) -> Self {
+        self.group_path = path.iter().map(|s| (*s).to_string()).collect();
         self
     }
 
@@ -163,21 +188,15 @@ pub struct TemplateBus {
 }
 
 impl IdealFullSessionTemplate {
-    /// The canonical FTS golden session: one top-level folder per
-    /// instrument-category band in [`music_catalog::groups::SLOT_BANDS`], each
-    /// carrying its canonical group path and group-slot membership. This is
-    /// the data-model seed; the engine fleshes out child tracks per project.
+    /// The canonical FTS golden session. There's one top-level folder per
+    /// instrument-category band in [`music_catalog::groups::SLOT_BANDS`], in
+    /// partition order. Bands authored in detail (see [`layout`]) expand into
+    /// their full subtree; the rest are top-level folder stubs carrying the
+    /// canonical path / color / group-slot membership until authored.
     pub fn golden() -> Self {
         let root = SLOT_BANDS
             .iter()
-            .map(|band| {
-                let group_path: Vec<String> = band.path.iter().map(|p| (*p).to_string()).collect();
-                let category = band.path.join("/");
-                let mut node = TemplateNode::folder(band.label, group_path);
-                node.defaults.color_hex = band.color().map(|c| c.to_hex_string());
-                node.group_membership = Some(GroupMembership { category });
-                node
-            })
+            .map(|band| layout::authored(band.label).unwrap_or_else(|| layout::stub(band)))
             .collect();
 
         Self {
@@ -189,6 +208,106 @@ impl IdealFullSessionTemplate {
                 channels: 2,
             }],
         }
+    }
+}
+
+/// The authored golden-session track layout — the actual ideal tree, built up
+/// group by group. Each top-level instrument band gets a `pub fn` returning
+/// its full subtree; [`golden`](IdealFullSessionTemplate::golden) assembles
+/// them in partition order, stubbing any band not yet authored.
+pub mod layout {
+    use super::*;
+
+    /// A leaf track (inherits color / membership from its parent folder).
+    fn track(name: &str) -> TemplateNode {
+        TemplateNode::track(name)
+    }
+
+    /// A folder carrying a canonical group `path` and `children`.
+    fn folder(name: &str, path: &[&str], children: Vec<TemplateNode>) -> TemplateNode {
+        TemplateNode::folder(name, path.iter().map(|s| (*s).to_string()).collect())
+            .with_children(children)
+    }
+
+    /// Top-level folder stub for a band that isn't authored in detail yet —
+    /// carries the canonical path, resolved color, and group-slot membership
+    /// straight from the slot partition.
+    pub fn stub(band: &music_catalog::groups::GroupSlotBand) -> TemplateNode {
+        let mut node = TemplateNode::folder(
+            band.label,
+            band.path.iter().map(|p| (*p).to_string()).collect(),
+        );
+        node.defaults.color_hex = band.color().map(|c| c.to_hex_string());
+        node.group_membership = Some(GroupMembership {
+            category: band.path.join("/"),
+        });
+        node
+    }
+
+    /// The detailed subtree for a top-level band by its REAPER label, or
+    /// `None` if not yet authored.
+    pub fn authored(label: &str) -> Option<TemplateNode> {
+        match label {
+            "Drums" => Some(drums()),
+            _ => None,
+        }
+    }
+
+    /// Drums — Kick / Snare / Toms / Cymbals / Rooms.
+    pub fn drums() -> TemplateNode {
+        folder(
+            "Drums",
+            &["Drums"],
+            vec![
+                folder(
+                    "Kick",
+                    &["Drums", "Kick"],
+                    vec![
+                        folder(
+                            "Sum",
+                            &["Drums", "Kick"],
+                            vec![track("In"), track("Out"), track("Trig")],
+                        ),
+                        track("Sub"),
+                    ],
+                ),
+                folder(
+                    "Snare",
+                    &["Drums", "Snare"],
+                    vec![
+                        folder(
+                            "SUM",
+                            &["Drums", "Snare"],
+                            vec![track("Top"), track("Bottom"), track("Trig")],
+                        ),
+                        track("Verb"),
+                    ],
+                ),
+                folder(
+                    "Toms",
+                    &["Drums", "Tom"],
+                    vec![track("T1"), track("T2"), track("T3"), track("T4")],
+                ),
+                folder(
+                    "Cymbals",
+                    &["Drums", "Cymbals"],
+                    vec![
+                        track("Hi-Hat").with_path(&["Drums", "Hi-Hat"]),
+                        track("Overheads"),
+                    ],
+                ),
+                folder(
+                    "Rooms",
+                    &["Drums", "Room"],
+                    vec![
+                        track("Rooms Far"),
+                        track("Rooms Close"),
+                        track("Rooms Mono"),
+                    ],
+                ),
+            ],
+        )
+        .in_group("Drums")
     }
 }
 
@@ -221,8 +340,43 @@ mod tests {
     #[test]
     fn golden_resolves_canonical_colors() {
         let t = IdealFullSessionTemplate::golden();
-        // Electric Gtr should resolve a color via the Guitars/Electric path.
+        // Electric Gtr (a stub band) resolves a color via the Guitars/Electric path.
         let electric = t.root.iter().find(|n| n.name == "Electric Gtr").unwrap();
         assert!(electric.defaults.color_hex.is_some());
+    }
+
+    #[test]
+    fn drums_layout_has_authored_shape() {
+        let drums = layout::drums();
+        assert_eq!(drums.name, "Drums");
+        // Top-level drums joins the Drums group-slot band.
+        assert_eq!(
+            drums.group_membership.as_ref().map(|g| g.category.as_str()),
+            Some("Drums")
+        );
+
+        let names: Vec<&str> = drums.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Kick", "Snare", "Toms", "Cymbals", "Rooms"]);
+
+        // Kick: a Sum sub-folder (In/Out/Trig) plus a Sub track.
+        let kick = drums.children.iter().find(|c| c.name == "Kick").unwrap();
+        let sum = kick.children.iter().find(|c| c.name == "Sum").unwrap();
+        let sum_kids: Vec<&str> = sum.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(sum_kids, ["In", "Out", "Trig"]);
+        assert!(kick.children.iter().any(|c| c.name == "Sub"));
+
+        // Toms are four leaf tracks.
+        let toms = drums.children.iter().find(|c| c.name == "Toms").unwrap();
+        assert_eq!(toms.children.len(), 4);
+        assert!(toms.children.iter().all(|c| c.children.is_empty()));
+
+        // Hi-Hat carries its own canonical path for color.
+        let cymbals = drums.children.iter().find(|c| c.name == "Cymbals").unwrap();
+        let hat = cymbals
+            .children
+            .iter()
+            .find(|c| c.name == "Hi-Hat")
+            .unwrap();
+        assert_eq!(hat.group_path, vec!["Drums", "Hi-Hat"]);
     }
 }
