@@ -115,7 +115,19 @@ async fn main() -> eyre::Result<()> {
                     }
                     ev = rx.recv() => {
                         match ev {
-                            Ok(Some(event_ref)) => web_registry.broadcast(event_ref.get()).await,
+                            Ok(Some(event_ref)) => {
+                                let event = event_ref.get();
+                                if let session::SetlistEvent::SetlistChanged(sl) = event {
+                                    tracing::info!(
+                                        "received SetlistChanged: {} songs ({})",
+                                        sl.songs.len(),
+                                        sl.songs.iter().map(|s| s.name.as_str())
+                                            .collect::<Vec<_>>().join(", ")
+                                    );
+                                    tracing::info!("FULL SETLIST STRUCT:\n{sl:#?}");
+                                }
+                                web_registry.broadcast(event).await;
+                            }
                             _ => break,
                         }
                     }
