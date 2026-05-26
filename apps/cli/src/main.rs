@@ -2708,9 +2708,26 @@ enum AgentCmd {
     /// life-Goal/OKR system (`task goal`).
     ///
     /// Example:
-    ///   task agent goal "all tests in features/git pass" \
+    ///   task agent goal run "all tests in features/git pass" \
     ///     --cmd 'claude -p' --eval-cmd 'claude -p' --as-agent claude
+    ///
+    /// The standing session can be inspected (`goal status`), parked
+    /// (`goal pause`), continued with a fresh turn budget
+    /// (`goal resume`), or dropped (`goal clear`).
     Goal {
+        #[command(subcommand)]
+        cmd: GoalLoopCmd,
+    },
+}
+
+/// `task agent goal *` — the autonomous goal loop and its lifecycle
+/// verbs. The loop persists a `GoalSession` (condition, turn budget,
+/// progress) over a `WorkSession`, so it can be parked and resumed
+/// without losing the directive.
+#[derive(Subcommand)]
+enum GoalLoopCmd {
+    /// Start (or restart) the loop toward a completion condition.
+    Run {
         /// The completion condition. Write it so the worker's own
         /// output can demonstrate it (e.g. "`cargo test -p x` exits
         /// 0"). Up to a few KB.
@@ -2750,6 +2767,50 @@ enum AgentCmd {
         /// this works it as a single task instead.
         #[arg(long)]
         no_triage: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Show the active goal session: condition, turns used/budget,
+    /// the last evaluator reason, and the session status.
+    Status {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Park the active goal session (stop auto-continuation) without
+    /// dropping it. Resume later with `goal resume`.
+    Pause {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Resume the parked goal session: reset the turn counter to 0
+    /// and continue the loop toward the stored condition.
+    Resume {
+        /// Worker command override (else env / per-org config).
+        #[arg(long)]
+        cmd: Option<String>,
+        /// Evaluator command override (else env / per-org config).
+        #[arg(long)]
+        eval_cmd: Option<String>,
+        /// Attribute the resumed loop to this agent (`name[@version]`).
+        #[arg(long = "as-agent", default_value = "claude")]
+        as_agent: String,
+        /// Turn ceiling for the resumed run. Defaults to the stored
+        /// budget from the original `goal run`.
+        #[arg(long)]
+        max_iters: Option<u32>,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Drop the active goal session (cancel it + delete its row).
+    Clear {
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -7082,24 +7143,42 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
             }
             Ok(())
         }
-        AgentCmd::Goal {
-            condition,
-            cmd,
-            eval_cmd,
-            task,
-            as_agent,
-            max_iters,
-            dry_run,
-            no_triage,
-            org,
-            server,
-        } => {
-            Box::pin(run_agent_goal(
-                condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, no_triage, org,
+        AgentCmd::Goal { cmd } => match cmd {
+            GoalLoopCmd::Run {
+                condition,
+                cmd,
+                eval_cmd,
+                task,
+                as_agent,
+                max_iters,
+                dry_run,
+                no_triage,
+                org,
                 server,
-            ))
-            .await
-        }
+            } => {
+                Box::pin(run_agent_goal(
+                    condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, no_triage, org,
+                    server,
+                ))
+                .await
+            }
+            GoalLoopCmd::Status { org, server } => Box::pin(run_goal_status(org, server)).await,
+            GoalLoopCmd::Pause { org, server } => Box::pin(run_goal_pause(org, server)).await,
+            GoalLoopCmd::Resume {
+                cmd,
+                eval_cmd,
+                as_agent,
+                max_iters,
+                org,
+                server,
+            } => {
+                Box::pin(run_goal_resume(
+                    cmd, eval_cmd, as_agent, max_iters, org, server,
+                ))
+                .await
+            }
+            GoalLoopCmd::Clear { org, server } => Box::pin(run_goal_clear(org, server)).await,
+        },
     }
 }
 
@@ -7118,7 +7197,7 @@ async fn run_agent_goal(
     org: Option<String>,
     server: Option<String>,
 ) -> eyre::Result<()> {
-    use workflows_orchestrator::{CodingWorkflow, IterationOutcome, RunEnd, WorkflowStore};
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
 
     let slug = resolve_active_org(org)?;
     let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
@@ -7246,12 +7325,51 @@ async fn run_agent_goal(
         short_uuid(&session.id)
     );
 
+    // Persist the goal-loop state (condition, budget, progress) so it
+    // can be inspected (`goal status`), parked (`goal pause`), and
+    // resumed (`goal resume`) independently of this process.
+    wf.store().put_goal(&workflows_proto::GoalSession::new(
+        session.id, &condition, max_iters,
+    ))?;
+
+    let run = drive_goal_loop(
+        &wf,
+        session.id,
+        &agent,
+        &condition,
+        &worker,
+        evaluator.as_deref(),
+        &base_prompt,
+        max_iters,
+    )?;
+
+    finalize_goal_run(&run, max_iters, task_id, &url, &wf, session.id).await
+}
+
+/// Drive the worker/evaluator loop for one goal session, persisting
+/// per-turn progress (`turns_used`, `last_reason`) onto the
+/// [`GoalSession`](workflows_proto::GoalSession) row so a concurrent
+/// `goal status` reads live state. Shared by `goal run` and
+/// `goal resume`.
+#[allow(clippy::too_many_arguments)]
+fn drive_goal_loop(
+    wf: &workflows_orchestrator::CodingWorkflow,
+    session_id: uuid::Uuid,
+    agent: &workflows_proto::AgentRef,
+    condition: &str,
+    worker: &str,
+    evaluator: Option<&str>,
+    base_prompt: &str,
+    budget: u32,
+) -> eyre::Result<workflows_orchestrator::SessionRun> {
+    use workflows_orchestrator::IterationOutcome;
+
     // The evaluator's latest reason, carried into the next worker turn.
     let last_reason = std::cell::RefCell::new(String::new());
 
-    let run = wf.run_session(session.id, agent.clone(), max_iters, |iter| {
+    let run = wf.run_session(session_id, agent.clone(), budget, |iter| {
         // 1. Worker turn.
-        let mut prompt = base_prompt.clone();
+        let mut prompt = base_prompt.to_owned();
         let reason = last_reason.borrow().clone();
         if !reason.is_empty() {
             prompt.push_str(&format!(
@@ -7259,12 +7377,12 @@ async fn run_agent_goal(
             ));
         }
         println!("▶ turn {iter} — worker running…");
-        let work = run_subprocess(&worker, &prompt, iter, &condition)
+        let work = run_subprocess(worker, &prompt, iter, condition)
             .map_err(|e| workflows_proto::WorkflowError::Backend(format!("worker: {e}")))?;
 
         // 2. Evaluator gate — judge the worker's output against the
         //    condition. Built-in done-check if no eval command.
-        let verdict = match &evaluator {
+        let verdict = match evaluator {
             Some(ev) => {
                 println!("⧖ turn {iter} — judging…");
                 // Lead with the strict judge directive so a raw LLM
@@ -7280,7 +7398,7 @@ async fn run_agent_goal(
                      CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}",
                     work.stdout
                 );
-                let r = run_subprocess(ev, &eval_in, iter, &condition)
+                let r = run_subprocess(ev, &eval_in, iter, condition)
                     .map_err(|e| workflows_proto::WorkflowError::Backend(format!("eval: {e}")))?;
                 // Prefer a structured verdict — the judge convention
                 // Hermes / Claude / Codex `/goal` all share:
@@ -7302,6 +7420,14 @@ async fn run_agent_goal(
             }
         };
 
+        // Persist progress so `goal status` reflects this turn.
+        if let Ok(mut g) = wf.store().goal(session_id) {
+            g.turns_used = iter + 1;
+            g.last_reason = verdict.reason.clone();
+            g.updated_at = chrono::Utc::now();
+            let _ = wf.store().put_goal(&g);
+        }
+
         if verdict.met {
             Ok(IterationOutcome::Done)
         } else {
@@ -7314,12 +7440,29 @@ async fn run_agent_goal(
             Ok(IterationOutcome::Continue)
         }
     })?;
+    Ok(run)
+}
 
-    match run.end {
+/// Report a finished goal run + reconcile side effects: drop the
+/// goal row on completion and close the linked task. Shared by
+/// `goal run` and `goal resume`.
+async fn finalize_goal_run(
+    run: &workflows_orchestrator::SessionRun,
+    budget: u32,
+    task_id: Option<uuid::Uuid>,
+    url: &str,
+    wf: &workflows_orchestrator::CodingWorkflow,
+    session_id: uuid::Uuid,
+) -> eyre::Result<()> {
+    use workflows_orchestrator::RunEnd;
+    match &run.end {
         RunEnd::Completed => {
             println!("✓ goal met after {} turn(s)", run.iterations);
+            // The standing goal is satisfied — drop its row so it no
+            // longer shows up in `goal status`.
+            let _ = wf.store().remove_goal(session_id);
             if let Some(id) = task_id {
-                let client = connect_task_client(&url).await?;
+                let client = connect_task_client(url).await?;
                 if let Ok(mut t) = client.get(id).await {
                     if task::Status::from_str(&t.status)
                         .is_none_or(|s| !matches!(s, task::Status::Done))
@@ -7337,11 +7480,249 @@ async fn run_agent_goal(
         }
         RunEnd::MaxedOut => {
             println!(
-                "⏹ hit the {max_iters}-turn ceiling without meeting the goal — session parked, resume to continue"
+                "⏹ hit the {budget}-turn ceiling without meeting the goal — session parked, resume to continue"
             );
         }
     }
     Ok(())
+}
+
+/// The org's standing goal session: the most recently touched
+/// `Active`/`Parked` [`WorkSession`](workflows_proto::WorkSession)
+/// that carries a [`GoalSession`](workflows_proto::GoalSession) row.
+/// `None` when no goal loop is in flight. Backs `status` / `pause` /
+/// `resume` / `clear`.
+fn active_goal_session(
+    wf: &workflows_orchestrator::CodingWorkflow,
+) -> eyre::Result<Option<(workflows_proto::WorkSession, workflows_proto::GoalSession)>> {
+    use workflows_proto::SessionStatus;
+    let mut hits: Vec<(workflows_proto::WorkSession, workflows_proto::GoalSession)> = Vec::new();
+    for g in wf.store().goals()? {
+        if let Ok(s) = wf.store().session(g.session_id) {
+            if matches!(s.status, SessionStatus::Active | SessionStatus::Parked) {
+                hits.push((s, g));
+            }
+        }
+    }
+    hits.sort_by_key(|(s, _)| s.updated_at);
+    Ok(hits.pop())
+}
+
+/// `task agent goal status` — report the active goal session.
+async fn run_goal_status(org: Option<String>, _server: Option<String>) -> eyre::Result<()> {
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
+    use workflows_proto::{SessionStatus, SubjectRef};
+
+    let slug = resolve_active_org(org)?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
+    match active_goal_session(&wf)? {
+        None => println!("no active goal session"),
+        Some((s, g)) => {
+            let status = match s.status {
+                SessionStatus::Active => "active",
+                SessionStatus::Parked => "parked",
+                SessionStatus::Blocked => "blocked",
+                SessionStatus::Finished => "finished",
+                SessionStatus::Cancelled => "cancelled",
+            };
+            println!("goal session {}  [{status}]", short_uuid(&s.id));
+            println!("  condition: {}", g.condition);
+            println!("  turns:     {}/{}", g.turns_used, g.budget);
+            if let SubjectRef::Task { id } = s.subject {
+                println!("  task:      {}", short_uuid(&id));
+            }
+            if g.last_reason.is_empty() {
+                println!("  last eval: (none yet)");
+            } else {
+                println!("  last eval: {}", g.last_reason);
+            }
+            // Heartbeat + a peek at recent activity — so a running
+            // loop's liveness ("how long since the last turn") and
+            // what it's been doing are visible on demand.
+            let recent = wf.store().activities_for(s.id).unwrap_or_default();
+            if let Some(last) = recent.first() {
+                println!("  heartbeat: last activity {} ago", human_ago(last.at));
+            }
+            if !recent.is_empty() {
+                println!("  recent:");
+                for a in recent.iter().take(5) {
+                    let kind = serde_json::to_value(&a.kind)
+                        .ok()
+                        .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned))
+                        .unwrap_or_else(|| "activity".into());
+                    println!("    {} · {kind}", human_ago(a.at));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Render a `DateTime` as a coarse "Ns / Nm / Nh ago" string for the
+/// goal-status heartbeat.
+fn human_ago(at: chrono::DateTime<chrono::Utc>) -> String {
+    let secs = (chrono::Utc::now() - at).num_seconds().max(0);
+    if secs < 90 {
+        format!("{secs}s")
+    } else if secs < 5400 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
+/// `task agent goal pause` — park the active goal session without
+/// dropping it. Idempotent if already parked.
+async fn run_goal_pause(org: Option<String>, _server: Option<String>) -> eyre::Result<()> {
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
+    use workflows_proto::{HandoffReason, SessionStatus};
+
+    let slug = resolve_active_org(org)?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
+    match active_goal_session(&wf)? {
+        None => println!("no active goal session to pause"),
+        Some((s, _g)) => {
+            if s.status == SessionStatus::Parked {
+                println!("goal session {} is already parked", short_uuid(&s.id));
+                return Ok(());
+            }
+            wf.park(
+                s.id,
+                s.current_actor.clone(),
+                HandoffReason::EndOfChunk,
+                "goal paused via `goal pause`",
+                "",
+                "- resume with `task agent goal resume`",
+            )?;
+            println!("⏸ paused goal session {}", short_uuid(&s.id));
+        }
+    }
+    Ok(())
+}
+
+/// `task agent goal clear` — drop the active goal session: cancel it
+/// and delete its goal row.
+async fn run_goal_clear(org: Option<String>, _server: Option<String>) -> eyre::Result<()> {
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
+
+    let slug = resolve_active_org(org)?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
+    match active_goal_session(&wf)? {
+        None => println!("no active goal session to clear"),
+        Some((s, _g)) => {
+            wf.cancel(s.id, s.current_actor.clone())?;
+            wf.store().remove_goal(s.id)?;
+            println!("⏹ cleared goal session {}", short_uuid(&s.id));
+        }
+    }
+    Ok(())
+}
+
+/// `task agent goal resume` — reset the parked session's turn counter
+/// to 0 and continue the loop toward its stored condition.
+async fn run_goal_resume(
+    cmd: Option<String>,
+    eval_cmd: Option<String>,
+    as_agent: String,
+    max_iters: Option<u32>,
+    org: Option<String>,
+    server: Option<String>,
+) -> eyre::Result<()> {
+    use workflows_orchestrator::{CodingWorkflow, WorkflowStore};
+    use workflows_proto::SubjectRef;
+
+    let slug = resolve_active_org(org)?;
+    let url = resolve_org_vox_url(server, &slug);
+    let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(org_workflows_dir(&slug)?));
+
+    let Some((session, mut goal)) = active_goal_session(&wf)? else {
+        println!("no goal session to resume");
+        return Ok(());
+    };
+
+    // Re-resolve the worker / evaluator commands (flag → env → config),
+    // matching `goal run`'s precedence — the loop doesn't persist them.
+    let cfg = load_goal_config(&slug);
+    let worker = cmd
+        .or_else(|| std::env::var("TASK_AGENT_CMD").ok())
+        .or(cfg.worker_cmd)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no worker command: pass --cmd, set TASK_AGENT_CMD, or set goal.worker_cmd in ~/.task/orgs/{slug}/agent.json"
+            )
+        })?;
+    let evaluator = eval_cmd
+        .or_else(|| std::env::var("TASK_GOAL_EVAL_CMD").ok())
+        .or(cfg.eval_cmd);
+
+    let task_id = match session.subject {
+        SubjectRef::Task { id } => Some(id),
+        _ => None,
+    };
+    if evaluator.is_none() && task_id.is_none() {
+        return Err(eyre::eyre!(
+            "no evaluator: pass --eval-cmd or set TASK_GOAL_EVAL_CMD / goal.eval_cmd"
+        ));
+    }
+
+    let base_prompt = build_goal_resume_prompt(&url, task_id, &goal.condition).await?;
+    let budget = max_iters.unwrap_or(goal.budget);
+
+    // Resume the session (→ Active) and reset the turn counter — the
+    // defining behaviour of `resume` vs a fresh `run`.
+    wf.resume(session.id, agent.clone())?;
+    goal.turns_used = 0;
+    goal.budget = budget;
+    goal.last_reason = String::new();
+    goal.updated_at = chrono::Utc::now();
+    wf.store().put_goal(&goal)?;
+
+    println!(
+        "▶ resuming goal session {} — “{}” (max {budget} turns, counter reset)",
+        short_uuid(&session.id),
+        goal.condition
+    );
+
+    let run = drive_goal_loop(
+        &wf,
+        session.id,
+        &agent,
+        &goal.condition,
+        &worker,
+        evaluator.as_deref(),
+        &base_prompt,
+        budget,
+    )?;
+    finalize_goal_run(&run, budget, task_id, &url, &wf, session.id).await
+}
+
+/// Rebuild the loop's base prompt on resume: the rendered task PRD +
+/// subtask checklist when the session is task-linked, else a bare
+/// goal directive. Mirrors `goal run`'s prompt assembly.
+async fn build_goal_resume_prompt(
+    url: &str,
+    task_id: Option<uuid::Uuid>,
+    condition: &str,
+) -> eyre::Result<String> {
+    if let Some(id) = task_id {
+        let client = connect_task_client(url).await?;
+        if let Ok(t) = client.get(id).await {
+            let parent = match t.workflow.as_ref().and_then(|w| w.parent) {
+                Some(pid) => client.get(pid).await.ok(),
+                None => None,
+            };
+            let children = subtasks_of(&client, t.id).await.unwrap_or_default();
+            let preamble = render_task_prompt(&t, parent.as_ref());
+            let subtasks_md = render_subtask_checklist(&children);
+            return Ok(format!(
+                "{preamble}{subtasks_md}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above; complete the subtasks in order."
+            ));
+        }
+    }
+    Ok(format!(
+        "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
+    ))
 }
 
 /// Verdict from one evaluator pass.

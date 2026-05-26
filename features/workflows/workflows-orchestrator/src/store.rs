@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
-use workflows_proto::{Activity, Handoff, Transition, WorkSession, WorkflowError};
+use workflows_proto::{Activity, GoalSession, Handoff, Transition, WorkSession, WorkflowError};
 
 /// Maps any IO / codec failure onto [`WorkflowError::Backend`].
 fn backend<E: std::fmt::Display>(ctx: &str) -> impl Fn(E) -> WorkflowError + '_ {
@@ -35,6 +35,7 @@ const SESSIONS: &str = "sessions.json";
 const TRANSITIONS: &str = "transitions.json";
 const ACTIVITIES: &str = "activities.json";
 const HANDOFFS: &str = "handoffs.json";
+const GOALS: &str = "goals.json";
 
 /// File-backed store rooted at one org's `workflows/` directory.
 #[derive(Debug, Clone)]
@@ -133,6 +134,38 @@ impl WorkflowStore {
         let mut rows = self.load::<Activity>(ACTIVITIES)?;
         rows.push(a.clone());
         self.save(ACTIVITIES, &rows)
+    }
+
+    // ── goal sessions ────────────────────────────────────────
+
+    /// Every persisted goal-loop row.
+    pub fn goals(&self) -> Result<Vec<GoalSession>, WorkflowError> {
+        self.load(GOALS)
+    }
+
+    /// The goal row for `session`, if the session is a goal loop.
+    pub fn goal(&self, session: Uuid) -> Result<GoalSession, WorkflowError> {
+        self.goals()?
+            .into_iter()
+            .find(|g| g.session_id == session)
+            .ok_or(WorkflowError::SessionNotFound(session))
+    }
+
+    /// Insert or replace a goal row by `session_id`.
+    pub fn put_goal(&self, goal: &GoalSession) -> Result<(), WorkflowError> {
+        let mut rows = self.goals()?;
+        match rows.iter_mut().find(|g| g.session_id == goal.session_id) {
+            Some(slot) => *slot = goal.clone(),
+            None => rows.push(goal.clone()),
+        }
+        self.save(GOALS, &rows)
+    }
+
+    /// Drop the goal row for `session` (no-op if absent).
+    pub fn remove_goal(&self, session: Uuid) -> Result<(), WorkflowError> {
+        let mut rows = self.goals()?;
+        rows.retain(|g| g.session_id != session);
+        self.save(GOALS, &rows)
     }
 
     // ── handoffs ─────────────────────────────────────────────

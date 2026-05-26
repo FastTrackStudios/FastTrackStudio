@@ -296,6 +296,26 @@ impl CodingWorkflow {
         Ok(())
     }
 
+    /// Cancel `session` — an explicit drop (distinct from
+    /// [`finish`](Self::finish), which marks success). Used by
+    /// `task agent goal clear` to abandon a standing goal without
+    /// closing it as met.
+    pub fn cancel(&self, session: Uuid, actor: AgentRef) -> Result<(), WorkflowError> {
+        let mut s = self.store.session(session)?;
+        s.status = SessionStatus::Cancelled;
+        s.ended_at = Some(chrono::Utc::now());
+        s.updated_at = chrono::Utc::now();
+        self.store.put_session(&s)?;
+        let a = Activity::record(
+            session,
+            ActivityKind::Note,
+            actor,
+            &serde_json::json!({ "event": "cancelled" }),
+        );
+        self.store.push_activity(&a)?;
+        Ok(())
+    }
+
     /// The active (or parked) session for a task, if one exists.
     pub fn active_session_for_task(
         &self,
