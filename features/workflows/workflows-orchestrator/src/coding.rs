@@ -199,10 +199,10 @@ impl CodingWorkflow {
         recommended_next: impl Into<String>,
     ) -> Result<Handoff, WorkflowError> {
         let mut s = self.store.session(session)?;
-        let mut handoffs = self.store.handoffs()?;
+        let mut handoffs = self.store.handoffs_for(session)?;
         for h in handoffs
             .iter_mut()
-            .filter(|h| h.session_id == session && h.status == HandoffStatus::Open)
+            .filter(|h| h.status == HandoffStatus::Open)
         {
             h.status = HandoffStatus::Cancelled;
             h.resolved_at = Some(chrono::Utc::now());
@@ -211,7 +211,7 @@ impl CodingWorkflow {
         handoff.open_questions = open_questions.into();
         handoff.recommended_next = recommended_next.into();
         handoffs.push(handoff.clone());
-        self.store.save_handoffs(&handoffs)?;
+        self.store.save_handoffs_for(session, &handoffs)?;
 
         // Mirror to the activity log so the trail stays dense.
         let a = Activity::record(
@@ -247,19 +247,19 @@ impl CodingWorkflow {
         recent_activity.truncate(RESUME_ACTIVITY_LIMIT);
 
         // Latest open handoff → mark Claimed, hand it to the resumer.
-        let mut handoffs = self.store.handoffs()?;
+        let mut handoffs = self.store.handoffs_for(session)?;
         let open_handoff = {
             let idx = handoffs
                 .iter()
                 .enumerate()
-                .filter(|(_, h)| h.session_id == session && h.status == HandoffStatus::Open)
+                .filter(|(_, h)| h.status == HandoffStatus::Open)
                 .max_by_key(|(_, h)| h.created_at)
                 .map(|(i, _)| i);
             match idx {
                 Some(i) => {
                     handoffs[i].status = HandoffStatus::Claimed;
                     let claimed = handoffs[i].clone();
-                    self.store.save_handoffs(&handoffs)?;
+                    self.store.save_handoffs_for(session, &handoffs)?;
                     Some(claimed)
                 }
                 None => None,
