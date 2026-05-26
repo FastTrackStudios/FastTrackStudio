@@ -352,6 +352,24 @@ pub mod setlist_service {
         async fn clear_loop(&self) -> Result<(), SessionServiceError>;
 
         // =========================================================================
+        // Recording — targets the active song's project (song-specific)
+        // =========================================================================
+
+        /// Start recording into the active song's project.
+        async fn record(&self) -> Result<(), SessionServiceError>;
+
+        /// Stop recording in the active song's project.
+        async fn stop_recording(&self) -> Result<(), SessionServiceError>;
+
+        /// Toggle recording in the active song's project.
+        async fn toggle_recording(&self) -> Result<(), SessionServiceError>;
+
+        /// Arm or disarm the selected tracks in the active song's project for
+        /// recording. (Selected, not all — arming every track would capture
+        /// silence onto click/guide/reference tracks.)
+        async fn set_song_record_arm(&self, armed: bool) -> Result<(), SessionServiceError>;
+
+        // =========================================================================
         // Build/Refresh
         // =========================================================================
 

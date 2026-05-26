@@ -13,11 +13,11 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
+use axum::Router;
 use session::{SetlistEvent, WebClientServiceClient};
 use std::sync::OnceLock;
 use tokio::net::TcpListener;
