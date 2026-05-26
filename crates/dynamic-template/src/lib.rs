@@ -21,16 +21,16 @@ pub mod track_schema;
 pub use error::{Error, Result};
 pub use groups::{
     Bass, Choir, Drums, Guide, Guitars, Harmonica, Horns, Keys, Orchestra, Percussion, Reference,
-    SFX, StemSplit, Strings, Synths, Vocals,
+    StemSplit, Strings, Synths, Vocals, SFX,
 };
 pub use item_metadata::ItemMetadata;
 
 // Re-export monarchy types needed for direct classification
 pub use groups::stem_split::is_stem_split_set;
-pub use monarchy::{Structure, monarchy_sort};
-pub use protools::{ProToolsMetadata, extract_protools_metadata, strip_protools_markers};
+pub use monarchy::{monarchy_sort, Structure};
+pub use protools::{extract_protools_metadata, strip_protools_markers, ProToolsMetadata};
 pub use song_name::{
-    SongNameConfig, detect_song_names, detect_song_names_with_config, strip_song_names,
+    detect_song_names, detect_song_names_with_config, strip_song_names, SongNameConfig,
 };
 pub use tempo::{extract_tempo, strip_tempo};
 
