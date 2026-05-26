@@ -7,6 +7,12 @@ pub struct DawMarkersProvider {
     items: Vec<Item>,
 }
 
+impl Default for DawMarkersProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DawMarkersProvider {
     pub fn new() -> Self {
         Self {
@@ -20,6 +26,7 @@ impl DawMarkersProvider {
         }
     }
 
+    #[allow(dead_code)]
     fn refresh(&mut self) {
         let Some(daw) = daw::get() else {
             return;
@@ -51,7 +58,7 @@ impl DawMarkersProvider {
 
             self.items.push(
                 Item::new(&id, &marker.name, "markers")
-                    .with_sub(&format!("Marker at {pos}"))
+                    .with_sub(format!("Marker at {pos}"))
                     .with_icon("M")
                     .with_tags(&["reaper/markers/marker"])
                     .with_search_fields(vec![marker.name.clone()])
@@ -82,7 +89,7 @@ impl DawMarkersProvider {
 
             self.items.push(
                 Item::new(&id, &region.name, "markers")
-                    .with_sub(&format!("Region {start} - {end}"))
+                    .with_sub(format!("Region {start} - {end}"))
                     .with_icon("R")
                     .with_tags(&["reaper/markers/region"])
                     .with_search_fields(vec![region.name.clone()])

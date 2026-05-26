@@ -1,3 +1,15 @@
+[workspace]
+members = ["xtask"]
+
+# Stylistic clippy lints allowed during stabilization (same policy as daw/fts-ui):
+# they're churn, not bugs. Tighten in a later cleanup sweep.
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+
 [package]
 name = "fts-launcher"
 version = "0.1.0"
@@ -48,3 +60,6 @@ facet-styx = "3.0"
 
 # Logging
 tracing = "0.1"
+
+[lints]
+workspace = true

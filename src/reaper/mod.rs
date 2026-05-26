@@ -26,6 +26,7 @@ pub use transport::DawTransportProvider;
 
 /// Helper: run an async DAW operation synchronously.
 /// Uses the DAW runtime if available, otherwise creates a temporary one.
+#[allow(dead_code)]
 pub(crate) fn daw_block_on<F: std::future::Future>(f: F) -> Option<F::Output> {
     daw::block_on(f)
 }
