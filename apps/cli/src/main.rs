@@ -2744,6 +2744,12 @@ enum AgentCmd {
         /// no evaluator, no state change.
         #[arg(long)]
         dry_run: bool,
+        /// Skip auto-triage. By default a `--task` with no subtasks
+        /// is first decomposed into agent-sized subtasks (one
+        /// decompose turn by the worker) before the loop executes;
+        /// this works it as a single task instead.
+        #[arg(long)]
+        no_triage: bool,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -7084,11 +7090,13 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
             as_agent,
             max_iters,
             dry_run,
+            no_triage,
             org,
             server,
         } => {
             Box::pin(run_agent_goal(
-                condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, org, server,
+                condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, no_triage, org,
+                server,
             ))
             .await
         }
@@ -7106,6 +7114,7 @@ async fn run_agent_goal(
     as_agent: String,
     max_iters: u32,
     dry_run: bool,
+    no_triage: bool,
     org: Option<String>,
     server: Option<String>,
 ) -> eyre::Result<()> {
@@ -7114,14 +7123,11 @@ async fn run_agent_goal(
 
     let slug = resolve_active_org(org)?;
     let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
+    let url = resolve_org_vox_url(server.clone(), &slug);
 
     // Resolve the optional linked task (claim it; it becomes the
     // session subject + the default evaluator's completion check).
-    let url = resolve_org_vox_url(server.clone(), &slug);
-    // When linked to a task: claim it and render its PRD (+ parent's)
-    // as the prompt preamble, so the agent gets the full spec, not
-    // just the bare condition.
-    let (task_id, task_preamble) = match &task_ref {
+    let (task_id, task_info, parent_info) = match &task_ref {
         Some(r) => {
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, r).await?;
@@ -7132,28 +7138,10 @@ async fn run_agent_goal(
                 Some(pid) => client.get(pid).await.ok(),
                 None => None,
             };
-            (Some(t.id), render_task_prompt(&t, parent.as_ref()))
+            (Some(t.id), Some(t), parent)
         }
-        None => (None, String::new()),
+        None => (None, None, None),
     };
-
-    // The first prompt: the condition is the directive (matching
-    // Claude Code's `/goal`, where the condition itself starts the
-    // turn). When tied to a task, lead with its rendered PRD.
-    // Subsequent turns append the evaluator's reason.
-    let base_prompt = if task_preamble.is_empty() {
-        format!(
-            "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
-        )
-    } else {
-        format!(
-            "{task_preamble}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above."
-        )
-    };
-    if dry_run {
-        println!("{base_prompt}");
-        return Ok(());
-    }
 
     // Resolve the worker + evaluator commands. Precedence: explicit
     // flag → env var → per-org `agent.json` [goal] defaults. The
@@ -7165,15 +7153,83 @@ async fn run_agent_goal(
     let cfg = load_goal_config(&slug);
     let worker = cmd
         .or_else(|| std::env::var("TASK_AGENT_CMD").ok())
-        .or(cfg.worker_cmd)
-        .ok_or_else(|| {
-            eyre::eyre!(
-                "no worker command: pass --cmd, set TASK_AGENT_CMD, or set goal.worker_cmd in ~/.task/orgs/{slug}/agent.json"
-            )
-        })?;
+        .or(cfg.worker_cmd);
     let evaluator = eval_cmd
         .or_else(|| std::env::var("TASK_GOAL_EVAL_CMD").ok())
         .or(cfg.eval_cmd);
+
+    // Auto-triage (Hermes kanban-orchestrator style: "decompose,
+    // don't execute"). A linked task with no subtasks gets one
+    // decompose turn — the worker breaks the PRD into agent-sized
+    // titles, or judges it a one-shot and emits none (we don't
+    // fragment small tasks). Skipped on --no-triage / --dry-run.
+    let mut subtasks_md = String::new();
+    if let Some(t) = &task_info {
+        let client = connect_task_client(&url).await?;
+        let mut children = subtasks_of(&client, t.id).await?;
+        if children.is_empty() && !no_triage && !dry_run {
+            let w = worker.as_deref().ok_or_else(|| {
+                eyre::eyre!(
+                    "auto-triage needs a worker: pass --cmd / set TASK_AGENT_CMD / goal.worker_cmd, or --no-triage"
+                )
+            })?;
+            let dprompt = decompose_prompt(&render_task_prompt(t, parent_info.as_ref()));
+            println!("⊙ auto-triage: decomposing {} …", short_uuid(&t.id));
+            let out = run_subprocess(w, &dprompt, 0, &condition)?;
+            let titles = parse_subtask_titles(&out.stdout);
+            if titles.is_empty() {
+                println!("  one-shot task — no subtasks created");
+            } else {
+                let mut made = 0usize;
+                for title in &titles {
+                    if create_subtask(&client, t, title).await? {
+                        made += 1;
+                        println!("    + {title}");
+                    } else {
+                        println!("    ~ {title} (already exists — skipped)");
+                    }
+                }
+                if made > 0 {
+                    // Flip the parent into the working state.
+                    let mut p = t.clone();
+                    p.status = "in-progress".into();
+                    p.completed_date = None;
+                    let _ = client.update(p).await;
+                }
+                println!("  created {made}/{} subtask(s)", titles.len());
+                children = subtasks_of(&client, t.id).await?;
+            }
+        }
+        subtasks_md = render_subtask_checklist(&children);
+    }
+
+    // The first prompt: the condition is the directive (matching
+    // Claude Code's `/goal`, where the condition itself starts the
+    // turn). When tied to a task, lead with its rendered PRD + the
+    // subtask checklist. Subsequent turns append the evaluator reason.
+    let preamble = task_info
+        .as_ref()
+        .map(|t| render_task_prompt(t, parent_info.as_ref()))
+        .unwrap_or_default();
+    let base_prompt = if preamble.is_empty() {
+        format!(
+            "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
+        )
+    } else {
+        format!(
+            "{preamble}{subtasks_md}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above; complete the subtasks in order."
+        )
+    };
+    if dry_run {
+        println!("{base_prompt}");
+        return Ok(());
+    }
+
+    let worker = worker.ok_or_else(|| {
+        eyre::eyre!(
+            "no worker command: pass --cmd, set TASK_AGENT_CMD, or set goal.worker_cmd in ~/.task/orgs/{slug}/agent.json"
+        )
+    })?;
     if evaluator.is_none() && task_id.is_none() {
         return Err(eyre::eyre!(
             "no evaluator: pass --eval-cmd, set TASK_GOAL_EVAL_CMD / goal.eval_cmd, or pass --task for the built-in done-check"
@@ -7419,6 +7475,124 @@ fn render_task_prompt(t: &task::TaskInfo, parent: Option<&task::TaskInfo>) -> St
     }
     if !t.tags.0.is_empty() {
         s.push_str(&format!("\ntags: {}\n", t.tags.0.join(", ")));
+    }
+    s
+}
+
+/// Open subtasks of `parent_id` — tasks whose `workflow.parent`
+/// points at it — oldest first by title (stable enough for a list).
+async fn subtasks_of(
+    client: &task::TaskServiceClient,
+    parent_id: uuid::Uuid,
+) -> eyre::Result<Vec<task::TaskInfo>> {
+    let rows = client
+        .list()
+        .await
+        .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+    let mut kids: Vec<task::TaskInfo> = rows
+        .into_iter()
+        .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent_id))
+        .collect();
+    kids.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(kids)
+}
+
+/// Create one subtask `title` under `parent`, mirroring `issue
+/// triage`'s row shape (parent link, `subtask` tag, inherited
+/// project). Returns `false` (rather than erroring) when a task with
+/// the same title-slug already exists — generated titles can collide,
+/// and a collision shouldn't abort the whole triage.
+async fn create_subtask(
+    client: &task::TaskServiceClient,
+    parent: &task::TaskInfo,
+    title: &str,
+) -> eyre::Result<bool> {
+    let sub = task::TaskInfo {
+        id: uuid::Uuid::nil(),
+        path: String::new(),
+        title: title.to_owned(),
+        status: "open".into(),
+        priority: parent.priority.clone(),
+        due: None,
+        scheduled: None,
+        tags: task::model::StringList(vec!["task".into(), "subtask".into()]),
+        contexts: task::model::StringList::default(),
+        projects: task::model::StringList::default(),
+        project_id: parent.project_id,
+        milestone_id: None,
+        time_estimate: None,
+        time_entries: task::model::TimeEntries::default(),
+        recurrence: None,
+        recurrence_anchor: None,
+        complete_instances: task::model::StringList::default(),
+        completed_date: None,
+        agent_profile: String::new(),
+        dispatched_agent_tasks: task::model::StringList::default(),
+        date_created: None,
+        date_modified: None,
+        details: String::new(),
+        workflow: Some(task::model::WorkflowAttrs {
+            parent: Some(parent.id),
+            ..Default::default()
+        }),
+    };
+    match client.create(sub).await {
+        Ok(_) => Ok(true),
+        // Title-slug already taken — skip rather than abort the run.
+        // Matched on the message since the error is wrapped in
+        // VoxError<TaskError> across the wire.
+        Err(e) if format!("{e:?}").contains("AlreadyExists") => Ok(false),
+        Err(e) => Err(eyre::eyre!("create subtask: {e:?}")),
+    }
+}
+
+/// The decompose-turn prompt. "Decompose, don't execute" (per
+/// Hermes's kanban-orchestrator): the worker breaks the PRD into
+/// agent-sized titles or declares it a one-shot.
+fn decompose_prompt(task_prompt: &str) -> String {
+    format!(
+        "{task_prompt}\n\n---\n\nYou are TRIAGING this task — do NOT implement anything. \
+         Break it into 2–6 agent-sized subtasks, each a single focused PR's worth of work, \
+         ideally independent. Output ONLY the subtask titles, one per line, no numbering or \
+         prose. If the task is small enough to do in one shot (no fan-out needed), output \
+         the single line: ONE-SHOT"
+    )
+}
+
+/// Parse subtask titles from a decompose turn's output. Strips
+/// bullets / numbering, drops blanks and the `ONE-SHOT` sentinel,
+/// and ignores obvious prose (lines ending in `:` or very long).
+fn parse_subtask_titles(out: &str) -> Vec<String> {
+    out.lines()
+        .map(|l| {
+            l.trim()
+                .trim_start_matches(['-', '*', '•'])
+                .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ')')
+                .trim()
+                .to_owned()
+        })
+        .filter(|l| {
+            !l.is_empty()
+                && !l.eq_ignore_ascii_case("ONE-SHOT")
+                && !l.ends_with(':')
+                && l.len() <= 140
+        })
+        .collect()
+}
+
+/// Render the subtask checklist appended to the goal prompt.
+fn render_subtask_checklist(children: &[task::TaskInfo]) -> String {
+    if children.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from("\n\n## Subtasks\n");
+    for c in children {
+        let done = matches!(task::Status::from_str(&c.status), Some(task::Status::Done));
+        s.push_str(&format!(
+            "- [{}] {}\n",
+            if done { "x" } else { " " },
+            c.title
+        ));
     }
     s
 }
