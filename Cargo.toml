@@ -56,14 +56,14 @@ eyre = "0.6"
 # moire: unify crates.io moire with the git rev that vox pulls in,
 # avoiding duplicate moire-runtime #[ctor] registrations that crash.
 [patch.crates-io]
-moire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-macros-noop = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-runtime = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-tokio = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-trace-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-wasm = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-wire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-macros-noop = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-runtime = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-tokio = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-trace-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-types = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wasm = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
+moire-wire = { git = "https://git.starcommand.live/FastTrackStudios/moire.git", rev = "7a2f1dc" }
 
 # dioxus: daw pulls REAPER UI features (daw-reaper → daw-reaper-dioxus →
 # patched dioxus). Mirror daw's dioxus-git patch so the dep graph resolves.
