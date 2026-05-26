@@ -17,7 +17,9 @@
 //! — wrap or extend it when an untrusted agent class appears.
 
 pub mod coding;
+pub mod runner;
 pub mod store;
 
 pub use coding::{CodingState, CodingWorkflow};
+pub use runner::{IterationOutcome, RunEnd, SessionRun};
 pub use store::WorkflowStore;
