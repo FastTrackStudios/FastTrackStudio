@@ -228,7 +228,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -239,7 +239,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -251,7 +251,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 [[package]]
 name = "anyrender"
 version = "0.10.0"
-source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#2dc40e1d43c1a67cc00a029de2d553c949472f8d"
+source = "git+https://github.com/DioxusLabs/anyrender.git?branch=main#7d60908c35f8df168888a66fe1ee5507cc6402ab"
 dependencies = [
  "kurbo 0.13.1",
  "peniko 0.6.1",
@@ -1287,7 +1287,7 @@ dependencies = [
 [[package]]
 name = "color-palette"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#86e393de36419700042408c78b07372991ed946f"
 dependencies = [
  "facet 0.46.4",
  "thiserror 2.0.18",
@@ -1323,7 +1323,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2066,7 +2066,7 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "facet 0.46.4",
- "moire 1.0.0",
+ "moire",
  "reaper-launcher",
  "tokio",
  "tracing",
@@ -2117,7 +2117,7 @@ dependencies = [
  "daw-reaper",
  "eyre",
  "fragile",
- "moire 1.0.0",
+ "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -2171,7 +2171,7 @@ dependencies = [
  "eyre",
  "facet-json",
  "libloading 0.8.9",
- "moire 1.0.0",
+ "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -2193,7 +2193,7 @@ dependencies = [
  "base64 0.22.1",
  "daw-proto",
  "gloo-timers",
- "moire 1.0.0",
+ "moire",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2949,7 +2949,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3103,7 +3103,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "dynamic-template"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#86e393de36419700042408c78b07372991ed946f"
 dependencies = [
  "anyhow",
  "color-palette",
@@ -3125,7 +3125,7 @@ dependencies = [
 [[package]]
 name = "dynamic-template-proto"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#86e393de36419700042408c78b07372991ed946f"
 dependencies = [
  "actions-proto",
  "daw-proto",
@@ -3280,7 +3280,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3395,7 +3395,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -3883,7 +3883,7 @@ dependencies = [
 [[package]]
 name = "fts-story-core"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#179f23782dbfb8f160c1c24fdd199187b6eb9de7"
 dependencies = [
  "linkme",
 ]
@@ -3891,7 +3891,7 @@ dependencies = [
 [[package]]
 name = "fts-story-macros"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#179f23782dbfb8f160c1c24fdd199187b6eb9de7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3902,7 +3902,7 @@ dependencies = [
 [[package]]
 name = "fts-story-runtime"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#7b7ae8b7609cc4f1914748ac410abcf75545e859"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#179f23782dbfb8f160c1c24fdd199187b6eb9de7"
 dependencies = [
  "dioxus",
  "fts-story-core",
@@ -4705,9 +4705,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
+checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
 dependencies = [
  "bytes",
  "itoa 1.0.18",
@@ -4808,7 +4808,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tokio",
  "tower-service",
  "tracing",
@@ -4826,7 +4826,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5123,7 +5123,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5193,9 +5193,9 @@ dependencies = [
 
 [[package]]
 name = "jiff"
-version = "0.2.25"
+version = "0.2.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6835eea34fb6321b9b3aa7b685c2b433948c09447e389dc017fdf687d5d11e65"
+checksum = "30457d51cb0e68ee18184b30cd9eb8e1602a20837c321f6ea9706b94f1c681c3"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
@@ -5203,14 +5203,14 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.52.0",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.25"
+version = "0.2.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c22e04db9c58f5136eb1757f3d5c49a7b187f49e52185228cbd2f5acdfcc08c"
+checksum = "05f86e4f0326c61ae6c00b04d9009aaeda644d0b5bdfbf6c67247f492f42b3f3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6171,30 +6171,15 @@ name = "moire"
 version = "1.0.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
- "moire-macros-noop 1.0.0",
- "moire-tokio 1.0.0",
- "moire-wasm 1.0.0",
-]
-
-[[package]]
-name = "moire"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "moire-macros-noop 1.0.1",
- "moire-tokio 1.0.1",
- "moire-wasm 1.0.1",
+ "moire-macros-noop",
+ "moire-tokio",
+ "moire-wasm",
 ]
 
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
-
-[[package]]
-name = "moire-macros-noop"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
 
 [[package]]
 name = "moire-runtime"
@@ -6205,26 +6190,10 @@ dependencies = [
  "facet 0.46.4",
  "facet-json",
  "facet-value",
- "moire-trace-capture 1.0.0",
- "moire-trace-types 1.0.0",
- "moire-types 1.0.0",
- "moire-wire 1.0.0",
- "tokio",
-]
-
-[[package]]
-name = "moire-runtime"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "ctor",
- "facet 0.46.4",
- "facet-json",
- "facet-value",
- "moire-trace-capture 1.0.1",
- "moire-trace-types 1.0.1",
- "moire-types 1.0.1",
- "moire-wire 1.0.1",
+ "moire-trace-capture",
+ "moire-trace-types",
+ "moire-types",
+ "moire-wire",
  "tokio",
 ]
 
@@ -6233,19 +6202,8 @@ name = "moire-tokio"
 version = "1.0.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
- "moire-runtime 1.0.0",
- "moire-types 1.0.0",
- "parking_lot",
- "tokio",
-]
-
-[[package]]
-name = "moire-tokio"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "moire-runtime 1.0.1",
- "moire-types 1.0.1",
+ "moire-runtime",
+ "moire-types",
  "parking_lot",
  "tokio",
 ]
@@ -6256,16 +6214,7 @@ version = "1.0.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "libc",
- "moire-trace-types 1.0.0",
-]
-
-[[package]]
-name = "moire-trace-capture"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "libc",
- "moire-trace-types 1.0.1",
+ "moire-trace-types",
 ]
 
 [[package]]
@@ -6277,31 +6226,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "moire-trace-types"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "facet 0.46.4",
-]
-
-[[package]]
 name = "moire-types"
 version = "1.0.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1dc#7a2f1dc4f188e8ea43f94743facb9bd7cb6cbce5"
 dependencies = [
  "facet 0.46.4",
  "facet-value",
- "moire-trace-types 1.0.0",
-]
-
-[[package]]
-name = "moire-types"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "facet 0.46.4",
- "facet-value",
- "moire-trace-types 1.0.1",
+ "moire-trace-types",
 ]
 
 [[package]]
@@ -6315,22 +6246,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-timers",
- "moire-types 1.0.0",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "moire-wasm"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "async-channel 2.5.0",
- "async-lock",
- "event-listener 5.4.1",
- "futures-channel",
- "futures-util",
- "gloo-timers",
- "moire-types 1.0.1",
+ "moire-types",
  "wasm-bindgen-futures",
 ]
 
@@ -6341,19 +6257,8 @@ source = "git+https://git.starcommand.live/FastTrackStudios/moire.git?rev=7a2f1d
 dependencies = [
  "facet 0.46.4",
  "facet-json",
- "moire-trace-types 1.0.0",
- "moire-types 1.0.0",
-]
-
-[[package]]
-name = "moire-wire"
-version = "1.0.1"
-source = "git+https://github.com/bearcove/moire?rev=cf162e7#cf162e7be775dd6a22317fa4fef1309e6c0a9d69"
-dependencies = [
- "facet 0.46.4",
- "facet-json",
- "moire-trace-types 1.0.1",
- "moire-types 1.0.1",
+ "moire-trace-types",
+ "moire-types",
 ]
 
 [[package]]
@@ -6439,7 +6344,7 @@ checksum = "bb41311b1064dea78399acd92ca903b13be1120eef0a8555803da792e2c50511"
 [[package]]
 name = "music-catalog"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#a2f312791b31cbe517ab06131ac778574d747e03"
+source = "git+https://git.starcommand.live/FastTrackStudios/dynamic-template.git?branch=main#86e393de36419700042408c78b07372991ed946f"
 dependencies = [
  "color-palette",
 ]
@@ -6609,7 +6514,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7856,7 +7761,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.2",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7893,7 +7798,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -8559,7 +8464,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8880,7 +8785,7 @@ dependencies = [
  "eyre",
  "keyflow",
  "keyflow-daw-analysis",
- "moire 1.0.0",
+ "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -8905,7 +8810,7 @@ dependencies = [
  "eyre",
  "facet 0.46.4",
  "facet-json",
- "moire 1.0.0",
+ "moire",
  "serde_json",
  "session-proto",
  "tokio",
@@ -8927,7 +8832,7 @@ dependencies = [
  "dock-proto",
  "eyre",
  "fts-ui",
- "moire 1.0.0",
+ "moire",
  "session",
  "session-ui",
  "tokio",
@@ -9293,7 +9198,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9530,7 +9435,7 @@ dependencies = [
 [[package]]
 name = "swell-ui"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#78b5af0a26d6836ade8ff21ec1c95b6bcd34ca23"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#1bd24cd9fa7f8992b9a3f1c8716c6904aaebe779"
 dependencies = [
  "fragile",
  "libloading 0.9.0",
@@ -9674,7 +9579,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10582,7 +10487,7 @@ dependencies = [
  "facet 0.46.4",
  "facet-pretty",
  "facet-reflect",
- "moire 1.0.1",
+ "moire",
  "tokio",
  "tracing",
  "vox-core 0.4.0",
@@ -10596,12 +10501,12 @@ dependencies = [
 [[package]]
 name = "vox"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-pretty",
  "facet-reflect",
- "moire 1.0.1",
+ "moire",
  "tokio",
  "tracing",
  "vox-core 0.5.0",
@@ -10624,7 +10529,7 @@ dependencies = [
  "facet-reflect",
  "futures-util",
  "getrandom 0.4.2",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -10638,7 +10543,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-cbor 0.3.4",
@@ -10647,7 +10552,7 @@ dependencies = [
  "facet-reflect",
  "futures-util",
  "getrandom 0.4.2",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "tokio",
  "tracing",
@@ -10661,7 +10566,7 @@ dependencies = [
 [[package]]
 name = "vox-ffi"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "tracing",
  "vox-types 0.5.0",
@@ -10691,7 +10596,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -10723,7 +10628,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "facet-core 0.46.4",
@@ -10743,7 +10648,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10764,7 +10669,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -10785,7 +10690,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -10807,7 +10712,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10832,7 +10737,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "blake3",
  "facet 0.46.4",
@@ -10853,7 +10758,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "vox-macros-core 0.5.0",
@@ -10865,7 +10770,7 @@ version = "0.4.0"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
 dependencies = [
  "libc",
- "moire 1.0.1",
+ "moire",
  "tokio",
  "vox-core 0.4.0",
  "vox-types 0.4.0",
@@ -10874,10 +10779,10 @@ dependencies = [
 [[package]]
 name = "vox-stream"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "libc",
- "moire 1.0.1",
+ "moire",
  "tokio",
  "vox-core 0.5.0",
  "vox-types 0.5.0",
@@ -10899,7 +10804,7 @@ dependencies = [
  "futures-channel",
  "heck 0.5.0",
  "indexmap",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -10911,7 +10816,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -10924,7 +10829,7 @@ dependencies = [
  "futures-channel",
  "heck 0.5.0",
  "indexmap",
- "moire 1.0.1",
+ "moire",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -10937,7 +10842,7 @@ dependencies = [
 [[package]]
 name = "vox-websocket"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -11631,7 +11536,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

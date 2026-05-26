@@ -186,3 +186,23 @@ map_clone = "allow"
 unnecessary_map_or = "allow"
 if_same_then_else = "allow"
 redundant_locals = "allow"
+
+# vox: FTS fork carries the vox-jit-abi __rust_alloc-scan fix — without it the
+# JIT encode worker OOMs/aborts on complex/allocating RPC return types
+# (complex_return_roundtrips). Redirect bearcove/vox → FTS fork.
+[patch."https://github.com/bearcove/vox"]
+facet-cbor = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-ffi = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit-abi = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit-cal = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-macros-core = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-macros-parse = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-postcard = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-schema = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-stream = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
