@@ -1425,7 +1425,10 @@ enum IssueCmd {
 #[derive(Subcommand)]
 enum CodeCmd {
     /// Claim a task, flip it to in-progress, and create a work
-    /// branch off the current HEAD.
+    /// branch off the current HEAD. With `--worktree`, the
+    /// branch gets its own git worktree (separate directory) so
+    /// multiple agents can work different subtasks of one issue
+    /// in parallel without colliding on HEAD / the index.
     Start {
         /// Task id (UUID or 8-char prefix).
         id: String,
@@ -1435,10 +1438,23 @@ enum CodeCmd {
         /// Branch prefix. Default `task`.
         #[arg(long, default_value = "task")]
         prefix: String,
+        /// Create an isolated git worktree for the branch (under
+        /// `.task-worktrees/`) instead of switching the current
+        /// checkout. The key to parallel agents on one issue.
+        #[arg(long)]
+        worktree: bool,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+    },
+    /// List active `task code` worktrees (parallel work dirs).
+    Worktrees,
+    /// Remove the worktree for a task branch once it's merged
+    /// (or to abandon it). Accepts the task short-id or branch.
+    Cleanup {
+        /// Task short-id (8 chars) or full branch name.
+        id: String,
     },
     /// `git commit` with attribution trailers (Task-Id,
     /// Task-Agent, Co-Authored-By) derived from the current
@@ -9524,6 +9540,7 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
             id,
             as_agent,
             prefix,
+            worktree,
             org,
             server,
         } => {
@@ -9531,7 +9548,7 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
             let url = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&url).await?;
             let mut t = resolve_issue_id(&client, &id).await?;
-            let short = &t.id.simple().to_string()[..8];
+            let short = t.id.simple().to_string()[..8].to_string();
             let title_slug: String = t
                 .title
                 .chars()
@@ -9549,7 +9566,25 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 .collect::<Vec<_>>()
                 .join("-");
             let branch = format!("{prefix}/{short}-{title_slug}");
-            git(&["switch", "-c", &branch])?;
+
+            if worktree {
+                // Isolated worktree → parallel agents don't collide.
+                let repo_root = git(&["rev-parse", "--show-toplevel"])?;
+                let wt_rel = format!(".task-worktrees/{short}-{title_slug}");
+                let wt_path = std::path::Path::new(&repo_root).join(&wt_rel);
+                if wt_path.exists() {
+                    return Err(eyre::eyre!(
+                        "worktree already exists at {wt_rel} — `task code cleanup {short}` to remove it"
+                    ));
+                }
+                git(&["worktree", "add", "-b", &branch, &wt_path.to_string_lossy()])?;
+                println!("started {short} in worktree {wt_rel} (branch {branch})");
+                println!("  work in: {}", wt_path.display());
+                println!("  then: cd into it and run `task code commit` / `task code push` there");
+            } else {
+                git(&["switch", "-c", &branch])?;
+                println!("started {short} on branch {branch}");
+            }
 
             t.status = "in-progress".into();
             t.completed_date = None;
@@ -9566,7 +9601,49 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 .update(t)
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
-            println!("started {short} on branch {branch}");
+        }
+        CodeCmd::Worktrees => {
+            // `git worktree list --porcelain` → show the task ones.
+            let out = git(&["worktree", "list", "--porcelain"])?;
+            let mut path = String::new();
+            let mut found = false;
+            for line in out.lines() {
+                if let Some(p) = line.strip_prefix("worktree ") {
+                    path = p.to_string();
+                } else if let Some(b) = line.strip_prefix("branch ") {
+                    let b = b.trim_start_matches("refs/heads/");
+                    if b.starts_with("task/") {
+                        println!("{b}\n  {path}");
+                        found = true;
+                    }
+                }
+            }
+            if !found {
+                println!("(no task worktrees)");
+            }
+        }
+        CodeCmd::Cleanup { id } => {
+            // Resolve the worktree dir from the short-id or branch.
+            let out = git(&["worktree", "list", "--porcelain"])?;
+            let mut path = String::new();
+            let mut target: Option<String> = None;
+            for line in out.lines() {
+                if let Some(p) = line.strip_prefix("worktree ") {
+                    path = p.to_string();
+                } else if let Some(b) = line.strip_prefix("branch ") {
+                    let b = b.trim_start_matches("refs/heads/");
+                    let matches =
+                        b == id || b.starts_with(&format!("task/{id}-")) || b.contains(&id);
+                    if matches && b.starts_with("task/") {
+                        target = Some(path.clone());
+                    }
+                }
+            }
+            let Some(dir) = target else {
+                return Err(eyre::eyre!("no task worktree matching `{id}`"));
+            };
+            git(&["worktree", "remove", "--force", &dir])?;
+            println!("removed worktree {dir}");
         }
         CodeCmd::Commit {
             message,
