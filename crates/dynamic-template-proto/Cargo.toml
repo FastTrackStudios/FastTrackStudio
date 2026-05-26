@@ -11,6 +11,9 @@ categories = ["multimedia::audio"]
 [dependencies]
 facet = { workspace = true }
 daw-proto = { workspace = true }
+# Canonical taxonomy: the IdealFullSessionTemplate sources its group-slot
+# categories from music-catalog's 128-slot partition (single source of truth).
+music-catalog = { workspace = true }
 vox = { workspace = true }
 thiserror = { workspace = true }
 actions-proto = { workspace = true }
