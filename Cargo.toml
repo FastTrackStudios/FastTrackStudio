@@ -273,13 +273,35 @@ reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/rea
 # which transitively drags in facet 0.44 and conflicts with the rest
 # of the FTS workspace running on facet 0.46) to the bearcove rev
 # every other sibling agrees on.
+# FTS fork of bearcove/vox@27eef573 carrying the vox-jit-abi
+# __rust_alloc-scan fallback fix. Without it, any RPC returning a complex
+# (allocating) type aborts the JIT encode worker — the desktop's setlist /
+# song subscriptions hang. Patch every vox crate to the fork so the whole
+# graph (incl. the Codys-Wright redirect below) resolves from one source.
+[patch."https://github.com/bearcove/vox"]
+facet-cbor = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+ur-taking-me-with-you = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-core = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-inprocess = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit-abi = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit-cal = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-macros-core = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-macros-parse = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-postcard = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-schema = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-service-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-stream = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-types = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+
 [patch."https://github.com/Codys-Wright/vox.git"]
-vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-inprocess = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+vox = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-core = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-types = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-stream = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-inprocess = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+ur-taking-me-with-you = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,
