@@ -36,6 +36,7 @@ git-proto = { workspace = true }
 git-config = { workspace = true }
 git-forgejo = { workspace = true }
 git-github = { workspace = true }
+label-proto = { workspace = true }
 # `task setup forge` registers webhooks via the forge REST API
 # directly (both forges' hook endpoints are near-identical).
 reqwest = { workspace = true }

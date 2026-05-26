@@ -140,6 +140,10 @@ enum Commands {
     /// git remote, so it works on third-party repos too.
     #[command(subcommand)]
     Code(CodeCmd),
+    /// Org-scoped labels — colored tags for triage + filtering.
+    /// Persisted per-org as `labels.json`.
+    #[command(subcommand)]
+    Label(LabelCmd),
     /// Goals (with cycle anchoring) served by the active
     /// org. Talks to `/org/<slug>/vox` via the architect-
     /// generated `GoalServiceClient`.
@@ -1458,6 +1462,38 @@ enum CodeCmd {
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+    },
+}
+
+/// `task label *` — org-scoped colored tags.
+#[derive(Subcommand)]
+enum LabelCmd {
+    /// Create a label (idempotent on name within the org).
+    Create {
+        name: String,
+        /// 6-char hex color without `#` (e.g. `d73a4a`).
+        #[arg(long)]
+        color: Option<String>,
+        /// Optional group (e.g. `priority`, `area`).
+        #[arg(long)]
+        group: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        org: Option<String>,
+    },
+    /// List all labels in the org.
+    List {
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a label by name.
+    Rm {
+        name: String,
+        #[arg(long)]
+        org: Option<String>,
     },
 }
 
@@ -3274,6 +3310,9 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Code(cmd) => {
             return Box::pin(run_code(cmd)).await;
+        }
+        Commands::Label(cmd) => {
+            return run_label(cmd);
         }
         Commands::Org(cmd) => {
             return Box::pin(run_org(cmd)).await;
@@ -9481,6 +9520,108 @@ async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
                 };
                 println!("  {kind:<5} {}/{}#{}", l.repo.owner, l.repo.repo, l.number);
             }
+        }
+    }
+    Ok(())
+}
+
+/// Path to the per-org label store JSON.
+fn label_store_path(org_slug: &str) -> eyre::Result<std::path::PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
+    Ok(std::path::Path::new(&home)
+        .join(".task")
+        .join("orgs")
+        .join(org_slug)
+        .join("labels.json"))
+}
+
+fn load_labels(org_slug: &str) -> eyre::Result<Vec<label_proto::Label>> {
+    let p = label_store_path(org_slug)?;
+    if !p.exists() {
+        return Ok(Vec::new());
+    }
+    let bytes = std::fs::read(&p).map_err(|e| eyre::eyre!("read {}: {e}", p.display()))?;
+    serde_json::from_slice(&bytes).map_err(|e| eyre::eyre!("parse labels.json: {e}"))
+}
+
+fn save_labels(org_slug: &str, labels: &[label_proto::Label]) -> eyre::Result<()> {
+    let p = label_store_path(org_slug)?;
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| eyre::eyre!("mkdir: {e}"))?;
+    }
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(labels)?)
+        .map_err(|e| eyre::eyre!("write: {e}"))?;
+    std::fs::rename(&tmp, &p).map_err(|e| eyre::eyre!("rename: {e}"))?;
+    Ok(())
+}
+
+fn run_label(cmd: LabelCmd) -> eyre::Result<()> {
+    match cmd {
+        LabelCmd::Create {
+            name,
+            color,
+            group,
+            description,
+            org,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let mut labels = load_labels(&slug)?;
+            if let Some(existing) = labels
+                .iter_mut()
+                .find(|l| l.name.eq_ignore_ascii_case(&name))
+            {
+                // Idempotent: update color/group/description on re-create.
+                existing.color = color.or(existing.color.take());
+                existing.group = group.or(existing.group.take());
+                existing.description = description.or(existing.description.take());
+                existing.updated_at = chrono::Utc::now();
+                save_labels(&slug, &labels)?;
+                println!("updated label `{name}`");
+                return Ok(());
+            }
+            // org-scoped: workspace_id is nil (no Workspace entity).
+            let mut l = label_proto::Label::new(uuid::Uuid::nil(), &name);
+            l.color = color;
+            l.group = group;
+            l.description = description;
+            labels.push(l);
+            save_labels(&slug, &labels)?;
+            println!("created label `{name}`");
+        }
+        LabelCmd::List { org, json } => {
+            let slug = resolve_active_org(org)?;
+            let labels = load_labels(&slug)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&labels)?);
+                return Ok(());
+            }
+            if labels.is_empty() {
+                println!("(no labels)");
+                return Ok(());
+            }
+            for l in &labels {
+                let color = l
+                    .color
+                    .as_deref()
+                    .map_or(String::new(), |c| format!(" #{c}"));
+                let group = l
+                    .group
+                    .as_deref()
+                    .map_or(String::new(), |g| format!(" [{g}]"));
+                println!("{}{group}{color}", l.name);
+            }
+        }
+        LabelCmd::Rm { name, org } => {
+            let slug = resolve_active_org(org)?;
+            let mut labels = load_labels(&slug)?;
+            let before = labels.len();
+            labels.retain(|l| !l.name.eq_ignore_ascii_case(&name));
+            if labels.len() == before {
+                return Err(eyre::eyre!("no label named `{name}`"));
+            }
+            save_labels(&slug, &labels)?;
+            println!("removed label `{name}`");
         }
     }
     Ok(())
