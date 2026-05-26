@@ -14308,6 +14308,7 @@ dependencies = [
  "wiki-live",
  "wiki-proto",
  "wiki-search",
+ "workflows-orchestrator",
  "workflows-proto",
  "workouts",
 ]
@@ -17396,6 +17397,18 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser 0.244.0",
+]
+
+[[package]]
+name = "workflows-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "workflows-proto",
 ]
 
 [[package]]

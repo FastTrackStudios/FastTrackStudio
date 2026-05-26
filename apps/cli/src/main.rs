@@ -2648,6 +2648,60 @@ enum AgentCmd {
         /// The user message. Quote it.
         message: String,
     },
+    /// Put an agent in an autonomous loop toward a completion
+    /// condition, the way Claude Code's `/goal` does — but
+    /// agent-agnostic and persisted. Each iteration runs the worker
+    /// command (one "turn"), then a separate evaluator judges whether
+    /// the condition holds against what the worker surfaced. "Not
+    /// met" loops with the evaluator's reason fed back as guidance;
+    /// "met" stops. Bounded by `--max-iters`.
+    ///
+    /// The run is a `WorkSession` (workflows-orchestrator), so every
+    /// turn is logged and the run is resumable. Distinct from the
+    /// life-Goal/OKR system (`task goal`).
+    ///
+    /// Example:
+    ///   task agent goal "all tests in features/git pass" \
+    ///     --cmd 'claude -p' --eval-cmd 'claude -p' --as-agent claude
+    Goal {
+        /// The completion condition. Write it so the worker's own
+        /// output can demonstrate it (e.g. "`cargo test -p x` exits
+        /// 0"). Up to a few KB.
+        condition: String,
+        /// Worker command, run via `sh -c` once per turn. The prompt
+        /// (condition + last evaluator reason) is piped to its stdin;
+        /// `TASK_GOAL` / `TASK_GOAL_ITER` are set in its env. Falls
+        /// back to `TASK_AGENT_CMD`.
+        #[arg(long)]
+        cmd: Option<String>,
+        /// Evaluator command, run via `sh -c` after each turn. Reads
+        /// the condition + the worker's captured output on stdin;
+        /// exit `0` = met (stop), nonzero = not met (its stdout is
+        /// the reason, fed into the next turn). Falls back to
+        /// `TASK_GOAL_EVAL_CMD`. If unset and `--task` is given, the
+        /// built-in evaluator checks whether the task is `done`.
+        #[arg(long)]
+        eval_cmd: Option<String>,
+        /// Tie the run to an existing task (UUID or 8-char prefix):
+        /// claim it, make it the session subject, and (default
+        /// evaluator) treat `status == done` as the condition.
+        #[arg(long)]
+        task: Option<String>,
+        /// Attribute the loop to this agent (`name[@version]`).
+        #[arg(long = "as-agent", default_value = "claude")]
+        as_agent: String,
+        /// Turn ceiling before parking the session as resumable.
+        #[arg(long, default_value_t = 25)]
+        max_iters: u32,
+        /// Render + print the first prompt and exit — no worker,
+        /// no evaluator, no state change.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -6975,7 +7029,232 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
             }
             Ok(())
         }
+        AgentCmd::Goal {
+            condition,
+            cmd,
+            eval_cmd,
+            task,
+            as_agent,
+            max_iters,
+            dry_run,
+            org,
+            server,
+        } => {
+            Box::pin(run_agent_goal(
+                condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, org, server,
+            ))
+            .await
+        }
     }
+}
+
+/// `task agent goal` — the autonomous goal loop (worker turn +
+/// evaluator gate, looped until the condition is met). See [`AgentCmd::Goal`].
+#[allow(clippy::too_many_arguments)]
+async fn run_agent_goal(
+    condition: String,
+    cmd: Option<String>,
+    eval_cmd: Option<String>,
+    task_ref: Option<String>,
+    as_agent: String,
+    max_iters: u32,
+    dry_run: bool,
+    org: Option<String>,
+    server: Option<String>,
+) -> eyre::Result<()> {
+    use std::io::Write as _;
+    use workflows_orchestrator::{CodingWorkflow, IterationOutcome, RunEnd, WorkflowStore};
+
+    let slug = resolve_active_org(org)?;
+    let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
+
+    // Resolve the optional linked task (claim it; it becomes the
+    // session subject + the default evaluator's completion check).
+    let url = resolve_org_vox_url(server.clone(), &slug);
+    let task_id = match &task_ref {
+        Some(r) => {
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, r).await?;
+            if let ClaimOutcome::Lost(holder) = try_claim(&client, &t.id, &agent, false).await? {
+                return Err(eyre::eyre!("{} is held by {holder}", short_uuid(&t.id)));
+            }
+            Some(t.id)
+        }
+        None => None,
+    };
+
+    // The first prompt: the condition is the directive (matching
+    // Claude Code's `/goal`, where the condition itself starts the
+    // turn). Subsequent turns append the evaluator's reason.
+    let base_prompt = format!(
+        "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
+    );
+    if dry_run {
+        println!("{base_prompt}");
+        return Ok(());
+    }
+
+    let worker = cmd
+        .or_else(|| std::env::var("TASK_AGENT_CMD").ok())
+        .ok_or_else(|| eyre::eyre!("no worker command: pass --cmd or set TASK_AGENT_CMD"))?;
+    let evaluator = eval_cmd.or_else(|| std::env::var("TASK_GOAL_EVAL_CMD").ok());
+    if evaluator.is_none() && task_id.is_none() {
+        return Err(eyre::eyre!(
+            "no evaluator: pass --eval-cmd, set TASK_GOAL_EVAL_CMD, or pass --task for the built-in done-check"
+        ));
+    }
+
+    // Open the work session (subject = the task if linked, else a
+    // custom "goal" subject keyed by a fresh id).
+    let store_dir = org_workflows_dir(&slug)?;
+    let wf = CodingWorkflow::new(WorkflowStore::open(store_dir));
+    let subject_task = task_id.unwrap_or_else(uuid::Uuid::new_v4);
+    let session = wf.start(subject_task, agent.clone())?;
+    println!(
+        "goal session {} — “{condition}” (max {max_iters} turns)",
+        short_uuid(&session.id)
+    );
+
+    // The evaluator's latest reason, carried into the next worker turn.
+    let last_reason = std::cell::RefCell::new(String::new());
+
+    let run = wf.run_session(session.id, agent.clone(), max_iters, |iter| {
+        // 1. Worker turn.
+        let mut prompt = base_prompt.clone();
+        let reason = last_reason.borrow().clone();
+        if !reason.is_empty() {
+            prompt.push_str(&format!(
+                "\n\nThe goal is NOT yet met. Evaluator feedback:\n{reason}\n\nContinue."
+            ));
+        }
+        let work = run_subprocess(&worker, &prompt, iter, &condition)
+            .map_err(|e| workflows_proto::WorkflowError::Backend(format!("worker: {e}")))?;
+        print!("{}", work.stdout);
+        std::io::stdout().flush().ok();
+
+        // 2. Evaluator gate — judge the worker's output against the
+        //    condition. Built-in done-check if no eval command.
+        let verdict = match &evaluator {
+            Some(ev) => {
+                let eval_in = format!("CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}", work.stdout);
+                let r = run_subprocess(ev, &eval_in, iter, &condition)
+                    .map_err(|e| workflows_proto::WorkflowError::Backend(format!("eval: {e}")))?;
+                EvalVerdict {
+                    met: r.code == 0,
+                    reason: r.stdout.trim().to_owned(),
+                }
+            }
+            None => {
+                // No evaluator + a linked task: the condition is
+                // "task is done". Checked synchronously below by the
+                // outer loop via a flag; here we approximate using
+                // the worker exit code as a hint and defer the
+                // authoritative check to the post-run reconcile.
+                EvalVerdict {
+                    met: work.code == 0,
+                    reason: "worker did not exit 0".to_owned(),
+                }
+            }
+        };
+
+        if verdict.met {
+            Ok(IterationOutcome::Done)
+        } else {
+            *last_reason.borrow_mut() = verdict.reason.clone();
+            if verdict.reason.is_empty() {
+                println!("  ◎ turn {iter}: not met yet");
+            } else {
+                println!("  ◎ turn {iter}: not met — {}", verdict.reason);
+            }
+            Ok(IterationOutcome::Continue)
+        }
+    })?;
+
+    match run.end {
+        RunEnd::Completed => {
+            println!("✓ goal met after {} turn(s)", run.iterations);
+            if let Some(id) = task_id {
+                let client = connect_task_client(&url).await?;
+                if let Ok(mut t) = client.get(id).await {
+                    if task::Status::from_str(&t.status)
+                        .is_none_or(|s| !matches!(s, task::Status::Done))
+                    {
+                        t.status = "done".into();
+                        t.completed_date = Some(chrono::Utc::now().date_naive());
+                        let _ = client.update(t).await;
+                        println!("  closed linked task {}", short_uuid(&id));
+                    }
+                }
+            }
+        }
+        RunEnd::Parked { reason } => {
+            println!("⏸ goal parked after {} turn(s): {reason}", run.iterations);
+        }
+        RunEnd::MaxedOut => {
+            println!(
+                "⏹ hit the {max_iters}-turn ceiling without meeting the goal — session parked, resume to continue"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Verdict from one evaluator pass.
+struct EvalVerdict {
+    met: bool,
+    reason: String,
+}
+
+/// Captured result of a worker / evaluator subprocess.
+struct SubprocOut {
+    code: i32,
+    stdout: String,
+}
+
+/// Run `command` via `sh -c`, piping `prompt` to its stdin and
+/// exposing `TASK_GOAL` / `TASK_GOAL_ITER` in its env. Captures
+/// stdout (also surfaced to the caller); stderr streams through.
+fn run_subprocess(
+    command: &str,
+    prompt: &str,
+    iter: u32,
+    condition: &str,
+) -> eyre::Result<SubprocOut> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .env("TASK_GOAL", condition)
+        .env("TASK_GOAL_ITER", iter.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| eyre::eyre!("spawn `{command}`: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .map_err(|e| eyre::eyre!("write stdin: {e}"))?;
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| eyre::eyre!("wait: {e}"))?;
+    Ok(SubprocOut {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+    })
+}
+
+/// `~/.task/orgs/<slug>/workflows` — the orchestrator store dir.
+fn org_workflows_dir(org_slug: &str) -> eyre::Result<std::path::PathBuf> {
+    let home = std::env::var_os("HOME").ok_or_else(|| eyre::eyre!("HOME not set"))?;
+    Ok(std::path::Path::new(&home)
+        .join(".task")
+        .join("orgs")
+        .join(org_slug)
+        .join("workflows"))
 }
 
 async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {

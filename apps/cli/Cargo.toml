@@ -29,6 +29,8 @@ task = { workspace = true, features = ["vox"] }
 # `task-cli issue …` — surfaces the Linear-style workflow
 # attributes on `TaskInfo`. `AgentRef` + friends live here.
 workflows-proto = { workspace = true }
+# `task run` — the autonomous loop runner (sessions + iteration engine).
+workflows-orchestrator = { workspace = true }
 # `task-cli issue push/pull/sync …` — bidirectional sync between
 # TaskInfo and a forge issue tracker (Forgejo today; GitHub when
 # git-github's todo!() stubs are filled in).
