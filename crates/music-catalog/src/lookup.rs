@@ -43,6 +43,8 @@ static COLOR_MAP: LazyLock<HashMap<&'static str, Color>> = LazyLock::new(|| {
     m.insert("sfx", groups::SFX);
     m.insert("guide", groups::GUIDE);
     m.insert("reference", groups::REFERENCE);
+    m.insert("stem split", groups::STEM_SPLIT);
+    m.insert("stem_split", groups::STEM_SPLIT);
 
     // Guitar sub-groups
     m.insert("guitars/electric", guitars::ELECTRIC);

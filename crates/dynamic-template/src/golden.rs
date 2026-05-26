@@ -153,6 +153,31 @@ mod tests {
     }
 
     #[test]
+    fn report_uncolored_folders() {
+        fn walk<'a>(n: &'a TemplateNode, out: &mut Vec<&'a TemplateNode>) {
+            if n.kind == NodeKind::Folder
+                && !n.group_path.is_empty()
+                && n.defaults.color_hex.is_none()
+            {
+                out.push(n);
+            }
+            for c in &n.children {
+                walk(c, out);
+            }
+        }
+        let t = golden_template();
+        let mut missing = Vec::new();
+        for n in &t.root {
+            walk(n, &mut missing);
+        }
+        let paths: Vec<String> = missing.iter().map(|n| n.group_path.join("/")).collect();
+        assert!(
+            paths.is_empty(),
+            "folders without a resolved color: {paths:#?}"
+        );
+    }
+
+    #[test]
     fn golden_has_top_level_instrument_folders() {
         let t = golden_template();
         let names: Vec<&str> = t.root.iter().map(|n| n.name.as_str()).collect();
