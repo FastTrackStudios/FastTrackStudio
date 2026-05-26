@@ -12,3 +12,6 @@ path = "src/main.rs"
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

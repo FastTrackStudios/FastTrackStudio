@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 fts-devtools = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", branch = "main" }
+fts-repo = { git = "https://git.starcommand.live/FastTrackStudios/fts-repo", branch = "main" }

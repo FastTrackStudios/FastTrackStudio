@@ -7,6 +7,24 @@ fn main() {
         Some("install") => install(),
         Some("uninstall") => uninstall(),
         Some("status") => fts_devtools::status(),
+        Some("ci") => {
+            let cfg = fts_repo::XtaskConfig {
+                nextest_profile: "ci".to_string(),
+                run_doctests: false,
+                run_tracey: false,
+                ..fts_repo::XtaskConfig::default()
+            };
+            if let Err(e) = fts_repo::run_ci(&cfg) {
+                eprintln!("ERROR: {e:#}");
+                std::process::exit(1);
+            }
+        }
+        Some("check") => {
+            if let Err(e) = fts_repo::run_check() {
+                eprintln!("ERROR: {e:#}");
+                std::process::exit(1);
+            }
+        }
         _ => {
             eprintln!("usage: cargo xtask <command>");
             eprintln!();
@@ -14,6 +32,8 @@ fn main() {
             eprintln!("  install     Build and symlink dynamic-template-extension into REAPER");
             eprintln!("  uninstall   Remove dynamic-template-extension symlink from REAPER");
             eprintln!("  status      Show installed extensions and plugins");
+            eprintln!("  ci          Run the shared FTS CI gate (fmt + clippy + check + nextest)");
+            eprintln!("  check       cargo check --workspace --all-targets");
             std::process::exit(1);
         }
     }

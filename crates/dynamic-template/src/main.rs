@@ -1,4 +1,4 @@
-use dynamic_template::{ItemMetadata, OrganizeIntoTracks, default_config};
+use dynamic_template::{default_config, ItemMetadata, OrganizeIntoTracks};
 use monarchy::Parser;
 use std::env;
 
@@ -78,7 +78,7 @@ fn analyze_single(
     println!("═══════════════════════════════════════════════════════════════\n");
 
     // Parse the input to get metadata
-    let parser = Parser::new(&config);
+    let parser = Parser::new(config);
     let item = match parser.parse(input.to_string()) {
         Ok(item) => item,
         Err(e) => {
@@ -153,7 +153,7 @@ fn analyze_multiple(
 
     if verbose {
         // Show parsing details for each input
-        let parser = Parser::new(&config);
+        let parser = Parser::new(config);
         println!("PARSING DETAILS:");
         println!("────────────────────────────────────────────────────────────────");
         for input in inputs {
