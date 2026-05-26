@@ -7267,7 +7267,19 @@ async fn run_agent_goal(
         let verdict = match &evaluator {
             Some(ev) => {
                 println!("⧖ turn {iter} — judging…");
-                let eval_in = format!("CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}", work.stdout);
+                // Lead with the strict judge directive so a raw LLM
+                // evaluator (`claude -p`, `hermes -p`) emits the
+                // verdict instead of prose — otherwise parsing fails
+                // and we'd fall back to "exit 0 = always met". The
+                // conservative framing mirrors Hermes/Claude /goal.
+                let eval_in = format!(
+                    "You are a STRICT completion judge. Reply with ONLY a JSON object: \
+                     {{\"done\": true|false, \"reason\": \"<one sentence>\"}}. Mark done:true \
+                     ONLY if the WORKER OUTPUT shows the CONDITION is fully and verifiably met; \
+                     when in doubt, done:false with the gap as the reason.\n\n\
+                     CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}",
+                    work.stdout
+                );
                 let r = run_subprocess(ev, &eval_in, iter, &condition)
                     .map_err(|e| workflows_proto::WorkflowError::Backend(format!("eval: {e}")))?;
                 // Prefer a structured verdict — the judge convention
