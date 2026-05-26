@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use reaper_test::runner::{self, ExtensionPackage, TestPackage, TestRunner};
+use daw::test::runner::{self, ExtensionPackage, TestPackage, TestRunner};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -17,6 +17,26 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some("ci") => {
+            // Canonical CI gate (shared fts-repo battery): fmt + clippy +
+            // check + nextest. Doctests/tracey off (edition-2021, no specs).
+            let cfg = fts_repo::XtaskConfig {
+                nextest_profile: "ci".to_string(),
+                run_doctests: false,
+                run_tracey: false,
+                ..fts_repo::XtaskConfig::default()
+            };
+            if let Err(e) = fts_repo::run_ci(&cfg) {
+                eprintln!("ci failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        Some("check") => {
+            if let Err(e) = fts_repo::run_check() {
+                eprintln!("check failed: {e}");
+                std::process::exit(1);
+            }
+        }
         _ => {
             eprintln!("usage: cargo xtask <command>");
             eprintln!();
@@ -25,6 +45,8 @@ fn main() {
             eprintln!("  uninstall     Remove the session test extension symlink from REAPER");
             eprintln!("  status        Show installed extensions and plugins");
             eprintln!("  reaper-test   Run REAPER integration tests (session-extension only)");
+            eprintln!("  ci            Shared fts-repo gate (fmt/clippy/check/nextest)");
+            eprintln!("  check         cargo check --workspace --all-targets");
             std::process::exit(1);
         }
     }

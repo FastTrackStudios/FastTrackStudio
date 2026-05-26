@@ -286,6 +286,12 @@ pub fn TransportPanel() -> Element {
         playback_state,
         daw::service::PlayState::Playing | daw::service::PlayState::Recording
     );
+    let is_recording = matches!(playback_state, daw::service::PlayState::Recording);
+
+    // Record-arm has no push signal yet, so track the operator's intent
+    // locally (optimistic). Toggling sends the arm/disarm to the active
+    // song's selected tracks.
+    let mut is_armed = use_signal(|| false);
 
     rsx! {
         div {
@@ -293,6 +299,8 @@ pub fn TransportPanel() -> Element {
             TransportControlBar {
                 is_playing: is_playing,
                 is_looping: is_looping,
+                is_recording: is_recording,
+                is_armed: is_armed(),
                 on_play_pause: Callback::new(move |_| {
                     LATENCY_TRACKER.write().start_play_toggle();
                     spawn(async move {
@@ -302,6 +310,18 @@ pub fn TransportPanel() -> Element {
                 on_loop_toggle: Callback::new(move |_| {
                     spawn(async move {
                         let _ = Session::get().setlist().toggle_song_loop().await;
+                    });
+                }),
+                on_record_toggle: Callback::new(move |_| {
+                    spawn(async move {
+                        let _ = Session::get().setlist().toggle_recording().await;
+                    });
+                }),
+                on_arm_toggle: Callback::new(move |_| {
+                    let next = !is_armed();
+                    is_armed.set(next);
+                    spawn(async move {
+                        let _ = Session::get().setlist().set_song_record_arm(next).await;
                     });
                 }),
                 on_back: Callback::new(move |_| {
@@ -499,6 +519,41 @@ fn PerformanceMainContent() -> Element {
                         is_time_sig: true,
                         show_line_only: false,
                     });
+                }
+
+                // Mid-song time-signature changes from the parsed chart. Each
+                // change records the section it begins in; map that to the
+                // section's start time → percent along the song so the bar
+                // marks meter changes, not just the opening signature.
+                if let Some(chart) = song.parsed_chart.as_ref() {
+                    let song_start = song.start_seconds;
+                    let song_duration = song.end_seconds - song_start;
+                    if song_duration > 0.0 {
+                        for change in &chart.time_signature_changes {
+                            let Some(section) = song.sections.get(change.section_index) else {
+                                continue;
+                            };
+                            let percent = ((section.start_seconds - song_start) / song_duration
+                                * 100.0)
+                                .clamp(0.0, 100.0);
+                            // The opening signature already marks the start;
+                            // skip a change landing on it to avoid a dup marker.
+                            if percent <= 0.5 {
+                                continue;
+                            }
+                            markers.push(TempoMarkerData {
+                                position_percent: percent,
+                                label: format!(
+                                    "{}/{}",
+                                    change.time_signature.numerator,
+                                    change.time_signature.denominator
+                                ),
+                                is_tempo: false,
+                                is_time_sig: true,
+                                show_line_only: false,
+                            });
+                        }
+                    }
                 }
 
                 markers

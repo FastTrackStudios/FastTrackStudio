@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 
 use daw::rpc::{Caller, Daw};
 use daw_reaper::{LocalCaller, Reaper};
-use eyre::{Result, bail};
+use eyre::{bail, Result};
 use session::{
-    SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
     serve_setlist_service, setlist_service_service_descriptor, song_service_service_descriptor,
+    SetlistServiceClient, SetlistServiceImpl, SongServiceDispatcher, SongServiceImpl,
 };
 use session_ui::Session;
 
@@ -32,11 +32,11 @@ pub async fn start_gateway() -> Result<gateway::GatewayInfo> {
 
     let handler = gateway::RoutedHandler::new()
         .with(
-            &setlist_service_service_descriptor(),
+            setlist_service_service_descriptor(),
             serve_setlist_service(setlist),
         )
         .with(
-            &song_service_service_descriptor(),
+            song_service_service_descriptor(),
             SongServiceDispatcher::new(song),
         );
 

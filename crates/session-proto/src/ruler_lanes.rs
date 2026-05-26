@@ -1,5 +1,10 @@
 //! FTS Ruler Manager — standardized ruler lane layout for FastTrackStudio projects.
 //!
+// The retired `CoreLane::Key` variant is intentionally retained for its
+// explicit discriminant / RPP layout compatibility; allow its self-referential
+// deprecation warnings module-wide rather than peppering call sites.
+#![allow(deprecated)]
+//!
 //! Every FTS project should have these ruler lanes to organize markers and regions
 //! into semantic categories. The lanes are split into two groups:
 //!
@@ -41,6 +46,7 @@ pub enum CoreLane {
     Marks = 2,
     /// Reserved historical slot — see the enum doc.
     #[deprecated(note = "KEY lane retired; key signatures are encoded separately now")]
+    #[allow(deprecated)] // self-reference via the explicit discriminant
     Key = 3,
 }
 
@@ -75,6 +81,7 @@ impl CoreLane {
     }
 
     /// Display name shown in the REAPER ruler.
+    #[allow(deprecated)] // matches the retired `Key` variant for completeness
     pub const fn display_name(&self) -> &'static str {
         match self {
             Self::Song => "SONG",
@@ -361,6 +368,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)] // asserts the retired `Key` lane index for completeness
     fn lane_layout_matches_reaper_rpp() {
         // FTS lane convention:
         // RULERLANE 1 4 SONG 0 -1

@@ -49,3 +49,6 @@ eyre.workspace = true
 [features]
 default = ["web"]
 web = ["dioxus/web"]
+
+[lints]
+workspace = true

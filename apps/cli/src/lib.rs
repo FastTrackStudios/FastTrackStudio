@@ -89,6 +89,19 @@ pub enum SessionCommand {
         #[arg(long)]
         guide: bool,
     },
+    /// Auto-organize an RPP project using dynamic-template classification (offline)
+    ///
+    /// Reads existing track names, classifies them via dynamic-template's
+    /// monarchy sort + group rules (Drums / Guitars / Keys / Synths / Vocals / …),
+    /// and writes a new RPP with tracks regrouped into folders. The source file
+    /// is never overwritten — output defaults to "<name> [FTS].rpp" next to it.
+    AutoOrganize {
+        /// Path to .RPP file to organize
+        input: String,
+        /// Output path (default: "<input_stem> [FTS].rpp" next to input)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
     /// Show current setlist
     Setlist,
     /// (Re)build the setlist by scanning every open REAPER project
@@ -133,6 +146,20 @@ pub enum SessionCommand {
     Seek {
         /// Position in seconds
         seconds: f64,
+    },
+    /// Track-group manager (128-slot instrument-category partition)
+    #[command(subcommand)]
+    Groups(GroupsCommand),
+    /// Song-specific recording controls (target the active song's project)
+    #[command(subcommand)]
+    Record(RecordCommand),
+    /// Rank the current/selected take — post-recording review
+    Rank {
+        /// Star level: 1, 2, 3, or `down`
+        level: String,
+        /// Marker placement: play-pos (default), item, or mouse
+        #[arg(long, default_value = "play-pos")]
+        scope: String,
     },
     /// FTS session mode (Organize / Write / Produce / Record / …)
     #[command(subcommand)]
@@ -219,12 +246,37 @@ pub enum GotoCommand {
 
 #[derive(Subcommand)]
 pub enum LoopCommand {
-    /// Loop the current song
+    /// Toggle looping for the current song
     Song,
-    /// Loop the current section
+    /// Toggle looping for the current section
     Section,
-    /// Clear loop
+    /// Clear any active loop
     Clear,
+}
+
+#[derive(Subcommand)]
+pub enum GroupsCommand {
+    /// Apply the instrument-category naming scheme to the project's 128 groups
+    Apply,
+    /// Assign the selected tracks to the next free slot in a category's band
+    Assign {
+        /// Category: drums, bass, electric, acoustic, keys, synths, lead, bgv
+        category: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RecordCommand {
+    /// Start recording into the active song's project
+    Start,
+    /// Stop recording in the active song's project
+    Stop,
+    /// Toggle recording in the active song's project
+    Toggle,
+    /// Arm the selected tracks in the active song's project
+    Arm,
+    /// Disarm the selected tracks in the active song's project
+    Disarm,
 }
 
 // ============================================================================
@@ -247,6 +299,10 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
             ref output,
             guide,
         } => cmd_organize(input, output.as_deref(), guide),
+        SessionCommand::AutoOrganize {
+            ref input,
+            ref output,
+        } => cmd_auto_organize(input, output.as_deref()),
         SessionCommand::Mode(mode_cmd) => cmd_mode(socket.as_deref(), mode_cmd, as_json).await,
         SessionCommand::Action { command_id } => cmd_action(socket.as_deref(), &command_id).await,
         SessionCommand::RenameLane { index, name } => {
@@ -298,7 +354,59 @@ pub async fn run(socket: Option<PathBuf>, cmd: SessionCommand, as_json: bool) ->
         SessionCommand::Loop(LoopCommand::Clear) => {
             cmd_setlist_nav(socket.as_deref(), SetlistNav::LoopClear).await
         }
+        SessionCommand::Record(RecordCommand::Start) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::Record).await
+        }
+        SessionCommand::Record(RecordCommand::Stop) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::StopRecording).await
+        }
+        SessionCommand::Record(RecordCommand::Toggle) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::ToggleRecording).await
+        }
+        SessionCommand::Record(RecordCommand::Arm) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::SetArm(true)).await
+        }
+        SessionCommand::Record(RecordCommand::Disarm) => {
+            cmd_setlist_nav(socket.as_deref(), SetlistNav::SetArm(false)).await
+        }
+        SessionCommand::Rank {
+            ref level,
+            ref scope,
+        } => cmd_rank(socket.as_deref(), level, scope).await,
+        SessionCommand::Groups(cmd) => cmd_groups(socket.as_deref(), cmd).await,
     }
+}
+
+/// Track-group manager — triggers the registered REAPER actions over the
+/// socket (the group manager itself runs main-thread REAPER FFI in the
+/// extension). `apply` names the 128 slots; `assign <category>` adds the
+/// selected tracks to the next free slot in that band.
+async fn cmd_groups(socket: Option<&std::path::Path>, cmd: GroupsCommand) -> Result<()> {
+    let command_id = match cmd {
+        GroupsCommand::Apply => "FTS_SESSION_GROUP_APPLY_NAMING".to_string(),
+        GroupsCommand::Assign { category } => {
+            let suffix = match category
+                .to_ascii_lowercase()
+                .replace([' ', '-'], "_")
+                .as_str()
+            {
+                "drums" => "DRUMS",
+                "bass" => "BASS",
+                "electric" | "electric_gtr" | "egtr" => "ELECTRIC_GTR",
+                "acoustic" | "acoustic_gtr" | "agtr" => "ACOUSTIC_GTR",
+                "keys" => "KEYS",
+                "synths" | "synth" => "SYNTHS",
+                "lead" | "lead_vocal" | "lv" => "LEAD_VOCAL",
+                "bgv" | "background" | "background_vox" | "bvox" => "BACKGROUND_VOX",
+                other => eyre::bail!(
+                    "unknown category {other:?} (expected drums, bass, electric, acoustic, \
+                     keys, synths, lead, bgv)"
+                ),
+            };
+            format!("FTS_SESSION_GROUP_ASSIGN_{suffix}")
+        }
+    };
+    cmd_action(socket, &command_id).await
 }
 
 // ============================================================================
@@ -397,7 +505,7 @@ pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32, trim: b
     // Parse RPL or treat as single RPP
     let is_rpl = input_path
         .extension()
-        .map_or(false, |ext| ext.eq_ignore_ascii_case("rpl"));
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("rpl"));
 
     let (combined_text, song_infos) = if is_rpl {
         setlist_rpp::combine_rpl(input_path, &options)?
@@ -514,6 +622,184 @@ pub fn cmd_organize(input: &str, output: Option<&str>, generate_guide: bool) -> 
     Ok(())
 }
 
+pub fn cmd_auto_organize(input: &str, output: Option<&str>) -> Result<()> {
+    use daw::file::types::track::{FolderSettings, FolderState, Track};
+    use daw::file::{parse_project_text, types::serialize::RppSerialize};
+    use daw_proto::FolderDepthChange;
+    use dynamic_template::{default_config, OrganizeIntoTracks, OrganizeOptions};
+    use std::collections::{HashMap, VecDeque};
+    use std::path::Path;
+
+    let input_path = Path::new(input);
+    if !input_path.exists() {
+        eyre::bail!("Input file not found: {}", input);
+    }
+
+    let output_path = output.map(PathBuf::from).unwrap_or_else(|| {
+        let parent = input_path.parent().unwrap_or(Path::new("."));
+        let stem = input_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("project");
+        let ext = input_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("rpp");
+        parent.join(format!("{stem} [FTS].{ext}"))
+    });
+
+    if output_path == input_path {
+        eyre::bail!(
+            "Output path matches input ({}); refusing to overwrite",
+            input
+        );
+    }
+
+    let content = std::fs::read_to_string(input_path)?;
+    let mut project = parse_project_text(&content)?;
+    let original_count = project.tracks.len();
+
+    let track_names: Vec<String> = project.tracks.iter().map(|t| t.name.clone()).collect();
+    let config = default_config();
+    // expand_items: each input becomes a leaf TrackNode so we can match it
+    // back to the original Track by name. cleanup_names off — we need
+    // names to round-trip exactly for the FIFO match.
+    let options = OrganizeOptions {
+        expand_items: true,
+        cleanup_names: false,
+        collapse_single_child: true,
+    };
+    let hierarchy = track_names
+        .organize_into_tracks_with_options(&config, None, options)
+        .map_err(|err| eyre::eyre!("organize failed: {err:?}"))?;
+
+    let mut name_to_indices: HashMap<String, VecDeque<usize>> = HashMap::new();
+    for (idx, track) in project.tracks.iter().enumerate() {
+        name_to_indices
+            .entry(track.name.clone())
+            .or_default()
+            .push_back(idx);
+    }
+
+    let mut originals: Vec<Option<Track>> = project.tracks.into_iter().map(Some).collect();
+
+    let mut new_tracks: Vec<Track> = Vec::with_capacity(hierarchy.tracks.len());
+    let mut matched = 0usize;
+    let mut created = 0usize;
+    for node in &hierarchy.tracks {
+        let folder_settings = match node.folder_depth_change {
+            FolderDepthChange::Normal => FolderSettings {
+                folder_state: FolderState::Regular,
+                indentation: 0,
+            },
+            FolderDepthChange::FolderStart => FolderSettings {
+                folder_state: FolderState::FolderParent,
+                indentation: 1,
+            },
+            FolderDepthChange::ClosesLevels(n) => FolderSettings {
+                folder_state: FolderState::LastInFolder,
+                indentation: n as i32,
+            },
+        };
+
+        let track = name_to_indices
+            .get_mut(&node.name)
+            .and_then(|deque| deque.pop_front())
+            .and_then(|idx| originals[idx].take());
+
+        let mut track = if let Some(track) = track {
+            matched += 1;
+            track
+        } else {
+            created += 1;
+            Track {
+                name: node.name.clone(),
+                ..Track::default()
+            }
+        };
+
+        track.name = node.name.clone();
+        let state_i32 = match folder_settings.folder_state {
+            FolderState::Regular => 0,
+            FolderState::FolderParent => 1,
+            FolderState::LastInFolder => 2,
+            FolderState::Unknown(v) => v,
+        };
+        let indent_i32 = folder_settings.indentation;
+        track.folder = Some(folder_settings);
+        // raw_content takes precedence in the structured serializer, so
+        // we patch ISBUS in place to make the new folder structure stick
+        // without trashing FX chains, sends, items, envelopes, etc.
+        if !track.raw_content.is_empty() {
+            track.raw_content = patch_isbus_in_raw(&track.raw_content, state_i32, indent_i32);
+        }
+        new_tracks.push(track);
+    }
+
+    // Append any unmatched originals at the end (shouldn't normally happen
+    // — every input name should appear once in the hierarchy — but better
+    // to keep tracks than silently drop them).
+    let mut orphaned = 0usize;
+    for track in originals.into_iter().flatten() {
+        orphaned += 1;
+        new_tracks.push(track);
+    }
+
+    project.tracks = new_tracks;
+    let serialized = project.to_rpp_string();
+    std::fs::write(&output_path, &serialized)?;
+
+    println!(
+        "Auto-organized {} tracks → {} ({} matched, {} folders created, {} orphaned)",
+        original_count,
+        output_path.display(),
+        matched,
+        created,
+        orphaned
+    );
+
+    Ok(())
+}
+
+/// Replace the trailing two-field `ISBUS <state> <indent>` line inside a
+/// parsed track's raw_content block, preserving leading whitespace and
+/// every other line.
+fn patch_isbus_in_raw(raw: &str, state: i32, indentation: i32) -> String {
+    let mut out = String::with_capacity(raw.len() + 8);
+    let mut patched = false;
+    for line in raw.lines() {
+        let trimmed = line.trim_start();
+        if !patched && trimmed.starts_with("ISBUS ") {
+            let prefix_len = line.len() - trimmed.len();
+            out.push_str(&line[..prefix_len]);
+            out.push_str(&format!("ISBUS {state} {indentation}"));
+            patched = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    if !patched {
+        // No ISBUS line — insert one after NAME (or at the top of the
+        // block body) so the folder change is honored.
+        let mut rebuilt = String::with_capacity(out.len() + 16);
+        let mut inserted = false;
+        for line in out.lines() {
+            rebuilt.push_str(line);
+            rebuilt.push('\n');
+            if !inserted && line.trim_start().starts_with("NAME ") {
+                let trimmed = line.trim_start();
+                let prefix_len = line.len() - trimmed.len();
+                rebuilt.push_str(&line[..prefix_len]);
+                rebuilt.push_str(&format!("ISBUS {state} {indentation}\n"));
+                inserted = true;
+            }
+        }
+        return rebuilt;
+    }
+    out
+}
+
 /// Resolve relative media paths in a track's items to absolute paths.
 fn resolve_track_paths(track: &mut daw::file::types::track::Track, source_dir: &std::path::Path) {
     for item in &mut track.items {
@@ -578,7 +864,7 @@ async fn cmd_bench(
 
     // Expand `All` once; deduplicate so `--target mode,mode` doesn't
     // double-run.
-    let mut wanted: Vec<BenchTarget> = if targets.iter().any(|t| *t == BenchTarget::All) {
+    let mut wanted: Vec<BenchTarget> = if targets.contains(&BenchTarget::All) {
         BenchTarget::expanded().to_vec()
     } else {
         targets
@@ -686,8 +972,8 @@ enum TransportOp {
 }
 
 async fn cmd_transport(socket: Option<&std::path::Path>, op: TransportOp) -> Result<()> {
-    use daw_proto::ProjectContext;
     use daw_proto::transport::TransportClient;
+    use daw_proto::ProjectContext;
 
     let caller = connection::connect(socket)
         .await
@@ -872,6 +1158,10 @@ enum SetlistNav {
     LoopSong,
     LoopSection,
     LoopClear,
+    Record,
+    StopRecording,
+    ToggleRecording,
+    SetArm(bool),
 }
 
 async fn cmd_setlist_nav(socket: Option<&std::path::Path>, nav: SetlistNav) -> Result<()> {
@@ -896,22 +1186,58 @@ async fn cmd_setlist_nav(socket: Option<&std::path::Path>, nav: SetlistNav) -> R
             .await
             .map_err(rpc_err("previous_section"))?,
         SetlistNav::Seek(s) => client.seek_to(s).await.map_err(rpc_err("seek_to"))?,
-        SetlistNav::LoopSong | SetlistNav::LoopSection | SetlistNav::LoopClear => {
-            // No matching trait method yet — keep the CLI flag for
-            // forward compatibility but tell the user it's unwired
-            // instead of pretending to work.
-            eyre::bail!(
-                "loop {} not yet wired on the server — `SetlistService` exposes \
-                 navigation + seek but no `set_loop` method.",
-                match nav {
-                    SetlistNav::LoopSong => "song",
-                    SetlistNav::LoopSection => "section",
-                    SetlistNav::LoopClear => "clear",
-                    _ => unreachable!(),
-                }
-            );
-        }
+        SetlistNav::LoopSong => client
+            .toggle_song_loop()
+            .await
+            .map_err(rpc_err("toggle_song_loop"))?,
+        SetlistNav::LoopSection => client
+            .toggle_section_loop()
+            .await
+            .map_err(rpc_err("toggle_section_loop"))?,
+        SetlistNav::LoopClear => client.clear_loop().await.map_err(rpc_err("clear_loop"))?,
+        SetlistNav::Record => client.record().await.map_err(rpc_err("record"))?,
+        SetlistNav::StopRecording => client
+            .stop_recording()
+            .await
+            .map_err(rpc_err("stop_recording"))?,
+        SetlistNav::ToggleRecording => client
+            .toggle_recording()
+            .await
+            .map_err(rpc_err("toggle_recording"))?,
+        SetlistNav::SetArm(armed) => client
+            .set_song_record_arm(armed)
+            .await
+            .map_err(rpc_err("set_song_record_arm"))?,
     }
+    Ok(())
+}
+
+/// Rank the current/selected take — post-recording review. Delegates to
+/// `TakeRankingService` (a separate control surface from the setlist).
+async fn cmd_rank(socket: Option<&std::path::Path>, level: &str, scope: &str) -> Result<()> {
+    use session_proto::services::{TakeRankLevel, TakeRankScope, TakeRankingServiceClient};
+
+    let level = match level.to_ascii_lowercase().as_str() {
+        "1" | "one" => TakeRankLevel::One,
+        "2" | "two" => TakeRankLevel::Two,
+        "3" | "three" => TakeRankLevel::Three,
+        "down" | "d" => TakeRankLevel::Down,
+        other => eyre::bail!("invalid rank level {other:?} (expected 1, 2, 3, or down)"),
+    };
+    let scope = match scope.to_ascii_lowercase().as_str() {
+        "play-pos" | "playpos" | "play" => TakeRankScope::PlayPosMinus2s,
+        "item" | "item-wide" => TakeRankScope::ItemWide,
+        "mouse" | "mouse-cursor" => TakeRankScope::MouseCursor,
+        other => eyre::bail!("invalid rank scope {other:?} (expected play-pos, item, or mouse)"),
+    };
+
+    let caller = connection::connect(socket)
+        .await
+        .wrap_err("connect to fts-extensions socket")?;
+    TakeRankingServiceClient::new(caller)
+        .apply_rank(scope, level)
+        .await
+        .map_err(|e| eyre::eyre!("take_ranking.apply_rank: {e:?}"))?;
     Ok(())
 }
 
@@ -951,8 +1277,8 @@ fn print_json<T: facet::Facet<'static>>(value: &T) -> Result<()> {
 // ============================================================================
 
 async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Result<()> {
-    use daw_proto::ProjectContext;
     use daw_proto::project::ProjectsClient;
+    use daw_proto::ProjectContext;
 
     // Normalise the command id: REAPER's named commands always start
     // with `_` (e.g. `_FTS_SESSION_BUILD_SETLIST`). Accept the bare
@@ -994,8 +1320,8 @@ async fn cmd_action(socket: Option<&std::path::Path>, command_id: &str) -> Resul
 // ============================================================================
 
 async fn cmd_rename_lane(socket: Option<&std::path::Path>, index: u32, name: &str) -> Result<()> {
-    use daw_proto::ProjectContext;
     use daw_proto::project::ProjectsClient;
+    use daw_proto::ProjectContext;
 
     let caller = connection::connect(socket)
         .await
@@ -1016,8 +1342,8 @@ async fn cmd_set_project_info(
     key: &str,
     value: f64,
 ) -> Result<()> {
-    use daw_proto::ProjectContext;
     use daw_proto::project::ProjectsClient;
+    use daw_proto::ProjectContext;
 
     let caller = connection::connect(socket)
         .await
