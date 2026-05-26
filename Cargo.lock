@@ -2260,12 +2260,17 @@ dependencies = [
  "daw-proto",
  "daw-reaper",
  "daw-reaper-dioxus",
+ "daw-test-macro",
  "dawfile-ableton",
  "dawfile-reaper",
+ "eyre",
  "facet 0.46.4",
+ "moire",
+ "reaper-launcher",
  "tokio",
  "tracing",
  "vox 0.5.0",
+ "vox-stream 0.5.0",
 ]
 
 [[package]]
@@ -2363,7 +2368,7 @@ dependencies = [
  "reaper-high",
  "reaper-low",
  "reaper-medium",
- "swell-ui 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main)",
+ "swell-ui",
  "tokio",
  "tracing",
  "uuid",
@@ -2431,6 +2436,15 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "daw-test-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3094,7 +3108,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -3442,7 +3456,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -4050,13 +4064,12 @@ dependencies = [
  "fragile",
  "fts-launcher",
  "fts-ui",
- "reaper-config",
+ "reaper-config 0.1.0",
  "reaper-high",
  "reaper-input",
  "reaper-low",
  "reaper-macros",
  "reaper-medium",
- "reaper-test",
  "session",
  "tokio",
  "tracing",
@@ -4086,7 +4099,7 @@ dependencies = [
 [[package]]
 name = "fts-story-core"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#42a2514a96eb3e8c1738d9ab74d82cd76500c8e6"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#179f23782dbfb8f160c1c24fdd199187b6eb9de7"
 dependencies = [
  "linkme",
 ]
@@ -4094,7 +4107,7 @@ dependencies = [
 [[package]]
 name = "fts-story-macros"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#42a2514a96eb3e8c1738d9ab74d82cd76500c8e6"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#179f23782dbfb8f160c1c24fdd199187b6eb9de7"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4105,7 +4118,7 @@ dependencies = [
 [[package]]
 name = "fts-story-runtime"
 version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#42a2514a96eb3e8c1738d9ab74d82cd76500c8e6"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-story.git?branch=main#179f23782dbfb8f160c1c24fdd199187b6eb9de7"
 dependencies = [
  "dioxus",
  "fts-story-core",
@@ -4734,7 +4747,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4752,7 +4765,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -5512,6 +5525,7 @@ dependencies = [
 [[package]]
 name = "launcher-core"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-launcher.git?branch=main#ec50cb2e0af501216660461169efcd4c96eff5e3"
 dependencies = [
  "chrono",
  "facet 0.46.4",
@@ -5527,6 +5541,7 @@ dependencies = [
 [[package]]
 name = "launcher-ui"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-launcher.git?branch=main#ec50cb2e0af501216660461169efcd4c96eff5e3"
 dependencies = [
  "dioxus",
  "fts-ui",
@@ -6420,7 +6435,7 @@ version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcbff9bc912032c62bf65ef1d5aea88983b420f4f839db1e9b0c281a25c9c799"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
@@ -6432,7 +6447,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -7488,15 +7503,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-crate"
-version = "3.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
-dependencies = [
- "toml_edit 0.25.11+spec-1.1.0",
-]
-
-[[package]]
 name = "proc-macro-error"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7569,6 +7575,7 @@ dependencies = [
 [[package]]
 name = "providers"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-launcher.git?branch=main#ec50cb2e0af501216660461169efcd4c96eff5e3"
 dependencies = [
  "launcher-core",
  "serde",
@@ -7920,8 +7927,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaper-config"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-file.git?branch=main#ab350b48bc17181a9f9138f82f9792c591af4bf5"
+dependencies = [
+ "bitflags 2.11.1",
+ "facet 0.46.4",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "reaper-dioxus"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#1bd24cd9fa7f8992b9a3f1c8716c6904aaebe779"
 dependencies = [
  "anyrender_vello",
  "blitz-dom",
@@ -7950,6 +7969,7 @@ dependencies = [
 [[package]]
 name = "reaper-embed"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#1bd24cd9fa7f8992b9a3f1c8716c6904aaebe779"
 dependencies = [
  "cocoa",
  "objc",
@@ -7993,6 +8013,7 @@ dependencies = [
 [[package]]
 name = "reaper-hwnd"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-file.git?branch=main#ab350b48bc17181a9f9138f82f9792c591af4bf5"
 dependencies = [
  "serde",
 ]
@@ -8012,7 +8033,7 @@ dependencies = [
  "helgoboss-midi",
  "input",
  "once_cell",
- "reaper-config",
+ "reaper-config 0.1.0 (git+https://git.starcommand.live/FastTrackStudios/reaper-file.git?branch=main)",
  "reaper-dioxus",
  "reaper-embed",
  "reaper-high",
@@ -8020,7 +8041,7 @@ dependencies = [
  "reaper-kbd",
  "reaper-low",
  "reaper-medium",
- "swell-ui 0.1.0",
+ "swell-ui",
  "tracing",
  "vello",
 ]
@@ -8028,6 +8049,7 @@ dependencies = [
 [[package]]
 name = "reaper-kbd"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-file.git?branch=main#ab350b48bc17181a9f9138f82f9792c591af4bf5"
 dependencies = [
  "bitflags 2.11.1",
  "serde",
@@ -8090,30 +8112,6 @@ dependencies = [
  "tracing",
  "vst",
  "winapi",
-]
-
-[[package]]
-name = "reaper-test"
-version = "0.1.0"
-dependencies = [
- "daw",
- "eyre",
- "moire",
- "reaper-launcher",
- "reaper-test-macro",
- "tokio",
- "tracing",
- "vox 0.5.0",
- "vox-stream 0.5.0",
-]
-
-[[package]]
-name = "reaper-test-macro"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -9486,26 +9484,7 @@ dependencies = [
 [[package]]
 name = "swell-ui"
 version = "0.1.0"
-dependencies = [
- "fragile",
- "libloading 0.9.0",
- "objc2 0.3.0-beta.3",
- "objc2-foundation 0.2.2",
- "palette",
- "raw-window-handle 0.4.3",
- "reaper-common-types",
- "reaper-low",
- "reaper-medium",
- "rxrust",
- "scopeguard",
- "tracing",
- "winapi",
-]
-
-[[package]]
-name = "swell-ui"
-version = "0.1.0"
-source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#78b5af0a26d6836ade8ff21ec1c95b6bcd34ca23"
+source = "git+https://git.starcommand.live/FastTrackStudios/reaper-lib.git?branch=main#1bd24cd9fa7f8992b9a3f1c8716c6904aaebe779"
 dependencies = [
  "fragile",
  "libloading 0.9.0",
@@ -9920,7 +9899,7 @@ checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
 dependencies = [
  "serde",
  "serde_spanned",
- "toml_datetime 0.6.11",
+ "toml_datetime",
  "toml_edit 0.22.27",
 ]
 
@@ -9934,22 +9913,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "toml_datetime"
-version = "1.1.1+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
 name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap",
- "toml_datetime 0.6.11",
+ "toml_datetime",
  "winnow 0.5.40",
 ]
 
@@ -9962,21 +9932,9 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_spanned",
- "toml_datetime 0.6.11",
+ "toml_datetime",
  "toml_write",
  "winnow 0.7.15",
-]
-
-[[package]]
-name = "toml_edit"
-version = "0.25.11+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b59c4d22ed448339746c59b905d24568fcbb3ab65a500494f7b8c3e97739f2b"
-dependencies = [
- "indexmap",
- "toml_datetime 1.1.1+spec-1.1.0",
- "toml_parser",
- "winnow 1.0.3",
 ]
 
 [[package]]
@@ -10651,7 +10609,7 @@ dependencies = [
 [[package]]
 name = "vox"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-pretty",
@@ -10693,7 +10651,7 @@ dependencies = [
 [[package]]
 name = "vox-core"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-cbor 0.3.4",
@@ -10716,7 +10674,7 @@ dependencies = [
 [[package]]
 name = "vox-ffi"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "tracing",
  "vox-types 0.5.0",
@@ -10746,7 +10704,7 @@ dependencies = [
 [[package]]
 name = "vox-jit"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -10778,7 +10736,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-abi"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "facet-core 0.46.4",
@@ -10798,7 +10756,7 @@ dependencies = [
 [[package]]
 name = "vox-jit-cal"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10819,7 +10777,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-core"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -10840,7 +10798,7 @@ dependencies = [
 [[package]]
 name = "vox-macros-parse"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -10862,7 +10820,7 @@ dependencies = [
 [[package]]
 name = "vox-postcard"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet 0.46.4",
  "facet-core 0.46.4",
@@ -10887,7 +10845,7 @@ dependencies = [
 [[package]]
 name = "vox-schema"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "blake3",
  "facet 0.46.4",
@@ -10908,7 +10866,7 @@ dependencies = [
 [[package]]
 name = "vox-service-macros"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "vox-macros-core 0.5.0",
@@ -10929,7 +10887,7 @@ dependencies = [
 [[package]]
 name = "vox-stream"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "libc",
  "moire",
@@ -10966,7 +10924,7 @@ dependencies = [
 [[package]]
 name = "vox-types"
 version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -12297,9 +12255,6 @@ name = "winnow"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0592e1c9d151f854e6fd382574c3a0855250e1d9b2f99d9281c6e6391af352f1"
-dependencies = [
- "memchr",
-]
 
 [[package]]
 name = "wit-bindgen"
@@ -12533,7 +12488,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
- "reaper-test",
+ "daw",
 ]
 
 [[package]]
@@ -12728,6 +12683,23 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "vox-websocket"
+version = "0.5.0"
+source = "git+ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git?rev=a6aa15972d8a16be10cc79fd12c0346e67c5da63#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
+
+[[patch.unused]]
+name = "session-ui"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "moire-runtime"
+version = "1.0.0"
+
+[[patch.unused]]
+name = "moire-trace-capture"
+version = "1.0.0"
+
+[[patch.unused]]
 name = "anyrender"
 version = "0.6.2"
 source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
@@ -12856,15 +12828,3 @@ version = "1.0.0"
 name = "wgpu_context"
 version = "0.1.2"
 source = "git+https://git.starcommand.live/FastTrackStudios/anyrender.git?rev=422b5d0#422b5d0b820dccda702c882fe3eee7ba8e958e77"
-
-[[patch.unused]]
-name = "session-ui"
-version = "0.1.0"
-
-[[patch.unused]]
-name = "moire-runtime"
-version = "1.0.0"
-
-[[patch.unused]]
-name = "moire-trace-capture"
-version = "1.0.0"

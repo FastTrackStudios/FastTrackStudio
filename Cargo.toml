@@ -36,7 +36,9 @@ tokio = { version = "1.48", features = ["rt-multi-thread", "net", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-reaper-test = { git = "https://git.starcommand.live/FastTrackStudios/daw.git", rev = "273dbaa1ef5e4dfac9cd35988e13d2b4b954ab6e" }
+# The former standalone `reaper-test` crate was folded into the daw facade
+# as `daw::test` (behind the `test-harness` feature); consumers enable that
+# feature on `daw` instead of depending on reaper-test.
 # `reaper-config` from reaper-file gives us the typed parser/serializer
 # for `reaper-menu.ini` so we can rename floating toolbars per session
 # mode at extension startup.
@@ -66,7 +68,6 @@ daw-reaper-embed = { path = "../daw/crates/daw-reaper-embed" }
 daw-synchronization = { path = "../daw/crates/daw-synchronization" }
 dawfile-reaper = { path = "../daw/crates/dawfile-reaper" }
 dawfile-ableton = { path = "../daw/crates/dawfile-ableton" }
-reaper-test = { path = "../daw/crates/reaper-test" }
 reaper-launcher = { path = "../daw/crates/reaper-launcher" }
 
 [patch."https://git.starcommand.live/FastTrackStudios/keyflow.git"]
@@ -102,6 +103,28 @@ moire-macros-noop = { path = "../moire/crates/moire-macros-noop" }
 moire-runtime = { path = "../moire/crates/moire-runtime" }
 moire-tokio = { path = "../moire/crates/moire-tokio" }
 moire-trace-capture = { path = "../moire/crates/moire-trace-capture" }
+
+# FTS fork of bearcove/vox carrying the vox-jit-abi __rust_alloc-scan
+# fallback fix. Without it, the REAPER extension aborts the encode worker
+# for any RPC returning a complex/allocating type (setlist, songs, …) and
+# the client hangs. Based on bearcove rev 27eef573; patch every vox crate
+# so the whole graph resolves from one consistent source.
+[patch."https://github.com/bearcove/vox"]
+facet-cbor = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-core = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-ffi = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit-abi = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-jit-cal = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-macros-core = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-macros-parse = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-postcard = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-schema = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-service-macros = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-stream = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-types = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
+vox-websocket = { git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/vox.git", rev = "a6aa15972d8a16be10cc79fd12c0346e67c5da63" }
 
 [patch.crates-io]
 dioxus = { path = "../../Dioxus/dioxus/packages/dioxus" }
