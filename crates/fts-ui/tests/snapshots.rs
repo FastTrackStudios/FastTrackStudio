@@ -10,7 +10,7 @@
 //! To accept current renders as new baselines:
 //! `FTS_STORY_UPDATE_SNAPSHOTS=1 cargo test --release -p fts-ui`.
 
-use fts_story_snapshots::{SnapshotConfig, assert_snapshot};
+use fts_story_snapshots::{assert_snapshot, SnapshotConfig};
 use fts_ui::stories;
 
 fn cfg() -> SnapshotConfig {
@@ -18,6 +18,10 @@ fn cfg() -> SnapshotConfig {
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+)]
 fn button_primary_default() {
     // Touch force_link so other registrations also pull in cleanly when
     // this test file is the only consumer of the stories module.
@@ -26,16 +30,28 @@ fn button_primary_default() {
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+)]
 fn button_variants_default() {
     assert_snapshot(&stories::BUTTON_VARIANTS_STORY, &cfg());
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+)]
 fn badge_variants_default() {
     assert_snapshot(&fts_ui::components::BADGE_VARIANTS_STORY, &cfg());
 }
 
 #[test]
+#[cfg_attr(
+    debug_assertions,
+    ignore = "VRT snapshot: render is only valid in release; run `cargo test --release -p fts-ui`"
+)]
 fn card_basic_default() {
     assert_snapshot(&stories::CARD_BASIC_STORY, &cfg());
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "apps/*"]
+members = ["crates/*", "apps/*", "xtask"]
 resolver = "2"
 
 [workspace.package]
@@ -25,7 +25,7 @@ tw_merge = "0.1.21"
 
 # fts-story — story registry / Lookbook shell / VRT runner. Currently
 # pulled via path dep against a sibling checkout for fast iteration; swap
-# to `git = "ssh://forgejo@git.starcommand.live/FastTrackStudios/fts-story", rev = "<sha>"`
+# to `git = "https://git.starcommand.live/FastTrackStudios/fts-story", rev = "<sha>"`
 # once the API stabilises.
 fts-story-runtime   = { git = "https://git.starcommand.live/FastTrackStudios/fts-story.git", branch = "main" }
 fts-story-shell     = { git = "https://git.starcommand.live/FastTrackStudios/fts-story.git", branch = "main" }
@@ -41,4 +41,14 @@ palette             = "0.7.6"
 
 [workspace.lints.rust]
 unused = "warn"
+
+# Stylistic clippy lints allowed during stabilization (same policy as daw):
+# they're churn, not bugs. Tighten per-crate in a later cleanup sweep.
+# Each crate opts in via `[lints] workspace = true`.
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
 

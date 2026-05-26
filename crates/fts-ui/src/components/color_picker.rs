@@ -13,7 +13,7 @@ use dioxus_primitives::color_picker::{
 };
 use dioxus_primitives::slider::{Slider as PrimitiveSlider, SliderRange, SliderThumb, SliderTrack};
 use fts_story_runtime::story;
-use palette::{Hsv, RgbHue, encoding};
+use palette::{encoding, Hsv, RgbHue};
 
 pub use dioxus_primitives::color_picker::Color;
 
