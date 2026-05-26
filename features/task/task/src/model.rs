@@ -501,8 +501,19 @@ pub struct WorkflowAttrs {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub estimate: Option<Estimate>,
 
-    /// Who owns this task. Human + agent + agent triple is the
-    /// common pattern for supervised agent work.
+    /// Parent task this is a subtask of. The triage workflow
+    /// breaks one issue into N agent-sized subtasks, each with
+    /// `parent` set to the issue's task id. A parent is
+    /// considered done when every subtask closes. Distinct from
+    /// `blockers`: parent is structural ("part of"), blockers
+    /// are ordering ("can't start until").
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parent: Option<Uuid>,
+
+    /// Who owns this task. For subtasks under parallel-agent
+    /// work this is the *claim*: an empty list means unclaimed
+    /// and available; a single agent means claimed. Human +
+    /// agent + agent triple is the supervised pattern.
     #[serde(skip_serializing_if = "AgentRefList::is_empty", default)]
     pub assignees: AgentRefList,
 

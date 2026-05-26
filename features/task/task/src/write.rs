@@ -157,6 +157,7 @@ mod tests {
 
         let attrs = WorkflowAttrs {
             cycle: Some(cycle),
+            parent: None,
             estimate: Some(Estimate::M),
             assignees: AgentRefList(vec![
                 AgentRef::human("cody"),

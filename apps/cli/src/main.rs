@@ -996,17 +996,36 @@ enum IssueCmd {
         server: Option<String>,
     },
 
-    /// Convenience: claim an issue for an agent.
-    /// Equivalent to `set-workflow --add-assignee agent:<name>`.
+    /// Atomically claim an issue for an agent — the core of the
+    /// parallel-agent workflow. Fails if another agent already
+    /// holds it (read → check-empty → write → re-read verify),
+    /// so two agents racing for the same subtask can't both win.
+    /// Pass `--force` to steal a claim.
     Claim {
         id: String,
         /// `name[@version]` — version omitted means "any version".
         #[arg(long = "as-agent")]
         as_agent: String,
+        /// Steal the claim even if someone else holds it.
+        #[arg(long)]
+        force: bool,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
         server: Option<String>,
+    },
+
+    /// List the subtasks of a parent task with their claim +
+    /// status, so you can see who's working what at a glance.
+    Subtasks {
+        /// Parent task id (UUID or 8-char prefix).
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 
     /// List the current assignees on an issue.
@@ -1041,6 +1060,10 @@ enum IssueCmd {
         /// Project UUID. Sets `project_id`.
         #[arg(long)]
         project: Option<uuid::Uuid>,
+        /// Parent task UUID — makes this a subtask. Sets
+        /// `workflow.parent`.
+        #[arg(long)]
+        parent: Option<uuid::Uuid>,
         /// Estimate (`xs` / `s` / `m` / `l` / `xl` / integer).
         #[arg(long)]
         estimate: Option<String>,
@@ -7327,6 +7350,62 @@ fn print_workflow_block(w: &task::model::WorkflowAttrs) {
     }
 }
 
+/// Result of an atomic claim attempt.
+enum ClaimOutcome {
+    /// This agent now holds the claim.
+    Won,
+    /// This agent already held it (idempotent).
+    AlreadyMine,
+    /// Another actor holds it; carries their label.
+    Lost(String),
+}
+
+/// Optimistic atomic claim: read the task; if unclaimed (or
+/// already ours, or `force`), write our claim then **re-read**
+/// to confirm we won the race. Under last-write-wins, if two
+/// agents claim concurrently the re-read disambiguates — both
+/// see the final writer, so only one reports `Won`.
+async fn try_claim(
+    client: &task::TaskServiceClient,
+    task_id: &uuid::Uuid,
+    agent: &workflows_proto::AgentRef,
+    force: bool,
+) -> eyre::Result<ClaimOutcome> {
+    let mut t = client
+        .get(*task_id)
+        .await
+        .map_err(|e| eyre::eyre!("get: {e:?}"))?;
+    let holder = t
+        .workflow
+        .as_ref()
+        .and_then(|w| w.assignees.0.first())
+        .cloned();
+    match &holder {
+        Some(h) if h == agent => return Ok(ClaimOutcome::AlreadyMine),
+        Some(h) if !force => return Ok(ClaimOutcome::Lost(h.short_label())),
+        _ => {}
+    }
+    // Write our claim (sole assignee).
+    let w = t
+        .workflow
+        .get_or_insert_with(task::model::WorkflowAttrs::default);
+    w.assignees = task::model::AgentRefList(vec![agent.clone()]);
+    client
+        .update(t)
+        .await
+        .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+    // Re-read to confirm we won (someone else may have written between).
+    let after = client
+        .get(*task_id)
+        .await
+        .map_err(|e| eyre::eyre!("get: {e:?}"))?;
+    match after.workflow.as_ref().and_then(|w| w.assignees.0.first()) {
+        Some(a) if a == agent => Ok(ClaimOutcome::Won),
+        Some(a) => Ok(ClaimOutcome::Lost(a.short_label())),
+        None => Ok(ClaimOutcome::Lost("(none)".into())),
+    }
+}
+
 /// Apply `set-workflow` style edits to a `TaskInfo` in-place.
 #[allow(clippy::too_many_arguments)]
 fn apply_workflow_patch(
@@ -7542,35 +7621,88 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
         IssueCmd::Claim {
             id,
             as_agent,
+            force,
             org,
             server,
         } => {
             let slug = resolve_active_org(org)?;
             let url = resolve_org_vox_url(server, &slug);
             let client = connect_task_client(&url).await?;
-            let mut t = resolve_issue_id(&client, &id).await?;
-            // Accept bare `name[@ver]` here; `parse_agent_ref`
-            // also handles both forms via the `agent:` prefix.
             let agent = parse_agent_ref(&format!("agent:{as_agent}"))?;
-            apply_workflow_patch(
-                &mut t,
-                None,
-                None,
-                None,
-                vec![agent.clone()],
-                vec![],
-                vec![],
-                vec![],
-            )?;
-            let updated = client
-                .update(t)
+            let t = resolve_issue_id(&client, &id).await?;
+            match try_claim(&client, &t.id, &agent, force).await? {
+                ClaimOutcome::Won => {
+                    println!("claimed {} by {}", short_uuid(&t.id), agent.short_label());
+                }
+                ClaimOutcome::AlreadyMine => {
+                    println!(
+                        "{} already claimed by {}",
+                        short_uuid(&t.id),
+                        agent.short_label()
+                    );
+                }
+                ClaimOutcome::Lost(holder) => {
+                    return Err(eyre::eyre!(
+                        "{} is already claimed by {holder} — pass --force to steal",
+                        short_uuid(&t.id)
+                    ));
+                }
+            }
+        }
+        IssueCmd::Subtasks {
+            id,
+            org,
+            server,
+            json,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let parent = resolve_issue_id(&client, &id).await?;
+            let all = client
+                .list()
                 .await
-                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+                .map_err(|e| eyre::eyre!("list: {e:?}"))?;
+            let mut subs: Vec<&task::TaskInfo> = all
+                .iter()
+                .filter(|t| t.workflow.as_ref().and_then(|w| w.parent) == Some(parent.id))
+                .collect();
+            subs.sort_by(|a, b| a.status.cmp(&b.status).then_with(|| a.title.cmp(&b.title)));
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&subs).map_err(|e| eyre::eyre!("json: {e}"))?
+                );
+                return Ok(());
+            }
+            let done = subs
+                .iter()
+                .filter(|t| matches!(task::Status::from_str(&t.status), Some(task::Status::Done)))
+                .count();
             println!(
-                "claimed {} by {}",
-                short_uuid(&updated.id),
-                agent.short_label()
+                "{} [{}]  {}",
+                short_uuid(&parent.id),
+                parent.status,
+                parent.title
             );
+            println!("  {done}/{} subtasks done\n", subs.len());
+            for t in &subs {
+                let claim = t
+                    .workflow
+                    .as_ref()
+                    .and_then(|w| w.assignees.0.first())
+                    .map_or_else(
+                        || "unclaimed".to_string(),
+                        workflows_proto::AgentRef::short_label,
+                    );
+                println!(
+                    "  {}  {:<12} {:<22} {}",
+                    short_uuid(&t.id),
+                    t.status,
+                    claim,
+                    t.title
+                );
+            }
         }
         IssueCmd::Assignees {
             id,
@@ -7611,6 +7743,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
             priority,
             cycle,
             project,
+            parent,
             estimate,
             assignees,
             blockers,
@@ -7633,6 +7766,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 .map(|s| parse_agent_ref(s))
                 .collect::<eyre::Result<_>>()?;
             let any_workflow = cycle.is_some()
+                || parent.is_some()
                 || estimate.is_some()
                 || !assignee_refs.is_empty()
                 || !blockers.is_empty();
@@ -7643,6 +7777,7 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 };
                 Some(task::model::WorkflowAttrs {
                     cycle,
+                    parent,
                     estimate,
                     assignees: task::model::AgentRefList(assignee_refs),
                     blockers: task::model::UuidList(blockers),
