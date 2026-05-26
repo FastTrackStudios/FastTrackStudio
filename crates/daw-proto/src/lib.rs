@@ -44,6 +44,7 @@ pub mod health;
 pub mod input;
 pub mod item;
 pub mod live_midi;
+pub mod main_thread;
 pub mod marker;
 pub mod markers_regions;
 pub mod midi;

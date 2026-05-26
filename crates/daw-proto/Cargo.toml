@@ -12,6 +12,9 @@ actions-proto = { workspace = true }
 # architect — provides `#[architect::rpc]`. Enabling the `vox` feature
 # wires the macro's emission through to the workspace's vox stack.
 architect = { workspace = true, features = ["vox"] }
+# futures::channel::oneshot powers main_thread::query's result hand-back.
+# WASM-safe (no tokio); keeps this crate web-app compatible.
+futures = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
 
 [features]

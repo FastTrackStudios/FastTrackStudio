@@ -2324,6 +2324,7 @@ dependencies = [
  "actions-proto",
  "architect",
  "facet",
+ "futures",
  "thiserror 2.0.18",
  "vox 0.5.0",
  "vox-types 0.5.0",

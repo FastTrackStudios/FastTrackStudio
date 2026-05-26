@@ -46,11 +46,30 @@ use std::sync::RwLock;
 /// Global TaskSupport instance — set by the extension during initialization.
 static TASK_SUPPORT: RwLock<Option<&'static TaskSupport>> = RwLock::new(None);
 
+/// REAPER's implementation of the backend-agnostic
+/// [`daw_proto::main_thread::MainThreadExecutor`]: bounce work onto REAPER's
+/// main thread via `TaskSupport`.
+struct ReaperMainThreadExecutor(&'static TaskSupport);
+
+impl daw_proto::main_thread::MainThreadExecutor for ReaperMainThreadExecutor {
+    fn spawn(&self, task: Box<dyn FnOnce() + Send + 'static>) {
+        let _ = self.0.do_later_in_main_thread_asap(task);
+    }
+}
+
 /// Called by the extension during initialization.
+///
+/// Stores the `TaskSupport` reference for REAPER-specific helpers (undo
+/// scoping, pointer validation) and installs the REAPER main-thread executor
+/// into the backend-agnostic [`daw_proto::main_thread`] registry, so service
+/// code calling `daw_proto::main_thread::query` / `run` bounces onto REAPER's
+/// main thread. Backends without that requirement (standalone) install no
+/// executor and those calls run inline.
 pub fn set_task_support(task_support: &'static TaskSupport) {
     if let Ok(mut slot) = TASK_SUPPORT.write() {
         *slot = Some(task_support);
     }
+    daw_proto::main_thread::set_executor(ReaperMainThreadExecutor(task_support));
 }
 
 /// Get the global TaskSupport reference.
@@ -58,10 +77,12 @@ pub(crate) fn task_support() -> Option<&'static TaskSupport> {
     TASK_SUPPORT.read().ok().and_then(|slot| *slot)
 }
 
-/// Execute a closure on REAPER's main thread and return the result.
+/// Execute a closure under the active backend's main-thread affinity and
+/// return the result.
 ///
-/// Use this for query/read operations that need to return a value from REAPER.
-/// Returns `None` if TaskSupport is not initialized.
+/// Thin wrapper over [`daw_proto::main_thread::query`]: REAPER installs its
+/// executor in [`set_task_support`], so this bounces onto the main thread;
+/// backends without a main-thread requirement run the closure inline.
 ///
 /// # Example
 ///
@@ -75,14 +96,11 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    let ts = task_support()?;
-    ts.main_thread_future(f).await.ok()
+    daw_proto::main_thread::query(f).await
 }
 
-/// Execute a closure on REAPER's main thread, fire-and-forget.
-///
-/// Use this for mutation operations that don't need to return a value.
-/// Silently does nothing if TaskSupport is not initialized.
+/// Execute a closure under the active backend's main-thread affinity,
+/// fire-and-forget. Thin wrapper over [`daw_proto::main_thread::run`].
 ///
 /// # Example
 ///
@@ -95,9 +113,7 @@ pub fn run<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
 {
-    if let Some(ts) = task_support() {
-        let _ = ts.do_later_in_main_thread_asap(f);
-    }
+    daw_proto::main_thread::run(f);
 }
 
 // =============================================================================
