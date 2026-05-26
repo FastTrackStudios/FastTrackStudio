@@ -7155,13 +7155,28 @@ async fn run_agent_goal(
         return Ok(());
     }
 
+    // Resolve the worker + evaluator commands. Precedence: explicit
+    // flag → env var → per-org `agent.json` [goal] defaults. The
+    // config layer (mirroring Hermes's `config.yaml: goals/auxiliary`)
+    // lets an org set its agent once instead of passing --cmd every
+    // run — the executor seam. The command itself is agent-agnostic:
+    // `claude -p`, `codex exec`, `hermes -p`, etc. all satisfy the
+    // stdin-prompt contract.
+    let cfg = load_goal_config(&slug);
     let worker = cmd
         .or_else(|| std::env::var("TASK_AGENT_CMD").ok())
-        .ok_or_else(|| eyre::eyre!("no worker command: pass --cmd or set TASK_AGENT_CMD"))?;
-    let evaluator = eval_cmd.or_else(|| std::env::var("TASK_GOAL_EVAL_CMD").ok());
+        .or(cfg.worker_cmd)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "no worker command: pass --cmd, set TASK_AGENT_CMD, or set goal.worker_cmd in ~/.task/orgs/{slug}/agent.json"
+            )
+        })?;
+    let evaluator = eval_cmd
+        .or_else(|| std::env::var("TASK_GOAL_EVAL_CMD").ok())
+        .or(cfg.eval_cmd);
     if evaluator.is_none() && task_id.is_none() {
         return Err(eyre::eyre!(
-            "no evaluator: pass --eval-cmd, set TASK_GOAL_EVAL_CMD, or pass --task for the built-in done-check"
+            "no evaluator: pass --eval-cmd, set TASK_GOAL_EVAL_CMD / goal.eval_cmd, or pass --task for the built-in done-check"
         ));
     }
 
@@ -7200,10 +7215,12 @@ async fn run_agent_goal(
                 let eval_in = format!("CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}", work.stdout);
                 let r = run_subprocess(ev, &eval_in, iter, &condition)
                     .map_err(|e| workflows_proto::WorkflowError::Backend(format!("eval: {e}")))?;
-                EvalVerdict {
-                    met: r.code == 0,
-                    reason: r.stdout.trim().to_owned(),
-                }
+                // Prefer a structured verdict — the judge convention
+                // Hermes / Claude / Codex `/goal` all share:
+                // `{"done": bool, "reason": "..."}` on stdout. This is
+                // the cross-agent interop contract. Fall back to the
+                // exit code when the output isn't that JSON.
+                parse_eval_verdict(&r.stdout, r.code)
             }
             None => {
                 // No evaluator + a linked task: the condition is
@@ -7264,6 +7281,72 @@ async fn run_agent_goal(
 struct EvalVerdict {
     met: bool,
     reason: String,
+}
+
+/// Per-org `agent.json` `[goal]` defaults for `task agent goal` —
+/// the executor seam's config layer. JSON to match the CLI's other
+/// per-org stores (`labels.json`, `handoffs.json`). All optional.
+#[derive(Default, serde::Deserialize)]
+struct GoalConfig {
+    worker_cmd: Option<String>,
+    eval_cmd: Option<String>,
+    #[allow(dead_code)] // reserved: config-driven turn budget
+    max_turns: Option<u32>,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct AgentConfig {
+    #[serde(default)]
+    goal: GoalConfig,
+}
+
+/// Load `~/.task/orgs/<slug>/agent.json` — missing / unparseable
+/// file yields defaults (the feature degrades to flags + env).
+fn load_goal_config(org_slug: &str) -> GoalConfig {
+    let Some(home) = std::env::var_os("HOME") else {
+        return GoalConfig::default();
+    };
+    let p = std::path::Path::new(&home)
+        .join(".task")
+        .join("orgs")
+        .join(org_slug)
+        .join("agent.json");
+    std::fs::read(&p)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<AgentConfig>(&b).ok())
+        .unwrap_or_default()
+        .goal
+}
+
+/// Interpret an evaluator's output. The cross-agent judge convention
+/// (Hermes / Claude / Codex `/goal`) is a JSON object
+/// `{"done": bool, "reason": "..."}` on stdout — preferred when
+/// present (anywhere in the output, so a chatty judge still works).
+/// Otherwise fall back to the exit code: `0` = met, nonzero = not,
+/// with the trimmed stdout as the reason.
+fn parse_eval_verdict(stdout: &str, code: i32) -> EvalVerdict {
+    #[derive(serde::Deserialize)]
+    struct Judged {
+        done: bool,
+        #[serde(default)]
+        reason: String,
+    }
+    // Scan for the first `{...}` that parses as the judge shape, so
+    // surrounding prose (common with LLM judges) doesn't defeat it.
+    if let (Some(start), Some(end)) = (stdout.find('{'), stdout.rfind('}')) {
+        if end > start {
+            if let Ok(j) = serde_json::from_str::<Judged>(&stdout[start..=end]) {
+                return EvalVerdict {
+                    met: j.done,
+                    reason: j.reason.trim().to_owned(),
+                };
+            }
+        }
+    }
+    EvalVerdict {
+        met: code == 0,
+        reason: stdout.trim().to_owned(),
+    }
 }
 
 /// Captured result of a worker / evaluator subprocess.
