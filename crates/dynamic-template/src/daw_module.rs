@@ -11,8 +11,8 @@ use daw_reaper::track::{
 };
 
 use crate::{
-    ItemMetadata, OrganizeIntoTracks, Structure, auto_color, default_config, monarchy_sort,
-    track_schema,
+    auto_color, default_config, monarchy_sort, track_schema, ItemMetadata, OrganizeIntoTracks,
+    Structure,
 };
 use dynamic_template_proto::{
     actions::dynamic_template_actions, auto_color::actions::auto_color_actions,
