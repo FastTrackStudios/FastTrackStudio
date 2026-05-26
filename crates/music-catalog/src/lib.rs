@@ -10,11 +10,13 @@
 //! - [`instruments`] — Instrument groups and sub-groups with colors
 //! - [`sections`] — Song sections with colors, abbreviations, and dynamic cues
 //! - [`lookup`] — Name-to-color resolution with abbreviation/alias support
+//! - [`groups`] — Canonical REAPER 128-slot group partition (instrument bands)
 
+pub mod groups;
 pub mod instruments;
 pub mod lookup;
 pub mod sections;
 
 // Re-export the Color type for convenience
-pub use color_palette::palette;
 pub use color_palette::Color;
+pub use color_palette::palette;

@@ -42,11 +42,16 @@ pub mod actions;
 pub mod auto_color;
 mod error;
 mod services;
+pub mod session_template;
 mod types;
 pub mod visibility_manager;
 
 pub use error::*;
 pub use services::*;
+pub use session_template::{
+    GroupMembership, IdealFullSessionTemplate, MonitorMode, NodeRouting, TemplateBus, TemplateNode,
+    TrackDefaults, TrackInput,
+};
 pub use types::*;
 
 // Re-export daw-proto hierarchy types for convenience
