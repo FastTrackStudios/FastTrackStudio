@@ -987,6 +987,19 @@ enum IssueCmd {
         json: bool,
     },
 
+    /// Render the agent prompt for a task — its PRD plus the parent
+    /// issue's PRD (when it's a subtask), formatted as the directive
+    /// an agent receives. The same renderer `task agent goal --task`
+    /// feeds the loop, exposed standalone so you can inspect exactly
+    /// what an agent will be handed.
+    Prompt {
+        id: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+
     /// Patch the issue's `WorkflowAttrs` in place. Repeatable
     /// `--add-assignee` / `--add-blocker` for set operations.
     /// Pass `--clear` to drop the workflow block entirely (the
@@ -7105,24 +7118,38 @@ async fn run_agent_goal(
     // Resolve the optional linked task (claim it; it becomes the
     // session subject + the default evaluator's completion check).
     let url = resolve_org_vox_url(server.clone(), &slug);
-    let task_id = match &task_ref {
+    // When linked to a task: claim it and render its PRD (+ parent's)
+    // as the prompt preamble, so the agent gets the full spec, not
+    // just the bare condition.
+    let (task_id, task_preamble) = match &task_ref {
         Some(r) => {
             let client = connect_task_client(&url).await?;
             let t = resolve_issue_id(&client, r).await?;
             if let ClaimOutcome::Lost(holder) = try_claim(&client, &t.id, &agent, false).await? {
                 return Err(eyre::eyre!("{} is held by {holder}", short_uuid(&t.id)));
             }
-            Some(t.id)
+            let parent = match t.workflow.as_ref().and_then(|w| w.parent) {
+                Some(pid) => client.get(pid).await.ok(),
+                None => None,
+            };
+            (Some(t.id), render_task_prompt(&t, parent.as_ref()))
         }
-        None => None,
+        None => (None, String::new()),
     };
 
     // The first prompt: the condition is the directive (matching
     // Claude Code's `/goal`, where the condition itself starts the
-    // turn). Subsequent turns append the evaluator's reason.
-    let base_prompt = format!(
-        "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
-    );
+    // turn). When tied to a task, lead with its rendered PRD.
+    // Subsequent turns append the evaluator's reason.
+    let base_prompt = if task_preamble.is_empty() {
+        format!(
+            "Goal: {condition}\n\nWork toward this goal. When you believe it is fully met, stop."
+        )
+    } else {
+        format!(
+            "{task_preamble}\n---\n\nGoal (stop when met): {condition}\n\nWork toward this goal using the task spec above."
+        )
+    };
     if dry_run {
         println!("{base_prompt}");
         return Ok(());
@@ -7279,6 +7306,38 @@ fn run_subprocess(
         code: out.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
     })
+}
+
+/// Render the agent-facing prompt for a task: its own PRD plus the
+/// parent issue's PRD when it's a subtask. The one built-in template
+/// (concrete-first; a pluggable template system is deferred). Shared
+/// by `task issue prompt` and `task agent goal --task` so the loop
+/// and the standalone preview never drift.
+fn render_task_prompt(t: &task::TaskInfo, parent: Option<&task::TaskInfo>) -> String {
+    let mut s = String::new();
+    if let Some(p) = parent {
+        s.push_str(&format!("# Parent issue (PRD): {}\n\n", p.title));
+        let body = p.details.trim();
+        if body.is_empty() {
+            s.push_str("(no description)\n\n");
+        } else {
+            s.push_str(body);
+            s.push_str("\n\n");
+        }
+        s.push_str("---\n\n");
+    }
+    s.push_str(&format!("# Task: {}  [{}]\n\n", t.title, t.priority));
+    let body = t.details.trim();
+    if body.is_empty() {
+        s.push_str("(no description)\n");
+    } else {
+        s.push_str(body);
+        s.push('\n');
+    }
+    if !t.tags.0.is_empty() {
+        s.push_str(&format!("\ntags: {}\n", t.tags.0.join(", ")));
+    }
+    s
 }
 
 /// `~/.task/orgs/<slug>/workflows` — the orchestrator store dir.
@@ -8090,6 +8149,17 @@ async fn run_issue(cmd: IssueCmd) -> eyre::Result<()> {
                 Some(w) => print_workflow_block(w),
                 None => println!("  workflow: (none)"),
             }
+        }
+        IssueCmd::Prompt { id, org, server } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let t = resolve_issue_id(&client, &id).await?;
+            let parent = match t.workflow.as_ref().and_then(|w| w.parent) {
+                Some(pid) => client.get(pid).await.ok(),
+                None => None,
+            };
+            print!("{}", render_task_prompt(&t, parent.as_ref()));
         }
         IssueCmd::SetWorkflow {
             id,
