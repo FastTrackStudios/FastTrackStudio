@@ -33,19 +33,34 @@ pub struct IdealFullSessionTemplate {
     pub buses: Vec<TemplateBus>,
 }
 
-/// One node in the template tree. A node is one of:
-/// - a **structural folder** (`variadic == false`, has `children`): an
-///   instrument group or sub-group (Drums, Drum Kit, Kick, Electric, …);
-/// - a **dimension** (`variadic == true`): a per-project deepening axis
-///   (Performer / Arrangement / Layers / Channel / Multi-mic) whose
-///   [`vocabulary`](Self::vocabulary) lists the configured descriptor names it
-///   may take. The engine instantiates as many as the project needs and
-///   collapses the level when it resolves to a single value;
-/// - a **leaf track** (`variadic == false`, no `children`): a concrete track.
+/// What a [`TemplateNode`] represents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Facet)]
+#[repr(u8)]
+pub enum NodeKind {
+    /// A structural folder: an instrument group or sub-group (Drums, Drum Kit,
+    /// Kick, Electric, …). Materializes whenever it has any content.
+    Folder,
+    /// A concrete leaf track.
+    Track,
+    /// A per-project deepening axis (Performer / Arrangement / Layers / Channel
+    /// / Multi-mic). The engine instantiates one instance per project value
+    /// drawn from [`vocabulary`](TemplateNode::vocabulary) and collapses the
+    /// level when it resolves to a single value.
+    Dimension,
+    /// A *conditional* tagged collection (e.g. drum `SUM`): a folder that only
+    /// materializes when a group has both items matching the collection's
+    /// [`vocabulary`](TemplateNode::vocabulary) patterns and items outside it —
+    /// the matching ones go inside, the rest sit alongside.
+    Collection,
+}
+
+/// One node in the template tree; see [`NodeKind`] for the variants.
 #[derive(Clone, Debug, Facet)]
 pub struct TemplateNode {
-    /// Display name, e.g. `"Drums"`, `"Kick"`, `"Arrangement"`.
+    /// Display name, e.g. `"Drums"`, `"Kick"`, `"Arrangement"`, `"SUM"`.
     pub name: String,
+    /// What this node represents.
+    pub kind: NodeKind,
     /// Canonical group path this node belongs to (top-level first), matching
     /// the music-catalog taxonomy / classification-engine names. Empty for
     /// structural-only or dimension nodes that inherit. e.g. `["Drums", "Kick"]`.
@@ -59,14 +74,10 @@ pub struct TemplateNode {
     pub group_membership: Option<GroupMembership>,
     /// How this node routes its output.
     pub routing: NodeRouting,
-    /// When true, this node is a per-project **dimension** — the engine
-    /// instantiates one instance per project value (drawn from `vocabulary`)
-    /// and collapses the level when it resolves to a single value.
-    pub variadic: bool,
-    /// For a dimension node, the configured descriptor names it may take
-    /// (e.g. Arrangement `["Clean", "Crunch", …]`, Channel `["L", "C", "R"]`,
-    /// Multi-mic `["In", "Out", "Top", "Bottom"]`). Empty means free-form —
-    /// the value is named per take (e.g. Performer, Layers).
+    /// For a [`Dimension`](NodeKind::Dimension) or [`Collection`](NodeKind::Collection)
+    /// node, the configured descriptor / pattern names it covers (e.g.
+    /// Arrangement `["Clean", "Crunch", …]`, Multi-mic `["In", "Out", …]`, SUM
+    /// `["In", "Out", "Trig"]`). Empty means free-form — named per take.
     pub vocabulary: Vec<String>,
 }
 
@@ -75,26 +86,40 @@ impl TemplateNode {
     pub fn folder(name: impl Into<String>, group_path: Vec<String>) -> Self {
         Self {
             name: name.into(),
+            kind: NodeKind::Folder,
             group_path,
             children: Vec::new(),
             defaults: TrackDefaults::default(),
             group_membership: None,
             routing: NodeRouting::default(),
-            variadic: false,
             vocabulary: Vec::new(),
         }
     }
 
     /// A leaf track (inherits color / membership from its parent folder).
     pub fn track(name: impl Into<String>) -> Self {
-        Self::folder(name, Vec::new())
+        Self {
+            kind: NodeKind::Track,
+            ..Self::folder(name, Vec::new())
+        }
     }
 
     /// A per-project dimension node named `name` with the configured
     /// `vocabulary` of descriptor names (empty = free-form, named per take).
     pub fn dimension(name: impl Into<String>, vocabulary: Vec<String>) -> Self {
         Self {
-            variadic: true,
+            kind: NodeKind::Dimension,
+            vocabulary,
+            ..Self::folder(name, Vec::new())
+        }
+    }
+
+    /// A conditional tagged-collection node (e.g. drum `SUM`) named `name`,
+    /// covering the given `vocabulary` of pattern names. See
+    /// [`NodeKind::Collection`].
+    pub fn collection(name: impl Into<String>, vocabulary: Vec<String>) -> Self {
+        Self {
+            kind: NodeKind::Collection,
             vocabulary,
             ..Self::folder(name, Vec::new())
         }
@@ -227,7 +252,7 @@ mod tests {
             .in_group("Drums");
 
         assert_eq!(kick.group_path, vec!["Drums", "Kick"]);
-        assert!(!kick.variadic);
+        assert_eq!(kick.kind, NodeKind::Folder);
         assert_eq!(
             kick.group_membership.as_ref().map(|g| g.category.as_str()),
             Some("Drums")
@@ -235,8 +260,11 @@ mod tests {
 
         let mics = &kick.children[0];
         assert_eq!(mics.name, "MultiMic");
-        assert!(mics.variadic);
+        assert_eq!(mics.kind, NodeKind::Dimension);
         assert_eq!(mics.vocabulary, vec!["In", "Out"]);
         assert!(mics.children.is_empty());
+
+        let sum = TemplateNode::collection("SUM", vec!["In".into(), "Out".into(), "Trig".into()]);
+        assert_eq!(sum.kind, NodeKind::Collection);
     }
 }

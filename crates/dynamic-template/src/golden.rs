@@ -8,7 +8,7 @@
 //! axes — with their configured descriptor vocabularies attached. The engine
 //! later expands and collapses that schema per project.
 
-use dynamic_template_proto::{IdealFullSessionTemplate, TemplateBus, TemplateNode};
+use dynamic_template_proto::{IdealFullSessionTemplate, NodeKind, TemplateBus, TemplateNode};
 use monarchy::Group;
 
 use crate::ItemMetadata;
@@ -107,6 +107,14 @@ fn build_node(g: &Group<ItemMetadata>, path: &mut Vec<String>) -> TemplateNode {
     if let Some(chain) = dimension_chain(&dimensions, &mic_vocab) {
         children.push(chain);
     }
+
+    // A tagged collection (e.g. drum SUM) declares a conditional grouping over
+    // its pattern vocabulary — the engine groups matching captures under it and
+    // leaves the rest alongside.
+    if let Some(tc) = &g.tagged_collection {
+        children.push(TemplateNode::collection(&tc.name, tc.patterns.clone()));
+    }
+
     node = node.with_children(children);
 
     path.pop();
@@ -166,8 +174,13 @@ mod tests {
         let kit = find(drums, "Drum Kit").expect("Drum Kit sub-folder");
         let kick = find(kit, "Kick").expect("Kick sub-folder");
         let mics = find(kick, "MultiMic").expect("Kick MultiMic dimension");
-        assert!(mics.variadic);
+        assert_eq!(mics.kind, NodeKind::Dimension);
         assert_eq!(mics.vocabulary, vec!["In", "Out", "Top", "Bottom"]);
+
+        // Kick also declares the SUM tagged collection (In/Out/Trig).
+        let sum = find(kick, "SUM").expect("Kick SUM collection");
+        assert_eq!(sum.kind, NodeKind::Collection);
+        assert_eq!(sum.vocabulary, vec!["In", "Out", "Trig"]);
     }
 
     #[test]
@@ -186,7 +199,7 @@ mod tests {
 
         // Performer → Arrangement → Layers → Channel → MultiMic, in order.
         let performer = find(electric, "Performer").expect("Performer dimension");
-        assert!(performer.variadic);
+        assert_eq!(performer.kind, NodeKind::Dimension);
         let arrangement = find(performer, "Arrangement").expect("Arrangement");
         assert!(arrangement.vocabulary.contains(&"Clean".to_string()));
         assert!(arrangement.vocabulary.contains(&"Crunch".to_string()));
