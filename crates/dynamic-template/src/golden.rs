@@ -208,5 +208,14 @@ mod tests {
         let keys = t.root.iter().find(|n| n.name == "Keys").unwrap();
         let keys_electric = find(keys, "Electric").expect("Keys/Electric");
         assert!(keys_electric.group_membership.is_none());
+
+        // Vocals/BGVs DOES map to the Background Vox band (path aligned to the
+        // config's "BGVs" sub-group name).
+        let vocals = t.root.iter().find(|n| n.name == "Vocals").unwrap();
+        let bgvs = find(vocals, "BGVs").expect("Vocals/BGVs");
+        assert_eq!(
+            bgvs.group_membership.as_ref().map(|g| g.category.as_str()),
+            Some("Background Vox")
+        );
     }
 }

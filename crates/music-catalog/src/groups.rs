@@ -100,7 +100,9 @@ pub const SLOT_BANDS: &[GroupSlotBand] = &[
         count: 20,
     },
     GroupSlotBand {
-        path: &["Vocals", "Background"],
+        // Path element matches the classification config's sub-group name
+        // ("BGVs"); the label is the friendly REAPER group-slot name.
+        path: &["Vocals", "BGVs"],
         label: "Background Vox",
         start: 101,
         count: 20,
