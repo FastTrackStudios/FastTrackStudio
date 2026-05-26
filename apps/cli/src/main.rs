@@ -133,6 +133,13 @@ enum Commands {
     /// webhook on the forge, record the repo binding.
     #[command(subcommand)]
     Setup(SetupCmd),
+    /// The agent dev loop — git operations wrapped around the
+    /// issue lifecycle. `start` branches + claims, `commit`
+    /// stamps attribution trailers, `push` opens a linked PR,
+    /// `finish` merges + closes. Infers the forge repo from the
+    /// git remote, so it works on third-party repos too.
+    #[command(subcommand)]
+    Code(CodeCmd),
     /// Goals (with cycle anchoring) served by the active
     /// org. Talks to `/org/<slug>/vox` via the architect-
     /// generated `GoalServiceClient`.
@@ -1309,6 +1316,72 @@ enum IssueCmd {
         /// Filter by issue state: `open` (default), `closed`, or `all`.
         #[arg(long, default_value = "open")]
         state: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+}
+
+/// `task code *` — the agent dev loop over git + issues.
+///
+/// Branch convention: `task/<short-id>-<slug>`. The short id is
+/// the first 8 chars of the task UUID; `commit`/`push`/`status`/
+/// `finish` parse it back out of the current branch name, so the
+/// branch is the only state these verbs need.
+#[derive(Subcommand)]
+enum CodeCmd {
+    /// Claim a task, flip it to in-progress, and create a work
+    /// branch off the current HEAD.
+    Start {
+        /// Task id (UUID or 8-char prefix).
+        id: String,
+        /// Claim as this agent (`name[@version]`).
+        #[arg(long = "as-agent")]
+        as_agent: Option<String>,
+        /// Branch prefix. Default `task`.
+        #[arg(long, default_value = "task")]
+        prefix: String,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// `git commit` with attribution trailers (Task-Id,
+    /// Task-Agent, Co-Authored-By) derived from the current
+    /// branch's task.
+    Commit {
+        #[arg(short = 'm', long)]
+        message: String,
+        /// Attribute to this agent (`name[@version]`).
+        #[arg(long = "as-agent")]
+        as_agent: Option<String>,
+        /// Stage everything first (`git add -A`).
+        #[arg(long)]
+        all: bool,
+    },
+    /// Push the current branch and open a linked PR that closes
+    /// the branch's task's forge issue on merge.
+    Push {
+        /// Target GitHub instead of Forgejo.
+        #[arg(long)]
+        github: bool,
+        /// Forgejo base URL (falls back to `TASK_FORGEJO_BASE_URL`).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// PR target branch. Default `main`.
+        #[arg(long, default_value = "main")]
+        base: String,
+        /// Open as a draft.
+        #[arg(long)]
+        draft: bool,
+        #[arg(long)]
+        org: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Show the current branch's task + its linked issue/PR.
+    Status {
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -3126,6 +3199,9 @@ async fn main() -> eyre::Result<()> {
         }
         Commands::Setup(cmd) => {
             return Box::pin(run_setup(cmd)).await;
+        }
+        Commands::Code(cmd) => {
+            return Box::pin(run_code(cmd)).await;
         }
         Commands::Org(cmd) => {
             return Box::pin(run_org(cmd)).await;
@@ -8786,6 +8862,268 @@ fn forge_link_store(org_slug: &str) -> eyre::Result<git_config::FileStore> {
         .join(org_slug)
         .join("issue-links.json");
     git_config::FileStore::open(p).map_err(|e| eyre::eyre!("open link store: {e}"))
+}
+
+// ── git helpers for `task code` ──────────────────────────────
+
+/// Run `git <args>` in the cwd, returning trimmed stdout.
+fn git(args: &[&str]) -> eyre::Result<String> {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| eyre::eyre!("git {}: {e}", args.join(" ")))?;
+    if !out.status.success() {
+        return Err(eyre::eyre!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn current_branch() -> eyre::Result<String> {
+    git(&["rev-parse", "--abbrev-ref", "HEAD"])
+}
+
+/// Parse the 8-char task prefix out of a `task/<short>-<slug>`
+/// branch name.
+fn task_short_from_branch(branch: &str) -> Option<String> {
+    let after = branch.split_once('/').map_or(branch, |(_, r)| r);
+    let short = after.split('-').next()?;
+    if short.len() == 8 && short.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(short.to_string())
+    } else {
+        None
+    }
+}
+
+/// Derive a `RepoId` from `git remote get-url origin`. Handles
+/// both SSH (`forgejo@host:owner/repo.git`,
+/// `git@github.com:owner/repo.git`) and HTTPS forms.
+fn repo_id_from_git_remote() -> eyre::Result<git_proto::RepoId> {
+    let url = git(&["remote", "get-url", "origin"])?;
+    let (host, owner, repo) =
+        parse_remote_url(&url).ok_or_else(|| eyre::eyre!("can't parse origin remote `{url}`"))?;
+    let forge = if host.contains("github.com") {
+        git_proto::Forge::Github
+    } else {
+        git_proto::Forge::Forgejo {
+            base_url: format!("https://{host}"),
+        }
+    };
+    Ok(git_proto::RepoId { forge, owner, repo })
+}
+
+/// `(host, owner, repo)` from a git remote URL.
+fn parse_remote_url(url: &str) -> Option<(String, String, String)> {
+    let url = url.trim();
+    // scp-like: user@host:owner/repo(.git)
+    let rest = if let Some(idx) = url.find('@') {
+        let after_at = &url[idx + 1..];
+        if let Some((host, path)) = after_at.split_once(':') {
+            let path = path.trim_end_matches(".git");
+            let (owner, repo) = path.split_once('/')?;
+            return Some((host.to_string(), owner.to_string(), repo.to_string()));
+        }
+        after_at.to_string()
+    } else {
+        url.to_string()
+    };
+    // https://host/owner/repo(.git)
+    let rest = rest
+        .strip_prefix("https://")
+        .or_else(|| rest.strip_prefix("http://"))
+        .unwrap_or(&rest);
+    let (host, path) = rest.split_once('/')?;
+    let path = path.trim_end_matches(".git");
+    let (owner, repo) = path.split_once('/')?;
+    Some((host.to_string(), owner.to_string(), repo.to_string()))
+}
+
+async fn run_code(cmd: CodeCmd) -> eyre::Result<()> {
+    use git_config::BindingStore as _;
+    match cmd {
+        CodeCmd::Start {
+            id,
+            as_agent,
+            prefix,
+            org,
+            server,
+        } => {
+            let slug = resolve_active_org(org)?;
+            let url = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&url).await?;
+            let mut t = resolve_issue_id(&client, &id).await?;
+            let short = &t.id.simple().to_string()[..8];
+            let title_slug: String = t
+                .title
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+                .split('-')
+                .filter(|s| !s.is_empty())
+                .take(6)
+                .collect::<Vec<_>>()
+                .join("-");
+            let branch = format!("{prefix}/{short}-{title_slug}");
+            git(&["switch", "-c", &branch])?;
+
+            t.status = "in-progress".into();
+            t.completed_date = None;
+            if let Some(name) = as_agent {
+                let agent = parse_agent_ref(&format!("agent:{name}"))?;
+                let w = t
+                    .workflow
+                    .get_or_insert_with(task::model::WorkflowAttrs::default);
+                if !w.assignees.0.iter().any(|a| a == &agent) {
+                    w.assignees.0.push(agent);
+                }
+            }
+            client
+                .update(t)
+                .await
+                .map_err(|e| eyre::eyre!("update: {e:?}"))?;
+            println!("started {short} on branch {branch}");
+        }
+        CodeCmd::Commit {
+            message,
+            as_agent,
+            all,
+        } => {
+            let branch = current_branch()?;
+            let short = task_short_from_branch(&branch);
+            let mut trailers = String::new();
+            if let Some(s) = &short {
+                trailers.push_str(&format!("\n\nTask-Id: {s}"));
+            }
+            let agent = as_agent.unwrap_or_else(|| "claude".to_string());
+            trailers.push_str(&format!("\nTask-Agent: {agent}"));
+            trailers.push_str("\nCo-Authored-By: Claude <noreply@anthropic.com>");
+            let full = format!("{message}{trailers}");
+            if all {
+                git(&["add", "-A"])?;
+            }
+            git(&["commit", "-m", &full])?;
+            let sha = git(&["rev-parse", "--short", "HEAD"])?;
+            println!("committed {sha} on {branch}");
+            if short.is_none() {
+                eprintln!("  note: branch isn't a `task/<id>-…` branch — no Task-Id trailer");
+            }
+        }
+        CodeCmd::Push {
+            github,
+            base_url,
+            base,
+            draft,
+            org,
+            server,
+        } => {
+            let branch = current_branch()?;
+            let short = task_short_from_branch(&branch).ok_or_else(|| {
+                eyre::eyre!(
+                    "current branch `{branch}` isn't a `task/<id>-…` branch; can't link a PR"
+                )
+            })?;
+            let slug = resolve_active_org(org)?;
+            let vox = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&vox).await?;
+            let t = resolve_issue_id(&client, &short).await?;
+
+            // Forge repo inferred from the git remote (works on
+            // third-party repos). --github / --base-url are
+            // accepted for parity but the remote is authoritative.
+            let _ = (github, &base_url);
+            let repo_id = repo_id_from_git_remote()?;
+            let repo_slug = format!("{}/{}", repo_id.owner, repo_id.repo);
+
+            // Push the branch.
+            git(&["push", "-u", "origin", &branch])?;
+            println!("pushed {branch} → {repo_slug}");
+
+            // Find the linked forge issue → inject Closes #N.
+            let store = forge_link_store(&slug)?;
+            let links = store
+                .issues_for_task(&t.id.to_string())
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            let closes = links
+                .iter()
+                .find(|l| l.repo == repo_id && l.kind == git_config::LinkKind::Issue)
+                .map(|l| l.number);
+            let mut body = format!("Work for task {short}.");
+            if let Some(n) = closes {
+                body.push_str(&format!("\n\nCloses #{n}"));
+            }
+
+            let repo_c = repo_id.clone();
+            let title = t.title.clone();
+            let head = branch.clone();
+            let pr = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .create_pull_request(
+                        &repo_c,
+                        git_proto::reviews::NewPullRequest {
+                            title,
+                            body,
+                            base,
+                            head,
+                            draft,
+                        },
+                    )
+                    .map_err(|e| eyre::eyre!("create_pull_request: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))??;
+
+            // Record a PR link on the task.
+            store
+                .add_issue_link(git_config::IssueLink {
+                    task_id: t.id.to_string(),
+                    repo: repo_id.clone(),
+                    number: pr.id.0,
+                    kind: git_config::LinkKind::Pull,
+                })
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            println!("opened PR #{} ({repo_slug})", pr.id.0);
+            if let Some(n) = closes {
+                println!("  closes #{n} on merge");
+            } else {
+                eprintln!("  note: task has no linked forge issue — PR won't auto-close one");
+            }
+        }
+        CodeCmd::Status { org, server } => {
+            let branch = current_branch()?;
+            println!("branch:  {branch}");
+            let Some(short) = task_short_from_branch(&branch) else {
+                println!("task:    (branch isn't a task/<id>-… branch)");
+                return Ok(());
+            };
+            let slug = resolve_active_org(org)?;
+            let vox = resolve_org_vox_url(server, &slug);
+            let client = connect_task_client(&vox).await?;
+            let t = resolve_issue_id(&client, &short).await?;
+            println!("task:    {} [{}]  {}", short, t.status, t.title);
+            let store = forge_link_store(&slug)?;
+            let links = store
+                .issues_for_task(&t.id.to_string())
+                .map_err(|e| eyre::eyre!("link store: {e}"))?;
+            for l in links {
+                let kind = match l.kind {
+                    git_config::LinkKind::Issue => "issue",
+                    git_config::LinkKind::Pull => "pr",
+                };
+                println!("  {kind:<5} {}/{}#{}", l.repo.owner, l.repo.repo, l.number);
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn run_setup(cmd: SetupCmd) -> eyre::Result<()> {
