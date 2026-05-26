@@ -1,19 +1,23 @@
 //! The Ideal Full Session Template — the opinionated "golden session".
 //!
 //! This is the canonical full track/folder layout FastTrackStudio organizes
-//! every session toward: the complete instrument-band folder tree, each band's
-//! group-slot membership (the REAPER 128-slot partition), routing into buses,
-//! and per-track defaults.
+//! every session toward. It is a **schema**, not a flat track list: fixed
+//! structural folders (instrument groups and sub-groups) followed by a chain
+//! of *dimension* nodes — Performer, Arrangement, Layers, Channel, Multi-mic —
+//! each carrying the configured [`vocabulary`](TemplateNode::vocabulary) of
+//! descriptor names it may take. The engine expands and collapses that schema
+//! per project, so the same template renders a one-off DI as `GTR E / DI` and
+//! a fully tracked, multi-performer part as the full nested tree.
 //!
-//! It is **pure data**. Categories are expressed as string paths (top-level
-//! first, e.g. `["Guitars", "Electric"]`) sourced from the canonical taxonomy
-//! in [`music_catalog`] — there is no typed instrument enum here, so other
-//! repos can describe layouts without coupling to a closed category set. The
-//! scaffold / conform / audit *logic* that consumes this model lives in the
-//! `dynamic-template` engine crate, not here.
+//! These are **pure data** types. Categories are string paths (top-level
+//! first, e.g. `["Guitars", "Electric"]`) matching the canonical taxonomy in
+//! `music_catalog` — there is no typed instrument enum, so other repos can
+//! describe layouts without coupling to a closed category set. The builder
+//! that *derives* a golden template from the classification configuration
+//! lives in the `dynamic-template` engine crate (it needs the `Config`),
+//! not here.
 
 use facet::Facet;
-use music_catalog::groups::SLOT_BANDS;
 
 /// The opinionated full-session template: the ideal track/folder layout a
 /// session is organized toward.
@@ -29,16 +33,25 @@ pub struct IdealFullSessionTemplate {
     pub buses: Vec<TemplateBus>,
 }
 
-/// One node in the template tree: a folder (has `children`) or a leaf track.
+/// One node in the template tree. A node is one of:
+/// - a **structural folder** (`variadic == false`, has `children`): an
+///   instrument group or sub-group (Drums, Drum Kit, Kick, Electric, …);
+/// - a **dimension** (`variadic == true`): a per-project deepening axis
+///   (Performer / Arrangement / Layers / Channel / Multi-mic) whose
+///   [`vocabulary`](Self::vocabulary) lists the configured descriptor names it
+///   may take. The engine instantiates as many as the project needs and
+///   collapses the level when it resolves to a single value;
+/// - a **leaf track** (`variadic == false`, no `children`): a concrete track.
 #[derive(Clone, Debug, Facet)]
 pub struct TemplateNode {
-    /// Display name, e.g. `"Drums"`, `"Electric Gtr"`, `"Kick In"`.
+    /// Display name, e.g. `"Drums"`, `"Kick"`, `"Arrangement"`.
     pub name: String,
     /// Canonical group path this node belongs to (top-level first), matching
     /// the music-catalog taxonomy / classification-engine names. Empty for
-    /// purely structural folders. e.g. `["Guitars", "Electric"]`.
+    /// structural-only or dimension nodes that inherit. e.g. `["Drums", "Kick"]`.
     pub group_path: Vec<String>,
-    /// Folder children, in display order. Empty ⇒ leaf track.
+    /// Child nodes, in display order. For a dimension node these are the inner
+    /// dimensions / captures; for a structural folder, its sub-folders.
     pub children: Vec<TemplateNode>,
     /// Per-track defaults (ignored for pure folders).
     pub defaults: TrackDefaults,
@@ -46,14 +59,19 @@ pub struct TemplateNode {
     pub group_membership: Option<GroupMembership>,
     /// How this node routes its output.
     pub routing: NodeRouting,
-    /// When true, `children` are an **exemplar** of a per-project repeated
-    /// pattern (e.g. synth layers, BGV stacks) rather than a fixed list — the
-    /// engine instantiates as many as the project needs, naming them per take.
+    /// When true, this node is a per-project **dimension** — the engine
+    /// instantiates one instance per project value (drawn from `vocabulary`)
+    /// and collapses the level when it resolves to a single value.
     pub variadic: bool,
+    /// For a dimension node, the configured descriptor names it may take
+    /// (e.g. Arrangement `["Clean", "Crunch", …]`, Channel `["L", "C", "R"]`,
+    /// Multi-mic `["In", "Out", "Top", "Bottom"]`). Empty means free-form —
+    /// the value is named per take (e.g. Performer, Layers).
+    pub vocabulary: Vec<String>,
 }
 
 impl TemplateNode {
-    /// A folder node carrying a canonical group path. No defaults applied.
+    /// A structural folder carrying a canonical group path.
     pub fn folder(name: impl Into<String>, group_path: Vec<String>) -> Self {
         Self {
             name: name.into(),
@@ -63,20 +81,22 @@ impl TemplateNode {
             group_membership: None,
             routing: NodeRouting::default(),
             variadic: false,
+            vocabulary: Vec::new(),
         }
     }
 
-    /// A leaf track with no canonical group path (inherits color/membership
-    /// from its parent folder).
+    /// A leaf track (inherits color / membership from its parent folder).
     pub fn track(name: impl Into<String>) -> Self {
+        Self::folder(name, Vec::new())
+    }
+
+    /// A per-project dimension node named `name` with the configured
+    /// `vocabulary` of descriptor names (empty = free-form, named per take).
+    pub fn dimension(name: impl Into<String>, vocabulary: Vec<String>) -> Self {
         Self {
-            name: name.into(),
-            group_path: Vec::new(),
-            children: Vec::new(),
-            defaults: TrackDefaults::default(),
-            group_membership: None,
-            routing: NodeRouting::default(),
-            variadic: false,
+            variadic: true,
+            vocabulary,
+            ..Self::folder(name, Vec::new())
         }
     }
 
@@ -95,13 +115,6 @@ impl TemplateNode {
     /// Set the canonical group path from string slices (builder-style).
     pub fn with_path(mut self, path: &[&str]) -> Self {
         self.group_path = path.iter().map(|s| (*s).to_string()).collect();
-        self
-    }
-
-    /// Mark this folder's children as a per-project repeated pattern (the
-    /// listed children are exemplars). Builder-style. See [`TemplateNode::variadic`].
-    pub fn variadic(mut self) -> Self {
-        self.variadic = true;
         self
     }
 
@@ -200,362 +213,30 @@ pub struct TemplateBus {
     pub channels: u32,
 }
 
-impl IdealFullSessionTemplate {
-    /// The canonical FTS golden session. There's one top-level folder per
-    /// instrument-category band in [`music_catalog::groups::SLOT_BANDS`], in
-    /// partition order. Bands authored in detail (see [`layout`]) expand into
-    /// their full subtree; the rest are top-level folder stubs carrying the
-    /// canonical path / color / group-slot membership until authored.
-    pub fn golden() -> Self {
-        let root = SLOT_BANDS
-            .iter()
-            .map(|band| layout::authored(band.label).unwrap_or_else(|| layout::stub(band)))
-            .collect();
-
-        Self {
-            name: "FTS Golden Session".to_string(),
-            version: 1,
-            root,
-            buses: vec![TemplateBus {
-                name: "Mix Bus".to_string(),
-                channels: 2,
-            }],
-        }
-    }
-}
-
-/// The authored golden-session track layout — the actual ideal tree, built up
-/// group by group. Each top-level instrument band gets a `pub fn` returning
-/// its full subtree; [`golden`](IdealFullSessionTemplate::golden) assembles
-/// them in partition order, stubbing any band not yet authored.
-pub mod layout {
-    use super::*;
-
-    /// A leaf track (inherits color / membership from its parent folder).
-    fn track(name: &str) -> TemplateNode {
-        TemplateNode::track(name)
-    }
-
-    /// A folder carrying a canonical group `path` and `children`.
-    fn folder(name: &str, path: &[&str], children: Vec<TemplateNode>) -> TemplateNode {
-        TemplateNode::folder(name, path.iter().map(|s| (*s).to_string()).collect())
-            .with_children(children)
-    }
-
-    /// A variadic *structural* folder — a per-project organizational level
-    /// (Performer / Arrangement / Layer / Channel) whose name is a placeholder
-    /// filled per instance and which collapses away when it has a single
-    /// child. Carries no canonical path of its own (inherits its color from
-    /// the nearest instrument ancestor).
-    fn level(name: &str, children: Vec<TemplateNode>) -> TemplateNode {
-        TemplateNode::folder(name, Vec::new())
-            .with_children(children)
-            .variadic()
-    }
-
-    /// Top-level folder stub for a band that isn't authored in detail yet —
-    /// carries the canonical path, resolved color, and group-slot membership
-    /// straight from the slot partition.
-    pub fn stub(band: &music_catalog::groups::GroupSlotBand) -> TemplateNode {
-        let mut node = TemplateNode::folder(
-            band.label,
-            band.path.iter().map(|p| (*p).to_string()).collect(),
-        );
-        node.defaults.color_hex = band.color().map(|c| c.to_hex_string());
-        node.group_membership = Some(GroupMembership {
-            category: band.path.join("/"),
-        });
-        node
-    }
-
-    /// The detailed subtree for a top-level band by its REAPER label, or
-    /// `None` if not yet authored.
-    pub fn authored(label: &str) -> Option<TemplateNode> {
-        match label {
-            "Drums" => Some(drums()),
-            "Bass" => Some(bass()),
-            "Electric Gtr" => Some(electric_gtr()),
-            "Acoustic Gtr" => Some(acoustic_gtr()),
-            "Keys" => Some(keys()),
-            _ => None,
-        }
-    }
-
-    /// Bass — the maximal form: a Guitar source (DI) and a Synth source
-    /// (variadic per-project layers). When only one source is present the
-    /// engine collapses this down (e.g. just `Bass / DI`).
-    pub fn bass() -> TemplateNode {
-        folder(
-            "Bass",
-            &["Bass"],
-            vec![
-                folder("Guitar", &["Bass", "Guitar"], vec![track("DI")]),
-                // Synth layers are named per take, so this folder is variadic;
-                // the single child is an exemplar layer.
-                folder("Synth", &["Bass", "Synth"], vec![track("Layer")]).variadic(),
-            ],
-        )
-        .in_group("Bass")
-    }
-
-    /// Drums — Kick / Snare / Toms / Cymbals / Rooms.
-    pub fn drums() -> TemplateNode {
-        folder(
-            "Drums",
-            &["Drums"],
-            vec![
-                folder(
-                    "Kick",
-                    &["Drums", "Kick"],
-                    vec![
-                        folder(
-                            "Sum",
-                            &["Drums", "Kick"],
-                            vec![track("In"), track("Out"), track("Trig")],
-                        ),
-                        track("Sub"),
-                    ],
-                ),
-                folder(
-                    "Snare",
-                    &["Drums", "Snare"],
-                    vec![
-                        folder(
-                            "SUM",
-                            &["Drums", "Snare"],
-                            vec![track("Top"), track("Bottom"), track("Trig")],
-                        ),
-                        track("Verb"),
-                    ],
-                ),
-                folder(
-                    "Toms",
-                    &["Drums", "Tom"],
-                    vec![track("T1"), track("T2"), track("T3"), track("T4")],
-                ),
-                folder(
-                    "Cymbals",
-                    &["Drums", "Cymbals"],
-                    vec![
-                        track("Hi-Hat").with_path(&["Drums", "Hi-Hat"]),
-                        track("Overheads"),
-                    ],
-                ),
-                folder(
-                    "Rooms",
-                    &["Drums", "Room"],
-                    vec![
-                        track("Rooms Far"),
-                        track("Rooms Close"),
-                        track("Rooms Mono"),
-                    ],
-                ),
-            ],
-        )
-        .in_group("Drums")
-    }
-
-    /// The most dynamic shape, shared by guitars and keys: a run of variadic
-    /// structural levels (Performer → Arrangement → Layer → Channel) bottoming
-    /// out in the per-performance multi-mic `captures`. Every level collapses
-    /// when singular, so the same template renders a one-off capture as
-    /// `<name> / DI` and a fully tracked, multi-performer part as the full
-    /// nested tree.
-    fn performance_chain(
-        name: &str,
-        path: &[&str],
-        category: &str,
-        captures: &[&str],
-    ) -> TemplateNode {
-        folder(
-            name,
-            path,
-            vec![level(
-                "Performer",
-                vec![level(
-                    "Arrangement",
-                    vec![level(
-                        "Layer",
-                        vec![level(
-                            "Channel",
-                            captures.iter().map(|c| track(*c)).collect(),
-                        )],
-                    )],
-                )],
-            )],
-        )
-        .in_group(category)
-    }
-
-    /// Guitar multi-mic captures (DI box, pedalboard DI, two amp mics).
-    const GUITAR_CAPTURES: &[&str] = &["DI", "DI-Pedalboard", "Amp 1", "Amp 2"];
-
-    /// Electric guitar. See [`performance_chain`].
-    pub fn electric_gtr() -> TemplateNode {
-        performance_chain(
-            "GTR E",
-            &["Guitars", "Electric"],
-            "Electric Gtr",
-            GUITAR_CAPTURES,
-        )
-    }
-
-    /// Acoustic guitar — same dynamic chain as electric. See [`performance_chain`].
-    pub fn acoustic_gtr() -> TemplateNode {
-        performance_chain(
-            "GTR A",
-            &["Guitars", "Acoustic"],
-            "Acoustic Gtr",
-            GUITAR_CAPTURES,
-        )
-    }
-
-    /// Keys — same dynamic chain as guitars. Captures are DI plus an amped
-    /// pair (Rhodes / organ / Leslie through an amp). Adjust if your keys
-    /// rigs capture differently.
-    pub fn keys() -> TemplateNode {
-        performance_chain("Keys", &["Keys"], "Keys", &["DI", "Amp 1", "Amp 2"])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn golden_has_one_folder_per_slot_band() {
-        let t = IdealFullSessionTemplate::golden();
-        assert_eq!(t.root.len(), SLOT_BANDS.len());
-        // Every top-level node carries a canonical group path + membership.
-        for node in &t.root {
-            assert!(
-                !node.group_path.is_empty(),
-                "{} has no group path",
-                node.name
-            );
-            assert!(
-                node.group_membership.is_some(),
-                "{} has no group membership",
-                node.name
-            );
-        }
-        // First band is Drums, last is Background Vox — order preserved.
-        assert_eq!(t.root.first().unwrap().name, "Drums");
-        assert_eq!(t.root.last().unwrap().name, "Background Vox");
-    }
+    fn builders_shape_nodes() {
+        let kick = TemplateNode::folder("Kick", vec!["Drums".into(), "Kick".into()])
+            .with_child(TemplateNode::dimension(
+                "MultiMic",
+                vec!["In".into(), "Out".into()],
+            ))
+            .in_group("Drums");
 
-    #[test]
-    fn golden_resolves_canonical_colors() {
-        let t = IdealFullSessionTemplate::golden();
-        // Synths (a stub band) resolves a color via its canonical path.
-        let synths = t.root.iter().find(|n| n.name == "Synths").unwrap();
-        assert!(synths.defaults.color_hex.is_some());
-    }
-
-    #[test]
-    fn drums_layout_has_authored_shape() {
-        let drums = layout::drums();
-        assert_eq!(drums.name, "Drums");
-        // Top-level drums joins the Drums group-slot band.
+        assert_eq!(kick.group_path, vec!["Drums", "Kick"]);
+        assert!(!kick.variadic);
         assert_eq!(
-            drums.group_membership.as_ref().map(|g| g.category.as_str()),
+            kick.group_membership.as_ref().map(|g| g.category.as_str()),
             Some("Drums")
         );
 
-        let names: Vec<&str> = drums.children.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["Kick", "Snare", "Toms", "Cymbals", "Rooms"]);
-
-        // Kick: a Sum sub-folder (In/Out/Trig) plus a Sub track.
-        let kick = drums.children.iter().find(|c| c.name == "Kick").unwrap();
-        let sum = kick.children.iter().find(|c| c.name == "Sum").unwrap();
-        let sum_kids: Vec<&str> = sum.children.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(sum_kids, ["In", "Out", "Trig"]);
-        assert!(kick.children.iter().any(|c| c.name == "Sub"));
-
-        // Toms are four leaf tracks.
-        let toms = drums.children.iter().find(|c| c.name == "Toms").unwrap();
-        assert_eq!(toms.children.len(), 4);
-        assert!(toms.children.iter().all(|c| c.children.is_empty()));
-
-        // Hi-Hat carries its own canonical path for color.
-        let cymbals = drums.children.iter().find(|c| c.name == "Cymbals").unwrap();
-        let hat = cymbals
-            .children
-            .iter()
-            .find(|c| c.name == "Hi-Hat")
-            .unwrap();
-        assert_eq!(hat.group_path, vec!["Drums", "Hi-Hat"]);
-    }
-
-    #[test]
-    fn bass_layout_splits_guitar_and_synth() {
-        let bass = layout::bass();
-        assert_eq!(bass.name, "Bass");
-        assert_eq!(
-            bass.group_membership.as_ref().map(|g| g.category.as_str()),
-            Some("Bass")
-        );
-
-        let guitar = bass.children.iter().find(|c| c.name == "Guitar").unwrap();
-        assert_eq!(guitar.group_path, vec!["Bass", "Guitar"]);
-        assert!(guitar.children.iter().any(|c| c.name == "DI"));
-        assert!(!guitar.variadic);
-
-        // Synth is variadic — its children are per-project exemplar layers.
-        let synth = bass.children.iter().find(|c| c.name == "Synth").unwrap();
-        assert_eq!(synth.group_path, vec!["Bass", "Synth"]);
-        assert!(synth.variadic);
-    }
-
-    #[test]
-    fn electric_gtr_nests_variadic_levels_down_to_mics() {
-        let gtr = layout::electric_gtr();
-        assert_eq!(gtr.name, "GTR E");
-        assert_eq!(gtr.group_path, vec!["Guitars", "Electric"]);
-        assert!(!gtr.variadic, "the GTR E anchor itself is not variadic");
-
-        // Walk the structural chain: Performer > Arrangement > Layer > Channel,
-        // each a variadic level, then the multi-mic leaf captures.
-        let chain = ["Performer", "Arrangement", "Layer", "Channel"];
-        let mut node = &gtr;
-        for level_name in chain {
-            node = &node.children[0];
-            assert_eq!(node.name, level_name);
-            assert!(node.variadic, "{level_name} should be variadic");
-            assert!(
-                node.group_path.is_empty(),
-                "{level_name} inherits its color"
-            );
-        }
-
-        // Channel holds the multi-mic captures as leaf tracks.
-        let mics: Vec<&str> = node.children.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(mics, ["DI", "DI-Pedalboard", "Amp 1", "Amp 2"]);
-        assert!(node.children.iter().all(|c| c.children.is_empty()));
-    }
-
-    #[test]
-    fn acoustic_gtr_mirrors_electric_chain() {
-        let acoustic = layout::acoustic_gtr();
-        assert_eq!(acoustic.name, "GTR A");
-        assert_eq!(acoustic.group_path, vec!["Guitars", "Acoustic"]);
-        assert_eq!(
-            acoustic
-                .group_membership
-                .as_ref()
-                .map(|g| g.category.as_str()),
-            Some("Acoustic Gtr")
-        );
-        // Same structural depth/shape as electric (Performer→…→Channel→mics).
-        let electric = layout::electric_gtr();
-        fn shape(n: &TemplateNode) -> Vec<(String, bool)> {
-            let mut out = vec![(n.name.clone(), n.variadic)];
-            for c in &n.children {
-                out.extend(shape(c));
-            }
-            out
-        }
-        // Identical but for the root name; compare from the first child down.
-        assert_eq!(shape(&acoustic.children[0]), shape(&electric.children[0]));
+        let mics = &kick.children[0];
+        assert_eq!(mics.name, "MultiMic");
+        assert!(mics.variadic);
+        assert_eq!(mics.vocabulary, vec!["In", "Out"]);
+        assert!(mics.children.is_empty());
     }
 }

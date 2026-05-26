@@ -8,6 +8,7 @@ pub mod colors;
 pub mod daw_module;
 pub mod equipment;
 mod error;
+pub mod golden;
 mod groups;
 pub mod icons;
 mod item_metadata;
@@ -19,6 +20,7 @@ mod tempo;
 pub mod track_schema;
 
 pub use error::{Error, Result};
+pub use golden::golden_template;
 pub use groups::{
     Bass, Choir, Drums, Guide, Guitars, Harmonica, Horns, Keys, Orchestra, Percussion, Reference,
     SFX, StemSplit, Strings, Synths, Vocals,
