@@ -7118,7 +7118,6 @@ async fn run_agent_goal(
     org: Option<String>,
     server: Option<String>,
 ) -> eyre::Result<()> {
-    use std::io::Write as _;
     use workflows_orchestrator::{CodingWorkflow, IterationOutcome, RunEnd, WorkflowStore};
 
     let slug = resolve_active_org(org)?;
@@ -7259,15 +7258,15 @@ async fn run_agent_goal(
                 "\n\nThe goal is NOT yet met. Evaluator feedback:\n{reason}\n\nContinue."
             ));
         }
+        println!("▶ turn {iter} — worker running…");
         let work = run_subprocess(&worker, &prompt, iter, &condition)
             .map_err(|e| workflows_proto::WorkflowError::Backend(format!("worker: {e}")))?;
-        print!("{}", work.stdout);
-        std::io::stdout().flush().ok();
 
         // 2. Evaluator gate — judge the worker's output against the
         //    condition. Built-in done-check if no eval command.
         let verdict = match &evaluator {
             Some(ev) => {
+                println!("⧖ turn {iter} — judging…");
                 let eval_in = format!("CONDITION:\n{condition}\n\nWORKER OUTPUT:\n{}", work.stdout);
                 let r = run_subprocess(ev, &eval_in, iter, &condition)
                     .map_err(|e| workflows_proto::WorkflowError::Backend(format!("eval: {e}")))?;
@@ -7412,17 +7411,26 @@ struct SubprocOut {
 }
 
 /// Run `command` via `sh -c`, piping `prompt` to its stdin and
-/// exposing `TASK_GOAL` / `TASK_GOAL_ITER` in its env. Captures
-/// stdout (also surfaced to the caller); stderr streams through.
+/// exposing `TASK_GOAL` / `TASK_GOAL_ITER` in its env.
+///
+/// Streams the child's stdout **live**, line by line, while also
+/// capturing it for the caller — so a multi-minute agent turn isn't a
+/// black box (the whole reason the loop looked "stuck"). A heartbeat
+/// thread prints elapsed time every ~15s while the child runs quietly,
+/// so even a worker that buffers its output (e.g. `claude -p`) shows
+/// signs of life. stderr passes straight through.
 fn run_subprocess(
     command: &str,
     prompt: &str,
     iter: u32,
     condition: &str,
 ) -> eyre::Result<SubprocOut> {
-    use std::io::Write as _;
+    use std::io::{BufRead as _, BufReader, Write as _};
     use std::process::{Command, Stdio};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
+    let started = std::time::Instant::now();
     let mut child = Command::new("sh")
         .arg("-c")
         .arg(command)
@@ -7433,17 +7441,49 @@ fn run_subprocess(
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| eyre::eyre!("spawn `{command}`: {e}"))?;
+
+    // Feed the prompt and close stdin (drop) so the child sees EOF and
+    // starts working.
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(prompt.as_bytes())
             .map_err(|e| eyre::eyre!("write stdin: {e}"))?;
     }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| eyre::eyre!("wait: {e}"))?;
+
+    // Heartbeat: every 15s of quiet, remind the user it's alive.
+    let alive = Arc::new(AtomicBool::new(true));
+    let beat = {
+        let alive = Arc::clone(&alive);
+        std::thread::spawn(move || {
+            let mut waited = 0u64;
+            while alive.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                waited += 1;
+                if waited.is_multiple_of(15) && alive.load(Ordering::Relaxed) {
+                    eprintln!("    …still working ({waited}s)");
+                }
+            }
+        })
+    };
+
+    // Stream + capture stdout line by line.
+    let mut captured = String::new();
+    if let Some(out) = child.stdout.take() {
+        for line in BufReader::new(out).lines() {
+            let line = line.map_err(|e| eyre::eyre!("read stdout: {e}"))?;
+            println!("    │ {line}");
+            captured.push_str(&line);
+            captured.push('\n');
+        }
+    }
+
+    let status = child.wait().map_err(|e| eyre::eyre!("wait: {e}"))?;
+    alive.store(false, Ordering::Relaxed);
+    let _ = beat.join();
+    eprintln!("    └ done in {}s", started.elapsed().as_secs());
     Ok(SubprocOut {
-        code: out.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        code: status.code().unwrap_or(-1),
+        stdout: captured,
     })
 }
 
