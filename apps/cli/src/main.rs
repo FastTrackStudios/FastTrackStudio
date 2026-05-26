@@ -2767,6 +2767,12 @@ enum GoalLoopCmd {
         /// this works it as a single task instead.
         #[arg(long)]
         no_triage: bool,
+        /// Hand the whole goal to the agent's own native goal loop in
+        /// one shot, instead of our turn-by-turn loop. For agents with
+        /// their own loop (Hermes/Codex/Claude). Also settable via
+        /// `agent.json` `goal.mode = "delegate"`.
+        #[arg(long)]
+        delegate: bool,
         #[arg(long)]
         org: Option<String>,
         #[arg(long)]
@@ -7186,12 +7192,13 @@ async fn run_agent(cmd: AgentCmd) -> eyre::Result<()> {
                 max_iters,
                 dry_run,
                 no_triage,
+                delegate,
                 org,
                 server,
             } => {
                 Box::pin(run_agent_goal(
-                    condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, no_triage, org,
-                    server,
+                    condition, cmd, eval_cmd, task, as_agent, max_iters, dry_run, no_triage,
+                    delegate, org, server,
                 ))
                 .await
             }
@@ -7235,6 +7242,7 @@ async fn run_agent_goal(
     max_iters: u32,
     dry_run: bool,
     no_triage: bool,
+    delegate: bool,
     org: Option<String>,
     server: Option<String>,
 ) -> eyre::Result<()> {
@@ -7350,7 +7358,10 @@ async fn run_agent_goal(
             "no worker command: pass --cmd, set TASK_AGENT_CMD, or set goal.worker_cmd in ~/.task/orgs/{slug}/agent.json"
         )
     })?;
-    if evaluator.is_none() && task_id.is_none() {
+    // Native-delegate uses the worker's exit code as the verdict, so
+    // it needs no separate evaluator.
+    let delegate = delegate || cfg.mode.as_deref() == Some("delegate");
+    if !delegate && evaluator.is_none() && task_id.is_none() {
         return Err(eyre::eyre!(
             "no evaluator: pass --eval-cmd, set TASK_GOAL_EVAL_CMD / goal.eval_cmd, or pass --task for the built-in done-check"
         ));
@@ -7374,15 +7385,18 @@ async fn run_agent_goal(
         session.id, &condition, max_iters,
     ))?;
 
-    let run = drive_goal_loop(
-        &wf,
-        session.id,
-        &agent,
-        &static_preamble,
-        &worker,
-        evaluator.as_deref(),
-        max_iters,
-    )?;
+    // Pick the executor: --delegate (or agent.json goal.mode) hands
+    // the whole goal to the agent's native loop; default is our
+    // turn-by-turn subprocess loop. (`delegate` resolved above.)
+    let executor = if delegate {
+        GoalExecutor::NativeDelegate { worker: &worker }
+    } else {
+        GoalExecutor::Subprocess {
+            worker: &worker,
+            evaluator: evaluator.as_deref(),
+        }
+    };
+    let run = executor.drive(&wf, session.id, &agent, &static_preamble, max_iters)?;
 
     finalize_goal_run(&run, max_iters, task_id, &url, &wf, session.id).await
 }
@@ -7546,6 +7560,91 @@ fn drive_goal_loop(
                 println!("  ◎ turn {iter}: not met — {}", verdict.reason);
             }
             Ok(IterationOutcome::Continue)
+        }
+    })?;
+    Ok(run)
+}
+
+/// The two ways to drive a goal session. Selected by `--delegate` /
+/// `agent.json goal.mode`. This is the seam #161 deferred —
+/// concretised now that a second real executor exists.
+enum GoalExecutor<'a> {
+    /// Default: our turn-by-turn loop — worker turn → judge → repeat,
+    /// with live steering + the budget. Agent-agnostic.
+    Subprocess {
+        worker: &'a str,
+        evaluator: Option<&'a str>,
+    },
+    /// Hand the whole goal to the agent's *own* loop in one shot (for
+    /// agents that have a native goal loop — Hermes/Codex/Claude). One
+    /// worker invocation with the full directive; its exit code is the
+    /// verdict. No re-prompt, no separate judge.
+    NativeDelegate { worker: &'a str },
+}
+
+impl GoalExecutor<'_> {
+    fn drive(
+        &self,
+        wf: &workflows_orchestrator::CodingWorkflow,
+        session_id: uuid::Uuid,
+        agent: &workflows_proto::AgentRef,
+        static_preamble: &str,
+        budget: u32,
+    ) -> eyre::Result<workflows_orchestrator::SessionRun> {
+        match self {
+            GoalExecutor::Subprocess { worker, evaluator } => drive_goal_loop(
+                wf,
+                session_id,
+                agent,
+                static_preamble,
+                worker,
+                *evaluator,
+                budget,
+            ),
+            GoalExecutor::NativeDelegate { worker } => {
+                drive_goal_delegate(wf, session_id, agent, static_preamble, worker)
+            }
+        }
+    }
+}
+
+/// Native-delegate executor (#169): one worker invocation handed the
+/// full goal (the agent runs its *own* loop internally), mapped onto a
+/// single-turn `WorkSession`. Exit 0 = met → finish; nonzero → park.
+fn drive_goal_delegate(
+    wf: &workflows_orchestrator::CodingWorkflow,
+    session_id: uuid::Uuid,
+    agent: &workflows_proto::AgentRef,
+    static_preamble: &str,
+    worker: &str,
+) -> eyre::Result<workflows_orchestrator::SessionRun> {
+    use workflows_orchestrator::IterationOutcome;
+    // Budget of 1: a single delegated invocation. The agent's native
+    // loop does the iterating; we just record the one outcome.
+    let run = wf.run_session(session_id, agent.clone(), 1, |_iter| {
+        let (condition, subgoals) = wf
+            .store()
+            .goal(session_id)
+            .map(|g| (g.condition, g.subgoals.0))
+            .unwrap_or_default();
+        let prompt = goal_prompt(static_preamble, &condition, &subgoals, "");
+        println!("▶ delegating the whole goal to the agent's native loop…");
+        let work = run_subprocess(worker, &prompt, 0, &condition)
+            .map_err(|e| workflows_proto::WorkflowError::Backend(format!("worker: {e}")))?;
+        let _ = wf.store().mutate_goal(session_id, |g| {
+            g.turns_used = 1;
+            if let Some(a) = &work.last_activity {
+                g.current_activity = a.clone();
+            }
+            g.updated_at = chrono::Utc::now();
+        });
+        if work.code == 0 {
+            Ok(IterationOutcome::Done)
+        } else {
+            Ok(IterationOutcome::Blocked {
+                reason: format!("delegated agent exited {}", work.code),
+                summary: "native-delegate run did not complete the goal".to_owned(),
+            })
         }
     })?;
     Ok(run)
@@ -7926,15 +8025,16 @@ async fn run_goal_resume(
         goal.condition
     );
 
-    let run = drive_goal_loop(
-        &wf,
-        session.id,
-        &agent,
-        &static_preamble,
-        &worker,
-        evaluator.as_deref(),
-        budget,
-    )?;
+    // Honor the configured executor mode on resume too.
+    let executor = if cfg.mode.as_deref() == Some("delegate") {
+        GoalExecutor::NativeDelegate { worker: &worker }
+    } else {
+        GoalExecutor::Subprocess {
+            worker: &worker,
+            evaluator: evaluator.as_deref(),
+        }
+    };
+    let run = executor.drive(&wf, session.id, &agent, &static_preamble, budget)?;
     finalize_goal_run(&run, budget, task_id, &url, &wf, session.id).await
 }
 
@@ -7974,6 +8074,10 @@ struct GoalConfig {
     eval_cmd: Option<String>,
     #[allow(dead_code)] // reserved: config-driven turn budget
     max_turns: Option<u32>,
+    /// `"delegate"` selects the native-delegate executor by default
+    /// (for agents with their own goal loop). Anything else / unset =
+    /// the turn-by-turn subprocess loop.
+    mode: Option<String>,
 }
 
 #[derive(Default, serde::Deserialize)]
