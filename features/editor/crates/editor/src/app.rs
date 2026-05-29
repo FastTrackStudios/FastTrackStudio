@@ -23,7 +23,7 @@ use crate::{
 /// `assets/playground.css` so consumers don't have to vendor it.
 /// `asset!` lets Dioxus serve it through the bundled-assets path
 /// on web + desktop alike.
-const EDITOR_STYLE: Asset = asset!("/assets/editor.css");
+pub const EDITOR_STYLE: Asset = asset!("/assets/editor.css");
 
 /// Zero-config markdown editor component. Wraps [`Editor`] with
 /// the standard markdown setup: live-preview decorations,
@@ -65,7 +65,7 @@ pub fn EditorApp() -> Element {
 /// Live-preview pass plus bracket-pair highlighting. The two
 /// builders dedupe nothing, but their mark ranges don't
 /// conflict in practice.
-fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
+pub fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     let mut out = markdown::live_preview(state);
     out.extend(bracket_match::bracket_match(state));
     out
@@ -75,7 +75,7 @@ fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
 /// since the view's `beforeinput` bridge already handles the
 /// common typing path (Enter / Backspace / Delete go through
 /// commands so list-continuation + atomic-line tracking work).
-fn standard_markdown_keymap() -> Keymap {
+pub fn standard_markdown_keymap() -> Keymap {
     Keymap::new()
         .with("Mod-a", commands::select_all as _)
         .with("Mod-b", commands::toggle_bold as _)
