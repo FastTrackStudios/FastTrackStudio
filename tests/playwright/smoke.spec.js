@@ -84,8 +84,14 @@ test("projects route renders", async ({ page }) => {
   await expectShell(page);
   // "Projects" H1 heading (distinct from the nav link).
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+  // The vox fetch must actually RESOLVE and hydrate: "Loading projects…"
+  // disappears and real data renders (the "N top-level · M total" counter),
+  // NOT the error box. If the WS handshake hangs, this stays on Loading
+  // forever and fails — guarding the initiator-role handshake fix.
+  await expect(page.getByText(/Loading projects/i)).toBeHidden({ timeout: 20_000 });
+  await expect(page.getByText(/Couldn't reach the project service/i)).toBeHidden();
+  await expect(page.getByText(/top-level ·/i)).toBeVisible({ timeout: 10_000 });
   await page.screenshot({ path: "screenshots/projects.png", fullPage: true });
-  await page.waitForTimeout(2500);
   expect(fatal, `fatal wasm/WS errors:\n${fatal.join("\n")}`).toHaveLength(0);
 });
 

@@ -30,10 +30,9 @@ pub async fn task_client() -> Result<task::TaskServiceClient, String> {
         if let Some(c) = CACHE.with(|c| c.borrow().clone()) {
             return Ok(c);
         }
-        use vox_core::acceptor_on;
+        use vox_core::{TransportMode, initiator_on};
         let link = link().await?;
-        let client = acceptor_on(link)
-            .on_connection(())
+        let client = initiator_on(link, TransportMode::Bare)
             .establish::<task::TaskServiceClient>()
             .await
             .map_err(|e| format!("establish: {e:?}"))?;
@@ -58,10 +57,9 @@ pub async fn project_client() -> Result<project::ProjectServiceClient, String> {
         if let Some(c) = CACHE.with(|c| c.borrow().clone()) {
             return Ok(c);
         }
-        use vox_core::acceptor_on;
+        use vox_core::{TransportMode, initiator_on};
         let link = link().await?;
-        let client = acceptor_on(link)
-            .on_connection(())
+        let client = initiator_on(link, TransportMode::Bare)
             .establish::<project::ProjectServiceClient>()
             .await
             .map_err(|e| format!("establish: {e:?}"))?;
