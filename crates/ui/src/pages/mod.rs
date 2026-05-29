@@ -8,6 +8,7 @@ pub mod gantt;
 pub mod goals;
 pub mod home;
 pub mod inbox;
+pub mod project_detail;
 pub mod projects;
 pub mod schedule;
 pub mod settings;

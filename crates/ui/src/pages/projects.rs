@@ -15,6 +15,8 @@ use project::ProjectInfo;
 #[cfg(target_arch = "wasm32")]
 use project::ProjectServiceClient;
 
+use crate::routes::Route;
+
 use crate::vox_session::vox_url;
 
 #[component]
@@ -112,6 +114,7 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
     let p = &props.p;
     let kids = props.subprojects.clone();
     let title = p.title.clone();
+    let pid = p.id.to_string();
     let status = p.status.clone();
     let priority = p.priority.clone();
     let tags: Vec<String> = p.tags.0.clone();
@@ -121,7 +124,9 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
         Card {
             CardHeader {
                 div { class: "flex items-start justify-between gap-2",
-                    CardTitle { "{title}" }
+                    Link { to: Route::ProjectDetailRoute { id: pid.clone() }, class: "hover:underline",
+                        CardTitle { "{title}" }
+                    }
                     StatusBadge {
                         variant: status_variant(&status),
                         label: status.clone(),

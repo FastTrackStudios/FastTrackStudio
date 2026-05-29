@@ -24,6 +24,9 @@ pub enum Route {
         #[route("/projects")]
         ProjectsRoute {},
 
+        #[route("/projects/:id")]
+        ProjectDetailRoute { id: String },
+
         #[route("/goals")]
         GoalsRoute {},
 
@@ -59,6 +62,11 @@ fn InboxRoute() -> Element {
 #[component]
 fn ProjectsRoute() -> Element {
     rsx! { pages::projects::ProjectsView {} }
+}
+
+#[component]
+fn ProjectDetailRoute(id: String) -> Element {
+    rsx! { pages::project_detail::ProjectDetailView { id } }
 }
 
 #[component]
