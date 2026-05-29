@@ -10663,6 +10663,18 @@ async fn sync_repo(
     use git_config::BindingStore as _;
 
     // 1. Reconcile already-linked issues (forge wins for open/closed).
+    //
+    // FUTURE: replace this coarse "forge wins for state" rule with
+    // the per-field resolver in `git_config::sync`
+    // (`resolve_conflict` over `Field::ALL`). That needs per-field
+    // provenance — `FieldProvenance { task_modified, forge_modified }`
+    // — which we don't track yet: the Task side has only a
+    // whole-record `date_modified`, and the forge `Issue` DTO carries
+    // no per-field timestamps. Plumb those (issue #127) and feed each
+    // field's provenance into `resolve_field` here so Task-owned
+    // fields (priority/cycle/project/estimate/agent-attribution)
+    // survive a forge edit and vice-versa. The resolver itself is a
+    // tested standalone unit in `features/git/git-config/src/sync.rs`.
     let local = client
         .list()
         .await

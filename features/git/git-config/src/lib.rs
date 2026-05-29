@@ -17,6 +17,9 @@ use facet::Facet;
 use git_proto::RepoId;
 use serde::{Deserialize, Serialize};
 
+pub mod sync;
+pub use sync::{Field, FieldProvenance, FieldSource, Resolution, resolve_conflict, resolve_field};
+
 /// Whether an `IssueLink` points at an issue or a pull request.
 /// Forge-level numbers may share a namespace (GitHub) or not
 /// (Forgejo) — record the kind so lookups know which trait to
