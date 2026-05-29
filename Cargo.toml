@@ -1,16 +1,16 @@
 [workspace]
 members = [
-    "apps/app/cli",
-    "apps/app/server",
-    "apps/app/db",
-    "apps/app/tests/e2e",
-    "features/example/example",
-    "features/example/example-proto",
-    "features/example/example-db",
-    "features/example/example-memory",
-    "features/example/example-crdt",
-    "features/example/example-ui",
-    "features/example/tests/native",
+    "examples/app/cli",
+    "examples/app/server",
+    "examples/app/db",
+    "examples/app/tests/e2e",
+    "examples/app/features/example/example",
+    "examples/app/features/example/example-proto",
+    "examples/app/features/example/example-db",
+    "examples/app/features/example/example-memory",
+    "examples/app/features/example/example-crdt",
+    "examples/app/features/example/example-ui",
+    "examples/app/features/example/tests/native",
     "macros/architect",
     "macros/architect-derive",
     "macros/architect-rpc-derive",
@@ -20,21 +20,25 @@ members = [
     "examples/layered-services",
     "crates/architect-cli",
     "libs/crdt",
-    "libs/crdt-seaorm", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-crdt", "features/foo/foo-db", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-crdt", "features/bar/bar-db", "features/bar/tests/native",
+    "libs/crdt-seaorm",
+    # In `members` (so `cargo xtask` / `cargo run -p xtask` can resolve it)
+    # but deliberately left out of `default-members` below — it's a build
+    # tool, not part of the production graph.
+    "xtask",
 ]
 # Build the production graph by default; xtask is opt-in via `cargo xtask`.
 default-members = [
-    "apps/app/cli",
-    "apps/app/server",
-    "apps/app/db",
-    "apps/app/tests/e2e",
-    "features/example/example",
-    "features/example/example-proto",
-    "features/example/example-db",
-    "features/example/example-memory",
-    "features/example/example-crdt",
-    "features/example/example-ui",
-    "features/example/tests/native",
+    "examples/app/cli",
+    "examples/app/server",
+    "examples/app/db",
+    "examples/app/tests/e2e",
+    "examples/app/features/example/example",
+    "examples/app/features/example/example-proto",
+    "examples/app/features/example/example-db",
+    "examples/app/features/example/example-memory",
+    "examples/app/features/example/example-crdt",
+    "examples/app/features/example/example-ui",
+    "examples/app/features/example/tests/native",
     "macros/architect",
     "macros/architect-derive",
     "macros/architect-rpc-derive",
@@ -42,15 +46,15 @@ default-members = [
     "examples/external-stub",
     "examples/custom-server",
     "libs/crdt",
-    "libs/crdt-seaorm", "features/foo/foo", "features/foo/foo-proto", "features/foo/foo-crdt", "features/foo/foo-db", "features/foo/tests/native", "features/bar/bar", "features/bar/bar-proto", "features/bar/bar-crdt", "features/bar/bar-db", "features/bar/tests/native",
+    "libs/crdt-seaorm",
 ]
 # Crates with wasm32 / Dioxus target deps that don't survive a workspace
 # host build sit outside; each invokes cargo directly.
 exclude = [
-    "apps/app/web",
-    "apps/app/desktop",
-    "apps/app/ui",
-    "features/example/tests/web",
+    "examples/app/web",
+    "examples/app/desktop",
+    "examples/app/ui",
+    "examples/app/features/example/tests/web",
 ]
 resolver = "2"
 
@@ -86,7 +90,7 @@ facet-pretty = "0.46"
 # a seeded RNG) or randomly (default Faker distribution).
 fake = { version = "4", features = ["derive", "uuid", "chrono"] }
 
-# CLI argument + config parser. Same shape across xtask, apps/app/cli,
+# CLI argument + config parser. Same shape across xtask, examples/app/cli,
 # and any future user-facing binary so flags / env / config files all
 # work consistently.
 figue = "4"
@@ -103,10 +107,17 @@ facet-core = "0.46"
 # use `vox::serve` — we go through axum directly so we only need this.
 # Wasm clients depend on `vox-websocket` directly, not through this dep.
 # Pattern lifted from vox's own `rust/wasm-browser-tests` crate.
-vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
+# v0.8.2-with-Uuid fork. Upstream vox v0.8.2 (230dcd5) panics encoding
+# `Uuid` — its postcard encoder has no branch for opaque `Def::Scalar`
+# shapes, so every RPC returning a Uuid-bearing entity dies on the wire.
+# This fork round-trips Uuid/chrono via display/parse in vox-postcard and
+# describes them as `String` in the schema so plan-based/wasm decode
+# agrees. The client crates (examples/app/{ui,desktop,tests/web}) pin the
+# SAME rev so server + clients share one coherent wire schema.
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
@@ -149,11 +160,11 @@ architect = { path = "macros/architect" }
 
 # Proto crate — referenced by everything else as a path dep so
 # entity changes flow uniformly to every surface.
-example = { path = "features/example/example" }
-example-proto = { path = "features/example/example-proto" }
-example-db = { path = "features/example/example-db" }
-example-memory = { path = "features/example/example-memory" }
-example-crdt = { path = "features/example/example-crdt" }
+example = { path = "examples/app/features/example/example" }
+example-proto = { path = "examples/app/features/example/example-proto" }
+example-db = { path = "examples/app/features/example/example-db" }
+example-memory = { path = "examples/app/features/example/example-memory" }
+example-crdt = { path = "examples/app/features/example/example-crdt" }
 example-stub-backend = { path = "examples/external-stub" }
 
 # Local-first CRDT layer — generic LoroDoc wrapper, EntityCrdt trait,
@@ -167,14 +178,6 @@ crdt-seaorm = { path = "libs/crdt-seaorm" }
 # workspace use Rust 2024 async-fn-in-trait via #[vox::service]; we
 # only reach for async-trait where dyn-dispatch is needed.
 async-trait = "0.1"
-foo = { path = "features/foo/foo" }
-foo-proto = { path = "features/foo/foo-proto" }
-foo-crdt = { path = "features/foo/foo-crdt" }
-foo-db = { path = "features/foo/foo-db" }
-bar = { path = "features/bar/bar" }
-bar-proto = { path = "features/bar/bar-proto" }
-bar-crdt = { path = "features/bar/bar-crdt" }
-bar-db = { path = "features/bar/bar-db" }
 
 # Redirect every transitive bearcove/moire reference (e.g. vox's
 # moire-runtime / moire-tokio / moire-types) to our fork at the same

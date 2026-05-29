@@ -1,0 +1,21 @@
+[package]
+name = "app-desktop"
+version = "0.1.0"
+edition = "2024"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+
+# Native Dioxus desktop target. Same UI as the web app — the platform
+# differences are confined to this binary; `app-ui` stays
+# platform-agnostic.
+
+[dependencies]
+example-proto = { path = "../features/example/example-proto" }
+app-ui = { path = "../ui" }
+
+dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
+# v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

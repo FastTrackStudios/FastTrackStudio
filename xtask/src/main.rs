@@ -51,7 +51,8 @@ fn print_usage() {
   cargo xtask docs serve             ddc serve
   cargo xtask docs build             ddc build
   cargo xtask wiki sync [--dry-run]  push docs/content/ to Forgejo wiki
-  cargo xtask ci                     fmt + clippy + check + test + tracey
+  cargo xtask ci                     fmt + clippy + check + test + idioms + tracey
+  cargo xtask idioms                 enforce vox/dioxus idioms in examples/app
   cargo xtask tracey-validate        spec ↔ impl ↔ verify coverage check
 ",
         "USAGE".bold()
@@ -99,6 +100,7 @@ fn main() -> ExitCode {
             }
         },
         Some((&"ci", _)) => run_ci(),
+        Some((&"idioms", _)) => run_idioms_check(),
         Some((&"tracey-validate", _)) => run_tracey_validate(),
         Some((&"--help" | &"-h" | &"help", _)) => {
             print_usage();
@@ -180,10 +182,104 @@ fn run_ci() -> eyre::Result<()> {
         "warnings",
     ])?;
     cargo(&["check", "--workspace", "--all-targets"])?;
+    // The wasm / desktop crates live outside the workspace (target-cfg
+    // deps), so the workspace check above skips them — verify them here.
+    check_target_cfg_crates()?;
     cargo(&["nextest", "run", "--workspace", "--profile", "ci"])?;
     // Doctests run separately — nextest doesn't pick them up.
     cargo(&["test", "--doc", "--workspace"])?;
+    // The app shell smoke test lives in the excluded `app-ui` crate.
+    run_in("examples/app/ui", &["cargo", "test"])?;
+    run_idioms_check()?;
     run_tracey_validate()?;
+    Ok(())
+}
+
+/// Type-check the target-cfg crates that sit outside the workspace
+/// (`exclude` in the root Cargo.toml): the Dioxus web (wasm), desktop,
+/// and the shared UI shell.
+fn check_target_cfg_crates() -> eyre::Result<()> {
+    section("check target-cfg crates (ui / web / desktop)");
+    run_in("examples/app/ui", &["cargo", "check"])?;
+    run_in(
+        "examples/app/web",
+        &["cargo", "check", "--target", "wasm32-unknown-unknown"],
+    )?;
+    run_in("examples/app/desktop", &["cargo", "check"])?;
+    Ok(())
+}
+
+/// Enforce the project's vox/dioxus idioms in the example app: all
+/// client<->server data flows through vox services, never Dioxus server
+/// functions. See `docs/content/architecture/idioms.md`. The dioxus-MCP
+/// audits (reinvented_widget, signal_lint, …) are the manual companion —
+/// they aren't CLI-runnable, so this guards the one rule grep can.
+fn run_idioms_check() -> eyre::Result<()> {
+    section("idioms (vox/dioxus)");
+    // (pattern, why) — forbidden anywhere under examples/app.
+    const FORBIDDEN: &[(&str, &str)] = &[
+        (
+            "#[server]",
+            "Dioxus server fn — define a vox service trait instead",
+        ),
+        (
+            "#[server(",
+            "Dioxus server fn — define a vox service trait instead",
+        ),
+        (
+            "use_server_future",
+            "Dioxus fullstack hook — fetch through a vox client + use_resource",
+        ),
+        (
+            "dioxus_fullstack",
+            "architect uses vox for RPC, not dioxus-fullstack",
+        ),
+        (
+            "dioxus::fullstack",
+            "architect uses vox for RPC, not dioxus-fullstack",
+        ),
+    ];
+    let root = repo_root().join("examples/app");
+    let mut violations = Vec::new();
+    collect_rs(&root, &mut |path: &std::path::Path, contents: &str| {
+        for (pat, why) in FORBIDDEN {
+            if contents.contains(pat) {
+                violations.push(format!("{}: `{pat}` — {why}", path.display()));
+            }
+        }
+    })?;
+    if violations.is_empty() {
+        eprintln!(
+            "  {} no Dioxus server functions in examples/app",
+            "✓".green()
+        );
+        Ok(())
+    } else {
+        for v in &violations {
+            eprintln!("  {} {v}", "✗".red());
+        }
+        eyre::bail!("{} idiom violation(s) in examples/app", violations.len())
+    }
+}
+
+/// Walk `dir` recursively, calling `f(path, contents)` for every `.rs`
+/// file. Skips `target/` directories.
+fn collect_rs(
+    dir: &std::path::Path,
+    f: &mut dyn FnMut(&std::path::Path, &str),
+) -> eyre::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            if path.file_name().is_some_and(|n| n == "target") {
+                continue;
+            }
+            collect_rs(&path, f)?;
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            let contents = std::fs::read_to_string(&path)?;
+            f(&path, &contents);
+        }
+    }
     Ok(())
 }
 
