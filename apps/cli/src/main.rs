@@ -6617,9 +6617,7 @@ async fn run_wiki(cmd: WikiCmd) -> eyre::Result<()> {
 async fn run_wiki_schema(cmd: WikiSchemaCmd) -> eyre::Result<()> {
     use wiki_proto::service::schema::SchemaClient;
     async fn connect(url: &str) -> eyre::Result<SchemaClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiSchemaCmd::Show {
@@ -6737,9 +6735,7 @@ async fn run_wiki_schema(cmd: WikiSchemaCmd) -> eyre::Result<()> {
 async fn run_wiki_catalog(cmd: WikiCatalogCmd) -> eyre::Result<()> {
     use wiki_proto::service::catalog::CatalogClient;
     async fn connect(url: &str) -> eyre::Result<CatalogClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiCatalogCmd::Show {
@@ -6783,9 +6779,7 @@ async fn run_wiki_catalog(cmd: WikiCatalogCmd) -> eyre::Result<()> {
 async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
     use wiki_proto::service::raw_layer::RawLayerClient;
     async fn connect(url: &str) -> eyre::Result<RawLayerClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiRawCmd::List {
@@ -6865,9 +6859,7 @@ async fn run_wiki_raw(cmd: WikiRawCmd) -> eyre::Result<()> {
 async fn run_wiki_ingest(cmd: WikiIngestCmd) -> eyre::Result<()> {
     use wiki_proto::service::ingest::IngestClient;
     async fn connect(url: &str) -> eyre::Result<IngestClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiIngestCmd::List {
@@ -6927,9 +6919,7 @@ async fn run_wiki_ingest(cmd: WikiIngestCmd) -> eyre::Result<()> {
 async fn run_wiki_lint_findings(cmd: WikiFindingsCmd) -> eyre::Result<()> {
     use wiki_proto::service::lint::LintClient;
     async fn connect(url: &str) -> eyre::Result<LintClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiFindingsCmd::List {
@@ -6991,9 +6981,7 @@ async fn run_wiki_review(cmd: WikiReviewCmd) -> eyre::Result<()> {
     use wiki_proto::review::{ReviewAction, ReviewItem};
     use wiki_proto::service::review::ReviewClient;
     async fn connect(url: &str) -> eyre::Result<ReviewClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     let read_body = |s: String| -> eyre::Result<String> {
         if s == "-" {
@@ -7068,9 +7056,7 @@ async fn run_wiki_research_plans(cmd: WikiResearchCmd) -> eyre::Result<()> {
     use wiki_proto::research::ResearchStatus;
     use wiki_proto::service::research::ResearchClient;
     async fn connect(url: &str) -> eyre::Result<ResearchClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiResearchCmd::List {
@@ -7127,9 +7113,7 @@ async fn run_wiki_research_plans(cmd: WikiResearchCmd) -> eyre::Result<()> {
 async fn run_wiki_watch(cmd: WikiWatchCmd) -> eyre::Result<()> {
     use wiki_proto::service::watcher::WatcherClient;
     async fn connect(url: &str) -> eyre::Result<WatcherClient> {
-        Box::pin(vox::connect(url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(url).await
     }
     match cmd {
         WikiWatchCmd::On {
