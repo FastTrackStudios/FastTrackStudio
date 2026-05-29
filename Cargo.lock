@@ -1241,8 +1241,8 @@ dependencies = [
 
 [[package]]
 name = "facet-cbor"
-version = "0.3.3"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.3.4"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet",
  "facet-core",
@@ -2401,6 +2401,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pin-utils"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3302,8 +3308,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vox"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -3321,8 +3327,8 @@ dependencies = [
 
 [[package]]
 name = "vox-core"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet",
  "facet-cbor",
@@ -3344,8 +3350,8 @@ dependencies = [
 
 [[package]]
 name = "vox-jit"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -3365,8 +3371,8 @@ dependencies = [
 
 [[package]]
 name = "vox-jit-abi"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "arc-swap",
  "facet-core",
@@ -3376,8 +3382,8 @@ dependencies = [
 
 [[package]]
 name = "vox-jit-cal"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet",
  "facet-core",
@@ -3385,8 +3391,8 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-core"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet-cargo-toml",
  "heck",
@@ -3397,8 +3403,8 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-parse"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -3406,8 +3412,8 @@ dependencies = [
 
 [[package]]
 name = "vox-postcard"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "facet",
  "facet-core",
@@ -3419,8 +3425,8 @@ dependencies = [
 
 [[package]]
 name = "vox-schema"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "blake3",
  "facet",
@@ -3431,8 +3437,8 @@ dependencies = [
 
 [[package]]
 name = "vox-service-macros"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "proc-macro2",
  "vox-macros-core",
@@ -3440,8 +3446,8 @@ dependencies = [
 
 [[package]]
 name = "vox-stream"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "libc",
  "moire",
@@ -3452,8 +3458,8 @@ dependencies = [
 
 [[package]]
 name = "vox-types"
-version = "0.4.0"
-source = "git+https://github.com/Codys-Wright/vox.git?rev=5ce8cdd9#5ce8cdd9c3110a605f72abe42a81f0069aeda0b3"
+version = "0.5.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/vox.git?branch=main#a6aa15972d8a16be10cc79fd12c0346e67c5da63"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -3473,6 +3479,7 @@ dependencies = [
  "vox-jit",
  "vox-postcard",
  "vox-schema",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -3667,6 +3674,19 @@ dependencies = [
  "libc",
  "wasmtime-internal-core",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "wasmtimer"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c598d6b99ea013e35844697fc4670d08339d5cda15588f193c6beedd12f644b"
+dependencies = [
+ "futures",
+ "js-sys",
+ "parking_lot",
+ "pin-utils",
+ "wasm-bindgen",
 ]
 
 [[package]]
