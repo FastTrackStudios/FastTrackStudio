@@ -78,8 +78,12 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use std::time::Duration;
 
+// The time types, re-exported so durations + instants come from one place
+// alongside the `Clock`. `Duration` is just `std::time::Duration` (with its
+// `from_millis`/`from_secs`/… constructors); `Instant` is `web_time::Instant`,
+// monotonic on both native and wasm.
+pub use std::time::Duration;
 pub use web_time::Instant;
 
 // ── Send / wasm cfg-split ───────────────────────────────────────────────
