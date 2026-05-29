@@ -7,7 +7,6 @@ edition = "2024"
 vox = { workspace = true }
 vox-types = { workspace = true }
 facet = { workspace = true }
-thiserror = { workspace = true }
 actions-proto = { workspace = true }
 # architect — provides `#[architect::rpc]`. Enabling the `vox` feature
 # wires the macro's emission through to the workspace's vox stack.

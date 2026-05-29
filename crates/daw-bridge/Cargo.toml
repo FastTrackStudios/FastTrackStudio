@@ -41,9 +41,6 @@ reaper-macros.workspace = true
 crossbeam-channel.workspace = true
 fragile.workspace = true
 
-# File watching
-notify.workspace = true
-
 # Project file import (Ableton/ProTools/AAF/DAWproject → REAPER conversion)
 dawfile-ableton = { path = "../dawfile-ableton" }
 dawfile-protools = { path = "../dawfile-protools" }
@@ -54,7 +51,6 @@ dawfile-reaper = { path = "../dawfile-reaper" }
 # Observability
 tracing.workspace = true
 tracing-subscriber.workspace = true
-tempfile = "3"
 eyre = "0.6"
 
 # Sync stack — engine + peer mesh. Default-on so reaper-test multi-instance

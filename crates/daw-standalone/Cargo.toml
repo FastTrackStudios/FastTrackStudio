@@ -53,7 +53,6 @@ daw-proto = { path = "../daw-proto" }
 daw-control = { path = "../daw-control" }
 eyre = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing-subscriber = "0.3"
 base64 = "0.22"
 dawfile-reaper = { path = "../dawfile-reaper" }
 

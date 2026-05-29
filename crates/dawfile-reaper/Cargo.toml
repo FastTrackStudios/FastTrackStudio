@@ -16,7 +16,6 @@ daw-proto = { path = "../daw-proto" }
 # Common workspace dependencies
 serde = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 base64 = "0.22.1"
 
 # Native-only optional speedups.

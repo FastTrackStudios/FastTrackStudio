@@ -20,8 +20,5 @@ roxmltree = "0.20"
 # XML writer (write path)
 quick-xml = "0.37"
 
-[dev-dependencies]
-dawfile-reaper = { path = "../dawfile-reaper" }
-
 [lints]
 workspace = true

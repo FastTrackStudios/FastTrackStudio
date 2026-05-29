@@ -6,7 +6,6 @@
 //! - [`HSlider`] - Horizontal slider
 //! - [`VSlider`] - Vertical slider
 //! - [`XYPad`] - Two-dimensional control pad
-//! - [`EqGraph`] - Parametric EQ visualization with draggable bands
 //! - [`CompressorGraph`] - Compressor transfer curve with interactive controls
 //! - [`GateGraph`] - Noise gate transfer curve with Pro-G style controls
 //! - [`BlockView`] - Adaptive block rendering with LOD support
@@ -15,7 +14,6 @@
 
 pub mod block_view;
 pub mod compressor_graph;
-pub mod eq_graph;
 pub mod gate_graph;
 pub mod hslider;
 pub mod knob;
@@ -27,7 +25,6 @@ pub use compressor_graph::{
     CompressorGraph, CompressorMetering, CompressorMode, CompressorParams, CompressorWidget,
     DbRange, DetectionMode, StereoLink,
 };
-pub use eq_graph::{EqBand, EqBandShape, EqGraph};
 pub use gate_graph::{GateDbRange, GateGraph, GateMetering, GateMode, GateParams};
 pub use hslider::{HSlider, SliderVariant};
 pub use knob::{Knob, KnobVariant};

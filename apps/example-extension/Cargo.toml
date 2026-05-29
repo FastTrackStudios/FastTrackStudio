@@ -10,7 +10,6 @@ name = "reaper_example_extension"
 path = "src/lib.rs"
 
 [dependencies]
-daw.workspace = true
 daw-extension-runtime.workspace = true
 eyre = "0.6"
 fragile.workspace = true

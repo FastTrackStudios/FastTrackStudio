@@ -16,8 +16,6 @@ daw-module = { path = "../daw-module" }
 # DockHostService trait + DockHandle/DockEvent types
 daw-proto = { path = "../daw-proto" }
 architect = { workspace = true }
-vox.workspace = true
-moire.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 thiserror.workspace = true
 
@@ -35,7 +33,6 @@ blitz-traits.workspace = true
 # Rendering pipeline
 anyrender_vello.workspace = true
 vello.workspace = true
-wgpu.workspace = true
 
 # Hot reload (enabled by default for dev, disable for release)
 dioxus-devtools = { workspace = true, optional = true }

@@ -6,9 +6,7 @@ edition = "2024"
 [dependencies]
 daw-proto = { path = "../daw-proto" }
 vox = { workspace = true }
-facet = { workspace = true }
 eyre = { workspace = true }
-futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 facet-json = { workspace = true }

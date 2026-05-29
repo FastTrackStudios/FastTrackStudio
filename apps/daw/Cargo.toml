@@ -22,7 +22,6 @@ eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json.workspace = true
-serde.workspace = true
 facet.workspace = true
 facet-json.workspace = true
 libc = "0.2"
@@ -32,7 +31,6 @@ dawfile-reaper = { path = "../../crates/dawfile-reaper" }
 default = []
 
 [dev-dependencies]
-daw-proto = { path = "../../crates/daw-proto" }
 # Integration-test harness via the daw facade's `test-harness` feature
 # (replaces the former `reaper-test` crate).
 daw = { workspace = true, features = ["test-harness"] }

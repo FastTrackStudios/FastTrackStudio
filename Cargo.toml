@@ -50,12 +50,8 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # Facade crate — the only public API surface for the daw domain
 daw = { path = "crates/daw" }
-# App crate (binary + lib)
-daw-cli = { path = "apps/daw" }
 # UI crate stays public (Dioxus components with feature flags)
 daw-ui = { path = "crates/daw-ui", default-features = false }
-# Widget crate stays public (standalone Dioxus widgets)
-audio-controls = { path = "crates/audio-controls" }
 # RT-aware allocator — offloads RT deallocation to background thread
 daw-allocator = { path = "crates/daw-allocator" }
 # Extension runtime — integrated REAPER extension helpers
@@ -65,9 +61,6 @@ daw-reaper = { path = "crates/daw-reaper" }
 # facade because each depends on `daw` itself, see lib.rs note).
 daw-synchronization = { path = "crates/daw-synchronization" }
 daw-network = { path = "crates/daw-network" }
-daw-link = { path = "crates/daw-link" }
-# Dev tooling — REAPER extension install/symlink helpers (for xtask use)
-fts-devtools = { path = "crates/fts-devtools" }
 # FTS design system — used by `daw-ui`'s `reaper-test-panels` feature so the
 # Native vs Desktop renderer demo panels can ship from this repo.
 fts-ui = { git = "https://git.starcommand.live/FastTrackStudios/fts-ui.git", rev = "d9f01261cb59708300cc5b31fa7fe6bd766a66aa" }
@@ -83,14 +76,11 @@ facet-json = { version = "0.46" }
 # Consumed from git.starcommand.live so daw is usable as a git dependency
 # (a local path dep escapes the repo and breaks downstream `cargo metadata`).
 architect = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
-architect-rpc-derive = { git = "https://git.starcommand.live/FastTrackStudios/architect.git", branch = "main" }
 
 # VOX service framework (pinned to FastTrackStudios fork)
 vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 vox-types = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 vox-stream = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-vox-ffi = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -179,9 +169,6 @@ dioxus-devtools = "0.7"
 # Platform UI bindings
 cocoa = "0.26"
 objc = "0.2.7"
-
-# File watching
-notify = "8"
 
 # Utilities
 eyre = "0.6"

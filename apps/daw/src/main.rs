@@ -281,12 +281,6 @@ enum Command {
     Ping,
     /// Return generated DAW service and method catalog
     ServiceCatalog,
-    /// Execute a daw::service::BatchRequest from a JSON file or stdin
-    Batch {
-        /// JSON file path, or "-" to read stdin
-        input: String,
-    },
-
     // -- Process & Project Management --
     /// Launch a REAPER instance
     Launch {
@@ -1012,15 +1006,6 @@ async fn run_sync(command: &SyncCommand, json_out: bool) -> Result<()> {
     Ok(())
 }
 
-fn read_json_input(input: &str) -> Result<Value> {
-    let text = if input == "-" {
-        std::io::read_to_string(std::io::stdin())?
-    } else {
-        std::fs::read_to_string(input)?
-    };
-    Ok(serde_json::from_str(&text)?)
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -1239,10 +1224,6 @@ async fn main() -> Result<()> {
             cli.json,
         )?,
         Command::Ping => daw_cli::cmd_ping(&daw).await?,
-        Command::Batch { ref input } => {
-            let request = read_json_input(input)?;
-            print_value(daw_cli::ops::execute_batch(&daw, request).await?, cli.json)?
-        }
         Command::Projects => daw_cli::cmd_projects(&daw, cli.json).await?,
         Command::NewProject => print_value(daw_cli::ops::create_project(&daw).await?, cli.json)?,
         Command::SelectProject { ref guid } => {

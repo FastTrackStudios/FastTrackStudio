@@ -79,16 +79,6 @@ pub fn service_catalog() -> Value {
     )
 }
 
-pub async fn execute_batch(daw: &Daw, request: Value) -> Result<Value> {
-    let json = serde_json::to_string(&request)?;
-    let request: daw::service::BatchRequest = facet_json::from_str(&json)
-        .map_err(|err| eyre::eyre!("invalid BatchRequest JSON: {err}"))?;
-    let response = daw.execute_batch(request).await?;
-    let response_json = facet_json::to_string(&response)
-        .map_err(|err| eyre::eyre!("serialize BatchResponse: {err}"))?;
-    Ok(serde_json::from_str(&response_json)?)
-}
-
 fn fx_param_json(p: &daw::service::FxParameter) -> Value {
     let mut obj = json!({
         "index": p.index,

@@ -9,6 +9,4 @@ reaper-launcher = { workspace = true, features = ["icon-gen"] }
 # Test-runner orchestration now lives at `daw::test::runner` behind the
 # `test-harness` feature (former `reaper-test` crate with its `runner` feature).
 daw = { workspace = true, features = ["test-harness"] }
-serde_json = "1.0"
 fts-repo = { git = "https://git.starcommand.live/FastTrackStudios/fts-repo", branch = "main" }
-eyre = "0.6"

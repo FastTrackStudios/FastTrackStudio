@@ -9,11 +9,5 @@ description = "Core audio processing DAG engine — AudioNode trait, BufferPool,
 [lib]
 path = "src/node.rs"
 
-[dependencies]
-tracing.workspace = true
-
-[dev-dependencies]
-approx = "0.5"
-
 [lints]
 workspace = true

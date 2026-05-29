@@ -57,7 +57,6 @@ base64 = "0.22.1"
 daw = { path = "../daw", features = ["test-harness"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-tokio-util = "0.7"
 vox.workspace = true
 moire.workspace = true
 

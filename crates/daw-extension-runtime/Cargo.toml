@@ -14,13 +14,10 @@ daw-module = { path = "../daw-module" }
 daw-proto = { path = "../daw-proto" }
 daw-reaper = { path = "../daw-reaper" }
 vox.workspace = true
-vox-ffi.workspace = true
-moire.workspace = true
 eyre = "0.6"
 tracing.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 crossbeam-channel.workspace = true
-fragile.workspace = true
 reaper-high.workspace = true
 reaper-low.workspace = true
 reaper-medium.workspace = true
