@@ -105,6 +105,14 @@ pub mod schedule;
 #[cfg(feature = "schedule")]
 pub use schedule::{Schedule, repeat, retry};
 
+// Supervision — keep a long-running task alive by restarting it under a
+// `Restart` policy with `Schedule` backoff, cancellable via the platform
+// `CancellationToken`. The service-loop counterpart to `schedule::retry`.
+#[cfg(feature = "schedule")]
+pub mod supervisor;
+#[cfg(feature = "schedule")]
+pub use supervisor::{Restart, Supervised, Supervisor};
+
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach
 // `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
 #[cfg(feature = "fake")]

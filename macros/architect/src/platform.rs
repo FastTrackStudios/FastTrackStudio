@@ -117,6 +117,19 @@ pub use cancel::{CancellationToken, run_until_cancelled};
 pub use sync::{Deferred, Permit, Queue, RecvError, Semaphore, SendError};
 pub use task::{Aborted, Either, Elapsed, JoinHandle, race, spawn, timeout, timeout_with};
 
+// Channel + pub/sub surface. Re-exported straight from tokio (both live under
+// `tokio/sync`, which is wasm-clean and makes no reactor assumptions) so
+// consumers reach point-to-point and broadcast channels through one common
+// `architect::platform` import path rather than a direct tokio dependency:
+//
+//   architect::platform::mpsc::channel(64)        // MPSC point-to-point
+//   architect::platform::broadcast::channel(64)   // fan-out pub/sub
+//
+// (Unlike the wrapped primitives above, these expose tokio's types directly —
+// a deliberate trade: tokio's channel API is rich and well-understood, and
+// moiré's instrumentation already wraps these same primitives.)
+pub use tokio::sync::{broadcast, mpsc};
+
 // ── Free primitives ─────────────────────────────────────────────────────
 
 /// Sleep for `dur`, portably. Native: [`tokio::time::sleep`] (needs a tokio
