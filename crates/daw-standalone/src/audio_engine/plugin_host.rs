@@ -233,6 +233,19 @@ impl ClapHost {
         Ok(out)
     }
 
+    /// List plugin display names inside a `.clap` bundle.
+    ///
+    /// Compatibility helper for analyzer-style callers that only
+    /// need the name list. Prefer [`Self::list_in_bundle`] when
+    /// descriptor ids/vendors/versions are useful.
+    pub fn list_plugin_names(&self, bundle_path: &Path) -> Result<Vec<String>, ClapHostError> {
+        Ok(self
+            .list_in_bundle(bundle_path)?
+            .into_iter()
+            .map(|d| d.name)
+            .collect())
+    }
+
     /// Instantiate a plugin from a `.clap` bundle. `plugin_index`
     /// selects which descriptor inside the bundle (most bundles ship
     /// a single plugin — use 0).
@@ -312,6 +325,9 @@ pub struct ClapParamInfo {
     pub max: f64,
     pub default: f64,
 }
+
+/// Compatibility alias for `fts-analyzer`'s former host API.
+pub type ParamInfo = ClapParamInfo;
 
 /// An instantiated CLAP plugin. Activation is separate so the
 /// plugin can be inspected (params, latency) before being used in
@@ -639,6 +655,107 @@ impl LoadedClapPlugin {
         Ok(())
     }
 
+    /// Process a full mono buffer through the plugin and return mono
+    /// output. The mono input is duplicated to stereo because most
+    /// CLAP effects expose a stereo main bus; the left output channel
+    /// is returned.
+    ///
+    /// `param_events` are sent at sample offset 0 of every block,
+    /// matching the analyzer host's behavior and ensuring static
+    /// overrides continue to apply for plugins that do not retain
+    /// parameter event state internally.
+    pub fn process_mono(
+        &mut self,
+        input: &[f32],
+        param_events: &[(u32, f64)],
+    ) -> Result<Vec<f32>, ClapHostError> {
+        let (left, _) = self.process_mono_to_stereo(input, param_events)?;
+        Ok(left)
+    }
+
+    /// Process a full mono buffer using an explicit audio
+    /// configuration. This matches `fts-analyzer`'s original host
+    /// contract: activate for the call, send parameter overrides on
+    /// every block, duplicate mono input to stereo, and return the
+    /// left output channel.
+    pub fn process_mono_with_config(
+        &mut self,
+        input: &[f32],
+        param_events: &[(u32, f64)],
+        sample_rate: f64,
+        block_size: u32,
+    ) -> Result<Vec<f32>, ClapHostError> {
+        let (left, _) =
+            self.process_mono_to_stereo_with_config(input, param_events, sample_rate, block_size)?;
+        Ok(left)
+    }
+
+    /// Process a full mono buffer through the plugin and return
+    /// stereo output. The plugin is activated for the duration of
+    /// the call if it was not already prepared.
+    pub fn process_mono_to_stereo(
+        &mut self,
+        input: &[f32],
+        param_events: &[(u32, f64)],
+    ) -> Result<(Vec<f32>, Vec<f32>), ClapHostError> {
+        let sample_rate = self.sample_rate().unwrap_or(48_000.0);
+        let block_size = self.block_size().unwrap_or(512).max(1);
+        self.process_mono_to_stereo_with_config(input, param_events, sample_rate, block_size)
+    }
+
+    /// Process a full mono buffer to stereo using an explicit audio
+    /// configuration. If the plugin was already prepared, the
+    /// existing activation is reused only when the config matches;
+    /// otherwise it is temporarily re-prepared for this call.
+    pub fn process_mono_to_stereo_with_config(
+        &mut self,
+        input: &[f32],
+        param_events: &[(u32, f64)],
+        sample_rate: f64,
+        block_size: u32,
+    ) -> Result<(Vec<f32>, Vec<f32>), ClapHostError> {
+        let was_prepared = self.is_prepared();
+        let previous_config = self.sample_rate().zip(self.block_size());
+        let block_size = block_size.max(1);
+        let config_matches = previous_config
+            .map(|(sr, bs)| (sr - sample_rate).abs() <= f64::EPSILON && bs == block_size)
+            .unwrap_or(false);
+        if was_prepared && !config_matches {
+            self.deactivate();
+        }
+        if !was_prepared || !config_matches {
+            self.prepare(sample_rate, block_size)?;
+        }
+
+        let mut out_l = vec![0.0f32; input.len()];
+        let mut out_r = vec![0.0f32; input.len()];
+        let block = block_size as usize;
+        let mut offset = 0usize;
+        while offset < input.len() {
+            let end = (offset + block).min(input.len());
+            let in_l = &input[offset..end];
+            let in_r = &input[offset..end];
+            let events = PluginEvents {
+                params: param_events,
+                midi: &[],
+                note_expressions: &[],
+            };
+            self.process_block(
+                in_l,
+                in_r,
+                &mut out_l[offset..end],
+                &mut out_r[offset..end],
+                &events,
+            )?;
+            offset = end;
+        }
+
+        if !was_prepared || !config_matches {
+            self.deactivate();
+        }
+        Ok((out_l, out_r))
+    }
+
     pub fn is_prepared(&self) -> bool {
         self.activation.is_some()
     }
@@ -684,6 +801,91 @@ impl LoadedClapPlugin {
             let stopped = act.processor.stop_processing();
             self.instance.deactivate(stopped);
         }
+    }
+}
+
+/// Offline CLAP plugin wrapper matching the old `fts-analyzer`
+/// hosting contract.
+///
+/// The DAW runtime should use [`LoadedClapPlugin`] directly so it can
+/// keep plugins activated across many callback blocks. Analyzer-style
+/// tools can use this wrapper for simple "load, process a whole
+/// buffer, deactivate" workflows.
+pub struct OfflineClapPlugin {
+    inner: LoadedClapPlugin,
+    sample_rate: f64,
+    block_size: u32,
+}
+
+/// Compatibility alias for `fts-analyzer`'s former `LoadedPlugin`.
+pub type LoadedPlugin = OfflineClapPlugin;
+
+impl OfflineClapPlugin {
+    pub fn load(
+        clap_path: &Path,
+        plugin_index: usize,
+        sample_rate: f64,
+        block_size: u32,
+    ) -> Result<Self, ClapHostError> {
+        Ok(Self {
+            inner: ClapHost::default().load(clap_path, plugin_index)?,
+            sample_rate,
+            block_size,
+        })
+    }
+
+    pub fn list_plugins(clap_path: &Path) -> Result<Vec<String>, ClapHostError> {
+        ClapHost::default().list_plugin_names(clap_path)
+    }
+
+    pub fn descriptor(&self) -> &ClapPluginDescriptor {
+        self.inner.descriptor()
+    }
+
+    pub fn params(&mut self) -> Vec<ParamInfo> {
+        self.inner.params()
+    }
+
+    pub fn process(
+        &mut self,
+        input: &[f32],
+        param_overrides: &[(u32, f64)],
+    ) -> Result<Vec<f32>, ClapHostError> {
+        self.inner.process_mono_with_config(
+            input,
+            param_overrides,
+            self.sample_rate,
+            self.block_size,
+        )
+    }
+
+    pub fn process_stereo(
+        &mut self,
+        input: &[f32],
+        param_overrides: &[(u32, f64)],
+    ) -> Result<(Vec<f32>, Vec<f32>), ClapHostError> {
+        self.inner.process_mono_to_stereo_with_config(
+            input,
+            param_overrides,
+            self.sample_rate,
+            self.block_size,
+        )
+    }
+
+    pub fn text_to_value(&mut self, param_id: u32, text: &str) -> Option<f64> {
+        self.inner.text_to_value(param_id, text)
+    }
+
+    pub fn value_to_text(&mut self, param_id: u32, value: f64) -> Option<String> {
+        self.inner.value_to_text(param_id, value)
+    }
+
+    pub fn latency(&mut self) -> u32 {
+        self.inner.latency()
+    }
+
+    pub fn into_inner(self) -> LoadedClapPlugin {
+        self.inner
     }
 }
 
