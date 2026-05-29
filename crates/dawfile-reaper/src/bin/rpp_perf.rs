@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use dawfile_reaper::{parse_rpp_file, DecodeOptions, ReaperProject};
+use dawfile_reaper::{DecodeOptions, ReaperProject, parse_rpp_file};
 
 struct CountingAllocator;
 

@@ -142,8 +142,8 @@ mod tests {
 // Re-export the main types for convenience
 pub use compat::{
     AddRChunk, AddRNode, AddRToken, CreateNodeInput, CreateRChunk, CreateRNode, CreateRPP,
-    CreateRTokens, ReadRPP, ReadRPPChunk, ReadRPPChunkLines, StringifyRPPNode, WriteRPP,
-    LUA_API_MATRIX,
+    CreateRTokens, LUA_API_MATRIX, ReadRPP, ReadRPPChunk, ReadRPPChunkLines, StringifyRPPNode,
+    WriteRPP,
 };
 pub use convert::{
     daw_track_to_rpp_track_chunk, fx_chain_to_tree, rpp_track_to_daw_track,
@@ -157,13 +157,13 @@ pub use io::{
     write_chunk, write_fx_tree, write_fxchain,
 };
 pub use primitives::{
-    parse_rpp, BlockType, QuoteType, RppBlock, RppBlockContent, RppProject, Token,
+    BlockType, QuoteType, RppBlock, RppBlockContent, RppProject, Token, parse_rpp,
 };
 pub use rpp_tree::{
-    add_rchunk, add_rnode, add_rtoken, create_rchunk, create_rnode_from_line,
-    create_rnode_from_tokens, create_rpp, create_rtokens, read_rpp, read_rpp_chunk, read_rpp_lines,
-    stringify_rpp_node, tokenize as tokenize_tree, write_rpp, GuidStripPolicy, RChunk, RNode,
-    RNodeTree, RToken as TreeToken,
+    GuidStripPolicy, RChunk, RNode, RNodeTree, RToken as TreeToken, add_rchunk, add_rnode,
+    add_rtoken, create_rchunk, create_rnode_from_line, create_rnode_from_tokens, create_rpp,
+    create_rtokens, read_rpp, read_rpp_chunk, read_rpp_lines, stringify_rpp_node,
+    tokenize as tokenize_tree, write_rpp,
 };
 pub use stock_fx::{
     EqBand, EqBandType, ReaComp, ReaControlMidi, ReaDelay, ReaEq, ReaFir, ReaFirMode, ReaGate,
@@ -171,11 +171,11 @@ pub use stock_fx::{
     StockFx,
 };
 pub use types::{
-    parse_js_params, DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint,
-    FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion,
-    MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, PluginType,
-    ReaperProject, RppSerialize, SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope,
-    TempoTimePoint, Track, TrackParseOptions,
+    DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint, FxParamEnvelope,
+    FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion, MarkerRegionCollection, MidiEvent,
+    MidiEventType, MidiSource, MidiSourceEvent, PluginType, ReaperProject, RppSerialize,
+    SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope, TempoTimePoint, Track,
+    TrackParseOptions, parse_js_params,
 };
 
 /// Main error type for RPP parsing

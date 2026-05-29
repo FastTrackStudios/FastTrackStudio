@@ -2086,7 +2086,7 @@ mod tests {
         assert_eq!(midi.events[1].bytes, vec![0xB0, 7, 100]);
         // Pitch bend center at tick 480
         assert_eq!(midi.events[2].bytes, vec![0xE0, 0, 64]); // 8192 = 0x2000
-                                                             // Pitch bend max at tick 960
+        // Pitch bend max at tick 960
         assert_eq!(midi.events[3].bytes, vec![0xE0, 127, 127]); // 16383 = 0x3FFF
     }
 

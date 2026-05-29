@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use dawfile_reaper::{parse_rpp, parse_rpp_file, ProjectIndex, ReaperProject, SourceType};
+use dawfile_reaper::{ProjectIndex, ReaperProject, SourceType, parse_rpp, parse_rpp_file};
 
 const GOODNESS_FIXTURE_CANDIDATES: [&str; 2] = [
     "tests/fixtures/local/Goodness of God.RPP",

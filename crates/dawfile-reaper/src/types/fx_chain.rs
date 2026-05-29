@@ -2661,10 +2661,12 @@ mod tests {
         let serialized = chain.to_rpp_string();
         let reparsed = FxChain::parse(&serialized).unwrap();
         assert_eq!(reparsed.nodes.len(), 3);
-        assert!(reparsed
-            .nodes
-            .iter()
-            .all(|n| matches!(n, FxChainNode::Plugin(_))));
+        assert!(
+            reparsed
+                .nodes
+                .iter()
+                .all(|n| matches!(n, FxChainNode::Plugin(_)))
+        );
     }
 
     /// Test: enclose then explode is a no-op (structurally).

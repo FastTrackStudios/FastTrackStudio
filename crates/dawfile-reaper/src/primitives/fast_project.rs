@@ -5,7 +5,7 @@
 
 use super::block::{BlockType, RppBlock, RppBlockContent};
 use super::project::RppProject;
-use super::token::{parse_token_line, Token};
+use super::token::{Token, parse_token_line};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
