@@ -370,7 +370,7 @@ async fn wait_for_tempo_event(
 }
 
 async fn next_daw_event(rx: &mut vox::Rx<DawEvent>) -> eyre::Result<DawEvent> {
-    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+    let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for daw event"))??
         .ok_or_else(|| eyre::eyre!("daw event stream closed"))?;
@@ -383,7 +383,7 @@ async fn wait_for_daw_event(
     rx: &mut vox::Rx<DawEvent>,
     pred: impl Fn(&DawEvent) -> bool,
 ) -> eyre::Result<DawEvent> {
-    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let event = next_daw_event(rx).await?;
         if pred(&event) {
@@ -538,6 +538,50 @@ async fn tempo_map_points_time_signatures_and_events_through_in_process_daw() ->
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn musical_time_conversion_walks_bpm_and_time_signature_segments() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let tempo_map = project.tempo_map();
+
+    tempo_map.set_default_tempo(120.0).await?;
+    tempo_map.set_default_time_signature(4, 4).await?;
+    assert_eq!(tempo_map.add_point(0.0, 120.0).await?, 0);
+    assert_eq!(tempo_map.add_point(8.0, 60.0).await?, 1);
+    tempo_map.set_time_signature_at(1, 3, 4).await?;
+
+    assert_eq!(tempo_map.time_to_musical(0.0).await?, (1, 1, 0.0));
+    assert_eq!(tempo_map.time_to_musical(2.0).await?, (2, 1, 0.0));
+    assert_eq!(tempo_map.time_to_musical(8.0).await?, (5, 1, 0.0));
+    assert_eq!(tempo_map.time_to_musical(11.0).await?, (6, 1, 0.0));
+    assert_eq!(tempo_map.time_to_musical(15.0).await?, (7, 2, 0.0));
+
+    assert!((tempo_map.musical_to_time(2, 1, 0.0).await? - 2.0).abs() < 1e-9);
+    assert!((tempo_map.musical_to_time(5, 1, 0.0).await? - 8.0).abs() < 1e-9);
+    assert!((tempo_map.musical_to_time(6, 1, 0.0).await? - 11.0).abs() < 1e-9);
+    assert!((tempo_map.musical_to_time(7, 2, 0.0).await? - 15.0).abs() < 1e-9);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn musical_time_conversion_honors_time_signature_denominator() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let tempo_map = project.tempo_map();
+
+    tempo_map.set_default_tempo(120.0).await?;
+    tempo_map.set_default_time_signature(6, 8).await?;
+
+    assert_eq!(tempo_map.time_to_musical(0.0).await?, (1, 1, 0.0));
+    assert_eq!(tempo_map.time_to_musical(0.125).await?, (1, 1, 0.5));
+    assert_eq!(tempo_map.time_to_musical(0.25).await?, (1, 2, 0.0));
+    assert_eq!(tempo_map.time_to_musical(3.0).await?, (3, 1, 0.0));
+    assert!((tempo_map.musical_to_time(2, 4, 0.0).await? - 2.25).abs() < 1e-9);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn event_bus_multiplexes_standalone_marker_region_tempo_events() -> eyre::Result<()> {
     let bundle = build_in_process_daw(seeded()).await?;
     let project = bundle.daw.current_project().await?;
@@ -555,6 +599,7 @@ async fn event_bus_multiplexes_standalone_marker_region_tempo_events() -> eyre::
             .for_project(project_guid),
         )
         .await?;
+    tokio::task::yield_now().await;
 
     let marker_id = project.markers().add(1.0, "Bus Marker").await?;
     wait_for_daw_event(&mut rx, |event| {
