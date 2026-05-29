@@ -32,10 +32,9 @@ impl Services for Standalone {
             region::Service,
             tempo_map::Service,
             audio_engine::Service,
-            // Stub services — methods panic with todo!("standalone: …").
-            // Listed here so the in-proc Daw client routes their method
-            // calls (and panics loudly) instead of failing with a
-            // routing error.
+            // Partial services are listed here so the in-proc Daw client can
+            // route implemented methods while each service owns its fallback
+            // behavior for unsupported operations.
             midi::Service,
             fx::Service,
             fx_chains::Service,
