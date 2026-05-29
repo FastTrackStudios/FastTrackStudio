@@ -1,4 +1,4 @@
-//! `vault::VaultPage` → `TaskInfo`.
+//! `vault_proto::VaultPage` → `TaskInfo`.
 //!
 //! Reads the parsed frontmatter, picks out the TaskNotes-shape
 //! fields, and falls back to defaults for everything missing.
@@ -9,7 +9,10 @@
 
 use serde_json::Value;
 use thiserror::Error;
-use vault::VaultPage;
+// `VaultPage` lives in vault-proto (wasm-clean wire shape) so
+// the parser compiles on wasm. The richer `vault::Vault` +
+// `vault-live::VaultPage` stay server-only.
+use vault_proto::VaultPage;
 
 use crate::model::{TaskInfo, TimeEntry};
 

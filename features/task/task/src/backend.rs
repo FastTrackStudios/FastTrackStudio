@@ -46,12 +46,15 @@ impl TaskBackend {
             .map_err(|e| TaskError::Io(format!("open vault {}: {e}", self.vault_root.display())))?;
         let mut out = Vec::new();
         for page in &vault.pages {
-            if !looks_like_task(page) {
+            // The parser consumes the wasm-clean
+            // `vault_proto::VaultPage`; convert the live page first.
+            let proto = page.to_proto();
+            if !looks_like_task(&proto) {
                 continue;
             }
-            match parse_page(page) {
+            match parse_page(&proto) {
                 Ok(t) => out.push(t),
-                Err(e) => tracing::warn!(path = %page.rel_path, ?e, "task parse failed"),
+                Err(e) => tracing::warn!(path = %proto.rel_path, ?e, "task parse failed"),
             }
         }
         Ok(out)

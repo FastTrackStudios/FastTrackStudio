@@ -144,6 +144,7 @@ pub fn route_title(route: &Route) -> &'static str {
         Route::HomeRoute {} => "Home",
         Route::InboxRoute {} => "Inbox",
         Route::ProjectsRoute {} => "Projects",
+        Route::ProjectDetailRoute { .. } => "Project",
         Route::GoalsRoute {} => "Goals",
         Route::TasksRoute {} => "Tasks",
         Route::VaultRoute {} => "Vault",

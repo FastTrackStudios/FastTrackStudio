@@ -198,6 +198,21 @@ pub fn vox_url() -> String {
     }
 }
 
+/// Per-org vox endpoint, derived from [`vox_url`]. The base may
+/// already carry a `/vox` suffix (legacy single-org default) — strip
+/// it and retarget at `/org/<slug>/vox`. Org is hardcoded to
+/// `codywright` until the org-context signal lands (mirrors the
+/// projects/goals pages). Empty string if no base is configured.
+#[must_use]
+pub fn org_vox_url() -> String {
+    let base = vox_url();
+    if base.is_empty() {
+        return String::new();
+    }
+    let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
+    format!("{trimmed}/org/codywright/vox")
+}
+
 /// Spawn the session bootstrap. Publishes lifecycle to the
 /// `VoxStatusCtx` Signal in the surrounding Dioxus context. Safe to
 /// call once at app start; subsequent invocations re-attempt the

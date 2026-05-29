@@ -12,6 +12,7 @@ pub mod pages;
 pub mod routes;
 pub mod server_registry;
 pub mod shell;
+pub mod task_wiring;
 pub mod theming;
 pub mod vox_session;
 
