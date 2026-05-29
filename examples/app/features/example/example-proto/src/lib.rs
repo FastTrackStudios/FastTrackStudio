@@ -1,19 +1,29 @@
-//! `example-proto` — the canonical `architect` usage example.
+//! `example-proto` — the canonical `architect` usage example. **Start
+//! here:** this one file is the contract the whole stack is generated
+//! from. End-to-end walkthrough: `docs/content/getting-started/walkthrough.md`.
 //!
 //! One struct definition. One source of truth. The
 //! [`architect::Entity`] derive does the rest:
 //!
 //! - Wasm builds get the wire struct `Example` with `facet::Facet`
 //!   derived, the `ExampleCreate`/`ExampleUpdate`/`ExampleList`
-//!   payload types, the `ExampleRepo` `#[vox::service]` trait, and
-//!   the auto-generated `ExampleClient` you call from the browser.
-//! - Server builds (`--features server`) additionally get the SeaORM
-//!   `Model` + `Entity` + `Column` + `Relation` + `ActiveModel`, plus
-//!   `ExampleRepoStorage<C>` that implements the repo trait against
-//!   a SeaORM connection.
+//!   payload types, the `ExampleRepo` `#[vox::service]` trait (→ the
+//!   auto-generated `ExampleRepoClient` you call from the browser), and
+//!   an `ExampleRepoLayer` token so the repo composes through the layer
+//!   system (`layers![…]` / `.into_router()`).
+//! - Server builds (`--features server-seaorm`) additionally get the
+//!   SeaORM `Model` + `Entity` + `Column` + `Relation` + `ActiveModel`,
+//!   plus `ExampleRepoStorage<C>` that implements the repo trait against
+//!   a SeaORM connection (with its `Services` bundle emitted too).
 //!
 //! No `cfg_attr` in the struct, no parallel definitions, no manual
 //! `From` impls — architect emits the storage<->wire bridge for you.
+//!
+//! Backends (`example-memory`, `example-db`, `example-crdt`,
+//! `examples/external-stub`) each `impl ExampleRepo` + declare a
+//! `Services` bundle; the server composes them via
+//! `app_server::service_router`; clients consume them over a remote or
+//! in-process `Transport` (`examples/app/ui/src/client.rs`).
 
 // Re-exported so downstream test/client crates can reach Page/Sort/Filter
 // without taking a direct architect dep.
