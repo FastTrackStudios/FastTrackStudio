@@ -1,6 +1,6 @@
 [package]
 name = "editor"
-description = "Umbrella crate. Re-exports editor-state + editor-view + editor-vim + editor-typst, and ships an `EditorApp` Dioxus component that mounts a working markdown editor (live preview, vim, slash menu) with one rsx call."
+description = "Umbrella crate. Re-exports editor-state + editor-view + editor-vim, and ships an `EditorApp` Dioxus component that mounts a working markdown editor (live preview, vim, slash menu) with one rsx call."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,6 @@ rust-version.workspace = true
 editor-state = { workspace = true }
 editor-view = { workspace = true }
 editor-vim = { workspace = true }
-editor-typst = { workspace = true }
 # Used by `app::EditorApp` — the turnkey-shell Dioxus component
 # the rest of the codebase mounts. `editor-view` already pulls
 # dioxus in transitively; declaring it here just makes the

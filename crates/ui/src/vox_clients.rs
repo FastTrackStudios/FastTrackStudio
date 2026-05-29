@@ -19,6 +19,18 @@
 #[cfg(target_arch = "wasm32")]
 use crate::vox_session::org_vox_url;
 
+/// Browser-console trace. vox's own `dlog!`/tracing is invisible on
+/// wasm (no env for `VOX_DLOG`, no console tracing subscriber), so we
+/// log the client fetch steps here to localize hangs. No-op on native.
+pub(crate) fn wlog(msg: &str) {
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!(
+        "[vox-client] {msg}"
+    )));
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = msg;
+}
+
 /// The org's `TaskServiceClient`, established once and cached.
 pub async fn task_client() -> Result<task::TaskServiceClient, String> {
     #[cfg(target_arch = "wasm32")]
@@ -55,16 +67,23 @@ pub async fn project_client() -> Result<project::ProjectServiceClient, String> {
             static CACHE: RefCell<Option<project::ProjectServiceClient>> =
                 const { RefCell::new(None) };
         }
+        wlog("project_client: start");
         if let Some(c) = CACHE.with(|c| c.borrow().clone()) {
+            wlog("project_client: cache hit");
             return Ok(c);
         }
         use vox_core::acceptor_on;
         let link = link().await?;
+        wlog("project_client: link ready, establishing ProjectServiceClient…");
         let client = acceptor_on(link)
             .on_connection(())
             .establish::<project::ProjectServiceClient>()
             .await
-            .map_err(|e| format!("establish: {e:?}"))?;
+            .map_err(|e| {
+                wlog(&format!("project_client: establish FAILED: {e:?}"));
+                format!("establish: {e:?}")
+            })?;
+        wlog("project_client: established OK");
         CACHE.with(|cell| *cell.borrow_mut() = Some(client.clone()));
         Ok(client)
     }
@@ -111,7 +130,11 @@ async fn link() -> Result<vox_websocket::WsLink, String> {
     if url.is_empty() {
         return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
     }
-    vox_websocket::WsLink::connect(&url)
-        .await
-        .map_err(|e| format!("ws connect: {e:?}"))
+    wlog(&format!("link: connecting WS to {url}"));
+    let r = vox_websocket::WsLink::connect(&url).await;
+    match &r {
+        Ok(_) => wlog("link: WS connected"),
+        Err(e) => wlog(&format!("link: WS connect FAILED: {e:?}")),
+    }
+    r.map_err(|e| format!("ws connect: {e:?}"))
 }
