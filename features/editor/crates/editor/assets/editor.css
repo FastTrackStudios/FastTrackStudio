@@ -1,65 +1,47 @@
-:root {
-    color-scheme: dark;
-    --bg: #0e0f12;
-    --bg-elev: #161821;
-    --border: #2a2d38;
-    --text: #d6d8df;
-    --text-dim: #7a7e8a;
-    --accent: #6b9eff;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-}
+/* ── fts-ui theme bridge ─────────────────────────────────────
+   This stylesheet is mounted inside Task's fts-ui ThemeProvider,
+   which injects the design-system tokens (--background,
+   --foreground, --border, --muted, --primary, --signal-*, …) as
+   inline custom properties on `.fts-theme-root`. The editor sits
+   under that root, inherits the tokens, and aliases them to its
+   own `--ed-*` names here — so its chrome tracks the active
+   light/dark theme and any per-org / per-project preset
+   automatically, with no JS.
 
-* { box-sizing: border-box; }
+   Two deliberate non-actions:
+   - We never set `:root`, `html`/`body`, `color-scheme`, or the
+     fts-ui token names (`--border`, `--accent`). This file is
+     linked globally; redefining those would clobber the host
+     app's theme and page chrome. (The old playground page-chrome
+     rules lived here by accident — they belong to the standalone
+     playground, which keeps its own `examples/playground/assets/
+     playground.css`.)
+   - Fallback literals after each token keep the editor legible if
+     it's ever mounted outside a provider.
 
-html, body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.page {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 32px;
-}
-
-.page-header h1 {
-    margin: 0;
-    font-weight: 600;
-    font-size: 24px;
-}
-
-.subtitle {
-    margin: 4px 0 24px;
-    color: var(--text-dim);
-}
-
-.split {
-    display: grid;
-    grid-template-columns: 1.4fr 1fr;
-    gap: 20px;
-    align-items: start;
-}
-
-@media (max-width: 800px) {
-    .split { grid-template-columns: 1fr; }
-}
-
-section h2 {
-    margin: 0 0 8px;
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
+   Colored semantics map onto the adaptive `--signal-*` tokens
+   (defined for both light and dark), so links/tags/errors keep
+   their hue across themes instead of being baked dark. */
+.editor-app,
+.editor-frame,
+.editor-root {
+    --ed-bg: var(--background, #0e0f12);
+    --ed-bg-elev: var(--muted, #161821);
+    --ed-border: var(--border, #2a2d38);
+    --ed-text: var(--foreground, #d6d8df);
+    --ed-text-dim: var(--muted-foreground, #7a7e8a);
+    --ed-accent: var(--primary, #6b9eff);
+    --ed-link: var(--signal-quick, #79b8ff);
+    --ed-wikilink: var(--signal-full, #b388ff);
+    --ed-tag: var(--signal-safe, #88d4a3);
+    --ed-warn: var(--signal-warn, #d4a957);
+    --ed-danger: var(--signal-danger, #ff7373);
+    --ed-mono: var(--font-mono, ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace);
 }
 
 .editor-frame {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
     border-radius: 8px;
     padding: 16px;
     min-height: 240px;
@@ -74,11 +56,11 @@ section h2 {
     color: inherit;
     white-space: pre-wrap;
     word-wrap: break-word;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 14px;
     line-height: 1.6;
     min-height: 200px;
-    caret-color: var(--accent);
+    caret-color: var(--ed-accent);
     /* Reserve room for the gutter on the left. Each .cm-line
        paints its number into this column via the CSS counter
        below; the counter increments in document order. */
@@ -93,18 +75,18 @@ section h2 {
 .editor-root.vim-mode-normal,
 .editor-root.vim-mode-visual {
     caret-shape: block;
-    caret-color: var(--accent);
+    caret-color: var(--ed-accent);
 }
 .editor-root.vim-mode-replace {
     caret-shape: underscore;
-    caret-color: #ff5370;
+    caret-color: var(--ed-danger);
 }
 .editor-root.vim-mode-insert {
     caret-shape: bar;
 }
 .editor-root.vim-mode-command {
     caret-shape: bar;
-    caret-color: #ffcb6b;
+    caret-color: var(--ed-warn);
 }
 
 /* Reading mode: dim the editor frame so it's clearly distinct
@@ -141,7 +123,7 @@ section h2 {
     top: 0.35em;
     width: 36px;
     text-align: right;
-    color: #4a526a;
+    color: var(--ed-text-dim);
     font-size: 12px;
     line-height: 1;
     user-select: none;
@@ -155,37 +137,37 @@ section h2 {
    text itself is unchanged. */
 .editor-root .md-bold {
     font-weight: 700;
-    color: #e8eaf0;
+    color: var(--ed-text);
 }
 .editor-root .md-italic {
     font-style: italic;
-    color: #e8eaf0;
+    color: var(--ed-text);
 }
 .editor-root .md-code {
-    font-family: var(--mono);
-    background: #1d2030;
+    font-family: var(--ed-mono);
+    background: var(--ed-bg-elev);
     padding: 0 4px;
     border-radius: 3px;
-    color: #b8d4ff;
+    color: var(--ed-link);
 }
 .editor-root .md-bold-italic {
     font-weight: 700;
     font-style: italic;
-    color: #e8eaf0;
+    color: var(--ed-text);
 }
 .editor-root .md-strike {
     text-decoration: line-through;
-    color: #7a8395;
+    color: var(--ed-text-dim);
 }
 .editor-root .md-highlight {
-    background: #5a4a00;
-    color: #fff7c2;
+    background: color-mix(in oklab, var(--ed-warn) 22%, transparent);
+    color: var(--ed-text);
     padding: 0 2px;
     border-radius: 2px;
 }
 .editor-root .md-link,
 .editor-root .md-wikilink {
-    color: #79b8ff;
+    color: var(--ed-link);
     text-decoration: underline;
     text-underline-offset: 2px;
 }
@@ -194,7 +176,7 @@ section h2 {
     cursor: pointer;
 }
 .editor-root .md-wikilink {
-    color: #b388ff;
+    color: var(--ed-wikilink);
 }
 
 /* Block reference chip — `((uuid))` rendered as an inline
@@ -210,7 +192,7 @@ section h2 {
     border: 1px solid rgba(127, 167, 217, 0.3);
     border-radius: 10px;
     font-size: 0.92em;
-    color: #b8d4ff;
+    color: var(--ed-link);
     cursor: pointer;
     user-select: none;
 }
@@ -221,7 +203,7 @@ section h2 {
 .editor-root .md-block-ref-unresolved {
     background: rgba(255, 115, 115, 0.12);
     border-color: rgba(255, 115, 115, 0.35);
-    color: #ff9999;
+    color: var(--ed-danger);
 }
 
 /* Block embed — `{{embed ((uuid))}}` rendered as a bordered
@@ -233,7 +215,7 @@ section h2 {
     background: rgba(127, 167, 217, 0.06);
     border-left: 3px solid rgba(127, 167, 217, 0.55);
     border-radius: 4px;
-    color: var(--text);
+    color: var(--ed-text);
 }
 
 /* Page / section / block embed cards (Obsidian `![[…]]` form).
@@ -251,37 +233,37 @@ section h2 {
     display: flex;
     align-items: baseline;
     gap: 6px;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-size: 0.9em;
     margin-bottom: 6px;
 }
 .editor-root .md-embed-title {
-    color: #b8d4ff;
+    color: var(--ed-link);
     font-weight: 600;
 }
 .editor-root .md-embed-sep {
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
 }
 .editor-root .md-embed-frag {
-    color: #c5cad8;
-    font-family: var(--mono);
+    color: var(--ed-text);
+    font-family: var(--ed-mono);
     font-size: 0.92em;
 }
 .editor-root .md-embed-body {
-    color: var(--text);
+    color: var(--ed-text);
     white-space: pre-wrap;
 }
 .editor-root .md-embed-placeholder {
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
     font-size: 0.9em;
 }
 .editor-root .md-embed-page {
     /* Whole-page embed: slightly bolder title bar. */
-    border-left-color: #b388ff;
+    border-left-color: var(--ed-wikilink);
 }
 .editor-root .md-embed-section {
-    border-left-color: #5be2d2;
+    border-left-color: var(--ed-link);
 }
 .editor-root .md-embed-block {
     border-left-color: rgba(127, 167, 217, 0.6);
@@ -289,19 +271,19 @@ section h2 {
 /* Unresolved wikilink — no vault has confirmed the target
    exists. Same red Obsidian uses for the same state. */
 .editor-root .md-wikilink-unresolved {
-    color: #ff7373;
+    color: var(--ed-danger);
     text-decoration-color: rgba(255, 115, 115, 0.5);
 }
 .editor-root .md-tag {
-    color: #88d4a3;
-    background: #1e2a22;
+    color: var(--ed-tag);
+    background: color-mix(in oklab, var(--ed-tag) 15%, transparent);
     padding: 0 4px;
     border-radius: 3px;
     font-size: 0.92em;
     /* Without an explicit color the block-cursor renders in
        `accent` (blue) and gets nearly invisible against the
        tag's saturated bg. Force a contrasting color. */
-    caret-color: #f5f5fa;
+    caret-color: var(--ed-text);
 }
 /* Same idea for every styled inline span with its own
    background — keep the cursor visible against the surface. */
@@ -309,10 +291,10 @@ section h2 {
 .editor-root .md-highlight,
 .editor-root .md-bracket-match,
 .editor-root .md-bracket-mismatch {
-    caret-color: #f5f5fa;
+    caret-color: var(--ed-text);
 }
 .editor-root .md-footnote {
-    color: #d4a957;
+    color: var(--ed-warn);
     font-size: 0.8em;
     vertical-align: super;
 }
@@ -322,12 +304,12 @@ section h2 {
    the body is replaced with a tiny `[*]` superscript marker
    (`.md-inline-footnote-marker`). */
 .editor-root .md-inline-footnote {
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
     font-size: 0.9em;
 }
 .editor-root .md-inline-footnote-marker {
-    color: var(--accent, #6b9eff);
+    color: var(--ed-accent, #6b9eff);
     font-size: 0.75em;
     cursor: pointer;
     margin-left: 1px;
@@ -337,7 +319,7 @@ section h2 {
     text-decoration: underline;
 }
 .editor-root .md-block-id {
-    color: #6a7392;
+    color: var(--ed-text-dim);
     font-size: 0.85em;
     background: rgba(212, 169, 87, 0.08);
     padding: 0 4px;
@@ -345,7 +327,7 @@ section h2 {
     user-select: none;
 }
 .editor-root .md-autolink {
-    color: #79b8ff;
+    color: var(--ed-link);
     text-decoration: underline;
     text-underline-offset: 2px;
 }
@@ -354,8 +336,8 @@ section h2 {
    carries `md-h1`/`md-h2`, so this just colors the underline
    line itself. */
 .editor-root .md-setext-underline {
-    color: #4a526a;
-    font-family: var(--mono);
+    color: var(--ed-text-dim);
+    font-family: var(--ed-mono);
     font-size: 0.85em;
     letter-spacing: 0.02em;
 }
@@ -371,13 +353,13 @@ section h2 {
 }
 .editor-root .md-table th,
 .editor-root .md-table td {
-    border: 1px solid #3a4060;
+    border: 1px solid var(--ed-border);
     padding: 4px 10px;
     text-align: left;
 }
 .editor-root .md-table th {
-    background: #20253a;
-    color: #f5f5fa;
+    background: var(--ed-bg-elev);
+    color: var(--ed-text);
     font-weight: 600;
 }
 .editor-root .md-table tr:nth-child(even) td {
@@ -388,7 +370,7 @@ section h2 {
    collapsed to nothing when caret is off (the Replace covers
    the outer span). */
 .editor-root .md-comment {
-    color: #6a7392;
+    color: var(--ed-text-dim);
     font-style: italic;
     opacity: 0.7;
 }
@@ -401,13 +383,13 @@ section h2 {
     display: block;
     margin: 4px 0 14px 0;
     padding: 8px 4px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid color-mix(in oklab, var(--ed-text) 6%, transparent);
     cursor: text;
     color: inherit;
     font-size: 13px;
 }
 .editor-root .md-properties-empty {
-    color: rgba(255, 255, 255, 0.4);
+    color: color-mix(in oklab, var(--ed-text) 40%, transparent);
     font-style: italic;
     padding: 4px 8px;
 }
@@ -420,7 +402,7 @@ section h2 {
     align-items: start;
 }
 .editor-root .md-property-row:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: color-mix(in oklab, var(--ed-text) 3%, transparent);
 }
 .editor-root .md-property-row:hover .md-property-row-remove,
 .editor-root .md-property-row.is-active .md-property-row-remove,
@@ -432,7 +414,7 @@ section h2 {
     float: right;
     margin-left: 8px;
     padding: 0 6px;
-    color: rgba(255, 255, 255, 0.55);
+    color: color-mix(in oklab, var(--ed-text) 55%, transparent);
     cursor: pointer;
     border-radius: 4px;
     opacity: 0;
@@ -453,14 +435,14 @@ section h2 {
     min-width: 12ch;
     padding: 2px 8px;
     border-radius: 4px;
-    color: rgba(255, 255, 255, 0.45);
+    color: color-mix(in oklab, var(--ed-text) 45%, transparent);
     cursor: text;
     outline: none;
     border: 1px dashed transparent;
 }
 .editor-root .md-property-add:hover {
-    border-color: rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.7);
+    border-color: color-mix(in oklab, var(--ed-text) 12%, transparent);
+    color: color-mix(in oklab, var(--ed-text) 70%, transparent);
 }
 .editor-root .md-property-add:focus {
     border-color: rgba(127, 167, 217, 0.6);
@@ -470,10 +452,10 @@ section h2 {
 }
 .editor-root .md-property-add:empty::before {
     content: attr(data-placeholder);
-    color: rgba(255, 255, 255, 0.3);
+    color: color-mix(in oklab, var(--ed-text) 30%, transparent);
 }
 .editor-root .md-property-key {
-    color: rgba(255, 255, 255, 0.55);
+    color: color-mix(in oklab, var(--ed-text) 55%, transparent);
     text-transform: lowercase;
     font-variant: small-caps;
     letter-spacing: 0.02em;
@@ -489,7 +471,7 @@ section h2 {
     word-break: break-word;
 }
 .editor-root .md-property-empty {
-    color: rgba(255, 255, 255, 0.3);
+    color: color-mix(in oklab, var(--ed-text) 30%, transparent);
 }
 .editor-root .md-property-bool {
     display: inline-block;
@@ -501,13 +483,13 @@ section h2 {
     user-select: none;
 }
 .editor-root .md-property-bool[data-checked="true"] {
-    color: #7fd99c;
+    color: var(--ed-tag);
 }
 .editor-root .md-property-bool[data-checked="false"] {
-    color: rgba(255, 255, 255, 0.35);
+    color: color-mix(in oklab, var(--ed-text) 35%, transparent);
 }
 .editor-root .md-property-bool:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in oklab, var(--ed-text) 6%, transparent);
 }
 .editor-root .md-property-bool:focus {
     outline: 1px solid rgba(127, 217, 156, 0.5);
@@ -528,7 +510,7 @@ section h2 {
 }
 .editor-root .md-property-text:hover,
 .editor-root .md-property-number:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: color-mix(in oklab, var(--ed-text) 4%, transparent);
 }
 .editor-root .md-property-text:focus,
 .editor-root .md-property-number:focus {
@@ -537,7 +519,7 @@ section h2 {
 }
 .editor-root .md-property-text:empty::before {
     content: "—";
-    color: rgba(255, 255, 255, 0.25);
+    color: color-mix(in oklab, var(--ed-text) 25%, transparent);
 }
 .editor-root .md-property-date {
     background: transparent;
@@ -546,11 +528,13 @@ section h2 {
     font: inherit;
     padding: 1px 4px;
     border-radius: 3px;
-    color-scheme: dark;
+    /* Inherit the date-picker's light/dark rendering from the
+       theme provider's `color-scheme` rather than forcing dark. */
+    color-scheme: inherit;
 }
 .editor-root .md-property-date:hover {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.1);
+    background: color-mix(in oklab, var(--ed-text) 4%, transparent);
+    border-color: color-mix(in oklab, var(--ed-text) 10%, transparent);
 }
 .editor-root .md-property-date:focus {
     outline: none;
@@ -574,7 +558,7 @@ section h2 {
 }
 .editor-root .md-chip-remove {
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.45);
+    color: color-mix(in oklab, var(--ed-text) 45%, transparent);
     font-size: 0.85em;
     line-height: 1;
     padding: 0 3px;
@@ -589,8 +573,8 @@ section h2 {
     min-width: 4ch;
     padding: 1px 6px;
     border-radius: 10px;
-    border: 1px dashed rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.6);
+    border: 1px dashed color-mix(in oklab, var(--ed-text) 15%, transparent);
+    color: color-mix(in oklab, var(--ed-text) 60%, transparent);
     font-size: 0.9em;
     cursor: text;
     outline: none;
@@ -602,7 +586,7 @@ section h2 {
 }
 .editor-root .md-property-chip-add:empty::before {
     content: attr(data-placeholder);
-    color: rgba(255, 255, 255, 0.3);
+    color: color-mix(in oklab, var(--ed-text) 30%, transparent);
 }
 /* Active row: any cell inside has focus. CSS-side state means
    we don't have to round-trip selection back to Rust just to
@@ -629,10 +613,10 @@ section h2 {
    range so the user can edit). `---` delimiters get a muted
    monospace look to hint they're a block boundary. */
 .editor-root .md-frontmatter-line {
-    background: rgba(255, 255, 255, 0.02);
+    background: color-mix(in oklab, var(--ed-text) 2%, transparent);
 }
 .editor-root .md-frontmatter-delim {
-    color: rgba(255, 255, 255, 0.35);
+    color: color-mix(in oklab, var(--ed-text) 35%, transparent);
     font-family: var(--font-mono, ui-monospace, monospace);
 }
 
@@ -697,6 +681,49 @@ section h2 {
     margin: 0 auto;
 }
 
+/* Keyflow charts render source + engraving together. The split is a
+   flex row that wraps: side-by-side while both columns clear their
+   flex-basis, stacked once the editor gets too narrow — no media
+   query needed. Clicking either column drops the caret back into the
+   fence body (data-focus-pos) so the raw source becomes editable. */
+.editor-root .md-keyflow-widget {
+    display: block;
+    padding: 6px 0;
+    color: inherit;
+    cursor: text;
+}
+.editor-root .md-keyflow-split {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+}
+.editor-root .md-keyflow-source {
+    flex: 1 1 260px;
+    min-width: 0;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--ed-bg-elev);
+    font-family: var(--ed-mono);
+    font-size: 0.85em;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+    color: inherit;
+}
+.editor-root .md-keyflow-render {
+    flex: 1 1 340px;
+    min-width: 0;
+    overflow-x: auto;
+}
+.editor-root .md-keyflow-render svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
 /* Slash-command popup. Floats below the editor frame; positions
    could later be caret-anchored via a sliver of JS that reads
    the DOM Selection rect. For v1 we just dock below the frame
@@ -711,8 +738,8 @@ section h2 {
     max-width: 420px;
     max-height: 320px;
     overflow-y: auto;
-    background: var(--bg-elev, #161821);
-    border: 1px solid var(--border, #2a2d38);
+    background: var(--ed-bg-elev, #161821);
+    border: 1px solid var(--ed-border, #2a2d38);
     border-radius: 6px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     padding: 4px;
@@ -726,7 +753,7 @@ section h2 {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
 }
 .editor-frame .slash-row {
     display: grid;
@@ -753,15 +780,15 @@ section h2 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 13px;
-    color: var(--text-dim, #7a7e8a);
-    background: rgba(255, 255, 255, 0.04);
+    color: var(--ed-text-dim, #7a7e8a);
+    background: color-mix(in oklab, var(--ed-text) 4%, transparent);
     border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid color-mix(in oklab, var(--ed-text) 6%, transparent);
 }
 .editor-frame .slash-row.selected .slash-row-icon {
-    color: var(--text, #d6d8df);
+    color: var(--ed-text, #d6d8df);
     background: rgba(127, 167, 217, 0.18);
     border-color: rgba(127, 167, 217, 0.4);
 }
@@ -771,16 +798,16 @@ section h2 {
     min-width: 0;
 }
 .editor-frame .slash-row-label {
-    color: var(--text, #d6d8df);
+    color: var(--ed-text, #d6d8df);
 }
 .editor-frame .slash-row-desc {
     font-size: 0.85em;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     margin-top: 2px;
 }
 .editor-frame .slash-empty {
     padding: 12px;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
 }
 
@@ -824,32 +851,32 @@ section h2 {
 .editor-root .cm-line.md-callout-header + .cm-line.md-callout {
     padding-bottom: 4px;
 }
-.editor-root .cm-line.md-callout-note::before     { background: #5a7fd6; }
-.editor-root .cm-line.md-callout-abstract::before { background: #79b8ff; }
-.editor-root .cm-line.md-callout-info::before     { background: #79b8ff; }
-.editor-root .cm-line.md-callout-todo::before     { background: #b388ff; }
-.editor-root .cm-line.md-callout-tip::before      { background: #5be2d2; }
-.editor-root .cm-line.md-callout-success::before  { background: #88d4a3; }
-.editor-root .cm-line.md-callout-question::before { background: #ffcb6b; }
-.editor-root .cm-line.md-callout-warning::before  { background: #ffa657; }
-.editor-root .cm-line.md-callout-failure::before  { background: #ff7b72; }
-.editor-root .cm-line.md-callout-danger::before   { background: #ff5370; }
-.editor-root .cm-line.md-callout-bug::before      { background: #ff5370; }
-.editor-root .cm-line.md-callout-example::before  { background: #c792ea; }
-.editor-root .cm-line.md-callout-quote::before    { background: #c5cad8; }
-.editor-root .cm-line.md-callout-header.md-callout-note     { color: #79b8ff; }
-.editor-root .cm-line.md-callout-header.md-callout-abstract { color: #79b8ff; }
-.editor-root .cm-line.md-callout-header.md-callout-info     { color: #79b8ff; }
-.editor-root .cm-line.md-callout-header.md-callout-todo     { color: #b388ff; }
-.editor-root .cm-line.md-callout-header.md-callout-tip      { color: #5be2d2; }
-.editor-root .cm-line.md-callout-header.md-callout-success  { color: #88d4a3; }
-.editor-root .cm-line.md-callout-header.md-callout-question { color: #ffcb6b; }
-.editor-root .cm-line.md-callout-header.md-callout-warning  { color: #ffa657; }
-.editor-root .cm-line.md-callout-header.md-callout-failure  { color: #ff7b72; }
-.editor-root .cm-line.md-callout-header.md-callout-danger   { color: #ff5370; }
-.editor-root .cm-line.md-callout-header.md-callout-bug      { color: #ff5370; }
-.editor-root .cm-line.md-callout-header.md-callout-example  { color: #c792ea; }
-.editor-root .cm-line.md-callout-header.md-callout-quote    { color: #c5cad8; }
+.editor-root .cm-line.md-callout-note::before     { background: var(--ed-link); }
+.editor-root .cm-line.md-callout-abstract::before { background: var(--ed-link); }
+.editor-root .cm-line.md-callout-info::before     { background: var(--ed-link); }
+.editor-root .cm-line.md-callout-todo::before     { background: var(--ed-wikilink); }
+.editor-root .cm-line.md-callout-tip::before      { background: var(--ed-link); }
+.editor-root .cm-line.md-callout-success::before  { background: var(--ed-tag); }
+.editor-root .cm-line.md-callout-question::before { background: var(--ed-warn); }
+.editor-root .cm-line.md-callout-warning::before  { background: var(--ed-warn); }
+.editor-root .cm-line.md-callout-failure::before  { background: var(--ed-danger); }
+.editor-root .cm-line.md-callout-danger::before   { background: var(--ed-danger); }
+.editor-root .cm-line.md-callout-bug::before      { background: var(--ed-danger); }
+.editor-root .cm-line.md-callout-example::before  { background: var(--ed-wikilink); }
+.editor-root .cm-line.md-callout-quote::before    { background: var(--ed-text); }
+.editor-root .cm-line.md-callout-header.md-callout-note     { color: var(--ed-link); }
+.editor-root .cm-line.md-callout-header.md-callout-abstract { color: var(--ed-link); }
+.editor-root .cm-line.md-callout-header.md-callout-info     { color: var(--ed-link); }
+.editor-root .cm-line.md-callout-header.md-callout-todo     { color: var(--ed-wikilink); }
+.editor-root .cm-line.md-callout-header.md-callout-tip      { color: var(--ed-link); }
+.editor-root .cm-line.md-callout-header.md-callout-success  { color: var(--ed-tag); }
+.editor-root .cm-line.md-callout-header.md-callout-question { color: var(--ed-warn); }
+.editor-root .cm-line.md-callout-header.md-callout-warning  { color: var(--ed-warn); }
+.editor-root .cm-line.md-callout-header.md-callout-failure  { color: var(--ed-danger); }
+.editor-root .cm-line.md-callout-header.md-callout-danger   { color: var(--ed-danger); }
+.editor-root .cm-line.md-callout-header.md-callout-bug      { color: var(--ed-danger); }
+.editor-root .cm-line.md-callout-header.md-callout-example  { color: var(--ed-wikilink); }
+.editor-root .cm-line.md-callout-header.md-callout-quote    { color: var(--ed-text); }
 
 /* Nested callouts. Each additional `>` deepens the visual
    indent and stacks a second / third vertical bar so the user
@@ -866,7 +893,7 @@ section h2 {
     top: 0;
     bottom: 0;
     width: 3px;
-    background: rgba(255, 255, 255, 0.18);
+    background: color-mix(in oklab, var(--ed-text) 18%, transparent);
 }
 .editor-root .cm-line.md-callout-nested-3 {
     padding-left: 50px;
@@ -879,8 +906,8 @@ section h2 {
     top: 0;
     bottom: 0;
     width: 21px;
-    border-left: 3px solid rgba(255, 255, 255, 0.18);
-    border-right: 3px solid rgba(255, 255, 255, 0.28);
+    border-left: 3px solid color-mix(in oklab, var(--ed-text) 18%, transparent);
+    border-right: 3px solid color-mix(in oklab, var(--ed-text) 28%, transparent);
     box-sizing: border-box;
 }
 .editor-root .cm-line.md-callout-nested-4 {
@@ -896,7 +923,7 @@ section h2 {
     align-items: center;
     gap: 8px;
     margin-bottom: 12px;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 11px;
     letter-spacing: 0.06em;
 }
@@ -906,25 +933,25 @@ section h2 {
     font-weight: 700;
     color: #0e0f12;
 }
-.vim-mode.mode-normal  { background: #5a7fd6; }
-.vim-mode.mode-insert  { background: #88d4a3; }
-.vim-mode.mode-visual  { background: #c792ea; }
-.vim-mode.mode-replace { background: #ff7b72; }
-.vim-mode.mode-command { background: #ffcb6b; }
+.vim-mode.mode-normal  { background: var(--ed-link); }
+.vim-mode.mode-insert  { background: var(--ed-tag); }
+.vim-mode.mode-visual  { background: var(--ed-wikilink); }
+.vim-mode.mode-replace { background: var(--ed-danger); }
+.vim-mode.mode-command { background: var(--ed-warn); }
 .vim-pending {
-    color: var(--text-dim);
+    color: var(--ed-text-dim);
     min-width: 4ch;
 }
 
 .editor-root .md-bracket-match {
-    background: #2f3a55;
-    color: #79b8ff;
-    border-bottom: 1.5px solid #5a7fd6;
+    background: color-mix(in oklab, var(--ed-link) 22%, transparent);
+    color: var(--ed-link);
+    border-bottom: 1.5px solid var(--ed-link);
 }
 .editor-root .md-bracket-mismatch {
-    background: #5a1d22;
-    color: #ff5370;
-    border-bottom: 1.5px solid #ff5370;
+    background: color-mix(in oklab, var(--ed-danger) 22%, transparent);
+    color: var(--ed-danger);
+    border-bottom: 1.5px solid var(--ed-danger);
 }
 
 /* ── Block-level live preview ─────────────────────────────── */
@@ -935,14 +962,14 @@ section h2 {
 .editor-root .cm-line.md-h5,
 .editor-root .cm-line.md-h6 {
     font-weight: 700;
-    color: #f5f5fa;
+    color: var(--ed-text);
     margin-top: 0.6em;
 }
 /* Heading marker `#` shown when the caret is on the line —
    smaller + muted so it doesn't dominate the heading text it's
    styling. */
 .editor-root .md-heading-marker {
-    color: #6a7392;
+    color: var(--ed-text-dim);
     font-weight: 400;
     font-size: 0.8em;
     margin-right: 0.2em;
@@ -952,10 +979,10 @@ section h2 {
 .editor-root .cm-line.md-h3 { font-size: 1.3em; }
 .editor-root .cm-line.md-h4 { font-size: 1.12em; }
 .editor-root .cm-line.md-h5 { font-size: 1em;  font-weight: 600; }
-.editor-root .cm-line.md-h6 { font-size: 0.92em; color: #c5cad8; font-weight: 600; }
+.editor-root .cm-line.md-h6 { font-size: 0.92em; color: var(--ed-text); font-weight: 600; }
 
 .editor-root .cm-line.md-blockquote {
-    color: #c5cad8;
+    color: var(--ed-text);
     font-style: italic;
     position: relative;
 }
@@ -969,7 +996,7 @@ section h2 {
     top: 0;
     bottom: 0;
     width: 3px;
-    background: #4a526a;
+    background: var(--ed-text-dim);
 }
 .editor-root .md-quote-marker {
     color: transparent;
@@ -998,10 +1025,10 @@ section h2 {
     left: 0;
     right: 0;
     top: 50%;
-    border-top: 1px solid #4a526a;
+    border-top: 1px solid var(--ed-text-dim);
 }
 .editor-root .cm-line.md-hr-active {
-    color: #6a7392;
+    color: var(--ed-text-dim);
 }
 
 .editor-root .cm-line.md-list-item,
@@ -1012,7 +1039,7 @@ section h2 {
        positioning, no padding gymnastics. */
 }
 .editor-root .md-list-marker {
-    color: #8892b0;
+    color: var(--ed-text-dim);
     font-weight: 600;
     user-select: none;
 }
@@ -1024,17 +1051,17 @@ section h2 {
     height: 1.1em;
     margin-right: 0.4em;
     vertical-align: -0.18em;
-    border: 1.5px solid #6a7392;
+    border: 1.5px solid var(--ed-text-dim);
     border-radius: 3px;
-    background: #1d2030;
+    background: var(--ed-bg-elev);
     cursor: pointer;
     font-size: 0.85em;
     color: transparent;
     user-select: none;
 }
 .editor-root .md-task-checkbox.checked {
-    background: #5a7fd6;
-    border-color: #5a7fd6;
+    background: var(--ed-link);
+    border-color: var(--ed-link);
     color: #ffffff;
 }
 
@@ -1049,9 +1076,9 @@ section h2 {
     word-break: normal;
 }
 .editor-root .cm-line.md-code-block {
-    font-family: var(--mono);
-    background: #1d2030;
-    color: #c5d4ff;
+    font-family: var(--ed-mono);
+    background: var(--ed-bg-elev);
+    color: var(--ed-text);
     padding: 0 8px;
     position: relative;
     /* The opener / closer lines hold only a position:absolute
@@ -1073,16 +1100,16 @@ section h2 {
     pointer-events: none;
 }
 .editor-root .md-code-header .md-code-lang {
-    color: #8892b0;
+    color: var(--ed-text-dim);
     font-size: 0.8em;
     text-transform: lowercase;
     letter-spacing: 0.04em;
 }
 .editor-root .md-code-header .md-code-copy {
     pointer-events: auto;
-    background: #2a2f44;
-    color: #c5cad8;
-    border: 1px solid #3a4060;
+    background: var(--ed-bg-elev);
+    color: var(--ed-text);
+    border: 1px solid var(--ed-border);
     border-radius: 4px;
     padding: 2px 8px;
     font-size: 0.85em;
@@ -1090,11 +1117,11 @@ section h2 {
     transition: background 0.15s, color 0.15s;
 }
 .editor-root .md-code-header .md-code-copy:hover {
-    background: #3a4060;
+    background: var(--ed-border);
     color: #ffffff;
 }
 .editor-root .md-code-header .md-code-copy.copied {
-    background: #5a7fd6;
+    background: var(--ed-link);
     color: #ffffff;
 }
 /* Arborium scope tags inside code fences. The set of tags here
@@ -1131,8 +1158,8 @@ section h2 {
 }
 
 .debug-pane {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
     border-radius: 8px;
     padding: 16px;
     /* Grid items default to `min-width: auto` which sizes to
@@ -1146,12 +1173,12 @@ section h2 {
     grid-template-columns: max-content 1fr;
     gap: 4px 16px;
     margin: 0 0 16px;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 12px;
 }
 
 .debug-grid dt {
-    color: var(--text-dim);
+    color: var(--ed-text-dim);
 }
 
 .debug-grid dd {
@@ -1164,7 +1191,7 @@ section h2 {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-dim);
+    color: var(--ed-text-dim);
 }
 
 .debug-text {
@@ -1172,8 +1199,8 @@ section h2 {
     padding: 12px;
     background: #0a0b0e;
     border-radius: 6px;
-    border: 1px solid var(--border);
-    font-family: var(--mono);
+    border: 1px solid var(--ed-border);
+    font-family: var(--ed-mono);
     font-size: 12px;
     white-space: pre-wrap;
     /* Break unbroken sequences (URLs, long no-space text) so

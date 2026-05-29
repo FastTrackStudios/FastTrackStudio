@@ -72,6 +72,7 @@ pub fn live_preview_with(
     // submodule for the budget value and rationale.
     reset_compile_budget();
     reset_mermaid_budget();
+    reset_keyflow_budget();
     reset_block_index();
 
     let text = state.doc.to_string();
@@ -368,6 +369,9 @@ use typst::{TypstKind, render_typst, reset_compile_budget};
 
 mod mermaid;
 use mermaid::{render_mermaid, reset_compile_budget as reset_mermaid_budget};
+
+mod keyflow;
+use keyflow::{render_keyflow, reset_compile_budget as reset_keyflow_budget};
 
 pub(crate) fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -867,8 +871,9 @@ fn scan_blocks(
             // rendered SVG already speaks for itself, and the
             // floating header would be a leftover when the user
             // moves the caret onto the fence to edit source.
-            let is_rendered_fence =
-                info.eq_ignore_ascii_case("typst") || info.eq_ignore_ascii_case("mermaid");
+            let is_rendered_fence = info.eq_ignore_ascii_case("typst")
+                || info.eq_ignore_ascii_case("mermaid")
+                || info.eq_ignore_ascii_case("kf");
             if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
@@ -888,7 +893,10 @@ fn scan_blocks(
             // code. Skip when the caret is anywhere inside the
             // fence range (so the user sees the raw source while
             // editing).
-            if info.eq_ignore_ascii_case("typst") || info.eq_ignore_ascii_case("mermaid") {
+            if info.eq_ignore_ascii_case("typst")
+                || info.eq_ignore_ascii_case("mermaid")
+                || info.eq_ignore_ascii_case("kf")
+            {
                 let body_end = find_fence_close(text, content_start, mc, mlen);
                 let body = &text[content_start..body_end];
                 // Extend the replace range to cover the closing
@@ -902,20 +910,38 @@ fn scan_blocks(
                 let fence_range = line_from..close_end;
                 if !cursor_touches(primary, fence_range.clone()) && !body.trim().is_empty() {
                     let is_mermaid = info.eq_ignore_ascii_case("mermaid");
-                    let svg = if is_mermaid {
+                    let is_keyflow = info.eq_ignore_ascii_case("kf");
+                    let svg = if is_keyflow {
+                        render_keyflow(body)
+                    } else if is_mermaid {
                         render_mermaid(body)
                     } else {
                         render_typst(TypstKind::Block, body)
                     };
                     if let Some(svg) = svg {
-                        let class = if is_mermaid {
-                            "md-mermaid-widget"
+                        // Keyflow shows source AND render together: a
+                        // flex-wrap row that sits side-by-side when the
+                        // editor is wide and stacks when it's narrow.
+                        // The source `<pre>` carries `data-focus-pos`
+                        // like the render, so clicking either drops the
+                        // caret back into the fence body to edit (next
+                        // pass the caret-on branch shows raw source).
+                        // Typst/mermaid keep the plain render-only widget.
+                        let html = if is_keyflow {
+                            format!(
+                                r#"<div class="md-keyflow-widget md-keyflow-split" data-focus-pos="{content_start}"><pre class="md-keyflow-source">{src}</pre><div class="md-keyflow-render">{svg}</div></div>"#,
+                                src = escape_html(body),
+                            )
                         } else {
-                            "md-typst-widget"
+                            let class = if is_mermaid {
+                                "md-mermaid-widget"
+                            } else {
+                                "md-typst-widget"
+                            };
+                            format!(
+                                r#"<div class="{class}" data-focus-pos="{content_start}">{svg}</div>"#,
+                            )
                         };
-                        let html = format!(
-                            r#"<div class="{class}" data-focus-pos="{content_start}">{svg}</div>"#,
-                        );
                         out.push(Decoration::replace(fence_range.clone()));
                         out.push(Decoration::widget(fence_range.start, html));
                     }

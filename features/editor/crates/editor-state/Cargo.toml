@@ -11,6 +11,7 @@ rust-version.workspace = true
 editor-syntax = { workspace = true, features = ["default-langs"] }
 editor-typst = { workspace = true }
 editor-mermaid = { workspace = true }
+editor-keyflow = { workspace = true }
 ropey = { workspace = true }
 serde = { workspace = true, optional = true }
 thiserror = { workspace = true }

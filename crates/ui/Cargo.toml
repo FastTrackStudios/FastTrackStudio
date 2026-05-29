@@ -39,6 +39,11 @@ cycle = { workspace = true, default-features = false }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
+# Vault file-replication wire surface — manifest / get_file /
+# put_file. The `/vault` route drives `editor::Editor` over the
+# auto-emitted `VaultSyncClient`. `vox` feature only (no
+# `server`/`full`), so it stays wasm-clean like the others.
+vault-proto = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

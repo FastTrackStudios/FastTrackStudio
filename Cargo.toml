@@ -19,6 +19,7 @@ members = [
     "features/editor/crates/editor-vim",
     "features/editor/crates/editor-typst",
     "features/editor/crates/editor-mermaid",
+    "features/editor/crates/editor-keyflow",
     "features/editor/crates/editor",
     # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
     # patched in for wasm32 compat. Lives next to the editor it
@@ -395,7 +396,13 @@ editor-view = { path = "features/editor/crates/editor-view" }
 editor-vim = { path = "features/editor/crates/editor-vim" }
 editor-typst = { path = "features/editor/crates/editor-typst" }
 editor-mermaid = { path = "features/editor/crates/editor-mermaid" }
+editor-keyflow = { path = "features/editor/crates/editor-keyflow" }
 editor = { path = "features/editor/crates/editor" }
+
+# Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the
+# editor renders ```kf``` fences to inline SVG client-side. The `svg`
+# feature is selected per-consumer in `editor-keyflow`.
+engraver = { path = "../FastTrackStudio/keyflow/crates/engraver", default-features = false }
 
 # Deps the editor's inner crates inherit via `workspace = true`.
 # `serde`, `serde_json` are already declared elsewhere in the
@@ -875,10 +882,26 @@ vox-types          = { git = "https://git.starcommand.live/FastTrackStudios/vox"
 vox-websocket      = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 facet-cbor         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
+# daw-proto reaches actions-proto through the starcommand host (not the
+# github mirror above), so redirect that source to the same local checkout.
+# The local input_actions now targets bearcove vox, which the bearcove
+# patch below folds into the single local vox — killing the old vox 0.5.0
+# that otherwise collides with 0.8.2 across the graph.
+[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
+
+# keyflow-proto pulls daw-proto (for its timing primitives) from the daw
+# git source. Redirect to the local checkout so daw-proto's runtime-only
+# vox profile applies — otherwise the git daw-proto requests vox's full
+# (tokio-net) features and the editor's wasm build can't link mio.
+[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
+
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
 # fork at the same rev as the workspace dep above. Without this,
 # vox + architect end up with two parallel moire compilations.
+
 [patch."https://github.com/bearcove/moire"]
 moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
 moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
