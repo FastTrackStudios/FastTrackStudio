@@ -8,6 +8,34 @@
 use app_server::vox_router;
 use tracing::info;
 
+/// Compact, readable logging. The default keeps our own logs at debug and
+/// everything else at info, while muting the noisy neighbours: the
+/// per-query sqlx/sea-orm chatter and — importantly — cranelift-jit, which
+/// `info!`-logs the full CLIF IR of every function the vox JIT compiles.
+/// Raise any of them with e.g. `RUST_LOG=sqlx=info`, or override the whole
+/// filter with `RUST_LOG=...` for ad-hoc debugging.
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        [
+            "info",
+            "app_server=debug",
+            "sqlx=warn",
+            "sqlx::query=warn",
+            "sea_orm=warn",
+            // cranelift-jit dumps each compiled function's CLIF at info.
+            "cranelift_jit=warn",
+            "cranelift_codegen=warn",
+        ]
+        .join(",")
+        .into()
+    });
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false) // drop the `sqlx::query:` / module prefix
+        .compact()
+        .init();
+}
+
 // ── Backend-specific state ────────────────────────────────────────────
 
 #[cfg(feature = "backend-db")]
@@ -46,12 +74,7 @@ mod backend {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,app_server=debug".into()),
-        )
-        .init();
+    init_tracing();
 
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4040".into());
     let (repo, backend_label) = backend::init().await?;

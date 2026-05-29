@@ -68,7 +68,11 @@ fn create_form_has_inputs_and_submit() {
     let html = render(app);
     assert!(html.matches("<input").count() >= 2, "two inputs: {html}");
     assert!(html.contains("<button"));
-    assert!(html.contains("name"));
+    assert!(html.contains("Name"), "labeled name field: {html}");
+    assert!(
+        html.contains("Description"),
+        "labeled description field: {html}"
+    );
 }
 
 #[test]

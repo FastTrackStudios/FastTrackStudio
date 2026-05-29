@@ -58,17 +58,23 @@ pub fn ExampleCreateForm(on_submit: EventHandler<(String, String)>) -> Element {
                 name.set(String::new());
                 description.set(String::new());
             },
-            input {
-                placeholder: "name",
-                value: "{name}",
-                oninput: move |evt| name.set(evt.value()),
+            label {
+                "Name"
+                input {
+                    placeholder: "e.g. Quarterly report",
+                    value: "{name}",
+                    oninput: move |evt| name.set(evt.value()),
+                }
             }
-            input {
-                placeholder: "description",
-                value: "{description}",
-                oninput: move |evt| description.set(evt.value()),
+            label {
+                "Description"
+                input {
+                    placeholder: "optional",
+                    value: "{description}",
+                    oninput: move |evt| description.set(evt.value()),
+                }
             }
-            button { r#type: "submit", "Add" }
+            button { class: "btn primary", r#type: "submit", "Add example" }
         }
     }
 }
@@ -92,17 +98,23 @@ pub fn ExampleEditForm(
                 evt.prevent_default();
                 on_submit.call((name(), description()));
             },
-            input {
-                placeholder: "name",
-                value: "{name}",
-                oninput: move |evt| name.set(evt.value()),
+            label {
+                "Name"
+                input {
+                    placeholder: "name",
+                    value: "{name}",
+                    oninput: move |evt| name.set(evt.value()),
+                }
             }
-            input {
-                placeholder: "description",
-                value: "{description}",
-                oninput: move |evt| description.set(evt.value()),
+            label {
+                "Description"
+                input {
+                    placeholder: "description",
+                    value: "{description}",
+                    oninput: move |evt| description.set(evt.value()),
+                }
             }
-            button { r#type: "submit", "Save" }
+            button { class: "btn primary", r#type: "submit", "Save changes" }
         }
     }
 }
