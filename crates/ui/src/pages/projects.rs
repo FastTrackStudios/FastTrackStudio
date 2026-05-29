@@ -339,10 +339,8 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
     let tags: Vec<String> = p.tags.0.clone();
     let shown_tags: Vec<String> = tags.iter().take(4).cloned().collect();
     let extra_tags = tags.len().saturating_sub(shown_tags.len());
-    // Cap subprojects shown so no single card runs away in height (keeps
-    // the equal-height row tidy); the rest collapse into a "+N more".
-    let shown_kids: Vec<ProjectInfo> = kids.iter().take(3).cloned().collect();
-    let extra_kids = kids.len().saturating_sub(shown_kids.len());
+    let sub_count = kids.len();
+    let has_image = !p.image.trim().is_empty();
     // Staggered entrance — capped so a long list doesn't drag.
     let delay = (props.index.min(11) * 45) as u32;
 
@@ -351,10 +349,27 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
             class: "group relative h-full",
             style: "animation: ftsFadeUp 0.55s cubic-bezier(0.16,1,0.3,1) both; animation-delay: {delay}ms;",
             Card { class: "relative flex h-full flex-col overflow-hidden border-border/70 bg-card/70 backdrop-blur-sm transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:border-border group-hover:shadow-xl group-hover:shadow-foreground/5",
-                // accent hairline across the top, intensifies on hover
-                div {
-                    class: "absolute inset-x-0 top-0 h-[3px] opacity-70 transition-opacity duration-300 group-hover:opacity-100",
-                    style: "background: linear-gradient(90deg, {accent}, transparent 85%);",
+                // 16:9 cover — the project's image if set, else an
+                // accent-gradient placeholder so the slot reads as
+                // "ready for an image".
+                div { class: "relative aspect-video w-full overflow-hidden bg-muted",
+                    if has_image {
+                        img {
+                            src: "{p.image}",
+                            alt: "{p.title}",
+                            loading: "lazy",
+                            class: "h-full w-full object-cover transition-transform duration-500 group-hover:scale-105",
+                        }
+                    } else {
+                        div {
+                            class: "h-full w-full",
+                            style: "background: linear-gradient(135deg, {accent} 0%, color-mix(in oklch, {accent} 35%, var(--card)) 100%);",
+                        }
+                        // a faint icon watermark so the placeholder isn't flat
+                        div { class: "absolute inset-0 flex items-center justify-center text-foreground/15",
+                            FolderKanban { size: 40 }
+                        }
+                    }
                 }
                 CardHeader {
                     div { class: "flex items-start justify-between gap-3",
@@ -408,54 +423,26 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                                     span { "{due}" }
                                 }
                             }
+                            // Subproject count — a compact chip instead of the
+                            // full list, so cards stay a uniform height.
+                            if sub_count > 0 {
+                                div { class: "flex items-center gap-1.5 text-muted-foreground",
+                                    Layers { size: 13 }
+                                    span {
+                                        if sub_count == 1 { "1 subproject" } else { "{sub_count} subprojects" }
+                                    }
+                                }
+                            }
                         }
-                        // tags
+                        // tags — pinned to the bottom so equal-height rows
+                        // line their footers up.
                         if !shown_tags.is_empty() {
-                            div { class: "flex flex-wrap items-center gap-1.5",
+                            div { class: "mt-auto flex flex-wrap items-center gap-1.5 pt-1",
                                 for tag in shown_tags.iter() {
                                     Badge { variant: BadgeVariant::Secondary, "{tag}" }
                                 }
                                 if extra_tags > 0 {
                                     span { class: "text-xs text-muted-foreground", "+{extra_tags}" }
-                                }
-                            }
-                        }
-                        // subprojects — pinned to the bottom so cards in a
-                        // row line up cleanly at equal height.
-                        if !kids.is_empty() {
-                            div { class: "mt-auto flex flex-col gap-2 border-t border-border/50 pt-3",
-                                div { class: "flex items-center gap-1.5 text-[0.7rem] font-medium uppercase tracking-[0.1em] text-muted-foreground",
-                                    Layers { size: 13 }
-                                    span { "Subprojects · {kids.len()}" }
-                                }
-                                div { class: "flex flex-col gap-0.5",
-                                    for kid in shown_kids.iter() {
-                                        {
-                                            let kid_id = kid.id.to_string();
-                                            let kid_pct = (kid.progress_percent >= 0)
-                                                .then(|| kid.progress_percent.clamp(0, 100));
-                                            let dot = status_dot(&kid.status);
-                                            rsx! {
-                                                Link {
-                                                    key: "{kid.id}",
-                                                    to: Route::ProjectDetailRoute { id: kid_id },
-                                                    class: "flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-muted/60",
-                                                    div { class: "flex min-w-0 items-center gap-2",
-                                                        span { class: "size-1.5 shrink-0 rounded-full {dot}" }
-                                                        span { class: "truncate text-foreground/90", "{kid.title}" }
-                                                    }
-                                                    if let Some(kp) = kid_pct {
-                                                        span { class: "shrink-0 text-xs tabular-nums text-muted-foreground", "{kp}%" }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if extra_kids > 0 {
-                                        span { class: "px-2.5 pt-0.5 text-xs text-muted-foreground",
-                                            "+{extra_kids} more"
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -596,15 +583,6 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
     }
 }
 
-/// Token-only dot color mirroring [`status_variant`]'s buckets.
-fn status_dot(status: &str) -> &'static str {
-    match status_variant(status) {
-        StatusBadgeVariant::Success => "bg-green-500",
-        StatusBadgeVariant::Warning => "bg-yellow-500",
-        StatusBadgeVariant::Danger => "bg-red-500",
-        StatusBadgeVariant::Neutral => "bg-muted-foreground/50",
-    }
-}
 
 fn priority_label(pr: &str) -> String {
     match pr {

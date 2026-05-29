@@ -3876,6 +3876,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
                 estimated_seconds: 0,
                 agent_profile: String::new(),
                 color: String::new(),
+                image: String::new(),
                 archived: false,
                 date_created: None,
                 date_modified: None,

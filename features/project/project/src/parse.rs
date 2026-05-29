@@ -88,6 +88,7 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
     let estimated_seconds = take_i64(&map, "estimatedSeconds").unwrap_or(0);
     let agent_profile = take_str(&map, "agentProfile").unwrap_or_default();
     let color = take_str(&map, "color").unwrap_or_default();
+    let image = take_str(&map, "image").unwrap_or_default();
     let archived = take_bool(&map, "archived").unwrap_or(false);
     let date_created = take_str(&map, "dateCreated").and_then(|s| s.parse().ok());
     let date_modified = take_str(&map, "dateModified").and_then(|s| s.parse().ok());
@@ -123,6 +124,7 @@ fn parse_page_inner(rel_path: &str, basename: &str, raw: &str) -> Result<Project
         estimated_seconds,
         agent_profile,
         color,
+        image,
         archived,
         date_created,
         date_modified,

@@ -202,6 +202,12 @@ pub struct ProjectInfo {
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub color: String,
 
+    /// Optional cover image URL shown as a 16:9 banner on the
+    /// project card. Empty = the card paints an accent-gradient
+    /// placeholder instead.
+    #[serde(skip_serializing_if = "String::is_empty", default)]
+    pub image: String,
+
     /// `false` while active. `true` once the project is
     /// closed out — kept on disk for historical timesheet
     /// integrity; new work sessions against an archived
