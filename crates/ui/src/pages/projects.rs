@@ -118,11 +118,25 @@ fn render_loaded(rows: &[ProjectInfo]) -> Element {
         };
     }
 
-    let top: Vec<&ProjectInfo> = live.iter().filter(|p| p.parent_id.is_none()).copied().collect();
+    let top: Vec<&ProjectInfo> = live
+        .iter()
+        .filter(|p| p.parent_id.is_none())
+        .copied()
+        .collect();
     let total = live.len();
-    let active = live.iter().filter(|p| matches_status(&p.status, Bucket::Active)).count();
-    let on_hold = live.iter().filter(|p| matches_status(&p.status, Bucket::Hold)).count();
-    let tracked: Vec<i16> = live.iter().filter(|p| p.progress_percent >= 0).map(|p| p.progress_percent).collect();
+    let active = live
+        .iter()
+        .filter(|p| matches_status(&p.status, Bucket::Active))
+        .count();
+    let on_hold = live
+        .iter()
+        .filter(|p| matches_status(&p.status, Bucket::Hold))
+        .count();
+    let tracked: Vec<i16> = live
+        .iter()
+        .filter(|p| p.progress_percent >= 0)
+        .map(|p| p.progress_percent)
+        .collect();
     let avg = if tracked.is_empty() {
         None
     } else {

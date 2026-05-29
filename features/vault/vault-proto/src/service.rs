@@ -15,7 +15,7 @@
 //! `TokioBlockingDispatcher` for the server, `CurrentThread`
 //! for tests / in-process callers.
 
-use crate::{FileBytes, IfMatch, Manifest, PutAck, VaultEvent, VaultSyncError};
+use crate::{FileBytes, FolderIndex, IfMatch, Manifest, PutAck, VaultEvent, VaultSyncError};
 use vox::Tx;
 
 /// File-replication operations on a single server. Sync methods
@@ -51,6 +51,27 @@ pub trait VaultSync {
         path: &str,
         if_match: IfMatch,
     ) -> Result<(), VaultSyncError>;
+
+    /// Frontmatter-derived metadata for every `.md` page —
+    /// path, basename, title, type, and the `folder` parent
+    /// (Obsidian folder-note wikilink, resolved to a basename).
+    /// Powers the virtual-folder sidebar without the client
+    /// fetching + parsing each file.
+    fn folder_index(&self, vault_id: &str) -> Result<FolderIndex, VaultSyncError>;
+
+    /// Re-file a note: set or clear its `folder` frontmatter
+    /// property. `parent` is the target folder note's basename,
+    /// or `None` to move the note to the root. The edit is a
+    /// surgical frontmatter splice (other properties + key order
+    /// preserved). Honors `if_match` like [`Self::put_file`] and
+    /// returns the freshly-committed sha.
+    fn set_folder(
+        &self,
+        vault_id: &str,
+        path: &str,
+        parent: Option<String>,
+        if_match: IfMatch,
+    ) -> Result<PutAck, VaultSyncError>;
 
     /// Subscribe to live change events for `vault_id`. The
     /// server keeps sending until the caller drops `tx`. On

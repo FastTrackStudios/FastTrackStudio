@@ -802,7 +802,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             attachments_proto::AttachmentServiceDispatcher::new((*org.attachments).clone()),
         )
         // Vault file replication (manifest / get / put / delete / subscribe).
-        .with(vault_proto::descriptor(), vault_proto::serve(org.vault_sync.clone()))
+        .with(
+            vault_proto::descriptor(),
+            vault_proto::serve(org.vault_sync.clone()),
+        )
         // Agent-task queue — slim domain trait (claim / complete / set-status).
         .with(
             agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
