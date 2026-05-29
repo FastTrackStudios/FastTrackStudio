@@ -81,12 +81,15 @@ dependencies = [
  "eyre",
  "facet",
  "facet-core",
+ "gloo-timers",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
  "vox",
  "vox-core",
+ "wasm-bindgen-futures",
+ "web-time",
 ]
 
 [[package]]

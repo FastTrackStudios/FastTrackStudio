@@ -24,11 +24,17 @@ vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10
 vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 uuid = { version = "1", features = ["v4", "js"] }
+# architect's `schedule` policies wrap the (flaky) remote connect in
+# exponential backoff — see `client.rs`. Cross-target: `schedule`'s clock
+# is wasm-clean (browser timers), so the web build gets resilient connect
+# too. The native target below layers `local` on top for `Transport::Local`.
+architect = { path = "../../../macros/architect", default-features = false, features = ["schedule"] }
 
 # Native (desktop/CLI/tests) only: architect's in-process transport, so
 # `Transport::Local` can serve a backend over a vox in-memory link. Not
 # pulled on wasm — vox's MemoryLink (and tokio rt) aren't wasm-clean, so
-# the browser build stays remote-only.
+# the browser build stays remote-only. Features merge with the base dep
+# above (→ `schedule` + `local` natively).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 architect = { path = "../../../macros/architect", default-features = false, features = ["local"] }
 
