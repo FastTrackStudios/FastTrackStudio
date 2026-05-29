@@ -244,6 +244,7 @@ fn populate_tracks(
                     num_channels: rt.channel_count.max(1).min(128),
                     record_input: daw_proto::track::RecordInput::None,
                     parent_send_enabled,
+                    tcp_height_pixels: 0,
                 },
             );
 

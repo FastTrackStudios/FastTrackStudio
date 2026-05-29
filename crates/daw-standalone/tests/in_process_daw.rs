@@ -9,6 +9,7 @@
 #![cfg(feature = "bootstrap")]
 
 use daw_proto::{PlayState, ProjectInfo};
+use daw_proto::{ProjectContext, TrackRef, track::ReorderTracksBehavior};
 use daw_standalone::bootstrap::build_in_process_daw;
 use daw_standalone::sync::Standalone;
 
@@ -156,5 +157,117 @@ async fn marker_add_through_in_process_daw() -> eyre::Result<()> {
         "marker should appear in list, got {:?}",
         markers.iter().map(|m| &m.name).collect::<Vec<_>>()
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn track_structure_routing_and_colors_through_in_process_daw() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let tracks = project.tracks();
+
+    let band = tracks.add("Band", None).await?;
+    let drums = tracks.add("Drums", None).await?;
+    let kick = tracks.add("Kick", None).await?;
+    let snare = tracks.add("Snare", None).await?;
+    let bass = tracks.add("Bass", None).await?;
+    let drum_bus = tracks.add("Drum Bus", None).await?;
+
+    band.set_folder_depth(1).await?;
+    drums.set_folder_depth(1).await?;
+    snare.set_folder_depth(-1).await?;
+    bass.set_folder_depth(-1).await?;
+
+    band.set_color(0x334455).await?;
+    drums.set_color(0x223344).await?;
+    kick.set_color(0xAA3300).await?;
+    snare.set_color(0x00AA66).await?;
+    bass.set_color(0x3333AA).await?;
+    drum_bus.set_color(0x8844CC).await?;
+
+    kick.set_visibility(true, false).await?;
+    snare.set_tcp_height(72).await?;
+    kick.set_parent_send(false).await?;
+
+    let send = kick.sends().add_to(drum_bus.guid()).await?;
+    send.set_volume(0.75).await?;
+    send.set_pan(-0.25).await?;
+
+    let all = tracks.all().await?;
+    let band_info = all.iter().find(|track| track.guid == band.guid()).unwrap();
+    let drums_info = all.iter().find(|track| track.guid == drums.guid()).unwrap();
+    let kick_info = all.iter().find(|track| track.guid == kick.guid()).unwrap();
+    let snare_info = all.iter().find(|track| track.guid == snare.guid()).unwrap();
+    let bass_info = all.iter().find(|track| track.guid == bass.guid()).unwrap();
+    let drum_bus_info = all
+        .iter()
+        .find(|track| track.guid == drum_bus.guid())
+        .unwrap();
+
+    assert!(band_info.is_folder);
+    assert!(drums_info.is_folder);
+    assert_eq!(drums_info.parent_guid.as_deref(), Some(band.guid()));
+    assert_eq!(kick_info.parent_guid.as_deref(), Some(drums.guid()));
+    assert_eq!(snare_info.parent_guid.as_deref(), Some(drums.guid()));
+    assert_eq!(bass_info.parent_guid.as_deref(), Some(band.guid()));
+    assert_eq!(drum_bus_info.parent_guid, None);
+
+    assert_eq!(band_info.color, Some(0x334455));
+    assert_eq!(kick_info.color, Some(0xAA3300));
+    assert!(kick_info.visible_in_tcp);
+    assert!(!kick_info.visible_in_mixer);
+    assert_eq!(snare_info.folder_depth, -1);
+    assert_eq!(bass_info.folder_depth, -1);
+
+    let ctx = ProjectContext::Project(project.info().await?.guid);
+    assert_eq!(
+        bundle
+            .standalone
+            .track_tcp_height(&ctx, &TrackRef::Guid(snare.guid().to_string())),
+        Some(72)
+    );
+
+    let sends = kick.sends().all().await?;
+    assert_eq!(sends.len(), 1);
+    assert_eq!(sends[0].dest_track_guid.as_deref(), Some(drum_bus.guid()));
+    assert!((sends[0].volume - 0.75).abs() < 1e-9);
+    assert!((sends[0].pan + 0.25).abs() < 1e-9);
+
+    let receives = drum_bus.receives().all().await?;
+    assert_eq!(receives.len(), 1);
+    assert_eq!(receives[0].source_track_guid, kick.guid());
+    assert!((receives[0].volume - 0.75).abs() < 1e-9);
+
+    kick.select().await?;
+    snare.select().await?;
+    tracks
+        .reorder_selected(5, ReorderTracksBehavior::Normal)
+        .await?;
+
+    let names_after_reorder = tracks
+        .all()
+        .await?
+        .into_iter()
+        .map(|track| track.name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names_after_reorder,
+        vec!["Band", "Drums", "Bass", "Kick", "Snare", "Drum Bus"]
+    );
+
+    let all_after_reorder = tracks.all().await?;
+    let kick_after = all_after_reorder
+        .iter()
+        .find(|track| track.guid == kick.guid())
+        .unwrap();
+    let snare_after = all_after_reorder
+        .iter()
+        .find(|track| track.guid == snare.guid())
+        .unwrap();
+    assert_eq!(kick_after.index, 3);
+    assert_eq!(snare_after.index, 4);
+    assert_eq!(kick_after.parent_guid.as_deref(), Some(band.guid()));
+    assert_eq!(snare_after.parent_guid.as_deref(), Some(band.guid()));
+
     Ok(())
 }

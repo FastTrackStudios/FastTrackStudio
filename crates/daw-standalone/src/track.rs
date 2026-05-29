@@ -7,6 +7,7 @@
 //! canonical state — fewer places for state to drift.
 
 use daw_proto::Tracks;
+use daw_proto::track::ReorderTracksBehavior;
 use daw_proto::{DawError, DawResult, ProjectContext, RecordInput, Track, TrackRef};
 use uuid::Uuid;
 
@@ -39,6 +40,33 @@ fn not_found_proj() -> DawError {
 
 fn not_found_track() -> DawError {
     DawError::not_found("Track", "")
+}
+
+fn reconcile_track_structure(tracks: &mut [Track]) {
+    let mut folder_stack: Vec<String> = Vec::new();
+    for (index, track) in tracks.iter_mut().enumerate() {
+        track.index = index as u32;
+        track.parent_guid = folder_stack.last().cloned();
+        track.is_folder = track.folder_depth > 0;
+
+        if track.folder_depth > 0 {
+            folder_stack.push(track.guid.clone());
+        } else if track.folder_depth < 0 {
+            for _ in 0..track.folder_depth.unsigned_abs() {
+                folder_stack.pop();
+            }
+        }
+    }
+}
+
+fn selected_reorder_insert_index(tracks: &[Track], index: u32) -> usize {
+    let target = (index as usize).min(tracks.len());
+    let selected_before_target = tracks
+        .iter()
+        .take(target)
+        .filter(|track| track.selected)
+        .count();
+    target.saturating_sub(selected_before_target)
 }
 
 impl Tracks for Standalone {
@@ -222,10 +250,7 @@ impl Tracks for Standalone {
                 ..Default::default()
             };
             p.tracks.insert(pos, track);
-            // Re-index the tracks below the insertion point.
-            for (i, t) in p.tracks.iter_mut().enumerate().skip(pos) {
-                t.index = i as u32;
-            }
+            reconcile_track_structure(&mut p.tracks);
             new_guid
         })
     }
@@ -234,10 +259,27 @@ impl Tracks for Standalone {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let removed = p.tracks[i].guid.clone();
             p.tracks.remove(i);
-            for (idx, t) in p.tracks.iter_mut().enumerate() {
-                t.index = idx as u32;
+            p.track_ext.remove(&removed);
+            p.track_ext_state
+                .retain(|(track_guid, _, _), _| track_guid != &removed);
+            p.sends.remove(&removed);
+            p.receives.remove(&removed);
+            p.hw_outputs.remove(&removed);
+            for sends in p.sends.values_mut() {
+                sends.retain(|route| route.dest_track_guid.as_deref() != Some(removed.as_str()));
+                for (idx, route) in sends.iter_mut().enumerate() {
+                    route.index = idx as u32;
+                }
             }
+            for receives in p.receives.values_mut() {
+                receives.retain(|route| route.source_track_guid != removed);
+                for (idx, route) in receives.iter_mut().enumerate() {
+                    route.index = idx as u32;
+                }
+            }
+            reconcile_track_structure(&mut p.tracks);
             Ok::<(), DawError>(())
         })?
     }
@@ -269,11 +311,17 @@ impl Tracks for Standalone {
 
     fn set_folder_depth(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _folder_depth: i32,
+        project: ProjectContext,
+        track: TrackRef,
+        folder_depth: i32,
     ) -> DawResult<()> {
-        Ok(())
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].folder_depth = folder_depth;
+            reconcile_track_structure(&mut p.tracks);
+            Ok::<(), DawError>(())
+        })?
     }
 
     fn set_num_channels(
@@ -317,30 +365,76 @@ impl Tracks for Standalone {
 
     fn reorder_selected(
         &self,
-        _project: ProjectContext,
-        _index: u32,
-        _behavior: daw_proto::track::ReorderTracksBehavior,
+        project: ProjectContext,
+        index: u32,
+        behavior: ReorderTracksBehavior,
     ) -> DawResult<()> {
-        Ok(())
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            if !p.tracks.iter().any(|track| track.selected) {
+                return Ok::<(), DawError>(());
+            }
+
+            let insert_at = selected_reorder_insert_index(&p.tracks, index);
+            let mut selected = Vec::new();
+            let mut remaining = Vec::with_capacity(p.tracks.len());
+            for track in p.tracks.drain(..) {
+                if track.selected {
+                    selected.push(track);
+                } else {
+                    remaining.push(track);
+                }
+            }
+
+            let insert_at = insert_at.min(remaining.len());
+            if matches!(
+                behavior,
+                ReorderTracksBehavior::MakeChildOfPreviousTrack
+                    | ReorderTracksBehavior::ExtendFolder
+            ) && insert_at > 0
+            {
+                remaining[insert_at - 1].folder_depth =
+                    remaining[insert_at - 1].folder_depth.max(1);
+            }
+            remaining.splice(insert_at..insert_at, selected);
+            p.tracks = remaining;
+            reconcile_track_structure(&mut p.tracks);
+            Ok::<(), DawError>(())
+        })?
     }
 
     fn set_visibility(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _visible_in_tcp: bool,
-        _visible_in_mixer: bool,
+        project: ProjectContext,
+        track: TrackRef,
+        visible_in_tcp: bool,
+        visible_in_mixer: bool,
     ) -> DawResult<()> {
-        Ok(())
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].visible_in_tcp = visible_in_tcp;
+            p.tracks[i].visible_in_mixer = visible_in_mixer;
+            Ok::<(), DawError>(())
+        })?
     }
 
     fn set_tcp_height(
         &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-        _height_pixels: u32,
+        project: ProjectContext,
+        track: TrackRef,
+        height_pixels: u32,
     ) -> DawResult<()> {
-        Ok(())
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
+            p.track_ext
+                .entry(track_guid)
+                .or_insert_with(TrackExt::default)
+                .tcp_height_pixels = height_pixels;
+            Ok::<(), DawError>(())
+        })?
     }
 
     async fn subscribe(
@@ -390,6 +484,19 @@ impl Standalone {
                     .map(|e| e.record_input)
                     .unwrap_or(RecordInput::None),
             )
+        })
+        .ok()
+        .flatten()
+    }
+
+    /// TCP height override for a track. Returns `0` for host/default
+    /// height, or `None` if the track can't be resolved.
+    pub fn track_tcp_height(&self, project: &ProjectContext, track: &TrackRef) -> Option<u32> {
+        let guid = resolve_project(self, project)?;
+        self.with_project(&guid, |p| {
+            let i = find_track_index(&p.tracks, track)?;
+            let g = &p.tracks[i].guid;
+            Some(p.track_ext.get(g).map(|e| e.tcp_height_pixels).unwrap_or(0))
         })
         .ok()
         .flatten()

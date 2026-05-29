@@ -67,6 +67,8 @@ pub struct TrackExt {
     /// Whether this track sends its output to the master/parent track
     /// (REAPER's `B_MAINSEND`). Default = true.
     pub parent_send_enabled: bool,
+    /// TCP height override in pixels. `0` means host/default height.
+    pub tcp_height_pixels: u32,
 }
 
 /// Stable hashable identity for an envelope on a track. Lifts
@@ -228,6 +230,7 @@ impl Default for TrackExt {
             num_channels: 2,
             record_input: RecordInput::None,
             parent_send_enabled: true,
+            tcp_height_pixels: 0,
         }
     }
 }
