@@ -641,8 +641,8 @@ features = ["derive"]
 version = "1"
 
 [workspace.dependencies.shm-primitives]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.tokio]
 version = "1"
@@ -671,42 +671,42 @@ features = [
 # add `features = ["transport-websocket"]` explicitly on their dep
 # line. Pattern lifted from architect's workspace + vox's own
 # rust/wasm-browser-tests crate.
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 default-features = false
 features = ["runtime"]
 
 [workspace.dependencies.vox-core]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-codegen]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-inprocess]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-local]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-schema]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-stream]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-types]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.vox-websocket]
-git = "https://github.com/Codys-Wright/vox"
-rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5"
+git = "https://github.com/bearcove/vox"
+rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57"
 
 [workspace.dependencies.sea-orm]
 git = "https://github.com/FastTrackStudios/sea-orm"
@@ -850,18 +850,10 @@ strip = "debuginfo"
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
-# Redirect every transitive bearcove/vox reference (architect pulls
-# vox from bearcove; this workspace pulls from Codys-Wright/vox at
-# the same rev). Without this, architect's `axum_ws::serve` builds a
-# Handler bound against bearcove's `vox_types::Handler` and the
-# Dispatchers we instantiate here implement Codys-Wright's — same
-# code, different SourceId, no impl found. Same trick as the moire
-# patch below.
-[patch."https://github.com/bearcove/vox"]
-vox           = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-core      = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-types     = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-websocket = { git = "https://github.com/Codys-Wright/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
+# NOTE: the former `[patch."https://github.com/bearcove/vox"]` block
+# (which redirected bearcove/vox → the Codys-Wright/vox mirror fork for
+# SourceId unification) was removed — the workspace + architect now both
+# depend on bearcove/vox directly at the same rev, so no patch is needed.
 
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
