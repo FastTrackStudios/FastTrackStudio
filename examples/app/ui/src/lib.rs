@@ -1,39 +1,82 @@
-//! Runtime UI shell — composes feature-ui crates into the pages that
-//! `apps/web` and `apps/desktop` mount.
+//! Runtime UI shell — the full example app, shared verbatim by the web
+//! (wasm) and desktop targets.
 //!
-//! For the example, there's one feature (`example`). A real project
-//! pulls in `timeline_ui::*`, `mixing_ui::*`, etc. here; the shell
-//! handles routing, layout, and the WebSocket client lifecycle, then
-//! delegates rendering to the feature components.
+//! Architecture:
+//! - [`App`] establishes the vox clients once (see [`client`]) and
+//!   provides them to the tree as a `Signal<ConnState>`, then mounts the
+//!   router. Data never flows through Dioxus server functions — every
+//!   read/write is a typed vox call. See `docs/.../idioms.md`.
+//! - [`Route`] is the typed route table; [`AppShell`] is the layout that
+//!   wraps every page with the header + nav.
+//! - The screens live in [`screens`]; the feature-scoped presentational
+//!   components (list, row, forms, search) come from `example_ui`.
+//!
+//! A real project pulls in more feature-ui crates here (timeline_ui,
+//! mixing_ui, …) and adds their routes; the shell shape is the same.
+
+mod client;
+mod screens;
 
 use dioxus::prelude::*;
-use example_ui::{ExampleCreateForm, ExampleList};
 
+pub use client::{ConnState, DEFAULT_SERVER_URL, VoxClients};
+
+use screens::{EditExample, ExampleDetail, Home, NewExample, NotFound};
+
+/// Bundled stylesheet. `dx` collects it for both web and desktop.
+static MAIN_CSS: Asset = asset!("/assets/main.css");
+
+/// Typed route table. `AppShell` wraps the four content routes; anything
+/// else falls through to `NotFound`.
+#[derive(Routable, Clone, PartialEq)]
+#[rustfmt::skip]
+pub enum Route {
+    #[layout(AppShell)]
+        #[route("/")]
+        Home {},
+        #[route("/new")]
+        NewExample {},
+        #[route("/example/:id")]
+        ExampleDetail { id: String },
+        #[route("/example/:id/edit")]
+        EditExample { id: String },
+    #[end_layout]
+    #[route("/:..route")]
+    NotFound { route: Vec<String> },
+}
+
+/// App root. Establishes the vox clients once, hands them to the tree,
+/// and mounts the router.
 #[component]
 pub fn App() -> Element {
-    // Placeholder data — wire to `ExampleRepoClient` on mount in the
-    // next pass. The components are intentionally agnostic to where
-    // the data came from, so we can render them with literals here
-    // and stream live data in later without changing the JSX.
-    let items = use_signal(Vec::new);
+    // Provided unconditionally so every screen's `use_conn()` is stable.
+    let conn = use_context_provider(|| Signal::new(ConnState::Connecting));
+
+    // One-shot connect on mount. Screens react when this flips to Ready.
+    use_future(move || async move {
+        let mut conn = conn;
+        match VoxClients::connect(DEFAULT_SERVER_URL).await {
+            Ok(clients) => conn.set(ConnState::Ready(clients)),
+            Err(e) => conn.set(ConnState::Failed(e)),
+        }
+    });
 
     rsx! {
-        div { class: "app-shell",
-            header { h1 { "architect" } }
-            main {
-                section { class: "panel",
-                    h2 { "Examples" }
-                    ExampleList { items: items() }
-                }
-                section { class: "panel",
-                    h2 { "Add example" }
-                    ExampleCreateForm {
-                        on_submit: move |(_name, _description): (String, String)| {
-                            // TODO: call ExampleRepoClient::create here.
-                        }
-                    }
-                }
-            }
+        document::Stylesheet { href: MAIN_CSS }
+        Router::<Route> {}
+    }
+}
+
+/// Layout shared by every content route: header/brand + the page outlet.
+#[component]
+fn AppShell() -> Element {
+    rsx! {
+        header { class: "app-header",
+            Link { class: "brand", to: Route::Home {}, "architect" }
+            span { class: "tagline", "reference example" }
+        }
+        main { class: "app-main",
+            Outlet::<Route> {}
         }
     }
 }

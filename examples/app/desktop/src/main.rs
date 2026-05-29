@@ -1,13 +1,8 @@
-//! Dioxus desktop entry point.
+//! Dioxus desktop entry point. All UI + the vox client lifecycle live in
+//! `app_ui::App`, shared verbatim with the web target.
 
-use dioxus::prelude::*;
 use app_ui::App;
 
 fn main() {
-    dioxus::launch(Root);
-}
-
-#[component]
-fn Root() -> Element {
-    rsx! { App {} }
+    dioxus::launch(App);
 }

@@ -1,15 +1,8 @@
-//! Dioxus web entry point. Hands off rendering to `app_ui::App`
-//! and provides a one-time vox connection in app context so any view
-//! can call `ExampleServiceClient` methods without re-connecting.
+//! Dioxus web (wasm) entry point. All UI + the vox client lifecycle
+//! live in `app_ui::App`, shared verbatim with the desktop target.
 
-use dioxus::prelude::*;
 use app_ui::App;
 
 fn main() {
-    dioxus::launch(Root);
-}
-
-#[component]
-fn Root() -> Element {
-    rsx! { App {} }
+    dioxus::launch(App);
 }

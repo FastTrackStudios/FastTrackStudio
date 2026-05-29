@@ -8,18 +8,14 @@ license.workspace = true
 # Per-feature Dioxus components for the `example` feature.
 #
 # The pattern: each feature owns the visual + interaction concerns that
-# belong to it (lists, forms, rows, dialogs). `apps/ui` composes one or
+# belong to it (lists, forms, rows, dialogs). `app-ui` composes one or
 # more feature-ui crates into the pages/shells consumed by the runtime
-# apps (`apps/web`, `apps/desktop`).
+# apps (`app-web`, `app-desktop`).
 #
-# Wasm-only by virtue of its dioxus + vox-websocket deps; lives outside
-# the cargo workspace so its target constraints don't bleed into the
-# server build.
+# Pure presentation: wire types in, events out. No vox/socket dep — the
+# shell (`app-ui`) owns the client and hands data down to these.
 
 [dependencies]
 example = { path = "../example", features = ["vox"] }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
-vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
 uuid = { version = "1", features = ["v4", "js"] }

@@ -5,20 +5,22 @@ edition = "2024"
 authors = ["Cody Wright"]
 license = "MIT OR Apache-2.0"
 
-# Dioxus web target. Renders `app_ui::App` and connects to
-# `apps/server`'s vox WebSocket. The same `example-proto` crate that
-# the server uses is consumed here without the `server` feature, so
-# we get typed `ExampleServiceClient` methods without a separate
-# schema.
+# Dioxus web target. A thin launcher: all UI + the vox client lifecycle
+# live in `app-ui`, shared verbatim with the desktop target.
+#
+# wasm-bindgen is pinned to 0.2.118: dioxus-web 0.7.9 only compiles
+# against that web-sys generation, while vox (230dcd5) accepts `^0.2`.
+# Without the pin, cargo picks the newest wasm-bindgen vox allows and
+# dioxus-web fails to build (`web_sys::Window::location` not found).
 
 [dependencies]
 # Outside the workspace — referenced by relative path.
-example-proto = { path = "../features/example/example-proto" }
 app-ui = { path = "../ui" }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "web", "launch", "router"] }
-vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
+wasm-bindgen = "=0.2.118"
+# dioxus-web 0.7.9's history.rs calls `Window::location()`, gated behind
+# the web-sys "Location" feature. The enabled dioxus features don't pull
+# it in this dependency graph, so enable it directly — feature unification
+# turns it on for dioxus-web too.
+web-sys = { version = "0.3.77", features = ["Location"] }
