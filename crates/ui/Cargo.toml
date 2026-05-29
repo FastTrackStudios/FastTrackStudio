@@ -38,6 +38,7 @@ cycle = { workspace = true, default-features = false }
 # tokio[net]). Pattern lifted from `vox/rust/wasm-browser-tests`.
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
+task = { workspace = true, features = ["vox"] }
 
 uuid = { workspace = true, features = ["v4", "js"] }
 chrono = { workspace = true, features = ["clock", "std", "wasmbind"] }

@@ -14,7 +14,7 @@
 //! - [`TaskInfo`] — the parsed task model.
 //! - [`Status`] / [`Priority`] — configurable enums (default set
 //!   mirrors `TaskNotes` defaults).
-//! - [`parse_page`] — `vault::VaultPage` → `TaskInfo`.
+//! - [`parse_page`] — `vault_proto::VaultPage` → `TaskInfo`.
 //! - [`serialize_task`] — `TaskInfo` → markdown bytes.
 //! - [`scan_vault`] — collect every `type: task` (or
 //!   `tags: [task]`) page from a `vault::Vault`.
@@ -26,24 +26,44 @@
 //! `.base` query DSL via formulas + filters; they live in
 //! `task-ui` (future) and don't need anything from this crate
 //! beyond `TaskInfo`.
-
-#![cfg(not(target_arch = "wasm32"))]
+//!
+//! ## Wasm
+//!
+//! The wire/file-format surface (`model`, `parse`, `service` and
+//! its `vox` client) compiles on `wasm32` so `task-ui` can drive
+//! a `TaskServiceClient` from the browser. The FS-dependent
+//! modules (`scan`, `write`, `backend` — they open a
+//! `vault::Vault` or touch `std::fs`) sit behind a
+//! `not(target_arch = "wasm32")` gate so the wasm crate graph
+//! never inherits `vault`'s tokio-net transitive. Mirrors
+//! `project`.
 
 pub mod capture;
 pub mod model;
 pub mod parse;
-pub mod scan;
-pub mod write;
-
-pub mod backend;
 pub mod service;
 
-pub use backend::TaskBackend;
+// FS-dependent modules (vault::Vault, std::fs walks). The
+// wasm-targeted UI imports the wire types + RPC client only,
+// not these.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod scan;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod write;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod backend;
+
 pub use capture::capture;
 pub use model::{Priority, Status, TaskInfo, TimeEntry};
 pub use parse::{ParseError, parse_page, parse_str};
-pub use scan::scan_vault;
 pub use service::{TaskError, TaskService, TaskServiceRpc};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::TaskBackend;
+#[cfg(not(target_arch = "wasm32"))]
+pub use scan::scan_vault;
+#[cfg(not(target_arch = "wasm32"))]
 pub use write::{WriteError, serialize_task, write_task};
 
 #[cfg(feature = "vox")]

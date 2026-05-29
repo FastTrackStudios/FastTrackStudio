@@ -1,6 +1,5 @@
 // architect's Entity derive emits cfg-gated blocks; allow at crate scope.
 #![allow(unexpected_cfgs)]
-#![cfg(not(target_arch = "wasm32"))]
 
 //! `workflows-proto` — cross-domain workflow primitives.
 //!

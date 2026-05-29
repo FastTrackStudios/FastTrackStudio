@@ -12,8 +12,11 @@ pub fn scan_vault(vault: &Vault) -> Vec<TaskInfo> {
     vault
         .pages
         .iter()
-        .filter(|p| looks_like_task(p))
-        .filter_map(|p| match parse_page(p) {
+        // The parser consumes the wasm-clean `vault_proto::VaultPage`,
+        // so convert each live page to the proto shape first.
+        .map(vault::VaultPage::to_proto)
+        .filter(looks_like_task)
+        .filter_map(|p| match parse_page(&p) {
             Ok(t) => Some(t),
             Err(e) => {
                 tracing::warn!(path = %p.rel_path, ?e, "task parse failed");
