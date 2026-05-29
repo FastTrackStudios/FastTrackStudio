@@ -19,7 +19,7 @@ mod screens;
 
 use dioxus::prelude::*;
 
-pub use client::{ConnState, DEFAULT_SERVER_URL, VoxClients};
+pub use client::{ConnState, DEFAULT_SERVER_URL, ExampleClients, Transport};
 
 use screens::{EditExample, ExampleDetail, Home, NewExample, NotFound};
 
@@ -49,15 +49,25 @@ pub enum Route {
 /// and mounts the router.
 #[component]
 pub fn App() -> Element {
+    // The transport is chosen at the app root (web → Remote, desktop →
+    // Local). Default to Remote so a bare `App` mount (tests) still works.
+    let transport = use_hook(|| {
+        try_consume_context::<Transport>()
+            .unwrap_or_else(|| Transport::Remote(DEFAULT_SERVER_URL.to_string()))
+    });
+
     // Provided unconditionally so every screen's `use_conn()` is stable.
     let conn = use_context_provider(|| Signal::new(ConnState::Connecting));
 
     // One-shot connect on mount. Screens react when this flips to Ready.
-    use_future(move || async move {
-        let mut conn = conn;
-        match VoxClients::connect(DEFAULT_SERVER_URL).await {
-            Ok(clients) => conn.set(ConnState::Ready(clients)),
-            Err(e) => conn.set(ConnState::Failed(e)),
+    use_future(move || {
+        let transport = transport.clone();
+        async move {
+            let mut conn = conn;
+            match ExampleClients::connect(&transport).await {
+                Ok(clients) => conn.set(ConnState::Ready(clients)),
+                Err(e) => conn.set(ConnState::Failed(e)),
+            }
         }
     });
 

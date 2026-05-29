@@ -51,6 +51,11 @@ full = ["vox", "server-seaorm", "server-axum", "fake", "diagnostics"]
 # A consumer that brings its own repo impl (or fronts a remote API)
 # enables `server-axum` only and never compiles sea-orm.
 
+# In-process transport (`architect::local`): serve a `LayerRouter` over a
+# vox in-memory link so a typed client consumes a local backend with no
+# server/socket. Native only — vox's `MemoryLink` is `#[cfg(not(wasm))]`.
+local = ["vox", "dep:vox-core", "dep:tracing", "tokio/rt"]
+
 server-seaorm = ["dep:sea-orm", "dep:async-trait"]
 server-axum = [
     "dep:axum",

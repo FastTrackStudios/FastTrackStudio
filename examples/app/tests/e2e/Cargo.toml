@@ -31,3 +31,6 @@ uuid.workspace = true
 # any other vox client would.
 vox-core.workspace = true
 vox-websocket.workspace = true
+
+# In-process transport — for the local round-trip test (no server).
+architect = { workspace = true, features = ["local"] }

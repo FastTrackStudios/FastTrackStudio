@@ -10,8 +10,14 @@ license = "MIT OR Apache-2.0"
 # platform-agnostic.
 
 [dependencies]
-example-proto = { path = "../features/example/example-proto" }
 app-ui = { path = "../ui" }
+# In-process backend: serve the full service router (repo + ExampleService)
+# over a vox in-memory link — the desktop runs the whole stack, no server.
+# `app-server` is depended on for its `service_router` lib fn (no default
+# features → no backend/sea-orm baggage, just the generic composition).
+app-server = { path = "../server", default-features = false }
+example-memory = { path = "../features/example/example-memory" }
+architect = { path = "../../../macros/architect", default-features = false, features = ["local"] }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
 # v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.

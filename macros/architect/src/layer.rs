@@ -82,8 +82,9 @@
 //!
 //! 4. **HTTP / WebSocket via axum.** Enable `architect`'s
 //!    `server-axum` feature and wrap the same router with
-//!    [`crate::axum_ws::serve`]. Browser clients use the same
-//!    `<T>Client` types compiled for wasm.
+//!    `axum_ws::serve` (not linked: the module is feature-gated, so the
+//!    intra-doc link wouldn't resolve under every feature combo). Browser
+//!    clients use the same `<T>Client` types compiled for wasm.
 //!
 //! See `examples/layered-services/` for a runnable composition
 //! walkthrough and `examples/custom-server/` for the axum mount

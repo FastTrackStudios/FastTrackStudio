@@ -23,16 +23,35 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use example::architect::Services;
+use example::architect::{LayerRouter, Services};
 use example::axum_ws;
 use example::{ExampleRepo, ExampleServiceDispatcher};
 use service_impl::ExampleServiceImpl;
 use tower_http::cors::CorsLayer;
 
+/// Compose the app's whole vox surface into one `LayerRouter`: the repo's
+/// `Services` bundle (CRUD) plus `ExampleService` (search/duplicate),
+/// which is a separate hand-written trait backed by the same repo. The
+/// router dispatches every service's methods by id.
+///
+/// This is the single source of the service graph — the axum server
+/// ([`vox_router`]) serves it over a WebSocket, and an in-process client
+/// (`architect::LocalServer::serve(service_router(repo), …)`, see the
+/// desktop app + the local-transport e2e test) serves the identical
+/// surface with no socket.
+pub fn service_router<R>(repo: R) -> LayerRouter
+where
+    R: ExampleRepo + Services + Clone + Send + Sync + 'static,
+{
+    repo.clone().into_router().with(
+        example::example_service_service_descriptor(),
+        ExampleServiceDispatcher::new(ExampleServiceImpl::new(repo)),
+    )
+}
+
 /// Build the app's axum router for any `ExampleRepo` backend that also
 /// declares its `Services` bundle: a health endpoint plus the `/vox`
-/// WebSocket serving the composed `LayerRouter` (repo CRUD +
-/// search/duplicate).
+/// WebSocket serving [`service_router`].
 pub fn vox_router<R>(repo: R) -> Router
 where
     R: ExampleRepo + Services + Clone + Send + Sync + 'static,
@@ -53,16 +72,7 @@ where
     R: ExampleRepo + Services + Clone + Send + Sync + 'static,
 {
     ws.on_upgrade(move |socket| async move {
-        let repo = (*repo).clone();
-        // Compose the whole vox surface once via the Layer system: the
-        // repo's canonical bundle, plus `ExampleService` (which is a
-        // separate hand-written trait backed by the same repo) mounted
-        // alongside. The resulting `LayerRouter` routes every service's
-        // methods by id, so each connection gets the same handler.
-        let router = repo.clone().into_router().with(
-            example::example_service_service_descriptor(),
-            ExampleServiceDispatcher::new(ExampleServiceImpl::new(repo)),
-        );
+        let router = service_router((*repo).clone());
         let factory = axum_ws::acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
             Ok(())

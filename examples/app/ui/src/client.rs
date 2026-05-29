@@ -1,64 +1,84 @@
 //! Vox client lifecycle for the app shell.
 //!
-//! The whole app talks to `app-server` over vox — *never* through
-//! Dioxus server functions. We establish the typed clients once at the
-//! root (`App`), stash them in a context-provided [`Signal`], and let
-//! every screen pull them with [`use_clients`]. Data reads then go
-//! through `use_resource` against these handles.
+//! Screens program against the generated `ExampleRepoClient` /
+//! `ExampleServiceClient` and never care where the data lives — that's
+//! the [`Transport`] choice, made once at the app root:
 //!
-//! Two links, one per service: vox's `establish` consumes the link and
-//! yields exactly one typed client, and the server's `/vox` acceptor
-//! routes each connection by service name. So `ExampleRepo` and
-//! `ExampleService` get a socket each — mirrors the working pattern in
-//! `examples/app/cli`.
+//! - [`Transport::Remote`] — talk to `app-server` over a vox WebSocket.
+//! - [`Transport::Local`] — serve a backend **in-process** over a vox
+//!   in-memory link (no server, no socket). Native only (the browser
+//!   stays remote — vox's in-memory link isn't compiled for wasm).
+//!
+//! The web app picks `Remote`; the desktop app picks `Local` and runs the
+//! whole thing offline. Same screens, same clients — only the transport
+//! differs. Established once at the root, stashed in a
+//! `Signal<ConnState>`, pulled by screens via [`use_conn`].
 
 use dioxus::prelude::*;
 use example::{ExampleRepoClient, ExampleServiceClient};
 use vox_core::{TransportMode, initiator_on};
 use vox_websocket::WsLink;
 
-/// Default vox endpoint. `app-server` binds `:4040`; `dx serve` runs the
-/// web app on a different port and connects back here.
+/// Default vox endpoint for the remote transport.
 pub const DEFAULT_SERVER_URL: &str = "ws://127.0.0.1:4040/vox";
+
+/// Where the services live. Chosen at the app root and provided via
+/// context; `App` reads it to establish the clients.
+#[derive(Clone)]
+pub enum Transport {
+    /// Remote `app-server` over a vox WebSocket.
+    Remote(String),
+    /// A backend served in-process — no server. Native only.
+    #[cfg(not(target_arch = "wasm32"))]
+    Local(architect::LocalServer),
+}
 
 /// The two typed clients the UI drives. Cheap to clone — each is a vox
 /// caller handle, not a connection.
 #[derive(Clone)]
-pub struct VoxClients {
+pub struct ExampleClients {
     pub repo: ExampleRepoClient,
     pub service: ExampleServiceClient,
 }
 
-impl VoxClients {
-    /// Open one socket per service and establish the typed client on each.
-    pub async fn connect(url: &str) -> Result<Self, String> {
-        let repo = {
-            let link = WsLink::connect(url)
-                .await
-                .map_err(|e| format!("connect {url}: {e:?}"))?;
-            initiator_on(link, TransportMode::Bare)
-                .establish::<ExampleRepoClient>()
-                .await
-                .map_err(|e| format!("ExampleRepo handshake: {e:?}"))?
-        };
-        let service = {
-            let link = WsLink::connect(url)
-                .await
-                .map_err(|e| format!("connect {url}: {e:?}"))?;
-            initiator_on(link, TransportMode::Bare)
-                .establish::<ExampleServiceClient>()
-                .await
-                .map_err(|e| format!("ExampleService handshake: {e:?}"))?
-        };
-        Ok(Self { repo, service })
+impl ExampleClients {
+    /// Establish both clients over the chosen transport.
+    pub async fn connect(transport: &Transport) -> Result<Self, String> {
+        match transport {
+            Transport::Remote(url) => Ok(Self {
+                repo: establish_ws(url).await?,
+                service: establish_ws(url).await?,
+            }),
+            #[cfg(not(target_arch = "wasm32"))]
+            Transport::Local(server) => Ok(Self {
+                repo: server.establish().await.map_err(|e| format!("{e:?}"))?,
+                service: server.establish().await.map_err(|e| format!("{e:?}"))?,
+            }),
+        }
     }
+}
+
+/// Establish one typed client over a fresh WebSocket. vox's `establish`
+/// consumes the link and yields exactly one client; the server's `/vox`
+/// acceptor routes by service name, so each client gets its own socket.
+async fn establish_ws<C>(url: &str) -> Result<C, String>
+where
+    C: vox_core::FromVoxSession,
+{
+    let link = WsLink::connect(url)
+        .await
+        .map_err(|e| format!("connect {url}: {e:?}"))?;
+    initiator_on(link, TransportMode::Bare)
+        .establish::<C>()
+        .await
+        .map_err(|e| format!("vox handshake: {e:?}"))
 }
 
 /// Connection state, provided to the tree as `Signal<ConnState>`.
 #[derive(Clone)]
 pub enum ConnState {
     Connecting,
-    Ready(VoxClients),
+    Ready(ExampleClients),
     Failed(String),
 }
 
