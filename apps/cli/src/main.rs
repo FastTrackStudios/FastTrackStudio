@@ -3696,21 +3696,52 @@ where
     C: vox_core::FromVoxSession,
 {
     if embed_enabled() {
-        let emb = embedded().await?;
-        let local = emb
-            .state
-            .local_server(slug, &emb.scope)
-            .ok_or_else(|| eyre::eyre!("org `{slug}` not hosted in embedded mode"))?;
-        local
-            .establish()
-            .await
-            .map_err(|e| eyre::eyre!("embedded establish for `{slug}`: {e:?}"))
+        establish_embedded(slug).await
     } else {
         let url = resolve_org_vox_url(server, slug);
         Box::pin(vox::connect(&url).establish())
             .await
             .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
     }
+}
+
+/// Establish a typed client given an already-resolved per-org vox URL
+/// (`…/org/<slug>/vox`). In embedded mode the slug is recovered from the
+/// URL and served in-process; otherwise it's a plain WebSocket connect.
+/// The choke point for the `connect_*_client` helpers, which only carry
+/// a URL.
+async fn establish_for_url<C>(url: &str) -> eyre::Result<C>
+where
+    C: vox_core::FromVoxSession,
+{
+    if embed_enabled() {
+        let slug = url
+            .rsplit_once("/org/")
+            .and_then(|(_, rest)| rest.strip_suffix("/vox"))
+            .ok_or_else(|| {
+                eyre::eyre!("can't recover an org slug from `{url}` for embedded mode")
+            })?;
+        establish_embedded(slug).await
+    } else {
+        Box::pin(vox::connect(url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+}
+
+/// Establish a typed client against the in-process [`LocalServer`] for
+/// `slug`. Shared by [`establish_client`] and [`establish_for_url`].
+async fn establish_embedded<C>(slug: &str) -> eyre::Result<C>
+where
+    C: vox_core::FromVoxSession,
+{
+    let emb = embedded().await?;
+    emb.state
+        .local_server(slug, &emb.scope)
+        .ok_or_else(|| eyre::eyre!("org `{slug}` not hosted in embedded mode"))?
+        .establish()
+        .await
+        .map_err(|e| eyre::eyre!("embedded establish for `{slug}`: {e:?}"))
 }
 
 /// Resolve the active org slug from `--org` flag or the
@@ -4015,9 +4046,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
 }
 
 async fn connect_project_client(url: &str) -> eyre::Result<project::ProjectServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_project_target(
@@ -4111,10 +4140,7 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
             json,
         } => {
             let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
-            let client: GoalServiceClient = Box::pin(vox::connect(&url).establish())
-                .await
-                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let client: GoalServiceClient = establish_client(server, &slug).await?;
             let mut rows = client
                 .list()
                 .await
@@ -4184,10 +4210,7 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
             json,
         } => {
             let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
-            let client: GoalServiceClient = Box::pin(vox::connect(&url).establish())
-                .await
-                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let client: GoalServiceClient = establish_client(server, &slug).await?;
             let g = if let Ok(id) = uuid::Uuid::parse_str(&target) {
                 client
                     .get(id)
@@ -4371,9 +4394,7 @@ async fn run_goal(cmd: GoalCmd) -> eyre::Result<()> {
 }
 
 async fn connect_goal_client(url: &str) -> eyre::Result<goal::GoalServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_goal_target(
@@ -8916,9 +8937,7 @@ async fn run_task(cmd: TaskCmd) -> eyre::Result<()> {
 }
 
 async fn connect_task_client(url: &str) -> eyre::Result<task::TaskServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_task_target(
@@ -12252,9 +12271,7 @@ async fn run_milestone(cmd: MilestoneCmd) -> eyre::Result<()> {
 }
 
 async fn connect_milestone_client(url: &str) -> eyre::Result<milestone::MilestoneServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_milestone_target(
@@ -12298,9 +12315,7 @@ where
 // ── Location (locations::Store) ──────────────────────────────────────
 
 async fn connect_locations_client(url: &str) -> eyre::Result<locations::LocationsServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_location_target(
@@ -12474,9 +12489,7 @@ async fn run_location(cmd: LocationCmd) -> eyre::Result<()> {
 // ── Recipe (cookbook::Store) — read + delete only ─────────────────────
 
 async fn connect_cookbook_client(url: &str) -> eyre::Result<cookbook::CookbookServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
@@ -12575,9 +12588,7 @@ async fn run_recipe(cmd: RecipeCmd) -> eyre::Result<()> {
 // ── Meal (mealplan::Store) ───────────────────────────────────────────
 
 async fn connect_mealplan_client(url: &str) -> eyre::Result<mealplan::MealplanServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_meal_target(
@@ -12814,9 +12825,7 @@ async fn run_meal(cmd: MealCmd) -> eyre::Result<()> {
 // ── Pantry (pantry::Store) ───────────────────────────────────────────
 
 async fn connect_pantry_client(url: &str) -> eyre::Result<pantry::PantryServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_pantry_target(
@@ -13107,9 +13116,7 @@ async fn run_agent_queue(cmd: AgentQueueCmd) -> eyre::Result<()> {
     use agent_proto::tasks::QueueFilter;
 
     async fn connect_queue(url: String) -> eyre::Result<AgentTaskQueueClient> {
-        Box::pin(vox::connect(&url).establish())
-            .await
-            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+        establish_for_url(&url).await
     }
     let connect = |url: String| connect_queue(url);
     let default_handle = || {
@@ -13266,9 +13273,7 @@ async fn run_agent_queue(cmd: AgentQueueCmd) -> eyre::Result<()> {
 // ── Body metrics (body::Store) ───────────────────────────────────────
 
 async fn connect_body_client(url: &str) -> eyre::Result<body::BodyServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_body_target(
@@ -13447,9 +13452,7 @@ async fn run_body(cmd: BodyCmd) -> eyre::Result<()> {
 // ── Exercises (exercises::Store) ─────────────────────────────────────
 
 async fn connect_exercises_client(url: &str) -> eyre::Result<exercises::ExercisesServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_exercise_target(
@@ -13624,9 +13627,7 @@ async fn run_exercise(cmd: ExerciseCmd) -> eyre::Result<()> {
 // ── Workouts (routines + sessions) ───────────────────────────────────
 
 async fn connect_workouts_client(url: &str) -> eyre::Result<workouts::WorkoutsServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_routine_target(
@@ -13909,9 +13910,7 @@ async fn run_workout_session(cmd: WorkoutSessionCmd) -> eyre::Result<()> {
 // ── Intake (intake::Store) ───────────────────────────────────────────
 
 async fn connect_intake_client(url: &str) -> eyre::Result<intake::IntakeServiceClient> {
-    Box::pin(vox::connect(url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    establish_for_url(url).await
 }
 
 async fn resolve_intake_target(
@@ -14469,9 +14468,7 @@ async fn run_vault_sync(cmd: VaultCmd) -> eyre::Result<()> {
     println!("Server: {url}");
     println!("Vault:  {vault_id}\n");
 
-    let client: VaultSyncClient = Box::pin(vox::connect(&url).establish())
-        .await
-        .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+    let client: VaultSyncClient = establish_for_url(&url).await?;
 
     // Index local + fetch remote manifest in parallel-ish (the
     // local walk is sync, but cheap; do it before the network
