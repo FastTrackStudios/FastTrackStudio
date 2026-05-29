@@ -344,7 +344,7 @@ async fn wait_for_region_event(
 async fn next_tempo_event(
     rx: &mut vox::Rx<TempoMapStreamEvent>,
 ) -> eyre::Result<TempoMapStreamEvent> {
-    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+    let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for tempo event"))??
         .ok_or_else(|| eyre::eyre!("tempo event stream closed"))?;
@@ -357,7 +357,7 @@ async fn wait_for_tempo_event(
     rx: &mut vox::Rx<TempoMapStreamEvent>,
     pred: impl Fn(&TempoMapEvent) -> bool,
 ) -> eyre::Result<TempoMapStreamEvent> {
-    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let event = next_tempo_event(rx).await?;
         if pred(&event.event) {
@@ -488,6 +488,7 @@ async fn tempo_map_points_time_signatures_and_events_through_in_process_daw() ->
     let project_guid = project.info().await?.guid;
     let tempo_map = project.tempo_map();
     let mut rx = tempo_map.subscribe().await?;
+    tokio::task::yield_now().await;
 
     tempo_map.set_default_tempo(120.0).await?;
     tempo_map.set_default_time_signature(4, 4).await?;

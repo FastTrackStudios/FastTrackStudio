@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use daw_proto::TempoMap;
-use daw_proto::tempo_map::{TempoMapEvent, TempoMapStreamEvent};
+use daw_proto::tempo_map::{TempoMapEngine, TempoMapEvent, TempoMapStreamEvent};
 use daw_proto::{DawError, DawResult, ProjectContext, TempoPoint};
 
 use crate::sync::Standalone;
@@ -80,176 +80,6 @@ fn sort_tempo_points(points: &mut [TempoPoint]) {
     });
 }
 
-#[derive(Clone, Copy)]
-struct MusicalCursor {
-    measure: i32,
-    quarter_offset: f64,
-    quarter_notes_per_measure: f64,
-    quarter_notes_per_display_beat: f64,
-}
-
-impl MusicalCursor {
-    fn new(metric: SignatureMetric) -> Self {
-        Self {
-            measure: 0,
-            quarter_offset: 0.0,
-            quarter_notes_per_measure: metric.quarter_notes_per_measure,
-            quarter_notes_per_display_beat: metric.quarter_notes_per_display_beat,
-        }
-    }
-
-    fn advance(&mut self, quarter_notes: f64) {
-        if quarter_notes <= 0.0 {
-            return;
-        }
-        let total = self.quarter_offset + quarter_notes;
-        let measures = (total / self.quarter_notes_per_measure).floor();
-        self.measure += measures as i32;
-        self.quarter_offset = total - (measures * self.quarter_notes_per_measure);
-        if (self.quarter_notes_per_measure - self.quarter_offset).abs() < 1e-9 {
-            self.measure += 1;
-            self.quarter_offset = 0.0;
-        }
-    }
-
-    fn apply_time_signature(&mut self, metric: SignatureMetric) {
-        if self.quarter_offset > 1e-9 {
-            self.measure += 1;
-            self.quarter_offset = 0.0;
-        }
-        self.quarter_notes_per_measure = metric.quarter_notes_per_measure;
-        self.quarter_notes_per_display_beat = metric.quarter_notes_per_display_beat;
-    }
-
-    fn as_parts(self) -> (i32, i32, f64) {
-        let display_beat_offset = self.quarter_offset / self.quarter_notes_per_display_beat;
-        let beat_floor = display_beat_offset.floor();
-        (
-            self.measure + 1,
-            beat_floor as i32 + 1,
-            display_beat_offset - beat_floor,
-        )
-    }
-}
-
-#[derive(Clone, Copy)]
-struct SignatureMetric {
-    quarter_notes_per_measure: f64,
-    quarter_notes_per_display_beat: f64,
-}
-
-fn signature_metric(time_signature: &daw_proto::TimeSignature) -> SignatureMetric {
-    let numerator = time_signature.numerator.max(1) as f64;
-    let denominator = time_signature.denominator.max(1) as f64;
-    let quarter_notes_per_display_beat = 4.0 / denominator;
-    SignatureMetric {
-        quarter_notes_per_measure: numerator * quarter_notes_per_display_beat,
-        quarter_notes_per_display_beat,
-    }
-}
-
-fn seconds_to_musical(
-    points: &[TempoPoint],
-    default_bpm: f64,
-    default_time_signature: &daw_proto::TimeSignature,
-    target_seconds: f64,
-) -> (i32, i32, f64) {
-    if target_seconds <= 0.0 {
-        return (1, 1, 0.0);
-    }
-
-    let mut cursor = MusicalCursor::new(signature_metric(default_time_signature));
-    let mut segment_start_seconds = 0.0;
-    let mut bpm = default_bpm.max(f64::EPSILON);
-
-    for point in points {
-        let point_seconds = point.position_seconds();
-        if point_seconds <= 0.0 {
-            bpm = point.bpm.max(f64::EPSILON);
-            if let Some(ts) = &point.time_signature {
-                cursor.apply_time_signature(signature_metric(ts));
-            }
-            continue;
-        }
-
-        let segment_end_seconds = point_seconds.min(target_seconds);
-        let segment_seconds = (segment_end_seconds - segment_start_seconds).max(0.0);
-        cursor.advance(segment_seconds * (bpm / 60.0));
-
-        if target_seconds <= point_seconds {
-            return cursor.as_parts();
-        }
-
-        segment_start_seconds = point_seconds;
-        bpm = point.bpm.max(f64::EPSILON);
-        if let Some(ts) = &point.time_signature {
-            cursor.apply_time_signature(signature_metric(ts));
-        }
-    }
-
-    let segment_seconds = (target_seconds - segment_start_seconds).max(0.0);
-    cursor.advance(segment_seconds * (bpm / 60.0));
-    cursor.as_parts()
-}
-
-fn musical_to_seconds(
-    points: &[TempoPoint],
-    default_bpm: f64,
-    default_time_signature: &daw_proto::TimeSignature,
-    measure: i32,
-    beat: i32,
-    fraction: f64,
-) -> f64 {
-    let target_measure = (measure - 1).max(0);
-    let target_display_beat_offset = (beat - 1).max(0) as f64 + fraction.max(0.0);
-    let mut cursor = MusicalCursor::new(signature_metric(default_time_signature));
-    let mut segment_start_seconds = 0.0;
-    let mut bpm = default_bpm.max(f64::EPSILON);
-
-    for point in points {
-        let point_seconds = point.position_seconds();
-        if point_seconds <= 0.0 {
-            bpm = point.bpm.max(f64::EPSILON);
-            if let Some(ts) = &point.time_signature {
-                cursor.apply_time_signature(signature_metric(ts));
-            }
-            continue;
-        }
-
-        let target_quarter_offset =
-            target_display_beat_offset * cursor.quarter_notes_per_display_beat;
-        if target_measure < cursor.measure
-            || (target_measure == cursor.measure && target_quarter_offset <= cursor.quarter_offset)
-        {
-            return segment_start_seconds;
-        }
-
-        let segment_seconds = (point_seconds - segment_start_seconds).max(0.0);
-        let segment_beats = segment_seconds * (bpm / 60.0);
-        let target_quarters_from_cursor = ((target_measure - cursor.measure) as f64
-            * cursor.quarter_notes_per_measure)
-            + target_quarter_offset
-            - cursor.quarter_offset;
-        if target_quarters_from_cursor <= segment_beats + 1e-9 {
-            return segment_start_seconds + (target_quarters_from_cursor.max(0.0) / (bpm / 60.0));
-        }
-
-        cursor.advance(segment_beats);
-        segment_start_seconds = point_seconds;
-        bpm = point.bpm.max(f64::EPSILON);
-        if let Some(ts) = &point.time_signature {
-            cursor.apply_time_signature(signature_metric(ts));
-        }
-    }
-
-    let target_quarter_offset = target_display_beat_offset * cursor.quarter_notes_per_display_beat;
-    let target_quarters_from_cursor = ((target_measure - cursor.measure) as f64
-        * cursor.quarter_notes_per_measure)
-        + target_quarter_offset
-        - cursor.quarter_offset;
-    segment_start_seconds + (target_quarters_from_cursor.max(0.0) / (bpm / 60.0))
-}
-
 impl TempoMap for Standalone {
     fn get_tempo_points(&self, project: ProjectContext) -> Vec<TempoPoint> {
         let Some(guid) = resolve_project(self, &project) else {
@@ -279,11 +109,12 @@ impl TempoMap for Standalone {
             return 120.0;
         };
         self.with_project(&guid, |p| {
-            p.tempo_points
-                .iter()
-                .rfind(|pt| pt.position_seconds() <= seconds)
-                .map(|pt| pt.bpm)
-                .unwrap_or_else(|| p.transport.tempo.bpm())
+            TempoMapEngine::new(
+                p.transport.tempo.bpm(),
+                p.transport.time_signature,
+                p.tempo_points.clone(),
+            )
+            .tempo_at(seconds)
         })
         .unwrap_or(120.0)
     }
@@ -293,16 +124,13 @@ impl TempoMap for Standalone {
             return (4, 4);
         };
         self.with_project(&guid, |p| {
-            p.tempo_points
-                .iter()
-                .filter(|pt| pt.position_seconds() <= seconds)
-                .filter_map(|pt| pt.time_signature.as_ref())
-                .next_back()
-                .map(|ts| (ts.numerator as i32, ts.denominator as i32))
-                .unwrap_or((
-                    p.transport.time_signature.numerator as i32,
-                    p.transport.time_signature.denominator as i32,
-                ))
+            let ts = TempoMapEngine::new(
+                p.transport.tempo.bpm(),
+                p.transport.time_signature,
+                p.tempo_points.clone(),
+            )
+            .time_signature_at(seconds);
+            (ts.numerator as i32, ts.denominator as i32)
         })
         .unwrap_or((4, 4))
     }
@@ -312,12 +140,12 @@ impl TempoMap for Standalone {
             return (1, 1, 0.0);
         };
         self.with_project(&guid, |p| {
-            seconds_to_musical(
-                &p.tempo_points,
+            TempoMapEngine::new(
                 p.transport.tempo.bpm(),
-                &p.transport.time_signature,
-                seconds,
+                p.transport.time_signature,
+                p.tempo_points.clone(),
             )
+            .time_to_musical(seconds)
         })
         .unwrap_or((1, 1, 0.0))
     }
@@ -333,14 +161,12 @@ impl TempoMap for Standalone {
             return 0.0;
         };
         self.with_project(&guid, |p| {
-            musical_to_seconds(
-                &p.tempo_points,
+            TempoMapEngine::new(
                 p.transport.tempo.bpm(),
-                &p.transport.time_signature,
-                measure,
-                beat,
-                fraction,
+                p.transport.time_signature,
+                p.tempo_points.clone(),
             )
+            .musical_to_time(measure, beat, fraction)
         })
         .unwrap_or(0.0)
     }

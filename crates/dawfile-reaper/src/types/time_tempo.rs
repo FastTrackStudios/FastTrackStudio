@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use crate::primitives::{Token, token::parse_token_line};
+use daw_proto::tempo_map::TempoMapEngine;
+use daw_proto::{Position, PositionInSeconds, TempoPoint, TimeSignature};
 
 /// A tempo/time signature change point
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -169,6 +171,21 @@ impl TempoTimePoint {
             "".to_string()
         }
     }
+
+    /// Convert to the shared daw-proto tempo point representation.
+    pub fn to_proto_point(&self) -> TempoPoint {
+        TempoPoint {
+            position: Position::from_time(PositionInSeconds::from_seconds(self.position)),
+            bpm: self.tempo,
+            time_signature: self
+                .time_signature()
+                .map(|(num, den)| TimeSignature::new(num.max(1) as u32, den.max(1) as u32)),
+            shape: Some(self.shape),
+            bezier_tension: Some(self.bezier_tension),
+            selected: Some(self.selected),
+            linear: Some(self.shape == 0),
+        }
+    }
 }
 
 impl fmt::Display for TempoTimePoint {
@@ -201,8 +218,6 @@ pub struct TempoTimeEnvelope {
 }
 
 impl TempoTimeEnvelope {
-    const EPSILON: f64 = 1e-9;
-
     /// Create a new tempo envelope with defaults
     pub fn new(default_tempo: f64, default_time_signature: (i32, i32)) -> Self {
         Self {
@@ -225,262 +240,41 @@ impl TempoTimeEnvelope {
 
     /// Get the tempo and time signature at a given time position
     pub fn get_at_time(&self, time: f64) -> (f64, (i32, i32)) {
-        // Find the last point before or at the given time
-        let mut current_tempo = self.default_tempo;
-        let mut current_time_sig = self.default_time_signature;
-
-        for point in &self.points {
-            if point.position <= time {
-                current_tempo = point.tempo;
-                if let Some(time_sig) = point.time_signature() {
-                    current_time_sig = time_sig;
-                }
-            } else {
-                break;
-            }
-        }
-
-        (current_tempo, current_time_sig)
+        let engine = self.to_engine();
+        let ts = engine.time_signature_at(time);
+        (
+            engine.tempo_at(time),
+            (ts.numerator as i32, ts.denominator as i32),
+        )
     }
 
-    fn integrate_linear_tempo_segment(
-        start: &TempoTimePoint,
-        end: &TempoTimePoint,
-        from: f64,
-        to: f64,
-    ) -> f64 {
-        let seg_duration = end.position - start.position;
-        if seg_duration <= Self::EPSILON {
-            return (to - from) * start.tempo / 60.0;
-        }
-
-        let off_from = (from - start.position).clamp(0.0, seg_duration);
-        let off_to = (to - start.position).clamp(0.0, seg_duration);
-        if off_to <= off_from {
-            return 0.0;
-        }
-
-        let slope = (end.tempo - start.tempo) / seg_duration;
-        let tempo_integral = start.tempo * (off_to - off_from)
-            + 0.5 * slope * (off_to * off_to - off_from * off_from);
-        tempo_integral / 60.0
-    }
-
-    fn integrate_hold_tempo_segment(start: &TempoTimePoint, from: f64, to: f64) -> f64 {
-        if to <= from {
-            return 0.0;
-        }
-        (to - from) * start.tempo / 60.0
-    }
-
-    fn bezier_shape_antiderivative(u: f64, tension: f64) -> f64 {
-        // Map REAPER-like tension (-1..1) to a bias exponent.
-        // |t| -> 1 approaches step-like behavior.
-        let u = u.clamp(0.0, 1.0);
-        let t = tension.clamp(-0.999_999, 0.999_999);
-        let raw = (1.0 + t.abs()) / (1.0 - t.abs());
-        let a = raw.powf(0.85).clamp(1.0, 12.0);
-
-        if t >= 0.0 {
-            // Positive tension: keep close to start value longer.
-            u.powf(a + 1.0) / (a + 1.0)
-        } else {
-            // Negative tension: approach end value earlier.
-            u + (1.0 - u).powf(a + 1.0) / (a + 1.0)
-        }
-    }
-
-    fn integrate_bezier_tempo_segment(
-        start: &TempoTimePoint,
-        end: &TempoTimePoint,
-        from: f64,
-        to: f64,
-    ) -> f64 {
-        let seg_duration = end.position - start.position;
-        if seg_duration <= Self::EPSILON {
-            return Self::integrate_hold_tempo_segment(start, from, to);
-        }
-
-        let off_from = (from - start.position).clamp(0.0, seg_duration);
-        let off_to = (to - start.position).clamp(0.0, seg_duration);
-        if off_to <= off_from {
-            return 0.0;
-        }
-
-        let u_from = off_from / seg_duration;
-        let u_to = off_to / seg_duration;
-
-        let bpm0 = start.tempo;
-        let bpm1 = end.tempo;
-        let dbpm = bpm1 - bpm0;
-        let bias_integral = Self::bezier_shape_antiderivative(u_to, start.bezier_tension)
-            - Self::bezier_shape_antiderivative(u_from, start.bezier_tension);
-        let du = u_to - u_from;
-
-        let tempo_integral = seg_duration * (bpm0 * du + dbpm * bias_integral);
-        tempo_integral / 60.0
-    }
-
-    fn integrate_between_points(
-        start: &TempoTimePoint,
-        end: &TempoTimePoint,
-        from: f64,
-        to: f64,
-    ) -> f64 {
-        if to <= from {
-            return 0.0;
-        }
-        match start.shape {
-            // REAPER "square" step: keep source marker tempo until next marker boundary.
-            1 => Self::integrate_hold_tempo_segment(start, from, to),
-            // REAPER "linear tempo" transition.
-            0 => Self::integrate_linear_tempo_segment(start, end, from, to),
-            // REAPER bezier tempo transition (uses start-point tension).
-            5 => Self::integrate_bezier_tempo_segment(start, end, from, to),
-            // Fallback to linear for unknown shapes.
-            _ => Self::integrate_linear_tempo_segment(start, end, from, to),
-        }
-    }
-
-    fn quarter_notes_at_time(&self, time: f64) -> f64 {
-        if time <= 0.0 {
-            return 0.0;
-        }
-        if self.points.is_empty() {
-            return time * self.default_tempo / 60.0;
-        }
-
-        let mut total_qn = 0.0f64;
-        let first = &self.points[0];
-
-        // Pre-first-marker segment runs at default tempo.
-        if time <= first.position {
-            return time * self.default_tempo / 60.0;
-        }
-        total_qn += (first.position.max(0.0)) * self.default_tempo / 60.0;
-
-        for idx in 0..self.points.len() {
-            let start = &self.points[idx];
-            let next = self.points.get(idx + 1);
-
-            let seg_from = start.position.max(0.0);
-            let seg_to = next.map(|p| p.position).unwrap_or(time).min(time);
-            if seg_to <= seg_from {
-                continue;
-            }
-
-            if let Some(end) = next {
-                total_qn += Self::integrate_between_points(start, end, seg_from, seg_to);
-            } else {
-                total_qn += (seg_to - seg_from) * start.tempo / 60.0;
-            }
-
-            if time <= seg_to + Self::EPSILON {
-                break;
-            }
-        }
-
-        total_qn
+    /// Build the shared tempo-map engine used by standalone and offline analysis.
+    pub fn to_engine(&self) -> TempoMapEngine {
+        TempoMapEngine::new(
+            self.default_tempo,
+            TimeSignature::new(
+                self.default_time_signature.0.max(1) as u32,
+                self.default_time_signature.1.max(1) as u32,
+            ),
+            self.points
+                .iter()
+                .map(TempoTimePoint::to_proto_point)
+                .collect(),
+        )
     }
 
     /// Calculate the total number of beats up to a given time
     /// This integrates tempo changes over time
     pub fn beats_at_time(&self, time: f64) -> f64 {
-        self.quarter_notes_at_time(time)
+        self.to_engine().seconds_to_quarter_notes(time)
     }
 
     /// Calculate musical position (measure and beat) at a given time
     /// Returns (measure, beat, beat_fraction) where measure is 1-based
     /// This is more complex because time signatures can change throughout the song
     pub fn musical_position_at_time(&self, time: f64) -> (i32, i32, f64) {
-        if time <= 0.0 {
-            return (1, 1, 0.0);
-        }
-
-        let target_qn = self.quarter_notes_at_time(time);
-
-        let mut measure = 1i32;
-        let mut quarter_in_measure = 0.0f64;
-        let mut current_sig = self.default_time_signature;
-
-        let advance_quarters =
-            |quarters: f64, sig: (i32, i32), measure_ref: &mut i32, qim: &mut f64| {
-                if quarters <= 0.0 {
-                    return;
-                }
-                let measure_len_qn = (sig.0 as f64) * (4.0 / sig.1 as f64);
-                *qim += quarters;
-                while *qim + Self::EPSILON >= measure_len_qn {
-                    *qim -= measure_len_qn;
-                    *measure_ref += 1;
-                }
-                if *qim < 0.0 {
-                    *qim = 0.0;
-                }
-            };
-
-        let mut sig_changes: Vec<(f64, (i32, i32))> = vec![(0.0, current_sig)];
-        for point in &self.points {
-            if let Some(sig) = point.time_signature() {
-                let qn = self.quarter_notes_at_time(point.position);
-                if let Some((last_qn, last_sig)) = sig_changes.last().copied() {
-                    if (qn - last_qn).abs() <= Self::EPSILON {
-                        sig_changes.pop();
-                        sig_changes.push((qn, sig));
-                    } else if sig != last_sig {
-                        sig_changes.push((qn, sig));
-                    }
-                }
-            }
-        }
-
-        let mut prev_qn = 0.0f64;
-        let mut done = false;
-
-        for (idx, (change_qn, next_sig)) in sig_changes.iter().enumerate() {
-            if idx == 0 {
-                current_sig = *next_sig;
-                continue;
-            }
-
-            if *change_qn <= prev_qn + Self::EPSILON {
-                current_sig = *next_sig;
-                continue;
-            }
-
-            let stop_qn = target_qn.min(*change_qn);
-            if stop_qn > prev_qn + Self::EPSILON {
-                advance_quarters(
-                    stop_qn - prev_qn,
-                    current_sig,
-                    &mut measure,
-                    &mut quarter_in_measure,
-                );
-                prev_qn = stop_qn;
-            }
-
-            if target_qn <= *change_qn + Self::EPSILON {
-                done = true;
-                break;
-            }
-
-            current_sig = *next_sig;
-        }
-
-        if !done && target_qn > prev_qn + Self::EPSILON {
-            advance_quarters(
-                target_qn - prev_qn,
-                current_sig,
-                &mut measure,
-                &mut quarter_in_measure,
-            );
-        }
-
-        let beat_len_qn = 4.0 / current_sig.1 as f64;
-        let beat_pos = quarter_in_measure / beat_len_qn;
-        let beat_whole = beat_pos.floor();
-        let mut beat = (beat_whole as i32 + 1).clamp(1, current_sig.0.max(1));
-        let mut fraction = (beat_pos - beat_whole).clamp(0.0, 1.0);
+        let (mut measure, mut beat, mut fraction) = self.to_engine().time_to_musical(time);
+        let current_sig = self.get_at_time(time).1;
 
         // Normalize near-boundary floating point residue.
         // REAPER display rounds aggressively at beat boundaries.
