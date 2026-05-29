@@ -24,6 +24,14 @@ use crate::routes::Route;
 /// per render as a plain `<style>` (idempotent — identical content).
 const PAGE_CSS: &str = "@keyframes ftsFadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}";
 
+/// How the project list is laid out. Persisted for the page's lifetime.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ViewMode {
+    #[default]
+    Cards,
+    List,
+}
+
 #[component]
 pub fn ProjectsView() -> Element {
     let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
@@ -32,6 +40,7 @@ pub fn ProjectsView() -> Element {
         let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
         crate::feeds::fetch_projects(&slugs).await
     });
+    let view_mode = use_signal(ViewMode::default);
 
     // While the org list is still being discovered the fetch resolves
     // to an empty set — show loading rather than an empty grid.
@@ -39,7 +48,7 @@ pub fn ProjectsView() -> Element {
         render_loading()
     } else {
         match &*projects.read() {
-            Some(Ok(rows)) => render_loaded(rows),
+            Some(Ok(rows)) => render_loaded(rows, view_mode),
             Some(Err(e)) => render_error(e),
             None => render_loading(),
         }
@@ -107,13 +116,13 @@ fn render_error(err: &str) -> Element {
     }
 }
 
-fn render_loaded(rows: &[ProjectInfo]) -> Element {
+fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
     // Archived projects stay out of the main grid.
     let live: Vec<&ProjectInfo> = rows.iter().filter(|p| !p.archived).collect();
 
     if live.is_empty() {
         return rsx! {
-            page_header { count_line: None }
+            page_header { count_line: None, view_mode: None }
             div { class: "flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border/70 bg-card/40 px-6 py-16 text-center",
                 div { class: "flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground",
                     FolderKanban { size: 26 }
@@ -129,25 +138,18 @@ fn render_loaded(rows: &[ProjectInfo]) -> Element {
         };
     }
 
-    let top: Vec<&ProjectInfo> = live
-        .iter()
-        .filter(|p| p.parent_id.is_none())
-        .copied()
-        .collect();
+    let mut top: Vec<&ProjectInfo> = live.iter().filter(|p| p.parent_id.is_none()).copied().collect();
+    // Stable, useful order: active first, then by priority, then title.
+    top.sort_by(|a, b| {
+        status_rank(&a.status)
+            .cmp(&status_rank(&b.status))
+            .then_with(|| priority_rank(&a.priority).cmp(&priority_rank(&b.priority)))
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+    });
     let total = live.len();
-    let active = live
-        .iter()
-        .filter(|p| matches_status(&p.status, Bucket::Active))
-        .count();
-    let on_hold = live
-        .iter()
-        .filter(|p| matches_status(&p.status, Bucket::Hold))
-        .count();
-    let tracked: Vec<i16> = live
-        .iter()
-        .filter(|p| p.progress_percent >= 0)
-        .map(|p| p.progress_percent)
-        .collect();
+    let active = live.iter().filter(|p| matches_status(&p.status, Bucket::Active)).count();
+    let on_hold = live.iter().filter(|p| matches_status(&p.status, Bucket::Hold)).count();
+    let tracked: Vec<i16> = live.iter().filter(|p| p.progress_percent >= 0).map(|p| p.progress_percent).collect();
     let avg = if tracked.is_empty() {
         None
     } else {
@@ -155,8 +157,22 @@ fn render_loaded(rows: &[ProjectInfo]) -> Element {
     };
     let count_line = format!("{} top-level · {total} total", top.len());
 
+    // Materialize each top-level project with its subprojects once, so
+    // both layouts share the same data shaping.
+    let groups: Vec<(ProjectInfo, Vec<ProjectInfo>)> = top
+        .iter()
+        .map(|parent| {
+            let kids: Vec<ProjectInfo> = rows
+                .iter()
+                .filter(|p| !p.archived && p.parent_id == Some(parent.id))
+                .cloned()
+                .collect();
+            ((*parent).clone(), kids)
+        })
+        .collect();
+
     rsx! {
-        page_header { count_line: Some(count_line) }
+        page_header { count_line: Some(count_line), view_mode: Some(view_mode) }
 
         // ── live stats band — hairline-divided tiles ───────────────
         div { class: "grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-border/70 bg-border/70 sm:grid-cols-4",
@@ -170,21 +186,33 @@ fn render_loaded(rows: &[ProjectInfo]) -> Element {
             }
         }
 
-        // ── card grid ──────────────────────────────────────────────
-        div { class: "grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3",
-            for (i, parent) in top.iter().enumerate() {
-                {
-                    let parent: ProjectInfo = (*parent).clone();
-                    let kids: Vec<ProjectInfo> = rows
-                        .iter()
-                        .filter(|p| !p.archived && p.parent_id == Some(parent.id))
-                        .cloned()
-                        .collect();
-                    rsx! {
-                        ProjectCardView { key: "{parent.id}", p: parent, subprojects: kids, index: i }
+        match view_mode() {
+            ViewMode::Cards => rsx! {
+                // Equal-height cards: the grid stretches each cell to the
+                // row's tallest, and the card fills it (`h-full`).
+                div { class: "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3",
+                    for (i, (parent, kids)) in groups.iter().enumerate() {
+                        ProjectCardView {
+                            key: "{parent.id}",
+                            p: parent.clone(),
+                            subprojects: kids.clone(),
+                            index: i,
+                        }
                     }
                 }
-            }
+            },
+            ViewMode::List => rsx! {
+                div { class: "overflow-hidden rounded-xl border border-border/70",
+                    for (i, (parent, kids)) in groups.iter().enumerate() {
+                        ProjectRow {
+                            key: "{parent.id}",
+                            p: parent.clone(),
+                            sub_count: kids.len(),
+                            first: i == 0,
+                        }
+                    }
+                }
+            },
         }
     }
 }
@@ -194,6 +222,7 @@ fn render_loaded(rows: &[ProjectInfo]) -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct PageHeaderProps {
     count_line: Option<String>,
+    view_mode: Option<Signal<ViewMode>>,
 }
 
 #[component]
@@ -205,9 +234,14 @@ fn page_header(props: PageHeaderProps) -> Element {
             }
             div { class: "flex flex-wrap items-end justify-between gap-3",
                 Heading { level: HeadingLevel::H1, class: "tracking-tight", "Projects" }
-                if let Some(line) = &props.count_line {
-                    span { class: "rounded-full border border-border/70 bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground tabular-nums",
-                        "{line}"
+                div { class: "flex items-center gap-2",
+                    if let Some(line) = &props.count_line {
+                        span { class: "rounded-full border border-border/70 bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground tabular-nums",
+                            "{line}"
+                        }
+                    }
+                    if let Some(vm) = props.view_mode {
+                        ViewToggle { view: vm }
                     }
                 }
             }
@@ -215,6 +249,39 @@ fn page_header(props: PageHeaderProps) -> Element {
                 variant: TextVariant::Muted,
                 class: "max-w-prose",
                 "Everything in flight across the org, live from the project service."
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct ViewToggleProps {
+    view: Signal<ViewMode>,
+}
+
+#[component]
+fn ViewToggle(props: ViewToggleProps) -> Element {
+    let mut view = props.view;
+    rsx! {
+        div { class: "inline-flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5 text-xs",
+            for (mode, label) in [(ViewMode::Cards, "Cards"), (ViewMode::List, "List")] {
+                {
+                    let active = view() == mode;
+                    let cls = if active {
+                        "rounded-md bg-background px-3 py-1 font-medium text-foreground shadow-sm transition-colors"
+                    } else {
+                        "rounded-md px-3 py-1 text-muted-foreground transition-colors hover:text-foreground"
+                    };
+                    rsx! {
+                        button {
+                            key: "{label}",
+                            r#type: "button",
+                            class: "{cls}",
+                            onclick: move |_| view.set(mode),
+                            "{label}"
+                        }
+                    }
+                }
             }
         }
     }
@@ -272,14 +339,18 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
     let tags: Vec<String> = p.tags.0.clone();
     let shown_tags: Vec<String> = tags.iter().take(4).cloned().collect();
     let extra_tags = tags.len().saturating_sub(shown_tags.len());
+    // Cap subprojects shown so no single card runs away in height (keeps
+    // the equal-height row tidy); the rest collapse into a "+N more".
+    let shown_kids: Vec<ProjectInfo> = kids.iter().take(3).cloned().collect();
+    let extra_kids = kids.len().saturating_sub(shown_kids.len());
     // Staggered entrance — capped so a long list doesn't drag.
     let delay = (props.index.min(11) * 45) as u32;
 
     rsx! {
         div {
-            class: "group relative",
+            class: "group relative h-full",
             style: "animation: ftsFadeUp 0.55s cubic-bezier(0.16,1,0.3,1) both; animation-delay: {delay}ms;",
-            Card { class: "relative overflow-hidden border-border/70 bg-card/70 backdrop-blur-sm transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:border-border group-hover:shadow-xl group-hover:shadow-foreground/5",
+            Card { class: "relative flex h-full flex-col overflow-hidden border-border/70 bg-card/70 backdrop-blur-sm transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:border-border group-hover:shadow-xl group-hover:shadow-foreground/5",
                 // accent hairline across the top, intensifies on hover
                 div {
                     class: "absolute inset-x-0 top-0 h-[3px] opacity-70 transition-opacity duration-300 group-hover:opacity-100",
@@ -302,8 +373,8 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                         StatusBadge { variant: status_variant(&p.status), label: p.status.clone() }
                     }
                 }
-                CardContent {
-                    div { class: "flex flex-col gap-4",
+                CardContent { class: "flex flex-1 flex-col",
+                    div { class: "flex h-full flex-col gap-4",
                         // progress
                         if let Some(pct) = progress {
                             div { class: "flex flex-col gap-1.5",
@@ -349,15 +420,16 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                                 }
                             }
                         }
-                        // subprojects
+                        // subprojects — pinned to the bottom so cards in a
+                        // row line up cleanly at equal height.
                         if !kids.is_empty() {
-                            div { class: "flex flex-col gap-2 border-t border-border/50 pt-3",
+                            div { class: "mt-auto flex flex-col gap-2 border-t border-border/50 pt-3",
                                 div { class: "flex items-center gap-1.5 text-[0.7rem] font-medium uppercase tracking-[0.1em] text-muted-foreground",
                                     Layers { size: 13 }
                                     span { "Subprojects · {kids.len()}" }
                                 }
                                 div { class: "flex flex-col gap-0.5",
-                                    for kid in kids.iter() {
+                                    for kid in shown_kids.iter() {
                                         {
                                             let kid_id = kid.id.to_string();
                                             let kid_pct = (kid.progress_percent >= 0)
@@ -379,6 +451,11 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
                                             }
                                         }
                                     }
+                                    if extra_kids > 0 {
+                                        span { class: "px-2.5 pt-0.5 text-xs text-muted-foreground",
+                                            "+{extra_kids} more"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -389,17 +466,102 @@ fn ProjectCardView(props: ProjectCardProps) -> Element {
     }
 }
 
+// ── project row (list view) ─────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+struct ProjectRowProps {
+    p: ProjectInfo,
+    sub_count: usize,
+    first: bool,
+}
+
+#[component]
+fn ProjectRow(props: ProjectRowProps) -> Element {
+    let p = &props.p;
+    let accent = accent(p);
+    let pid = p.id.to_string();
+    let progress = (p.progress_percent >= 0).then(|| p.progress_percent.clamp(0, 100));
+    let pri_label = priority_label(&p.priority);
+    let pri_class = priority_class(&p.priority);
+    let shown_tags: Vec<String> = p.tags.0.iter().take(3).cloned().collect();
+    let row_cls = if props.first {
+        "group flex items-center gap-3 bg-card/40 px-4 py-3 transition-colors hover:bg-accent/30"
+    } else {
+        "group flex items-center gap-3 border-t border-border/60 bg-card/40 px-4 py-3 transition-colors hover:bg-accent/30"
+    };
+
+    rsx! {
+        Link { to: Route::ProjectDetailRoute { id: pid }, class: "{row_cls}",
+            // accent rail
+            span { class: "h-9 w-1 shrink-0 rounded-full", style: "background: {accent};" }
+            // title + inline meta
+            div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
+                span { class: "truncate text-sm font-medium text-foreground transition-colors group-hover:text-foreground",
+                    "{p.title}"
+                }
+                div { class: "flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-muted-foreground",
+                    span { class: "{pri_class}", "{pri_label}" }
+                    if props.sub_count > 0 {
+                        span { "· {props.sub_count} sub" }
+                    }
+                    for tag in shown_tags.iter() {
+                        span { key: "{tag}", class: "hidden sm:inline", "· {tag}" }
+                    }
+                }
+            }
+            // progress (desktop)
+            if let Some(pct) = progress {
+                div { class: "hidden w-32 shrink-0 items-center gap-2 md:flex",
+                    div { class: "h-1.5 flex-1 overflow-hidden rounded-full bg-muted",
+                        div {
+                            class: "h-full rounded-full",
+                            style: "width: {pct}%; background: {accent};",
+                        }
+                    }
+                    span { class: "w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground",
+                        "{pct}%"
+                    }
+                }
+            }
+            StatusBadge { variant: status_variant(&p.status), label: p.status.clone() }
+        }
+    }
+}
+
 // ── helpers ─────────────────────────────────────────────────────────
+
+/// Sort key: active projects first, paused next, in-progress/other,
+/// then done, then cancelled.
+fn status_rank(status: &str) -> u8 {
+    match status {
+        "active" | "open" | "in_progress" => 0,
+        "on_hold" | "on-hold" | "paused" | "waiting" => 1,
+        "done" | "completed" | "shipped" => 3,
+        "cancelled" | "canceled" | "abandoned" => 4,
+        _ => 2,
+    }
+}
+
+/// Sort key: urgent → high → normal → low → lowest/unknown.
+fn priority_rank(pr: &str) -> u8 {
+    match pr {
+        "p0" | "urgent" => 0,
+        "p1" | "high" => 1,
+        "" | "p2" | "normal" => 2,
+        "p3" | "low" => 3,
+        _ => 4,
+    }
+}
 
 /// Accent for a project: its own stored `color` if set, else a stable
 /// pick from the chart palette by title hash. Always a CSS value safe
 /// for an inline `style` (a `var(--chart-N)` token, or user-set data).
 fn accent(p: &ProjectInfo) -> String {
-    if p.color.trim().is_empty() {
+    if !p.color.trim().is_empty() {
+        p.color.clone()
+    } else {
         let n = 1 + (fnv1a(&p.title) % 5);
         format!("var(--chart-{n})")
-    } else {
-        p.color.clone()
     }
 }
 
