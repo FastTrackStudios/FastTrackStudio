@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use daw_standalone::audio_engine::plugin_host::{ClapHost, ClapHostError};
+use daw_standalone::audio_engine::plugin_host::{ClapHost, ClapHostError, ClapPluginSelector};
 
 #[test]
 fn load_from_bogus_path_errors_cleanly() {
@@ -40,6 +40,28 @@ fn lsp_parametric_eq_bundle_path() -> Option<PathBuf> {
     .find(|p| p.exists())
 }
 
+fn fts_eq_bundle_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("DAW_TEST_FTS_EQ_CLAP_BUNDLE") {
+        return Some(PathBuf::from(path));
+    }
+
+    [
+        "/home/cody/.clap/eq-plugin.clap",
+        "/home/cody/.config/FastTrackStudio/Reaper/UserPlugins/FX/eq-plugin.clap",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
+}
+
+fn gui_hold_duration(default_secs: u64) -> std::time::Duration {
+    let hold_secs = std::env::var("DAW_TEST_CLAP_GUI_HOLD_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(default_secs);
+    std::time::Duration::from_secs(hold_secs)
+}
+
 /// Manual GUI smoke test for LSP Parametric Equalizer x32 Stereo CLAP.
 ///
 /// This is ignored because it opens a native window and requires a
@@ -62,26 +84,10 @@ fn clap_lsp_parametric_equalizer_x32_stereo_gui_opens() {
     };
 
     let host = ClapHost::default();
-    let descriptors = host.list_in_bundle(&path).expect("LSP bundle should load");
-    let wanted_terms = ["parametric", "equalizer", "x32", "stereo"];
-    let plugin_index = descriptors
-        .iter()
-        .position(|d| {
-            let haystack = format!("{} {}", d.id, d.name).to_ascii_lowercase();
-            wanted_terms.iter().all(|term| haystack.contains(term))
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "no LSP Parametric Equalizer x32 Stereo descriptor found in {}; descriptors: {:?}",
-                path.display(),
-                descriptors
-                    .iter()
-                    .map(|d| format!("{} ({})", d.name, d.id))
-                    .collect::<Vec<_>>()
-            )
-        });
-
-    let descriptor = &descriptors[plugin_index];
+    let selector = ClapPluginSelector::terms(["parametric", "equalizer", "x32", "stereo"]);
+    let (plugin_index, descriptor) = host
+        .find_in_bundle(&path, &selector)
+        .expect("LSP Parametric Equalizer x32 Stereo descriptor should exist");
     eprintln!(
         "opening LSP Parametric Equalizer x32 Stereo CLAP GUI for descriptor #{plugin_index}: '{}' id='{}' from {}",
         descriptor.name,
@@ -89,20 +95,71 @@ fn clap_lsp_parametric_equalizer_x32_stereo_gui_opens() {
         path.display()
     );
 
-    let mut plugin = host
-        .load(&path, plugin_index)
-        .expect("LSP Parametric Equalizer x32 Stereo should instantiate");
-    assert!(plugin.has_gui(), "LSP Parametric EQ should expose clap gui");
-    plugin.open_gui_floating().expect("CLAP GUI should open");
+    let result = host
+        .smoke_test_gui(&path, &selector, gui_hold_duration(10))
+        .expect("CLAP GUI should open");
+    eprintln!(
+        "CLAP GUI smoke test complete: descriptor #{} '{}' held for {:?}",
+        result.plugin_index, result.descriptor.name, result.held_for
+    );
+}
 
-    let hold_secs = std::env::var("DAW_TEST_CLAP_GUI_HOLD_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(10);
-    eprintln!("CLAP GUI is open for {hold_secs}s; inspect the window now");
-    std::thread::sleep(std::time::Duration::from_secs(hold_secs));
+/// Generic native-GUI smoke test for CI. This is intentionally
+/// selector-driven so plugin projects such as FTS-EQ can reuse the
+/// DAW host without adding a bespoke test per plugin.
+///
+/// ```bash
+/// DAW_TEST_CLAP_GUI_BUNDLE=/path/to/plugin.clap \
+/// DAW_TEST_CLAP_GUI_TERMS=fts,eq \
+/// DAW_TEST_CLAP_GUI_HOLD_SECS=2 \
+/// cargo test -p daw-standalone --features clap-host \
+///   clap_selected_plugin_gui_opens -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "manual/CI GUI test: opens a native CLAP plugin window"]
+fn clap_selected_plugin_gui_opens() {
+    let Some(path) = std::env::var_os("DAW_TEST_CLAP_GUI_BUNDLE") else {
+        eprintln!("(skip) set DAW_TEST_CLAP_GUI_BUNDLE to a .clap bundle path");
+        return;
+    };
 
-    plugin.close_gui();
+    let host = ClapHost::default();
+    let mut selector = ClapPluginSelector::from_env("DAW_TEST_CLAP_GUI");
+    if selector.id.is_none() && selector.required_terms.is_empty() {
+        selector = ClapPluginSelector::any();
+    }
+    let result = host
+        .smoke_test_gui(&PathBuf::from(path), &selector, gui_hold_duration(2))
+        .expect("selected CLAP GUI should open");
+    eprintln!(
+        "CLAP GUI smoke test complete: descriptor #{} '{}' id='{}' held for {:?}",
+        result.plugin_index, result.descriptor.name, result.descriptor.id, result.held_for
+    );
+}
+
+/// FTS-EQ native-GUI smoke test. CI can point this at the plugin
+/// build artifact with `DAW_TEST_FTS_EQ_CLAP_BUNDLE`; local developer
+/// machines can use the default FastTrackStudio install locations.
+#[test]
+#[ignore = "manual/CI GUI test: opens the FTS-EQ CLAP plugin window"]
+fn clap_fts_eq_gui_opens() {
+    let Some(path) = fts_eq_bundle_path() else {
+        eprintln!("(skip) set DAW_TEST_FTS_EQ_CLAP_BUNDLE to the FTS-EQ .clap bundle path");
+        return;
+    };
+
+    let host = ClapHost::default();
+    let mut selector = ClapPluginSelector::from_env("DAW_TEST_FTS_EQ_CLAP");
+    if selector.id.is_none() && selector.required_terms.is_empty() {
+        selector = ClapPluginSelector::any();
+    }
+    let result = host
+        .smoke_test_gui(&path, &selector, gui_hold_duration(2))
+        .expect("FTS-EQ CLAP GUI should open");
+    eprintln!(
+        "FTS-EQ GUI smoke test complete: descriptor #{} '{}' id='{}' held for {:?}",
+        result.plugin_index, result.descriptor.name, result.descriptor.id, result.held_for
+    );
 }
 
 /// Real-plugin smoke test: list descriptors. Set

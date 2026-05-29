@@ -26,6 +26,7 @@
 
 use std::ffi::CString;
 use std::path::Path;
+use std::time::Duration;
 
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
 use clack_extensions::gui::{
@@ -246,6 +247,19 @@ impl ClapHost {
             .collect())
     }
 
+    /// Find the first plugin descriptor matching `selector`.
+    pub fn find_in_bundle(
+        &self,
+        bundle_path: &Path,
+        selector: &ClapPluginSelector,
+    ) -> Result<(usize, ClapPluginDescriptor), ClapHostError> {
+        self.list_in_bundle(bundle_path)?
+            .into_iter()
+            .enumerate()
+            .find(|(_, d)| selector.matches(d))
+            .ok_or(ClapHostError::DescriptorNotFound)
+    }
+
     /// Instantiate a plugin from a `.clap` bundle. `plugin_index`
     /// selects which descriptor inside the bundle (most bundles ship
     /// a single plugin — use 0).
@@ -293,6 +307,30 @@ impl ClapHost {
             },
         })
     }
+
+    /// Open a floating plugin GUI, hold it for `hold_for`, then close
+    /// it. This is intended for manual and CI smoke-test runners that
+    /// launch on the process main thread.
+    pub fn smoke_test_gui(
+        &self,
+        bundle_path: &Path,
+        selector: &ClapPluginSelector,
+        hold_for: Duration,
+    ) -> Result<ClapGuiSmokeResult, ClapHostError> {
+        let (plugin_index, descriptor) = self.find_in_bundle(bundle_path, selector)?;
+        let mut plugin = self.load(bundle_path, plugin_index)?;
+        if !plugin.has_gui() {
+            return Err(ClapHostError::NoGuiExtension);
+        }
+        plugin.open_gui_floating()?;
+        std::thread::sleep(hold_for);
+        plugin.close_gui();
+        Ok(ClapGuiSmokeResult {
+            plugin_index,
+            descriptor,
+            held_for: hold_for,
+        })
+    }
 }
 
 /// Bundle-time metadata for a single CLAP plugin descriptor.
@@ -328,6 +366,73 @@ pub struct ClapParamInfo {
 
 /// Compatibility alias for `fts-analyzer`'s former host API.
 pub type ParamInfo = ClapParamInfo;
+
+/// Descriptor selector used by GUI and CI smoke-test harnesses.
+///
+/// Matching is case-insensitive across descriptor id and name.
+#[derive(Clone, Debug, Default)]
+pub struct ClapPluginSelector {
+    pub id: Option<String>,
+    pub required_terms: Vec<String>,
+}
+
+impl ClapPluginSelector {
+    pub fn any() -> Self {
+        Self::default()
+    }
+
+    pub fn id(id: impl Into<String>) -> Self {
+        Self {
+            id: Some(id.into()),
+            required_terms: Vec::new(),
+        }
+    }
+
+    pub fn terms(terms: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self {
+            id: None,
+            required_terms: terms.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn from_env(prefix: &str) -> Self {
+        let id = std::env::var(format!("{prefix}_ID")).ok();
+        let required_terms = std::env::var(format!("{prefix}_TERMS"))
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { id, required_terms }
+    }
+
+    fn matches(&self, descriptor: &ClapPluginDescriptor) -> bool {
+        if let Some(id) = &self.id
+            && descriptor.id == *id
+        {
+            return true;
+        }
+        if self.required_terms.is_empty() {
+            return self.id.is_none();
+        }
+        let haystack = format!("{} {}", descriptor.id, descriptor.name).to_ascii_lowercase();
+        self.required_terms
+            .iter()
+            .all(|term| haystack.contains(&term.to_ascii_lowercase()))
+    }
+}
+
+/// Result of opening a plugin GUI for smoke testing.
+#[derive(Clone, Debug)]
+pub struct ClapGuiSmokeResult {
+    pub plugin_index: usize,
+    pub descriptor: ClapPluginDescriptor,
+    pub held_for: Duration,
+}
 
 /// An instantiated CLAP plugin. Activation is separate so the
 /// plugin can be inspected (params, latency) before being used in
@@ -1080,6 +1185,7 @@ fn map_err(e: ClapHostError) -> crate::plugin::PluginError {
         }
         ClapHostError::GuiCreate => P::LoadFailed("clap gui create failed".into()),
         ClapHostError::GuiShow => P::LoadFailed("clap gui show failed".into()),
+        ClapHostError::DescriptorNotFound => P::LoadFailed("clap descriptor not found".into()),
     }
 }
 
@@ -1121,4 +1227,6 @@ pub enum ClapHostError {
     GuiCreate,
     #[error("clap_plugin_gui.show failed")]
     GuiShow,
+    #[error("no matching plugin descriptor found")]
+    DescriptorNotFound,
 }

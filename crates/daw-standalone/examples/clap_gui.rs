@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(feature = "clap-host")]
-use daw_standalone::audio_engine::plugin_host::ClapHost;
+use daw_standalone::audio_engine::plugin_host::{ClapHost, ClapPluginSelector};
 
 #[cfg(feature = "clap-host")]
 fn main() {
@@ -21,6 +21,8 @@ fn main() {
     let path = args
         .next()
         .map(PathBuf::from)
+        .or_else(|| std::env::var_os("DAW_TEST_CLAP_GUI_BUNDLE").map(PathBuf::from))
+        .or_else(|| std::env::var_os("DAW_TEST_FTS_EQ_CLAP_BUNDLE").map(PathBuf::from))
         .or_else(|| std::env::var_os("DAW_TEST_LSP_CLAP_BUNDLE").map(PathBuf::from))
         .expect("usage: clap_gui /path/to/plugin.clap");
     let hold_secs = std::env::var("DAW_TEST_CLAP_GUI_HOLD_SECS")
@@ -29,26 +31,13 @@ fn main() {
         .unwrap_or(30);
 
     let host = ClapHost::default();
-    let descriptors = host.list_in_bundle(&path).expect("bundle should load");
-    let wanted_terms = ["parametric", "equalizer", "x32", "stereo"];
-    let plugin_index = descriptors
-        .iter()
-        .position(|d| {
-            let haystack = format!("{} {}", d.id, d.name).to_ascii_lowercase();
-            wanted_terms.iter().all(|term| haystack.contains(term))
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "no Parametric Equalizer x32 Stereo descriptor found in {}; descriptors: {:?}",
-                path.display(),
-                descriptors
-                    .iter()
-                    .map(|d| format!("{} ({})", d.name, d.id))
-                    .collect::<Vec<_>>()
-            )
-        });
-
-    let descriptor = &descriptors[plugin_index];
+    let mut selector = ClapPluginSelector::from_env("DAW_TEST_CLAP_GUI");
+    if selector.id.is_none() && selector.required_terms.is_empty() {
+        selector = ClapPluginSelector::terms(["parametric", "equalizer", "x32", "stereo"]);
+    }
+    let (plugin_index, descriptor) = host
+        .find_in_bundle(&path, &selector)
+        .expect("matching descriptor should exist");
     eprintln!(
         "opening descriptor #{plugin_index}: '{}' id='{}' from {}",
         descriptor.name,
@@ -56,15 +45,13 @@ fn main() {
         path.display()
     );
 
-    let mut plugin = host
-        .load(&path, plugin_index)
-        .expect("plugin should instantiate");
-    assert!(plugin.has_gui(), "plugin does not expose clap gui");
-    plugin.open_gui_floating().expect("CLAP GUI should open");
-
-    eprintln!("GUI is open for {hold_secs}s");
-    std::thread::sleep(Duration::from_secs(hold_secs));
-    plugin.close_gui();
+    let result = host
+        .smoke_test_gui(&path, &selector, Duration::from_secs(hold_secs))
+        .expect("CLAP GUI should open");
+    eprintln!(
+        "GUI smoke test complete: descriptor #{} '{}' held for {:?}",
+        result.plugin_index, result.descriptor.name, result.held_for
+    );
 }
 
 #[cfg(not(feature = "clap-host"))]
