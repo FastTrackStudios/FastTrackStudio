@@ -48,7 +48,8 @@
 use std::sync::{Arc, Mutex};
 
 use architect::{
-    HasDispatcher, Layer, LayerRouter, Services, dispatch::CurrentThreadDispatcher, layers,
+    HasDispatcher, Layer, LayerGraph, LayerNode, LayerRouter, Services,
+    dispatch::CurrentThreadDispatcher, layers,
 };
 use example_memory::ExampleRepoMemory;
 use example_proto::{ExampleRepo, example_repo_layer};
@@ -321,4 +322,30 @@ fn main() {
         .merge(example_repo_layer(StubBackend::with_seed_data()))
         .provide(ExampleRepoMemory::new());
     info!("override: repo impl swapped at the call site, bundle unchanged");
+
+    // ── Dependency planner ───────────────────────────────────────────
+    //
+    // For a multi-node backend graph, declare what each node requires +
+    // provides and get a validated build order — or a precise diagnostic.
+    // (The async construction side — building these with deps,
+    // memoization, and scoped teardown — is `architect::Resource`; see
+    // `examples/app/server` for the real graceful-shutdown wiring.)
+    info!("── Layer planner ───────────────────────────────────────");
+    let plan = LayerGraph::new()
+        .add(LayerNode::new("config", [] as [&str; 0], ["config"]))
+        .add(LayerNode::new("db", ["config"], ["db"]))
+        .add(LayerNode::new("repo", ["db"], ["repo"]))
+        .plan()
+        .expect("valid graph");
+    info!(build_order = ?plan.build_order, "planned backend build order");
+
+    // A deliberate mistake surfaces a diagnostic instead of a panic far
+    // away at wiring time.
+    let broken = LayerGraph::new()
+        .add(LayerNode::new("repo", ["db"], ["repo"])) // nothing provides "db"
+        .plan();
+    match broken {
+        Err(e) => info!(diagnostic = %e, "planner caught a wiring mistake"),
+        Ok(_) => unreachable!("graph should be missing a provider"),
+    }
 }
