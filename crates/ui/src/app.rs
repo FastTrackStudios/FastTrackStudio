@@ -11,6 +11,7 @@ use fts_ui::prelude::*;
 use uuid::Uuid;
 
 use crate::data::{Organization, organizations};
+use crate::orgs::{OrgMeta, OrgSelection, fetch_orgs};
 use crate::routes::Route;
 use crate::theming::{OrgThemeOverrides, ProjectThemeOverrides, state_from_preset_name};
 
@@ -19,6 +20,22 @@ pub fn App() -> Element {
     let orgs = organizations();
     let initial_org = orgs[0].clone();
     let active_org: Signal<Organization> = use_context_provider(move || Signal::new(initial_org));
+
+    // Multi-org data selection: which org(s) the data views load from.
+    // Defaults to `All` (every hosted org); the org switcher drives it.
+    let _org_selection: Signal<OrgSelection> =
+        use_context_provider(|| Signal::new(OrgSelection::All));
+    // Hosted org list, discovered from the server's well-known endpoint
+    // and published for the switcher + data fetchers.
+    let mut org_list: Signal<Vec<OrgMeta>> = use_context_provider(|| Signal::new(Vec::new()));
+    let orgs_res = use_resource(|| async move { fetch_orgs().await });
+    use_effect(move || {
+        if let Some(Ok(list)) = &*orgs_res.read_unchecked() {
+            if *org_list.peek() != *list {
+                org_list.set(list.clone());
+            }
+        }
+    });
 
     let org_overrides: OrgThemeOverrides = use_context_provider(|| OrgThemeOverrides {
         map: Signal::new(HashMap::<String, String>::new()),

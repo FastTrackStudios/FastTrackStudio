@@ -1,15 +1,18 @@
 //! Organization switcher + per-org theme picker.
 //!
-//! Reads `Signal<Organization>` + [`OrgThemeOverrides`] from
-//! context (provided by [`crate::app::App`]). Theme picker is a
-//! `Popover` over the workspace's `ThemeSwitcher`.
+//! The dropdown drives the **data** selection — `All` (every hosted
+//! org, the default) or a single org — via the `Signal<OrgSelection>`
+//! context; the hosted-org list comes from the `Signal<Vec<OrgMeta>>`
+//! context (discovered at app start). The Palette button is the
+//! per-org theme picker, unchanged.
 
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::Palette;
 use fts_ui::prelude::*;
 use fts_ui::primitives::{ContentAlign, ContentSide};
 
-use crate::data::{Organization, organizations};
+use crate::data::Organization;
+use crate::orgs::{OrgMeta, OrgSelection};
 use crate::theming::{OrgThemeOverrides, state_from_preset_name};
 
 #[component]
@@ -17,18 +20,23 @@ pub fn OrgSwitcher(
     #[props(default = Vec::new())] orgs: Vec<Organization>,
     #[props(default = false)] compact: bool,
 ) -> Element {
-    let mut active_org = use_context::<Signal<Organization>>();
+    let _ = &orgs; // legacy prop; org list now comes from context
+    let active_org = use_context::<Signal<Organization>>();
     let mut org_overrides = use_context::<OrgThemeOverrides>();
+    // Data selection + discovered org list.
+    let mut selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
+
     let mut open = use_signal(|| false);
     let mut theme_open = use_signal(|| false);
-    let orgs = if orgs.is_empty() {
-        organizations()
-    } else {
-        orgs
-    };
     let active = active_org();
 
-    let mut switcher_state = use_signal(|| {
+    let list = org_list();
+    let current = selection();
+    let trigger_label = current.label(&list);
+
+    // ── theme picker state (unchanged) ──────────────────────────────
+    let switcher_state = use_signal(|| {
         let name = org_overrides
             .map
             .read()
@@ -37,21 +45,6 @@ pub fn OrgSwitcher(
             .unwrap_or_else(|| active.theme_preset.to_string());
         let mode = *org_overrides.mode.read();
         state_from_preset_name(&name, mode)
-    });
-
-    use_effect(move || {
-        let org = active_org.read().clone();
-        let name = org_overrides
-            .map
-            .read()
-            .get(org.id)
-            .cloned()
-            .unwrap_or_else(|| org.theme_preset.to_string());
-        let prev_mode = switcher_state.peek().mode;
-        if switcher_state.peek().preset == name {
-            return;
-        }
-        switcher_state.set(state_from_preset_name(&name, prev_mode));
     });
 
     let active_id_for_effect: &'static str = active.id;
@@ -82,27 +75,48 @@ pub fn OrgSwitcher(
                     button {
                         r#type: "button",
                         class: "flex items-center gap-2 rounded-full border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent",
-                        "{active.name}"
+                        span { class: "max-w-[10rem] truncate", "{trigger_label}" }
                     }
                 }
                 DropdownContent {
                     side: if compact { "bottom" } else { "top" },
                     align: "end",
                     width: "w-64",
-                    DropdownLabel { "Switch organization" }
-                    for (idx, org) in orgs.iter().enumerate() {
+                    DropdownLabel { "View organization" }
+                    // All — the default aggregate view.
+                    DropdownItem {
+                        value: "__all".to_string(),
+                        index: 0,
+                        on_select: move |_| {
+                            selection.set(OrgSelection::All);
+                            open.set(false);
+                        },
+                        div { class: "flex w-full items-center justify-between gap-2",
+                            span { "All organizations" }
+                            if current == OrgSelection::All {
+                                span { class: "text-xs text-primary", "●" }
+                            }
+                        }
+                    }
+                    for (idx, org) in list.iter().enumerate() {
                         {
-                            let org_for_select = org.clone();
+                            let slug = org.slug.clone();
+                            let selected = current == OrgSelection::One(slug.clone());
                             rsx! {
                                 DropdownItem {
-                                    key: "{org.id}",
-                                    value: org.id.to_string(),
-                                    index: idx,
+                                    key: "{org.slug}",
+                                    value: org.slug.clone(),
+                                    index: idx + 1,
                                     on_select: move |_| {
-                                        active_org.set(org_for_select.clone());
+                                        selection.set(OrgSelection::One(slug.clone()));
                                         open.set(false);
                                     },
-                                    "{org.name}"
+                                    div { class: "flex w-full items-center justify-between gap-2",
+                                        span { class: "truncate", "{org.name}" }
+                                        if selected {
+                                            span { class: "text-xs text-primary", "●" }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -117,7 +131,7 @@ pub fn OrgSwitcher(
                     button {
                         r#type: "button",
                         class: "inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                        title: "Organization theme",
+                        title: "Theme",
                         onclick: move |_| {
                             let v = !*theme_open.read();
                             theme_open.set(v);
@@ -131,7 +145,7 @@ pub fn OrgSwitcher(
                     class: "w-[17rem] p-3 max-h-[70vh] overflow-y-auto",
                     div { class: "flex flex-col gap-2",
                         span { class: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
-                            "Theme · {active.name}"
+                            "Theme"
                         }
                         ThemeSwitcher { state: switcher_state }
                     }

@@ -10,11 +10,16 @@ use fts_ui::prelude::*;
 use task::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 
-use crate::task_wiring::{fetch_tasks, handle, to_ui};
+use crate::task_wiring::{handle, to_ui};
 
 #[component]
 pub fn TasksView() -> Element {
-    let loader = use_resource(|| async move { fetch_tasks().await });
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let loader = use_resource(move || async move {
+        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
+        crate::feeds::fetch_tasks(&slugs).await
+    });
     let mut tasks = use_signal(Vec::<DbTask>::new);
 
     use_effect(move || {

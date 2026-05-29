@@ -6,6 +6,11 @@ const MANIFEST: Asset = asset!("/assets/manifest.json");
 const SERVICE_WORKER: Asset = asset!("/assets/sw.js");
 
 fn main() {
+    // Quiet the browser console: vox-core emits a flood of per-request
+    // DEBUG tracing on wasm. Cap at INFO so our own info/warn/error and
+    // genuine problems still surface, but the request-loop chatter
+    // doesn't drown them.
+    let _ = dioxus::logger::init(dioxus::logger::tracing::Level::INFO);
     dioxus::launch(Root);
 }
 

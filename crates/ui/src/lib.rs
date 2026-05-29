@@ -7,7 +7,9 @@
 
 pub mod app;
 pub mod data;
+pub mod feeds;
 pub mod nav;
+pub mod orgs;
 pub mod pages;
 pub mod routes;
 pub mod server_registry;

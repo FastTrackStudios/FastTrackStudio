@@ -101,7 +101,7 @@ pub async fn vault_client() -> Result<vault_proto::VaultSyncClient, String> {
     }
 }
 
-/// Open a WS link to the org endpoint.
+/// Open a WS link to the (default home) org endpoint.
 #[cfg(target_arch = "wasm32")]
 async fn link() -> Result<vox_websocket::WsLink, String> {
     let url = org_vox_url();
@@ -111,4 +111,63 @@ async fn link() -> Result<vox_websocket::WsLink, String> {
     vox_websocket::WsLink::connect(&url)
         .await
         .map_err(|e| format!("ws connect: {e:?}"))
+}
+
+/// Per-org vox endpoint: the configured base retargeted at
+/// `/org/<slug>/vox`. Empty when no base is configured.
+#[cfg(target_arch = "wasm32")]
+fn org_ws_url(slug: &str) -> String {
+    let base = crate::vox_session::vox_url();
+    if base.is_empty() {
+        return String::new();
+    }
+    let trimmed = base.trim_end_matches("/vox").trim_end_matches('/');
+    format!("{trimmed}/org/{slug}/vox")
+}
+
+/// Establish *any* service client against a specific org's vox
+/// endpoint, cached per `(service type, slug)` so the multi-org
+/// fetchers reuse one socket per org instead of re-dialing on every
+/// render. This is what backs the org switcher's "All" mode (fan out
+/// across slugs) and single-org mode alike.
+#[cfg(target_arch = "wasm32")]
+pub async fn establish_for<C>(slug: &str) -> Result<C, String>
+where
+    C: vox_core::FromVoxSession + Clone + 'static,
+{
+    use std::any::{Any, TypeId};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use vox_core::{TransportMode, initiator_on};
+
+    thread_local! {
+        static CACHE: RefCell<HashMap<(TypeId, String), Box<dyn Any>>> =
+            RefCell::new(HashMap::new());
+    }
+    let key = (TypeId::of::<C>(), slug.to_owned());
+    if let Some(c) = CACHE.with(|m| {
+        m.borrow()
+            .get(&key)
+            .and_then(|b| b.downcast_ref::<C>().cloned())
+    }) {
+        return Ok(c);
+    }
+    let url = org_ws_url(slug);
+    if url.is_empty() {
+        return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
+    }
+    let link = vox_websocket::WsLink::connect(&url)
+        .await
+        .map_err(|e| format!("ws connect `{url}`: {e:?}"))?;
+    let client = initiator_on(link, TransportMode::Bare)
+        .establish::<C>()
+        .await
+        .map_err(|e| format!("establish `{slug}`: {e:?}"))?;
+    CACHE.with(|m| m.borrow_mut().insert(key, Box::new(client.clone())));
+    Ok(client)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn establish_for<C>(_slug: &str) -> Result<C, String> {
+    Err("native client not wired yet".to_owned())
 }

@@ -26,12 +26,23 @@ const PAGE_CSS: &str = "@keyframes ftsFadeUp{from{opacity:0;transform:translateY
 
 #[component]
 pub fn ProjectsView() -> Element {
-    let projects = use_resource(|| async move { fetch_projects().await });
+    let selection = use_context::<Signal<crate::orgs::OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<crate::orgs::OrgMeta>>>();
+    let projects = use_resource(move || async move {
+        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
+        crate::feeds::fetch_projects(&slugs).await
+    });
 
-    let view = match &*projects.read_unchecked() {
-        Some(Ok(rows)) => render_loaded(rows),
-        Some(Err(e)) => render_error(e),
-        None => render_loading(),
+    // While the org list is still being discovered the fetch resolves
+    // to an empty set — show loading rather than an empty grid.
+    let view = if org_list.read().is_empty() {
+        render_loading()
+    } else {
+        match &*projects.read() {
+            Some(Ok(rows)) => render_loaded(rows),
+            Some(Err(e)) => render_error(e),
+            None => render_loading(),
+        }
     };
 
     rsx! {
@@ -462,19 +473,4 @@ fn first_line(body: &str) -> Option<String> {
         .find(|l| !l.is_empty() && !l.starts_with("---") && !l.starts_with('#'))?;
     let cleaned = line.trim_start_matches(['#', '>', '-', '*', ' ']).trim();
     (!cleaned.is_empty()).then(|| cleaned.to_string())
-}
-
-/// Fetch the active org's project list via the architect-generated
-/// `ProjectServiceClient`. Returns `Err` strings for the page to render.
-async fn fetch_projects() -> Result<Vec<ProjectInfo>, String> {
-    let client = crate::vox_clients::project_client().await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        client.list().await.map_err(|e| format!("list: {e:?}"))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = client;
-        Err("native client not wired yet".to_owned())
-    }
 }
