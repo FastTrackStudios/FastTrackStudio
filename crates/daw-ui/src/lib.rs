@@ -23,5 +23,5 @@ pub use components::fx_chain_tree::FxChainTree;
 pub use components::fx_parameter_browser::FxParameterBrowser;
 pub use components::mixer::MixerPanel;
 pub use components::track_control_panel::TrackControlPanel;
-pub use layouts::daw_panels::FxBrowserDockPanel;
+pub use layouts::daw_panels::{DawApplication, FxBrowserDockPanel};
 pub use panel_registration::register_panels;

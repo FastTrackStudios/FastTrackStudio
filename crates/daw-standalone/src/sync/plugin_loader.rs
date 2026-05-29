@@ -23,9 +23,12 @@ fn name_from_path(path: &str) -> String {
 
 impl<'a> PluginLoading for StandalonePluginLoader<'a> {
     fn load(&self, path: &str) -> DawResult<LoadedPluginInfo> {
-        let mut s = self.daw.state.lock().expect("standalone state poisoned");
-        let entry = s
-            .plugins
+        let mut loaded = self
+            .daw
+            .loaded_plugins
+            .lock()
+            .expect("loaded_plugins poisoned");
+        let entry = loaded
             .entry(path.to_string())
             .or_insert_with(|| LoadedPluginInfo {
                 path: path.to_string(),
@@ -36,12 +39,20 @@ impl<'a> PluginLoading for StandalonePluginLoader<'a> {
     }
 
     fn list_loaded(&self) -> Vec<LoadedPluginInfo> {
-        let s = self.daw.state.lock().expect("standalone state poisoned");
-        s.plugins.values().cloned().collect()
+        let loaded = self
+            .daw
+            .loaded_plugins
+            .lock()
+            .expect("loaded_plugins poisoned");
+        loaded.values().cloned().collect()
     }
 
     fn is_loaded(&self, path: &str) -> bool {
-        let s = self.daw.state.lock().expect("standalone state poisoned");
-        s.plugins.contains_key(path)
+        let loaded = self
+            .daw
+            .loaded_plugins
+            .lock()
+            .expect("loaded_plugins poisoned");
+        loaded.contains_key(path)
     }
 }

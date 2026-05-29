@@ -821,6 +821,13 @@ impl crate::plugin::PluginInstance for SendableClapPlugin {
     fn save_state(&mut self) -> Result<Vec<u8>, crate::plugin::PluginError> {
         LoadedClapPlugin::save_state(self).map_err(map_err)
     }
+    fn open_gui(&mut self) -> Result<(), crate::plugin::PluginError> {
+        LoadedClapPlugin::open_gui_floating(self).map_err(map_err)
+    }
+    fn close_gui(&mut self) -> Result<(), crate::plugin::PluginError> {
+        LoadedClapPlugin::close_gui(self);
+        Ok(())
+    }
 }
 
 fn map_err(e: ClapHostError) -> crate::plugin::PluginError {

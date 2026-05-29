@@ -414,6 +414,11 @@ pub struct Standalone {
     /// independently of project state mutations.
     pub(crate) plugin_instances:
         Arc<Mutex<std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>>>,
+    /// Plugin binaries that have been explicitly loaded/validated via
+    /// the PluginLoading service. Actual per-track DSP instances live
+    /// in `plugin_instances` after an FX is inserted.
+    pub(crate) loaded_plugins:
+        Arc<Mutex<std::collections::HashMap<String, daw_proto::LoadedPluginInfo>>>,
     /// Track-domain event broadcaster. Mutating `Tracks` methods publish
     /// here; per-subscriber vox pumps bridge broadcast events into `Tx`.
     pub(crate) track_events:
@@ -443,6 +448,7 @@ impl Standalone {
                 crate::automation_touch::AutomationTouchState::default(),
             )),
             plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            loaded_plugins: Arc::new(Mutex::new(std::collections::HashMap::new())),
             track_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             marker_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             region_events: Arc::new(tokio::sync::broadcast::channel(1024).0),

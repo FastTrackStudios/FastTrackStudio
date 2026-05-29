@@ -1,9 +1,9 @@
 //! `impl Effects for Standalone` — backed by `ProjectState.fx_chains`.
 //!
-//! Standalone has no real plugin host, so every "plugin" added is a
-//! synthetic FX with 8 generic continuous parameters (0..=1.0). That's
-//! enough to exercise routing / chain manipulation / state-chunk
-//! round-tripping without a CLAP/VST3 backend.
+//! Standalone hosts real CLAP/VST3 plugins when the matching feature
+//! is enabled and the FX name is a plugin bundle path. Non-path names
+//! fall back to synthetic FX with 8 generic continuous parameters
+//! (0..=1.0), which keeps tests and UI prototypes lightweight.
 //!
 //! Implemented surface:
 //! - `list_installed` — returns a small canned list of "built-in" FX
@@ -85,6 +85,22 @@ fn find_fx_index(chain: &[FxEntry], fx_ref: &FxRef) -> Option<usize> {
         }
         FxRef::Name(name) => chain.iter().position(|e| e.fx.plugin_name == *name),
     }
+}
+
+fn resolve_fx_guid(
+    daw: &Standalone,
+    project: &ProjectContext,
+    target: &FxTarget,
+) -> Option<String> {
+    let guid = resolve_project(daw, project)?;
+    let key: FxChainKey = (&target.context).into();
+    daw.with_project(&guid, |p| {
+        let chain = p.fx_chains.get(&key)?;
+        let i = find_fx_index(chain, &target.fx)?;
+        Some(chain[i].fx.guid.clone())
+    })
+    .ok()
+    .flatten()
 }
 
 /// Synthesize 8 generic parameters for a new FX. Provides enough surface
@@ -318,6 +334,34 @@ impl Effects for Standalone {
     }
 
     fn parameters(&self, project: ProjectContext, target: FxTarget) -> Vec<FxParameter> {
+        if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
+            let mut plugins = self
+                .plugin_instances
+                .lock()
+                .expect("plugin_instances poisoned");
+            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+                return plugin
+                    .params()
+                    .into_iter()
+                    .map(|p| {
+                        let value = plugin.param_value(p.id).unwrap_or(p.default);
+                        let formatted = plugin
+                            .value_to_text(p.id, value)
+                            .unwrap_or_else(|| format!("{value:.2}"));
+                        FxParameter {
+                            index: p.id,
+                            name: p.name,
+                            value,
+                            formatted,
+                            is_toggle: false,
+                            step_count: None,
+                            step_labels: Vec::new(),
+                        }
+                    })
+                    .collect();
+            }
+        }
+
         let Some(guid) = resolve_project(self, &project) else {
             return Vec::new();
         };
@@ -429,9 +473,31 @@ impl Effects for Standalone {
     }
 
     fn open_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
+        if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
+            let mut plugins = self
+                .plugin_instances
+                .lock()
+                .expect("plugin_instances poisoned");
+            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+                plugin
+                    .open_gui()
+                    .map_err(|e| DawError::operation_failed(e.to_string()))?;
+            }
+        }
         set_window_open(self, project, target, true)
     }
     fn close_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
+        if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
+            let mut plugins = self
+                .plugin_instances
+                .lock()
+                .expect("plugin_instances poisoned");
+            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+                plugin
+                    .close_gui()
+                    .map_err(|e| DawError::operation_failed(e.to_string()))?;
+            }
+        }
         set_window_open(self, project, target, false)
     }
     fn toggle_ui(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {
@@ -623,7 +689,18 @@ impl Effects for Standalone {
             Ok::<(), DawError>(())
         })?
     }
-    fn latency(&self, _project: ProjectContext, _target: FxTarget) -> Option<FxLatency> {
+    fn latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency> {
+        if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
+            let mut plugins = self.plugin_instances.lock().ok()?;
+            if let Some(plugin) = plugins.get_mut(&fx_guid) {
+                let samples = plugin.latency() as i32;
+                return Some(FxLatency {
+                    pdc_samples: samples,
+                    chain_pdc_actual: samples,
+                    chain_pdc_reporting: samples,
+                });
+            }
+        }
         Some(FxLatency::default())
     }
     fn param_modulation(

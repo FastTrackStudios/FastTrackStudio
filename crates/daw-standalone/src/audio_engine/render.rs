@@ -93,6 +93,10 @@ struct TrackSnapshot {
     /// Per-FX enabled flag from `Fx.enabled`. Matched 1:1 with
     /// `fx_chain` by index.
     fx_enabled: Vec<bool>,
+    /// Stored normalized parameter values per FX. Matched 1:1 with
+    /// `fx_chain` by index and sent to hosted plugins every block so
+    /// service-side parameter edits affect DSP.
+    fx_params: Vec<Vec<(u32, f64)>>,
     /// Volume envelope points, sorted by time. Multiplies the
     /// static `volume` field when present.
     volume_env: Option<Vec<EnvelopePoint>>,
@@ -107,6 +111,13 @@ struct TrackSnapshot {
     /// Pre-FX pan envelope. Blended additively with the static + main
     /// pan envelope, then clamped.
     pan_prefx_env: Option<Vec<EnvelopePoint>>,
+}
+
+#[derive(Default)]
+struct FxChainSnapshot {
+    chain: Vec<String>,
+    enabled: Vec<bool>,
+    params: Vec<Vec<(u32, f64)>>,
 }
 
 struct SendSnapshot {
@@ -315,8 +326,9 @@ impl<'a> ProjectRenderer<'a> {
                     for v in out_l.iter_mut().chain(out_r.iter_mut()) {
                         *v = 0.0;
                     }
+                    let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
                     let events = crate::plugin::PluginEvents {
-                        params: &[],
+                        params: param_events,
                         midi: &midi_events,
                         note_expressions: &note_expr_events,
                     };
@@ -837,14 +849,23 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
     };
 
     // FX chain (track-side only — input FX is a future addition).
-    let (fx_chain, fx_enabled): (Vec<String>, Vec<bool>) = p
+    let fx = p
         .fx_chains
         .get(&crate::sync::FxChainKey::Track(t.guid.clone()))
         .map(|chain| {
-            chain
-                .iter()
-                .map(|e| (e.fx.guid.clone(), e.fx.enabled))
-                .unzip()
+            let mut guids = Vec::with_capacity(chain.len());
+            let mut enabled = Vec::with_capacity(chain.len());
+            let mut params = Vec::with_capacity(chain.len());
+            for e in chain {
+                guids.push(e.fx.guid.clone());
+                enabled.push(e.fx.enabled);
+                params.push(e.params.iter().map(|(&id, &value)| (id, value)).collect());
+            }
+            FxChainSnapshot {
+                chain: guids,
+                enabled,
+                params,
+            }
         })
         .unwrap_or_default();
 
@@ -858,8 +879,9 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
         parent_send,
         sends,
         items,
-        fx_chain,
-        fx_enabled,
+        fx_chain: fx.chain,
+        fx_enabled: fx.enabled,
+        fx_params: fx.params,
         volume_env: track_env(EnvelopeType::Volume),
         pan_env: track_env(EnvelopeType::Pan),
         mute_env: track_env(EnvelopeType::Mute),

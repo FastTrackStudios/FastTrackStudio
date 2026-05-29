@@ -181,6 +181,17 @@ pub trait PluginInstance: Send {
         Err(PluginError::UnsupportedFormat(self.descriptor().format))
     }
 
+    /// Open the plugin's editor UI, if the backend/plugin supports it.
+    fn open_gui(&mut self) -> Result<(), PluginError> {
+        Err(PluginError::UnsupportedFormat(self.descriptor().format))
+    }
+
+    /// Close a previously-opened plugin editor UI. Backends that do
+    /// not support plugin editors may treat this as a no-op.
+    fn close_gui(&mut self) -> Result<(), PluginError> {
+        Ok(())
+    }
+
     /// Release activation. Idempotent — calling twice is fine.
     fn deactivate(&mut self);
 }
