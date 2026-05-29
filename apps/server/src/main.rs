@@ -28,11 +28,42 @@ async fn main() -> eyre::Result<()> {
     // `/org/<slug>/...`.
     let org_slug = std::env::var("TASK_SERVER_ORG").ok();
     let state = AppState::new(org_slug.as_deref()).await?;
+    // Hold the construction scope so DB pools tear down in LIFO order
+    // on shutdown; `router` takes ownership of `state`.
+    let scope = state.scope.clone();
     let app = router(state);
 
     info!(%bind, "listening");
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
+    info!("shutdown — closing backend resources");
+    scope.close().await;
     Ok(())
+}
+
+/// Resolve when the process receives Ctrl-C (or SIGTERM on unix), so
+/// axum stops accepting and in-flight requests drain before the scope
+/// finalizers run.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        if let Ok(mut sig) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            sig.recv().await;
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
 }

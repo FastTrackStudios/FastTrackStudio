@@ -114,12 +114,13 @@ impl OrgManagementService for OrgManagementImpl {
         // consistent across orgs.
         let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
         let keypair = self.state.keypair.clone();
+        let scope = self.state.scope.clone();
         let slug = org_root.slug().to_owned();
         let built = tokio::runtime::Handle::current().block_on(async move {
             let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET)
                 .await
                 .map_err(|e| OrgManagementError::Internal(format!("open auth: {e}")))?;
-            build_org_state(auth, &keypair, org_root)
+            build_org_state(auth, &keypair, org_root, &scope)
                 .await
                 .map_err(|e| OrgManagementError::Internal(format!("build org: {e}")))
         })?;

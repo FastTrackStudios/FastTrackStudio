@@ -138,6 +138,12 @@ pub struct AppState {
     /// Source data root. Held for `.well-known/task-server.json`
     /// discovery, manifest re-scans, and the keypair path.
     pub data_root: org_proto::DataRoot,
+    /// Construction scope for every backend resource (DB pools).
+    /// Each org's SQLite pools register a finalizer here via
+    /// architect's [`Resource::acquire_release`]; [`Scope::close`]
+    /// at shutdown tears them down in LIFO order. Shared across all
+    /// hosted orgs.
+    pub scope: std::sync::Arc<architect::Scope>,
 }
 
 impl AppState {
@@ -148,6 +154,29 @@ impl AppState {
     #[must_use]
     pub fn org(&self, slug: &str) -> Option<OrgAppState> {
         self.orgs.read().ok()?.get(slug).cloned()
+    }
+
+    /// Serve an org's full [`LayerRouter`] over an **in-process**
+    /// vox link (no socket, no TCP). Returns a [`LocalServer`] whose
+    /// `.establish::<C>()` yields the *same* service client types the
+    /// WebSocket transport produces — so a native binary (CLI, desktop)
+    /// can drive the backend directly without a running `task-server`.
+    /// This is architect's "inject remote vs local, one client".
+    ///
+    /// The acceptor task lives until `scope` is closed; keep the scope
+    /// alive for as long as the clients are used, then `scope.close()`.
+    /// `None` if the slug isn't hosted.
+    #[must_use]
+    pub fn local_server(
+        &self,
+        slug: &str,
+        scope: &std::sync::Arc<architect::Scope>,
+    ) -> Option<architect::LocalServer> {
+        let org = self.org(slug)?;
+        Some(architect::LocalServer::serve(
+            org_layer_router(&org),
+            std::sync::Arc::clone(scope),
+        ))
     }
 
     /// Slugs of every hosted org, sorted for deterministic
@@ -222,13 +251,14 @@ impl AppState {
         let keypair = ServerKeypair::load_or_generate(&data_root.server_keypair_path())
             .map_err(|e| eyre::eyre!("load server keypair: {e}"))?;
 
+        let scope = architect::Scope::new();
         let org_roots = pick_server_orgs(&data_root, slug_filter)?;
         let mut orgs = std::collections::HashMap::new();
         for org_root in org_roots {
             let slug = org_root.slug().to_owned();
             let auth_db_url = format!("sqlite://{}?mode=rwc", org_root.auth_db().display());
             let auth = AuthState::open(&auth_db_url, DEFAULT_AUTH_SECRET).await?;
-            let org_state = build_org_state(auth, &keypair, org_root).await?;
+            let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
             orgs.insert(slug, org_state);
         }
 
@@ -236,6 +266,7 @@ impl AppState {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
+            scope,
         })
     }
 
@@ -249,18 +280,20 @@ impl AppState {
         data_root
             .ensure()
             .map_err(|e| eyre::eyre!("ensure data root: {e}"))?;
+        let scope = architect::Scope::new();
         let mut org_roots = pick_server_orgs(&data_root, None)?;
         let org_root = org_roots
             .pop()
             .ok_or_else(|| eyre::eyre!("no org to host"))?;
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
+            scope,
         })
     }
 
@@ -274,16 +307,62 @@ impl AppState {
     ) -> eyre::Result<Self> {
         let data_root =
             org_proto::DataRoot::from_env().map_err(|e| eyre::eyre!("data root: {e}"))?;
+        let scope = architect::Scope::new();
         let slug = org_root.slug().to_owned();
-        let org_state = build_org_state(auth, &keypair, org_root).await?;
+        let org_state = build_org_state(auth, &keypair, org_root, &scope).await?;
         let mut orgs = std::collections::HashMap::new();
         orgs.insert(slug, org_state);
         Ok(Self {
             keypair,
             orgs: Arc::new(std::sync::RwLock::new(orgs)),
             data_root,
+            scope,
         })
     }
+}
+
+/// Open a migrated SQLite pool as an architect [`Resource`] tied to
+/// `scope`: connect, run `migrate`, and register a finalizer that
+/// closes the pool. On [`Scope::close`] (graceful shutdown) every pool
+/// opened this way is torn down in LIFO order instead of relying on
+/// `Drop`. `migrate` receives the fresh connection and returns it after
+/// running its migrator.
+async fn open_sqlite_pool<F>(
+    scope: &std::sync::Arc<architect::Scope>,
+    url: String,
+    label: &'static str,
+    migrate: F,
+) -> eyre::Result<sea_orm::DatabaseConnection>
+where
+    F: FnOnce(
+            sea_orm::DatabaseConnection,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<sea_orm::DatabaseConnection, sea_orm::DbErr>,
+                    > + Send,
+            >,
+        > + Send
+        + 'static,
+{
+    architect::Resource::acquire_release(
+        architect::Resource::from_fn(move |_| async move {
+            let db = Database::connect(&url)
+                .await
+                .map_err(|e| eyre::eyre!("connect {label} db `{url}`: {e}"))?;
+            let db = migrate(db)
+                .await
+                .map_err(|e| eyre::eyre!("{label} migrations: {e}"))?;
+            Ok(db)
+        }),
+        |db: sea_orm::DatabaseConnection| async move {
+            if let Err(e) = db.close().await {
+                tracing::warn!(error = %e, "closing sqlite pool");
+            }
+        },
+    )
+    .build(scope)
+    .await
 }
 
 /// Build one [`OrgAppState`] for a single org's
@@ -293,6 +372,7 @@ pub(crate) async fn build_org_state(
     auth: AuthState,
     keypair: &ServerKeypair,
     org_root: org_proto::OrgRoot,
+    scope: &std::sync::Arc<architect::Scope>,
 ) -> eyre::Result<OrgAppState> {
     {
         // Attachments — local blob store under the standard XDG
@@ -348,12 +428,10 @@ pub(crate) async fn build_org_state(
                 org_root.path().join("agent-tasks.sqlite").display()
             )
         });
-        let agent_tasks_conn = Database::connect(&agent_tasks_url)
-            .await
-            .map_err(|e| eyre::eyre!("connect agent-tasks db `{agent_tasks_url}`: {e}"))?;
-        agent_tasks::Migrator::up(&agent_tasks_conn, None)
-            .await
-            .map_err(|e| eyre::eyre!("agent-tasks migrations: {e}"))?;
+        let agent_tasks_conn = open_sqlite_pool(scope, agent_tasks_url, "agent-tasks", |db| {
+            Box::pin(async move { agent_tasks::Migrator::up(&db, None).await.map(|_| db) })
+        })
+        .await?;
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
 
         // Timer store. SQLite at
@@ -365,12 +443,10 @@ pub(crate) async fn build_org_state(
         // session's project markdown on close.
         let timer_url = std::env::var("TASK_SERVER_TIMER_URL")
             .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.timer_db().display()));
-        let timer_conn = Database::connect(&timer_url)
-            .await
-            .map_err(|e| eyre::eyre!("connect timer db `{timer_url}`: {e}"))?;
-        timer::Migrator::up(&timer_conn, None)
-            .await
-            .map_err(|e| eyre::eyre!("timer migrations: {e}"))?;
+        let timer_conn = open_sqlite_pool(scope, timer_url, "timer", |db| {
+            Box::pin(async move { timer::Migrator::up(&db, None).await.map(|_| db) })
+        })
+        .await?;
         let timer_defaults = std::sync::Arc::new(timer::store::VaultProjectDefaults {
             vault_root: vault_root.clone(),
         });
@@ -385,12 +461,10 @@ pub(crate) async fn build_org_state(
         // when that feature lands.
         let finance_url = std::env::var("TASK_SERVER_FINANCE_URL")
             .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.finance_db().display()));
-        let finance_conn = Database::connect(&finance_url)
-            .await
-            .map_err(|e| eyre::eyre!("connect finance db `{finance_url}`: {e}"))?;
-        finance_db::Migrator::up(&finance_conn, None)
-            .await
-            .map_err(|e| eyre::eyre!("finance migrations: {e}"))?;
+        let finance_conn = open_sqlite_pool(scope, finance_url, "finance", |db| {
+            Box::pin(async move { finance_db::Migrator::up(&db, None).await.map(|_| db) })
+        })
+        .await?;
 
         // Auto-retry any wiki ingest tasks the previous
         // backend left stuck mid-flight. Best-effort —
@@ -665,22 +739,15 @@ async fn server_vox_handler(
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
     let mgmt = crate::server_mgmt::OrgManagementImpl::new(state);
+    let router = architect::LayerRouter::new().with(
+        org_proto::org_management_descriptor(),
+        org_proto::serve_org_management(mgmt),
+    );
     ws.on_upgrade(move |socket| async move {
-        let mgmt = mgmt.clone();
-        let acceptor =
-            architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
-                name if name == org_proto::org_management_descriptor().service_name => {
-                    connection.handle_with(org_proto::serve_org_management(mgmt.clone()));
-                    Ok(())
-                }
-                other => {
-                    tracing::info!(
-                        service = %other,
-                        "server-vox: unknown service requested"
-                    );
-                    Err(Vec::new())
-                }
-            });
+        let acceptor = architect::axum_ws::acceptor_fn(move |_req, connection| {
+            connection.handle_with(router.clone());
+            Ok(())
+        });
         architect::axum_ws::serve(socket, acceptor).await;
     })
     .into_response()
@@ -709,228 +776,153 @@ async fn legacy_vox_handler(
     serve_org_vox(org, ws)
 }
 
+/// Build the per-org [`LayerRouter`]: every service this org hosts,
+/// mounted by its descriptor onto one router. One connection then
+/// multiplexes all of them — the client's establish handshake names
+/// the service and the router dispatches by method id.
+///
+/// This replaces the old per-connection `match req.service()` acceptor
+/// with architect's composable layer system; the same router is reused
+/// for the WebSocket transport here and the in-process `LocalServer`
+/// transport (see [`org_local_server`]).
+pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
+    use architect::LayerRouter;
+
+    let mut router = LayerRouter::new()
+        // Auth — wrapped with the server middleware that validates
+        // session tokens before the inner service sees the request.
+        .with(
+            architect_auth::auth_service_service_descriptor(),
+            AuthServiceDispatcher::new(AuthVoxService::new(org.auth.auth.clone()))
+                .with_middleware(AuthServerMiddleware),
+        )
+        // Attachments — signed blob upload/download.
+        .with(
+            attachments_proto::attachment_service_service_descriptor(),
+            attachments_proto::AttachmentServiceDispatcher::new((*org.attachments).clone()),
+        )
+        // Vault file replication (manifest / get / put / delete / subscribe).
+        .with(vault_proto::descriptor(), vault_proto::serve(org.vault_sync.clone()))
+        // Agent-task queue — slim domain trait (claim / complete / set-status).
+        .with(
+            agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),
+            agent_proto::service::tasks::serve(org.agent_tasks.clone()),
+        )
+        // Timer — billable time tracking.
+        .with(
+            timer_proto::service::timer_service_rpc_service_descriptor(),
+            timer_proto::service::serve(org.timer.clone()),
+        );
+
+    // Wiki feature — 11 per-capability traits, one descriptor each.
+    let wiki = org.wiki.clone();
+    router = router
+        .with(
+            wiki_proto::service::schema::schema_rpc_service_descriptor(),
+            wiki_proto::service::schema::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::catalog::catalog_rpc_service_descriptor(),
+            wiki_proto::service::catalog::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor(),
+            wiki_proto::service::raw_layer::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::graph::graph_rpc_service_descriptor(),
+            wiki_proto::service::graph::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::ingest::ingest_rpc_service_descriptor(),
+            wiki_proto::service::ingest::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::lint::lint_rpc_service_descriptor(),
+            wiki_proto::service::lint::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::search::search_rpc_service_descriptor(),
+            wiki_proto::service::search::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::watcher::watcher_rpc_service_descriptor(),
+            wiki_proto::service::watcher::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::multimodal::multimodal_rpc_service_descriptor(),
+            wiki_proto::service::multimodal::serve(wiki.clone()),
+        )
+        .with(
+            wiki_proto::service::review::review_rpc_service_descriptor(),
+            wiki_proto::service::review::serve(wiki.clone()),
+        );
+
+    // Project / Goal / Milestone / Task readers (vault-backed).
+    router = router
+        .with(
+            project::project_service_descriptor(),
+            project::serve_project_service(org.projects.clone()),
+        )
+        .with(
+            goal::goal_service_descriptor(),
+            goal::serve_goal_service(org.goals.clone()),
+        )
+        .with(
+            milestone::milestone_service_descriptor(),
+            milestone::serve_milestone_service(org.milestones.clone()),
+        )
+        .with(
+            task::task_service_descriptor(),
+            task::serve_task_service(org.tasks.clone()),
+        );
+
+    // Entity-CRUD services: locations + the mealplan trio.
+    router = router
+        .with(
+            locations::locations_service_descriptor(),
+            locations::serve_locations_service(org.locations.clone()),
+        )
+        .with(
+            cookbook::cookbook_service_descriptor(),
+            cookbook::serve_cookbook_service(org.cookbook.clone()),
+        )
+        .with(
+            mealplan::mealplan_service_descriptor(),
+            mealplan::serve_mealplan_service(org.mealplan.clone()),
+        )
+        .with(
+            pantry::pantry_service_descriptor(),
+            pantry::serve_pantry_service(org.pantry.clone()),
+        );
+
+    // Fitness suite — body / exercises / workouts / intake.
+    router
+        .with(
+            body::body_service_descriptor(),
+            body::serve_body_service(org.body.clone()),
+        )
+        .with(
+            exercises::exercises_service_descriptor(),
+            exercises::serve_exercises_service(org.exercises.clone()),
+        )
+        .with(
+            workouts::workouts_service_descriptor(),
+            workouts::serve_workouts_service(org.workouts.clone()),
+        )
+        .with(
+            intake::intake_service_descriptor(),
+            intake::serve_intake_service(org.intake.clone()),
+        )
+}
+
 fn serve_org_vox(org: OrgAppState, ws: WebSocketUpgrade) -> axum::response::Response {
+    let router = org_layer_router(&org);
     ws.on_upgrade(move |socket| async move {
-        let auth = org.auth.auth.clone();
-        let attachment_service = org.attachments.clone();
-        let vault_sync_state = org.vault_sync.clone();
-        let wiki = org.wiki.clone();
-        let projects_backend = org.projects.clone();
-        let goals_backend = org.goals.clone();
-        let milestones_backend = org.milestones.clone();
-        let tasks_backend = org.tasks.clone();
-        let locations_backend = org.locations.clone();
-        let cookbook_backend = org.cookbook.clone();
-        let mealplan_backend = org.mealplan.clone();
-        let pantry_backend = org.pantry.clone();
-        let body_backend = org.body.clone();
-        let exercises_backend = org.exercises.clone();
-        let workouts_backend = org.workouts.clone();
-        let intake_backend = org.intake.clone();
-        let agent_tasks_store = org.agent_tasks.clone();
-        let timer_store = org.timer.clone();
-        let acceptor =
-            architect::axum_ws::acceptor_fn(move |req, connection| match req.service() {
-                "AuthService" => {
-                    connection.handle_with(
-                        AuthServiceDispatcher::new(AuthVoxService::new(auth.clone()))
-                            .with_middleware(AuthServerMiddleware),
-                    );
-                    Ok(())
-                }
-                "AttachmentService" => {
-                    use attachments_proto::AttachmentServiceDispatcher;
-                    connection.handle_with(AttachmentServiceDispatcher::new(
-                        (*attachment_service).clone(),
-                    ));
-                    Ok(())
-                }
-                // architect-emitted mount: `serve` wraps the
-                // backend in `VaultSyncRpcDispatcher` and pulls
-                // its `TokioBlockingDispatcher` via
-                // `HasDispatcher`. Wire-level service name from
-                // `vault_proto::descriptor()`.
-                name if name == vault_proto::descriptor().service_name => {
-                    connection.handle_with(vault_proto::serve(vault_sync_state.clone()));
-                    Ok(())
-                }
-                // Agent-task queue — slim domain trait (claim,
-                // complete, set-status). Plain CRUD is the
-                // architect-emitted per-entity Repo traits, not
-                // mounted here yet.
-                name if name
-                    == agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(agent_proto::service::tasks::serve(
-                        agent_tasks_store.clone(),
-                    ));
-                    Ok(())
-                }
-                // Timer — billable time tracking. The slim
-                // TimerService trait (start/stop/active/
-                // switch/log/resolve_rate). Plain CRUD on
-                // Client/Tag/Rate/WorkSession entities goes
-                // through their architect-emitted Repo
-                // traits, not mounted here yet.
-                name if name
-                    == timer_proto::service::timer_service_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(timer_proto::service::serve(timer_store.clone()));
-                    Ok(())
-                }
-                // Wiki feature — 13 per-capability traits, one
-                // descriptor each. `wiki_proto::service::*`.
-                name if name
-                    == wiki_proto::service::schema::schema_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::schema::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::catalog::catalog_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::catalog::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::raw_layer::raw_layer_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::raw_layer::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::graph::graph_rpc_service_descriptor().service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::graph::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::ingest::ingest_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::ingest::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::lint::lint_rpc_service_descriptor().service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::lint::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::search::search_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::search::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::watcher::watcher_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::watcher::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::multimodal::multimodal_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::multimodal::serve(wiki.clone()));
-                    Ok(())
-                }
-                name if name
-                    == wiki_proto::service::review::review_rpc_service_descriptor()
-                        .service_name =>
-                {
-                    connection.handle_with(wiki_proto::service::review::serve(wiki.clone()));
-                    Ok(())
-                }
-                // Project + Goal services — file-backed
-                // readers that walk the org's vault on each
-                // request. UI surfaces consume the
-                // architect-generated `ProjectServiceClient`
-                // and `GoalServiceClient`.
-                name if name == project::project_service_descriptor().service_name => {
-                    connection
-                        .handle_with(project::serve_project_service(projects_backend.clone()));
-                    Ok(())
-                }
-                name if name == goal::goal_service_descriptor().service_name => {
-                    connection.handle_with(goal::serve_goal_service(goals_backend.clone()));
-                    Ok(())
-                }
-                name if name == milestone::milestone_service_descriptor().service_name => {
-                    connection.handle_with(milestone::serve_milestone_service(
-                        milestones_backend.clone(),
-                    ));
-                    Ok(())
-                }
-                name if name == task::task_service_descriptor().service_name => {
-                    connection.handle_with(task::serve_task_service(tasks_backend.clone()));
-                    Ok(())
-                }
-                // Entity-CRUD services: locations + the
-                // mealplan trio (recipes, scheduled meals,
-                // pantry). All four expose the same
-                // `list / get / create / update / rename /
-                // delete` shape; pantry + mealplan
-                // additionally expose domain verbs
-                // (`consume`, `cook`, …) at the trait level.
-                name if name == locations::locations_service_descriptor().service_name => {
-                    connection.handle_with(locations::serve_locations_service(
-                        locations_backend.clone(),
-                    ));
-                    Ok(())
-                }
-                name if name == cookbook::cookbook_service_descriptor().service_name => {
-                    connection
-                        .handle_with(cookbook::serve_cookbook_service(cookbook_backend.clone()));
-                    Ok(())
-                }
-                name if name == mealplan::mealplan_service_descriptor().service_name => {
-                    connection
-                        .handle_with(mealplan::serve_mealplan_service(mealplan_backend.clone()));
-                    Ok(())
-                }
-                name if name == pantry::pantry_service_descriptor().service_name => {
-                    connection.handle_with(pantry::serve_pantry_service(pantry_backend.clone()));
-                    Ok(())
-                }
-                // Fitness suite — body / exercises / workouts /
-                // intake. All four mounted per-org alongside
-                // the entity-CRUD services above.
-                name if name == body::body_service_descriptor().service_name => {
-                    connection.handle_with(body::serve_body_service(body_backend.clone()));
-                    Ok(())
-                }
-                name if name == exercises::exercises_service_descriptor().service_name => {
-                    connection.handle_with(exercises::serve_exercises_service(
-                        exercises_backend.clone(),
-                    ));
-                    Ok(())
-                }
-                name if name == workouts::workouts_service_descriptor().service_name => {
-                    connection
-                        .handle_with(workouts::serve_workouts_service(workouts_backend.clone()));
-                    Ok(())
-                }
-                name if name == intake::intake_service_descriptor().service_name => {
-                    connection.handle_with(intake::serve_intake_service(intake_backend.clone()));
-                    Ok(())
-                }
-                other => {
-                    tracing::info!(
-                        service = %other,
-                        "vox session: unknown service requested"
-                    );
-                    Err(Vec::new())
-                }
-            });
+        let acceptor = architect::axum_ws::acceptor_fn(move |_req, connection| {
+            connection.handle_with(router.clone());
+            Ok(())
+        });
         architect::axum_ws::serve(socket, acceptor).await;
     })
     .into_response()

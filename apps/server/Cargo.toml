@@ -78,7 +78,7 @@ finance-proto = { workspace = true, features = ["server"] }
 finance-db = { workspace = true }
 vox = { workspace = true }
 chrono.workspace = true
-architect = { workspace = true, features = ["server-axum", "dispatch-tokio"] }
+architect = { workspace = true, features = ["server-axum", "dispatch-tokio", "local"] }
 architect-auth = { workspace = true, features = ["full"] }
 
 [dev-dependencies]
@@ -92,6 +92,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 walkdir = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 vault-proto = { workspace = true }
+project = { workspace = true, features = ["vox"] }
 
 [lints]
 workspace = true
