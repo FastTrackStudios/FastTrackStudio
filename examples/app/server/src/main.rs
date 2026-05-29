@@ -1,11 +1,14 @@
 //! Reference axum + vox server binary.
 //!
-//! This is a thin shell: it picks a backend (sqlite or in-memory, via
-//! cargo features), runs migrations if needed, then hands the repo to
-//! `app_server::vox_router`. All HTTP/vox wiring lives in the lib so the
-//! e2e tests mount the exact same router.
+//! A thin shell: it builds a backend via a `Resource` (architect's
+//! construction layer) under a `Scope`, hands the backend to
+//! `app_server::vox_router`, serves, and on shutdown closes the scope —
+//! running any finalizers (e.g. closing the db pool) in reverse order.
+//! All HTTP/vox wiring lives in the lib so the e2e tests mount the exact
+//! same router.
 
 use app_server::vox_router;
+use example::architect::Scope;
 use tracing::info;
 
 /// Compact, readable logging. The default keeps our own logs at debug and
@@ -36,39 +39,57 @@ fn init_tracing() {
         .init();
 }
 
-// ── Backend-specific state ────────────────────────────────────────────
+// ── Backend-specific construction ─────────────────────────────────────
+//
+// Each backend is built as a `Resource<Repo>`. The db backend wraps the
+// pool in `acquire_release` so it's closed on shutdown; the in-memory
+// backend is a trivial `succeed`.
 
 #[cfg(feature = "backend-db")]
 mod backend {
+    use example::architect::Resource;
     use example::backend_db::{ExampleRepoStorage, Migrator};
     use sea_orm::{Database, DatabaseConnection};
     use sea_orm_migration::MigratorTrait;
 
     pub type Repo = ExampleRepoStorage<DatabaseConnection>;
+    pub const LABEL: &str = "sqlite";
 
-    pub async fn init() -> eyre::Result<(Repo, String)> {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "sqlite://./example.db?mode=rwc".into());
-        let db = Database::connect(&database_url).await?;
-        Migrator::up(&db, None).await?;
-        Ok((
-            ExampleRepoStorage::new(db),
-            format!("sqlite ({database_url})"),
-        ))
+    pub fn resource() -> Resource<Repo> {
+        // config → pool (acquire_release: closed on scope teardown) → repo
+        Resource::from_fn(|_| async {
+            Ok(std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "sqlite://./example.db?mode=rwc".into()))
+        })
+        .and_then(|url| {
+            Resource::acquire_release(
+                Resource::from_fn(move |_| async move {
+                    let db = Database::connect(&url).await?;
+                    Migrator::up(&db, None).await?;
+                    Ok(db)
+                }),
+                |db: DatabaseConnection| async move {
+                    tracing::info!("closing database pool");
+                    let _ = db.close().await;
+                },
+            )
+        })
+        .map(ExampleRepoStorage::new)
     }
 }
 
 // Picks backend-memory only when backend-db isn't also enabled — keeps
-// `cargo build --all-features` resolvable. In practice each binary
-// enables exactly one backend feature.
+// `cargo build --all-features` resolvable.
 #[cfg(all(not(feature = "backend-db"), feature = "backend-memory"))]
 mod backend {
+    use example::architect::Resource;
     use example::backend_memory::ExampleRepoMemory;
 
     pub type Repo = ExampleRepoMemory;
+    pub const LABEL: &str = "in-memory";
 
-    pub async fn init() -> eyre::Result<(Repo, String)> {
-        Ok((ExampleRepoMemory::new(), "in-memory".into()))
+    pub fn resource() -> Resource<Repo> {
+        Resource::succeed(ExampleRepoMemory::new())
     }
 }
 
@@ -77,15 +98,30 @@ async fn main() -> eyre::Result<()> {
     init_tracing();
 
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4040".into());
-    let (repo, backend_label) = backend::init().await?;
-    info!(backend = %backend_label, %bind_addr, "starting example server");
+
+    // Build the backend under a scope so resources (the db pool) get a
+    // finalizer; the scope closes after the server stops.
+    let scope = Scope::new();
+    let repo = backend::resource().build(&scope).await?;
+    info!(backend = backend::LABEL, %bind_addr, "starting example server");
 
     let app = vox_router(repo);
-
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     info!("HTTP listening on http://{bind_addr}");
     info!("  Health:  http://{bind_addr}/api/health");
     info!("  Vox WS:  ws://{bind_addr}/vox");
-    axum::serve(listener, app).await?;
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    info!("shutdown — running finalizers");
+    scope.close().await;
     Ok(())
+}
+
+/// Resolve on Ctrl-C so the server can shut down gracefully and run the
+/// scope's finalizers (close the db pool) before exiting.
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }

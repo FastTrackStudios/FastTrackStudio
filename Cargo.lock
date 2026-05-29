@@ -207,6 +207,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "eyre",
  "facet",
  "facet-core",
  "fake",

@@ -65,6 +65,18 @@ pub use layer::{
     Services,
 };
 
+// Construction layer — lazy backend builders with dependent composition,
+// memoization, and scoped (LIFO) teardown. Feeds the service layer's
+// `.provide()` via `Resource::into_router` (vox-gated inside). The
+// `Scope`/`Resource` surface itself is transport-agnostic.
+pub mod resource;
+pub use resource::{Resource, Scope, SharedResource};
+
+// Dependency planner — topologically order a declared layer graph, with
+// cycle / conflict / missing-provider diagnostics. Pure data.
+pub mod plan;
+pub use plan::{LayerDiagnostic, LayerGraph, LayerNode, LayerPlan, LayerPlanError};
+
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach
 // `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
 #[cfg(feature = "fake")]
