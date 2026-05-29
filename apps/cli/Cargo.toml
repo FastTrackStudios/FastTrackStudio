@@ -9,7 +9,13 @@ path = "src/main.rs"
 
 [dependencies]
 vox = { workspace = true, features = ["transport-websocket", "transport-websocket-tls"] }
+vox-core = { workspace = true }
 tokio = { workspace = true }
+# Embedded mode (`TASK_EMBED=1`): the CLI hosts the backend in-process
+# over architect's `LocalServer` and establishes the same service
+# clients with no running `task-server`. Pulls the full server stack.
+task-server = { path = "../server" }
+architect = { workspace = true, features = ["local"] }
 chrono.workspace = true
 eyre.workspace = true
 clap = { version = "4", features = ["derive", "env"] }

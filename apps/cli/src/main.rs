@@ -3658,6 +3658,61 @@ fn resolve_org_vox_url(server: Option<String>, org_slug: &str) -> String {
     format!("{stripped}/org/{org_slug}/vox")
 }
 
+/// Embedded backend, built once per process: a full `AppState` plus the
+/// construction `Scope` that keeps its in-process vox acceptor tasks
+/// alive. Only initialized when embedded mode is active.
+struct Embedded {
+    state: task_server::AppState,
+    scope: std::sync::Arc<architect::Scope>,
+}
+
+static EMBEDDED: tokio::sync::OnceCell<Embedded> = tokio::sync::OnceCell::const_new();
+
+/// True when the CLI should host the backend in-process instead of
+/// talking to a running `task-server`. Opt-in via `TASK_EMBED`.
+fn embed_enabled() -> bool {
+    std::env::var("TASK_EMBED").is_ok_and(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+}
+
+/// Lazily build (once) and return the embedded backend.
+async fn embedded() -> eyre::Result<&'static Embedded> {
+    EMBEDDED
+        .get_or_try_init(|| async {
+            let scope = architect::Scope::new();
+            let state = task_server::AppState::new(None)
+                .await
+                .map_err(|e| eyre::eyre!("embedded backend boot: {e}"))?;
+            Ok::<_, eyre::Report>(Embedded { state, scope })
+        })
+        .await
+}
+
+/// Establish a typed service client over the active transport: an
+/// in-process `LocalServer` when embedded (`TASK_EMBED`), otherwise a
+/// vox WebSocket to the resolved per-org URL. Same client type either
+/// way — architect's "inject remote vs local, one client".
+async fn establish_client<C>(server: Option<String>, slug: &str) -> eyre::Result<C>
+where
+    C: vox_core::FromVoxSession,
+{
+    if embed_enabled() {
+        let emb = embedded().await?;
+        let local = emb
+            .state
+            .local_server(slug, &emb.scope)
+            .ok_or_else(|| eyre::eyre!("org `{slug}` not hosted in embedded mode"))?;
+        local
+            .establish()
+            .await
+            .map_err(|e| eyre::eyre!("embedded establish for `{slug}`: {e:?}"))
+    } else {
+        let url = resolve_org_vox_url(server, slug);
+        Box::pin(vox::connect(&url).establish())
+            .await
+            .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))
+    }
+}
+
 /// Resolve the active org slug from `--org` flag or the
 /// stored session. Returns a friendly error if neither
 /// resolves.
@@ -3676,10 +3731,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
     match cmd {
         ProjectCmd::List { org, server, json } => {
             let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
-            let client: ProjectServiceClient = Box::pin(vox::connect(&url).establish())
-                .await
-                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let client: ProjectServiceClient = establish_client(server, &slug).await?;
             let rows = client
                 .list()
                 .await
@@ -3717,10 +3769,7 @@ async fn run_project(cmd: ProjectCmd) -> eyre::Result<()> {
             json,
         } => {
             let slug = resolve_active_org(org)?;
-            let url = resolve_org_vox_url(server, &slug);
-            let client: ProjectServiceClient = Box::pin(vox::connect(&url).establish())
-                .await
-                .map_err(|e| eyre::eyre!("connect `{url}`: {e:?}"))?;
+            let client: ProjectServiceClient = establish_client(server, &slug).await?;
             let p = if let Ok(id) = uuid::Uuid::parse_str(&target) {
                 client
                     .get(id)
