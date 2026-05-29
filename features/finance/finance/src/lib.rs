@@ -46,6 +46,7 @@
 
 pub mod firefly;
 pub mod invoice_from_sessions;
+pub mod ledger;
 pub mod pdf_adapter;
 pub mod reports;
 
@@ -54,8 +55,10 @@ pub mod reports;
 // consumer to repeat the path.
 pub use finance_db::entity as finance_db_entity;
 
-// Concrete service modules land in follow-up commits. The
-// proto + db crates are the shape; the facade wires them
-// together.
+// Concrete service modules land here. The proto + db crates are
+// the shape; the facade wires them together. `LedgerService` is
+// the first — the `finance-db`-backed impl of the `Ledger`
+// capability trait (post_transaction + balances + history).
+pub use ledger::LedgerService;
 
 pub use finance_proto::*;

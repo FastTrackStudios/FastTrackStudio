@@ -5396,6 +5396,7 @@ dependencies = [
 name = "finance"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "async-trait",
  "chrono",
  "finance-db",
