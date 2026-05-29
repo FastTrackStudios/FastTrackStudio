@@ -251,6 +251,16 @@ impl<P: ClapPlugin> GuiContext for WrapperGuiContext<P> {
     fn set_state(&self, state: PluginState) {
         self.wrapper.set_state_object_from_gui(state)
     }
+
+    fn rescan_param_info(&self) {
+        let task_posted = self.wrapper.schedule_gui(Task::RescanParamInfo);
+        crate::nice_debug_assert!(task_posted, "Task queue full, param info rescan not sent");
+    }
+
+    fn rescan_param_all(&self) {
+        let task_posted = self.wrapper.schedule_gui(Task::RescanParamAll);
+        crate::nice_debug_assert!(task_posted, "Task queue full, param rescan-all not sent");
+    }
 }
 
 /// A remote control section. The plugin can fill this with information for one or more pages.

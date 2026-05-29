@@ -1,5 +1,7 @@
 //! Traits for working with plugin editors.
 
+pub mod embedded;
+
 use bitflags::bitflags;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::any::Any;
@@ -7,6 +9,11 @@ use std::ffi::c_void;
 use std::sync::Arc;
 
 use crate::context::gui::GuiContext;
+
+// Re-export embedded editor types so they're reachable as `nice_plug_core::editor::*`.
+pub use embedded::{
+    EmbedBitmap, EmbedContext, EmbedDrawInfo, EmbedMouseEvent, EmbedSizeHints, EmbeddedEditor,
+};
 
 /// An editor for a [`Plugin`][crate::plugin::Plugin].
 pub trait Editor: Send {
