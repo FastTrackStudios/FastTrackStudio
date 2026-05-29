@@ -1050,7 +1050,7 @@ async fn main() -> Result<()> {
     run_rpc_command(&daw, cli.command, cli.json).await
 }
 
-async fn run_rpc_command(daw: daw::rpc::Daw, command: Command, json: bool) -> Result<()> {
+async fn run_rpc_command(daw: &daw::rpc::Daw, command: Command, json: bool) -> Result<()> {
     match command {
         Command::Info => daw_cli::cmd_info(daw, json).await?,
         Command::Tracks => daw_cli::cmd_tracks(daw, json).await?,
