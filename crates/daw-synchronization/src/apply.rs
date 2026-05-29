@@ -10,8 +10,9 @@ use std::sync::Mutex;
 use crate::{SyncDomain, SyncEvent};
 use daw::rpc::Daw;
 use daw::service::{
-    FxChainContext, FxEvent, ItemEvent, MarkerEvent, ProjectContext, RegionEvent, RoutingEvent,
-    TakeEvent, TempoMapEvent, TrackEvent, TrackRef, Transport, routing::RouteType,
+    FxChainContext, FxEvent, ItemEvent, MarkerEvent, ProjectContext, RegionEvent,
+    ReorderTracksBehavior, RoutingEvent, TakeEvent, TempoMapEvent, TrackEvent, TrackRef, Transport,
+    routing::RouteType,
 };
 use tracing::{debug, info, warn};
 
@@ -536,8 +537,10 @@ async fn apply_track(
             let visible = *visible;
             apply_track_mutation(daw, ctx, guid, move |handle| {
                 Box::pin(async move {
-                    let _ = (handle, visible);
-                    todo!("TrackHandle::set_visible_in_tcp not yet available on daw facade")
+                    let current = handle.info().await?;
+                    handle
+                        .set_visibility(visible, current.visible_in_mixer)
+                        .await
                 })
             })
             .await;
@@ -547,8 +550,8 @@ async fn apply_track(
             let visible = *visible;
             apply_track_mutation(daw, ctx, guid, move |handle| {
                 Box::pin(async move {
-                    let _ = (handle, visible);
-                    todo!("TrackHandle::set_visible_in_mixer not yet available on daw facade")
+                    let current = handle.info().await?;
+                    handle.set_visibility(current.visible_in_tcp, visible).await
                 })
             })
             .await;
@@ -593,14 +596,83 @@ async fn apply_track(
             guid, new_index, ..
         } => {
             suppression.suppress(SuppressionKey::track(&resolve(guid), "moved"));
-            apply_track_mutation(daw, ctx, guid, |handle| {
-                let new_index = *new_index;
-                Box::pin(async move {
-                    let _ = (handle, new_index);
-                    todo!("TrackHandle::move_to_index not yet available on daw facade")
-                })
-            })
-            .await;
+            move_track_to_index(daw, ctx, guid, *new_index).await;
+        }
+    }
+}
+
+async fn move_track_to_index(daw: &Daw, ctx: &ProjectContext, remote_guid: &str, new_index: u32) {
+    let local_guid = resolve_guid(remote_guid);
+    let project = match resolve_project(daw, ctx).await {
+        Some(p) => p,
+        None => return,
+    };
+    let tracks = project.tracks();
+
+    let selected_guids = match tracks.all().await {
+        Ok(tracks) => tracks
+            .into_iter()
+            .filter(|track| track.selected)
+            .map(|track| track.guid)
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            warn!("Failed to read track selection before move: {e}");
+            Vec::new()
+        }
+    };
+
+    let handle = match tracks.by_guid(&local_guid).await {
+        Ok(Some(handle)) => handle,
+        Ok(None) => {
+            warn!(
+                "Track not found for move: {}",
+                &remote_guid[..8.min(remote_guid.len())]
+            );
+            return;
+        }
+        Err(e) => {
+            warn!(
+                "Failed to resolve track {} for move: {e}",
+                &remote_guid[..8.min(remote_guid.len())]
+            );
+            return;
+        }
+    };
+
+    if let Err(e) = tracks.clear_selection().await {
+        warn!("Failed to clear selection before moving track: {e}");
+        return;
+    }
+    if let Err(e) = handle.select().await {
+        warn!("Failed to select track before move: {e}");
+        return;
+    }
+    if let Err(e) = tracks
+        .reorder_selected(new_index, ReorderTracksBehavior::Normal)
+        .await
+    {
+        warn!("Failed to move track to index {new_index}: {e}");
+    }
+
+    if let Err(e) = tracks.clear_selection().await {
+        warn!("Failed to clear temporary move selection: {e}");
+        return;
+    }
+    for guid in selected_guids {
+        match tracks.by_guid(&guid).await {
+            Ok(Some(handle)) => {
+                if let Err(e) = handle.select().await {
+                    warn!(
+                        "Failed to restore selected track {}: {e}",
+                        &guid[..8.min(guid.len())]
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => warn!(
+                "Failed to restore selected track {}: {e}",
+                &guid[..8.min(guid.len())]
+            ),
         }
     }
 }
