@@ -38,3 +38,10 @@ vox.workspace = true
 facet.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# Real entity + two interchangeable backends, to show that a
+# `#[derive(Entity)]` repo participates in the layer system exactly like
+# the hand-written rpc traits above.
+example-proto.workspace = true
+example-memory.workspace = true
+example-stub-backend.workspace = true

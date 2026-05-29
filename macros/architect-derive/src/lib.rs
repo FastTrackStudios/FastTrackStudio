@@ -287,6 +287,100 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         quote! {}
     };
 
+    // ── Repo as a Layer service ──
+    //
+    // The `<Entity>Repo` trait is an all-async `#[vox::service]`, exactly
+    // the shape `#[architect::rpc]` turns into a composable `Service`
+    // token. Emit the same surface for repos so they drop into a
+    // `layers![…]` bundle and `.provide(backend)` / `.into_router()` like
+    // any other service. Because several entities share one module, the
+    // token is uniquely named `<Entity>RepoLayer` (not the bare `Service`
+    // that rpc-derive — one trait per module — can get away with).
+    //
+    // We reference the identifiers `#[vox::service]` emits from the repo
+    // trait directly: `<Entity>RepoDispatcher::new(backend)` (the vox
+    // Handler; architect's blanket `DynHandler` covers it) and the
+    // `<snake>_service_descriptor()` free fn.
+    let repo_layer = if container.emit_repo {
+        let layer_token = format_ident!("{}Layer", repo_ident);
+        let repo_snake = repo_ident.to_string().to_snake_case();
+        let descriptor_fn = format_ident!("{}_service_descriptor", repo_snake);
+        let dispatcher_ident = format_ident!("{}Dispatcher", repo_ident);
+        let layer_fn = format_ident!("{}_layer", repo_snake);
+        quote! {
+            /// Deferred-bind Layer token for the repository service. Acts
+            /// as a one-element [`architect::Layer`]; compose it with
+            /// [`architect::Layer::merge`] and bind a backend at
+            /// [`architect::Layer::provide`] time. Any backend that
+            /// implements `#repo_ident` (the SeaORM storage, an in-memory
+            /// repo, a third-party impl) is interchangeable here.
+            #[cfg(feature = "vox")]
+            #[derive(Debug, Default, Clone, Copy)]
+            #vis struct #layer_token;
+
+            #[cfg(feature = "vox")]
+            impl ::architect::BindAny for #layer_token {
+                fn descriptor(&self) -> &'static ::architect::vox::ServiceDescriptor {
+                    #descriptor_fn()
+                }
+            }
+
+            #[cfg(feature = "vox")]
+            impl<B> ::architect::Bind<B> for #layer_token
+            where
+                B: #repo_ident
+                    + ::core::clone::Clone
+                    + ::core::marker::Send
+                    + ::core::marker::Sync
+                    + 'static,
+            {
+                fn bind_into(self, backend: &B, router: &mut ::architect::LayerRouter) {
+                    use ::architect::LayerSink as _;
+                    router.add_mounted(::architect::Mounted::new(
+                        #descriptor_fn(),
+                        #dispatcher_ident::new(backend.clone()),
+                    ));
+                }
+            }
+
+            #[cfg(feature = "vox")]
+            impl<R> ::architect::Append<R> for #layer_token {
+                type Output = ::architect::Cons<#layer_token, R>;
+                fn append(self, rhs: R) -> Self::Output {
+                    ::architect::Cons::new(self, rhs)
+                }
+            }
+
+            #[cfg(feature = "vox")]
+            impl ::architect::Descriptors for #layer_token {
+                fn collect(
+                    &self,
+                    out: &mut ::std::vec::Vec<&'static ::architect::vox::ServiceDescriptor>,
+                ) {
+                    out.push(::architect::BindAny::descriptor(self));
+                }
+            }
+
+            /// Immediate-bind shortcut: wrap a backend in the repo's vox
+            /// dispatcher and return a `Mounted`, ready to drop into
+            /// someone else's bundle via [`architect::Layer::merge`]
+            /// (e.g. to override the repo impl for one service).
+            #[cfg(feature = "vox")]
+            #vis fn #layer_fn<B>(backend: B) -> ::architect::Mounted
+            where
+                B: #repo_ident
+                    + ::core::clone::Clone
+                    + ::core::marker::Send
+                    + ::core::marker::Sync
+                    + 'static,
+            {
+                ::architect::Mounted::new(#descriptor_fn(), #dispatcher_ident::new(backend))
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     // ── Fake-data seeding helper ──
     //
     // Emit a free `seed_fake_<entity>` function that loops, generates
@@ -348,6 +442,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         #update_struct
         #list_struct
         #repo_trait
+        #repo_layer
         #seed_fn
         #server_block
     })
@@ -374,6 +469,8 @@ fn build_server_block(
         .clone()
         .unwrap_or_else(|| ident.to_string().to_snake_case());
     let storage_mod = format_ident!("__{}_storage", ident.to_string().to_snake_case());
+    // The repo's Layer token, emitted at parent scope in `expand`.
+    let layer_token = format_ident!("{}Layer", repo_ident);
 
     // Model fields with sea_orm attrs.
     let model_fields = parsed.iter().map(|f| {
@@ -595,6 +692,17 @@ fn build_server_block(
         // can name `__<snake>_storage::Entity` directly.
         #[cfg(feature = "server")]
         #vis use #storage_mod::#storage_ident;
+
+        // The generated storage backend is the canonical single-service
+        // backend: it provides exactly the repo. Declaring its `Services`
+        // bundle lets `<Entity>RepoStorage::new(db).into_router()` work
+        // out of the box, swappable with any other repo backend.
+        #[cfg(all(feature = "server", feature = "vox"))]
+        impl<C: ::architect::storage::DbConn> ::architect::Services for #storage_ident<C> {
+            fn layers() -> impl ::architect::Layer<Self> {
+                ::architect::layers![#layer_token]
+            }
+        }
     }
 }
 
