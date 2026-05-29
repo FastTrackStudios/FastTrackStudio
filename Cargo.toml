@@ -850,10 +850,30 @@ strip = "debuginfo"
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
-# NOTE: the former `[patch."https://github.com/bearcove/vox"]` block
-# (which redirected bearcove/vox → the Codys-Wright/vox mirror fork for
-# SourceId unification) was removed — the workspace + architect now both
-# depend on bearcove/vox directly at the same rev, so no patch is needed.
+# Unify vox onto a single source. `architect` (../architect) pins vox at
+# the starcommand fork (rev f31f1040 — the uuid-opaque-scalar tip, which
+# carries the Uuid/chrono opaque-scalar serialization fix), while the
+# workspace deps point at bearcove/vox. Two identical-content vox copies
+# means architect's generated `Handler` impls don't unify across them and
+# every proto's dispatcher fails the trait bound. Redirect bearcove/vox
+# at the published starcommand rev so the graph carries exactly one
+# `vox-types` — the same source+rev architect already uses (no local path
+# dep, so this is portable to fresh clones / CI).
+[patch."https://github.com/bearcove/vox"]
+vox                = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-core           = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-codegen        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit            = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit-abi        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-jit-cal        = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-macros-core    = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-macros-parse   = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-postcard       = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-schema         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-service-macros = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types          = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket      = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+facet-cbor         = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
