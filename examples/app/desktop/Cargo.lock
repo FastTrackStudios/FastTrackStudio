@@ -126,6 +126,7 @@ dependencies = [
  "facet",
  "facet-core",
  "futures",
+ "gloo-timers",
  "moire 1.0.1 (git+https://git.starcommand.live/codywright/moire?rev=aea86f91f84cdf6052e4310e8a0541d87f37c624)",
  "thiserror 2.0.18",
  "tokio",
@@ -134,6 +135,8 @@ dependencies = [
  "vox",
  "vox-core",
  "vox-types",
+ "wasm-bindgen-futures",
+ "web-time",
 ]
 
 [[package]]
@@ -6557,6 +6560,16 @@ name = "web-sys"
 version = "0.3.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d621441cfc37b84979402712047321980c178f299193a3589d05b99e8763436"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

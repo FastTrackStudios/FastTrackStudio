@@ -85,6 +85,24 @@ pub mod local;
 #[cfg(all(feature = "local", not(target_arch = "wasm32")))]
 pub use local::{LocalServer, serve_local};
 
+// Platform layer — a portable `Clock` (async `sleep` + monotonic `now`) and
+// task `spawn`, abstracted native (tokio) <-> wasm (browser timers), plus a
+// deterministic `TestClock`. Centralizes the cfg-split the rest of the crate
+// scatters and is the foundation `schedule` waits on.
+#[cfg(feature = "platform")]
+pub mod platform;
+#[cfg(feature = "platform")]
+pub use platform::{Clock, SystemClock, TestClock, now, sleep, spawn};
+
+// Schedule layer — composable retry/repeat policies (exponential backoff,
+// jitter, caps, recurrence limits) + drivers that run a plain
+// `async FnMut() -> Result` under them. Sleeps between attempts through a
+// `platform::Clock`.
+#[cfg(feature = "schedule")]
+pub mod schedule;
+#[cfg(feature = "schedule")]
+pub use schedule::{Schedule, repeat, retry};
+
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach
 // `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
 #[cfg(feature = "fake")]

@@ -58,10 +58,32 @@ impl ExampleClients {
     }
 }
 
-/// Establish one typed client over a fresh WebSocket. vox's `establish`
-/// consumes the link and yields exactly one client; the server's `/vox`
-/// acceptor routes by service name, so each client gets its own socket.
+/// Establish one typed client over a fresh WebSocket, **resiliently**.
+///
+/// A just-booting or briefly-flaky server shouldn't fail the first frame,
+/// so the connect+handshake is wrapped in [`architect::schedule::retry`]
+/// under an exponential-backoff-with-jitter policy: ~200ms, 400ms, 800ms,
+/// … (±20% jitter, capped at 5s), up to 5 retries. The policy's clock is
+/// platform-portable — `tokio::time` on desktop, browser timers on web —
+/// so the same resilient connect works on both targets.
 async fn establish_ws<C>(url: &str) -> Result<C, String>
+where
+    C: vox_core::FromVoxSession,
+{
+    architect::schedule::retry(
+        || establish_ws_once::<C>(url),
+        architect::Schedule::exponential(std::time::Duration::from_millis(200))
+            .max_delay(std::time::Duration::from_secs(5))
+            .jittered()
+            .take(5),
+    )
+    .await
+}
+
+/// One connect attempt. vox's `establish` consumes the link and yields
+/// exactly one client; the server's `/vox` acceptor routes by service
+/// name, so each client gets its own socket.
+async fn establish_ws_once<C>(url: &str) -> Result<C, String>
 where
     C: vox_core::FromVoxSession,
 {

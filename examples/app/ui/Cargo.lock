@@ -72,12 +72,15 @@ dependencies = [
  "eyre",
  "facet",
  "facet-core",
+ "gloo-timers",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
  "vox",
  "vox-core",
+ "wasm-bindgen-futures",
+ "web-time",
 ]
 
 [[package]]
@@ -3409,6 +3412,16 @@ name = "web-sys"
 version = "0.3.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b572dff8bcf38bad0fa19729c89bb5748b2b9b1d8be70cf90df697e3a8f32aa"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
