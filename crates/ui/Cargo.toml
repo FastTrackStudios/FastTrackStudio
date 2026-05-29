@@ -25,6 +25,9 @@ fts-ui = { workspace = true, features = ["router"] }
 editor.workspace = true
 view.workspace = true
 view-calendar.workspace = true
+# Knowledge-graph view (the `/wiki` graph) — force-directed map of the
+# vault's `[[wikilink]]` web, built client-side from file contents.
+view-knowledge-graph.workspace = true
 task-ui.workspace = true
 scheduling-proto = { workspace = true, default-features = false }
 scheduling-ui.workspace = true

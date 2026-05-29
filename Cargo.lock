@@ -16220,6 +16220,7 @@ dependencies = [
  "vault-proto",
  "view",
  "view-calendar",
+ "view-knowledge-graph",
  "vox",
  "vox-core",
  "vox-websocket",
@@ -16794,6 +16795,16 @@ dependencies = [
  "serde_json",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "view-knowledge-graph"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "fts-ui",
+ "serde",
+ "tracing",
 ]
 
 [[package]]

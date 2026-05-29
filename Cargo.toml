@@ -458,6 +458,7 @@ view-kanban = { path = "features/view/view-kanban" }
 view-calendar = { path = "features/view/view-calendar" }
 view-table = { path = "features/view/view-table" }
 view-heatmap = { path = "features/view/view-heatmap" }
+view-knowledge-graph = { path = "features/view/view-knowledge-graph" }
 # Scheduling — personal day-templates + cal.com-style bookable
 # event types, sync over CalDAV (future). Trio + facade follow the
 # vault pattern; `scheduling-proto` is wasm-clean.

@@ -57,6 +57,58 @@ pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)
     collect(futures_util::future::join_all(futs).await)
 }
 
+/// Fetch one org's vault markdown as `WikiFile`s for the knowledge
+/// graph: pull the manifest, then read every `.md` file concurrently
+/// over the one socket. Pure graph-building happens caller-side.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_wiki_files(
+    slug: &str,
+) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
+    use view_knowledge_graph::WikiFile;
+
+    let client =
+        crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    let manifest = client
+        .manifest("default".to_owned())
+        .await
+        .map_err(|e| format!("manifest: {e:?}"))?;
+    let md_paths: Vec<String> = manifest
+        .files
+        .into_iter()
+        .map(|f| f.path)
+        .filter(|p| p.ends_with(".md"))
+        .collect();
+
+    let futs = md_paths.into_iter().map(|path| {
+        let c = client.clone();
+        async move {
+            let bytes = c.get_file("default".to_owned(), path.clone()).await.ok()?;
+            let name = std::path::Path::new(&path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&path)
+                .to_string();
+            Some(WikiFile {
+                name,
+                path,
+                content: String::from_utf8_lossy(&bytes.0).into_owned(),
+            })
+        }
+    });
+    Ok(futures_util::future::join_all(futs)
+        .await
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_wiki_files(
+    _slug: &str,
+) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
 /// Locate a single project by id across the selected orgs, returning it
 /// together with the slug of the org that owns it. Used by the project
 /// detail page so it works regardless of which org is in view.
