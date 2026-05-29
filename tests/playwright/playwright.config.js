@@ -2,40 +2,47 @@
 const { defineConfig, devices } = require("@playwright/test");
 
 /**
- * Playwright config for Task-architect.
+ * Playwright config for the Task web app (`apps/web`).
  *
- * Two background servers run in parallel for the duration of the
- * test run:
+ * Modeled on the sibling `Editor/tests/playwright.config.js` and the
+ * Dioxus repo's own `packages/playwright-tests/`. A single `webServer`
+ * boots `dx serve` (web platform) for the run; tests connect over
+ * `baseURL`. The smoke suite asserts the shell + routes render, so it
+ * does NOT require a running `task-server` — pages render their
+ * loading/empty states when the vox endpoint is absent.
  *
- *   1. task-server on :9090 — vox WebSocket endpoint, seeded with
- *      one project + N tasks before the listener binds.
- *   2. dx serve on :8765 — Dioxus dev server hosting the wasm
- *      bundle. Same port `crates/task-ui::vox_url()` hard-codes,
- *      so the in-page client connects to localhost.
+ * Run (from the repo root):
+ *   nix develop .#playwright
+ *   cd tests/playwright && pnpm install
+ *   pnpm test            # or: pnpm test:headed / pnpm test:ui
  *
- * The pattern mirrors the Dioxus repo's `packages/playwright-tests/
- * playwright.config.js` (webServer array, port-keyed `cwd`,
- * `reuseExistingServer` for local dev).
+ * The dev shell pins Chromium via `playwright-driver.browsers`, so you
+ * do NOT run `playwright install`.
+ *
+ * DATA-DRIVEN TESTS (opt-in): to exercise live tasks/projects, also run
+ * a seeded `task-server` on the port baked into `DEFAULT_VOX_URL`
+ * (`ws://127.0.0.1:18080/vox`, see `crates/ui/src/vox_session.rs`) and
+ * build the web app with `TASK_VOX_URL_WEB` pointing at it. Add it as a
+ * second `webServer` entry when those specs land.
  */
+
+const PORT = parseInt(process.env.PW_PORT || "9100", 10);
+
 module.exports = defineConfig({
   testDir: ".",
-  // Each spec needs the dev servers; we run one at a time so the
-  // shared task-server's CRDT state doesn't see overlapping bursts
-  // from unrelated tests.
+  fullyParallel: false,
   workers: 1,
-  // Realtime assertions can take a moment for the WS round-trip.
-  // 30s per test is plenty for the slice we have today.
-  timeout: 30_000,
-  expect: {
-    // Generous timeout on `expect.poll` / `toHaveText` — the
-    // realtime push is fast in practice but we don't want
-    // flake on a slow CI box.
-    timeout: 10_000,
-  },
+  forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  reporter: process.env.CI ? "list" : "html",
+  // The first run includes a wasm build; keep per-test timeouts sane
+  // (the slow part is the one-time server boot, handled below).
+  timeout: 90_000,
+  expect: { timeout: 10_000 },
   use: {
-    baseURL: "http://localhost:8765",
+    baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
   projects: [
     {
@@ -43,30 +50,17 @@ module.exports = defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: [
-    {
-      // task-server: vox endpoint + seed.
-      // `TASK_SERVER_SEED=1` populates the workspace doc before
-      // the listener binds, so the first browser request finds
-      // tasks.
-      command:
-        "TASK_SERVER_SEED=1 TASK_SERVER_BIND=127.0.0.1:9090 cargo run --release -p task-server",
-      url: "http://127.0.0.1:9090/health",
-      reuseExistingServer: !process.env.CI,
-      timeout: 180_000,
-      cwd: "../..",
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-    {
-      // dx serve: serves the wasm bundle.
-      command: "dx serve --web --addr 127.0.0.1 --port 8765",
-      url: "http://127.0.0.1:8765",
-      reuseExistingServer: !process.env.CI,
-      timeout: 240_000,
-      cwd: "../../apps/web",
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  ],
+  webServer: {
+    // Force the web platform and a fixed port. `dx serve` builds the
+    // wasm bundle and hosts it. cwd is `apps/web` relative to this
+    // config (tests/playwright/).
+    command: `dx serve --platform web --addr 127.0.0.1 --port ${PORT}`,
+    cwd: "../../apps/web",
+    url: `http://127.0.0.1:${PORT}`,
+    // First-time wasm build can be very slow.
+    timeout: 10 * 60 * 1000,
+    reuseExistingServer: !process.env.CI,
+    stdout: "pipe",
+    stderr: "pipe",
+  },
 });
