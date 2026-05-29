@@ -148,6 +148,16 @@ impl EntityCrdt for ExampleEntity {
 //
 // One-line forwarders; the macro will emit this block.
 
+// Layer bundle: the CRDT backend provides the repo service like any
+// other, so `ExampleRepoLoro::into_router()` / `serve_local(loro_repo)`
+// work — a local-first client can serve a Loro-backed repo in-process.
+#[cfg(feature = "vox")]
+impl architect::Services for ExampleRepoLoro {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![example_proto::ExampleRepoLayer]
+    }
+}
+
 impl ExampleRepo for ExampleRepoLoro {
     async fn get(&self, id: Uuid) -> Result<Example, RepoError> {
         self.inner.get(id).await
