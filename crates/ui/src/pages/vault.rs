@@ -1,37 +1,45 @@
-//! `/vault` — browse the org's markdown vault and edit files
-//! live in the rich `editor::Editor` surface.
+//! `/vault` — browse the org's vault as a **virtual-folder
+//! tree** and edit files live in the rich `editor::Editor`.
 //!
-//! Data path mirrors `/projects`: the wasm UI talks to the
-//! server's `/org/<slug>/vox` endpoint through the
-//! architect-emitted [`vault_proto::VaultSyncClient`]. The
-//! left pane lists `.md` files from `manifest` (and creates
-//! new ones); selecting one pulls its bytes via `get_file`
-//! and seeds a fresh [`EditorState`]. Save round-trips through
-//! `put_file` with an `IfMatch::Sha` conditional write so a
-//! concurrent server change surfaces as a [conflict] the user
-//! resolves (reload vs overwrite) rather than a silent
-//! clobber. The conditional sha is the manifest entry's
-//! `sha256` (server-computed), so it always matches the
-//! server's own hashing.
+//! The vault is organized the Obsidian "folder-note" way: each
+//! note's `folder: "[[Parent]]"` frontmatter is a wikilink to a
+//! parent *folder note*. The sidebar builds an expandable tree
+//! from that property (not from physical directories) via the
+//! server's [`folder_index`] rpc, which parses frontmatter once
+//! and returns lightweight [`PageMeta`]s. Folder notes are real
+//! notes: clicking the **name opens the note**, the **chevron
+//! toggles** its children. Notes can be **re-filed** from the
+//! sidebar (a "move to folder" picker rewrites the `folder`
+//! property through [`set_folder`]).
 //!
-//! The server registers exactly one vault per org under the
-//! id `"default"` (`vault::Backend::single("default", …)` in
-//! `apps/server`), so that's the only id we pass.
+//! Editing path is unchanged: selecting a note pulls its bytes
+//! via `get_file`, saves through `put_file` with an
+//! `IfMatch::Sha` conditional write, and surfaces conflicts.
 //!
-//! [conflict]: vault_proto::VaultSyncError::Conflict
+//! The server registers exactly one vault per org under the id
+//! `"default"`.
+//!
+//! [`folder_index`]: vault_proto::VaultSync::folder_index
+//! [`set_folder`]: vault_proto::VaultSync::set_folder
+//! [`PageMeta`]: vault_proto::PageMeta
+
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use dioxus::prelude::*;
 use editor::editor_view::slash::{SlashMenu, SlashState};
 use editor::editor_vim::VimState;
 use editor::{Editor, EditorState, editor_view};
+use fts_ui::lucide_dioxus::{ChevronRight, FileText, Folder};
 use fts_ui::prelude::*;
+use vault_proto::PageMeta;
 
 /// The single vault id the server hosts per org. Referenced
 /// only from the wasm client calls.
 #[cfg(target_arch = "wasm32")]
 const VAULT_ID: &str = "default";
 
-/// A markdown file as shown in the browser pane.
+/// Minimal payload to open a file: its path + last-known sha.
 #[derive(Clone, PartialEq)]
 struct FileMeta {
     path: String,
@@ -39,16 +47,14 @@ struct FileMeta {
 }
 
 /// The server's version of a file we tried to save over.
-/// Surfaced as a banner so the user picks reload or overwrite.
 #[derive(Clone, PartialEq)]
 struct ConflictInfo {
     server_sha: String,
     server_text: String,
 }
 
-/// Outcome of a `put_file` attempt, distinguishing the
-/// load-bearing conflict case from a plain failure. `Saved` /
-/// `Conflict` are only constructed in the wasm client path.
+/// Outcome of a `put_file` attempt. `Saved` / `Conflict` are
+/// only constructed in the wasm client path.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 enum SaveOutcome {
     Saved(String),
@@ -59,14 +65,19 @@ enum SaveOutcome {
     Failed(String),
 }
 
+/// One node of the virtual-folder tree.
+#[derive(Clone, PartialEq)]
+struct TreeNode {
+    meta: PageMeta,
+    children: Vec<usize>,
+    is_folder: bool,
+}
+
 #[component]
 pub fn VaultView() -> Element {
-    let mut files = use_resource(|| async move { fetch_manifest().await });
+    let mut files = use_resource(|| async move { fetch_folder_index().await });
 
-    // Open file + its editing state. `sha` is the
-    // last-known-server hash threaded into the conditional
-    // write; `saved_text` is the content as of the last
-    // load/save, the baseline for the dirty check.
+    // Open file + its editing state.
     let mut selected = use_signal(|| None::<String>);
     let mut state = use_signal(|| EditorState::new(String::new()));
     let mut sha = use_signal(|| None::<String>);
@@ -76,25 +87,29 @@ pub fn VaultView() -> Element {
     let mut conflict = use_signal(|| None::<ConflictInfo>);
     let mut new_name = use_signal(String::new);
 
-    // Editor extensions — the same standard markdown setup the
-    // turnkey `editor::EditorApp` uses, reused here so the
-    // persistent surface behaves identically to the demo.
+    // Tree UI state. `collapsed` holds folders the user has
+    // closed — default-empty means the whole tree starts
+    // expanded. `move_target` is the path of a note being
+    // re-filed (drives the folder picker). `create_parent` is
+    // the folder a new note will be filed under.
+    let collapsed = use_signal(HashSet::<String>::new);
+    let mut move_target = use_signal(|| None::<String>);
+    let mut create_parent = use_signal(|| None::<String>);
+
+    // Editor extensions — same standard markdown setup as the
+    // turnkey `editor::EditorApp`.
     let keymap = use_signal(editor::standard_markdown_keymap);
     let vim = use_signal(VimState::new);
     let slash = use_signal(|| None::<SlashState>);
 
-    // Dirty tracking: recompute against the saved baseline
-    // whenever the document changes. Cheap for note-sized
-    // files; isolated to this effect so the page body doesn't
-    // re-render on every keystroke.
     use_effect(move || {
         let cur = state.read().doc.to_string();
         dirty.set(cur != *saved_text.read());
     });
 
-    // Open a file: pull bytes, seed a fresh state, remember the
+    // Open a note: pull bytes, seed a fresh state, remember the
     // server sha so the next save is a conditional write.
-    let open_file = move |meta: FileMeta| {
+    let on_open = use_callback(move |meta: FileMeta| {
         spawn(async move {
             status.set(String::new());
             conflict.set(None);
@@ -109,10 +124,27 @@ pub fn VaultView() -> Element {
                 Err(e) => status.set(format!("Load failed: {e}")),
             }
         });
-    };
+    });
 
-    // Save the current buffer. `force` skips the sha guard —
-    // used by the conflict banner's overwrite action.
+    // Re-file a note under `parent` (None = root) via set_folder,
+    // then refresh the tree.
+    let do_move = use_callback(
+        move |(path, prev_sha, parent): (String, String, Option<String>)| {
+            spawn(async move {
+                status.set("Moving…".to_owned());
+                match move_to_folder(path, parent, prev_sha).await {
+                    Ok(()) => {
+                        status.set("Moved".to_owned());
+                        move_target.set(None);
+                        files.restart();
+                    }
+                    Err(e) => status.set(format!("Move failed: {e}")),
+                }
+            });
+        },
+    );
+
+    // Save the current buffer. `force` skips the sha guard.
     let do_save = move |force: bool| {
         let Some(path) = selected.peek().clone() else {
             return;
@@ -144,8 +176,8 @@ pub fn VaultView() -> Element {
         });
     };
 
-    // Create a new empty file, then open it. Refreshes the
-    // manifest so the new entry shows in the list.
+    // Create a new empty note. If a folder was chosen (via a
+    // folder row's "+"), file it there right after creating.
     let create_file = move || {
         let mut name = new_name.peek().trim().to_owned();
         if name.is_empty() {
@@ -154,14 +186,27 @@ pub fn VaultView() -> Element {
         if !name.to_ascii_lowercase().ends_with(".md") {
             name.push_str(".md");
         }
+        let parent = create_parent.peek().clone();
         spawn(async move {
             status.set("Creating…".to_owned());
             match create_new_file(name.clone()).await {
                 Ok(new_sha) => {
                     new_name.set(String::new());
+                    create_parent.set(None);
+                    let mut open_sha = new_sha;
+                    if let Some(parent) = parent {
+                        match move_to_folder(name.clone(), Some(parent), open_sha.clone()).await {
+                            Ok(()) => {}
+                            Err(e) => status.set(format!("Filed, but move failed: {e}")),
+                        }
+                        // The folder write changed the sha; reload by
+                        // path on open below handles it, but seed an
+                        // empty buffer either way.
+                        open_sha = String::new();
+                    }
                     saved_text.set(String::new());
                     state.set(EditorState::new(String::new()));
-                    sha.set(Some(new_sha));
+                    sha.set(Some(open_sha));
                     selected.set(Some(name));
                     dirty.set(false);
                     conflict.set(None);
@@ -173,8 +218,27 @@ pub fn VaultView() -> Element {
         });
     };
 
-    let list = match &*files.read_unchecked() {
-        Some(Ok(rows)) => render_file_list(rows, selected, move |meta| open_file(meta)),
+    // Build the tree from the folder index.
+    let tree = use_memo(move || match &*files.read_unchecked() {
+        Some(Ok(pages)) => Some(Rc::new(build_tree(pages))),
+        _ => None,
+    });
+
+    let sidebar_body = match &*files.read_unchecked() {
+        Some(Ok(_)) => {
+            let Some(t) = tree() else { unreachable!() };
+            let (nodes, roots) = (Rc::new(t.0.clone()), t.1.clone());
+            rsx! {
+                nav { class: "flex flex-col gap-0.5 px-2 pb-4",
+                    if roots.is_empty() {
+                        div { class: "px-2 py-1 text-sm text-muted-foreground", "Empty vault. Create a note above." }
+                    }
+                    for &root in roots.iter() {
+                        {render_node(nodes.clone(), root, 0, collapsed, selected, on_open, move_target, create_parent)}
+                    }
+                }
+            }
+        }
         Some(Err(e)) => rsx! {
             div { class: "px-3 py-2 text-sm text-destructive", "Couldn't reach the vault service: {e}" }
         },
@@ -186,22 +250,40 @@ pub fn VaultView() -> Element {
         },
     };
 
+    // Folder targets for the move picker: every node that is a
+    // folder, by basename + title.
+    let folder_targets: Vec<(String, String)> = tree()
+        .map(|t| {
+            t.0.iter()
+                .filter(|n| n.is_folder)
+                .map(|n| (n.meta.basename.clone(), n.meta.title.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let has_file = selected.read().is_some();
     let current = selected.read().clone().unwrap_or_default();
     let is_dirty = *dirty.read();
     let status_msg = status.read().clone();
     let conflict_open = conflict.read().is_some();
+    let moving = move_target.read().clone();
+    let create_under = create_parent.read().clone();
 
     rsx! {
         div { class: "flex h-full min-h-[80vh]",
-            // ── File browser ──────────────────────────────
+            // ── Virtual-folder tree ───────────────────────
             aside { class: "flex w-72 shrink-0 flex-col overflow-y-auto border-r border-border bg-muted/30",
                 div { class: "flex flex-col gap-2 px-3 py-3",
                     Heading { level: HeadingLevel::H3, "Vault" }
+                    if let Some(parent) = create_under.clone() {
+                        Text { variant: TextVariant::Muted, class: "text-xs",
+                            "New note will be filed under {parent}."
+                        }
+                    }
                     div { class: "flex items-center gap-2",
                         Input {
                             value: new_name,
-                            placeholder: "New file…",
+                            placeholder: "New note…",
                             on_change: move |_| {},
                         }
                         Button {
@@ -212,16 +294,50 @@ pub fn VaultView() -> Element {
                         }
                     }
                 }
-                {list}
+                // ── Move-to-folder picker ─────────────────
+                if let Some(path) = moving.clone() {
+                    div { class: "mx-2 mb-2 rounded border border-border bg-background p-2",
+                        div { class: "flex items-center justify-between gap-2 pb-1",
+                            Text { variant: TextVariant::Muted, class: "text-xs truncate", "Move to…" }
+                            button {
+                                class: "text-xs text-muted-foreground hover:text-foreground",
+                                onclick: move |_| move_target.set(None),
+                                "Cancel"
+                            }
+                        }
+                        div { class: "flex max-h-48 flex-col gap-0.5 overflow-y-auto",
+                            {
+                                let p = path.clone();
+                                rsx! {
+                                    button {
+                                        class: "rounded px-2 py-1 text-left text-sm hover:bg-accent/50",
+                                        onclick: move |_| do_move.call((p.clone(), String::new(), None)),
+                                        "(Root)"
+                                    }
+                                }
+                            }
+                            for (base, title) in folder_targets.iter().cloned() {
+                                {
+                                    let p = path.clone();
+                                    let b = base.clone();
+                                    rsx! {
+                                        button {
+                                            key: "{base}",
+                                            class: "truncate rounded px-2 py-1 text-left text-sm hover:bg-accent/50",
+                                            onclick: move |_| do_move.call((p.clone(), String::new(), Some(b.clone()))),
+                                            "{title}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                {sidebar_body}
             }
             // ── Editor pane ───────────────────────────────
             div {
                 class: "flex min-w-0 flex-1 flex-col",
-                // Mod-S anywhere in the pane saves. The editor
-                // doesn't bind or stop-propagate Ctrl/Cmd+S, so
-                // the bubbled keydown reaches us here; we
-                // preventDefault to suppress the browser's save
-                // dialog.
                 onkeydown: move |evt: Event<KeyboardData>| {
                     let m = evt.modifiers();
                     if (m.ctrl() || m.meta()) && evt.key().to_string() == "s" {
@@ -235,11 +351,7 @@ pub fn VaultView() -> Element {
                             span { class: "size-2 shrink-0 rounded-full bg-primary", title: "Unsaved changes" }
                         }
                         div { class: "min-w-0 truncate text-sm font-medium",
-                            if has_file {
-                                "{current}"
-                            } else {
-                                "No file selected"
-                            }
+                            if has_file { "{current}" } else { "No file selected" }
                         }
                     }
                     div { class: "flex items-center gap-3",
@@ -255,7 +367,6 @@ pub fn VaultView() -> Element {
                         }
                     }
                 }
-                // ── Conflict banner ───────────────────────
                 if conflict_open {
                     div { class: "flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm",
                         span { "This file changed on the server since you opened it." }
@@ -302,7 +413,7 @@ pub fn VaultView() -> Element {
                     } else {
                         div { class: "flex h-full items-center justify-center p-8",
                             Text { variant: TextVariant::Muted,
-                                "Select a file from the left to start editing."
+                                "Select a note from the tree to start editing."
                             }
                         }
                     }
@@ -313,71 +424,192 @@ pub fn VaultView() -> Element {
     }
 }
 
-/// Render the markdown-file list. `on_open` fires with the
-/// selected [`FileMeta`] when a row is clicked.
-fn render_file_list(
-    rows: &[FileMeta],
+/// Render one tree node (and, when a folder is expanded, its
+/// children) recursively. Folders: chevron toggles `collapsed`,
+/// the name opens the folder note, "+" files a new note under
+/// it. Leaves: the name opens the note. Every row has a hover
+/// "move" affordance.
+#[allow(clippy::too_many_arguments)]
+fn render_node(
+    nodes: Rc<Vec<TreeNode>>,
+    idx: usize,
+    depth: usize,
+    mut collapsed: Signal<HashSet<String>>,
     selected: Signal<Option<String>>,
-    on_open: impl FnMut(FileMeta) + Clone + 'static,
+    on_open: Callback<FileMeta>,
+    mut move_target: Signal<Option<String>>,
+    mut create_parent: Signal<Option<String>>,
 ) -> Element {
-    if rows.is_empty() {
-        return rsx! {
-            div { class: "px-3 py-2 text-sm text-muted-foreground",
-                "No markdown files yet. Create one above."
-            }
-        };
-    }
-    let active = selected.read().clone();
+    let node = nodes[idx].clone();
+    let key = node.meta.basename.to_lowercase();
+    let is_expanded = !collapsed.read().contains(&key);
+    let is_active = selected.read().as_deref() == Some(node.meta.path.as_str());
+    let indent = depth * 14 + 8;
+
+    let open_meta = FileMeta {
+        path: node.meta.path.clone(),
+        sha256: node.meta.sha256.clone(),
+    };
+    let move_path = node.meta.path.clone();
+    let create_base = node.meta.basename.clone();
+    let toggle_key = key.clone();
+
+    let row_cls = if is_active {
+        "group flex items-center gap-1 rounded pr-1 text-sm bg-accent text-accent-foreground"
+    } else {
+        "group flex items-center gap-1 rounded pr-1 text-sm hover:bg-accent/50"
+    };
+
     rsx! {
-        nav { class: "flex flex-col gap-0.5 px-2 pb-4",
-            for f in rows.iter() {
-                {
-                    let meta = f.clone();
-                    let is_active = active.as_deref() == Some(meta.path.as_str());
-                    let mut open = on_open.clone();
-                    let cls = if is_active {
-                        "w-full truncate rounded px-2 py-1 text-left text-sm bg-accent text-accent-foreground"
-                    } else {
-                        "w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-accent/50"
-                    };
-                    rsx! {
-                        button {
-                            key: "{meta.path}",
-                            class: cls,
-                            onclick: move |_| open(meta.clone()),
-                            "{f.path}"
+        div {
+            div { class: row_cls, style: "padding-left: {indent}px",
+                if node.is_folder {
+                    button {
+                        class: "flex size-5 shrink-0 items-center justify-center text-muted-foreground",
+                        onclick: move |_| {
+                            let mut c = collapsed.write();
+                            if !c.remove(&toggle_key) { c.insert(toggle_key.clone()); }
+                        },
+                        span {
+                            class: if is_expanded { "transition-transform rotate-90" } else { "transition-transform" },
+                            ChevronRight { size: 14 }
                         }
                     }
+                    span { class: "flex size-4 shrink-0 items-center justify-center text-muted-foreground",
+                        Folder { size: 14 }
+                    }
+                } else {
+                    span { class: "ml-5 flex size-4 shrink-0 items-center justify-center text-muted-foreground",
+                        FileText { size: 14 }
+                    }
+                }
+                button {
+                    class: "min-w-0 flex-1 truncate py-1 text-left",
+                    onclick: move |_| on_open.call(open_meta.clone()),
+                    "{node.meta.title}"
+                }
+                if node.is_folder {
+                    button {
+                        class: "hidden size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground group-hover:flex",
+                        title: "New note in this folder",
+                        onclick: move |_| create_parent.set(Some(create_base.clone())),
+                        "+"
+                    }
+                }
+                button {
+                    class: "hidden size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground group-hover:flex",
+                    title: "Move to folder",
+                    onclick: move |_| move_target.set(Some(move_path.clone())),
+                    "⋯"
+                }
+            }
+            if node.is_folder && is_expanded {
+                for &child in node.children.iter() {
+                    {render_node(nodes.clone(), child, depth + 1, collapsed, selected, on_open, move_target, create_parent)}
                 }
             }
         }
     }
 }
 
-/// List the vault's `.md` files, sorted by path.
-async fn fetch_manifest() -> Result<Vec<FileMeta>, String> {
+/// Build the virtual-folder tree from the flat page list.
+/// Parent = each page's `folder` (already a basename); roots are
+/// pages with no/unresolved parent. Cycles are broken (the node
+/// falls back to a root). Children sort folders-first, then by
+/// title.
+fn build_tree(pages: &[PageMeta]) -> (Vec<TreeNode>, Vec<usize>) {
+    let mut nodes: Vec<TreeNode> = pages
+        .iter()
+        .map(|m| TreeNode {
+            meta: m.clone(),
+            children: Vec::new(),
+            is_folder: false,
+        })
+        .collect();
+
+    // basename (lowercased) → first node with it.
+    let mut by_base: HashMap<String, usize> = HashMap::new();
+    for (i, n) in nodes.iter().enumerate() {
+        by_base.entry(n.meta.basename.to_lowercase()).or_insert(i);
+    }
+
+    // Resolve each node's parent index (None = root). Self-parent
+    // and unknown targets resolve to root.
+    let parent_of: Vec<Option<usize>> = (0..nodes.len())
+        .map(|i| {
+            let f = nodes[i].meta.folder.to_lowercase();
+            if f.is_empty() {
+                return None;
+            }
+            match by_base.get(&f) {
+                Some(&p) if p != i => Some(p),
+                _ => None,
+            }
+        })
+        .collect();
+
+    // A node is a tree child only if walking its ancestry reaches
+    // a root within N steps — otherwise it's in a cycle and we
+    // treat it as a root so the tree stays finite.
+    let max = nodes.len();
+    let resolves = |start: usize| -> bool {
+        let mut cur = start;
+        for _ in 0..=max {
+            match parent_of[cur] {
+                None => return true,
+                Some(p) => cur = p,
+            }
+        }
+        false
+    };
+
+    let mut roots = Vec::new();
+    for (i, parent) in parent_of.iter().enumerate() {
+        match parent {
+            Some(p) if resolves(i) => nodes[*p].children.push(i),
+            _ => roots.push(i),
+        }
+    }
+
+    for n in &mut nodes {
+        let t = n.meta.page_type.to_lowercase();
+        n.is_folder = !n.children.is_empty() || t == "folder" || t == "index";
+    }
+
+    // Sort key per node — captured up front so the child/root
+    // sorts borrow it (not `nodes`).
+    let sort_key: Vec<(bool, String)> = nodes
+        .iter()
+        .map(|n| (!n.is_folder, n.meta.title.to_lowercase()))
+        .collect();
+    roots.sort_by(|a, b| sort_key[*a].cmp(&sort_key[*b]));
+    for n in &mut nodes {
+        n.children.sort_by(|a, b| sort_key[*a].cmp(&sort_key[*b]));
+    }
+
+    (nodes, roots)
+}
+
+/// Frontmatter-derived page index for the folder tree.
+async fn fetch_folder_index() -> Result<Vec<PageMeta>, String> {
     let client = crate::vox_clients::vault_client().await?;
     #[cfg(target_arch = "wasm32")]
     {
-        let m = client
-            .manifest(VAULT_ID.to_owned())
+        let idx = client
+            .folder_index(VAULT_ID.to_owned())
             .await
-            .map_err(|e| format!("manifest: {e:?}"))?;
-        let mut files: Vec<FileMeta> = m
-            .files
+            .map_err(|e| format!("folder_index: {e:?}"))?;
+        let mut pages: Vec<PageMeta> = idx
+            .pages
             .into_iter()
-            .filter(|e| {
-                std::path::Path::new(&e.path)
+            .filter(|p| {
+                std::path::Path::new(&p.path)
                     .extension()
                     .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
             })
-            .map(|e| FileMeta {
-                path: e.path,
-                sha256: e.sha256,
-            })
             .collect();
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(files)
+        pages.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        Ok(pages)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -406,8 +638,7 @@ async fn fetch_file(path: String) -> Result<String, String> {
 
 /// Conditional-write the file back. `prev_sha` is the
 /// last-known-server hash (`None` → create-only); `force`
-/// writes unconditionally. Distinguishes the conflict case so
-/// the page can offer reload vs overwrite.
+/// writes unconditionally.
 async fn save_file(
     path: String,
     text: String,
@@ -450,6 +681,36 @@ async fn save_file(
     {
         let _ = (client, path, text, prev_sha, force);
         SaveOutcome::Failed("native client not wired yet".to_owned())
+    }
+}
+
+/// Re-file a note: set its `folder` to `parent` (None = root)
+/// via the server-side frontmatter splice. `prev_sha` empty →
+/// unconditional.
+async fn move_to_folder(
+    path: String,
+    parent: Option<String>,
+    prev_sha: String,
+) -> Result<(), String> {
+    let client = crate::vox_clients::vault_client().await?;
+    #[cfg(target_arch = "wasm32")]
+    {
+        use vault_proto::IfMatch;
+        let if_match = if prev_sha.is_empty() {
+            IfMatch::Force
+        } else {
+            IfMatch::Sha(prev_sha)
+        };
+        client
+            .set_folder(VAULT_ID.to_owned(), path, parent, if_match)
+            .await
+            .map_err(|e| format!("set_folder: {e:?}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (client, path, parent, prev_sha);
+        Err("native client not wired yet".to_owned())
     }
 }
 

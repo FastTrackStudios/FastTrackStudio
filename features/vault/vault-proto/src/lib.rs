@@ -27,6 +27,7 @@ mod event;
 mod file;
 mod manifest;
 mod page;
+mod page_meta;
 mod service;
 
 pub use error::VaultSyncError;
@@ -34,6 +35,7 @@ pub use event::VaultEvent;
 pub use file::{FileBytes, IfMatch, PutAck};
 pub use manifest::{Manifest, ManifestEntry};
 pub use page::VaultPage;
+pub use page_meta::{FolderIndex, PageMeta};
 pub use service::{VaultSync, VaultSyncRpc};
 
 // architect-emitted vox bits from the auto-generated mirror

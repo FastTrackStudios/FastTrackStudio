@@ -429,7 +429,7 @@ pub(crate) async fn build_org_state(
             )
         });
         let agent_tasks_conn = open_sqlite_pool(scope, agent_tasks_url, "agent-tasks", |db| {
-            Box::pin(async move { agent_tasks::Migrator::up(&db, None).await.map(|_| db) })
+            Box::pin(async move { agent_tasks::Migrator::up(&db, None).await.map(|()| db) })
         })
         .await?;
         let agent_tasks = agent_tasks::Store::new(agent_tasks_conn);
@@ -444,7 +444,7 @@ pub(crate) async fn build_org_state(
         let timer_url = std::env::var("TASK_SERVER_TIMER_URL")
             .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.timer_db().display()));
         let timer_conn = open_sqlite_pool(scope, timer_url, "timer", |db| {
-            Box::pin(async move { timer::Migrator::up(&db, None).await.map(|_| db) })
+            Box::pin(async move { timer::Migrator::up(&db, None).await.map(|()| db) })
         })
         .await?;
         let timer_defaults = std::sync::Arc::new(timer::store::VaultProjectDefaults {
@@ -462,7 +462,7 @@ pub(crate) async fn build_org_state(
         let finance_url = std::env::var("TASK_SERVER_FINANCE_URL")
             .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", org_root.finance_db().display()));
         let finance_conn = open_sqlite_pool(scope, finance_url, "finance", |db| {
-            Box::pin(async move { finance_db::Migrator::up(&db, None).await.map(|_| db) })
+            Box::pin(async move { finance_db::Migrator::up(&db, None).await.map(|()| db) })
         })
         .await?;
 
@@ -802,7 +802,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             attachments_proto::AttachmentServiceDispatcher::new((*org.attachments).clone()),
         )
         // Vault file replication (manifest / get / put / delete / subscribe).
-        .with(vault_proto::descriptor(), vault_proto::serve(org.vault_sync.clone()))
+        .with(
+            vault_proto::descriptor(),
+            vault_proto::serve(org.vault_sync.clone()),
+        )
         // Agent-task queue — slim domain trait (claim / complete / set-status).
         .with(
             agent_proto::service::tasks::agent_task_queue_rpc_service_descriptor(),

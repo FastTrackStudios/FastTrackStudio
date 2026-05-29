@@ -39,7 +39,10 @@ async fn local_transport_round_trip() {
         .list()
         .await
         .expect("project list() round-trips over local transport");
-    eprintln!("local transport: project list() returned {} rows", rows.len());
+    eprintln!(
+        "local transport: project list() returned {} rows",
+        rows.len()
+    );
 
     // A second establish proves the same router multiplexes more than one
     // session (each establish gets its own in-memory link + acceptor).

@@ -43,10 +43,13 @@ use architect::vox;
 use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, broadcast};
 use vault_proto::{
-    FileBytes, IfMatch, Manifest, ManifestEntry, PutAck, VaultEvent, VaultSync, VaultSyncError,
+    FileBytes, FolderIndex, IfMatch, Manifest, ManifestEntry, PageMeta, PutAck, VaultEvent,
+    VaultSync, VaultSyncError,
 };
 
+use crate::vault::Vault;
 use crate::watcher::{self, WatchError};
+use editor_state::markdown::{FrontMatter, PropValue, parse_frontmatter};
 
 /// Debounce window for the FS watcher attached by
 /// [`Backend::start_watcher`]. Coalesces editor swap-file dances
@@ -365,6 +368,110 @@ impl VaultSync for Backend {
         Ok(())
     }
 
+    fn folder_index(&self, vault_id: &str) -> Result<FolderIndex, VaultSyncError> {
+        let dir = self.root(vault_id)?;
+        if !dir.exists() {
+            return Ok(FolderIndex {
+                vault_id: vault_id.to_string(),
+                pages: Vec::new(),
+            });
+        }
+        // `Vault::open` walks every `.md` page and hands back the
+        // raw bytes + derived basename, so we parse frontmatter
+        // once here rather than re-walking the tree.
+        let vault = Vault::open(&dir).map_err(|e| VaultSyncError::Internal(e.to_string()))?;
+        let pages = vault
+            .pages
+            .iter()
+            .map(|p| {
+                let fm = parse_frontmatter(&p.raw);
+                let get = |key: &str| fm.as_ref().and_then(|f| fm_text(f, key));
+                PageMeta {
+                    path: p.rel_path.clone(),
+                    basename: p.basename.clone(),
+                    title: get("title").unwrap_or_else(|| p.basename.clone()),
+                    page_type: get("type").unwrap_or_default(),
+                    folder: get("folder")
+                        .map(|s| strip_wikilink(&s))
+                        .unwrap_or_default(),
+                    // `raw` is the file's verbatim UTF-8 bytes, so this
+                    // matches the manifest's per-file hash.
+                    sha256: sha256_hex(p.raw.as_bytes()),
+                }
+            })
+            .collect();
+        Ok(FolderIndex {
+            vault_id: vault_id.to_string(),
+            pages,
+        })
+    }
+
+    fn set_folder(
+        &self,
+        vault_id: &str,
+        path: &str,
+        parent: Option<String>,
+        if_match: IfMatch,
+    ) -> Result<PutAck, VaultSyncError> {
+        let abs = self.file_path(vault_id, path)?;
+        let g = self
+            .write_lock
+            .lock()
+            .expect("vault::sync write_lock poisoned");
+        if !abs.exists() {
+            return Err(VaultSyncError::NotFound);
+        }
+        let bytes = std::fs::read(&abs).map_err(io_err)?;
+        let existing_sha = sha256_hex(&bytes);
+        if let IfMatch::Sha(want) = &if_match {
+            if *want != existing_sha {
+                return Err(VaultSyncError::Conflict {
+                    server_sha: existing_sha,
+                    server_bytes: bytes,
+                });
+            }
+        }
+        let content = String::from_utf8(bytes)
+            .map_err(|_| VaultSyncError::Internal("page is not valid UTF-8".into()))?;
+        let mtime_now = || {
+            std::fs::metadata(&abs)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_millis() as i64)
+        };
+        let Some(new_content) = apply_folder(&content, parent.as_deref()) else {
+            // Already in the requested state (e.g. clearing an
+            // absent `folder`): no write, no broadcast.
+            return Ok(PutAck {
+                sha256: existing_sha,
+                mtime_ms: mtime_now(),
+            });
+        };
+        let new_bytes = new_content.into_bytes();
+        let tmp = abs.with_extension(format!(
+            "{}.tmp.{}",
+            abs.extension().and_then(|s| s.to_str()).unwrap_or(""),
+            std::process::id()
+        ));
+        std::fs::write(&tmp, &new_bytes).map_err(io_err)?;
+        std::fs::rename(&tmp, &abs).map_err(io_err)?;
+        let new_sha = sha256_hex(&new_bytes);
+        let mtime_ms = mtime_now();
+        drop(g);
+        let tx = self.channel_blocking(vault_id);
+        let _ = tx.send(VaultEvent::Put {
+            path: path.to_string(),
+            sha256: new_sha.clone(),
+            mtime_ms,
+            size: new_bytes.len() as u64,
+        });
+        Ok(PutAck {
+            sha256: new_sha,
+            mtime_ms,
+        })
+    }
+
     async fn subscribe(&self, vault_id: String, tx: vox::Tx<VaultEvent>) {
         // Validate up front so misconfigured callers fail fast.
         if !self.knows(&vault_id) {
@@ -430,6 +537,80 @@ fn conflict(abs: &Path, existing_sha: Option<&str>) -> VaultSyncError {
     VaultSyncError::Conflict {
         server_sha: existing_sha.unwrap_or("").to_string(),
         server_bytes: bytes,
+    }
+}
+
+/// Read a scalar frontmatter property as a string. Text and Date
+/// round-trip as-is; other kinds (bool/number/list) aren't
+/// meaningful for the folder/title/type keys we read.
+fn fm_text(fm: &FrontMatter, key: &str) -> Option<String> {
+    fm.props
+        .iter()
+        .find(|p| p.key.eq_ignore_ascii_case(key))
+        .and_then(|p| match &p.value {
+            PropValue::Text(s) | PropValue::Date(s) => Some(s.clone()),
+            _ => None,
+        })
+}
+
+/// Reduce a `folder` value to a bare parent basename. Handles the
+/// Obsidian wikilink form `[[Name|alias]]#heading` as well as a
+/// plain string.
+fn strip_wikilink(value: &str) -> String {
+    let t = value.trim();
+    let inner = t
+        .strip_prefix("[[")
+        .and_then(|x| x.strip_suffix("]]"))
+        .unwrap_or(t);
+    inner
+        .split(['|', '#'])
+        .next()
+        .unwrap_or(inner)
+        .trim()
+        .to_string()
+}
+
+/// Splice a note's `folder` frontmatter to point at `parent`
+/// (`None` clears it). Returns the rewritten content, or `None`
+/// when no change is needed. Preserves key order + every other
+/// property by editing only the `folder` line's byte range.
+fn apply_folder(content: &str, parent: Option<&str>) -> Option<String> {
+    let fm = parse_frontmatter(content);
+    let existing = fm.as_ref().and_then(|f| {
+        f.props
+            .iter()
+            .find(|p| p.key.eq_ignore_ascii_case("folder"))
+    });
+    match (parent, existing) {
+        // Re-point an existing `folder:` line.
+        (Some(p), Some(prop)) => {
+            let mut s = String::with_capacity(content.len() + p.len());
+            s.push_str(&content[..prop.range.start]);
+            s.push_str(&format!("folder: \"[[{p}]]\"\n"));
+            s.push_str(&content[prop.range.end..]);
+            Some(s)
+        }
+        // Drop an existing `folder:` line (move to root).
+        (None, Some(prop)) => {
+            let mut s = String::with_capacity(content.len());
+            s.push_str(&content[..prop.range.start]);
+            s.push_str(&content[prop.range.end..]);
+            Some(s)
+        }
+        // Insert into an existing frontmatter block, just before
+        // the closing `---`.
+        (Some(p), None) if fm.is_some() => {
+            let at = fm.as_ref().unwrap().closer.start;
+            let mut s = String::with_capacity(content.len() + p.len() + 16);
+            s.push_str(&content[..at]);
+            s.push_str(&format!("folder: \"[[{p}]]\"\n"));
+            s.push_str(&content[at..]);
+            Some(s)
+        }
+        // No frontmatter at all — prepend a minimal block.
+        (Some(p), None) => Some(format!("---\nfolder: \"[[{p}]]\"\n---\n{content}")),
+        // Clearing an absent `folder:` — already at root.
+        (None, None) => None,
     }
 }
 
@@ -667,5 +848,109 @@ mod tests {
         .unwrap();
         assert_eq!(backend.manifest("b").unwrap().files.len(), 0);
         assert_eq!(backend.manifest("a").unwrap().files.len(), 1);
+    }
+
+    fn meta<'a>(idx: &'a vault_proto::FolderIndex, base: &str) -> &'a PageMeta {
+        idx.pages
+            .iter()
+            .find(|p| p.basename == base)
+            .unwrap_or_else(|| panic!("no page `{base}` in index"))
+    }
+
+    #[test]
+    fn folder_index_parses_frontmatter_and_resolves_parent() {
+        let (_tmp, b) = make_backend();
+        // Root folder note (no `folder`), a child note pointing at
+        // it via a wikilink, and a plain note with no frontmatter.
+        b.put_file(
+            "v1",
+            "Wisdom/Wisdom.md",
+            b"---\ntitle: Wisdom\ntype: folder\n---\n# Wisdom\n".to_vec(),
+            IfMatch::CreateOnly,
+        )
+        .unwrap();
+        b.put_file(
+            "v1",
+            "Wisdom/Plans.md",
+            b"---\ntitle: Plans rot\nfolder: \"[[Wisdom]]\"\n---\nbody\n".to_vec(),
+            IfMatch::CreateOnly,
+        )
+        .unwrap();
+        b.put_file(
+            "v1",
+            "loose.md",
+            b"no frontmatter here\n".to_vec(),
+            IfMatch::CreateOnly,
+        )
+        .unwrap();
+
+        let idx = b.folder_index("v1").unwrap();
+        assert_eq!(idx.pages.len(), 3);
+
+        let root = meta(&idx, "Wisdom");
+        assert_eq!(root.title, "Wisdom");
+        assert_eq!(root.page_type, "folder");
+        assert_eq!(root.folder, "", "root folder note has no parent");
+
+        let child = meta(&idx, "Plans");
+        assert_eq!(child.title, "Plans rot");
+        assert_eq!(
+            child.folder, "Wisdom",
+            "wikilink resolved to parent basename"
+        );
+
+        let loose = meta(&idx, "loose");
+        assert_eq!(loose.title, "loose", "title falls back to basename");
+        assert_eq!(loose.folder, "");
+    }
+
+    #[test]
+    fn set_folder_inserts_replaces_and_clears_preserving_order() {
+        let (_tmp, b) = make_backend();
+        b.put_file(
+            "v1",
+            "n.md",
+            b"---\ntitle: N\ntags: [a]\n---\nbody\n".to_vec(),
+            IfMatch::CreateOnly,
+        )
+        .unwrap();
+
+        // Insert into an existing block (before the closer), other
+        // keys + order preserved.
+        b.set_folder("v1", "n.md", Some("Home".into()), IfMatch::Force)
+            .unwrap();
+        let after_insert = String::from_utf8(b.get_file("v1", "n.md").unwrap().0).unwrap();
+        assert_eq!(
+            after_insert,
+            "---\ntitle: N\ntags: [a]\nfolder: \"[[Home]]\"\n---\nbody\n"
+        );
+
+        // Re-point the existing folder line.
+        b.set_folder("v1", "n.md", Some("Work".into()), IfMatch::Force)
+            .unwrap();
+        let after_repoint = String::from_utf8(b.get_file("v1", "n.md").unwrap().0).unwrap();
+        assert!(after_repoint.contains("folder: \"[[Work]]\""));
+        assert!(!after_repoint.contains("Home"));
+
+        // Clear it (move to root) — line removed, rest intact.
+        b.set_folder("v1", "n.md", None, IfMatch::Force).unwrap();
+        let after_clear = String::from_utf8(b.get_file("v1", "n.md").unwrap().0).unwrap();
+        assert_eq!(after_clear, "---\ntitle: N\ntags: [a]\n---\nbody\n");
+    }
+
+    #[test]
+    fn set_folder_creates_block_when_no_frontmatter() {
+        let (_tmp, b) = make_backend();
+        b.put_file(
+            "v1",
+            "bare.md",
+            b"just text\n".to_vec(),
+            IfMatch::CreateOnly,
+        )
+        .unwrap();
+        b.set_folder("v1", "bare.md", Some("Inbox".into()), IfMatch::Force)
+            .unwrap();
+        let out = String::from_utf8(b.get_file("v1", "bare.md").unwrap().0).unwrap();
+        assert_eq!(out, "---\nfolder: \"[[Inbox]]\"\n---\njust text\n");
     }
 }
