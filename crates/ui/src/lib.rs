@@ -8,6 +8,7 @@
 pub mod app;
 pub mod data;
 pub mod feeds;
+pub mod gantt_adapt;
 pub mod nav;
 pub mod orgs;
 pub mod pages;
