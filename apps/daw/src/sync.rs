@@ -91,6 +91,12 @@ impl InstanceStatus {
     }
 }
 
+struct ReadyPeer<'a> {
+    status: &'a InstanceStatus,
+    peer_id: &'a str,
+    mesh_port: &'a str,
+}
+
 async fn read_instance(pid: u32, socket: PathBuf) -> Result<InstanceStatus> {
     let daw = connect(Some(socket.clone())).await?;
     let status = read_key(&daw, "status").await;
@@ -133,8 +139,16 @@ pub async fn connect_all() -> Result<()> {
     let instances = status_all().await?;
     let ready: Vec<_> = instances
         .iter()
-        .filter(|s| {
-            s.status.as_deref() == Some("ready") && s.peer_id.is_some() && s.mesh_port.is_some()
+        .filter_map(|status| {
+            if status.status.as_deref() == Some("ready") {
+                Some(ReadyPeer {
+                    status,
+                    peer_id: status.peer_id.as_deref()?,
+                    mesh_port: status.mesh_port.as_deref()?,
+                })
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -147,22 +161,16 @@ pub async fn connect_all() -> Result<()> {
 
     let connect_str: String = ready
         .iter()
-        .map(|s| {
-            format!(
-                "{}@127.0.0.1:{}",
-                s.peer_id.as_ref().unwrap(),
-                s.mesh_port.as_ref().unwrap()
-            )
-        })
+        .map(|peer| format!("{}@127.0.0.1:{}", peer.peer_id, peer.mesh_port))
         .collect::<Vec<_>>()
         .join(",");
 
-    for inst in &ready {
-        let daw = connect(Some(inst.socket.clone())).await?;
+    for peer in &ready {
+        let daw = connect(Some(peer.status.socket.clone())).await?;
         daw.ext_state()
             .set(EXT_SECTION, "connect_peers", &connect_str, false)
             .await
-            .map_err(|e| eyre::eyre!("write connect_peers on pid={}: {e}", inst.pid))?;
+            .map_err(|e| eyre::eyre!("write connect_peers on pid={}: {e}", peer.status.pid))?;
     }
     println!(
         "Wrote connect_peers to {} REAPER(s):\n  {connect_str}",
