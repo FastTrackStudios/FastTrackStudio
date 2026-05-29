@@ -42,7 +42,6 @@ pub fn WikiView() -> Element {
                         KnowledgeGraphView {
                             graph: g,
                             spacing: 1.6,
-                            node_scale: 0.85,
                             on_node_click: move |_id: String| {},
                         }
                     }

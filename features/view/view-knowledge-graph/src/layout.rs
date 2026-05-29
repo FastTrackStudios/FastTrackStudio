@@ -188,8 +188,8 @@ pub fn bounds(positions: &HashMap<String, Position>) -> (f32, f32, f32, f32) {
 
 // --- Node sizing (port of `nodeSize` / `graphDensityScale`) ---
 
-const BASE_NODE_SIZE: f32 = 8.0;
-const MAX_NODE_SIZE: f32 = 28.0;
+const BASE_NODE_SIZE: f32 = 3.0;
+const MAX_NODE_SIZE: f32 = 11.0;
 
 fn density_scale(node_count: usize) -> f32 {
     if node_count <= 150 {

@@ -103,7 +103,7 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
 
     // Scale factors mapping the node-size model into layout units.
     let k = (1_000_000.0_f32 * spacing.max(0.2) / graph.nodes.len() as f32).sqrt();
-    let radius_unit = k / 22.0;
+    let radius_unit = k / 48.0;
     let edge_unit = k / 90.0;
     let pan_px_factor = vw / 800.0; // approx layout-units per screen px
 
