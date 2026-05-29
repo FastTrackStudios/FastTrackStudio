@@ -1,16 +1,23 @@
-//! Platform layer — a `Clock` (async `sleep` + monotonic `now`) and task
-//! `spawn`, abstracted **native (tokio) ↔ wasm (browser timers)**.
+//! Platform layer — the portable async-runtime seam architect builds on.
 //!
-//! architect already scatters this cfg-split across [`resource`](crate::resource),
-//! `local`, and `axum_ws`. This module centralizes it into one place so
-//! anything that needs to *wait* — most visibly [`schedule`](crate::schedule)'s
-//! retry/repeat drivers — does so portably:
+//! One place for the primitives that otherwise force a native↔wasm cfg-split
+//! at every call site: a [`Clock`] (async [`sleep`] + monotonic [`now`]),
+//! task [`spawn`] (with an awaitable/abortable [`JoinHandle`]), a [`timeout`]
+//! combinator, cooperative [`CancellationToken`]s, and the everyday
+//! concurrency primitives [`Deferred`], [`Semaphore`], and [`Queue`].
 //!
-//! - **native** — [`tokio::time::sleep`] / [`tokio::task::spawn`] (needs a
-//!   running tokio runtime, which servers and desktop apps already have).
-//! - **wasm** — `gloo_timers`' `TimeoutFuture` (a real async sleep backed by
-//!   `setTimeout`) / `wasm_bindgen_futures::spawn_local` (no tokio runtime in
-//!   the browser).
+//! Everything here is **monad-free** (plain `async`) and works on both
+//! targets:
+//!
+//! - **native** — tokio (`tokio::time`, `tokio::task::spawn`, `tokio::sync`).
+//! - **wasm** — browser timers (`gloo_timers`), `spawn_local`, and
+//!   runtime-agnostic primitives (`tokio::sync` + `async-channel`, neither of
+//!   which assumes a tokio reactor).
+//!
+//! Because call sites program against *these* types rather than tokio
+//! directly, the underlying implementation is a swappable seam — an
+//! instrumented runtime (moiré) or an alternate executor can be slotted in
+//! without touching consumers.
 //!
 //! [`web_time::Instant`] provides a monotonic clock on both targets.
 //!
@@ -40,6 +47,31 @@
 //! })
 //! .await;
 //! assert!(slept.load(std::sync::atomic::Ordering::SeqCst));
+//! # });
+//! ```
+//!
+//! The concurrency primitives at a glance:
+//!
+//! ```
+//! # #[cfg(not(target_arch = "wasm32"))]
+//! # futures_lite::future::block_on(async {
+//! use architect::platform::{CancellationToken, Deferred, Queue, run_until_cancelled};
+//!
+//! // A write-once value many tasks can await.
+//! let ready = Deferred::<u32>::new();
+//! assert!(ready.complete(7));
+//! assert_eq!(ready.wait().await, 7);
+//!
+//! // A bounded MPMC queue.
+//! let q = Queue::<&str>::bounded(8);
+//! q.send("hi").await.unwrap();
+//! assert_eq!(q.recv().await.unwrap(), "hi");
+//!
+//! // Cooperative cancellation short-circuits a pending future to `None`.
+//! let token = CancellationToken::new();
+//! token.cancel();
+//! let out = run_until_cancelled(&token, std::future::pending::<u32>()).await;
+//! assert_eq!(out, None);
 //! # });
 //! ```
 
@@ -72,6 +104,19 @@ mod bounds {
 
 pub use bounds::{BoxFuture, MaybeSend};
 
+// ── Submodules ────────────────────────────────────────────────────────────
+//
+// The clock lives in this file (it's the foundation); the runtime primitives
+// that build on it live alongside.
+
+mod cancel;
+mod sync;
+mod task;
+
+pub use cancel::{CancellationToken, run_until_cancelled};
+pub use sync::{Deferred, Permit, Queue, RecvError, Semaphore, SendError};
+pub use task::{Aborted, Either, Elapsed, JoinHandle, race, spawn, timeout, timeout_with};
+
 // ── Free primitives ─────────────────────────────────────────────────────
 
 /// Sleep for `dur`, portably. Native: [`tokio::time::sleep`] (needs a tokio
@@ -95,24 +140,6 @@ pub async fn sleep(dur: Duration) {
 /// `performance.now()` on wasm).
 pub fn now() -> Instant {
     Instant::now()
-}
-
-/// Spawn a detached background task. Native: [`tokio::task::spawn`] (the
-/// caller must be inside a tokio runtime). Wasm:
-/// `wasm_bindgen_futures::spawn_local`. The join handle is dropped — this is
-/// fire-and-forget; for a result, await the future directly instead.
-pub fn spawn<F>(fut: F)
-where
-    F: Future<Output = ()> + MaybeSend + 'static,
-{
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        tokio::task::spawn(fut);
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        wasm_bindgen_futures::spawn_local(fut);
-    }
 }
 
 // ── Clock ────────────────────────────────────────────────────────────────

@@ -92,7 +92,9 @@ pub use local::{LocalServer, serve_local};
 #[cfg(feature = "platform")]
 pub mod platform;
 #[cfg(feature = "platform")]
-pub use platform::{Clock, SystemClock, TestClock, now, sleep, spawn};
+pub use platform::{
+    CancellationToken, Clock, JoinHandle, SystemClock, TestClock, now, sleep, spawn, timeout,
+};
 
 // Schedule layer — composable retry/repeat policies (exponential backoff,
 // jitter, caps, recurrence limits) + drivers that run a plain
