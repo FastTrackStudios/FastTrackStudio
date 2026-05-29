@@ -24,6 +24,87 @@ fn host_constructs_with_custom_identity() {
     let _ = host; // construction must not panic; visible via dropping the value
 }
 
+fn lsp_parametric_eq_bundle_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("DAW_TEST_LSP_CLAP_BUNDLE") {
+        return Some(PathBuf::from(path));
+    }
+
+    [
+        "/usr/lib/clap/lsp-plugins-clap.clap",
+        "/usr/local/lib/clap/lsp-plugins-clap.clap",
+        "/usr/lib/clap/LSP Parametric Equalizer.clap",
+        "/usr/local/lib/clap/LSP Parametric Equalizer.clap",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())
+}
+
+/// Manual GUI smoke test for LSP Parametric Equalizer x32 Stereo CLAP.
+///
+/// This is ignored because it opens a native window and requires a
+/// graphical session plus the LSP CLAP bundle. Run it manually with:
+///
+/// ```bash
+/// DAW_TEST_LSP_CLAP_BUNDLE=/path/to/lsp-plugins-clap.clap \
+/// DAW_TEST_CLAP_GUI_HOLD_SECS=20 \
+/// cargo test -p daw-standalone --features clap-host \
+///   clap_lsp_parametric_equalizer_x32_stereo_gui_opens -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "manual GUI test: opens a native CLAP plugin window"]
+fn clap_lsp_parametric_equalizer_x32_stereo_gui_opens() {
+    let Some(path) = lsp_parametric_eq_bundle_path() else {
+        eprintln!(
+            "(skip) set DAW_TEST_LSP_CLAP_BUNDLE to the LSP CLAP bundle path, e.g. lsp-plugins-clap.clap"
+        );
+        return;
+    };
+
+    let host = ClapHost::default();
+    let descriptors = host.list_in_bundle(&path).expect("LSP bundle should load");
+    let wanted_terms = ["parametric", "equalizer", "x32", "stereo"];
+    let plugin_index = descriptors
+        .iter()
+        .position(|d| {
+            let haystack = format!("{} {}", d.id, d.name).to_ascii_lowercase();
+            wanted_terms.iter().all(|term| haystack.contains(term))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no LSP Parametric Equalizer x32 Stereo descriptor found in {}; descriptors: {:?}",
+                path.display(),
+                descriptors
+                    .iter()
+                    .map(|d| format!("{} ({})", d.name, d.id))
+                    .collect::<Vec<_>>()
+            )
+        });
+
+    let descriptor = &descriptors[plugin_index];
+    eprintln!(
+        "opening LSP Parametric Equalizer x32 Stereo CLAP GUI for descriptor #{plugin_index}: '{}' id='{}' from {}",
+        descriptor.name,
+        descriptor.id,
+        path.display()
+    );
+
+    let mut plugin = host
+        .load(&path, plugin_index)
+        .expect("LSP Parametric Equalizer x32 Stereo should instantiate");
+    assert!(plugin.has_gui(), "LSP Parametric EQ should expose clap gui");
+    plugin.open_gui_floating().expect("CLAP GUI should open");
+
+    let hold_secs = std::env::var("DAW_TEST_CLAP_GUI_HOLD_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(10);
+    eprintln!("CLAP GUI is open for {hold_secs}s; inspect the window now");
+    std::thread::sleep(std::time::Duration::from_secs(hold_secs));
+
+    plugin.close_gui();
+}
+
 /// Real-plugin smoke test: list descriptors. Set
 /// `DAW_TEST_CLAP_BUNDLE=/path/to/something.clap` before running.
 #[test]

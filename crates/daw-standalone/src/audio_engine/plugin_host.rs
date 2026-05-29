@@ -28,7 +28,9 @@ use std::ffi::CString;
 use std::path::Path;
 
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
-use clack_extensions::gui::{GuiApiType, GuiConfiguration, PluginGui};
+use clack_extensions::gui::{
+    GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui,
+};
 use clack_extensions::latency::*;
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
 use clack_extensions::note_ports::{NotePortInfoBuffer, PluginNotePorts};
@@ -92,6 +94,28 @@ impl HostThreadCheckImpl for DawHostShared {
     }
 }
 
+/// Host-side `gui` extension callbacks. For floating plugin windows
+/// the plugin owns the native window, so these are mostly
+/// acknowledgements. Embedded windows will need real parent-window
+/// sizing and visibility plumbing from the app shell.
+impl HostGuiImpl for DawHostShared {
+    fn resize_hints_changed(&self) {}
+
+    fn request_resize(&self, _new_size: GuiSize) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    fn request_show(&self) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    fn request_hide(&self) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    fn closed(&self, _was_destroyed: bool) {}
+}
+
 struct DawHostMainThread;
 
 impl<'a> MainThreadHandler<'a> for DawHostMainThread {}
@@ -129,7 +153,8 @@ impl HostHandlers for DawHost {
         builder
             .register::<HostLog>()
             .register::<HostThreadCheck>()
-            .register::<HostTimer>();
+            .register::<HostTimer>()
+            .register::<HostGui>();
     }
 }
 
