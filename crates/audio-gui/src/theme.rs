@@ -8,7 +8,7 @@
 //! Components call `use_theme()` to get a `Theme` reference from context.
 //! The `ThemeProvider` component wraps the editor root and provides the signal.
 
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 // ═══════════════════════════════════════════════════════════════════
 //  THEME VARIANT

@@ -238,5 +238,5 @@ impl Vst3Plugin for FtsMeter {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Analyzer];
 }
 
-nih_export_clap!(FtsMeter);
-nih_export_vst3!(FtsMeter);
+nice_export_clap!(FtsMeter);
+nice_export_vst3!(FtsMeter);

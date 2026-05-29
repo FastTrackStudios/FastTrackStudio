@@ -1,5 +1,5 @@
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Position of the tooltip relative to the wrapped element.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

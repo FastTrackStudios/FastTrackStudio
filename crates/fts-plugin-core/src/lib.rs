@@ -6,18 +6,18 @@
 //! # Usage
 //!
 //! ```ignore
-//! use fts_plugin_core::prelude::*;  // nih_plug + nih_plug_dioxus re-exports
+//! use fts_plugin_core::prelude::*;  // nice_plug + nice_plug_dioxus re-exports
 //! use fts_plugin_core::ui::prelude::*;  // FTS UI components (Toggle, Section, etc.)
 //! ```
 
 // Re-export core dependencies
-pub use nih_plug;
-pub use nih_plug::prelude::*;
+pub use nice_plug;
+pub use nice_plug::prelude::*;
 
 #[cfg(feature = "gui")]
-pub use nih_plug_dioxus;
+pub use nice_plug_dioxus;
 #[cfg(feature = "gui")]
-pub use nih_plug_dioxus::prelude::*;
+pub use nice_plug_dioxus::prelude::*;
 
 #[cfg(feature = "gui")]
 pub mod ui;
@@ -28,10 +28,10 @@ pub use audio_gui;
 
 /// Prelude for convenient imports.
 pub mod prelude {
-    pub use nih_plug::prelude::*;
+    pub use nice_plug::prelude::*;
 
     #[cfg(feature = "gui")]
-    pub use nih_plug_dioxus::prelude::*;
+    pub use nice_plug_dioxus::prelude::*;
 }
 
 /// Standard window size for FTS plugins (16:9 aspect ratio).

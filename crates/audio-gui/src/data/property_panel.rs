@@ -1,7 +1,7 @@
 use crate::controls::{Dropdown, Knob, KnobSize, ParamSlider, Toggle};
 use crate::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
 /// What control to render for a property row.
 #[derive(Clone, PartialEq)]

@@ -16,8 +16,8 @@ use audio_gui::controls::dropdown::Dropdown;
 use audio_gui::controls::segment::SegmentButton;
 use audio_gui::prelude::{CanvasPainter, DragProvider, VelloCanvas, use_init_theme};
 use fts_plugin_core::prelude::*;
-use nih_plug_dioxus::prelude::vello::Scene;
-use nih_plug_dioxus::prelude::vello::kurbo::Affine;
+use nice_plug_dioxus::prelude::vello::Scene;
+use nice_plug_dioxus::prelude::vello::kurbo::Affine;
 use parking_lot::RwLock;
 
 use meter_dsp::bit_depth::BitDepthState;
@@ -139,8 +139,10 @@ fn SpectrumView(props: SpectrumViewProps) -> Element {
     // Underlay config (right channel, warm color, no grid, no background)
     let ulay_config = use_hook(|| {
         Arc::new(RwLock::new(SpectrumConfig {
-            color: nih_plug_dioxus::prelude::vello::peniko::Color::from_rgba8(255, 160, 80, 160),
-            max_color: nih_plug_dioxus::prelude::vello::peniko::Color::from_rgba8(255, 160, 80, 80),
+            color: nice_plug_dioxus::prelude::vello::peniko::Color::from_rgba8(255, 160, 80, 160),
+            max_color: nice_plug_dioxus::prelude::vello::peniko::Color::from_rgba8(
+                255, 160, 80, 80,
+            ),
             show_max: false,
             show_grid: false,
             draw_background: false,

@@ -3,7 +3,7 @@
 //! Ported from FastTrackStudio signal-ui, adapted for Blitz inline styles.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// A frequency spectrum bar graph.
 ///

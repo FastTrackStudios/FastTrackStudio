@@ -3,7 +3,7 @@
 //! Recessed panel background with raised active segment.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Pill-style segment button for enum-style selections.
 ///

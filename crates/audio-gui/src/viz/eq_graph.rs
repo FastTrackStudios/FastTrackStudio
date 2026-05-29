@@ -10,12 +10,12 @@
 //! - Smart filter type selection based on click position
 //!
 //! Uses SVG rendering for cross-platform compatibility.
-//! Ported from the legacy `audio-controls` crate for the nih_plug_dioxus Blitz renderer.
+//! Ported from the legacy `audio-controls` crate for the nice_plug_dioxus Blitz renderer.
 
 use std::rc::Rc;
 
 use dioxus_elements::input_data::MouseButton;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 use super::eq_graph_painter::{EqGraphPainter, EqGraphRenderState};
 

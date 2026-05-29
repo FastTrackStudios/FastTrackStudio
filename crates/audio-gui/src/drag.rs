@@ -8,8 +8,8 @@
 
 use std::rc::Rc;
 
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
 /// Fine-adjustment multiplier when Shift is held during drag.
 const FINE_MULTIPLIER: f64 = 5.0;

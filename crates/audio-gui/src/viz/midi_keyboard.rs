@@ -1,5 +1,5 @@
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Interactive horizontal piano keyboard display.
 ///

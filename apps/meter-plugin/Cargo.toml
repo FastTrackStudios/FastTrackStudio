@@ -14,7 +14,7 @@ meter-dsp = { workspace = true }
 meter-ui = { workspace = true }
 audio-gui = { workspace = true }
 fts-plugin-core = { workspace = true }
-nih_plug = { workspace = true }
-nih_plug_dioxus = { workspace = true }
+nice-plug = { workspace = true }
+nice-plug-dioxus = { workspace = true }
 atomic_float = { workspace = true }
 parking_lot = "0.12"

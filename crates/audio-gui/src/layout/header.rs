@@ -4,7 +4,7 @@
 
 use crate::controls::segment::SegmentButton;
 use crate::theme::{Theme, ThemeVariant, use_theme};
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Header bar with plugin title + theme selector + transport info.
 #[component]

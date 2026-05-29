@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
-use nih_plug_dioxus::prelude::SceneOverlay;
-use nih_plug_dioxus::prelude::vello::Scene;
-use nih_plug_dioxus::prelude::vello::kurbo::{Affine, BezPath, Circle, Line, Rect, Stroke};
-use nih_plug_dioxus::prelude::vello::peniko::{Color, Fill};
+use nice_plug_dioxus::prelude::SceneOverlay;
+use nice_plug_dioxus::prelude::vello::Scene;
+use nice_plug_dioxus::prelude::vello::kurbo::{Affine, BezPath, Circle, Line, Rect, Stroke};
+use nice_plug_dioxus::prelude::vello::peniko::{Color, Fill};
 use parking_lot::RwLock;
 
 use super::eq_graph::{

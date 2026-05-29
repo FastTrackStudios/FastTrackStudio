@@ -1,15 +1,15 @@
 //! Parameter slider — inline-styled, Blitz-compatible.
 //!
 //! Two variants:
-//! - `ParamSlider`: bound to a nih_plug `ParamPtr`, displays name + value
+//! - `ParamSlider`: bound to a nice_plug `ParamPtr`, displays name + value
 //! - `Slider`: raw normalized value with callback
 //!
 //! Redesigned with recessed track, illuminated fill bar, and 3D thumb.
 
 use crate::drag::{DragState, begin_drag};
 use crate::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
 /// Slider orientation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -19,13 +19,13 @@ pub enum SliderOrientation {
     Vertical,
 }
 
-/// Parameter slider bound to a nih_plug parameter.
+/// Parameter slider bound to a nice_plug parameter.
 ///
 /// Displays parameter name, a horizontal fill bar, and current value.
 /// Drag vertically to adjust, double-click to reset.
 #[component]
 pub fn ParamSlider(
-    /// The nih_plug parameter to control.
+    /// The nice_plug parameter to control.
     param_ptr: ParamPtr,
     /// Label override (defaults to param name).
     #[props(default)]
@@ -125,7 +125,7 @@ pub fn ParamSlider(
 
 /// A raw styled slider with normalized value and callback.
 ///
-/// For use outside of nih_plug parameter binding.
+/// For use outside of nice_plug parameter binding.
 #[component]
 pub fn Slider(
     /// Current normalized value (0.0–1.0).

@@ -1,5 +1,5 @@
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Scrollable container with up/down arrow buttons.
 ///

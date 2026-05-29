@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Centered bipolar waveform display.
 ///
@@ -81,8 +81,8 @@ pub fn WaveformDisplay(
 
 // ── Reusable VelloCanvas component ──────────────────────────────────────
 
-use nih_plug_dioxus::prelude::vello::kurbo::{Affine, Rect};
-use nih_plug_dioxus::prelude::vello::peniko::{Color, Fill};
+use nice_plug_dioxus::prelude::vello::kurbo::{Affine, Rect};
+use nice_plug_dioxus::prelude::vello::peniko::{Color, Fill};
 
 /// Trait for painting into a Vello scene. Implement this for your custom
 /// GPU-rendered content.
@@ -94,7 +94,7 @@ pub trait CanvasPainter: 'static {
     /// pass it to all `scene.fill()` / `scene.stroke()` calls.
     fn paint(
         &self,
-        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        scene: &mut nice_plug_dioxus::prelude::vello::Scene,
         transform: Affine,
         width: f64,
         height: f64,
@@ -109,7 +109,7 @@ struct CanvasOverlay {
 impl SceneOverlay for CanvasOverlay {
     fn paint(
         &mut self,
-        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        scene: &mut nice_plug_dioxus::prelude::vello::Scene,
         transform: Affine,
         width: u32,
         height: u32,
@@ -239,7 +239,7 @@ pub fn VelloCanvas(props: VelloCanvasProps) -> Element {
 
 // ── Vello-rendered PeakWaveform ─────────────────────────────────────────
 
-use nih_plug_dioxus::prelude::vello::kurbo::{BezPath, Circle, Line, Stroke};
+use nice_plug_dioxus::prelude::vello::kurbo::{BezPath, Circle, Line, Stroke};
 
 /// Compute gain reduction for a given input level using soft-knee compression.
 fn compress_transfer(input_db: f32, threshold_db: f32, ratio: f32, knee_db: f32) -> f32 {
@@ -324,7 +324,7 @@ impl PeakWaveformPainter {
     /// and the threshold line + dB scale across the full width.
     fn paint_transfer_overlay(
         &self,
-        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        scene: &mut nice_plug_dioxus::prelude::vello::Scene,
         transform: Affine,
         w: f64,
         h: f64,
@@ -575,12 +575,12 @@ impl PeakWaveformPainter {
 impl CanvasPainter for PeakWaveformPainter {
     fn paint(
         &self,
-        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        scene: &mut nice_plug_dioxus::prelude::vello::Scene,
         transform: Affine,
         w: f64,
         h: f64,
     ) {
-        use nih_plug_dioxus::prelude::vello::peniko::Gradient;
+        use nice_plug_dioxus::prelude::vello::peniko::Gradient;
 
         // Background — pure near-black, neutral (no color cast)
         scene.fill(

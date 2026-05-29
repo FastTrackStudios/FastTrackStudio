@@ -7,6 +7,6 @@ edition.workspace = true
 description = "Shared Dioxus audio GUI components for FTS plugins — Blitz-compatible, inline-styled"
 
 [dependencies]
-nih_plug = { workspace = true }
-nih_plug_dioxus = { workspace = true }
+nice-plug = { workspace = true }
+nice-plug-dioxus = { workspace = true }
 parking_lot = "0.12"

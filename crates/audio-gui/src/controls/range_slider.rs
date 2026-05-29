@@ -1,6 +1,6 @@
 use crate::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
 /// Which thumb of a range slider is being dragged.
 #[derive(Clone, Copy, PartialEq)]
@@ -148,7 +148,7 @@ pub fn RangeSlider(
     }
 }
 
-/// Dual-thumb range slider bound to two nih_plug parameters.
+/// Dual-thumb range slider bound to two nice_plug parameters.
 #[component]
 pub fn ParamRangeSlider(
     low_param: ParamPtr,

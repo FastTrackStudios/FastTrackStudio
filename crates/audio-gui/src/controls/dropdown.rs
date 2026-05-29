@@ -2,11 +2,11 @@
 //!
 //! Two variants:
 //! - `Dropdown`: standalone with `Vec<String>` items and `on_change` callback
-//! - `ParamDropdown`: bound to a nih_plug enum parameter
+//! - `ParamDropdown`: bound to a nice_plug enum parameter
 
 use crate::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
 /// Themed dropdown select menu.
 ///
@@ -148,7 +148,7 @@ pub fn Dropdown(
     }
 }
 
-/// Dropdown bound to a nih_plug enum parameter.
+/// Dropdown bound to a nice_plug enum parameter.
 ///
 /// Reads enum variant names from the parameter and auto-generates the item list.
 #[component]

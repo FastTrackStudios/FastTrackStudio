@@ -4,7 +4,7 @@
 //! for click-outside detection, same pattern as the dropdown.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 use dioxus_elements::input_data::MouseButton;
 

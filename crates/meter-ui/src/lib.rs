@@ -1,6 +1,6 @@
 //! Vello scene overlay painters for audio metering.
 //!
-//! Each painter implements `SceneOverlay` from `nih_plug_dioxus` and reads from
+//! Each painter implements `SceneOverlay` from `nice_plug_dioxus` and reads from
 //! the shared `Arc<*State>` types provided by `meter-dsp`.
 //!
 //! # Usage

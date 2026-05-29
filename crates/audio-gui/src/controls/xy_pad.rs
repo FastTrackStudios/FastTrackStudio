@@ -3,7 +3,7 @@
 //! Backlit grid with glowing crosshair cursor and recessed background.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// 2D control output.
 #[derive(Debug, Clone, Copy, PartialEq)]

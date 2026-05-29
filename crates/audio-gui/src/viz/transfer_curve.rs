@@ -11,9 +11,9 @@ use std::rc::Rc;
 
 use crate::theme::use_theme;
 use crate::viz::waveform::{CanvasPainter, VelloCanvas};
-use nih_plug_dioxus::prelude::vello::kurbo::{Affine, BezPath, Circle, Line, Rect, Stroke};
-use nih_plug_dioxus::prelude::vello::peniko::{Color, Fill};
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::vello::kurbo::{Affine, BezPath, Circle, Line, Rect, Stroke};
+use nice_plug_dioxus::prelude::vello::peniko::{Color, Fill};
+use nice_plug_dioxus::prelude::*;
 
 /// Compute gain reduction for a given input level using soft-knee compression.
 ///
@@ -78,7 +78,7 @@ impl TransferCurvePainter {
 impl CanvasPainter for TransferCurvePainter {
     fn paint(
         &self,
-        scene: &mut nih_plug_dioxus::prelude::vello::Scene,
+        scene: &mut nice_plug_dioxus::prelude::vello::Scene,
         transform: Affine,
         w: f64,
         h: f64,

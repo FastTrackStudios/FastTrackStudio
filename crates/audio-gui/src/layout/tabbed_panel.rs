@@ -1,5 +1,5 @@
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 #[component]
 pub fn TabBar(tabs: Vec<&'static str>, active: usize, on_change: EventHandler<usize>) -> Element {

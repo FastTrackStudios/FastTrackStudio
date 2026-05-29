@@ -1,12 +1,12 @@
-//! Toggle switch — bound to a nih_plug BoolParam via ParamPtr.
+//! Toggle switch — bound to a nice_plug BoolParam via ParamPtr.
 //!
 //! LED-style illumination with soft glow when active.
 
 use crate::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
-/// Toggle switch bound to a boolean nih_plug parameter.
+/// Toggle switch bound to a boolean nice_plug parameter.
 ///
 /// Uses a local revision signal to force Dioxus re-renders on click,
 /// since `param_ptr.modulated_normalized_value()` is not reactive.

@@ -8,6 +8,6 @@ description = "Vello scene overlay painters for audio metering — spectrum, LUF
 
 [dependencies]
 meter-dsp = { workspace = true }
-nih_plug = { workspace = true }
-nih_plug_dioxus = { workspace = true }
+nice-plug = { workspace = true }
+nice-plug-dioxus = { workspace = true }
 parking_lot = "0.12"

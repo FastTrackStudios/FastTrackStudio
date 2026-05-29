@@ -3,7 +3,7 @@
 //! Raised panels with depth shadows and consistent spacing tokens.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Card-style section wrapper with uppercase title.
 ///

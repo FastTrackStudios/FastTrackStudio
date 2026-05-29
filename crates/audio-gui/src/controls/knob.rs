@@ -9,9 +9,9 @@
 
 use crate::drag::{DragState, TextEditState, begin_drag};
 use crate::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::dioxus_elements::geometry::WheelDelta;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::dioxus_elements::geometry::WheelDelta;
+use nice_plug_dioxus::prelude::*;
 use std::f64::consts::PI;
 
 /// Knob display size.
@@ -101,12 +101,12 @@ fn svg_arc(cx: f64, cy: f64, r: f64, start_deg: f64, end_deg: f64) -> String {
 /// Drag sensitivity: pixels of vertical drag per full 0→1 sweep.
 const SENSITIVITY: f64 = 150.0;
 
-/// A rotary knob bound to a nih_plug parameter.
+/// A rotary knob bound to a nice_plug parameter.
 ///
 /// Requires a `DragProvider` ancestor to handle drag capture.
 #[component]
 pub fn Knob(
-    /// The nih_plug parameter to control.
+    /// The nice_plug parameter to control.
     param_ptr: ParamPtr,
     /// Display size.
     #[props(default)]

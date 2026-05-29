@@ -3,7 +3,7 @@
 //! Recessed trough with glowing fill segments and peak hold indicator.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Meter orientation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

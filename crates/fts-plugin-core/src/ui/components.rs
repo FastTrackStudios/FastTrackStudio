@@ -5,8 +5,8 @@
 //! (Toggle, Section, SegmentButton, etc.) are now in `audio-gui`.
 
 use audio_gui::theme::use_theme;
-use nih_plug::prelude::ParamPtr;
-use nih_plug_dioxus::prelude::*;
+use nice_plug::prelude::ParamPtr;
+use nice_plug_dioxus::prelude::*;
 
 /// Inline-styled parameter slider for Blitz compatibility.
 ///

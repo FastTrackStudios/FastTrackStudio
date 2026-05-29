@@ -1,7 +1,7 @@
 //! UI module for FTS plugins — Blitz-compatible components and theme.
 //!
 //! All components use inline styles for reliable rendering in the
-//! nih_plug_dioxus Blitz renderer. Import everything via the prelude:
+//! nice_plug_dioxus Blitz renderer. Import everything via the prelude:
 //!
 //! ```ignore
 //! use fts_plugin_core::ui::prelude::*;

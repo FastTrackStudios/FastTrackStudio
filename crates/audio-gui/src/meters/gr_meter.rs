@@ -3,7 +3,7 @@
 //! Fills from top down with glowing segments and recessed trough.
 
 use crate::theme::use_theme;
-use nih_plug_dioxus::prelude::*;
+use nice_plug_dioxus::prelude::*;
 
 /// Vertical gain reduction meter with numeric readout.
 ///
