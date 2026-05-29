@@ -77,6 +77,14 @@ pub use resource::{Resource, Scope, SharedResource};
 pub mod plan;
 pub use plan::{LayerDiagnostic, LayerGraph, LayerNode, LayerPlan, LayerPlanError};
 
+// In-process transport — serve a `LayerRouter` over a vox in-memory link
+// so a typed client consumes a local backend with no server. Native only
+// (vox's `MemoryLink` isn't compiled for wasm).
+#[cfg(all(feature = "local", not(target_arch = "wasm32")))]
+pub mod local;
+#[cfg(all(feature = "local", not(target_arch = "wasm32")))]
+pub use local::{LocalServer, serve_local};
+
 // fake-rs re-export, gated on the `fake` feature. Lets consumers reach
 // `architect::fake::{Dummy, Faker, Fake}` without a direct dep.
 #[cfg(feature = "fake")]

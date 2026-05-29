@@ -166,6 +166,7 @@ name = "app-tests-e2e"
 version = "0.1.0"
 dependencies = [
  "app-server",
+ "architect",
  "axum",
  "example",
  "tokio",

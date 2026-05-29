@@ -205,6 +205,44 @@ async fn service_duplicate_copies_row() {
     let _ = shutdown.send(());
 }
 
+// Same contract, no server: serve the backend in-process over a vox
+// in-memory link and drive the *same* generated clients. This is the
+// "inject the transport" payoff — the desktop app runs exactly this way.
+#[tokio::test]
+async fn local_transport_round_trip() {
+    use app_server::service_router;
+    use architect::{LocalServer, Scope};
+
+    let scope = Scope::new();
+    // Serve the full surface (repo + ExampleService) in-process — the same
+    // `service_router` the axum server mounts, just over an in-memory link.
+    let local = LocalServer::serve(service_router(ExampleRepoMemory::new()), scope.clone());
+    let repo: ExampleRepoClient = local.establish().await.expect("local repo establish");
+    let service: ExampleServiceClient = local.establish().await.expect("local service establish");
+
+    // create → get (no socket, no server)
+    let created = repo
+        .create(ExampleCreate {
+            name: "local".into(),
+            description: "in-process".into(),
+        })
+        .await
+        .expect("create");
+    let got = repo.get(created.id).await.expect("get");
+    assert_eq!(got.name, "local");
+
+    // the ExampleService surface works identically in-process
+    let hits = service.search("local".into(), 10).await.expect("search");
+    assert_eq!(hits.len(), 1);
+    let copy = service
+        .duplicate(created.id, None)
+        .await
+        .expect("duplicate");
+    assert_eq!(copy.name, "local (copy)");
+
+    scope.close().await;
+}
+
 // Tiny stdlib HTTP client to avoid pulling reqwest in for one GET.
 async fn reqwest_health(url: &str) -> String {
     let (host_port, path) = url.trim_start_matches("http://").split_once('/').unwrap();

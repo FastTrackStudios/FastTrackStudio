@@ -11,7 +11,7 @@ use example_ui::{ExampleCreateForm, ExampleEditForm, SearchBar};
 use uuid::Uuid;
 
 use crate::Route;
-use crate::client::{ConnState, VoxClients, use_conn};
+use crate::client::{ConnState, ExampleClients, use_conn};
 
 /// Render the connection banner (Connecting / Failed). Returns `Some`
 /// when the socket isn't ready yet, so screens can early-return it.
@@ -308,7 +308,7 @@ pub fn NotFound(route: Vec<String>) -> Element {
 /// Read the clients out of a connection signal inside an event handler
 /// (a plain read, not a hook). Returns `None` if the socket isn't ready —
 /// handlers just no-op in that window.
-fn clients_of(conn: Signal<ConnState>) -> Option<VoxClients> {
+fn clients_of(conn: Signal<ConnState>) -> Option<ExampleClients> {
     match &*conn.read() {
         ConnState::Ready(c) => Some(c.clone()),
         _ => None,

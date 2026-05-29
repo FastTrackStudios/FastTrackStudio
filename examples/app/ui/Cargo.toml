@@ -25,6 +25,13 @@ vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f
 vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 uuid = { version = "1", features = ["v4", "js"] }
 
+# Native (desktop/CLI/tests) only: architect's in-process transport, so
+# `Transport::Local` can serve a backend over a vox in-memory link. Not
+# pulled on wasm — vox's MemoryLink (and tokio rt) aren't wasm-clean, so
+# the browser build stays remote-only.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+architect = { path = "../../../macros/architect", default-features = false, features = ["local"] }
+
 [dev-dependencies]
 # Headless smoke test: mount the full App (router + connection lifecycle)
 # in a VirtualDom and render it without a window.
