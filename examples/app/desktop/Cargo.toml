@@ -14,7 +14,8 @@ example-proto = { path = "../features/example/example-proto" }
 app-ui = { path = "../ui" }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
-vox = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57" }
+# v0.8.2-with-Uuid fork (see root Cargo.toml) — same rev as the server.
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

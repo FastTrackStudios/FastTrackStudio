@@ -103,10 +103,17 @@ facet-core = "0.46"
 # use `vox::serve` — we go through axum directly so we only need this.
 # Wasm clients depend on `vox-websocket` directly, not through this dep.
 # Pattern lifted from vox's own `rust/wasm-browser-tests` crate.
-vox = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57", default-features = false, features = ["runtime"] }
-vox-core = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57" }
-vox-types = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57" }
-vox-websocket = { git = "https://github.com/bearcove/vox", rev = "230dcd5bb1e5aedd1309308c64de07781fad5b57" }
+# v0.8.2-with-Uuid fork. Upstream vox v0.8.2 (230dcd5) panics encoding
+# `Uuid` — its postcard encoder has no branch for opaque `Def::Scalar`
+# shapes, so every RPC returning a Uuid-bearing entity dies on the wire.
+# This fork round-trips Uuid/chrono via display/parse in vox-postcard and
+# describes them as `String` in the schema so plan-based/wasm decode
+# agrees. The client crates (examples/app/{ui,desktop,tests/web}) pin the
+# SAME rev so server + clients share one coherent wire schema.
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
+vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-types = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
+vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 
 # Loro — CRDT engine. Local-first state lives inside a LoroDoc;
 # SeaORM stores the doc's snapshot + update log as opaque bytes.
