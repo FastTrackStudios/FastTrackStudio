@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashSet};
 use dioxus::prelude::*;
 
 use crate::model::{
-    community_bg_class, kind_bg_class, kind_label, ColorMode, CommunityInfo, GraphNode,
+    ColorMode, CommunityInfo, GraphNode, community_bg_class, kind_bg_class, kind_label,
 };
 
 #[derive(Props, Clone, PartialEq)]

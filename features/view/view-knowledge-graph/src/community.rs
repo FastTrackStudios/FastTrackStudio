@@ -7,7 +7,7 @@
 //! good clustering for wiki-scale graphs, no external dep. Determinism
 //! comes from sorted iteration (no RNG), so renders are stable.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::model::{CommunityInfo, GraphEdge};
 
@@ -92,19 +92,16 @@ pub fn detect_communities(
     }
 
     // Edge set for cohesion lookups (undirected, by index pair).
-    let mut edge_set: HashMap<(usize, usize), ()> = HashMap::new();
+    let mut edge_set: HashSet<(usize, usize)> = HashSet::new();
     for e in edges {
-        if let (Some(&s), Some(&t)) =
-            (index.get(e.source.as_str()), index.get(e.target.as_str()))
-        {
+        if let (Some(&s), Some(&t)) = (index.get(e.source.as_str()), index.get(e.target.as_str())) {
             if s != t {
-                edge_set.insert((s.min(t), s.max(t)), ());
+                edge_set.insert((s.min(t), s.max(t)));
             }
         }
     }
 
-    let link_count: HashMap<&str, u32> =
-        nodes.iter().map(|n| (n.id, n.link_count)).collect();
+    let link_count: HashMap<&str, u32> = nodes.iter().map(|n| (n.id, n.link_count)).collect();
     let label_of: HashMap<usize, &str> = ids.iter().enumerate().map(|(i, id)| (i, *id)).collect();
 
     // Build community summaries.
@@ -116,7 +113,7 @@ pub fn detect_communities(
             for j in (i + 1)..members.len() {
                 let a = members[i].min(members[j]);
                 let b = members[i].max(members[j]);
-                if edge_set.contains_key(&(a, b)) {
+                if edge_set.contains(&(a, b)) {
                     intra += 1;
                 }
             }
@@ -139,8 +136,7 @@ pub fn detect_communities(
                 nodes
                     .iter()
                     .find(|nd| nd.id == id)
-                    .map(|nd| nd.label.to_string())
-                    .unwrap_or_else(|| id.to_string())
+                    .map_or_else(|| id.to_string(), |nd| nd.label.to_string())
             })
             .collect();
 
@@ -182,16 +178,44 @@ mod tests {
     #[test]
     fn two_cliques_become_two_communities() {
         let nodes = vec![
-            CommNode { id: "a", label: "A", link_count: 2 },
-            CommNode { id: "b", label: "B", link_count: 2 },
-            CommNode { id: "c", label: "C", link_count: 2 },
-            CommNode { id: "x", label: "X", link_count: 2 },
-            CommNode { id: "y", label: "Y", link_count: 2 },
-            CommNode { id: "z", label: "Z", link_count: 2 },
+            CommNode {
+                id: "a",
+                label: "A",
+                link_count: 2,
+            },
+            CommNode {
+                id: "b",
+                label: "B",
+                link_count: 2,
+            },
+            CommNode {
+                id: "c",
+                label: "C",
+                link_count: 2,
+            },
+            CommNode {
+                id: "x",
+                label: "X",
+                link_count: 2,
+            },
+            CommNode {
+                id: "y",
+                label: "Y",
+                link_count: 2,
+            },
+            CommNode {
+                id: "z",
+                label: "Z",
+                link_count: 2,
+            },
         ];
         let edges = vec![
-            edge("a", "b"), edge("b", "c"), edge("a", "c"),
-            edge("x", "y"), edge("y", "z"), edge("x", "z"),
+            edge("a", "b"),
+            edge("b", "c"),
+            edge("a", "c"),
+            edge("x", "y"),
+            edge("y", "z"),
+            edge("x", "z"),
         ];
         let (assign, comms) = detect_communities(&nodes, &edges);
         assert_eq!(comms.len(), 2);

@@ -50,18 +50,22 @@ pub fn surprising_connections(
     let max_degree = nodes.iter().map(|n| n.link_count).max().unwrap_or(1).max(1) as f32;
 
     let distant_pairs: HashSet<&str> = [
-        "source-concept", "concept-source",
-        "source-synthesis", "synthesis-source",
-        "query-entity", "entity-query",
+        "source-concept",
+        "concept-source",
+        "source-synthesis",
+        "synthesis-source",
+        "query-entity",
+        "entity-query",
     ]
     .into_iter()
     .collect();
 
     let mut scored: Vec<SurprisingConnection> = Vec::new();
     for e in edges {
-        let (Some(&source), Some(&target)) =
-            (node_map.get(e.source.as_str()), node_map.get(e.target.as_str()))
-        else {
+        let (Some(&source), Some(&target)) = (
+            node_map.get(e.source.as_str()),
+            node_map.get(e.target.as_str()),
+        ) else {
             continue;
         };
         if STRUCTURAL_IDS.contains(&source.id.as_str())
@@ -183,30 +187,39 @@ pub fn knowledge_gaps(
     }
 
     // 3. Bridge nodes (touch >= 3 communities).
-    let mut comm_neighbors: HashMap<&str, HashSet<u32>> =
-        nodes.iter().map(|n| (n.id.as_str(), HashSet::new())).collect();
+    let mut comm_neighbors: HashMap<&str, HashSet<u32>> = nodes
+        .iter()
+        .map(|n| (n.id.as_str(), HashSet::new()))
+        .collect();
     for e in edges {
-        if let (Some(&s), Some(&t)) =
-            (node_map.get(e.source.as_str()), node_map.get(e.target.as_str()))
-        {
-            comm_neighbors.get_mut(e.source.as_str()).map(|set| set.insert(t.community));
-            comm_neighbors.get_mut(e.target.as_str()).map(|set| set.insert(s.community));
+        if let (Some(&s), Some(&t)) = (
+            node_map.get(e.source.as_str()),
+            node_map.get(e.target.as_str()),
+        ) {
+            comm_neighbors
+                .get_mut(e.source.as_str())
+                .map(|set| set.insert(t.community));
+            comm_neighbors
+                .get_mut(e.target.as_str())
+                .map(|set| set.insert(s.community));
         }
     }
     let mut bridges: Vec<&GraphNode> = nodes
         .iter()
         .filter(|n| {
             !STRUCTURAL_IDS.contains(&n.id.as_str())
-                && comm_neighbors.get(n.id.as_str()).map(|s| s.len()).unwrap_or(0) >= 3
+                && comm_neighbors.get(n.id.as_str()).map_or(0, |s| s.len()) >= 3
         })
         .collect();
     bridges.sort_by(|a, b| {
-        let bc = comm_neighbors.get(b.id.as_str()).map(|s| s.len()).unwrap_or(0);
-        let ac = comm_neighbors.get(a.id.as_str()).map(|s| s.len()).unwrap_or(0);
+        let bc = comm_neighbors.get(b.id.as_str()).map_or(0, |s| s.len());
+        let ac = comm_neighbors.get(a.id.as_str()).map_or(0, |s| s.len());
         bc.cmp(&ac)
     });
     for bridge in bridges.into_iter().take(3) {
-        let count = comm_neighbors.get(bridge.id.as_str()).map(|s| s.len()).unwrap_or(0);
+        let count = comm_neighbors
+            .get(bridge.id.as_str())
+            .map_or(0, |s| s.len());
         gaps.push(KnowledgeGap {
             kind: GapKind::BridgeNode,
             title: format!("Key bridge: {}", bridge.label),

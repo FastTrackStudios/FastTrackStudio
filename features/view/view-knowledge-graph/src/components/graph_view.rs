@@ -19,8 +19,8 @@ use dioxus::prelude::*;
 use dioxus_elements::geometry::WheelDelta;
 use fts_ui::lucide_dioxus::{Maximize, ZoomIn, ZoomOut};
 
-use crate::layout::{bounds, layout, node_radius, LayoutConfig, Position};
-use crate::model::{community_text_class, kind_text_class, ColorMode, WikiGraph};
+use crate::layout::{LayoutConfig, Position, bounds, layout, node_radius};
+use crate::model::{ColorMode, WikiGraph, community_text_class, kind_text_class};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct KnowledgeGraphViewProps {
@@ -56,19 +56,32 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
     let adj_graph = props.graph.clone();
 
     // Deterministic layout — only recomputes when inputs change.
-    let positions: Memo<HashMap<String, Position>> = use_memo(use_reactive!(|(layout_graph, spacing)| {
-        layout(&layout_graph.nodes, &layout_graph.edges, LayoutConfig { spacing, iterations: None })
-    }));
+    let positions: Memo<HashMap<String, Position>> =
+        use_memo(use_reactive!(|(layout_graph, spacing)| {
+            layout(
+                &layout_graph.nodes,
+                &layout_graph.edges,
+                LayoutConfig {
+                    spacing,
+                    iterations: None,
+                },
+            )
+        }));
 
     // Adjacency for hover-neighbor highlighting.
-    let adjacency: Memo<HashMap<String, HashSet<String>>> = use_memo(use_reactive!(|(adj_graph,)| {
-        let mut adj: HashMap<String, HashSet<String>> = HashMap::new();
-        for e in &adj_graph.edges {
-            adj.entry(e.source.clone()).or_default().insert(e.target.clone());
-            adj.entry(e.target.clone()).or_default().insert(e.source.clone());
-        }
-        adj
-    }));
+    let adjacency: Memo<HashMap<String, HashSet<String>>> =
+        use_memo(use_reactive!(|(adj_graph,)| {
+            let mut adj: HashMap<String, HashSet<String>> = HashMap::new();
+            for e in &adj_graph.edges {
+                adj.entry(e.source.clone())
+                    .or_default()
+                    .insert(e.target.clone());
+                adj.entry(e.target.clone())
+                    .or_default()
+                    .insert(e.source.clone());
+            }
+            adj
+        }));
 
     let mut hovered: Signal<Option<String>> = use_signal(|| None);
     let mut zoom: Signal<f32> = use_signal(|| 1.0_f32);
@@ -91,8 +104,8 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
     let pad = raw_w.max(raw_h) * 0.12;
     let base_w = raw_w + pad * 2.0;
     let base_h = raw_h + pad * 2.0;
-    let cx = (min_x + max_x) / 2.0;
-    let cy = (min_y + max_y) / 2.0;
+    let cx = f32::midpoint(min_x, max_x);
+    let cy = f32::midpoint(min_y, max_y);
     let z = (*zoom.read()).max(0.05);
     let (px, py) = *pan.read();
     let vw = base_w / z;
@@ -175,8 +188,7 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                             let width = (0.5 + nw * 3.5) * edge_unit;
                             let edge_active = active
                                 .as_ref()
-                                .map(|s| s.contains(&edge.source) && s.contains(&edge.target))
-                                .unwrap_or(true);
+                                .is_none_or(|s| s.contains(&edge.source) && s.contains(&edge.target));
                             let opacity = if !has_active || edge_active { 0.5 } else { 0.06 };
                             rsx! {
                                 line {
@@ -202,7 +214,7 @@ pub fn KnowledgeGraphView(props: KnowledgeGraphViewProps) -> Element {
                                 ColorMode::Kind => kind_text_class(&node.kind),
                                 ColorMode::Community => community_text_class(node.community),
                             };
-                            let is_active = active.as_ref().map(|s| s.contains(&node.id)).unwrap_or(true);
+                            let is_active = active.as_ref().is_none_or(|s| s.contains(&node.id));
                             let dim_class = if has_active && !is_active { "opacity-20" } else { "opacity-100" };
                             let show_label = is_active
                                 && (hov.as_deref() == Some(node.id.as_str())

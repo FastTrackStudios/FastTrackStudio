@@ -8,7 +8,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::parse::{extract_kind, extract_sources, extract_title, extract_wikilinks, resolve_target, WikiFile};
+use crate::parse::{
+    WikiFile, extract_kind, extract_sources, extract_title, extract_wikilinks, resolve_target,
+};
 
 #[derive(Debug, Clone)]
 pub struct RetrievalNode {
@@ -45,19 +47,53 @@ const W_TYPE_AFFINITY: f32 = 1.0;
 /// `0.5`.
 fn type_affinity(a: &str, b: &str) -> f32 {
     let row: &[(&str, f32)] = match a {
-        "entity" => &[("concept", 1.2), ("entity", 0.8), ("source", 1.0), ("synthesis", 1.0), ("query", 0.8)],
-        "concept" => &[("entity", 1.2), ("concept", 0.8), ("source", 1.0), ("synthesis", 1.2), ("query", 1.0)],
-        "source" => &[("entity", 1.0), ("concept", 1.0), ("source", 0.5), ("query", 0.8), ("synthesis", 1.0)],
-        "query" => &[("concept", 1.0), ("entity", 0.8), ("synthesis", 1.0), ("source", 0.8), ("query", 0.5)],
-        "synthesis" => &[("concept", 1.2), ("entity", 1.0), ("source", 1.0), ("query", 1.0), ("synthesis", 0.8)],
+        "entity" => &[
+            ("concept", 1.2),
+            ("entity", 0.8),
+            ("source", 1.0),
+            ("synthesis", 1.0),
+            ("query", 0.8),
+        ],
+        "concept" => &[
+            ("entity", 1.2),
+            ("concept", 0.8),
+            ("source", 1.0),
+            ("synthesis", 1.2),
+            ("query", 1.0),
+        ],
+        "source" => &[
+            ("entity", 1.0),
+            ("concept", 1.0),
+            ("source", 0.5),
+            ("query", 0.8),
+            ("synthesis", 1.0),
+        ],
+        "query" => &[
+            ("concept", 1.0),
+            ("entity", 0.8),
+            ("synthesis", 1.0),
+            ("source", 0.8),
+            ("query", 0.5),
+        ],
+        "synthesis" => &[
+            ("concept", 1.2),
+            ("entity", 1.0),
+            ("source", 1.0),
+            ("query", 1.0),
+            ("synthesis", 0.8),
+        ],
         _ => return 0.5,
     };
-    row.iter().find(|(k, _)| *k == b).map(|(_, v)| *v).unwrap_or(0.5)
+    row.iter().find(|(k, _)| *k == b).map_or(0.5, |(_, v)| *v)
 }
+
+/// One parsed wiki file before link resolution:
+/// `(id, title, kind, path, sources, wikilinks)`.
+type RawNode = (String, String, String, String, Vec<String>, Vec<String>);
 
 /// Build the retrieval graph from wiki files.
 pub fn build_retrieval_graph(files: &[WikiFile]) -> RetrievalGraph {
-    let mut raw: Vec<(String, String, String, String, Vec<String>, Vec<String>)> = Vec::new();
+    let mut raw: Vec<RawNode> = Vec::new();
     for f in files {
         let id = f.id();
         raw.push((
@@ -65,7 +101,10 @@ pub fn build_retrieval_graph(files: &[WikiFile]) -> RetrievalGraph {
             {
                 let t = extract_title(&f.content, &f.name);
                 if t.is_empty() {
-                    f.name.strip_suffix(".md").unwrap_or(&f.name).replace('-', " ")
+                    f.name
+                        .strip_suffix(".md")
+                        .unwrap_or(&f.name)
+                        .replace('-', " ")
                 } else {
                     t
                 }
@@ -127,8 +166,16 @@ pub fn calculate_relevance(a: &RetrievalNode, b: &RetrievalNode, graph: &Retriev
     }
 
     // Signal 1: direct links (either direction).
-    let forward = if a.out_links.contains(&b.id) { 1.0 } else { 0.0 };
-    let backward = if b.out_links.contains(&a.id) { 1.0 } else { 0.0 };
+    let forward = if a.out_links.contains(&b.id) {
+        1.0
+    } else {
+        0.0
+    };
+    let backward = if b.out_links.contains(&a.id) {
+        1.0
+    } else {
+        0.0
+    };
     let direct = (forward + backward) * W_DIRECT_LINK;
 
     // Signal 2: source overlap.

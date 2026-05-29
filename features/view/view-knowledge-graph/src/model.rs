@@ -55,18 +55,13 @@ pub struct WikiGraph {
 }
 
 /// How node fill colors are chosen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ColorMode {
     /// Color by page `kind` (the [`NodeKind`] palette).
+    #[default]
     Kind,
     /// Color by community id (cycled palette).
     Community,
-}
-
-impl Default for ColorMode {
-    fn default() -> Self {
-        ColorMode::Kind
-    }
 }
 
 /// Known wiki page kinds, each mapped to a fixed Tailwind palette stem.

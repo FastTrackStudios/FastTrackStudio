@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 use fts_ui::lucide_dioxus::Funnel;
 
-use crate::filters::{apply_filters, GraphFilterState};
-use crate::model::{kind_label, GraphEdge, GraphNode};
+use crate::filters::{GraphFilterState, apply_filters};
+use crate::model::{GraphEdge, GraphNode, kind_label};
 
 #[derive(Props, Clone, PartialEq)]
 pub struct GraphFiltersProps {
@@ -60,7 +60,11 @@ pub fn GraphFilters(props: GraphFiltersProps) -> Element {
 
     let scale_pct = (props.node_scale * 100.0).round() as i32;
     let spacing_pct = (props.spacing * 100.0).round() as i32;
-    let max_links_value = props.filters.max_links.map(|m| m.to_string()).unwrap_or_default();
+    let max_links_value = props
+        .filters
+        .max_links
+        .map(|m| m.to_string())
+        .unwrap_or_default();
 
     // Hidden-node rows (label looked up from nodes).
     let hidden_rows: Vec<(String, String)> = props
@@ -72,8 +76,7 @@ pub fn GraphFilters(props: GraphFiltersProps) -> Element {
                 .nodes
                 .iter()
                 .find(|n| &n.id == id)
-                .map(|n| n.label.clone())
-                .unwrap_or_else(|| id.clone());
+                .map_or_else(|| id.clone(), |n| n.label.clone());
             (id.clone(), label)
         })
         .collect();

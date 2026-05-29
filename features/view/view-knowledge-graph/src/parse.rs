@@ -73,14 +73,16 @@ pub fn extract_title(content: &str, file_name: &str) -> String {
             }
         }
     }
-    file_name.strip_suffix(".md").unwrap_or(file_name).replace('-', " ")
+    file_name
+        .strip_suffix(".md")
+        .unwrap_or(file_name)
+        .replace('-', " ")
 }
 
 /// Page kind: frontmatter `type:` lowercased, else `"other"`.
 pub fn extract_kind(content: &str) -> String {
     fm_scalar(frontmatter(content), "type")
-        .map(|t| t.to_ascii_lowercase())
-        .unwrap_or_else(|| "other".to_string())
+        .map_or_else(|| "other".to_string(), |t| t.to_ascii_lowercase())
 }
 
 /// Source citations from frontmatter `sources:` — supports both the
@@ -205,7 +207,10 @@ mod tests {
 
     #[test]
     fn title_falls_back_to_heading_then_filename() {
-        assert_eq!(extract_title("# Just A Heading\n", "x.md"), "Just A Heading");
+        assert_eq!(
+            extract_title("# Just A Heading\n", "x.md"),
+            "Just A Heading"
+        );
         assert_eq!(extract_title("body only", "acme-corp.md"), "acme corp");
     }
 
@@ -220,7 +225,10 @@ mod tests {
     #[test]
     fn resolve_target_normalizes() {
         let ids = vec!["other-page".to_string(), "acme".to_string()];
-        assert_eq!(resolve_target("Other Page", &ids), Some("other-page".into()));
+        assert_eq!(
+            resolve_target("Other Page", &ids),
+            Some("other-page".into())
+        );
         assert_eq!(resolve_target("missing", &ids), None);
     }
 }

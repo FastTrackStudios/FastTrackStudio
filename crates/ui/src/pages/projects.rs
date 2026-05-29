@@ -138,7 +138,11 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
         };
     }
 
-    let mut top: Vec<&ProjectInfo> = live.iter().filter(|p| p.parent_id.is_none()).copied().collect();
+    let mut top: Vec<&ProjectInfo> = live
+        .iter()
+        .filter(|p| p.parent_id.is_none())
+        .copied()
+        .collect();
     // Stable, useful order: active first, then by priority, then title.
     top.sort_by(|a, b| {
         status_rank(&a.status)
@@ -147,9 +151,19 @@ fn render_loaded(rows: &[ProjectInfo], view_mode: Signal<ViewMode>) -> Element {
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
     let total = live.len();
-    let active = live.iter().filter(|p| matches_status(&p.status, Bucket::Active)).count();
-    let on_hold = live.iter().filter(|p| matches_status(&p.status, Bucket::Hold)).count();
-    let tracked: Vec<i16> = live.iter().filter(|p| p.progress_percent >= 0).map(|p| p.progress_percent).collect();
+    let active = live
+        .iter()
+        .filter(|p| matches_status(&p.status, Bucket::Active))
+        .count();
+    let on_hold = live
+        .iter()
+        .filter(|p| matches_status(&p.status, Bucket::Hold))
+        .count();
+    let tracked: Vec<i16> = live
+        .iter()
+        .filter(|p| p.progress_percent >= 0)
+        .map(|p| p.progress_percent)
+        .collect();
     let avg = if tracked.is_empty() {
         None
     } else {
@@ -544,11 +558,11 @@ fn priority_rank(pr: &str) -> u8 {
 /// pick from the chart palette by title hash. Always a CSS value safe
 /// for an inline `style` (a `var(--chart-N)` token, or user-set data).
 fn accent(p: &ProjectInfo) -> String {
-    if !p.color.trim().is_empty() {
-        p.color.clone()
-    } else {
+    if p.color.trim().is_empty() {
         let n = 1 + (fnv1a(&p.title) % 5);
         format!("var(--chart-{n})")
+    } else {
+        p.color.clone()
     }
 }
 
@@ -582,7 +596,6 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
         _ => StatusBadgeVariant::Neutral,
     }
 }
-
 
 fn priority_label(pr: &str) -> String {
     match pr {

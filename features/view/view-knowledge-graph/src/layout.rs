@@ -51,17 +51,25 @@ fn default_iterations(n: usize) -> usize {
 }
 
 fn id_hash(id: &str) -> u32 {
-    let mut h: u32 = 2166136261;
+    // FNV-1a 32-bit offset basis + prime.
+    let mut h: u32 = 2_166_136_261;
     for b in id.bytes() {
         h ^= b as u32;
-        h = h.wrapping_mul(16777619);
+        h = h.wrapping_mul(16_777_619);
     }
     h
 }
 
 /// Compute positions for every node. Returns a map keyed by node id.
 /// Edge `weight` strengthens attraction so related pages cluster.
-pub fn layout(nodes: &[GraphNode], edges: &[GraphEdge], cfg: LayoutConfig) -> HashMap<String, Position> {
+// Short math names (`n`, `k`, `d`, `temp`) read truer to the
+// force-directed layout literature than verbose ones would.
+#[allow(clippy::many_single_char_names)]
+pub fn layout(
+    nodes: &[GraphNode],
+    edges: &[GraphEdge],
+    cfg: LayoutConfig,
+) -> HashMap<String, Position> {
     let n = nodes.len();
     let mut pos: HashMap<String, Position> = HashMap::with_capacity(n);
     if n == 0 {
@@ -89,7 +97,11 @@ pub fn layout(nodes: &[GraphNode], edges: &[GraphEdge], cfg: LayoutConfig) -> Ha
         });
     }
 
-    let index: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, nd)| (nd.id.as_str(), i)).collect();
+    let index: HashMap<&str, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, nd)| (nd.id.as_str(), i))
+        .collect();
     let max_weight = edges.iter().map(|e| e.weight).fold(1.0_f32, f32::max);
 
     // Resolve edges to index pairs with normalized weight once.
@@ -113,7 +125,7 @@ pub fn layout(nodes: &[GraphNode], edges: &[GraphEdge], cfg: LayoutConfig) -> Ha
     let mut disp = vec![Position { x: 0.0, y: 0.0 }; n];
 
     for _ in 0..iterations {
-        for d in disp.iter_mut() {
+        for d in &mut disp {
             d.x = 0.0;
             d.y = 0.0;
         }
@@ -152,7 +164,9 @@ pub fn layout(nodes: &[GraphNode], edges: &[GraphEdge], cfg: LayoutConfig) -> Ha
         for i in 0..n {
             disp[i].x -= p[i].x * gravity * k;
             disp[i].y -= p[i].y * gravity * k;
-            let len = (disp[i].x * disp[i].x + disp[i].y * disp[i].y).sqrt().max(0.01);
+            let len = (disp[i].x * disp[i].x + disp[i].y * disp[i].y)
+                .sqrt()
+                .max(0.01);
             let capped = len.min(temp);
             p[i].x += disp[i].x / len * capped;
             p[i].y += disp[i].y / len * capped;
@@ -169,7 +183,9 @@ pub fn layout(nodes: &[GraphNode], edges: &[GraphEdge], cfg: LayoutConfig) -> Ha
 
 /// Bounding box of a position set: `(min_x, min_y, max_x, max_y)`.
 /// Returns a unit box when empty.
-pub fn bounds(positions: &HashMap<String, Position>) -> (f32, f32, f32, f32) {
+pub fn bounds<S: std::hash::BuildHasher>(
+    positions: &HashMap<String, Position, S>,
+) -> (f32, f32, f32, f32) {
     let mut min_x = f32::MAX;
     let mut min_y = f32::MAX;
     let mut max_x = f32::MIN;
@@ -228,7 +244,11 @@ mod tests {
     #[test]
     fn deterministic_layout() {
         let nodes = vec![node("a"), node("b"), node("c")];
-        let edges = vec![GraphEdge { source: "a".into(), target: "b".into(), weight: 1.0 }];
+        let edges = vec![GraphEdge {
+            source: "a".into(),
+            target: "b".into(),
+            weight: 1.0,
+        }];
         let a = layout(&nodes, &edges, LayoutConfig::default());
         let b = layout(&nodes, &edges, LayoutConfig::default());
         assert_eq!(a["a"], b["a"]);
@@ -239,7 +259,11 @@ mod tests {
     fn positions_are_finite() {
         let nodes: Vec<GraphNode> = (0..30).map(|i| node(&format!("n{i}"))).collect();
         let edges: Vec<GraphEdge> = (0..29)
-            .map(|i| GraphEdge { source: format!("n{i}"), target: format!("n{}", i + 1), weight: 1.0 })
+            .map(|i| GraphEdge {
+                source: format!("n{i}"),
+                target: format!("n{}", i + 1),
+                weight: 1.0,
+            })
             .collect();
         let pos = layout(&nodes, &edges, LayoutConfig::default());
         for p in pos.values() {

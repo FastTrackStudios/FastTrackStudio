@@ -18,7 +18,10 @@ use task::TaskInfo as DbTask;
 pub async fn fetch_projects(slugs: &[String]) -> Result<Vec<ProjectInfo>, String> {
     let futs = slugs.iter().cloned().map(|slug| async move {
         match crate::vox_clients::establish_for::<project::ProjectServiceClient>(&slug).await {
-            Ok(client) => client.list().await.map_err(|e| format!("{slug}: list: {e:?}")),
+            Ok(client) => client
+                .list()
+                .await
+                .map_err(|e| format!("{slug}: list: {e:?}")),
             Err(e) => Err(format!("{slug}: {e}")),
         }
     });
@@ -61,13 +64,10 @@ pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
 #[cfg(target_arch = "wasm32")]
-pub async fn fetch_wiki_files(
-    slug: &str,
-) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
+pub async fn fetch_wiki_files(slug: &str) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
     use view_knowledge_graph::WikiFile;
 
-    let client =
-        crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
+    let client = crate::vox_clients::establish_for::<vault_proto::VaultSyncClient>(slug).await?;
     let manifest = client
         .manifest("default".to_owned())
         .await
@@ -103,9 +103,7 @@ pub async fn fetch_wiki_files(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch_wiki_files(
-    _slug: &str,
-) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
+pub async fn fetch_wiki_files(_slug: &str) -> Result<Vec<view_knowledge_graph::WikiFile>, String> {
     Err("native client not wired yet".to_owned())
 }
 

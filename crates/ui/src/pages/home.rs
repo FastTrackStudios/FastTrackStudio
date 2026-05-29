@@ -225,12 +225,12 @@ fn parse_due(s: &str) -> Option<(String, &'static str)> {
     } else {
         d.format("%b %-d").to_string()
     };
-    let cls = if d < today {
-        "border border-destructive/50 bg-destructive/15 text-destructive"
-    } else if d == today {
-        "border border-amber-400/50 bg-amber-500/15 text-amber-200"
-    } else {
-        "border border-border bg-muted/40 text-muted-foreground"
+    let cls = match d.cmp(&today) {
+        std::cmp::Ordering::Less => {
+            "border border-destructive/50 bg-destructive/15 text-destructive"
+        }
+        std::cmp::Ordering::Equal => "border border-amber-400/50 bg-amber-500/15 text-amber-200",
+        std::cmp::Ordering::Greater => "border border-border bg-muted/40 text-muted-foreground",
     };
     Some((label, cls))
 }

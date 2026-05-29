@@ -90,12 +90,17 @@ pub fn apply_filters(
         }
     }
 
-    let visible_nodes: Vec<GraphNode> =
-        nodes.iter().filter(|n| !hidden.contains(&n.id)).cloned().collect();
+    let visible_nodes: Vec<GraphNode> = nodes
+        .iter()
+        .filter(|n| !hidden.contains(&n.id))
+        .cloned()
+        .collect();
     let visible_ids: HashSet<&str> = visible_nodes.iter().map(|n| n.id.as_str()).collect();
     let visible_edges: Vec<GraphEdge> = edges
         .iter()
-        .filter(|e| visible_ids.contains(e.source.as_str()) && visible_ids.contains(e.target.as_str()))
+        .filter(|e| {
+            visible_ids.contains(e.source.as_str()) && visible_ids.contains(e.target.as_str())
+        })
         .cloned()
         .collect();
 
@@ -133,8 +138,10 @@ mod tests {
     #[test]
     fn isolated_filter() {
         let nodes = vec![node("a", "entity", 0), node("b", "entity", 3)];
-        let mut filt = GraphFilterState::default();
-        filt.hide_isolated = true;
+        let filt = GraphFilterState {
+            hide_isolated: true,
+            ..Default::default()
+        };
         let f = apply_filters(&nodes, &[], &filt);
         assert_eq!(f.nodes.len(), 1);
         assert_eq!(f.nodes[0].id, "b");

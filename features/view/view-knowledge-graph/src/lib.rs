@@ -50,10 +50,10 @@ pub use components::{
     GraphFilters, GraphFiltersProps, GraphLegend, GraphLegendProps, KnowledgeGraphView,
     KnowledgeGraphViewProps,
 };
-pub use filters::{apply_filters, FilteredGraph, GraphFilterState};
+pub use filters::{FilteredGraph, GraphFilterState, apply_filters};
 pub use insights::{
-    knowledge_gaps, surprising_connections, GapKind, KnowledgeGap, SurprisingConnection,
+    GapKind, KnowledgeGap, SurprisingConnection, knowledge_gaps, surprising_connections,
 };
 pub use model::{ColorMode, CommunityInfo, GraphEdge, GraphNode, NodeKind, WikiGraph};
 pub use parse::WikiFile;
-pub use search::{apply_search, SearchResult};
+pub use search::{SearchResult, apply_search};

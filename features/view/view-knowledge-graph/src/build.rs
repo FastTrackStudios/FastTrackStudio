@@ -7,11 +7,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::community::{detect_communities, CommNode};
+use crate::community::{CommNode, detect_communities};
 use crate::model::{GraphEdge, GraphNode, WikiGraph};
-use crate::parse::{
-    extract_kind, extract_title, extract_wikilinks, resolve_target, WikiFile,
-};
+use crate::parse::{WikiFile, extract_kind, extract_title, extract_wikilinks, resolve_target};
 use crate::relevance::{build_retrieval_graph, calculate_relevance};
 
 /// Page kinds excluded from the graph — query/research artifacts are
@@ -51,8 +49,7 @@ pub fn build_wiki_graph(files: &[WikiFile]) -> WikiGraph {
     let id_vec: Vec<String> = id_set.iter().cloned().collect();
 
     // Resolve links → directed edges + degree counts.
-    let mut link_counts: HashMap<String, u32> =
-        raw.iter().map(|r| (r.id.clone(), 0u32)).collect();
+    let mut link_counts: HashMap<String, u32> = raw.iter().map(|r| (r.id.clone(), 0u32)).collect();
     let mut directed: Vec<(String, String)> = Vec::new();
     for r in &raw {
         for link in &r.links {
