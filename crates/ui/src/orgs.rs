@@ -52,6 +52,21 @@ pub fn selected_slugs(sel: &OrgSelection, orgs: &[OrgMeta]) -> Vec<String> {
     }
 }
 
+/// Where a newly-created record should land: the selected org, or the
+/// home org (falling back to the first hosted org) when viewing All.
+#[must_use]
+pub fn create_target(sel: &OrgSelection, orgs: &[OrgMeta]) -> String {
+    match sel {
+        OrgSelection::One(slug) => slug.clone(),
+        OrgSelection::All => orgs
+            .iter()
+            .find(|o| o.is_home)
+            .or_else(|| orgs.first())
+            .map(|o| o.slug.clone())
+            .unwrap_or_default(),
+    }
+}
+
 // ── discovery ───────────────────────────────────────────────────────
 
 #[cfg(target_arch = "wasm32")]

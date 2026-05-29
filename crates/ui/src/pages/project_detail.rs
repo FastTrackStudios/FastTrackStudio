@@ -7,6 +7,8 @@
 //! [`task_ui::TasksApp`] (fully editable, write-through). Native has
 //! no client yet (offline notice).
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use project::ProjectInfo;
@@ -14,27 +16,45 @@ use task::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 use uuid::Uuid;
 
+use crate::orgs::{OrgMeta, OrgSelection};
 use crate::routes::Route;
-use crate::task_wiring::{fetch_tasks, handle, to_ui};
+use crate::task_wiring::{handle, to_ui};
 
 #[component]
 pub fn ProjectDetailView(id: String) -> Element {
+    let selection = use_context::<Signal<OrgSelection>>();
+    let org_list = use_context::<Signal<Vec<OrgMeta>>>();
     let route_id = id.clone();
-    let project = use_resource(move || {
+    // Discover which org owns this project (search the selected orgs by
+    // id), then load that org's tasks — so the page + its edits work in
+    // "All" mode, not just the default org.
+    let data = use_resource(move || {
         let id = route_id.clone();
-        async move { fetch_project(id).await }
+        async move {
+            let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
+            let (project, slug) = crate::feeds::find_project(&id, &slugs).await?;
+            let tasks = crate::feeds::fetch_tasks_tagged(std::slice::from_ref(&slug))
+                .await?
+                .into_iter()
+                .map(|(_, t)| t)
+                .collect::<Vec<_>>();
+            Ok::<(ProjectInfo, String, Vec<DbTask>), String>((project, slug, tasks))
+        }
     });
-    let tasks_loader = use_resource(|| async move { fetch_tasks().await });
     let mut tasks = use_signal(Vec::<DbTask>::new);
+    let mut org_of = use_signal(HashMap::<Uuid, String>::new);
+    let mut project_slug = use_signal(String::new);
     use_effect(move || {
-        if let Some(Ok(rows)) = &*tasks_loader.read_unchecked() {
+        if let Some(Ok((_, slug, rows))) = &*data.read_unchecked() {
             tasks.set(rows.clone());
+            org_of.set(rows.iter().map(|t| (t.id, slug.clone())).collect());
+            project_slug.set(slug.clone());
         }
     });
 
-    let proj = project.read_unchecked();
+    let proj = data.read();
     let body = match &*proj {
-        Some(Ok(p)) => {
+        Some(Ok((p, _slug, _))) => {
             let p = p.clone();
             let all = tasks.read().clone();
             let mine: Vec<UiTask> = all.iter().filter(|t| belongs(t, &p)).map(to_ui).collect();
@@ -83,7 +103,10 @@ pub fn ProjectDetailView(id: String) -> Element {
                     } else {
                         TasksApp {
                             tasks: mine,
-                            on_event: move |mu: TaskMutation| handle(&mut tasks, mu),
+                            on_event: move |mu: TaskMutation| {
+                                let create_slug = project_slug.read().clone();
+                                handle(&mut tasks, &mut org_of, &create_slug, mu);
+                            },
                         }
                     }
                 }
@@ -129,20 +152,5 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
         "on_hold" | "on-hold" | "paused" => StatusBadgeVariant::Warning,
         "cancelled" | "canceled" | "archived" => StatusBadgeVariant::Danger,
         _ => StatusBadgeVariant::Neutral,
-    }
-}
-
-/// Fetch a single project via `ProjectServiceClient.get`.
-async fn fetch_project(id: String) -> Result<ProjectInfo, String> {
-    let uuid = Uuid::parse_str(&id).map_err(|_| "invalid project id".to_owned())?;
-    let client = crate::vox_clients::project_client().await?;
-    #[cfg(target_arch = "wasm32")]
-    {
-        client.get(uuid).await.map_err(|e| format!("get: {e:?}"))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = (uuid, client);
-        Err("native client not wired yet".to_owned())
     }
 }

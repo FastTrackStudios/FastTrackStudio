@@ -7,26 +7,28 @@
 //! records with optimistic write-through to the org's `TaskService`.
 //! Native has no client yet (fetch returns an offline notice).
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
 use task::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TimeEntry as UiTimeEntry};
-
-/// Fetch the active org's tasks via the cached `TaskServiceClient`.
-pub(crate) async fn fetch_tasks() -> Result<Vec<DbTask>, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let client = crate::vox_clients::task_client().await?;
-        client.list().await.map_err(|e| format!("list: {e:?}"))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Err("native client not wired yet".to_owned())
-    }
-}
+use uuid::Uuid;
 
 /// Apply a UI mutation: optimistically update the authoritative list,
-/// then write the affected record through to the service.
-pub(crate) fn handle(tasks: &mut Signal<Vec<DbTask>>, mu: TaskMutation) {
+/// then write the affected record through to the **owning org's**
+/// service.
+///
+/// `org_of` maps each task id → the slug of the org it was fetched from
+/// (populated by the tagged fetch). In "All" mode this is what lets an
+/// edit to a task from org X route back to org X rather than the
+/// default org. `create_slug` is where freshly-created tasks land (the
+/// selected org, or the home org when viewing All).
+pub(crate) fn handle(
+    tasks: &mut Signal<Vec<DbTask>>,
+    org_of: &mut Signal<HashMap<Uuid, String>>,
+    create_slug: &str,
+    mu: TaskMutation,
+) {
     let mut list = tasks.write();
     let affected: Option<Affected> = match mu {
         TaskMutation::Create { task } => {
@@ -56,7 +58,31 @@ pub(crate) fn handle(tasks: &mut Signal<Vec<DbTask>>, mu: TaskMutation) {
     };
     drop(list);
     if let Some(a) = affected {
-        persist(a);
+        // Route the write to the org that owns this task.
+        let slug = match &a {
+            Affected::Create(_) => create_slug.to_owned(),
+            Affected::Update(t) => org_of
+                .read()
+                .get(&t.id)
+                .cloned()
+                .unwrap_or_else(|| create_slug.to_owned()),
+            Affected::Delete(id) => org_of
+                .read()
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| create_slug.to_owned()),
+        };
+        // Keep the id → org map in step with the list.
+        match &a {
+            Affected::Create(t) => {
+                org_of.write().insert(t.id, slug.clone());
+            }
+            Affected::Delete(id) => {
+                org_of.write().remove(id);
+            }
+            Affected::Update(_) => {}
+        }
+        persist(slug, a);
     }
 }
 
@@ -65,7 +91,7 @@ pub(crate) fn handle(tasks: &mut Signal<Vec<DbTask>>, mu: TaskMutation) {
 enum Affected {
     Create(DbTask),
     Update(DbTask),
-    Delete(uuid::Uuid),
+    Delete(Uuid),
 }
 
 /// Forward convert the persistence model into the dumb UI model.
@@ -113,26 +139,26 @@ fn apply_ui_edits(t: &mut DbTask, ui: &UiTask) {
     t.details = ui.details.clone();
 }
 
-/// Best-effort write-through. Optimistic UI already updated; on
-/// failure the next load reconciles.
-fn persist(affected: Affected) {
+/// Best-effort write-through to `slug`'s `TaskService`. Optimistic UI
+/// already updated; on failure the next load reconciles.
+fn persist(slug: String, affected: Affected) {
     #[cfg(target_arch = "wasm32")]
     {
         wasm_bindgen_futures::spawn_local(async move {
-            if let Err(e) = persist_inner(affected).await {
-                tracing::warn!("task write-through failed: {e}");
+            if let Err(e) = persist_inner(&slug, affected).await {
+                tracing::warn!("task write-through to `{slug}` failed: {e}");
             }
         });
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = affected;
+        let _ = (slug, affected);
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn persist_inner(affected: Affected) -> Result<(), String> {
-    let client = crate::vox_clients::task_client().await?;
+async fn persist_inner(slug: &str, affected: Affected) -> Result<(), String> {
+    let client = crate::vox_clients::establish_for::<task::TaskServiceClient>(slug).await?;
     match affected {
         Affected::Create(task) => {
             client
