@@ -36,6 +36,9 @@ pub enum Route {
         #[route("/schedule")]
         ScheduleRoute {},
 
+        #[route("/gantt")]
+        GanttRoute {},
+
         #[route("/wiki")]
         WikiRoute {},
 
@@ -76,6 +79,11 @@ fn VaultRoute() -> Element {
 #[component]
 fn ScheduleRoute() -> Element {
     rsx! { pages::schedule::ScheduleView {} }
+}
+
+#[component]
+fn GanttRoute() -> Element {
+    rsx! { pages::gantt::GanttView {} }
 }
 
 #[component]

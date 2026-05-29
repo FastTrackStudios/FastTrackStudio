@@ -20,7 +20,11 @@ pub enum SendError {
     Connect(String),
     #[error("send: {0}")]
     Send(String),
-    #[error("starttls is not yet implemented")]
+    /// No longer produced on the send path (STARTTLS is
+    /// implemented via mail-send's `connect()` upgrade); kept for
+    /// API stability and any future plaintext-only transport.
+    #[allow(dead_code)]
+    #[error("starttls is not supported by this transport")]
     StarttlsUnsupported,
     #[error("plaintext SMTP is refused (tests/loopback only)")]
     PlaintextRefused,
@@ -69,7 +73,16 @@ impl SmtpSender {
             TlsMode::Implicit => SmtpClientBuilder::new(self.config.host.clone(), self.config.port)
                 .implicit_tls(true)
                 .credentials(creds),
-            TlsMode::Starttls => return Err(SendError::StarttlsUnsupported),
+            // STARTTLS: connect in clear text, then upgrade. With
+            // `implicit_tls(false)` mail-send's `connect()` reads
+            // the greeting, sends EHLO, and issues `STARTTLS` when
+            // the server advertises it — yielding the same
+            // `SmtpClient<TlsStream<..>>` as the implicit path
+            // (and erroring with `MissingStartTls` if the server
+            // doesn't offer it).
+            TlsMode::Starttls => SmtpClientBuilder::new(self.config.host.clone(), self.config.port)
+                .implicit_tls(false)
+                .credentials(creds),
             TlsMode::None => {
                 #[cfg(feature = "test-plaintext")]
                 {
@@ -113,7 +126,10 @@ impl SmtpSender {
                     .await
                     .map_err(|e| SendError::Send(e.to_string()))?;
             }
-            TlsMode::Implicit => {
+            // Both implicit TLS and STARTTLS resolve to a
+            // TLS-wrapped client via `connect()`; the builder
+            // above already encoded which handshake to run.
+            TlsMode::Implicit | TlsMode::Starttls => {
                 let mut client = builder
                     .connect()
                     .await
@@ -123,7 +139,10 @@ impl SmtpSender {
                     .await
                     .map_err(|e| SendError::Send(e.to_string()))?;
             }
-            _ => return Err(SendError::PlaintextRefused),
+            // Plaintext without the test feature: refused above
+            // when building the builder, so this only fires in
+            // production builds where `None` is rejected.
+            TlsMode::None => return Err(SendError::PlaintextRefused),
         }
 
         Ok(message_id)
