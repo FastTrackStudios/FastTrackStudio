@@ -414,6 +414,10 @@ pub struct Standalone {
     /// independently of project state mutations.
     pub(crate) plugin_instances:
         Arc<Mutex<std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>>>,
+    /// Track-domain event broadcaster. Mutating `Tracks` methods publish
+    /// here; per-subscriber vox pumps bridge broadcast events into `Tx`.
+    pub(crate) track_events:
+        Arc<tokio::sync::broadcast::Sender<daw_proto::track::TrackStreamEvent>>,
 }
 
 impl Default for Standalone {
@@ -433,6 +437,7 @@ impl Standalone {
                 crate::automation_touch::AutomationTouchState::default(),
             )),
             plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            track_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
         }
     }
 

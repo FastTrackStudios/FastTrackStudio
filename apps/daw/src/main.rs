@@ -1046,60 +1046,55 @@ async fn main() -> Result<()> {
         _ => {}
     }
 
-    // All other commands need a DAW connection
     let daw = daw_cli::connect(cli.socket).await?;
+    run_rpc_command(&daw, cli.command, cli.json).await
+}
 
-    match cli.command {
-        Command::Info => daw_cli::cmd_info(&daw, cli.json).await?,
-        Command::Tracks => daw_cli::cmd_tracks(&daw, cli.json).await?,
-        Command::Track { ref track } => daw_cli::cmd_track(&daw, track, cli.json).await?,
-        Command::Fx { ref track } => daw_cli::cmd_fx(&daw, track, cli.json).await?,
-        Command::Params { ref track, ref fx } => {
-            daw_cli::cmd_params(&daw, track, fx, cli.json).await?
-        }
-        Command::LastTouchedFx => {
-            print_value(daw_cli::ops::last_touched_fx(&daw).await?, cli.json)?
-        }
+async fn run_rpc_command(daw: daw::rpc::Daw, command: Command, json: bool) -> Result<()> {
+    match command {
+        Command::Info => daw_cli::cmd_info(daw, json).await?,
+        Command::Tracks => daw_cli::cmd_tracks(daw, json).await?,
+        Command::Track { ref track } => daw_cli::cmd_track(daw, track, json).await?,
+        Command::Fx { ref track } => daw_cli::cmd_fx(daw, track, json).await?,
+        Command::Params { ref track, ref fx } => daw_cli::cmd_params(daw, track, fx, json).await?,
+        Command::LastTouchedFx => print_value(daw_cli::ops::last_touched_fx(daw).await?, json)?,
         Command::BypassFx { ref track, ref fx } => print_value(
-            daw_cli::ops::fx_set_enabled(&daw, track, fx, false).await?,
-            cli.json,
+            daw_cli::ops::fx_set_enabled(daw, track, fx, false).await?,
+            json,
         )?,
         Command::EnableFx { ref track, ref fx } => print_value(
-            daw_cli::ops::fx_set_enabled(&daw, track, fx, true).await?,
-            cli.json,
+            daw_cli::ops::fx_set_enabled(daw, track, fx, true).await?,
+            json,
         )?,
         Command::FxAdd {
             ref track,
             ref name,
             at,
-        } => print_value(daw_cli::ops::fx_add(&daw, track, name, at).await?, cli.json)?,
+        } => print_value(daw_cli::ops::fx_add(daw, track, name, at).await?, json)?,
         Command::FxRemove { ref track, ref fx } => {
-            print_value(daw_cli::ops::fx_remove(&daw, track, fx).await?, cli.json)?
+            print_value(daw_cli::ops::fx_remove(daw, track, fx).await?, json)?
         }
         Command::FxEnable {
             ref track,
             ref fx,
             enabled,
         } => print_value(
-            daw_cli::ops::fx_set_enabled(&daw, track, fx, enabled.0).await?,
-            cli.json,
+            daw_cli::ops::fx_set_enabled(daw, track, fx, enabled.0).await?,
+            json,
         )?,
         Command::FxMove {
             ref track,
             ref fx,
             index,
-        } => print_value(
-            daw_cli::ops::fx_move(&daw, track, fx, index).await?,
-            cli.json,
-        )?,
+        } => print_value(daw_cli::ops::fx_move(daw, track, fx, index).await?, json)?,
         Command::FxSetParam {
             ref track,
             ref fx,
             param,
             value,
         } => print_value(
-            daw_cli::ops::fx_set_param(&daw, track, fx, param, value).await?,
-            cli.json,
+            daw_cli::ops::fx_set_param(daw, track, fx, param, value).await?,
+            json,
         )?,
         Command::FxSetParamName {
             ref track,
@@ -1107,269 +1102,238 @@ async fn main() -> Result<()> {
             ref param,
             value,
         } => print_value(
-            daw_cli::ops::fx_set_param_by_name(&daw, track, fx, param, value).await?,
-            cli.json,
+            daw_cli::ops::fx_set_param_by_name(daw, track, fx, param, value).await?,
+            json,
         )?,
         Command::FxUi {
             ref track,
             ref fx,
             ref action,
-        } => print_value(
-            daw_cli::ops::fx_ui(&daw, track, fx, action).await?,
-            cli.json,
-        )?,
+        } => print_value(daw_cli::ops::fx_ui(daw, track, fx, action).await?, json)?,
         Command::FxPreset {
             ref track,
             ref fx,
             ref action,
             index,
         } => print_value(
-            daw_cli::ops::fx_preset(&daw, track, fx, action, index).await?,
-            cli.json,
+            daw_cli::ops::fx_preset(daw, track, fx, action, index).await?,
+            json,
         )?,
-        Command::Transport => daw_cli::cmd_transport(&daw, cli.json).await?,
-        Command::Play => print_value(
-            daw_cli::ops::transport_control(&daw, "play").await?,
-            cli.json,
-        )?,
-        Command::Stop => print_value(
-            daw_cli::ops::transport_control(&daw, "stop").await?,
-            cli.json,
-        )?,
-        Command::Pause => print_value(
-            daw_cli::ops::transport_control(&daw, "pause").await?,
-            cli.json,
-        )?,
-        Command::Record => print_value(
-            daw_cli::ops::transport_control(&daw, "record").await?,
-            cli.json,
-        )?,
+        Command::Transport => daw_cli::cmd_transport(daw, json).await?,
+        Command::Play => print_value(daw_cli::ops::transport_control(daw, "play").await?, json)?,
+        Command::Stop => print_value(daw_cli::ops::transport_control(daw, "stop").await?, json)?,
+        Command::Pause => print_value(daw_cli::ops::transport_control(daw, "pause").await?, json)?,
+        Command::Record => {
+            print_value(daw_cli::ops::transport_control(daw, "record").await?, json)?
+        }
         Command::PlayPause => print_value(
-            daw_cli::ops::transport_control(&daw, "play_pause").await?,
-            cli.json,
+            daw_cli::ops::transport_control(daw, "play_pause").await?,
+            json,
         )?,
         Command::Loop => print_value(
-            daw_cli::ops::transport_control(&daw, "toggle_loop").await?,
-            cli.json,
+            daw_cli::ops::transport_control(daw, "toggle_loop").await?,
+            json,
         )?,
-        Command::TransportDo { ref action } => print_value(
-            daw_cli::ops::transport_control(&daw, action).await?,
-            cli.json,
-        )?,
+        Command::TransportDo { ref action } => {
+            print_value(daw_cli::ops::transport_control(daw, action).await?, json)?
+        }
         Command::SetPosition { seconds } => print_value(
-            daw_cli::ops::transport_set_position(&daw, seconds).await?,
-            cli.json,
+            daw_cli::ops::transport_set_position(daw, seconds).await?,
+            json,
         )?,
-        Command::SetTempo { bpm } => print_value(
-            daw_cli::ops::transport_set_tempo(&daw, bpm).await?,
-            cli.json,
-        )?,
+        Command::SetTempo { bpm } => {
+            print_value(daw_cli::ops::transport_set_tempo(daw, bpm).await?, json)?
+        }
         Command::SetLoop { enabled } => print_value(
-            daw_cli::ops::transport_set_loop(&daw, enabled.0).await?,
-            cli.json,
+            daw_cli::ops::transport_set_loop(daw, enabled.0).await?,
+            json,
         )?,
-        Command::SetPlayrate { rate } => print_value(
-            daw_cli::ops::transport_set_playrate(&daw, rate).await?,
-            cli.json,
-        )?,
+        Command::SetPlayrate { rate } => {
+            print_value(daw_cli::ops::transport_set_playrate(daw, rate).await?, json)?
+        }
         Command::GotoMeasure { measure } => print_value(
-            daw_cli::ops::transport_goto_measure(&daw, measure).await?,
-            cli.json,
+            daw_cli::ops::transport_goto_measure(daw, measure).await?,
+            json,
         )?,
-        Command::Markers => daw_cli::cmd_markers(&daw, cli.json).await?,
+        Command::Markers => daw_cli::cmd_markers(daw, json).await?,
         Command::MarkerAdd {
             position,
             ref name,
             lane,
         } => print_value(
-            daw_cli::ops::marker_add(&daw, position, name, lane).await?,
-            cli.json,
+            daw_cli::ops::marker_add(daw, position, name, lane).await?,
+            json,
         )?,
         Command::MarkerRemove { id } => {
-            print_value(daw_cli::ops::marker_remove(&daw, id).await?, cli.json)?
+            print_value(daw_cli::ops::marker_remove(daw, id).await?, json)?
         }
-        Command::MarkerMove { id, position } => print_value(
-            daw_cli::ops::marker_move(&daw, id, position).await?,
-            cli.json,
-        )?,
+        Command::MarkerMove { id, position } => {
+            print_value(daw_cli::ops::marker_move(daw, id, position).await?, json)?
+        }
         Command::MarkerRename { id, ref name } => {
-            print_value(daw_cli::ops::marker_rename(&daw, id, name).await?, cli.json)?
+            print_value(daw_cli::ops::marker_rename(daw, id, name).await?, json)?
         }
-        Command::Regions => daw_cli::cmd_regions(&daw, cli.json).await?,
+        Command::Regions => daw_cli::cmd_regions(daw, json).await?,
         Command::RegionAdd {
             start,
             end,
             ref name,
             lane,
         } => print_value(
-            daw_cli::ops::region_add(&daw, start, end, name, lane).await?,
-            cli.json,
+            daw_cli::ops::region_add(daw, start, end, name, lane).await?,
+            json,
         )?,
         Command::RegionRemove { id } => {
-            print_value(daw_cli::ops::region_remove(&daw, id).await?, cli.json)?
+            print_value(daw_cli::ops::region_remove(daw, id).await?, json)?
         }
         Command::RegionBounds { id, start, end } => print_value(
-            daw_cli::ops::region_set_bounds(&daw, id, start, end).await?,
-            cli.json,
+            daw_cli::ops::region_set_bounds(daw, id, start, end).await?,
+            json,
         )?,
         Command::RegionRename { id, ref name } => {
-            print_value(daw_cli::ops::region_rename(&daw, id, name).await?, cli.json)?
+            print_value(daw_cli::ops::region_rename(daw, id, name).await?, json)?
         }
-        Command::Plugins => daw_cli::cmd_plugins(&daw, cli.json).await?,
-        Command::LoadedPlugins => {
-            print_value(daw_cli::ops::plugin_loader_list(&daw).await?, cli.json)?
+        Command::Plugins => daw_cli::cmd_plugins(daw, json).await?,
+        Command::LoadedPlugins => print_value(daw_cli::ops::plugin_loader_list(daw).await?, json)?,
+        Command::LoadPlugin { ref path } => {
+            print_value(daw_cli::ops::plugin_loader_load(daw, path).await?, json)?
         }
-        Command::LoadPlugin { ref path } => print_value(
-            daw_cli::ops::plugin_loader_load(&daw, path).await?,
-            cli.json,
-        )?,
-        Command::Ping => daw_cli::cmd_ping(&daw).await?,
-        Command::Projects => daw_cli::cmd_projects(&daw, cli.json).await?,
-        Command::NewProject => print_value(daw_cli::ops::create_project(&daw).await?, cli.json)?,
+        Command::Ping => daw_cli::cmd_ping(daw).await?,
+        Command::Projects => daw_cli::cmd_projects(daw, json).await?,
+        Command::NewProject => print_value(daw_cli::ops::create_project(daw).await?, json)?,
         Command::SelectProject { ref guid } => {
-            print_value(daw_cli::ops::select_project(&daw, guid).await?, cli.json)?
+            print_value(daw_cli::ops::select_project(daw, guid).await?, json)?
         }
-        Command::Open { ref path } => daw_cli::cmd_open(&daw, path, cli.json).await?,
-        Command::Close { ref guid } => daw_cli::cmd_close(&daw, guid.as_deref()).await?,
-        Command::Save => print_value(daw_cli::ops::save_project(&daw).await?, cli.json)?,
-        Command::SaveAll => print_value(daw_cli::ops::save_all_projects(&daw).await?, cli.json)?,
-        Command::Undo => print_value(daw_cli::ops::project_undo(&daw).await?, cli.json)?,
-        Command::Redo => print_value(daw_cli::ops::project_redo(&daw).await?, cli.json)?,
-        Command::RunCommand { ref command } => print_value(
-            daw_cli::ops::project_run_command(&daw, command).await?,
-            cli.json,
-        )?,
+        Command::Open { ref path } => daw_cli::cmd_open(daw, path, json).await?,
+        Command::Close { ref guid } => daw_cli::cmd_close(daw, guid.as_deref()).await?,
+        Command::Save => print_value(daw_cli::ops::save_project(daw).await?, json)?,
+        Command::SaveAll => print_value(daw_cli::ops::save_all_projects(daw).await?, json)?,
+        Command::Undo => print_value(daw_cli::ops::project_undo(daw).await?, json)?,
+        Command::Redo => print_value(daw_cli::ops::project_redo(daw).await?, json)?,
+        Command::RunCommand { ref command } => {
+            print_value(daw_cli::ops::project_run_command(daw, command).await?, json)?
+        }
         Command::ProjectInfoString { ref key, ref value } => print_value(
-            daw_cli::ops::project_info_string(&daw, key, value.as_deref()).await?,
-            cli.json,
+            daw_cli::ops::project_info_string(daw, key, value.as_deref()).await?,
+            json,
         )?,
         Command::ProjectInfoNumber { ref key, value } => print_value(
-            daw_cli::ops::project_info_number(&daw, key, value).await?,
-            cli.json,
+            daw_cli::ops::project_info_number(daw, key, value).await?,
+            json,
         )?,
         Command::AddTrack { ref name, at } => {
-            daw_cli::cmd_add_track(&daw, name.as_deref(), at, cli.json).await?
+            daw_cli::cmd_add_track(daw, name.as_deref(), at, json).await?
         }
-        Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(&daw, track).await?,
+        Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(daw, track).await?,
         Command::Mute { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "muted", bool_value(true)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "muted", bool_value(true)).await?,
+            json,
         )?,
         Command::Unmute { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "muted", bool_value(false)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "muted", bool_value(false)).await?,
+            json,
         )?,
         Command::Solo { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "soloed", bool_value(true)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "soloed", bool_value(true)).await?,
+            json,
         )?,
         Command::Unsolo { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "soloed", bool_value(false)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "soloed", bool_value(false)).await?,
+            json,
         )?,
         Command::Arm { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "armed", bool_value(true)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "armed", bool_value(true)).await?,
+            json,
         )?,
         Command::Disarm { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "armed", bool_value(false)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "armed", bool_value(false)).await?,
+            json,
         )?,
         Command::SelectTrack { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "selected", bool_value(true)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "selected", bool_value(true)).await?,
+            json,
         )?,
         Command::DeselectTrack { ref track } => print_value(
-            daw_cli::ops::track_set(&daw, track, "selected", bool_value(false)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, "selected", bool_value(false)).await?,
+            json,
         )?,
         Command::TrackRename {
             ref track,
             ref name,
-        } => print_value(
-            daw_cli::ops::track_rename(&daw, track, &name.0).await?,
-            cli.json,
-        )?,
+        } => print_value(daw_cli::ops::track_rename(daw, track, &name.0).await?, json)?,
         Command::TrackColor { ref track, color } => print_value(
-            daw_cli::ops::track_set_color(&daw, track, color.0).await?,
-            cli.json,
+            daw_cli::ops::track_set_color(daw, track, color.0).await?,
+            json,
         )?,
         Command::TrackFolderDepth { ref track, depth } => print_value(
-            daw_cli::ops::track_set_folder_depth(&daw, track, depth.0).await?,
-            cli.json,
+            daw_cli::ops::track_set_folder_depth(daw, track, depth.0).await?,
+            json,
         )?,
         Command::TrackSet {
             ref track,
             ref field,
             ref value,
         } => print_value(
-            daw_cli::ops::track_set(&daw, track, field, cli_value(value)).await?,
-            cli.json,
+            daw_cli::ops::track_set(daw, track, field, cli_value(value)).await?,
+            json,
         )?,
-        Command::TrackMove { ref track, index } => print_value(
-            daw_cli::ops::track_move(&daw, track, index).await?,
-            cli.json,
-        )?,
+        Command::TrackMove { ref track, index } => {
+            print_value(daw_cli::ops::track_move(daw, track, index).await?, json)?
+        }
         Command::TrackExtState {
             ref track,
             ref section,
             ref key,
             ref value,
         } => print_value(
-            daw_cli::ops::track_ext_state(&daw, track, section, key, value.as_deref()).await?,
-            cli.json,
+            daw_cli::ops::track_ext_state(daw, track, section, key, value.as_deref()).await?,
+            json,
         )?,
         Command::TrackExtStateDelete {
             ref track,
             ref section,
             ref key,
         } => print_value(
-            daw_cli::ops::track_delete_ext_state(&daw, track, section, key).await?,
-            cli.json,
+            daw_cli::ops::track_delete_ext_state(daw, track, section, key).await?,
+            json,
         )?,
         Command::ExtStateGet {
             ref section,
             ref key,
-        } => print_value(
-            daw_cli::ops::ext_state_get(&daw, section, key).await?,
-            cli.json,
-        )?,
+        } => print_value(daw_cli::ops::ext_state_get(daw, section, key).await?, json)?,
         Command::ExtStateSet {
             ref section,
             ref key,
             ref value,
             persist,
         } => print_value(
-            daw_cli::ops::ext_state_set(&daw, section, key, value, persist).await?,
-            cli.json,
+            daw_cli::ops::ext_state_set(daw, section, key, value, persist).await?,
+            json,
         )?,
         Command::ExtStateDelete {
             ref section,
             ref key,
             persist,
         } => print_value(
-            daw_cli::ops::ext_state_delete(&daw, section, key, persist).await?,
-            cli.json,
+            daw_cli::ops::ext_state_delete(daw, section, key, persist).await?,
+            json,
         )?,
-        Command::AudioEngine => print_value(daw_cli::ops::audio_engine(&daw).await?, cli.json)?,
-        Command::AudioEngineDo { ref action } => print_value(
-            daw_cli::ops::audio_engine_control(&daw, action).await?,
-            cli.json,
-        )?,
-        Command::Action { ref action_id } => print_value(
-            daw_cli::ops::action_execute(&daw, action_id).await?,
-            cli.json,
-        )?,
-        Command::ActionLookup { ref command_name } => print_value(
-            daw_cli::ops::action_lookup(&daw, command_name).await?,
-            cli.json,
-        )?,
+        Command::AudioEngine => print_value(daw_cli::ops::audio_engine(daw).await?, json)?,
+        Command::AudioEngineDo { ref action } => {
+            print_value(daw_cli::ops::audio_engine_control(daw, action).await?, json)?
+        }
+        Command::Action { ref action_id } => {
+            print_value(daw_cli::ops::action_execute(daw, action_id).await?, json)?
+        }
+        Command::ActionLookup { ref command_name } => {
+            print_value(daw_cli::ops::action_lookup(daw, command_name).await?, json)?
+        }
         Command::ActionToggle {
             ref command_name,
             is_on,
         } => print_value(
-            daw_cli::ops::action_set_toggle(&daw, command_name, is_on.0).await?,
-            cli.json,
+            daw_cli::ops::action_set_toggle(daw, command_name, is_on.0).await?,
+            json,
         )?,
         Command::Actions { ref command } => match command {
             ActionsCommand::List {
@@ -1379,8 +1343,8 @@ async fn main() -> Result<()> {
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, filter, section, query.as_deref(), *limit).await?,
-                cli.json,
+                daw_cli::ops::action_list(daw, filter, section, query.as_deref(), *limit).await?,
+                json,
                 columns,
             )?,
             ActionsCommand::Sws {
@@ -1389,8 +1353,8 @@ async fn main() -> Result<()> {
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "sws", section, query.as_deref(), *limit).await?,
-                cli.json,
+                daw_cli::ops::action_list(daw, "sws", section, query.as_deref(), *limit).await?,
+                json,
                 columns,
             )?,
             ActionsCommand::Reaper {
@@ -1399,9 +1363,8 @@ async fn main() -> Result<()> {
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "reaper", section, query.as_deref(), *limit)
-                    .await?,
-                cli.json,
+                daw_cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit).await?,
+                json,
                 columns,
             )?,
             ActionsCommand::NonReaper {
@@ -1410,9 +1373,9 @@ async fn main() -> Result<()> {
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "non-reaper", section, query.as_deref(), *limit)
+                daw_cli::ops::action_list(daw, "non-reaper", section, query.as_deref(), *limit)
                     .await?,
-                cli.json,
+                json,
                 columns,
             )?,
             ActionsCommand::Registered {
@@ -1421,44 +1384,39 @@ async fn main() -> Result<()> {
                 limit,
                 columns,
             } => print_action_list(
-                daw_cli::ops::action_list(&daw, "registered", section, query.as_deref(), *limit)
+                daw_cli::ops::action_list(daw, "registered", section, query.as_deref(), *limit)
                     .await?,
-                cli.json,
+                json,
                 columns,
             )?,
-            ActionsCommand::Aliases => print_value(daw_cli::ops::action_aliases(), cli.json)?,
-            ActionsCommand::ExecAlias { alias } => print_value(
-                daw_cli::ops::action_execute_alias(&daw, alias).await?,
-                cli.json,
-            )?,
-            ActionsCommand::Lookup { command_name } => print_value(
-                daw_cli::ops::action_lookup(&daw, command_name).await?,
-                cli.json,
-            )?,
-            ActionsCommand::Exec { action_id } => print_value(
-                daw_cli::ops::action_execute(&daw, action_id).await?,
-                cli.json,
-            )?,
+            ActionsCommand::Aliases => print_value(daw_cli::ops::action_aliases(), json)?,
+            ActionsCommand::ExecAlias { alias } => {
+                print_value(daw_cli::ops::action_execute_alias(daw, alias).await?, json)?
+            }
+            ActionsCommand::Lookup { command_name } => {
+                print_value(daw_cli::ops::action_lookup(daw, command_name).await?, json)?
+            }
+            ActionsCommand::Exec { action_id } => {
+                print_value(daw_cli::ops::action_execute(daw, action_id).await?, json)?
+            }
             ActionsCommand::Toggle {
                 command_name,
                 state,
             } => print_value(
-                daw_cli::ops::action_set_toggle(&daw, command_name, parse_toggle_state(state)?)
+                daw_cli::ops::action_set_toggle(daw, command_name, parse_toggle_state(state)?)
                     .await?,
-                cli.json,
+                json,
             )?,
-            ActionsCommand::Toolbar => {
-                print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?
-            }
+            ActionsCommand::Toolbar => print_value(daw_cli::ops::toolbar_status(daw).await?, json)?,
         },
-        Command::Toolbar => print_value(daw_cli::ops::toolbar_status(&daw).await?, cli.json)?,
+        Command::Toolbar => print_value(daw_cli::ops::toolbar_status(daw).await?, json)?,
         Command::ToolbarLive { target } => print_value(
-            daw_cli::ops::toolbar_live(&daw, target.as_deref()).await?,
-            cli.json,
+            daw_cli::ops::toolbar_live(daw, target.as_deref()).await?,
+            json,
         )?,
         Command::ToolbarConfig { path, target } => print_value(
-            daw_cli::ops::toolbar_config(&daw, &path, target.as_deref()).await?,
-            cli.json,
+            daw_cli::ops::toolbar_config(daw, &path, target.as_deref()).await?,
+            json,
         )?,
         Command::ToolbarAdd {
             command_name,
@@ -1471,7 +1429,7 @@ async fn main() -> Result<()> {
             flags,
         } => print_value(
             daw_cli::ops::toolbar_add(
-                &daw,
+                daw,
                 &command_name,
                 &label,
                 &target,
@@ -1482,7 +1440,7 @@ async fn main() -> Result<()> {
                 flags,
             )
             .await?,
-            cli.json,
+            json,
         )?,
         Command::ToolbarUpdate {
             command_name,
@@ -1495,7 +1453,7 @@ async fn main() -> Result<()> {
             flags,
         } => print_value(
             daw_cli::ops::toolbar_update(
-                &daw,
+                daw,
                 &command_name,
                 &label,
                 &target,
@@ -1506,22 +1464,22 @@ async fn main() -> Result<()> {
                 flags,
             )
             .await?,
-            cli.json,
+            json,
         )?,
         Command::ToolbarRemove {
             command_name,
             target,
         } => print_value(
-            daw_cli::ops::toolbar_remove(&daw, &command_name, &target).await?,
-            cli.json,
+            daw_cli::ops::toolbar_remove(daw, &command_name, &target).await?,
+            json,
         )?,
         Command::ToolbarMove {
             command_name,
             position,
             target,
         } => print_value(
-            daw_cli::ops::toolbar_move(&daw, &command_name, &target, position).await?,
-            cli.json,
+            daw_cli::ops::toolbar_move(daw, &command_name, &target, position).await?,
+            json,
         )?,
         Command::ToolbarIcon {
             command_name,
@@ -1531,7 +1489,7 @@ async fn main() -> Result<()> {
             clear,
         } => print_value(
             daw_cli::ops::toolbar_icon(
-                &daw,
+                daw,
                 &command_name,
                 &target,
                 icon.as_deref(),
@@ -1539,9 +1497,9 @@ async fn main() -> Result<()> {
                 clear,
             )
             .await?,
-            cli.json,
+            json,
         )?,
-        Command::Screensets => print_value(daw_cli::ops::screenset_list(&daw).await?, cli.json)?,
+        Command::Screensets => print_value(daw_cli::ops::screenset_list(daw).await?, json)?,
         Command::ScreensetCapture {
             id,
             name,
@@ -1552,7 +1510,7 @@ async fn main() -> Result<()> {
             persist,
         } => print_value(
             daw_cli::ops::screenset_capture(
-                &daw,
+                daw,
                 &id,
                 name.as_deref(),
                 description.as_deref(),
@@ -1562,47 +1520,45 @@ async fn main() -> Result<()> {
                 persist,
             )
             .await?,
-            cli.json,
+            json,
         )?,
         Command::ScreensetShow { id } => {
-            print_value(daw_cli::ops::screenset_show(&daw, &id).await?, cli.json)?
+            print_value(daw_cli::ops::screenset_show(daw, &id).await?, json)?
         }
         Command::ScreensetApply { id } => {
-            print_value(daw_cli::ops::screenset_apply(&daw, &id).await?, cli.json)?
+            print_value(daw_cli::ops::screenset_apply(daw, &id).await?, json)?
         }
         Command::ScreensetDelete { id, persist } => print_value(
-            daw_cli::ops::screenset_delete(&daw, &id, persist).await?,
-            cli.json,
+            daw_cli::ops::screenset_delete(daw, &id, persist).await?,
+            json,
         )?,
         Command::Combine {
             ref input,
             ref output,
             gap,
-        } => daw_cli::cmd_combine(&daw, input, output.as_deref(), gap).await?,
+        } => daw_cli::cmd_combine(daw, input, output.as_deref(), gap).await?,
         Command::RppSummary { ref path } => {
-            print_value(daw_cli::ops::rpp_summary(&daw, path).await?, cli.json)?
+            print_value(daw_cli::ops::rpp_summary(daw, path).await?, json)?
         }
-        Command::Items { ref track } => daw_cli::cmd_items(&daw, track, cli.json).await?,
-        Command::Takes { ref track, item } => {
-            daw_cli::cmd_takes(&daw, track, item, cli.json).await?
-        }
+        Command::Items { ref track } => daw_cli::cmd_items(daw, track, json).await?,
+        Command::Takes { ref track, item } => daw_cli::cmd_takes(daw, track, item, json).await?,
         Command::TakeDelete {
             ref track,
             item,
             take,
-        } => daw_cli::cmd_take_delete(&daw, track, item, take).await?,
+        } => daw_cli::cmd_take_delete(daw, track, item, take).await?,
         Command::TakePreservePitch {
             ref track,
             item,
             take,
             preserve,
-        } => daw_cli::cmd_take_preserve_pitch(&daw, track, item, take, preserve.0).await?,
+        } => daw_cli::cmd_take_preserve_pitch(daw, track, item, take, preserve.0).await?,
         Command::TakeSetSource {
             ref track,
             item,
             take,
             ref path,
-        } => daw_cli::cmd_take_set_source(&daw, track, item, take, path).await?,
+        } => daw_cli::cmd_take_set_source(daw, track, item, take, path).await?,
         // Already handled above
         Command::Launch { .. }
         | Command::Profiles

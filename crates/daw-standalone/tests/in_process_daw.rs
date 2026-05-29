@@ -9,7 +9,10 @@
 #![cfg(feature = "bootstrap")]
 
 use daw_proto::{PlayState, ProjectInfo};
-use daw_proto::{ProjectContext, TrackRef, track::ReorderTracksBehavior};
+use daw_proto::{
+    ProjectContext, TrackRef,
+    track::{ReorderTracksBehavior, TrackEvent, TrackStreamEvent},
+};
 use daw_standalone::bootstrap::build_in_process_daw;
 use daw_standalone::sync::Standalone;
 
@@ -268,6 +271,102 @@ async fn track_structure_routing_and_colors_through_in_process_daw() -> eyre::Re
     assert_eq!(snare_after.index, 4);
     assert_eq!(kick_after.parent_guid.as_deref(), Some(band.guid()));
     assert_eq!(snare_after.parent_guid.as_deref(), Some(band.guid()));
+
+    Ok(())
+}
+
+async fn next_track_event(rx: &mut vox::Rx<TrackStreamEvent>) -> eyre::Result<TrackStreamEvent> {
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| eyre::eyre!("timed out waiting for track event"))??
+        .ok_or_else(|| eyre::eyre!("track event stream closed"))?;
+    let mut out = None;
+    let _ = event.map(|event| out = Some(event));
+    Ok(out.expect("vox SelfRef::map runs once"))
+}
+
+async fn wait_for_track_event(
+    rx: &mut vox::Rx<TrackStreamEvent>,
+    pred: impl Fn(&TrackEvent) -> bool,
+) -> eyre::Result<TrackStreamEvent> {
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let event = next_track_event(rx).await?;
+        if pred(&event.event) {
+            return Ok(event);
+        }
+        if web_time::Instant::now() >= deadline {
+            eyre::bail!("timed out waiting for matching track event");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn track_subscribe_emits_mutation_events_through_in_process_daw() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let project_guid = project.info().await?.guid;
+    let tracks = project.tracks();
+    let mut rx = tracks.subscribe().await?;
+
+    let guitar = tracks.add("Guitar", None).await?;
+    let added = wait_for_track_event(
+        &mut rx,
+        |event| matches!(event, TrackEvent::Added(track) if track.guid == guitar.guid()),
+    )
+    .await?;
+    assert_eq!(added.project_guid, project_guid);
+
+    guitar.rename("Electric Guitar").await?;
+    wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::Renamed { guid, name } if guid == guitar.guid() && name == "Electric Guitar")
+    })
+    .await?;
+
+    guitar.set_volume(0.42).await?;
+    wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::VolumeChanged { guid, volume } if guid == guitar.guid() && (volume - 0.42).abs() < 1e-9)
+    })
+    .await?;
+
+    guitar.set_visibility(false, true).await?;
+    wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::TcpVisibilityChanged { guid, visible } if guid == guitar.guid() && !visible)
+    })
+    .await?;
+    wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::MixerVisibilityChanged { guid, visible } if guid == guitar.guid() && *visible)
+    })
+    .await?;
+
+    let keys = tracks.add("Keys", None).await?;
+    wait_for_track_event(
+        &mut rx,
+        |event| matches!(event, TrackEvent::Added(track) if track.guid == keys.guid()),
+    )
+    .await?;
+
+    keys.select_exclusive().await?;
+    wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::SelectionChanged { guid, selected } if guid == keys.guid() && *selected)
+    })
+    .await?;
+    tracks
+        .reorder_selected(0, ReorderTracksBehavior::Normal)
+        .await?;
+    wait_for_track_event(&mut rx, |event| {
+        matches!(event, TrackEvent::Moved { guid, old_index, new_index } if guid == keys.guid() && *old_index == 1 && *new_index == 0)
+    })
+    .await?;
+
+    tracks
+        .remove(TrackRef::Guid(guitar.guid().to_string()))
+        .await?;
+    wait_for_track_event(
+        &mut rx,
+        |event| matches!(event, TrackEvent::Removed(guid) if guid == guitar.guid()),
+    )
+    .await?;
 
     Ok(())
 }

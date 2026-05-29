@@ -7,7 +7,7 @@
 //! canonical state — fewer places for state to drift.
 
 use daw_proto::Tracks;
-use daw_proto::track::ReorderTracksBehavior;
+use daw_proto::track::{ReorderTracksBehavior, TrackEvent, TrackStreamEvent};
 use daw_proto::{DawError, DawResult, ProjectContext, RecordInput, Track, TrackRef};
 use uuid::Uuid;
 
@@ -69,6 +69,34 @@ fn selected_reorder_insert_index(tracks: &[Track], index: u32) -> usize {
     target.saturating_sub(selected_before_target)
 }
 
+fn moved_events(before: &[Track], after: &[Track]) -> Vec<TrackEvent> {
+    let old_indices = before
+        .iter()
+        .map(|track| (track.guid.as_str(), track.index))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    after
+        .iter()
+        .filter_map(|track| {
+            let old_index = old_indices.get(track.guid.as_str()).copied()?;
+            (old_index != track.index).then(|| TrackEvent::Moved {
+                guid: track.guid.clone(),
+                old_index,
+                new_index: track.index,
+            })
+        })
+        .collect()
+}
+
+fn publish_track_events(daw: &Standalone, project_guid: &str, events: Vec<TrackEvent>) {
+    for event in events {
+        let _ = daw.track_events.send(TrackStreamEvent {
+            project_guid: project_guid.to_string(),
+            event,
+        });
+    }
+}
+
 impl Tracks for Standalone {
     fn all(&self, project: ProjectContext) -> Vec<Track> {
         let Some(guid) = resolve_project(self, &project) else {
@@ -119,68 +147,119 @@ impl Tracks for Standalone {
 
     fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].muted = muted;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(TrackEvent::MuteChanged {
+                guid: track_guid,
+                muted,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_soloed(&self, project: ProjectContext, track: TrackRef, soloed: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].soloed = soloed;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(TrackEvent::SoloChanged {
+                guid: track_guid,
+                soloed,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_solo_exclusive(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let target = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let target_guid = p.tracks[target].guid.clone();
+            let mut events = Vec::new();
             for t in p.tracks.iter_mut() {
-                t.soloed = false;
+                let next = t.guid == target_guid;
+                if t.soloed != next {
+                    t.soloed = next;
+                    events.push(TrackEvent::SoloChanged {
+                        guid: t.guid.clone(),
+                        soloed: next,
+                    });
+                }
             }
-            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            p.tracks[i].soloed = true;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(events)
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn clear_all_solo(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let mut events = Vec::new();
             for t in p.tracks.iter_mut() {
-                t.soloed = false;
+                if t.soloed {
+                    t.soloed = false;
+                    events.push(TrackEvent::SoloChanged {
+                        guid: t.guid.clone(),
+                        soloed: false,
+                    });
+                }
             }
-        })
+            events
+        })?;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn set_armed(&self, project: ProjectContext, track: TrackRef, armed: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].armed = armed;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(TrackEvent::ArmChanged {
+                guid: track_guid,
+                armed,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_volume(&self, project: ProjectContext, track: TrackRef, volume: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].volume = volume;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(TrackEvent::VolumeChanged {
+                guid: track_guid,
+                volume,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_pan(&self, project: ProjectContext, track: TrackRef, pan: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            p.tracks[i].pan = pan.clamp(-1.0, 1.0);
-            Ok::<(), DawError>(())
-        })?
+            let track_guid = p.tracks[i].guid.clone();
+            let pan = pan.clamp(-1.0, 1.0);
+            p.tracks[i].pan = pan;
+            Ok::<_, DawError>(TrackEvent::PanChanged {
+                guid: track_guid,
+                pan,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_selected(
@@ -190,55 +269,102 @@ impl Tracks for Standalone {
         selected: bool,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].selected = selected;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(TrackEvent::SelectionChanged {
+                guid: track_guid,
+                selected,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn select_exclusive(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let target = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let target_guid = p.tracks[target].guid.clone();
+            let mut events = Vec::new();
             for t in p.tracks.iter_mut() {
-                t.selected = false;
+                let next = t.guid == target_guid;
+                if t.selected != next {
+                    t.selected = next;
+                    events.push(TrackEvent::SelectionChanged {
+                        guid: t.guid.clone(),
+                        selected: next,
+                    });
+                }
             }
-            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            p.tracks[i].selected = true;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(events)
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn clear_selection(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let mut events = Vec::new();
             for t in p.tracks.iter_mut() {
-                t.selected = false;
+                if t.selected {
+                    t.selected = false;
+                    events.push(TrackEvent::SelectionChanged {
+                        guid: t.guid.clone(),
+                        selected: false,
+                    });
+                }
             }
-        })
+            events
+        })?;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn mute_all(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let mut events = Vec::new();
             for t in p.tracks.iter_mut() {
-                t.muted = true;
+                if !t.muted {
+                    t.muted = true;
+                    events.push(TrackEvent::MuteChanged {
+                        guid: t.guid.clone(),
+                        muted: true,
+                    });
+                }
             }
-        })
+            events
+        })?;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn unmute_all(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let mut events = Vec::new();
             for t in p.tracks.iter_mut() {
-                t.muted = false;
+                if t.muted {
+                    t.muted = false;
+                    events.push(TrackEvent::MuteChanged {
+                        guid: t.guid.clone(),
+                        muted: false,
+                    });
+                }
             }
-        })
+            events
+        })?;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn add(&self, project: ProjectContext, name: &str, at_index: Option<u32>) -> DawResult<String> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let (new_guid, events) = self.with_project_mut(&guid, |p| {
+            let before = p.tracks.clone();
             let new_guid = Uuid::new_v4().to_string();
             let pos = at_index
                 .map(|i| (i as usize).min(p.tracks.len()))
@@ -251,13 +377,19 @@ impl Tracks for Standalone {
             };
             p.tracks.insert(pos, track);
             reconcile_track_structure(&mut p.tracks);
-            new_guid
-        })
+            let added = p.tracks[pos].clone();
+            let mut events = vec![TrackEvent::Added(added)];
+            events.extend(moved_events(&before, &p.tracks));
+            (new_guid, events)
+        })?;
+        publish_track_events(self, &guid, events);
+        Ok(new_guid)
     }
 
     fn remove(&self, project: ProjectContext, track: TrackRef) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let before = p.tracks.clone();
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             let removed = p.tracks[i].guid.clone();
             p.tracks.remove(i);
@@ -280,33 +412,63 @@ impl Tracks for Standalone {
                 }
             }
             reconcile_track_structure(&mut p.tracks);
-            Ok::<(), DawError>(())
-        })?
+            let mut events = vec![TrackEvent::Removed(removed)];
+            events.extend(moved_events(&before, &p.tracks));
+            Ok::<_, DawError>(events)
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn remove_all(&self, project: ProjectContext) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let events = p
+                .tracks
+                .iter()
+                .map(|track| TrackEvent::Removed(track.guid.clone()))
+                .collect::<Vec<_>>();
             p.tracks.clear();
-        })
+            p.track_ext.clear();
+            p.track_ext_state.clear();
+            p.sends.clear();
+            p.receives.clear();
+            p.hw_outputs.clear();
+            events
+        })?;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn rename(&self, project: ProjectContext, track: TrackRef, name: &str) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].name = name.to_string();
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(TrackEvent::Renamed {
+                guid: track_guid,
+                name: name.to_string(),
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_color(&self, project: ProjectContext, track: TrackRef, color: u32) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let event = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            p.tracks[i].color = if color == 0 { None } else { Some(color) };
-            Ok::<(), DawError>(())
-        })?
+            let track_guid = p.tracks[i].guid.clone();
+            let color = if color == 0 { None } else { Some(color) };
+            p.tracks[i].color = color;
+            Ok::<_, DawError>(TrackEvent::ColorChanged {
+                guid: track_guid,
+                color,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
     }
 
     fn set_folder_depth(
@@ -316,12 +478,15 @@ impl Tracks for Standalone {
         folder_depth: i32,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let before = p.tracks.clone();
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
             p.tracks[i].folder_depth = folder_depth;
             reconcile_track_structure(&mut p.tracks);
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(moved_events(&before, &p.tracks))
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn set_num_channels(
@@ -370,9 +535,10 @@ impl Tracks for Standalone {
         behavior: ReorderTracksBehavior,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
+            let before = p.tracks.clone();
             if !p.tracks.iter().any(|track| track.selected) {
-                return Ok::<(), DawError>(());
+                return Ok::<_, DawError>(Vec::new());
             }
 
             let insert_at = selected_reorder_insert_index(&p.tracks, index);
@@ -399,8 +565,10 @@ impl Tracks for Standalone {
             remaining.splice(insert_at..insert_at, selected);
             p.tracks = remaining;
             reconcile_track_structure(&mut p.tracks);
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(moved_events(&before, &p.tracks))
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn set_visibility(
@@ -411,12 +579,24 @@ impl Tracks for Standalone {
         visible_in_mixer: bool,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let track_guid = p.tracks[i].guid.clone();
             p.tracks[i].visible_in_tcp = visible_in_tcp;
             p.tracks[i].visible_in_mixer = visible_in_mixer;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(vec![
+                TrackEvent::TcpVisibilityChanged {
+                    guid: track_guid.clone(),
+                    visible: visible_in_tcp,
+                },
+                TrackEvent::MixerVisibilityChanged {
+                    guid: track_guid,
+                    visible: visible_in_mixer,
+                },
+            ])
+        })??;
+        publish_track_events(self, &guid, events);
+        Ok(())
     }
 
     fn set_tcp_height(
@@ -439,10 +619,30 @@ impl Tracks for Standalone {
 
     async fn subscribe(
         &self,
-        _project: ProjectContext,
-        _tx: vox::Tx<daw_proto::track::TrackStreamEvent>,
+        project: ProjectContext,
+        tx: vox::Tx<daw_proto::track::TrackStreamEvent>,
     ) {
-        // Standalone has no event source; subscriber gets nothing.
+        let project_guid = resolve_project(self, &project);
+        let mut rx = self.track_events.subscribe();
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if project_guid
+                            .as_ref()
+                            .is_some_and(|guid| event.project_guid != *guid)
+                        {
+                            continue;
+                        }
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
     }
 }
 
