@@ -8,6 +8,10 @@ edition.workspace = true
 [package.metadata."docs.rs"]
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
+[lib]
+name = "app_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "app-server"
 path = "src/main.rs"
@@ -39,7 +43,10 @@ backend-memory = [
 full = ["backend-db", "backend-memory"]
 
 [dependencies]
-example = { workspace = true }
+# The lib (vox_router + ExampleServiceImpl) only needs the contract + the
+# vox/axum surface; the backend is chosen by the bin via the features
+# below. Generic over the repo, so no backend dep leaks into the lib.
+example = { workspace = true, features = ["vox", "server-axum"] }
 
 axum.workspace = true
 tokio.workspace = true

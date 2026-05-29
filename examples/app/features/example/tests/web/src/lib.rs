@@ -14,11 +14,11 @@
 #![cfg(target_arch = "wasm32")]
 
 use example::{
-    architect::{Page, SortOrder, Sort},
-    ExampleCreate, ExampleRepoClient,
+    ExampleCreate, ExampleRepoClient, ExampleServiceClient, ExampleUpdate,
+    architect::{Page, Sort, SortOrder},
 };
 use uuid::Uuid;
-use vox_core::{initiator_on, TransportMode};
+use vox_core::{TransportMode, initiator_on};
 use vox_websocket::WsLink;
 use wasm_bindgen_test::*;
 
@@ -32,6 +32,16 @@ async fn connect() -> ExampleRepoClient {
         .expect("WsLink::connect — is example-server running on :4040?");
     initiator_on(link, TransportMode::Bare)
         .establish::<ExampleRepoClient>()
+        .await
+        .expect("vox handshake failed")
+}
+
+async fn connect_service() -> ExampleServiceClient {
+    let link = WsLink::connect(SERVER_URL)
+        .await
+        .expect("WsLink::connect — is example-server running on :4040?");
+    initiator_on(link, TransportMode::Bare)
+        .establish::<ExampleServiceClient>()
         .await
         .expect("vox handshake failed")
 }
@@ -71,7 +81,10 @@ async fn list_includes_inserted_row() {
 
     let page = client
         .list(
-            Page { index: 0, size: 100 },
+            Page {
+                index: 0,
+                size: 100,
+            },
             Some(Sort {
                 field: "name".into(),
                 order: SortOrder::Asc,
@@ -103,8 +116,83 @@ async fn delete_removes_row() {
     let err = client.get(created.id).await.unwrap_err();
     // RepoError::NotFound is what the server returns when the row's gone.
     let msg = format!("{err:?}");
+    assert!(msg.contains("NotFound"), "expected NotFound, got: {msg}");
+}
+
+#[wasm_bindgen_test]
+async fn update_round_trip() {
+    let client = connect().await;
+
+    let created = client
+        .create(ExampleCreate {
+            name: format!("update-{}", Uuid::new_v4()),
+            description: "before".into(),
+        })
+        .await
+        .expect("create failed");
+
+    let updated = client
+        .update(
+            created.id,
+            ExampleUpdate {
+                name: None,
+                description: Some("after".into()),
+            },
+        )
+        .await
+        .expect("update failed");
+
+    assert_eq!(updated.id, created.id);
+    assert_eq!(updated.description, "after");
+    assert_eq!(updated.name, created.name, "untouched field preserved");
+}
+
+#[wasm_bindgen_test]
+async fn service_search_finds_inserted_row() {
+    let repo = connect().await;
+    let service = connect_service().await;
+
+    let marker = format!("searchable-{}", Uuid::new_v4());
+    repo.create(ExampleCreate {
+        name: marker.clone(),
+        description: "find me by name".into(),
+    })
+    .await
+    .expect("create failed");
+
+    let hits = service
+        .search(marker.clone(), 10)
+        .await
+        .expect("search failed");
     assert!(
-        msg.contains("NotFound"),
-        "expected NotFound, got: {msg}"
+        hits.iter().any(|e| e.name == marker),
+        "search did not return the freshly-created row"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn service_duplicate_creates_copy() {
+    let repo = connect().await;
+    let service = connect_service().await;
+
+    let original = repo
+        .create(ExampleCreate {
+            name: format!("dup-{}", Uuid::new_v4()),
+            description: "to be copied".into(),
+        })
+        .await
+        .expect("create failed");
+
+    let copy = service
+        .duplicate(original.id, None)
+        .await
+        .expect("duplicate failed");
+
+    assert_ne!(copy.id, original.id, "copy must be a new row");
+    assert_eq!(copy.description, original.description);
+    assert!(
+        copy.name.ends_with("(copy)"),
+        "default duplicate name should be suffixed, got {}",
+        copy.name
     );
 }

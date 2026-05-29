@@ -37,3 +37,12 @@ tracing-subscriber.workspace = true
 # vox-websocket's target-cfg automatically.
 vox-core.workspace = true
 vox-websocket.workspace = true
+
+[dev-dependencies]
+# Integration tests spawn the real server in-process (memory backend) and
+# run the `app` binary against it as a subprocess. Internal crates use the
+# path form (release-plz / the external-deps hook reject `workspace = true`
+# for internal dev-dependencies).
+app-server = { path = "../server" }
+example = { path = "../features/example/example", features = ["backend-memory", "server-axum", "vox"] }
+axum.workspace = true

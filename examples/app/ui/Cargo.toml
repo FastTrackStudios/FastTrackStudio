@@ -24,3 +24,8 @@ vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10
 vox-core = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 vox-websocket = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93" }
 uuid = { version = "1", features = ["v4", "js"] }
+
+[dev-dependencies]
+# Headless smoke test: mount the full App (router + connection lifecycle)
+# in a VirtualDom and render it without a window.
+dioxus-ssr = "0.7"

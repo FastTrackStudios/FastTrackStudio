@@ -1,47 +1,30 @@
-//! Reference axum + vox server.
+//! Reference axum + vox server binary.
 //!
-//! Backend is chosen at compile time via cargo features on the `example`
-//! facade (`backend-db` or `backend-memory`). The dispatcher wiring is
-//! identical either way — the contract from `example_proto` is what
-//! holds it all together.
+//! This is a thin shell: it picks a backend (sqlite or in-memory, via
+//! cargo features), runs migrations if needed, then hands the repo to
+//! `app_server::vox_router`. All HTTP/vox wiring lives in the lib so the
+//! e2e tests mount the exact same router.
 
-mod service_impl;
-
-use axum::{
-    Router,
-    extract::{State, WebSocketUpgrade},
-    response::{IntoResponse, Response},
-    routing::get,
-};
-use example::axum_ws;
-use example::{ExampleRepoDispatcher, ExampleServiceDispatcher};
-use service_impl::ExampleServiceImpl;
-use std::sync::Arc;
-use tower_http::cors::CorsLayer;
-use tracing::{info, warn};
+use app_server::vox_router;
+use tracing::info;
 
 // ── Backend-specific state ────────────────────────────────────────────
 
 #[cfg(feature = "backend-db")]
-mod state {
+mod backend {
     use example::backend_db::{ExampleRepoStorage, Migrator};
     use sea_orm::{Database, DatabaseConnection};
     use sea_orm_migration::MigratorTrait;
 
-    #[derive(Clone)]
-    pub struct AppState {
-        pub repo: ExampleRepoStorage<DatabaseConnection>,
-    }
+    pub type Repo = ExampleRepoStorage<DatabaseConnection>;
 
-    pub async fn init() -> eyre::Result<(AppState, String)> {
+    pub async fn init() -> eyre::Result<(Repo, String)> {
         let database_url = std::env::var("DATABASE_URL")
             .unwrap_or_else(|_| "sqlite://./example.db?mode=rwc".into());
         let db = Database::connect(&database_url).await?;
         Migrator::up(&db, None).await?;
         Ok((
-            AppState {
-                repo: ExampleRepoStorage::new(db),
-            },
+            ExampleRepoStorage::new(db),
             format!("sqlite ({database_url})"),
         ))
     }
@@ -51,25 +34,15 @@ mod state {
 // `cargo build --all-features` resolvable. In practice each binary
 // enables exactly one backend feature.
 #[cfg(all(not(feature = "backend-db"), feature = "backend-memory"))]
-mod state {
+mod backend {
     use example::backend_memory::ExampleRepoMemory;
 
-    #[derive(Clone)]
-    pub struct AppState {
-        pub repo: ExampleRepoMemory,
-    }
+    pub type Repo = ExampleRepoMemory;
 
-    pub async fn init() -> eyre::Result<(AppState, String)> {
-        Ok((
-            AppState {
-                repo: ExampleRepoMemory::new(),
-            },
-            "in-memory".into(),
-        ))
+    pub async fn init() -> eyre::Result<(Repo, String)> {
+        Ok((ExampleRepoMemory::new(), "in-memory".into()))
     }
 }
-
-use state::AppState;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -81,14 +54,10 @@ async fn main() -> eyre::Result<()> {
         .init();
 
     let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:4040".into());
-    let (state, backend_label) = state::init().await?;
+    let (repo, backend_label) = backend::init().await?;
     info!(backend = %backend_label, %bind_addr, "starting example server");
 
-    let app = Router::new()
-        .route("/api/health", get(health))
-        .route("/vox", get(vox_ws_handler))
-        .layer(CorsLayer::permissive())
-        .with_state(Arc::new(state));
+    let app = vox_router(repo);
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     info!("HTTP listening on http://{bind_addr}");
@@ -96,32 +65,4 @@ async fn main() -> eyre::Result<()> {
     info!("  Vox WS:  ws://{bind_addr}/vox");
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn health() -> &'static str {
-    "ok"
-}
-
-async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
-    ws.on_upgrade(move |socket| async move {
-        let repo = state.repo.clone();
-        let factory = axum_ws::acceptor_fn(move |req, connection| match req.service() {
-            "ExampleRepo" => {
-                connection.handle_with(ExampleRepoDispatcher::new(repo.clone()));
-                Ok(())
-            }
-            "ExampleService" => {
-                connection.handle_with(ExampleServiceDispatcher::new(ExampleServiceImpl::new(
-                    repo.clone(),
-                )));
-                Ok(())
-            }
-            other => {
-                warn!(service = other, "unknown vox service requested");
-                Err(vec![])
-            }
-        });
-        axum_ws::serve(socket, factory).await;
-    })
-    .into_response()
 }
