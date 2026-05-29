@@ -16986,9 +16986,7 @@ dependencies = [
  "vox-jit",
  "vox-postcard",
  "vox-schema",
- "wasm-bindgen",
  "wasmtimer",
- "web-sys",
 ]
 
 [[package]]
