@@ -21,6 +21,10 @@ members = [
     "crates/architect-cli",
     "libs/crdt",
     "libs/crdt-seaorm",
+    # In `members` (so `cargo xtask` / `cargo run -p xtask` can resolve it)
+    # but deliberately left out of `default-members` below — it's a build
+    # tool, not part of the production graph.
+    "xtask",
 ]
 # Build the production graph by default; xtask is opt-in via `cargo xtask`.
 default-members = [
