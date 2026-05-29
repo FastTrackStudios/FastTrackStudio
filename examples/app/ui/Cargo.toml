@@ -14,9 +14,9 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Single dep root — facade re-exports the wire types + vox client.
-example = { path = "../../../features/example/example", features = ["vox"] }
+example = { path = "../features/example/example", features = ["vox"] }
 # Feature-scoped Dioxus components.
-example-ui = { path = "../../../features/example/example-ui" }
+example-ui = { path = "../features/example/example-ui" }
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
 vox = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5", default-features = false, features = ["runtime"] }
 vox-core = { git = "https://github.com/bearcove/vox", rev = "fd3167b6d6b89b60edd9c78f7b8890f5a87571d5" }

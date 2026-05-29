@@ -126,8 +126,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "vox-core 0.5.0",
- "vox-websocket 0.5.0",
+ "vox-core 0.8.2",
+ "vox-websocket 0.8.2",
 ]
 
 [[package]]
@@ -169,8 +169,8 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
- "vox-core 0.5.0",
- "vox-websocket 0.5.0",
+ "vox-core 0.8.2",
+ "vox-websocket 0.8.2",
 ]
 
 [[package]]
@@ -217,9 +217,9 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "vox 0.5.0",
- "vox-core 0.5.0",
- "vox-types 0.5.0",
+ "vox 0.8.2",
+ "vox-core 0.8.2",
+ "vox-types 0.8.2",
 ]
 
 [[package]]
@@ -253,7 +253,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
- "vox 0.5.0",
+ "vox 0.8.2",
 ]
 
 [[package]]
@@ -432,68 +432,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "bar"
-version = "0.1.0"
-dependencies = [
- "architect",
- "bar-crdt",
- "bar-db",
- "bar-proto",
- "crdt",
-]
-
-[[package]]
-name = "bar-crdt"
-version = "0.1.0"
-dependencies = [
- "architect",
- "bar-proto",
- "chrono",
- "crdt",
- "loro",
- "uuid",
-]
-
-[[package]]
-name = "bar-db"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bar-proto",
- "crdt-seaorm",
- "sea-orm",
- "sea-orm-migration",
-]
-
-[[package]]
-name = "bar-proto"
-version = "0.1.0"
-dependencies = [
- "architect",
- "chrono",
- "facet",
- "fake",
- "sea-orm",
- "thiserror 2.0.18",
- "uuid",
- "vox 0.5.0",
-]
-
-[[package]]
-name = "bar-tests-native"
-version = "0.1.0"
-dependencies = [
- "architect",
- "bar-crdt",
- "bar-proto",
- "crdt",
- "fake",
- "loro",
- "tokio",
- "uuid",
 ]
 
 [[package]]
@@ -1841,7 +1779,7 @@ dependencies = [
  "facet",
  "tracing",
  "tracing-subscriber",
- "vox 0.5.0",
+ "vox 0.8.2",
 ]
 
 [[package]]
@@ -1866,7 +1804,7 @@ dependencies = [
  "sea-orm",
  "thiserror 2.0.18",
  "uuid",
- "vox 0.5.0",
+ "vox 0.8.2",
 ]
 
 [[package]]
@@ -1957,7 +1895,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "0.3.4"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "facet",
  "facet-core",
@@ -2226,68 +2164,6 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
-
-[[package]]
-name = "foo"
-version = "0.1.0"
-dependencies = [
- "architect",
- "crdt",
- "foo-crdt",
- "foo-db",
- "foo-proto",
-]
-
-[[package]]
-name = "foo-crdt"
-version = "0.1.0"
-dependencies = [
- "architect",
- "chrono",
- "crdt",
- "foo-proto",
- "loro",
- "uuid",
-]
-
-[[package]]
-name = "foo-db"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "crdt-seaorm",
- "foo-proto",
- "sea-orm",
- "sea-orm-migration",
-]
-
-[[package]]
-name = "foo-proto"
-version = "0.1.0"
-dependencies = [
- "architect",
- "chrono",
- "facet",
- "fake",
- "sea-orm",
- "thiserror 2.0.18",
- "uuid",
- "vox 0.5.0",
-]
-
-[[package]]
-name = "foo-tests-native"
-version = "0.1.0"
-dependencies = [
- "architect",
- "crdt",
- "fake",
- "foo-crdt",
- "foo-proto",
- "loro",
- "tokio",
- "uuid",
-]
 
 [[package]]
 name = "form_urlencoded"
@@ -5928,8 +5804,8 @@ dependencies = [
 
 [[package]]
 name = "vox"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "facet",
  "facet-pretty",
@@ -5937,11 +5813,11 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox-core 0.5.0",
+ "vox-core 0.8.2",
  "vox-jit",
- "vox-postcard 0.5.0",
- "vox-service-macros 0.5.0",
- "vox-types 0.5.0",
+ "vox-postcard 0.8.2",
+ "vox-service-macros 0.8.2",
+ "vox-types 0.8.2",
 ]
 
 [[package]]
@@ -5967,8 +5843,8 @@ dependencies = [
 
 [[package]]
 name = "vox-core"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "facet",
  "facet-cbor 0.3.4",
@@ -5982,16 +5858,16 @@ dependencies = [
  "tokio",
  "tracing",
  "vox-jit",
- "vox-postcard 0.5.0",
- "vox-types 0.5.0",
+ "vox-postcard 0.8.2",
+ "vox-types 0.8.2",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
 
 [[package]]
 name = "vox-jit"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "arc-swap",
  "cranelift-codegen",
@@ -6003,16 +5879,17 @@ dependencies = [
  "facet-core",
  "libc",
  "museair",
+ "tracing",
  "vox-jit-abi",
  "vox-jit-cal",
- "vox-postcard 0.5.0",
- "vox-schema 0.5.0",
+ "vox-postcard 0.8.2",
+ "vox-schema 0.8.2",
 ]
 
 [[package]]
 name = "vox-jit-abi"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "arc-swap",
  "facet-core",
@@ -6022,8 +5899,8 @@ dependencies = [
 
 [[package]]
 name = "vox-jit-cal"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "facet",
  "facet-core",
@@ -6043,14 +5920,14 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-core"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse 0.5.0",
+ "vox-macros-parse 0.8.2",
 ]
 
 [[package]]
@@ -6064,8 +5941,8 @@ dependencies = [
 
 [[package]]
 name = "vox-macros-parse"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -6086,15 +5963,16 @@ dependencies = [
 
 [[package]]
 name = "vox-postcard"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "facet",
  "facet-core",
  "facet-reflect",
+ "facet-value",
  "vox-jit-abi",
  "vox-jit-cal",
- "vox-schema 0.5.0",
+ "vox-schema 0.8.2",
 ]
 
 [[package]]
@@ -6111,8 +5989,8 @@ dependencies = [
 
 [[package]]
 name = "vox-schema"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "blake3",
  "facet",
@@ -6132,11 +6010,11 @@ dependencies = [
 
 [[package]]
 name = "vox-service-macros"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "proc-macro2",
- "vox-macros-core 0.5.0",
+ "vox-macros-core 0.8.2",
 ]
 
 [[package]]
@@ -6164,8 +6042,8 @@ dependencies = [
 
 [[package]]
 name = "vox-types"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "bitflags 2.11.1",
  "blake3",
@@ -6183,8 +6061,8 @@ dependencies = [
  "structstruck",
  "tokio",
  "vox-jit",
- "vox-postcard 0.5.0",
- "vox-schema 0.5.0",
+ "vox-postcard 0.8.2",
+ "vox-schema 0.8.2",
  "wasmtimer",
 ]
 
@@ -6207,8 +6085,8 @@ dependencies = [
 
 [[package]]
 name = "vox-websocket"
-version = "0.5.0"
-source = "git+https://github.com/bearcove/vox?rev=27eef573efd388bddaad0befdd59143a7e98b830#27eef573efd388bddaad0befdd59143a7e98b830"
+version = "0.8.2"
+source = "git+https://github.com/bearcove/vox?rev=230dcd5bb1e5aedd1309308c64de07781fad5b57#230dcd5bb1e5aedd1309308c64de07781fad5b57"
 dependencies = [
  "futures-channel",
  "futures-util",
@@ -6216,8 +6094,8 @@ dependencies = [
  "js-sys",
  "tokio",
  "tokio-tungstenite 0.29.0",
- "vox-core 0.5.0",
- "vox-types 0.5.0",
+ "vox-core 0.8.2",
+ "vox-types 0.8.2",
  "wasm-bindgen",
  "web-sys",
 ]

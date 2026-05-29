@@ -10,7 +10,7 @@ license = "MIT OR Apache-2.0"
 # platform-agnostic.
 
 [dependencies]
-example-proto = { path = "../../../features/example/example-proto" }
+example-proto = { path = "../features/example/example-proto" }
 app-ui = { path = "../ui" }
 
 dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
