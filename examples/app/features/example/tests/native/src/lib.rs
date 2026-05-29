@@ -569,3 +569,33 @@ async fn external_backend_seed_data_sorts() {
     let names: Vec<_> = page.items.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, vec!["stub.alpha", "stub.bravo", "stub.charlie"]);
 }
+
+// The `#[derive(Entity)]` repo participates in the Layer system: the
+// emitted `ExampleRepoLayer` token makes every backend composable +
+// swappable through one generic call site, no consumer change.
+#[test]
+fn repos_compose_as_layers_for_any_backend() {
+    use architect::{Layer, Services};
+    use example_stub_backend::StubBackend;
+
+    // Identical for every backend: build the router and read the
+    // bundle's advertised surface.
+    fn surface<B>(backend: B) -> Vec<&'static str>
+    where
+        B: ExampleRepo + Services + Clone + Send + Sync + 'static,
+    {
+        let _router = backend.into_router();
+        B::layers()
+            .descriptors()
+            .iter()
+            .map(|d| d.service_name)
+            .collect()
+    }
+
+    assert_eq!(surface(ExampleRepoMemory::new()), vec!["ExampleRepo"]);
+    assert_eq!(
+        surface(StubBackend::with_seed_data()),
+        vec!["ExampleRepo"],
+        "a third-party backend mounts identically to the in-tree one"
+    );
+}

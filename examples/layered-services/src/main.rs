@@ -47,8 +47,25 @@
 
 use std::sync::{Arc, Mutex};
 
-use architect::{HasDispatcher, Layer, Services, dispatch::CurrentThreadDispatcher, layers};
+use architect::{
+    HasDispatcher, Layer, LayerRouter, Services, dispatch::CurrentThreadDispatcher, layers,
+};
+use example_memory::ExampleRepoMemory;
+use example_proto::{ExampleRepo, example_repo_layer};
+use example_stub_backend::StubBackend;
 use tracing::info;
+
+/// One generic mount fn — identical code for an in-memory repo, a
+/// third-party stub, or (with the `server` feature) the SeaORM storage.
+/// The `#[derive(Entity)]`-emitted `<Entity>RepoLayer` token makes the
+/// repo a `Layer` participant, so the backend is injected at this call
+/// site and nothing downstream changes.
+fn mount<B>(backend: B) -> LayerRouter
+where
+    B: ExampleRepo + Services + Clone + Send + Sync + 'static,
+{
+    backend.into_router()
+}
 
 // ── Service traits ────────────────────────────────────────────────────
 //
@@ -269,4 +286,39 @@ fn main() {
     // The composition surface shown here doesn't change between
     // in-process and cross-process: the `LayerRouter` is the same
     // object, only the transport in front of it differs.
+
+    // ── Entity repos are layers too ──────────────────────────────────
+    //
+    // Everything above used hand-written `#[architect::rpc]` traits. A
+    // `#[derive(Entity)]` repo is the same shape — an all-async vox
+    // service — so the derive emits an `ExampleRepoLayer` token and the
+    // repo composes/swaps through the layer system identically.
+
+    // Same call site, three interchangeable backends. Neither `mount`
+    // nor any consumer code changes when the backend does.
+    let _mem = mount(ExampleRepoMemory::new());
+    let _stub = mount(StubBackend::with_seed_data());
+
+    let mem_surface: Vec<_> = ExampleRepoMemory::layers()
+        .descriptors()
+        .iter()
+        .map(|d| d.service_name)
+        .collect();
+    let stub_surface: Vec<_> = StubBackend::layers()
+        .descriptors()
+        .iter()
+        .map(|d| d.service_name)
+        .collect();
+    info!(
+        ?mem_surface,
+        ?stub_surface,
+        "same repo surface, different backend — zero consumer change"
+    );
+
+    // Per-service override: keep the in-memory bundle, but bind the repo
+    // to the third-party stub instead (last-merge-wins on method id).
+    let _hybrid = ExampleRepoMemory::layers()
+        .merge(example_repo_layer(StubBackend::with_seed_data()))
+        .provide(ExampleRepoMemory::new());
+    info!("override: repo impl swapped at the call site, bundle unchanged");
 }

@@ -70,6 +70,16 @@ impl StubBackend {
     }
 }
 
+// A third-party backend declares its Layer bundle exactly like an
+// in-tree one — `StubBackend::with_seed_data().into_router()` is
+// interchangeable with the SeaORM or in-memory backends at the call site.
+#[cfg(feature = "vox")]
+impl architect::Services for StubBackend {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![example_proto::ExampleRepoLayer]
+    }
+}
+
 impl ExampleRepo for StubBackend {
     // r[impl repo.get.missing]
     async fn get(&self, id: Uuid) -> Result<Example, RepoError> {

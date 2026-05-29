@@ -1793,6 +1793,9 @@ name = "example-layered-services"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "example-memory",
+ "example-proto",
+ "example-stub-backend",
  "facet",
  "tracing",
  "tracing-subscriber",

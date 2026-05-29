@@ -24,6 +24,16 @@ impl ExampleRepoMemory {
     }
 }
 
+// This backend's Layer bundle: it provides exactly the repo service.
+// `ExampleRepoMemory::into_router()` mounts it, interchangeable with any
+// other `ExampleRepo` backend at the call site.
+#[cfg(feature = "vox")]
+impl architect::Services for ExampleRepoMemory {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![example_proto::ExampleRepoLayer]
+    }
+}
+
 impl ExampleRepo for ExampleRepoMemory {
     // r[impl repo.get.missing]
     async fn get(&self, id: Uuid) -> Result<Example, RepoError> {

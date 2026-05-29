@@ -23,6 +23,12 @@ publish = false
 # crates.io references. We use paths here because everything lives
 # in the same workspace, but the dependency graph is the same shape.
 
+[features]
+# On by default: a third-party backend still wants to declare its
+# `Services` bundle so consumers can `.into_router()` it like any other.
+default = ["vox"]
+vox = ["example-proto/vox", "architect/vox"]
+
 [dependencies]
 example-proto.workspace = true
 architect.workspace = true
