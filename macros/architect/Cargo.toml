@@ -46,7 +46,7 @@ full = ["vox", "server-seaorm", "server-axum", "fake", "diagnostics", "platform"
 #   wasm    gloo-timers TimeoutFuture / wasm_bindgen_futures::spawn_local
 #
 # `web-time` provides a monotonic `Instant` on both targets.
-platform = ["dep:web-time", "tokio/time", "tokio/rt", "dep:gloo-timers", "dep:wasm-bindgen-futures"]
+platform = ["dep:web-time", "dep:async-channel", "tokio/time", "tokio/rt", "dep:gloo-timers", "dep:wasm-bindgen-futures"]
 
 # Schedule layer (`architect::schedule`): composable retry/repeat policies
 # (exponential backoff, jitter, caps, recurrence limits) + drivers that run
@@ -134,6 +134,11 @@ fake = { workspace = true, optional = true }
 # feature adds `tokio/time` + `tokio/rt`); the wasm path uses the
 # target-cfg deps below.
 web-time = { version = "1", optional = true }
+# Runtime-agnostic MPMC channel backing `platform::Queue` — wasm-clean
+# (no executor assumptions), unlike tokio's single-consumer mpsc. The
+# rest of `platform`'s primitives (Deferred/Semaphore/CancellationToken)
+# ride tokio's `sync` (already in the base dep).
+async-channel = { version = "2", optional = true }
 
 # Server-side only — sea-orm + async-trait are gated.
 sea-orm = { workspace = true, optional = true }

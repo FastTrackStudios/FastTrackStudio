@@ -120,6 +120,7 @@ version = "0.1.0"
 dependencies = [
  "architect-derive",
  "architect-rpc-derive",
+ "async-channel",
  "axum",
  "chrono",
  "eyre",
