@@ -4,7 +4,7 @@
 //! unconditionally and gates everything else behind cargo features so
 //! a consumer chooses their feature surface from one dep declaration:
 //!
-//! ```ignore
+//! ```toml
 //! # Cargo.toml of a binary that wants everything
 //! example = { workspace = true, features = ["full"] }
 //!
