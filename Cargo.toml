@@ -19,6 +19,7 @@ members = [
     "features/editor/crates/editor-vim",
     "features/editor/crates/editor-typst",
     "features/editor/crates/editor-mermaid",
+    "features/editor/crates/editor-keyflow",
     "features/editor/crates/editor",
     # Vendored fork of `mermaid-rs-renderer` 0.2.2 with web-time
     # patched in for wasm32 compat. Lives next to the editor it
@@ -395,7 +396,13 @@ editor-view = { path = "features/editor/crates/editor-view" }
 editor-vim = { path = "features/editor/crates/editor-vim" }
 editor-typst = { path = "features/editor/crates/editor-typst" }
 editor-mermaid = { path = "features/editor/crates/editor-mermaid" }
+editor-keyflow = { path = "features/editor/crates/editor-keyflow" }
 editor = { path = "features/editor/crates/editor" }
+
+# Keyflow's engraver, CPU-only `svg` tier (no wgpu/vello/PDF) — the
+# editor renders ```kf``` fences to inline SVG client-side. The `svg`
+# feature is selected per-consumer in `editor-keyflow`.
+engraver = { path = "../FastTrackStudio/keyflow/crates/engraver", default-features = false }
 
 # Deps the editor's inner crates inherit via `workspace = true`.
 # `serde`, `serde_json` are already declared elsewhere in the
@@ -850,15 +857,63 @@ strip = "debuginfo"
 [patch."https://github.com/FastTrackStudios/input_actions.git"]
 actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
 
-# NOTE: the former `[patch."https://github.com/bearcove/vox"]` block
-# (which redirected bearcove/vox → the Codys-Wright/vox mirror fork for
-# SourceId unification) was removed — the workspace + architect now both
-# depend on bearcove/vox directly at the same rev, so no patch is needed.
+# daw-proto reaches actions-proto through the starcommand host (not the
+# github mirror above), so redirect that source to the same local checkout.
+# The local input_actions now targets bearcove vox, which the bearcove
+# patch below folds into the single local vox — killing the old vox 0.5.0
+# that otherwise collides with 0.8.2 across the graph.
+[patch."https://git.starcommand.live/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../FastTrackStudio/input_actions/crates/actions-proto" }
+
+# keyflow-proto pulls daw-proto (for its timing primitives) from the daw
+# git source. Redirect to the local checkout so daw-proto's runtime-only
+# vox profile applies — otherwise the git daw-proto requests vox's full
+# (tokio-net) features and the editor's wasm build can't link mio.
+[patch."https://git.starcommand.live/FastTrackStudios/daw.git"]
+daw-proto = { path = "../FastTrackStudio/daw/crates/daw-proto" }
+
+# Redirect every bearcove/vox reference (this workspace's vox* deps +
+# architect's + architect-auth's transitive ones) to the LOCAL fork
+# checkout at ~/Development/vox. The fork = bearcove v0.8.2 (230dcd5b)
+# PLUS the vox-postcard patch that round-trips opaque `Def::Scalar`
+# types (Uuid, chrono::DateTime/NaiveDate) via their facet display/parse
+# affordances — without it vox 0.8.2's JIT can't encode Uuid-keyed wire
+# types and every RPC reply containing an id panics → client hang.
+# Path patch (not a git rev) so edits to the fork are picked up live;
+# switch to a pushed `git`/`rev` once the fork is published.
+[patch."https://github.com/bearcove/vox"]
+vox                = { path = "/home/cody/Development/vox/rust/vox" }
+vox-core           = { path = "/home/cody/Development/vox/rust/vox-core" }
+vox-codegen        = { path = "/home/cody/Development/vox/rust/vox-codegen" }
+vox-jit            = { path = "/home/cody/Development/vox/rust/vox-jit" }
+vox-jit-abi        = { path = "/home/cody/Development/vox/rust/vox-jit-abi" }
+vox-jit-cal        = { path = "/home/cody/Development/vox/rust/vox-jit-cal" }
+vox-macros-core    = { path = "/home/cody/Development/vox/rust/vox-macros-core" }
+vox-macros-parse   = { path = "/home/cody/Development/vox/rust/vox-macros-parse" }
+vox-postcard       = { path = "/home/cody/Development/vox/rust/vox-postcard" }
+vox-schema         = { path = "/home/cody/Development/vox/rust/vox-schema" }
+vox-service-macros = { path = "/home/cody/Development/vox/rust/vox-macros" }
+vox-types          = { path = "/home/cody/Development/vox/rust/vox-types" }
+vox-websocket      = { path = "/home/cody/Development/vox/rust/vox-websocket" }
+facet-cbor         = { path = "/home/cody/Development/vox/rust/facet-cbor" }
 
 # Redirect every transitive bearcove/moire reference (vox's
 # moire-runtime / moire-tokio / moire-types, etc.) to the codywright
 # fork at the same rev as the workspace dep above. Without this,
 # vox + architect end up with two parallel moire compilations.
+# architect (../architect) now pins vox at the starcommand source/rev
+# (f31f1040 — the uuid-opaque-scalar tip, == this local checkout's HEAD).
+# That's a *different source* than the bearcove refs above, so without
+# this redirect the graph carries two identical-content vox copies and
+# architect's `Handler` impls don't unify across them (every proto's
+# `serve`/dispatcher fails to satisfy the bound). Collapse the
+# starcommand source onto the same local path so there's exactly one vox.
+[patch."https://git.starcommand.live/FastTrackStudios/vox"]
+vox           = { path = "/home/cody/Development/vox/rust/vox" }
+vox-core      = { path = "/home/cody/Development/vox/rust/vox-core" }
+vox-types     = { path = "/home/cody/Development/vox/rust/vox-types" }
+vox-websocket = { path = "/home/cody/Development/vox/rust/vox-websocket" }
+
 [patch."https://github.com/bearcove/moire"]
 moire             = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }
 moire-macros      = { git = "https://git.starcommand.live/codywright/moire", rev = "aea86f91f84cdf6052e4310e8a0541d87f37c624" }

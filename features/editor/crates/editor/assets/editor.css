@@ -697,6 +697,49 @@ section h2 {
     margin: 0 auto;
 }
 
+/* Keyflow charts render source + engraving together. The split is a
+   flex row that wraps: side-by-side while both columns clear their
+   flex-basis, stacked once the editor gets too narrow — no media
+   query needed. Clicking either column drops the caret back into the
+   fence body (data-focus-pos) so the raw source becomes editable. */
+.editor-root .md-keyflow-widget {
+    display: block;
+    padding: 6px 0;
+    color: inherit;
+    cursor: text;
+}
+.editor-root .md-keyflow-split {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+}
+.editor-root .md-keyflow-source {
+    flex: 1 1 260px;
+    min-width: 0;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--bg-elev);
+    font-family: var(--mono);
+    font-size: 0.85em;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+    color: inherit;
+}
+.editor-root .md-keyflow-render {
+    flex: 1 1 340px;
+    min-width: 0;
+    overflow-x: auto;
+}
+.editor-root .md-keyflow-render svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
 /* Slash-command popup. Floats below the editor frame; positions
    could later be caret-anchored via a sliver of JS that reads
    the DOM Selection rect. For v1 we just dock below the frame

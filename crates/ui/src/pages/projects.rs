@@ -218,10 +218,19 @@ fn first_line(body: &str) -> Option<String> {
 /// for the page to render; no `tracing` here so the wasm
 /// console stays clean unless something genuinely surprises.
 async fn fetch_projects() -> Result<Vec<ProjectInfo>, String> {
+    crate::vox_clients::wlog("fetch_projects: start");
     let client = crate::vox_clients::project_client().await?;
+    crate::vox_clients::wlog("fetch_projects: got client, calling list()…");
     #[cfg(target_arch = "wasm32")]
     {
-        client.list().await.map_err(|e| format!("list: {e:?}"))
+        let r = client.list().await;
+        match &r {
+            Ok(rows) => {
+                crate::vox_clients::wlog(&format!("fetch_projects: list() OK, {} rows", rows.len()))
+            }
+            Err(e) => crate::vox_clients::wlog(&format!("fetch_projects: list() FAILED: {e:?}")),
+        }
+        r.map_err(|e| format!("list: {e:?}"))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
