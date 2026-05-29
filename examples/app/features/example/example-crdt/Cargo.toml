@@ -14,6 +14,12 @@ license.workspace = true
 # Architect's `Entity` derive will emit both impls eventually; right
 # now they're hand-written so the macro has a concrete reference.
 
+[features]
+# On by default: pulls the vox surface so this backend can declare its
+# `Services` bundle (and reference `ExampleRepoLayer`).
+default = ["vox"]
+vox = ["example-proto/vox", "architect/vox"]
+
 [dependencies]
 example-proto.workspace = true
 crdt.workspace = true

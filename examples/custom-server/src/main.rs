@@ -29,7 +29,7 @@
 
 use std::sync::Arc;
 
-use architect::axum_ws;
+use architect::{Services, axum_ws};
 use axum::{
     Router,
     extract::{State, WebSocketUpgrade},
@@ -37,12 +37,12 @@ use axum::{
     routing::get,
 };
 use example_proto::{
-    Example, ExampleRepo, ExampleRepoDispatcher, ExampleService, ExampleServiceDispatcher,
-    ExampleServiceError,
+    Example, ExampleRepo, ExampleService, ExampleServiceDispatcher, ExampleServiceError,
+    example_service_service_descriptor,
 };
 use example_stub_backend::StubBackend;
 use tower_http::cors::CorsLayer;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 // ── Service impl ──────────────────────────────────────────────────────
@@ -134,26 +134,18 @@ async fn health() -> &'static str {
 async fn vox_ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> Response {
     ws.on_upgrade(move |socket| async move {
         let repo = state.repo.clone();
-        let factory = axum_ws::acceptor_fn(move |req, connection| match req.service() {
-            "ExampleRepo" => {
-                // Step 2a: mount the repo dispatcher directly. Any
-                // type implementing ExampleRepo works.
-                connection.handle_with(ExampleRepoDispatcher::new(repo.clone()));
-                Ok(())
-            }
-            "ExampleService" => {
-                // Step 2b: build the service from the same repo and
-                // mount it. The service is generic over R, so the
-                // concrete repo type just flows through.
-                connection.handle_with(ExampleServiceDispatcher::new(CustomExampleService::new(
-                    repo.clone(),
-                )));
-                Ok(())
-            }
-            other => {
-                warn!(service = other, "unknown vox service requested");
-                Err(vec![])
-            }
+        // Compose the surface via the layer system, by hand: StubBackend's
+        // repo bundle (`into_router`) plus the custom service mounted
+        // alongside (`.with`). One router for every connection — it
+        // dispatches each service's methods by id. Same shape as
+        // apps/app/server, but with hand-picked repo + service impls.
+        let router = repo.clone().into_router().with(
+            example_service_service_descriptor(),
+            ExampleServiceDispatcher::new(CustomExampleService::new(repo)),
+        );
+        let factory = axum_ws::acceptor_fn(move |_req, connection| {
+            connection.handle_with(router.clone());
+            Ok(())
         });
         axum_ws::serve(socket, factory).await;
     })
