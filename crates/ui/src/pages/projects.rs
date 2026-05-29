@@ -12,12 +12,8 @@
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use project::ProjectInfo;
-#[cfg(target_arch = "wasm32")]
-use project::ProjectServiceClient;
 
 use crate::routes::Route;
-
-use crate::vox_session::vox_url;
 
 #[component]
 pub fn ProjectsView() -> Element {
@@ -222,41 +218,14 @@ fn first_line(body: &str) -> Option<String> {
 /// for the page to render; no `tracing` here so the wasm
 /// console stays clean unless something genuinely surprises.
 async fn fetch_projects() -> Result<Vec<ProjectInfo>, String> {
-    let url = build_org_vox_url();
-    if url.is_empty() {
-        return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
-    }
+    let client = crate::vox_clients::project_client().await?;
     #[cfg(target_arch = "wasm32")]
     {
-        use vox_core::acceptor_on;
-        let link = vox_websocket::WsLink::connect(&url)
-            .await
-            .map_err(|e| format!("ws connect: {e:?}"))?;
-        let client: ProjectServiceClient = acceptor_on(link)
-            .on_connection(())
-            .establish::<ProjectServiceClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
         client.list().await.map_err(|e| format!("list: {e:?}"))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        let _ = client;
         Err("native client not wired yet".to_owned())
     }
-}
-
-/// Build the per-org vox URL from the base. The base may
-/// already include `/vox` (legacy single-org default); strip
-/// the suffix and retarget at `/org/codywright/vox` for now.
-/// Multi-org switcher lands when the org-context signal does.
-fn build_org_vox_url() -> String {
-    let base = vox_url();
-    if base.is_empty() {
-        return String::new();
-    }
-    let trimmed = base
-        .trim_end_matches("/vox")
-        .trim_end_matches('/')
-        .to_string();
-    format!("{trimmed}/org/codywright/vox")
 }

@@ -14,6 +14,7 @@ pub mod server_registry;
 pub mod shell;
 pub mod task_wiring;
 pub mod theming;
+pub mod vox_clients;
 pub mod vox_session;
 
 pub use app::App;

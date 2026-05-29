@@ -14,9 +14,6 @@ use task::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TasksApp};
 use uuid::Uuid;
 
-#[cfg(target_arch = "wasm32")]
-use crate::vox_session::org_vox_url;
-
 use crate::routes::Route;
 use crate::task_wiring::{fetch_tasks, handle, to_ui};
 
@@ -138,26 +135,14 @@ fn status_variant(status: &str) -> StatusBadgeVariant {
 /// Fetch a single project via `ProjectServiceClient.get`.
 async fn fetch_project(id: String) -> Result<ProjectInfo, String> {
     let uuid = Uuid::parse_str(&id).map_err(|_| "invalid project id".to_owned())?;
+    let client = crate::vox_clients::project_client().await?;
     #[cfg(target_arch = "wasm32")]
     {
-        use vox_core::acceptor_on;
-        let url = org_vox_url();
-        if url.is_empty() {
-            return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
-        }
-        let link = vox_websocket::WsLink::connect(&url)
-            .await
-            .map_err(|e| format!("ws connect: {e:?}"))?;
-        let client: project::ProjectServiceClient = acceptor_on(link)
-            .on_connection(())
-            .establish::<project::ProjectServiceClient>()
-            .await
-            .map_err(|e| format!("establish: {e:?}"))?;
         client.get(uuid).await.map_err(|e| format!("get: {e:?}"))
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let _ = uuid;
+        let _ = (uuid, client);
         Err("native client not wired yet".to_owned())
     }
 }

@@ -29,6 +29,22 @@ async function open(page, path) {
   await page.goto(path, { waitUntil: "domcontentloaded" });
 }
 
+// Regression guard for the vox-client closure bug: a dropped WebSocket
+// callback surfaces as an uncaught wasm-bindgen error. The page shell
+// still renders, so only watching the DOM misses it — we watch the
+// console + pageerror stream instead.
+const FATAL = /closure invoked recursively or after being dropped|after being dropped|unreachable executed/i;
+function watchFatal(page) {
+  const hits = [];
+  page.on("pageerror", (e) => {
+    if (FATAL.test(String(e))) hits.push(String(e));
+  });
+  page.on("console", (m) => {
+    if (m.type() === "error" && FATAL.test(m.text())) hits.push(m.text());
+  });
+  return hits;
+}
+
 /** Wait for the Dioxus shell to hydrate (sidebar present). */
 async function expectShell(page) {
   for (const label of ["Projects", "Tasks"]) {
@@ -48,6 +64,7 @@ test("home renders the app shell", async ({ page }) => {
 });
 
 test("tasks route renders", async ({ page }) => {
+  const fatal = watchFatal(page);
   await open(page, "/tasks");
   await expectShell(page);
   // The page shows the task workspace, a loading line, or an error box
@@ -56,14 +73,20 @@ test("tasks route renders", async ({ page }) => {
     page.locator("body").getByText(/Loading tasks|task service|Today|Inbox|No date|Status/i).first(),
   ).toBeVisible({ timeout: 15_000 }).catch(() => {});
   await page.screenshot({ path: "screenshots/tasks.png", fullPage: true });
+  // Let the vox round-trip (or any closure-after-drop) fire.
+  await page.waitForTimeout(2500);
+  expect(fatal, `fatal wasm/WS errors:\n${fatal.join("\n")}`).toHaveLength(0);
 });
 
 test("projects route renders", async ({ page }) => {
+  const fatal = watchFatal(page);
   await open(page, "/projects");
   await expectShell(page);
   // "Projects" H1 heading (distinct from the nav link).
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await page.screenshot({ path: "screenshots/projects.png", fullPage: true });
+  await page.waitForTimeout(2500);
+  expect(fatal, `fatal wasm/WS errors:\n${fatal.join("\n")}`).toHaveLength(0);
 });
 
 test("goals route renders", async ({ page }) => {

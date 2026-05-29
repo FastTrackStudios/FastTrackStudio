@@ -11,17 +11,11 @@ use dioxus::prelude::*;
 use task::TaskInfo as DbTask;
 use task_ui::{TaskInfo as UiTask, TaskMutation, TimeEntry as UiTimeEntry};
 
-#[cfg(target_arch = "wasm32")]
-use task::TaskServiceClient;
-
-#[cfg(target_arch = "wasm32")]
-use crate::vox_session::org_vox_url;
-
-/// Fetch the active org's tasks via `TaskServiceClient`.
+/// Fetch the active org's tasks via the cached `TaskServiceClient`.
 pub(crate) async fn fetch_tasks() -> Result<Vec<DbTask>, String> {
     #[cfg(target_arch = "wasm32")]
     {
-        let client = connect().await?;
+        let client = crate::vox_clients::task_client().await?;
         client.list().await.map_err(|e| format!("list: {e:?}"))
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -138,7 +132,7 @@ fn persist(affected: Affected) {
 
 #[cfg(target_arch = "wasm32")]
 async fn persist_inner(affected: Affected) -> Result<(), String> {
-    let client = connect().await?;
+    let client = crate::vox_clients::task_client().await?;
     match affected {
         Affected::Create(task) => {
             client
@@ -160,24 +154,4 @@ async fn persist_inner(affected: Affected) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// Open a vox link to the org endpoint and establish a
-/// `TaskServiceClient`. One connection per call (mirrors the projects
-/// page); a pooled session is a follow-up.
-#[cfg(target_arch = "wasm32")]
-async fn connect() -> Result<TaskServiceClient, String> {
-    let url = org_vox_url();
-    if url.is_empty() {
-        return Err("no vox URL configured (set TASK_VOX_URL_WEB)".to_owned());
-    }
-    use vox_core::acceptor_on;
-    let link = vox_websocket::WsLink::connect(&url)
-        .await
-        .map_err(|e| format!("ws connect: {e:?}"))?;
-    acceptor_on(link)
-        .on_connection(())
-        .establish::<TaskServiceClient>()
-        .await
-        .map_err(|e| format!("establish: {e:?}"))
 }
