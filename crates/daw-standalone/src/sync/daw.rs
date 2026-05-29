@@ -418,6 +418,12 @@ pub struct Standalone {
     /// here; per-subscriber vox pumps bridge broadcast events into `Tx`.
     pub(crate) track_events:
         Arc<tokio::sync::broadcast::Sender<daw_proto::track::TrackStreamEvent>>,
+    pub(crate) marker_events:
+        Arc<tokio::sync::broadcast::Sender<daw_proto::marker::MarkerStreamEvent>>,
+    pub(crate) region_events:
+        Arc<tokio::sync::broadcast::Sender<daw_proto::region::RegionStreamEvent>>,
+    pub(crate) tempo_map_events:
+        Arc<tokio::sync::broadcast::Sender<daw_proto::tempo_map::TempoMapStreamEvent>>,
 }
 
 impl Default for Standalone {
@@ -438,6 +444,9 @@ impl Standalone {
             )),
             plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
             track_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
+            marker_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
+            region_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
+            tempo_map_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
         }
     }
 

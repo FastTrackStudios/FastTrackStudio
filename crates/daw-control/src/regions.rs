@@ -133,6 +133,15 @@ impl Regions {
         Ok(())
     }
 
+    /// Set the region lane. `None` returns it to the DAW's default lane.
+    pub async fn set_lane(&self, id: u32, lane: Option<u32>) -> Result<()> {
+        self.clients
+            .region
+            .set_lane(self.context(), id, lane)
+            .await??;
+        Ok(())
+    }
+
     // =========================================================================
     // Navigation Methods
     // =========================================================================

@@ -11,6 +11,10 @@
 use daw_proto::{PlayState, ProjectInfo};
 use daw_proto::{
     ProjectContext, TrackRef,
+    event_bus::{BusFilter, DawEvent},
+    marker::{MarkerEvent, MarkerStreamEvent},
+    region::{RegionEvent, RegionStreamEvent},
+    tempo_map::{TempoMapEvent, TempoMapStreamEvent},
     track::{ReorderTracksBehavior, TrackEvent, TrackStreamEvent},
 };
 use daw_standalone::bootstrap::build_in_process_daw;
@@ -285,6 +289,112 @@ async fn next_track_event(rx: &mut vox::Rx<TrackStreamEvent>) -> eyre::Result<Tr
     Ok(out.expect("vox SelfRef::map runs once"))
 }
 
+async fn next_marker_event(rx: &mut vox::Rx<MarkerStreamEvent>) -> eyre::Result<MarkerStreamEvent> {
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| eyre::eyre!("timed out waiting for marker event"))??
+        .ok_or_else(|| eyre::eyre!("marker event stream closed"))?;
+    let mut out = None;
+    let _ = event.map(|event| out = Some(event));
+    Ok(out.expect("vox SelfRef::map runs once"))
+}
+
+async fn wait_for_marker_event(
+    rx: &mut vox::Rx<MarkerStreamEvent>,
+    pred: impl Fn(&MarkerEvent) -> bool,
+) -> eyre::Result<MarkerStreamEvent> {
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let event = next_marker_event(rx).await?;
+        if pred(&event.event) {
+            return Ok(event);
+        }
+        if web_time::Instant::now() >= deadline {
+            eyre::bail!("timed out waiting for matching marker event");
+        }
+    }
+}
+
+async fn next_region_event(rx: &mut vox::Rx<RegionStreamEvent>) -> eyre::Result<RegionStreamEvent> {
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| eyre::eyre!("timed out waiting for region event"))??
+        .ok_or_else(|| eyre::eyre!("region event stream closed"))?;
+    let mut out = None;
+    let _ = event.map(|event| out = Some(event));
+    Ok(out.expect("vox SelfRef::map runs once"))
+}
+
+async fn wait_for_region_event(
+    rx: &mut vox::Rx<RegionStreamEvent>,
+    pred: impl Fn(&RegionEvent) -> bool,
+) -> eyre::Result<RegionStreamEvent> {
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let event = next_region_event(rx).await?;
+        if pred(&event.event) {
+            return Ok(event);
+        }
+        if web_time::Instant::now() >= deadline {
+            eyre::bail!("timed out waiting for matching region event");
+        }
+    }
+}
+
+async fn next_tempo_event(
+    rx: &mut vox::Rx<TempoMapStreamEvent>,
+) -> eyre::Result<TempoMapStreamEvent> {
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| eyre::eyre!("timed out waiting for tempo event"))??
+        .ok_or_else(|| eyre::eyre!("tempo event stream closed"))?;
+    let mut out = None;
+    let _ = event.map(|event| out = Some(event));
+    Ok(out.expect("vox SelfRef::map runs once"))
+}
+
+async fn wait_for_tempo_event(
+    rx: &mut vox::Rx<TempoMapStreamEvent>,
+    pred: impl Fn(&TempoMapEvent) -> bool,
+) -> eyre::Result<TempoMapStreamEvent> {
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let event = next_tempo_event(rx).await?;
+        if pred(&event.event) {
+            return Ok(event);
+        }
+        if web_time::Instant::now() >= deadline {
+            eyre::bail!("timed out waiting for matching tempo event");
+        }
+    }
+}
+
+async fn next_daw_event(rx: &mut vox::Rx<DawEvent>) -> eyre::Result<DawEvent> {
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .map_err(|_| eyre::eyre!("timed out waiting for daw event"))??
+        .ok_or_else(|| eyre::eyre!("daw event stream closed"))?;
+    let mut out = None;
+    let _ = event.map(|event| out = Some(event));
+    Ok(out.expect("vox SelfRef::map runs once"))
+}
+
+async fn wait_for_daw_event(
+    rx: &mut vox::Rx<DawEvent>,
+    pred: impl Fn(&DawEvent) -> bool,
+) -> eyre::Result<DawEvent> {
+    let deadline = web_time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let event = next_daw_event(rx).await?;
+        if pred(&event) {
+            return Ok(event);
+        }
+        if web_time::Instant::now() >= deadline {
+            eyre::bail!("timed out waiting for matching daw event");
+        }
+    }
+}
+
 async fn wait_for_track_event(
     rx: &mut vox::Rx<TrackStreamEvent>,
     pred: impl Fn(&TrackEvent) -> bool,
@@ -299,6 +409,172 @@ async fn wait_for_track_event(
             eyre::bail!("timed out waiting for matching track event");
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn marker_region_lanes_and_events_through_in_process_daw() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let project_guid = project.info().await?.guid;
+
+    let markers = project.markers();
+    let mut marker_rx = markers.subscribe().await?;
+    let marker_id = markers.add(2.5, "Verse").await?;
+    let added_marker = wait_for_marker_event(&mut marker_rx, |event| {
+        matches!(event, MarkerEvent::Added(marker) if marker.id == Some(marker_id) && marker.name == "Verse")
+    })
+    .await?;
+    assert_eq!(added_marker.project_guid, project_guid);
+
+    markers.set_lane(marker_id, Some(3)).await?;
+    markers.set_color(marker_id, 0x112233).await?;
+    markers.rename(marker_id, "Verse Marker").await?;
+    let lane_marker = wait_for_marker_event(&mut marker_rx, |event| {
+        matches!(event, MarkerEvent::Changed(marker) if marker.id == Some(marker_id) && marker.lane == Some(3))
+    })
+    .await?;
+    assert_eq!(lane_marker.project_guid, project_guid);
+
+    let marker = markers.get(marker_id).await?.expect("marker exists");
+    assert_eq!(marker.lane, Some(3));
+    assert_eq!(marker.color, Some(0x112233));
+    assert_eq!(marker.name, "Verse Marker");
+
+    markers.remove(marker_id).await?;
+    wait_for_marker_event(
+        &mut marker_rx,
+        |event| matches!(event, MarkerEvent::Removed(id) if *id == marker_id),
+    )
+    .await?;
+
+    let regions = project.regions();
+    let mut region_rx = regions.subscribe().await?;
+    let region_id = regions.add(4.0, 12.0, "Chorus").await?;
+    let added_region = wait_for_region_event(&mut region_rx, |event| {
+        matches!(event, RegionEvent::Added(region) if region.id == Some(region_id) && region.name == "Chorus")
+    })
+    .await?;
+    assert_eq!(added_region.project_guid, project_guid);
+
+    regions.set_lane(region_id, Some(2)).await?;
+    regions.set_color(region_id, 0x445566).await?;
+    regions.set_bounds(region_id, 5.0, 14.0).await?;
+    let lane_region = wait_for_region_event(&mut region_rx, |event| {
+        matches!(event, RegionEvent::Changed(region) if region.id == Some(region_id) && region.lane == Some(2))
+    })
+    .await?;
+    assert_eq!(lane_region.project_guid, project_guid);
+
+    let region = regions.get(region_id).await?.expect("region exists");
+    assert_eq!(region.lane, Some(2));
+    assert_eq!(region.color, Some(0x445566));
+    assert!((region.time_range.start_seconds() - 5.0).abs() < 1e-9);
+    assert!((region.time_range.end_seconds() - 14.0).abs() < 1e-9);
+
+    regions.remove(region_id).await?;
+    wait_for_region_event(
+        &mut region_rx,
+        |event| matches!(event, RegionEvent::Removed(id) if *id == region_id),
+    )
+    .await?;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tempo_map_points_time_signatures_and_events_through_in_process_daw() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let project_guid = project.info().await?.guid;
+    let tempo_map = project.tempo_map();
+    let mut rx = tempo_map.subscribe().await?;
+
+    tempo_map.set_default_tempo(120.0).await?;
+    tempo_map.set_default_time_signature(4, 4).await?;
+
+    let idx = tempo_map.add_point(4.0, 90.0).await?;
+    assert_eq!(idx, 0);
+    let added = wait_for_tempo_event(&mut rx, |event| {
+        matches!(event, TempoMapEvent::PointAdded(point) if (point.position_seconds() - 4.0).abs() < 1e-9 && (point.bpm - 90.0).abs() < 1e-9)
+    })
+    .await?;
+    assert_eq!(added.project_guid, project_guid);
+
+    let early_idx = tempo_map.add_point(0.0, 120.0).await?;
+    assert_eq!(early_idx, 0);
+    wait_for_tempo_event(&mut rx, |event| {
+        matches!(event, TempoMapEvent::PointAdded(point) if (point.position_seconds() - 0.0).abs() < 1e-9 && (point.bpm - 120.0).abs() < 1e-9)
+    })
+    .await?;
+
+    tempo_map.set_time_signature_at(1, 3, 4).await?;
+    wait_for_tempo_event(&mut rx, |event| {
+        matches!(event, TempoMapEvent::PointChanged(point) if (point.position_seconds() - 4.0).abs() < 1e-9 && point.time_signature.as_ref().is_some_and(|ts| ts.numerator == 3 && ts.denominator == 4))
+    })
+    .await?;
+    assert_eq!(tempo_map.time_signature_at(4.5).await?, (3, 4));
+
+    tempo_map.move_point(1, 6.0).await?;
+    wait_for_tempo_event(&mut rx, |event| {
+        matches!(event, TempoMapEvent::PointChanged(point) if (point.position_seconds() - 6.0).abs() < 1e-9)
+    })
+    .await?;
+    assert!((tempo_map.tempo_at(6.5).await? - 90.0).abs() < 1e-9);
+
+    let musical = tempo_map.time_to_musical(2.0).await?;
+    assert_eq!(musical.0, 2);
+    assert_eq!(musical.1, 1);
+    assert!((tempo_map.musical_to_time(2, 1, 0.0).await? - 2.0).abs() < 1e-9);
+
+    tempo_map.remove_point(1).await?;
+    wait_for_tempo_event(
+        &mut rx,
+        |event| matches!(event, TempoMapEvent::PointRemoved(index) if *index == 1),
+    )
+    .await?;
+    assert_eq!(tempo_map.points().await?.len(), 1);
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn event_bus_multiplexes_standalone_marker_region_tempo_events() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let project_guid = project.info().await?.guid;
+    let mut rx = bundle
+        .daw
+        .events()
+        .subscribe(
+            BusFilter {
+                markers: true,
+                regions: true,
+                tempo_map: true,
+                ..BusFilter::default()
+            }
+            .for_project(project_guid),
+        )
+        .await?;
+
+    let marker_id = project.markers().add(1.0, "Bus Marker").await?;
+    wait_for_daw_event(&mut rx, |event| {
+        matches!(event, DawEvent::Marker(event) if matches!(&event.event, MarkerEvent::Added(marker) if marker.id == Some(marker_id)))
+    })
+    .await?;
+
+    let region_id = project.regions().add(2.0, 3.0, "Bus Region").await?;
+    wait_for_daw_event(&mut rx, |event| {
+        matches!(event, DawEvent::Region(event) if matches!(&event.event, RegionEvent::Added(region) if region.id == Some(region_id)))
+    })
+    .await?;
+
+    project.tempo_map().add_point(0.0, 128.0).await?;
+    wait_for_daw_event(&mut rx, |event| {
+        matches!(event, DawEvent::TempoMap(event) if matches!(&event.event, TempoMapEvent::PointAdded(point) if (point.bpm - 128.0).abs() < 1e-9))
+    })
+    .await?;
+
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

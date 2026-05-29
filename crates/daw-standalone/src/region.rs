@@ -7,6 +7,7 @@
 //! canonical state.
 
 use daw_proto::Regions;
+use daw_proto::region::{RegionEvent, RegionStreamEvent};
 use daw_proto::{DawError, DawResult, ProjectContext, Region};
 
 use crate::sync::Standalone;
@@ -19,6 +20,13 @@ fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
             state.current_project_guid.clone()
         }
     }
+}
+
+fn publish_region_event(daw: &Standalone, project_guid: &str, event: RegionEvent) {
+    let _ = daw.region_events.send(RegionStreamEvent {
+        project_guid: project_guid.to_string(),
+        event,
+    });
 }
 
 impl Regions for Standalone {
@@ -48,14 +56,16 @@ impl Regions for Standalone {
     fn add(&self, project: ProjectContext, start: f64, end: f64, name: &str) -> DawResult<u32> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let (id, region) = self.with_project_mut(&guid, |p| {
             let id = p.next_region_id;
             p.next_region_id += 1;
             let mut region = Region::from_seconds(start, end, name.to_string());
             region.id = Some(id);
-            p.regions.insert(id, region);
-            id
-        })
+            p.regions.insert(id, region.clone());
+            (id, region)
+        })?;
+        publish_region_event(self, &guid, RegionEvent::Added(region));
+        Ok(id)
     }
 
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
@@ -66,65 +76,96 @@ impl Regions for Standalone {
                 .remove(&id)
                 .map(|_| ())
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))
-        })?
+        })??;
+        publish_region_event(self, &guid, RegionEvent::Removed(id));
+        Ok(())
     }
 
     fn set_bounds(&self, project: ProjectContext, id: u32, start: f64, end: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let region = self.with_project_mut(&guid, |p| {
             let r = p
                 .regions
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
             r.time_range = daw_proto::TimeRange::from_seconds(start, end);
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(r.clone())
+        })??;
+        publish_region_event(self, &guid, RegionEvent::Changed(region));
+        Ok(())
     }
 
     fn rename(&self, project: ProjectContext, id: u32, name: &str) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let region = self.with_project_mut(&guid, |p| {
             let r = p
                 .regions
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
             r.name = name.to_string();
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(r.clone())
+        })??;
+        publish_region_event(self, &guid, RegionEvent::Changed(region));
+        Ok(())
     }
 
     fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let region = self.with_project_mut(&guid, |p| {
             let r = p
                 .regions
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
             r.color = if color == 0 { None } else { Some(color) };
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(r.clone())
+        })??;
+        publish_region_event(self, &guid, RegionEvent::Changed(region));
+        Ok(())
     }
 
     fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let region = self.with_project_mut(&guid, |p| {
             let r = p
                 .regions
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Region", &id.to_string()))?;
             r.lane = lane;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(r.clone())
+        })??;
+        publish_region_event(self, &guid, RegionEvent::Changed(region));
+        Ok(())
     }
 
     async fn subscribe(
         &self,
-        _project: ProjectContext,
-        _tx: vox::Tx<daw_proto::region::RegionStreamEvent>,
+        project: ProjectContext,
+        tx: vox::Tx<daw_proto::region::RegionStreamEvent>,
     ) {
+        let project_guid = resolve_project(self, &project);
+        let mut rx = self.region_events.subscribe();
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if project_guid
+                            .as_ref()
+                            .is_some_and(|guid| event.project_guid != *guid)
+                        {
+                            continue;
+                        }
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
     }
 }

@@ -15,6 +15,7 @@
 use architect::HasDispatcher;
 use architect::dispatch::CurrentThreadDispatcher;
 use daw_proto::Markers;
+use daw_proto::marker::{MarkerEvent, MarkerStreamEvent};
 use daw_proto::{DawError, DawResult, Marker, Position, PositionInSeconds, ProjectContext};
 
 use crate::sync::Standalone;
@@ -25,6 +26,13 @@ impl HasDispatcher for Standalone {
     fn dispatcher(&self) -> Self::Dispatcher {
         CurrentThreadDispatcher
     }
+}
+
+fn publish_marker_event(daw: &Standalone, project_guid: &str, event: MarkerEvent) {
+    let _ = daw.marker_events.send(MarkerStreamEvent {
+        project_guid: project_guid.to_string(),
+        event,
+    });
 }
 
 impl Markers for Standalone {
@@ -55,7 +63,7 @@ impl Markers for Standalone {
     fn add(&self, project: ProjectContext, position: f64, name: &str) -> DawResult<u32> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let (id, marker) = self.with_project_mut(&guid, |p| {
             let id = p.next_marker_id;
             p.next_marker_id += 1;
             let marker = Marker {
@@ -65,9 +73,11 @@ impl Markers for Standalone {
                     name.to_string(),
                 )
             };
-            p.markers.insert(id, marker);
-            id
-        })
+            p.markers.insert(id, marker.clone());
+            (id, marker)
+        })?;
+        publish_marker_event(self, &guid, MarkerEvent::Added(marker));
+        Ok(id)
     }
 
     fn remove(&self, project: ProjectContext, id: u32) -> DawResult<()> {
@@ -78,59 +88,97 @@ impl Markers for Standalone {
                 .remove(&id)
                 .map(|_| ())
                 .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))
-        })?
+        })??;
+        publish_marker_event(self, &guid, MarkerEvent::Removed(id));
+        Ok(())
     }
 
     fn set_position(&self, project: ProjectContext, id: u32, position: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let marker = self.with_project_mut(&guid, |p| {
             let m = p
                 .markers
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))?;
             m.position = Position::from_time(PositionInSeconds::from_seconds(position));
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(m.clone())
+        })??;
+        publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
+        Ok(())
     }
 
     fn rename(&self, project: ProjectContext, id: u32, name: &str) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let marker = self.with_project_mut(&guid, |p| {
             let m = p
                 .markers
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))?;
             m.name = name.to_string();
-            Ok::<(), DawError>(())
-        })?
+            Ok::<_, DawError>(m.clone())
+        })??;
+        publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
+        Ok(())
     }
 
     fn set_color(&self, project: ProjectContext, id: u32, color: u32) -> DawResult<()> {
         let guid = resolve_project(self, &project)
             .ok_or_else(|| DawError::not_found("Project", "current"))?;
-        self.with_project_mut(&guid, |p| {
+        let marker = self.with_project_mut(&guid, |p| {
             let m = p
                 .markers
                 .get_mut(&id)
                 .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))?;
-            m.color = Some(color);
-            Ok::<(), DawError>(())
-        })?
+            m.color = if color == 0 { None } else { Some(color) };
+            Ok::<_, DawError>(m.clone())
+        })??;
+        publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
+        Ok(())
     }
 
-    fn set_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) -> DawResult<()> {
-        // Standalone has no lane concept yet; accept the call so
-        // consumers writing portable code don't have to branch.
+    fn set_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) -> DawResult<()> {
+        let guid = resolve_project(self, &project)
+            .ok_or_else(|| DawError::not_found("Project", "current"))?;
+        let marker = self.with_project_mut(&guid, |p| {
+            let m = p
+                .markers
+                .get_mut(&id)
+                .ok_or_else(|| DawError::not_found("Marker", &id.to_string()))?;
+            m.lane = lane;
+            Ok::<_, DawError>(m.clone())
+        })??;
+        publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
         Ok(())
     }
 
     async fn subscribe(
         &self,
-        _project: ProjectContext,
-        _tx: vox::Tx<daw_proto::marker::MarkerStreamEvent>,
+        project: ProjectContext,
+        tx: vox::Tx<daw_proto::marker::MarkerStreamEvent>,
     ) {
+        let project_guid = resolve_project(self, &project);
+        let mut rx = self.marker_events.subscribe();
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if project_guid
+                            .as_ref()
+                            .is_some_and(|guid| event.project_guid != *guid)
+                        {
+                            continue;
+                        }
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
     }
 }
 

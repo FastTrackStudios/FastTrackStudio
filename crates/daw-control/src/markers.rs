@@ -116,6 +116,15 @@ impl Markers {
         Ok(())
     }
 
+    /// Set the marker lane. `None` returns it to the DAW's default lane.
+    pub async fn set_lane(&self, id: u32, lane: Option<u32>) -> Result<()> {
+        self.clients
+            .marker
+            .set_lane(self.context(), id, lane)
+            .await??;
+        Ok(())
+    }
+
     /// Subscribe to marker add/remove/modify events.
     pub async fn subscribe(&self) -> Result<vox::Rx<daw_proto::marker::MarkerStreamEvent>> {
         let (tx, rx) = vox::channel();
