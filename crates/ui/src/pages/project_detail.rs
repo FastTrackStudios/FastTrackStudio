@@ -53,7 +53,7 @@ pub fn ProjectDetailView(id: String) -> Element {
                     Link { to: Route::ProjectsRoute {}, class: "text-xs text-muted-foreground hover:text-foreground",
                         "‹ Projects"
                     }
-                    div { class: "flex items-center justify-between gap-3",
+                    div { class: "flex flex-wrap items-center justify-between gap-2",
                         Heading { level: HeadingLevel::H1, "{p.title}" }
                         StatusBadge { variant: status_variant(&p.status), label: p.status.clone() }
                     }
@@ -100,7 +100,7 @@ pub fn ProjectDetailView(id: String) -> Element {
     };
 
     rsx! {
-        div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-6 lg:p-10", {body} }
+        div { class: "mx-auto w-full max-w-6xl flex flex-col gap-6 p-4 sm:p-6 lg:p-10", {body} }
     }
 }
 

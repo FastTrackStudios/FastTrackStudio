@@ -29,7 +29,17 @@ pub fn TaskDetail(props: TaskDetailProps) -> Element {
     let current_priority = initial.priority_enum();
 
     rsx! {
-        aside { class: "fixed right-0 top-0 z-40 flex h-screen w-[28rem] max-w-[90vw] flex-col gap-3 border-l border-border bg-background p-4 shadow-2xl",
+        // Tap-to-close backdrop — essential on mobile where the sheet
+        // is full-width; a subtle scrim on desktop.
+        button {
+            r#type: "button",
+            class: "fixed inset-0 z-30 bg-foreground/20 backdrop-blur-[1px]",
+            "aria-label": "Close task detail",
+            onclick: move |_| props.on_close.call(()),
+        }
+        // Right sheet: full-width on phones (capped at 28rem), a fixed
+        // 28rem panel on larger screens. Scrolls when fields overflow.
+        aside { class: "fixed inset-y-0 right-0 z-40 flex h-screen w-full max-w-[28rem] flex-col gap-3 overflow-y-auto border-l border-border bg-background p-4 shadow-2xl sm:w-[28rem]",
             div { class: "flex items-center justify-between",
                 span { class: "text-xs uppercase tracking-wider text-muted-foreground", "Task" }
                 div { class: "flex items-center gap-1",

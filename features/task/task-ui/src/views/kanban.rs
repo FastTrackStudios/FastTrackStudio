@@ -33,7 +33,7 @@ pub fn KanbanBoard(props: KanbanBoardProps) -> Element {
         .collect();
 
     rsx! {
-        div { class: "flex gap-3 overflow-x-auto pb-2",
+        div { class: "flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 [scrollbar-width:thin]",
             for (status, items) in columns.into_iter() {
                 Column {
                     key: "{status.as_str()}",
@@ -66,7 +66,7 @@ fn Column(props: ColumnProps) -> Element {
         Status::Cancelled => "bg-rose-400",
     };
     rsx! {
-        div { class: "flex flex-col gap-2 w-72 shrink-0 rounded-lg border border-border bg-muted/20 p-2",
+        div { class: "flex flex-col gap-2 w-[82vw] max-w-xs sm:w-72 shrink-0 snap-start rounded-lg border border-border bg-muted/20 p-2",
             div { class: "flex items-center gap-2 px-1 py-1",
                 span { class: "h-2 w-2 rounded-full {header_dot}" }
                 span { class: "text-xs font-semibold uppercase tracking-wider text-foreground",

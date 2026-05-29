@@ -56,8 +56,8 @@ pub fn TasksApp(props: TasksAppProps) -> Element {
     let open_count = total - done;
 
     rsx! {
-        div { class: "relative mx-auto flex max-w-5xl flex-col gap-4 p-6 lg:p-10 h-full",
-            div { class: "flex items-center gap-3",
+        div { class: "relative mx-auto flex max-w-5xl flex-col gap-4 p-4 sm:p-6 lg:p-10 h-full",
+            div { class: "flex flex-wrap items-center gap-x-3 gap-y-2",
                 Heading { level: HeadingLevel::H1, "Tasks" }
                 span { class: "text-xs text-muted-foreground", "{open_count} open · {done} done" }
                 div { class: "ml-auto inline-flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5 text-xs",

@@ -33,7 +33,7 @@ pub fn TaskRow(props: TaskRowProps) -> Element {
 
     rsx! {
         div {
-            class: "group flex items-center gap-3 rounded-md border border-transparent px-2 py-2 hover:border-border hover:bg-accent/30 cursor-pointer",
+            class: "group flex min-h-[44px] items-center gap-3 rounded-md border border-transparent px-2 py-2.5 hover:border-border hover:bg-accent/30 cursor-pointer sm:min-h-0 sm:py-2",
             onclick: move |_| props.on_open.call(id),
             CheckboxButton {
                 done,
@@ -109,14 +109,14 @@ struct CheckboxButtonProps {
 #[component]
 fn CheckboxButton(props: CheckboxButtonProps) -> Element {
     let cls = if props.done {
-        "flex h-5 w-5 items-center justify-center rounded-md border-2 bg-emerald-500 border-emerald-500 text-white shrink-0"
+        "flex h-6 w-6 sm:h-5 sm:w-5 items-center justify-center rounded-md border-2 bg-emerald-500 border-emerald-500 text-white shrink-0"
     } else {
         let edge = match props.priority {
             Priority::Critical => "border-rose-500",
             Priority::High => "border-amber-500",
             _ => "border-border",
         };
-        let base = "flex h-5 w-5 items-center justify-center rounded-md border-2 bg-transparent hover:bg-accent/30 shrink-0";
+        let base = "flex h-6 w-6 sm:h-5 sm:w-5 items-center justify-center rounded-md border-2 bg-transparent hover:bg-accent/30 shrink-0";
         return rsx! {
             button {
                 r#type: "button",

@@ -42,7 +42,7 @@ pub fn ProjectsView() -> Element {
                 class: "pointer-events-none absolute inset-x-0 top-0 -z-10 h-72",
                 style: "background: radial-gradient(60% 120% at 50% -10%, color-mix(in oklch, var(--primary) 10%, transparent), transparent 70%);",
             }
-            div { class: "mx-auto w-full max-w-6xl flex flex-col gap-8 p-6 lg:p-10",
+            div { class: "mx-auto w-full max-w-6xl flex flex-col gap-8 p-4 sm:p-6 lg:p-10",
                 {view}
             }
         }
