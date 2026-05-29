@@ -1,65 +1,47 @@
-:root {
-    color-scheme: dark;
-    --bg: #0e0f12;
-    --bg-elev: #161821;
-    --border: #2a2d38;
-    --text: #d6d8df;
-    --text-dim: #7a7e8a;
-    --accent: #6b9eff;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
-}
+/* ── fts-ui theme bridge ─────────────────────────────────────
+   This stylesheet is mounted inside Task's fts-ui ThemeProvider,
+   which injects the design-system tokens (--background,
+   --foreground, --border, --muted, --primary, --signal-*, …) as
+   inline custom properties on `.fts-theme-root`. The editor sits
+   under that root, inherits the tokens, and aliases them to its
+   own `--ed-*` names here — so its chrome tracks the active
+   light/dark theme and any per-org / per-project preset
+   automatically, with no JS.
 
-* { box-sizing: border-box; }
+   Two deliberate non-actions:
+   - We never set `:root`, `html`/`body`, `color-scheme`, or the
+     fts-ui token names (`--border`, `--accent`). This file is
+     linked globally; redefining those would clobber the host
+     app's theme and page chrome. (The old playground page-chrome
+     rules lived here by accident — they belong to the standalone
+     playground, which keeps its own `examples/playground/assets/
+     playground.css`.)
+   - Fallback literals after each token keep the editor legible if
+     it's ever mounted outside a provider.
 
-html, body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.page {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 32px;
-}
-
-.page-header h1 {
-    margin: 0;
-    font-weight: 600;
-    font-size: 24px;
-}
-
-.subtitle {
-    margin: 4px 0 24px;
-    color: var(--text-dim);
-}
-
-.split {
-    display: grid;
-    grid-template-columns: 1.4fr 1fr;
-    gap: 20px;
-    align-items: start;
-}
-
-@media (max-width: 800px) {
-    .split { grid-template-columns: 1fr; }
-}
-
-section h2 {
-    margin: 0 0 8px;
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-dim);
+   Colored semantics map onto the adaptive `--signal-*` tokens
+   (defined for both light and dark), so links/tags/errors keep
+   their hue across themes instead of being baked dark. */
+.editor-app,
+.editor-frame,
+.editor-root {
+    --ed-bg: var(--background, #0e0f12);
+    --ed-bg-elev: var(--muted, #161821);
+    --ed-border: var(--border, #2a2d38);
+    --ed-text: var(--foreground, #d6d8df);
+    --ed-text-dim: var(--muted-foreground, #7a7e8a);
+    --ed-accent: var(--primary, #6b9eff);
+    --ed-link: var(--signal-quick, #79b8ff);
+    --ed-wikilink: var(--signal-full, #b388ff);
+    --ed-tag: var(--signal-safe, #88d4a3);
+    --ed-warn: var(--signal-warn, #d4a957);
+    --ed-danger: var(--signal-danger, #ff7373);
+    --ed-mono: var(--font-mono, ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace);
 }
 
 .editor-frame {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
     border-radius: 8px;
     padding: 16px;
     min-height: 240px;
@@ -74,11 +56,11 @@ section h2 {
     color: inherit;
     white-space: pre-wrap;
     word-wrap: break-word;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 14px;
     line-height: 1.6;
     min-height: 200px;
-    caret-color: var(--accent);
+    caret-color: var(--ed-accent);
     /* Reserve room for the gutter on the left. Each .cm-line
        paints its number into this column via the CSS counter
        below; the counter increments in document order. */
@@ -93,7 +75,7 @@ section h2 {
 .editor-root.vim-mode-normal,
 .editor-root.vim-mode-visual {
     caret-shape: block;
-    caret-color: var(--accent);
+    caret-color: var(--ed-accent);
 }
 .editor-root.vim-mode-replace {
     caret-shape: underscore;
@@ -162,7 +144,7 @@ section h2 {
     color: #e8eaf0;
 }
 .editor-root .md-code {
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     background: #1d2030;
     padding: 0 4px;
     border-radius: 3px;
@@ -233,7 +215,7 @@ section h2 {
     background: rgba(127, 167, 217, 0.06);
     border-left: 3px solid rgba(127, 167, 217, 0.55);
     border-radius: 4px;
-    color: var(--text);
+    color: var(--ed-text);
 }
 
 /* Page / section / block embed cards (Obsidian `![[…]]` form).
@@ -251,7 +233,7 @@ section h2 {
     display: flex;
     align-items: baseline;
     gap: 6px;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-size: 0.9em;
     margin-bottom: 6px;
 }
@@ -260,19 +242,19 @@ section h2 {
     font-weight: 600;
 }
 .editor-root .md-embed-sep {
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
 }
 .editor-root .md-embed-frag {
     color: #c5cad8;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 0.92em;
 }
 .editor-root .md-embed-body {
-    color: var(--text);
+    color: var(--ed-text);
     white-space: pre-wrap;
 }
 .editor-root .md-embed-placeholder {
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
     font-size: 0.9em;
 }
@@ -322,12 +304,12 @@ section h2 {
    the body is replaced with a tiny `[*]` superscript marker
    (`.md-inline-footnote-marker`). */
 .editor-root .md-inline-footnote {
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
     font-size: 0.9em;
 }
 .editor-root .md-inline-footnote-marker {
-    color: var(--accent, #6b9eff);
+    color: var(--ed-accent, #6b9eff);
     font-size: 0.75em;
     cursor: pointer;
     margin-left: 1px;
@@ -355,7 +337,7 @@ section h2 {
    line itself. */
 .editor-root .md-setext-underline {
     color: #4a526a;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 0.85em;
     letter-spacing: 0.02em;
 }
@@ -546,7 +528,9 @@ section h2 {
     font: inherit;
     padding: 1px 4px;
     border-radius: 3px;
-    color-scheme: dark;
+    /* Inherit the date-picker's light/dark rendering from the
+       theme provider's `color-scheme` rather than forcing dark. */
+    color-scheme: inherit;
 }
 .editor-root .md-property-date:hover {
     background: rgba(255, 255, 255, 0.04);
@@ -720,8 +704,8 @@ section h2 {
     margin: 0;
     padding: 8px 10px;
     border-radius: 6px;
-    background: var(--bg-elev);
-    font-family: var(--mono);
+    background: var(--ed-bg-elev);
+    font-family: var(--ed-mono);
     font-size: 0.85em;
     line-height: 1.5;
     white-space: pre;
@@ -754,8 +738,8 @@ section h2 {
     max-width: 420px;
     max-height: 320px;
     overflow-y: auto;
-    background: var(--bg-elev, #161821);
-    border: 1px solid var(--border, #2a2d38);
+    background: var(--ed-bg-elev, #161821);
+    border: 1px solid var(--ed-border, #2a2d38);
     border-radius: 6px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     padding: 4px;
@@ -769,7 +753,7 @@ section h2 {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
 }
 .editor-frame .slash-row {
     display: grid;
@@ -796,15 +780,15 @@ section h2 {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 13px;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     background: rgba(255, 255, 255, 0.04);
     border-radius: 4px;
     border: 1px solid rgba(255, 255, 255, 0.06);
 }
 .editor-frame .slash-row.selected .slash-row-icon {
-    color: var(--text, #d6d8df);
+    color: var(--ed-text, #d6d8df);
     background: rgba(127, 167, 217, 0.18);
     border-color: rgba(127, 167, 217, 0.4);
 }
@@ -814,16 +798,16 @@ section h2 {
     min-width: 0;
 }
 .editor-frame .slash-row-label {
-    color: var(--text, #d6d8df);
+    color: var(--ed-text, #d6d8df);
 }
 .editor-frame .slash-row-desc {
     font-size: 0.85em;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     margin-top: 2px;
 }
 .editor-frame .slash-empty {
     padding: 12px;
-    color: var(--text-dim, #7a7e8a);
+    color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
 }
 
@@ -939,7 +923,7 @@ section h2 {
     align-items: center;
     gap: 8px;
     margin-bottom: 12px;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 11px;
     letter-spacing: 0.06em;
 }
@@ -955,7 +939,7 @@ section h2 {
 .vim-mode.mode-replace { background: #ff7b72; }
 .vim-mode.mode-command { background: #ffcb6b; }
 .vim-pending {
-    color: var(--text-dim);
+    color: var(--ed-text-dim);
     min-width: 4ch;
 }
 
@@ -1092,7 +1076,7 @@ section h2 {
     word-break: normal;
 }
 .editor-root .cm-line.md-code-block {
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     background: #1d2030;
     color: #c5d4ff;
     padding: 0 8px;
@@ -1174,8 +1158,8 @@ section h2 {
 }
 
 .debug-pane {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
     border-radius: 8px;
     padding: 16px;
     /* Grid items default to `min-width: auto` which sizes to
@@ -1189,12 +1173,12 @@ section h2 {
     grid-template-columns: max-content 1fr;
     gap: 4px 16px;
     margin: 0 0 16px;
-    font-family: var(--mono);
+    font-family: var(--ed-mono);
     font-size: 12px;
 }
 
 .debug-grid dt {
-    color: var(--text-dim);
+    color: var(--ed-text-dim);
 }
 
 .debug-grid dd {
@@ -1207,7 +1191,7 @@ section h2 {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-dim);
+    color: var(--ed-text-dim);
 }
 
 .debug-text {
@@ -1215,8 +1199,8 @@ section h2 {
     padding: 12px;
     background: #0a0b0e;
     border-radius: 6px;
-    border: 1px solid var(--border);
-    font-family: var(--mono);
+    border: 1px solid var(--ed-border);
+    font-family: var(--ed-mono);
     font-size: 12px;
     white-space: pre-wrap;
     /* Break unbroken sequences (URLs, long no-space text) so
