@@ -44,6 +44,8 @@ cycle = { workspace = true, default-features = false }
 project = { workspace = true, features = ["vox"] }
 goal = { workspace = true, features = ["vox"] }
 task = { workspace = true, features = ["vox"] }
+# Timer service client for the `/timer` time-tracking page.
+timer-proto = { workspace = true, features = ["vox"] }
 # Vault file-replication wire surface — manifest / get_file /
 # put_file. The `/vault` route drives `editor::Editor` over the
 # auto-emitted `VaultSyncClient`. `vox` feature only (no
@@ -88,6 +90,11 @@ futures-util.workspace = true
 vox.workspace = true
 vox-core.workspace = true
 vox-websocket.workspace = true
+
+# Browser-only timers for the live elapsed-time tick on the timer
+# page. Wasm-only — used inside `cfg(target_arch = "wasm32")` blocks.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true, features = ["futures"] }
 
 [features]
 default = []

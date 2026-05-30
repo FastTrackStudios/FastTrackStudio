@@ -18,7 +18,7 @@ use sea_orm::{
 use timer_proto::service::{
     LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerService,
 };
-use timer_proto::{TimerError, WorkSession};
+use timer_proto::{TimerError, WorkSession, WorkSessionFilter};
 use uuid::Uuid;
 
 use crate::entity::{
@@ -274,7 +274,7 @@ impl Store {
     /// `list_sessions` analogue used by tests + the future
     /// server-side reports endpoint. Honors the bundled
     /// `WorkSessionFilter` flags.
-    pub async fn list_sessions(
+    pub async fn query_sessions(
         &self,
         filter: &timer_proto::WorkSessionFilter,
     ) -> Result<Vec<WorkSession>, TimerDbError> {
@@ -411,6 +411,13 @@ impl TimerService for Store {
             currency: r.currency,
             source: r.source,
         })
+    }
+
+    async fn list_sessions(
+        &self,
+        filter: WorkSessionFilter,
+    ) -> Result<Vec<WorkSession>, TimerError> {
+        self.query_sessions(&filter).await.map_err(Into::into)
     }
 }
 

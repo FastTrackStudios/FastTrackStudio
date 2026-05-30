@@ -72,6 +72,66 @@ pub async fn fetch_day_templates(slug: &str) -> Result<Vec<scheduling_proto::Day
         .map_err(|e| format!("{slug}: day templates: {e:?}"))
 }
 
+// ── Timer ─────────────────────────────────────────────────────────
+
+/// The currently-running session for `user_id` in this org, if any.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_active_timer(
+    slug: &str,
+    user_id: uuid::Uuid,
+) -> Result<Option<timer_proto::WorkSession>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .active_timer(user_id)
+        .await
+        .map_err(|e| format!("{slug}: active timer: {e:?}"))
+}
+
+/// Recent sessions for `user_id`, newest first.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_recent_sessions(
+    slug: &str,
+    user_id: uuid::Uuid,
+) -> Result<Vec<timer_proto::WorkSession>, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    let filter = timer_proto::WorkSessionFilter {
+        user_id: Some(user_id),
+        ..Default::default()
+    };
+    let mut sessions = client
+        .list_sessions(filter)
+        .await
+        .map_err(|e| format!("{slug}: list sessions: {e:?}"))?;
+    sessions.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+    Ok(sessions)
+}
+
+/// Start a timer; returns the new open session.
+#[cfg(target_arch = "wasm32")]
+pub async fn start_timer(
+    slug: &str,
+    req: timer_proto::StartTimerRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .start_timer(req)
+        .await
+        .map_err(|e| format!("{slug}: start timer: {e:?}"))
+}
+
+/// Stop `user_id`'s running timer; returns the closed session.
+#[cfg(target_arch = "wasm32")]
+pub async fn stop_timer(
+    slug: &str,
+    user_id: uuid::Uuid,
+) -> Result<timer_proto::WorkSession, String> {
+    let client = crate::vox_clients::establish_for::<timer_proto::TimerServiceClient>(slug).await?;
+    client
+        .stop_timer(user_id)
+        .await
+        .map_err(|e| format!("{slug}: stop timer: {e:?}"))
+}
+
 /// Fetch one org's vault markdown as `WikiFile`s for the knowledge
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
@@ -179,6 +239,38 @@ pub async fn fetch_tasks_tagged(
 pub async fn fetch_day_templates(
     _slug: &str,
 ) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_active_timer(
+    _slug: &str,
+    _user_id: uuid::Uuid,
+) -> Result<Option<timer_proto::WorkSession>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_recent_sessions(
+    _slug: &str,
+    _user_id: uuid::Uuid,
+) -> Result<Vec<timer_proto::WorkSession>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn start_timer(
+    _slug: &str,
+    _req: timer_proto::StartTimerRequest,
+) -> Result<timer_proto::WorkSession, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn stop_timer(
+    _slug: &str,
+    _user_id: uuid::Uuid,
+) -> Result<timer_proto::WorkSession, String> {
     Err("native client not wired yet".to_owned())
 }
 

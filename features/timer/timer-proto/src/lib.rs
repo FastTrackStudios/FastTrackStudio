@@ -53,6 +53,11 @@ pub mod tag;
 pub use client::Client;
 pub use error::TimerError;
 pub use rate::{OrgMemberRate, ProjectMemberRate};
-pub use service::TimerService;
+pub use service::{LogSessionRequest, RateResolution, RateSource, StartTimerRequest, TimerService};
 pub use session::{WorkSession, WorkSessionFilter};
 pub use tag::{Tag, WorkSessionTag};
+
+/// The architect-generated vox client for [`TimerService`] — what the
+/// app calls via `establish_for::<TimerServiceClient>(slug)`.
+#[cfg(feature = "vox")]
+pub use service::TimerServiceClient;

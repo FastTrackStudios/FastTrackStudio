@@ -27,7 +27,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::error::TimerError;
-use crate::session::WorkSession;
+use crate::session::{WorkSession, WorkSessionFilter};
 
 #[architect::rpc]
 pub trait TimerService {
@@ -75,6 +75,13 @@ pub trait TimerService {
         user_id: Uuid,
         project_id: Option<Uuid>,
     ) -> Result<RateResolution, TimerError>;
+
+    /// List sessions matching `filter` (by user / project / date range
+    /// / billable / open). Powers the timer page's history + totals.
+    async fn list_sessions(
+        &self,
+        filter: WorkSessionFilter,
+    ) -> Result<Vec<WorkSession>, TimerError>;
 }
 
 /// Args for [`TimerService::start_timer`].

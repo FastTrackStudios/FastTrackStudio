@@ -5684,7 +5684,7 @@ async fn run_timer(cmd: TimerCmd, org_override: Option<&str>) -> eyre::Result<()
                 open,
             };
             let rows = store
-                .list_sessions(&filter)
+                .query_sessions(&filter)
                 .await
                 .map_err(|e| eyre::eyre!("list: {e}"))?;
             if rows.is_empty() {

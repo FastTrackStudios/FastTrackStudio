@@ -698,6 +698,7 @@ async fn well_known_handler(State(state): State<AppState>) -> axum::Json<serde_j
             let manifest = state.data_root.org(slug.as_str()).manifest().ok()?;
             Some(serde_json::json!({
                 "slug": slug,
+                "id": manifest.id,
                 "display_name": manifest.display_name,
                 "is_home": manifest.is_home,
                 "federation_url": manifest.federation_url,

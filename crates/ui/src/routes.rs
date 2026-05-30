@@ -42,6 +42,9 @@ pub enum Route {
         #[route("/gantt")]
         GanttRoute {},
 
+        #[route("/timer")]
+        TimerRoute {},
+
         #[route("/wiki")]
         WikiRoute {},
 
@@ -92,6 +95,11 @@ fn ScheduleRoute() -> Element {
 #[component]
 fn GanttRoute() -> Element {
     rsx! { pages::gantt::GanttView {} }
+}
+
+#[component]
+fn TimerRoute() -> Element {
+    rsx! { pages::timer::TimerView {} }
 }
 
 #[component]

@@ -12,6 +12,10 @@ pub struct OrgMeta {
     pub slug: String,
     pub name: String,
     pub is_home: bool,
+    /// Org's stable UUID (`org.toml` `id`). `None` for older servers
+    /// that don't surface it. Needed by org-scoped services like the
+    /// timer that key on `org_id`.
+    pub id: Option<uuid::Uuid>,
 }
 
 /// What the org switcher is pointed at. `All` aggregates every hosted
@@ -81,6 +85,8 @@ struct RawOrg {
     slug: String,
     display_name: String,
     is_home: bool,
+    #[serde(default)]
+    id: Option<uuid::Uuid>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -93,6 +99,7 @@ fn parse_orgs(body: &str) -> Result<Vec<OrgMeta>, String> {
             slug: o.slug,
             name: o.display_name,
             is_home: o.is_home,
+            id: o.id,
         })
         .collect())
 }

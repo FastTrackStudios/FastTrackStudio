@@ -13,5 +13,6 @@ pub mod projects;
 pub mod schedule;
 pub mod settings;
 pub mod tasks;
+pub mod timer;
 pub mod vault;
 pub mod wiki;
