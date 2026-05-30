@@ -9,6 +9,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrontmatterKind {
     DayTemplate,
+    DayPlan,
     EventType,
     Schedule,
     Booking,
@@ -19,6 +20,7 @@ impl FrontmatterKind {
     pub const fn frontmatter_value(self) -> &'static str {
         match self {
             Self::DayTemplate => "scheduling-day-template",
+            Self::DayPlan => "scheduling-day-plan",
             Self::EventType => "scheduling-event-type",
             Self::Schedule => "scheduling-schedule",
             Self::Booking => "scheduling-booking",
@@ -31,6 +33,7 @@ impl FrontmatterKind {
 pub fn frontmatter_kind(ty: &str) -> Option<FrontmatterKind> {
     Some(match ty {
         "scheduling-day-template" => FrontmatterKind::DayTemplate,
+        "scheduling-day-plan" => FrontmatterKind::DayPlan,
         "scheduling-event-type" => FrontmatterKind::EventType,
         "scheduling-schedule" => FrontmatterKind::Schedule,
         "scheduling-booking" => FrontmatterKind::Booking,

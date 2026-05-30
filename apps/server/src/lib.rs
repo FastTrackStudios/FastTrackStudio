@@ -833,10 +833,15 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
             timer_proto::service::timer_service_rpc_service_descriptor(),
             timer_proto::service::serve(org.timer.clone()),
         )
-        // Scheduling — day templates (drives the calendar overlay).
+        // Scheduling — day templates (drives the calendar overlay)
+        // + per-date day plans (the day-by-day editor).
         .with(
             scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
             scheduling_proto::service::day_templates::serve(org.scheduling.clone()),
+        )
+        .with(
+            scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
+            scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
         );
 
     // Wiki feature — 11 per-capability traits, one descriptor each.

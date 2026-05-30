@@ -39,7 +39,7 @@ pub(crate) fn format_time(t: TimeOfDay) -> String {
     format!("{:02}:{:02}", t.hours(), t.minutes())
 }
 
-fn category_label(c: BlockCategory) -> &'static str {
+pub(crate) fn category_label(c: BlockCategory) -> &'static str {
     match c {
         BlockCategory::Reset => "reset",
         BlockCategory::Spiritual => "spiritual",

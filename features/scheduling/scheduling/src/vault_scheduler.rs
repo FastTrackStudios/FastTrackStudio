@@ -15,17 +15,20 @@ use architect::dispatch::TokioBlockingDispatcher;
 use thiserror::Error;
 
 use scheduling_proto::{
-    AvailabilitySchedule, Booking, BookingId, BookingStatus, Bookings, DayTemplate, DayTemplateId,
-    DayTemplates, EventType, EventTypeId, EventTypes, NewBooking, ScheduleId, Schedules,
-    SchedulingError, SlotQuery, Slots, TimeSlot,
+    AvailabilitySchedule, Booking, BookingId, BookingStatus, Bookings, DayPlan, DayPlans,
+    DayTemplate, DayTemplateId, DayTemplates, EventType, EventTypeId, EventTypes, NewBooking,
+    ScheduleId, Schedules, SchedulingError, SlotQuery, Slots, TimeSlot,
 };
 use store_proto::{KvStore, LogStore};
 
-use crate::parse::{parse_booking, parse_day_template, parse_event_type, parse_schedule};
+use crate::parse::{
+    parse_booking, parse_day_plan, parse_day_template, parse_event_type, parse_schedule,
+};
 use crate::scan::frontmatter_split;
 use crate::slots;
 use crate::write::{
-    serialize_booking, serialize_day_template, serialize_event_type, serialize_schedule,
+    serialize_booking, serialize_day_plan, serialize_day_template, serialize_event_type,
+    serialize_schedule,
 };
 
 // Scheduling content lives split across the vault: config under
@@ -35,6 +38,8 @@ const TEMPLATES_DIR: &str = "Projects/Scheduling/templates";
 const EVENT_TYPES_DIR: &str = "Projects/Scheduling/event-types";
 const SCHEDULES_DIR: &str = "Projects/Scheduling/schedules";
 const BOOKINGS_DIR: &str = "Records/bookings";
+// Per-date plans the user has edited — one file per `YYYY-MM-DD`.
+const DAYPLANS_DIR: &str = "Records/dayplans";
 
 /// Errors not covered by `SchedulingError` (mostly path
 /// composition + IO bubbling).
@@ -200,6 +205,38 @@ impl DayTemplates for VaultScheduler {
 
     fn delete_day_template(&self, id: &DayTemplateId) -> Result<(), SchedulingError> {
         self.delete_file(&format!("{TEMPLATES_DIR}/{}.md", sanitize(&id.0)))
+    }
+}
+
+// ── DayPlans ─────────────────────────────────────────────────────
+impl DayPlans for VaultScheduler {
+    fn get_day_plan(&self, date: &str) -> Result<Option<DayPlan>, SchedulingError> {
+        let rel = format!("{DAYPLANS_DIR}/{}.md", sanitize(date));
+        let abs = self.root.join(&rel);
+        if !abs.is_file() {
+            return Ok(None);
+        }
+        let raw = std::fs::read_to_string(&abs).map_err(io)?;
+        let Some((fm, _body)) = frontmatter_split(&raw) else {
+            return Ok(None);
+        };
+        parse_day_plan(&rel, fm)
+            .map(Some)
+            .map_err(|e| SchedulingError::Backend {
+                message: format!("parse day plan {rel}: {e}"),
+            })
+    }
+
+    fn upsert_day_plan(&self, plan: &DayPlan) -> Result<(), SchedulingError> {
+        let body = serialize_day_plan(plan).map_err(write_err)?;
+        self.write_file(
+            &format!("{DAYPLANS_DIR}/{}.md", sanitize(&plan.date)),
+            &body,
+        )
+    }
+
+    fn delete_day_plan(&self, date: &str) -> Result<(), SchedulingError> {
+        self.delete_file(&format!("{DAYPLANS_DIR}/{}.md", sanitize(date)))
     }
 }
 

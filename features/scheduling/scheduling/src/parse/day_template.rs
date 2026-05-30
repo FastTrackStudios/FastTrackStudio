@@ -88,7 +88,7 @@ pub(crate) fn parse_time(value: &str) -> Result<TimeOfDay, ParseError> {
     Ok(TimeOfDay::new(h, m))
 }
 
-fn parse_category(value: &str) -> BlockCategory {
+pub(crate) fn parse_category(value: &str) -> BlockCategory {
     match value.to_ascii_lowercase().as_str() {
         "reset" => BlockCategory::Reset,
         "spiritual" => BlockCategory::Spiritual,
