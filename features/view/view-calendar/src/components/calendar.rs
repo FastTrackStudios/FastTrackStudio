@@ -35,6 +35,10 @@ pub struct CalendarProps {
     /// the consumer can edit that date's plan.
     #[props(default)]
     pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
+    /// Fired with `(date, block_id, payload)` when a task/project is
+    /// dropped onto a plan block (`payload` = `"id|title"`).
+    #[props(default)]
+    pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     /// Fired with the visible `(first_date, last_date)` whenever the
     /// view range changes, so the consumer can load that range's plans.
     #[props(default)]
@@ -198,6 +202,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             events: events_for_view,
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
+                            on_block_drop: props.on_block_drop,
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
@@ -209,6 +214,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             events: events_for_view,
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
+                            on_block_drop: props.on_block_drop,
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),

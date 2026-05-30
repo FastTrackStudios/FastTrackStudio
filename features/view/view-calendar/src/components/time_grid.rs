@@ -36,6 +36,9 @@ pub struct TimeGridViewProps {
     /// Fired with `(date, block_id)` when a plan block is clicked.
     #[props(default)]
     pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
+    /// Fired with `(date, block_id, payload)` on a drop onto a block.
+    #[props(default)]
+    pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -123,6 +126,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             placements: day_overlap_layout(*date, &timed_events),
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
+                            on_block_drop: props.on_block_drop,
                             is_last: idx == props.days.len() - 1,
                             readonly: props.readonly,
                             on_event: props.on_event,
@@ -173,11 +177,20 @@ struct DayColumnProps {
     /// Fired with `(date, block_id)` when a plan block is clicked.
     #[props(default)]
     on_block_click: Option<EventHandler<(NaiveDate, String)>>,
+    /// Fired with `(date, block_id, payload)` when something is dropped
+    /// on a plan block. `payload` is the dropped item's
+    /// [`TASK_DROP_MIME`] data (`"id|title"`).
+    #[props(default)]
+    on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     is_last: bool,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
     on_open_editor: EventHandler<EventId>,
 }
+
+/// `DataTransfer` MIME for dragging a task/project onto a plan block.
+/// Payload is `"id|title"`.
+pub const TASK_DROP_MIME: &str = "text/x-task-assign";
 
 /// Sweep state: a `(start_min, current_min)` range the user is
 /// dragging out with the primary mouse button. While `Some` the
@@ -244,6 +257,7 @@ fn DayColumn(props: DayColumnProps) -> Element {
         })
         .collect();
     let on_block_click = props.on_block_click;
+    let on_block_drop = props.on_block_drop;
 
     rsx! {
         div {
@@ -413,8 +427,9 @@ fn DayColumn(props: DayColumnProps) -> Element {
             for tp in template_placements.iter() {
                 {
                     let block_id = tp.id.clone();
-                    let interactive = on_block_click.is_some();
-                    let cursor = if interactive { "cursor-pointer hover:brightness-125" } else { "" };
+                    let drop_id = tp.id.clone();
+                    let interactive = on_block_click.is_some() || on_block_drop.is_some();
+                    let cursor = if on_block_click.is_some() { "cursor-pointer hover:brightness-125" } else { "" };
                     let pe = if interactive { "" } else { "pointer-events-none" };
                     rsx! {
                         div {
@@ -424,6 +439,22 @@ fn DayColumn(props: DayColumnProps) -> Element {
                             onclick: move |_| {
                                 if let Some(cb) = on_block_click {
                                     cb.call((date, block_id.clone()));
+                                }
+                            },
+                            ondragover: move |e: Event<DragData>| {
+                                if on_block_drop.is_some() {
+                                    e.prevent_default();
+                                }
+                            },
+                            ondrop: move |e: Event<DragData>| {
+                                e.prevent_default();
+                                if let Some(cb) = on_block_drop {
+                                    if let Some(p) = e.data().data_transfer().get_data(TASK_DROP_MIME)
+                                    {
+                                        if !p.is_empty() {
+                                            cb.call((date, drop_id.clone(), p));
+                                        }
+                                    }
                                 }
                             },
                             span {

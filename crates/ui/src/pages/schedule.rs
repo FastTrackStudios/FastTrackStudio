@@ -18,7 +18,9 @@ use fts_ui::prelude::*;
 use scheduling_proto::{
     BlockAssignment, BlockCategory, DayPlan, DayTemplate, PlannedBlock, TimeOfDay,
 };
-use view_calendar::{Calendar, CalendarState, ColorTag, TemplateBlock, ViewMode, apply};
+use view_calendar::{
+    Calendar, CalendarState, ColorTag, TASK_DROP_MIME, TemplateBlock, ViewMode, apply,
+};
 
 use crate::orgs::{OrgMeta, OrgSelection};
 
@@ -165,6 +167,66 @@ pub fn ScheduleView() -> Element {
         });
     };
 
+    // Set just a block's assignment (used by drag-drop), then persist.
+    let mut assign_block = move |date: NaiveDate, id: String, assign: Option<Assign>| {
+        let Some(slug) = slug() else { return };
+        let plan = {
+            let mut w = plans.write();
+            let Some(plan) = w.get_mut(&date) else { return };
+            if let Some(b) = plan.blocks.iter_mut().find(|b| b.id.0 == id) {
+                b.assignment = assign.map(|(kind, title, ref_id)| BlockAssignment {
+                    kind,
+                    title,
+                    ref_id,
+                });
+            }
+            plan.clone()
+        };
+        spawn(async move {
+            let _ = crate::feeds::save_day_plan(&slug, plan).await;
+        });
+    };
+
+    // Revert a date to its template — drop the saved plan, re-materialize.
+    let mut reset_day = move |date: NaiveDate| {
+        let Some(slug) = slug() else { return };
+        let tpls = match &*templates.read_unchecked() {
+            Some(Ok(t)) => t.clone(),
+            _ => Vec::new(),
+        };
+        plans.write().insert(date, materialize(date, &tpls));
+        editing.set(None);
+        spawn(async move {
+            let _ = crate::feeds::delete_day_plan(&slug, &date.to_string()).await;
+        });
+    };
+
+    // Tasks to drag onto blocks (cap the strip).
+    let drag_tasks: PickList = tasks.iter().take(12).cloned().collect();
+
+    // Allocatable-block usage across the visible range.
+    let overview = {
+        let p = plans.read();
+        let r = range();
+        let (mut alloc_min, mut blocks, mut assigned) = (0i64, 0u32, 0u32);
+        for (date, plan) in p.iter() {
+            if !r.is_some_and(|(s, e)| *date >= s && *date <= e) {
+                continue;
+            }
+            for b in &plan.blocks {
+                if matches!(b.category, BlockCategory::Allocatable) {
+                    blocks += 1;
+                    alloc_min += i64::from(b.end.minutes_since_midnight)
+                        - i64::from(b.start.minutes_since_midnight);
+                    if b.assignment.is_some() {
+                        assigned += 1;
+                    }
+                }
+            }
+        }
+        (alloc_min.max(0) as f64 / 60.0, blocks, assigned)
+    };
+
     rsx! {
         div { class: "h-[calc(100vh-3.5rem)] lg:h-screen p-4 flex flex-col gap-3 overflow-hidden",
             if matches!(&*templates.read_unchecked(), Some(Ok(t)) if t.is_empty()) {
@@ -173,12 +235,58 @@ pub fn ScheduleView() -> Element {
                     "No day-plan templates under Projects/Scheduling/templates/."
                 }
             }
+            // Allocatable usage for the visible range.
+            if overview.1 > 0 {
+                Text {
+                    variant: TextVariant::Muted,
+                    "{overview.0:.1}h allocatable across {overview.1} blocks · {overview.2} assigned"
+                }
+            }
+            // Draggable tasks — drop one onto an allocatable block.
+            if !drag_tasks.is_empty() {
+                div { class: "flex shrink-0 items-center gap-2 overflow-x-auto pb-1",
+                    span { class: "shrink-0 text-[0.7rem] uppercase tracking-wider text-muted-foreground",
+                        "Drag onto a block:"
+                    }
+                    for (id, title) in drag_tasks.iter() {
+                        {
+                            let payload = format!("{id}|{title}");
+                            rsx! {
+                                div {
+                                    key: "drag-{id}",
+                                    draggable: true,
+                                    "data-cal-drag": "true",
+                                    class: "shrink-0 cursor-grab rounded-full border border-border bg-card px-2.5 py-1 text-xs text-foreground hover:border-primary active:cursor-grabbing",
+                                    ondragstart: move |e: Event<DragData>| {
+                                        let _ = e.data().data_transfer().set_data(TASK_DROP_MIME, &payload);
+                                    },
+                                    "{title}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Calendar {
                 events,
                 template_blocks,
                 initial_view: Some(ViewMode::Week),
                 on_range: move |(s, e)| range.set(Some((s, e))),
                 on_block_click: move |(date, id)| editing.set(Some((date, id))),
+                on_block_drop: move |(date, id, payload): (NaiveDate, String, String)| {
+                    let (rid, title) = payload
+                        .split_once('|')
+                        .unwrap_or(("", payload.as_str()));
+                    assign_block(
+                        date,
+                        id,
+                        Some((
+                            "task".to_string(),
+                            title.to_string(),
+                            (!rid.is_empty()).then(|| rid.to_string()),
+                        )),
+                    );
+                },
                 on_event: move |mu| apply(&mut state.write(), &mu),
             }
         }
@@ -194,6 +302,7 @@ pub fn ScheduleView() -> Element {
                 on_save: move |(l, s, e, a): (String, u16, u16, Option<Assign>)| {
                     save_block((date, id.clone()), l, s, e, a);
                 },
+                on_reset: move |()| reset_day(date),
                 on_cancel: move |()| editing.set(None),
             }
         }
@@ -211,6 +320,7 @@ fn BlockEditor(
     tasks: PickList,
     projects: PickList,
     on_save: EventHandler<(String, u16, u16, Option<Assign>)>,
+    on_reset: EventHandler<()>,
     on_cancel: EventHandler<()>,
 ) -> Element {
     let mut lbl = use_signal(|| label.clone());
@@ -320,18 +430,26 @@ fn BlockEditor(
                         }
                     }
                 }
-                div { class: "mt-1 flex justify-end gap-2",
+                div { class: "mt-1 flex items-center justify-between gap-2",
                     Button {
                         variant: ButtonVariant::Outline,
                         size: ButtonSize::Small,
-                        on_click: move |_| on_cancel.call(()),
-                        "Cancel"
+                        on_click: move |_| on_reset.call(()),
+                        "Reset day to template"
                     }
-                    Button {
-                        variant: ButtonVariant::Primary,
-                        size: ButtonSize::Small,
-                        on_click: move |_| on_save.call((lbl(), start(), end(), assign())),
-                        "Save"
+                    div { class: "flex gap-2",
+                        Button {
+                            variant: ButtonVariant::Outline,
+                            size: ButtonSize::Small,
+                            on_click: move |_| on_cancel.call(()),
+                            "Cancel"
+                        }
+                        Button {
+                            variant: ButtonVariant::Primary,
+                            size: ButtonSize::Small,
+                            on_click: move |_| on_save.call((lbl(), start(), end(), assign())),
+                            "Save"
+                        }
                     }
                 }
             }

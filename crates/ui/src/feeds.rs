@@ -98,6 +98,17 @@ pub async fn save_day_plan(slug: &str, plan: scheduling_proto::DayPlan) -> Resul
         .map_err(|e| format!("{slug}: save day plan: {e:?}"))
 }
 
+/// Delete a per-date plan, reverting that date to the template.
+#[cfg(target_arch = "wasm32")]
+pub async fn delete_day_plan(slug: &str, date: &str) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
+    client
+        .delete_day_plan(date.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete day plan {date}: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -278,6 +289,11 @@ pub async fn fetch_day_plan(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn save_day_plan(_slug: &str, _plan: scheduling_proto::DayPlan) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn delete_day_plan(_slug: &str, _date: &str) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 

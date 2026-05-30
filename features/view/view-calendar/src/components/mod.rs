@@ -18,3 +18,4 @@ mod toolbar;
 mod week_view;
 
 pub use calendar::{Calendar, CalendarProps};
+pub use time_grid::TASK_DROP_MIME;
