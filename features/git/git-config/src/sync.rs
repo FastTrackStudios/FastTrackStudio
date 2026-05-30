@@ -1,13 +1,10 @@
 //! Per-field conflict resolution between a local `TaskInfo` and
 //! the forge `Issue` it's linked to via [`crate::IssueLink`].
 //!
-//! The live sync path (`task issue sync`, the webhook receiver)
-//! currently uses a *coarse* rule: forge wins for the open/closed
-//! projection, full stop. That loses every Task-only field the
-//! moment the two sides diverge.
-//!
-//! `plans/issue-tracker-integration.md` documents a finer model —
-//! a per-field source-of-truth split:
+//! `plans/issue-tracker-integration.md` documents a per-field
+//! source-of-truth split (superseding the old coarse "forge wins for
+//! open/closed, full stop" rule that lost every Task-only field the
+//! moment the two sides diverged):
 //!
 //! | Field                                            | Wins  |
 //! |--------------------------------------------------|-------|
@@ -16,14 +13,18 @@
 //! | `priority`, `cycle`, `project`, `estimate`       | Task  |
 //! | `agent-attribution`, `task-only-labels`          | Task  |
 //!
-//! This module is the **pure, testable** core of that model. It
-//! is deliberately free of I/O: callers gather the two sides plus
-//! their per-field provenance, call [`resolve_field`] /
-//! [`resolve_conflict`], and apply the verdicts. Wiring it into
-//! the live sync path is tracked separately (see the `// FUTURE:`
-//! marker at the `sync_repo` call site in `apps/cli`).
+//! This module is the **pure, testable** core of that model. The
+//! field-agnostic primitives ([`resolve_field`] / [`resolve_conflict`])
+//! take per-field provenance and return verdicts; [`reconcile_synced`]
+//! layers on the concrete scalar projection (`title` / `body` /
+//! open-closed `state`) the live `task issue sync` path drives,
+//! deriving provenance by value-diffing each side against the
+//! last-converged [`crate::IssueSnapshot`]. Pushing task-won
+//! forge-owned edits back to the forge, and extending the projection
+//! to labels / assignees / milestone, are follow-up subtasks.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// Which side last modified a field. The provenance tracked
 /// alongside every syncable field so resolution is per-field, not
@@ -265,6 +266,108 @@ pub fn resolve_conflict(provenance: impl Fn(Field) -> FieldProvenance) -> Vec<Re
         .map(|&f| resolve_field(f, &provenance(f)))
         .collect()
 }
+// ── Live-sync integration ────────────────────────────────────────────
+//
+// The resolver above is field-agnostic. To drive it from the live
+// `task issue sync` path we need (a) a concrete projection of the
+// forge-owned fields that map cleanly onto a `TaskInfo`, and (b) a
+// way to turn "did this side change since the last reconcile?" into
+// the [`FieldProvenance`] the resolver consumes. Per-field timestamps
+// would be one source of that signal; a cheaper one — used here — is a
+// **value diff against the last-converged baseline** (a snapshot the
+// caller persists per [`crate::IssueLink`]). `resolve_field` only
+// inspects whether each side's timestamp is `Some`/`None`, so a
+// changed/unchanged bit is all the provenance it actually needs.
+//
+// Scope note: only the scalar forge-owned fields that map onto a plain
+// `TaskInfo` field today — `title`, `body`, open/closed `state` — are
+// projected here. Labels / assignees / milestone are forge-owned too
+// but need richer mapping (the task-only-label split, a forge-assignee
+// field, milestone-by-title); they're tracked as follow-up subtasks of
+// the per-field-resolution issue and intentionally left out of the
+// projection rather than mapped half-way.
+
+/// The scalar forge-owned projection synced bidirectionally between a
+/// `TaskInfo` and its linked forge `Issue`: title, body, and the
+/// open/closed state bit (`TaskInfo::status == "done"` ⇄
+/// `Issue::state == Closed`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncedFields {
+    pub title: String,
+    pub body: String,
+    /// `true` ⇒ closed/done.
+    pub closed: bool,
+}
+
+/// A sentinel "this field moved" timestamp. `resolve_field` only reads
+/// the `Some`/`None` shape of a [`FieldProvenance`], never the instant,
+/// so any fixed value works — the Unix epoch keeps it obvious in a
+/// debugger that the time is a placeholder, not a real edit time.
+fn moved() -> DateTime<Utc> {
+    DateTime::<Utc>::from_timestamp(0, 0).expect("epoch is a valid timestamp")
+}
+
+fn provenance(task_changed: bool, forge_changed: bool) -> FieldProvenance {
+    FieldProvenance {
+        task_modified: task_changed.then(moved),
+        forge_modified: forge_changed.then(moved),
+    }
+}
+
+/// Reconcile the scalar forge-owned projection of one linked
+/// `TaskInfo` ↔ `Issue` pair, returning the **converged value for each
+/// field** (what the Task side should hold after the merge).
+///
+/// `base_*` are the values each side held at the last reconcile (the
+/// persisted snapshot); `task` / `forge` are the current values. A
+/// field counts as changed on a side when it differs from that side's
+/// baseline. The per-field [`resolve_field`] verdict then picks the
+/// winner: a forge-only edit lands locally, a task-only edit to a
+/// forge-owned field stands until the forge next moves it, and a
+/// genuine both-sides conflict goes to the field's owner (forge, for
+/// all three of these).
+#[must_use]
+pub fn reconcile_synced(
+    base_task: &SyncedFields,
+    base_forge: &SyncedFields,
+    task: &SyncedFields,
+    forge: &SyncedFields,
+) -> SyncedFields {
+    let resolve = |field: Field, task_changed: bool, forge_changed: bool| {
+        resolve_field(field, &provenance(task_changed, forge_changed)).winner
+    };
+
+    let title = match resolve(
+        Field::Title,
+        task.title != base_task.title,
+        forge.title != base_forge.title,
+    ) {
+        FieldSource::Forge => forge.title.clone(),
+        FieldSource::Task => task.title.clone(),
+    };
+    let body = match resolve(
+        Field::Body,
+        task.body != base_task.body,
+        forge.body != base_forge.body,
+    ) {
+        FieldSource::Forge => forge.body.clone(),
+        FieldSource::Task => task.body.clone(),
+    };
+    let closed = match resolve(
+        Field::State,
+        task.closed != base_task.closed,
+        forge.closed != base_forge.closed,
+    ) {
+        FieldSource::Forge => forge.closed,
+        FieldSource::Task => task.closed,
+    };
+
+    SyncedFields {
+        title,
+        body,
+        closed,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -433,5 +536,91 @@ mod tests {
         assert!(!FieldProvenance::task_only(ts(1)).both_changed());
         assert!(!FieldProvenance::forge_only(ts(1)).both_changed());
         assert!(!FieldProvenance::never().both_changed());
+    }
+
+    // ── reconcile_synced: the live-sync projection ──────────────────
+
+    fn sf(title: &str, body: &str, closed: bool) -> SyncedFields {
+        SyncedFields {
+            title: title.into(),
+            body: body.into(),
+            closed,
+        }
+    }
+
+    #[test]
+    fn forge_only_edit_lands_locally() {
+        // Baseline agrees; forge renamed the issue, Task untouched.
+        let base = sf("old", "b", false);
+        let task = sf("old", "b", false);
+        let forge = sf("new", "b", false);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        assert_eq!(merged.title, "new");
+    }
+
+    #[test]
+    fn forge_close_lands_locally() {
+        let base = sf("t", "b", false);
+        let task = sf("t", "b", false);
+        let forge = sf("t", "b", true);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        assert!(merged.closed);
+    }
+
+    #[test]
+    fn task_only_edit_to_forge_owned_field_is_kept() {
+        // Task renamed locally; forge unchanged. A forge-owned field,
+        // but with no forge movement the local edit stands.
+        let base = sf("old", "b", false);
+        let task = sf("local", "b", false);
+        let forge = sf("old", "b", false);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        assert_eq!(merged.title, "local");
+    }
+
+    #[test]
+    fn both_changed_forge_owned_field_forge_wins() {
+        // Genuine conflict on a forge-owned field → owner (forge) wins.
+        let base = sf("old", "b", false);
+        let task = sf("task-rename", "b", false);
+        let forge = sf("forge-rename", "b", false);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        assert_eq!(merged.title, "forge-rename");
+    }
+
+    #[test]
+    fn unchanged_pair_is_a_noop() {
+        let base = sf("t", "b", false);
+        let merged = reconcile_synced(&base, &base, &base, &base);
+        assert_eq!(merged, base);
+    }
+
+    #[test]
+    fn first_sync_seeds_baseline_from_task_so_forge_wins_divergence() {
+        // Models the CLI's first-reconcile seeding: with no snapshot,
+        // the baseline is the *task* projection on both sides, so a
+        // forge that disagrees on a forge-owned field registers as a
+        // forge-side change and wins — preserving "forge wins for
+        // state" on first contact.
+        let task = sf("t", "b", false);
+        let forge = sf("t", "b", true); // forge has it closed
+        let merged = reconcile_synced(&task, &task, &task, &forge);
+        assert!(merged.closed);
+    }
+
+    #[test]
+    fn acceptance_forge_close_while_task_edits_an_unsynced_field() {
+        // The #127 scenario, projected: the forge closes the issue
+        // while the agent's local edit is to a Task-owned field
+        // (priority) that isn't part of SyncedFields at all. The state
+        // close lands; nothing in the projection disturbs the local
+        // priority, which the caller never feeds in.
+        let base = sf("t", "b", false);
+        let task = sf("t", "b", false); // title/body/state untouched locally
+        let forge = sf("t", "b", true); // forge closed it
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        assert!(merged.closed);
+        assert_eq!(merged.title, "t");
+        assert_eq!(merged.body, "b");
     }
 }

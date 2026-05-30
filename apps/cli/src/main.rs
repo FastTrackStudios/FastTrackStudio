@@ -10715,19 +10715,19 @@ async fn sync_repo(
 ) -> eyre::Result<(usize, usize)> {
     use git_config::BindingStore as _;
 
-    // 1. Reconcile already-linked issues (forge wins for open/closed).
+    // 1. Reconcile already-linked issues with the per-field resolver
+    //    in `git_config::sync` over the scalar forge-owned projection
+    //    (title / body / state). Provenance is a value-diff against
+    //    the last-converged snapshot the store persists per link, so
+    //    a forge edit lands locally while a local-only edit to a
+    //    forge-owned field isn't clobbered, and Task-owned fields
+    //    (priority/cycle/project/estimate/agent-attribution) are never
+    //    in the projection so they always survive a forge edit.
     //
-    // FUTURE: replace this coarse "forge wins for state" rule with
-    // the per-field resolver in `git_config::sync`
-    // (`resolve_conflict` over `Field::ALL`). That needs per-field
-    // provenance — `FieldProvenance { task_modified, forge_modified }`
-    // — which we don't track yet: the Task side has only a
-    // whole-record `date_modified`, and the forge `Issue` DTO carries
-    // no per-field timestamps. Plumb those (issue #127) and feed each
-    // field's provenance into `resolve_field` here so Task-owned
-    // fields (priority/cycle/project/estimate/agent-attribution)
-    // survive a forge edit and vice-versa. The resolver itself is a
-    // tested standalone unit in `features/git/git-config/src/sync.rs`.
+    //    FUTURE (issue #127 follow-up subtasks): push task-won
+    //    forge-owned edits back to the forge via `update_issue`, and
+    //    extend the projection to labels / assignees / milestone with
+    //    their richer mapping.
     let local = client
         .list()
         .await
@@ -10751,17 +10751,47 @@ async fn sync_repo(
         .await
         .map_err(|e| eyre::eyre!("join: {e}"))??;
 
-        let forge_done = matches!(ext.state, git_proto::IssueState::Closed);
-        let local_done = t.status == "done";
-        if forge_done != local_done {
+        let task_proj = git_config::SyncedFields {
+            title: t.title.clone(),
+            body: t.details.clone(),
+            closed: t.status == "done",
+        };
+        let forge_proj = git_config::SyncedFields {
+            title: ext.title.clone(),
+            body: ext.body.clone(),
+            closed: matches!(ext.state, git_proto::IssueState::Closed),
+        };
+        // Baseline: the recorded snapshot, or — on the first reconcile
+        // of this link — the *task* projection on both sides. That way
+        // a field the forge disagrees on registers as a forge-side
+        // change (forge != baseline, task == baseline) and the
+        // substrate wins for its owned fields, preserving the prior
+        // "forge wins for state" behaviour; a freshly-pulled task
+        // already equals the forge, so this is a no-op that just seeds
+        // the snapshot.
+        let (base_task, base_forge) = match store
+            .get_issue_snapshot(repo_id, number)
+            .map_err(|e| eyre::eyre!("snapshot: {e}"))?
+        {
+            Some(s) => (s.task, s.forge),
+            None => (task_proj.clone(), task_proj.clone()),
+        };
+        let merged = git_config::reconcile_synced(&base_task, &base_forge, &task_proj, &forge_proj);
+
+        if merged != task_proj {
             let mut t2 = t.clone();
-            if forge_done {
+            t2.title = merged.title.clone();
+            t2.details = merged.body.clone();
+            // State projection: only cross the done boundary, leaving
+            // non-done statuses (in-progress/waiting/…) intact.
+            let was_done = t2.status == "done";
+            if merged.closed && !was_done {
                 t2.status = "done".into();
                 t2.completed_date = Some(chrono::Local::now().date_naive());
                 if let Some(w) = t2.workflow.as_mut() {
                     w.session = None;
                 }
-            } else {
+            } else if !merged.closed && was_done {
                 t2.status = "open".into();
                 t2.completed_date = None;
             }
@@ -10770,9 +10800,23 @@ async fn sync_repo(
                 .await
                 .map_err(|e| eyre::eyre!("update: {e:?}"))?;
             reconciled += 1;
-            let s = if forge_done { "done" } else { "open" };
-            println!("  reconciled {} #{number} -> {s}", short_uuid(&t.id));
+            println!("  reconciled {} #{number}", short_uuid(&t.id));
         }
+
+        // Record the new baseline. The Task side now holds `merged`;
+        // the forge side still holds `forge_proj` (this pass doesn't
+        // push), so a task-won forge-owned field stays divergent but
+        // stable until the push subtask lands.
+        store
+            .set_issue_snapshot(
+                repo_id,
+                number,
+                git_config::IssueSnapshot {
+                    task: merged,
+                    forge: forge_proj,
+                },
+            )
+            .map_err(|e| eyre::eyre!("snapshot: {e}"))?;
     }
 
     // 2. Pull new forge issues (unless suppressed).

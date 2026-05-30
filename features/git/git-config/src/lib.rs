@@ -18,7 +18,10 @@ use git_proto::RepoId;
 use serde::{Deserialize, Serialize};
 
 pub mod sync;
-pub use sync::{Field, FieldProvenance, FieldSource, Resolution, resolve_conflict, resolve_field};
+pub use sync::{
+    Field, FieldProvenance, FieldSource, Resolution, SyncedFields, reconcile_synced,
+    resolve_conflict, resolve_field,
+};
 
 /// Whether an `IssueLink` points at an issue or a pull request.
 /// Forge-level numbers may share a namespace (GitHub) or not
@@ -50,6 +53,19 @@ pub struct IssueLink {
     pub kind: LinkKind,
 }
 
+/// The last-converged baseline for a linked issue's synced fields —
+/// what each side held at the previous reconcile. The sync path
+/// value-diffs the current values against this to decide, per field,
+/// whether the Task side, the forge side, or neither changed; that
+/// drives [`sync::reconcile_synced`]. Persisted per `(repo, number)`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueSnapshot {
+    /// Values the Task side held at the last reconcile.
+    pub task: SyncedFields,
+    /// Values the forge side held at the last reconcile.
+    pub forge: SyncedFields,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("storage error: {0}")]
@@ -69,6 +85,33 @@ pub trait BindingStore: Send + Sync {
     fn remove_issue_link(&self, task_id: &str, number: u64) -> Result<(), ConfigError>;
     fn issues_for_task(&self, task_id: &str) -> Result<Vec<IssueLink>, ConfigError>;
     fn tasks_for_issue(&self, repo: &RepoId, number: u64) -> Result<Vec<String>, ConfigError>;
+
+    /// The last-converged sync baseline for `(repo, number)`, if one
+    /// has been recorded. `None` means "never reconciled" — the first
+    /// sync treats the forge as authoritative for the forge-owned
+    /// fields and then records a snapshot.
+    fn get_issue_snapshot(
+        &self,
+        repo: &RepoId,
+        number: u64,
+    ) -> Result<Option<IssueSnapshot>, ConfigError>;
+
+    /// Record (replacing any prior) the sync baseline for
+    /// `(repo, number)`.
+    fn set_issue_snapshot(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        snapshot: IssueSnapshot,
+    ) -> Result<(), ConfigError>;
+}
+
+/// A persisted sync baseline keyed by its forge issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SnapshotEntry {
+    repo: RepoId,
+    number: u64,
+    snapshot: IssueSnapshot,
 }
 
 /// In-memory store. Cheap to `Clone`; all state is `Arc`'d.
@@ -81,6 +124,7 @@ pub struct MemoryStore {
 struct MemoryInner {
     repo_bindings: Vec<RepoBinding>,
     issue_links: Vec<IssueLink>,
+    snapshots: Vec<SnapshotEntry>,
     /// Indices kept as `HashMap` so reads don't scan vectors.
     /// Tiny crate's invariant: the indices are rebuilt
     /// alongside every write.
@@ -197,6 +241,42 @@ impl BindingStore for MemoryStore {
             .map(|l| l.task_id.clone())
             .collect())
     }
+
+    fn get_issue_snapshot(
+        &self,
+        repo: &RepoId,
+        number: u64,
+    ) -> Result<Option<IssueSnapshot>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .snapshots
+            .iter()
+            .find(|s| &s.repo == repo && s.number == number)
+            .map(|s| s.snapshot.clone()))
+    }
+
+    fn set_issue_snapshot(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        snapshot: IssueSnapshot,
+    ) -> Result<(), ConfigError> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(e) = inner
+            .snapshots
+            .iter_mut()
+            .find(|s| &s.repo == repo && s.number == number)
+        {
+            e.snapshot = snapshot;
+        } else {
+            inner.snapshots.push(SnapshotEntry {
+                repo: repo.clone(),
+                number,
+                snapshot,
+            });
+        }
+        Ok(())
+    }
 }
 
 // ---- File-backed store -----------------------------------------------
@@ -230,6 +310,8 @@ struct FileInner {
     repo_bindings: Vec<RepoBinding>,
     #[serde(default)]
     issue_links: Vec<IssueLink>,
+    #[serde(default)]
+    snapshots: Vec<SnapshotEntry>,
 }
 
 impl FileStore {
@@ -399,6 +481,43 @@ impl BindingStore for FileStore {
             .map(|l| l.task_id.clone())
             .collect())
     }
+
+    fn get_issue_snapshot(
+        &self,
+        repo: &RepoId,
+        number: u64,
+    ) -> Result<Option<IssueSnapshot>, ConfigError> {
+        let inner = self.inner.lock().unwrap();
+        Ok(inner
+            .snapshots
+            .iter()
+            .find(|s| &s.repo == repo && s.number == number)
+            .map(|s| s.snapshot.clone()))
+    }
+
+    fn set_issue_snapshot(
+        &self,
+        repo: &RepoId,
+        number: u64,
+        snapshot: IssueSnapshot,
+    ) -> Result<(), ConfigError> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(e) = inner
+            .snapshots
+            .iter_mut()
+            .find(|s| &s.repo == repo && s.number == number)
+        {
+            e.snapshot = snapshot;
+        } else {
+            inner.snapshots.push(SnapshotEntry {
+                repo: repo.clone(),
+                number,
+                snapshot,
+            });
+        }
+        self.flush_locked(&inner)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -454,5 +573,38 @@ mod tests {
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].number, 7);
         assert_eq!(s.tasks_for_issue(&r, 7).unwrap(), vec!["task-42"]);
+    }
+
+    #[test]
+    fn snapshot_round_trips_and_replaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("links.json");
+        let r = repo("git.example.org", "acme", "widgets");
+        let snap = |t: &str| IssueSnapshot {
+            task: SyncedFields {
+                title: t.into(),
+                body: "b".into(),
+                closed: false,
+            },
+            forge: SyncedFields {
+                title: t.into(),
+                body: "b".into(),
+                closed: false,
+            },
+        };
+
+        {
+            let s = FileStore::open(&path).unwrap();
+            assert!(s.get_issue_snapshot(&r, 7).unwrap().is_none());
+            s.set_issue_snapshot(&r, 7, snap("first")).unwrap();
+            // Overwrite the same key.
+            s.set_issue_snapshot(&r, 7, snap("second")).unwrap();
+        }
+
+        let s = FileStore::open(&path).unwrap();
+        let got = s.get_issue_snapshot(&r, 7).unwrap().unwrap();
+        assert_eq!(got.task.title, "second");
+        // Distinct key is independent.
+        assert!(s.get_issue_snapshot(&r, 8).unwrap().is_none());
     }
 }
