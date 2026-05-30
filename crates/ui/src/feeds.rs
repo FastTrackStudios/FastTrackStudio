@@ -72,6 +72,32 @@ pub async fn fetch_day_templates(slug: &str) -> Result<Vec<scheduling_proto::Day
         .map_err(|e| format!("{slug}: day templates: {e:?}"))
 }
 
+/// The saved per-date plan for `date` (ISO `YYYY-MM-DD`), or `None`
+/// when the date hasn't been edited (caller materializes a default).
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_day_plan(
+    slug: &str,
+    date: &str,
+) -> Result<Option<scheduling_proto::DayPlan>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
+    client
+        .get_day_plan(date.to_string())
+        .await
+        .map_err(|e| format!("{slug}: day plan {date}: {e:?}"))
+}
+
+/// Save (replacing) a per-date plan.
+#[cfg(target_arch = "wasm32")]
+pub async fn save_day_plan(slug: &str, plan: scheduling_proto::DayPlan) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::DayPlansClient>(slug).await?;
+    client
+        .upsert_day_plan(plan)
+        .await
+        .map_err(|e| format!("{slug}: save day plan: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -239,6 +265,19 @@ pub async fn fetch_tasks_tagged(
 pub async fn fetch_day_templates(
     _slug: &str,
 ) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_day_plan(
+    _slug: &str,
+    _date: &str,
+) -> Result<Option<scheduling_proto::DayPlan>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn save_day_plan(_slug: &str, _plan: scheduling_proto::DayPlan) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 

@@ -59,31 +59,28 @@ impl ColorTag {
     }
 }
 
-/// A faded, read-only background block from a day-plan template — a
-/// recurring daily-routine slot (e.g. "Block 1: Work / Event / Free
-/// Time" 9:30–12:30) rendered behind real events as a placement
-/// guide. The user drops actual [`CalendarEvent`]s onto these
-/// outlines; the blocks themselves never move or fire mutations.
+/// A day-plan block rendered behind real events as a placement guide
+/// — a faded outline (e.g. "Block 1: Work / Event / Free Time"
+/// 9:30–12:30) for one specific date. Clicking it emits `on_block_click`
+/// so the consumer can edit the day's plan (move/relabel/assign). The
+/// user also drops actual [`CalendarEvent`]s onto these outlines.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TemplateBlock {
+    /// Stable id within the date's plan — what `on_block_click`
+    /// reports so the consumer can target the edit.
+    pub id: String,
+    /// The specific date this block sits on.
+    pub date: chrono::NaiveDate,
     pub label: String,
     /// Minutes since local midnight, `[0, 1440]`. `end_min` is
-    /// exclusive. A block crossing midnight should be split by the
-    /// producer into two same-day blocks.
+    /// exclusive. A block crossing midnight is split by the producer
+    /// into two same-day blocks.
     pub start_min: u16,
     pub end_min: u16,
     pub color: ColorTag,
-    /// Weekdays this block recurs on. Empty = every day.
-    pub weekdays: Vec<chrono::Weekday>,
-}
-
-impl TemplateBlock {
-    /// Does this block apply on `date`'s weekday?
-    #[must_use]
-    pub fn applies_on(&self, date: chrono::NaiveDate) -> bool {
-        use chrono::Datelike;
-        self.weekdays.is_empty() || self.weekdays.contains(&date.weekday())
-    }
+    /// Optional second line — what's assigned to the block today
+    /// (a task title, project, or free label). `None` = unassigned.
+    pub assignment: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

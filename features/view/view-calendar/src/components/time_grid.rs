@@ -30,9 +30,12 @@ const SNAP_MINUTES: i64 = 15;
 pub struct TimeGridViewProps {
     pub days: Vec<NaiveDate>,
     pub events: Vec<CalendarEvent>,
-    /// Faded day-plan template outlines drawn behind real events.
+    /// Faded day-plan blocks drawn behind real events.
     #[props(default)]
     pub template_blocks: Vec<TemplateBlock>,
+    /// Fired with `(date, block_id)` when a plan block is clicked.
+    #[props(default)]
+    pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -119,6 +122,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             date: *date,
                             placements: day_overlap_layout(*date, &timed_events),
                             template_blocks: props.template_blocks.clone(),
+                            on_block_click: props.on_block_click,
                             is_last: idx == props.days.len() - 1,
                             readonly: props.readonly,
                             on_event: props.on_event,
@@ -166,6 +170,9 @@ struct DayColumnProps {
     placements: Vec<TimeBlockPlacement>,
     #[props(default)]
     template_blocks: Vec<TemplateBlock>,
+    /// Fired with `(date, block_id)` when a plan block is clicked.
+    #[props(default)]
+    on_block_click: Option<EventHandler<(NaiveDate, String)>>,
     is_last: bool,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
@@ -213,36 +220,34 @@ fn DayColumn(props: DayColumnProps) -> Element {
     };
     let mut sweep: Signal<Option<Sweep>> = use_signal(|| None);
 
-    // Day-plan template outlines that apply to this column's weekday,
-    // pre-resolved to pixel geometry. Faded, non-interactive guides.
-    let template_placements: Vec<(usize, i64, i64, &'static str, String)> = props
+    // Day-plan blocks for this column's date, pre-resolved to pixel
+    // geometry. Faded, clickable placement guides.
+    struct TplPlacement {
+        id: String,
+        top: i64,
+        h: i64,
+        pal: &'static str,
+        label: String,
+        assignment: Option<String>,
+    }
+    let template_placements: Vec<TplPlacement> = props
         .template_blocks
         .iter()
-        .enumerate()
-        .filter(|(_, tb)| tb.applies_on(date) && tb.end_min > tb.start_min)
-        .map(|(i, tb)| {
-            let top = i64::from(tb.start_min) * PX_PER_HOUR / 60;
-            let h = i64::from(tb.end_min - tb.start_min) * PX_PER_HOUR / 60;
-            (i, top, h, template_palette(tb.color), tb.label.clone())
+        .filter(|tb| tb.date == date && tb.end_min > tb.start_min)
+        .map(|tb| TplPlacement {
+            id: tb.id.clone(),
+            top: i64::from(tb.start_min) * PX_PER_HOUR / 60,
+            h: i64::from(tb.end_min - tb.start_min) * PX_PER_HOUR / 60,
+            pal: template_palette(tb.color),
+            label: tb.label.clone(),
+            assignment: tb.assignment.clone(),
         })
         .collect();
+    let on_block_click = props.on_block_click;
 
     rsx! {
         div {
             class: "relative border-border/40 {border_r} {column_bg}",
-            // Day-plan template ghost outlines — behind the input
-            // surface and real events, never interactive.
-            for (i, top, h, pal, label) in template_placements.iter() {
-                div {
-                    key: "tpl-{i}",
-                    class: "absolute left-0.5 right-0.5 rounded-md border border-dashed pointer-events-none overflow-hidden {pal}",
-                    style: "top: {top}px; height: {h}px;",
-                    span {
-                        class: "block px-1.5 py-0.5 text-[10px] font-medium leading-tight truncate",
-                        "{label}"
-                    }
-                }
-            }
             // Hour grid lines (solid).
             for h in 1..24u32 {
                 div {
@@ -398,6 +403,39 @@ fn DayColumn(props: DayColumnProps) -> Element {
                         div {
                             class: "absolute left-1 right-1 rounded-sm bg-primary/20 border border-primary/60 pointer-events-none",
                             style: "top: {top}px; height: {h}px;",
+                        }
+                    }
+                }
+            }
+            // Day-plan blocks — clickable guides above the sweep
+            // surface but behind real events. Clicking one asks the
+            // consumer to edit that date's plan.
+            for tp in template_placements.iter() {
+                {
+                    let block_id = tp.id.clone();
+                    let interactive = on_block_click.is_some();
+                    let cursor = if interactive { "cursor-pointer hover:brightness-125" } else { "" };
+                    let pe = if interactive { "" } else { "pointer-events-none" };
+                    rsx! {
+                        div {
+                            key: "tpl-{tp.id}-{tp.top}",
+                            class: "absolute left-0.5 right-0.5 rounded-md border border-dashed overflow-hidden transition {cursor} {pe} {tp.pal}",
+                            style: "top: {tp.top}px; height: {tp.h}px;",
+                            onclick: move |_| {
+                                if let Some(cb) = on_block_click {
+                                    cb.call((date, block_id.clone()));
+                                }
+                            },
+                            span {
+                                class: "block px-1.5 py-0.5 text-[10px] font-medium leading-tight truncate",
+                                "{tp.label}"
+                            }
+                            if let Some(a) = tp.assignment.as_ref() {
+                                span {
+                                    class: "block px-1.5 text-[10px] leading-tight truncate opacity-80 italic",
+                                    "{a}"
+                                }
+                            }
                         }
                     }
                 }

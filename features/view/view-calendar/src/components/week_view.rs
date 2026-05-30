@@ -16,6 +16,8 @@ pub struct WeekViewProps {
     pub events: Vec<CalendarEvent>,
     #[props(default)]
     pub template_blocks: Vec<TemplateBlock>,
+    #[props(default)]
+    pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -30,6 +32,7 @@ pub fn WeekView(props: WeekViewProps) -> Element {
             days,
             events: props.events,
             template_blocks: props.template_blocks,
+            on_block_click: props.on_block_click,
             readonly: props.readonly,
             on_event: props.on_event,
             on_open_editor: props.on_open_editor,

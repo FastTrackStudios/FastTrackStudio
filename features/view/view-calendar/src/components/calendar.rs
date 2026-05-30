@@ -26,11 +26,19 @@ pub struct CalendarProps {
     /// Defaults to `ViewMode::Week`.
     #[props(default)]
     pub initial_view: Option<ViewMode>,
-    /// Faded day-plan template outlines drawn behind real events in
-    /// the week/day time grid (a recurring placement guide). Empty =
-    /// no overlay. Not shown in month view.
+    /// Day-plan blocks drawn behind real events in the week/day grid
+    /// (per-date placement guides). Empty = no overlay. Not shown in
+    /// month view.
     #[props(default)]
     pub template_blocks: Vec<TemplateBlock>,
+    /// Fired with `(date, block_id)` when a plan block is clicked, so
+    /// the consumer can edit that date's plan.
+    #[props(default)]
+    pub on_block_click: Option<EventHandler<(NaiveDate, String)>>,
+    /// Fired with the visible `(first_date, last_date)` whenever the
+    /// view range changes, so the consumer can load that range's plans.
+    #[props(default)]
+    pub on_range: Option<EventHandler<(NaiveDate, NaiveDate)>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -48,6 +56,16 @@ pub fn Calendar(props: CalendarProps) -> Element {
         ghost: Signal::new(None),
     });
     use_hook(super::drag::install_drag_image_suppressor);
+
+    // Tell the consumer which dates are visible so it can load that
+    // range's day plans. Fires on mount + every anchor/view change.
+    let on_range = props.on_range;
+    use_effect(move || {
+        if let Some(cb) = on_range {
+            let (s, e) = visible_dates(*anchor.read(), *view.read());
+            cb.call((s, e));
+        }
+    });
 
     let on_event = props.on_event;
     let events = props.events.clone();
@@ -179,6 +197,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             anchor: *anchor.read(),
                             events: events_for_view,
                             template_blocks: props.template_blocks.clone(),
+                            on_block_click: props.on_block_click,
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
@@ -189,6 +208,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             anchor: *anchor.read(),
                             events: events_for_view,
                             template_blocks: props.template_blocks.clone(),
+                            on_block_click: props.on_block_click,
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
@@ -211,6 +231,22 @@ pub fn Calendar(props: CalendarProps) -> Element {
 /// The UTC `[start, end)` window covered by the current view, with
 /// a one-day padding on each side so chips that lap the edge still
 /// render correctly.
+/// The inclusive `(first, last)` calendar dates the current view
+/// shows — what the consumer loads day plans for.
+fn visible_dates(anchor: NaiveDate, view: ViewMode) -> (NaiveDate, NaiveDate) {
+    match view {
+        ViewMode::Month => {
+            let grid = month_grid(anchor);
+            (grid[0][0], grid[5][6])
+        }
+        ViewMode::Week => {
+            let days = week_days(anchor);
+            (days[0], days[6])
+        }
+        ViewMode::Day => (anchor, anchor),
+    }
+}
+
 fn visible_range(
     anchor: NaiveDate,
     view: ViewMode,

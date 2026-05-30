@@ -1,155 +1,305 @@
-//! `/schedule` — calendar with the daily-plan template overlaid as
-//! faded "ghost" outlines.
+//! `/schedule` — calendar with the editable per-day plan.
 //!
-//! Loads the selected org's day-plan templates (`weekday` / `weekend`)
-//! via [`crate::feeds::fetch_day_templates`], converts each
-//! [`scheduling_proto::TimeBlock`] into a read-only
-//! [`view_calendar::TemplateBlock`], and feeds them to the calendar as
-//! a recurring background guide the user drops real events onto.
+//! Each visible date gets a [`DayPlan`] — the saved one if the user
+//! has edited that date, otherwise materialized from the matching
+//! `weekday` / `weekend` [`DayTemplate`]. The plan's blocks render on
+//! the calendar as clickable guides; clicking one opens an editor to
+//! move / relabel it, and the edit is saved as that date's `DayPlan`.
 //!
-//! Real events are still in-memory only (no persistence yet) — the
-//! component is storage-agnostic, so wiring events to a service is a
-//! follow-up. The overlay is the point of this page.
+//! Real calendar events are still in-memory (separate follow-up). Drag-
+//! to-move on the grid and drag-a-task-onto-a-block are planned polish
+//! (see `plans/day-by-day-scheduling.md`).
 
-use chrono::Weekday;
+use std::collections::HashMap;
+
+use chrono::{Datelike, NaiveDate, Weekday};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use scheduling_proto::{BlockCategory, DayTemplate};
+use scheduling_proto::{BlockCategory, DayPlan, DayTemplate, PlannedBlock, TimeOfDay};
 use view_calendar::{Calendar, CalendarState, ColorTag, TemplateBlock, ViewMode, apply};
 
 use crate::orgs::{OrgMeta, OrgSelection};
-
-const WEEKDAYS: [Weekday; 5] = [
-    Weekday::Mon,
-    Weekday::Tue,
-    Weekday::Wed,
-    Weekday::Thu,
-    Weekday::Fri,
-];
-const WEEKEND: [Weekday; 2] = [Weekday::Sat, Weekday::Sun];
 
 #[component]
 pub fn ScheduleView() -> Element {
     let selection = use_context::<Signal<OrgSelection>>();
     let org_list = use_context::<Signal<Vec<OrgMeta>>>();
 
-    // The day-plan lives per-org; the schedule is personal, so we read
-    // it from the first selected org (or the home org in "All" mode).
+    // The org we read/write plans for (first selected, or home).
+    let slug = use_memo(move || {
+        crate::orgs::selected_slugs(&selection.read(), &org_list.read())
+            .into_iter()
+            .next()
+    });
+
     let templates = use_resource(move || async move {
-        let slugs = crate::orgs::selected_slugs(&selection.read(), &org_list.read());
-        match slugs.first() {
-            Some(slug) => crate::feeds::fetch_day_templates(slug).await,
+        match slug() {
+            Some(s) => crate::feeds::fetch_day_templates(&s).await,
             None => Ok(Vec::new()),
         }
     });
 
-    // Real events are local-only for now; the user adds them on top of
-    // the template outlines.
+    // Visible date range (from the calendar) + the per-date plans we've
+    // loaded/materialized for it.
+    let mut range = use_signal(|| None::<(NaiveDate, NaiveDate)>);
+    let mut plans = use_signal(HashMap::<NaiveDate, DayPlan>::new);
+    // Which (date, block_id) is being edited, if any.
+    let mut editing = use_signal(|| None::<(NaiveDate, String)>);
+    // In-memory real events.
     let mut state = use_signal(CalendarState::default);
+
+    // Load (or materialize) plans for every date in the visible range.
+    use_effect(move || {
+        let Some((start, end)) = range() else { return };
+        let Some(slug) = slug() else { return };
+        let tpls = match &*templates.read() {
+            Some(Ok(t)) => t.clone(),
+            _ => return,
+        };
+        spawn(async move {
+            let mut d = start;
+            let mut loaded = Vec::new();
+            while d <= end {
+                if !plans.peek().contains_key(&d) {
+                    let plan = match crate::feeds::fetch_day_plan(&slug, &d.to_string()).await {
+                        Ok(Some(p)) => p,
+                        _ => materialize(d, &tpls),
+                    };
+                    loaded.push((d, plan));
+                }
+                d = match d.succ_opt() {
+                    Some(n) => n,
+                    None => break,
+                };
+            }
+            if !loaded.is_empty() {
+                let mut w = plans.write();
+                for (d, p) in loaded {
+                    w.entry(d).or_insert(p);
+                }
+            }
+        });
+    });
+
     let events = state.read().events.values().cloned().collect::<Vec<_>>();
+    let template_blocks = build_blocks(&plans.read());
 
-    let template_blocks = match &*templates.read_unchecked() {
-        Some(Ok(tpls)) => template_blocks_from(tpls),
-        _ => Vec::new(),
-    };
+    // The block currently under edit, resolved to its values.
+    let editor = editing().and_then(|(date, id)| {
+        let p = plans.read();
+        let plan = p.get(&date)?;
+        let b = plan.blocks.iter().find(|b| b.id.0 == id)?;
+        Some((
+            date,
+            id,
+            b.label.clone(),
+            b.start.minutes_since_midnight,
+            b.end.minutes_since_midnight,
+        ))
+    });
 
-    let banner = match &*templates.read_unchecked() {
-        Some(Err(e)) => Some(rsx! {
-            div { class: "rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200",
-                "Couldn't load the day-plan overlay: {e}"
+    let mut save_block = move |(date, id): (NaiveDate, String), label: String, s: u16, e: u16| {
+        let Some(slug) = slug() else { return };
+        let plan = {
+            let mut w = plans.write();
+            let Some(plan) = w.get_mut(&date) else { return };
+            if let Some(b) = plan.blocks.iter_mut().find(|b| b.id.0 == id) {
+                b.label = label;
+                b.start = TimeOfDay {
+                    minutes_since_midnight: s.min(1440),
+                };
+                b.end = TimeOfDay {
+                    minutes_since_midnight: e.min(1440),
+                };
             }
-        }),
-        Some(Ok(t)) if t.is_empty() => Some(rsx! {
-            Text {
-                variant: TextVariant::Muted,
-                "No day-plan templates found under Projects/Scheduling/templates/."
-            }
-        }),
-        _ => None,
+            plan.clone()
+        };
+        editing.set(None);
+        spawn(async move {
+            let _ = crate::feeds::save_day_plan(&slug, plan).await;
+        });
     };
 
     rsx! {
         div { class: "h-[calc(100vh-3.5rem)] lg:h-screen p-4 flex flex-col gap-3 overflow-hidden",
-            if let Some(b) = banner {
-                {b}
+            if matches!(&*templates.read_unchecked(), Some(Ok(t)) if t.is_empty()) {
+                Text {
+                    variant: TextVariant::Muted,
+                    "No day-plan templates under Projects/Scheduling/templates/."
+                }
             }
             Calendar {
                 events,
                 template_blocks,
                 initial_view: Some(ViewMode::Week),
+                on_range: move |(s, e)| range.set(Some((s, e))),
+                on_block_click: move |(date, id)| editing.set(Some((date, id))),
                 on_event: move |mu| apply(&mut state.write(), &mu),
             }
         }
-    }
-}
-
-/// Build the overlay from the org's templates: `weekday` blocks recur
-/// Mon–Fri, `weekend` blocks Sat–Sun. A lone template (any id) applies
-/// to every day. Unknown ids are ignored.
-fn template_blocks_from(templates: &[DayTemplate]) -> Vec<TemplateBlock> {
-    if templates.len() == 1 {
-        return blocks_for(&templates[0], &every_day());
-    }
-    let mut out = Vec::new();
-    for dt in templates {
-        let days: &[Weekday] = match dt.id.0.as_str() {
-            "weekday" => &WEEKDAYS,
-            "weekend" => &WEEKEND,
-            _ => continue,
-        };
-        out.extend(blocks_for(dt, days));
-    }
-    out
-}
-
-fn every_day() -> Vec<Weekday> {
-    WEEKDAYS.iter().chain(WEEKEND.iter()).copied().collect()
-}
-
-/// Convert one template's blocks to calendar overlays, splitting any
-/// block that wraps past midnight (e.g. sleep 22:30–06:00) into two
-/// same-day blocks so each renders on the right column.
-fn blocks_for(dt: &DayTemplate, weekdays: &[Weekday]) -> Vec<TemplateBlock> {
-    let mut out = Vec::new();
-    for b in &dt.blocks {
-        let start = b.start.minutes_since_midnight;
-        let end = b.end.minutes_since_midnight;
-        let color = category_color(b.category);
-        if end <= start {
-            if start < 1440 {
-                out.push(TemplateBlock {
-                    label: b.label.clone(),
-                    start_min: start,
-                    end_min: 1440,
-                    color,
-                    weekdays: weekdays.to_vec(),
-                });
+        if let Some((date, id, label, start_min, end_min)) = editor {
+            BlockEditor {
+                key: "{date}-{id}",
+                label,
+                start_min,
+                end_min,
+                on_save: move |(l, s, e): (String, u16, u16)| {
+                    save_block((date, id.clone()), l, s, e);
+                },
+                on_cancel: move |()| editing.set(None),
             }
-            if end > 0 {
-                out.push(TemplateBlock {
-                    label: b.label.clone(),
-                    start_min: 0,
-                    end_min: end,
-                    color,
-                    weekdays: weekdays.to_vec(),
-                });
+        }
+    }
+}
+
+/// Modal to move / relabel a plan block. Holds its own working values
+/// so typing doesn't churn the page; commits on Save.
+#[component]
+fn BlockEditor(
+    label: String,
+    start_min: u16,
+    end_min: u16,
+    on_save: EventHandler<(String, u16, u16)>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    let mut lbl = use_signal(|| label.clone());
+    let mut start = use_signal(|| start_min);
+    let mut end = use_signal(|| end_min);
+
+    rsx! {
+        div {
+            class: "fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4",
+            onclick: move |_| on_cancel.call(()),
+            div {
+                class: "flex w-full max-w-sm flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-xl",
+                onclick: move |e| e.stop_propagation(),
+                Heading { level: HeadingLevel::H3, "Edit block" }
+                label { class: "flex flex-col gap-1 text-xs text-muted-foreground",
+                    "Label"
+                    input {
+                        class: "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40",
+                        value: "{lbl}",
+                        oninput: move |e| lbl.set(e.value()),
+                    }
+                }
+                div { class: "flex gap-3",
+                    label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
+                        "Start"
+                        input {
+                            class: "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40",
+                            r#type: "time",
+                            value: "{fmt_time(start())}",
+                            oninput: move |e| {
+                                if let Some(m) = parse_time(&e.value()) {
+                                    start.set(m);
+                                }
+                            },
+                        }
+                    }
+                    label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
+                        "End"
+                        input {
+                            class: "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40",
+                            r#type: "time",
+                            value: "{fmt_time(end())}",
+                            oninput: move |e| {
+                                if let Some(m) = parse_time(&e.value()) {
+                                    end.set(m);
+                                }
+                            },
+                        }
+                    }
+                }
+                div { class: "mt-1 flex justify-end gap-2",
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Small,
+                        on_click: move |_| on_cancel.call(()),
+                        "Cancel"
+                    }
+                    Button {
+                        variant: ButtonVariant::Primary,
+                        size: ButtonSize::Small,
+                        on_click: move |_| on_save.call((lbl(), start(), end())),
+                        "Save"
+                    }
+                }
             }
-        } else {
-            out.push(TemplateBlock {
+        }
+    }
+}
+
+// ── helpers ─────────────────────────────────────────────────────────
+
+/// The template a date defaults to: `weekend` for Sat/Sun, else
+/// `weekday`; falls back to the first template if those ids are absent.
+fn template_for(date: NaiveDate, templates: &[DayTemplate]) -> Option<&DayTemplate> {
+    let weekend = matches!(date.weekday(), Weekday::Sat | Weekday::Sun);
+    let want = if weekend { "weekend" } else { "weekday" };
+    templates
+        .iter()
+        .find(|t| t.id.0 == want)
+        .or_else(|| templates.first())
+}
+
+/// Build a fresh `DayPlan` for `date` from its template (unassigned).
+fn materialize(date: NaiveDate, templates: &[DayTemplate]) -> DayPlan {
+    let tpl = template_for(date, templates);
+    let blocks = tpl.map_or_else(Vec::new, |t| {
+        t.blocks
+            .iter()
+            .map(|b| PlannedBlock {
+                id: b.id.clone(),
+                start: b.start,
+                end: b.end,
                 label: b.label.clone(),
-                start_min: start,
-                end_min: end,
+                category: b.category,
+                note: b.note.clone(),
+                assignment: None,
+            })
+            .collect()
+    });
+    DayPlan {
+        date: date.to_string(),
+        from_template: tpl.map(|t| t.id.clone()),
+        blocks,
+    }
+}
+
+/// Convert the loaded plans into dated calendar overlay blocks,
+/// splitting any block that wraps past midnight.
+fn build_blocks(plans: &HashMap<NaiveDate, DayPlan>) -> Vec<TemplateBlock> {
+    let mut out = Vec::new();
+    for (date, plan) in plans {
+        for b in &plan.blocks {
+            let start = b.start.minutes_since_midnight;
+            let end = b.end.minutes_since_midnight;
+            let color = category_color(b.category);
+            let assignment = b.assignment.as_ref().map(|a| a.title.clone());
+            let mk = |start_min, end_min| TemplateBlock {
+                id: b.id.0.clone(),
+                date: *date,
+                label: b.label.clone(),
+                start_min,
+                end_min,
                 color,
-                weekdays: weekdays.to_vec(),
-            });
+                assignment: assignment.clone(),
+            };
+            if end <= start {
+                if start < 1440 {
+                    out.push(mk(start, 1440));
+                }
+                if end > 0 {
+                    out.push(mk(0, end));
+                }
+            } else {
+                out.push(mk(start, end));
+            }
         }
     }
     out
 }
 
-/// Tint each category to a calendar color. The three allocatable work
-/// blocks get the strongest (emerald) accent; fixed routine wrappers
-/// get muted, day-appropriate tints.
 fn category_color(c: BlockCategory) -> ColorTag {
     match c {
         BlockCategory::Allocatable => ColorTag::Success,
@@ -161,83 +311,18 @@ fn category_color(c: BlockCategory) -> ColorTag {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use scheduling_proto::{DayTemplateId, TimeBlock, TimeBlockId, TimeOfDay};
+fn fmt_time(min: u16) -> String {
+    let m = min.min(1439);
+    format!("{:02}:{:02}", m / 60, m % 60)
+}
 
-    fn block(label: &str, start: u16, end: u16, category: BlockCategory) -> TimeBlock {
-        TimeBlock {
-            id: TimeBlockId(label.into()),
-            start: TimeOfDay {
-                minutes_since_midnight: start,
-            },
-            end: TimeOfDay {
-                minutes_since_midnight: end,
-            },
-            label: label.into(),
-            category,
-            note: None,
-        }
-    }
-
-    fn template(id: &str, blocks: Vec<TimeBlock>) -> DayTemplate {
-        DayTemplate {
-            id: DayTemplateId(id.into()),
-            name: id.into(),
-            description: None,
-            blocks,
-        }
-    }
-
-    #[test]
-    fn midnight_crossing_block_splits_in_two() {
-        // Sleep 22:30 → 06:00 wraps midnight.
-        let dt = template(
-            "weekday",
-            vec![block("Sleep", 22 * 60 + 30, 6 * 60, BlockCategory::Sleep)],
-        );
-        let blocks = blocks_for(&dt, &WEEKDAYS);
-        assert_eq!(blocks.len(), 2);
-        // Evening segment runs to end-of-day; morning segment starts at 0.
-        assert_eq!((blocks[0].start_min, blocks[0].end_min), (1350, 1440));
-        assert_eq!((blocks[1].start_min, blocks[1].end_min), (0, 360));
-    }
-
-    #[test]
-    fn normal_block_passes_through() {
-        let dt = template(
-            "weekday",
-            vec![block(
-                "Block 1",
-                9 * 60 + 30,
-                12 * 60 + 30,
-                BlockCategory::Allocatable,
-            )],
-        );
-        let blocks = blocks_for(&dt, &WEEKDAYS);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!((blocks[0].start_min, blocks[0].end_min), (570, 750));
-        assert_eq!(blocks[0].color, ColorTag::Success);
-        assert_eq!(blocks[0].weekdays, WEEKDAYS.to_vec());
-    }
-
-    #[test]
-    fn weekday_and_weekend_templates_map_to_their_days() {
-        let tpls = vec![
-            template(
-                "weekday",
-                vec![block("Gym", 8 * 60, 9 * 60, BlockCategory::Exercise)],
-            ),
-            template(
-                "weekend",
-                vec![block("Brunch", 10 * 60, 11 * 60, BlockCategory::Meal)],
-            ),
-        ];
-        let blocks = template_blocks_from(&tpls);
-        let gym = blocks.iter().find(|b| b.label == "Gym").unwrap();
-        let brunch = blocks.iter().find(|b| b.label == "Brunch").unwrap();
-        assert_eq!(gym.weekdays, WEEKDAYS.to_vec());
-        assert_eq!(brunch.weekdays, WEEKEND.to_vec());
+fn parse_time(s: &str) -> Option<u16> {
+    let (h, m) = s.split_once(':')?;
+    let h: u16 = h.parse().ok()?;
+    let m: u16 = m.parse().ok()?;
+    if h < 24 && m < 60 {
+        Some(h * 60 + m)
+    } else {
+        None
     }
 }
