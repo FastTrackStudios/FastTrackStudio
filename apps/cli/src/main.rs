@@ -10724,10 +10724,11 @@ async fn sync_repo(
     //    (priority/cycle/project/estimate/agent-attribution) are never
     //    in the projection so they always survive a forge edit.
     //
-    //    FUTURE (issue #127 follow-up subtasks): push task-won
-    //    forge-owned edits back to the forge via `update_issue`, and
-    //    extend the projection to labels / assignees / milestone with
-    //    their richer mapping.
+    //    Both directions are wired: forge→Task below, and Task→forge
+    //    (pushing task-won forge-owned edits via `update_issue`) after
+    //    the merge. FUTURE (issue #127 follow-up): extend the
+    //    projection past the scalar fields to labels / assignees /
+    //    milestone with their richer mapping.
     let local = client
         .list()
         .await
@@ -10737,7 +10738,14 @@ async fn sync_repo(
         let links = store
             .issues_for_task(&t.id.to_string())
             .map_err(|e| eyre::eyre!("link store: {e}"))?;
-        let Some(link) = links.iter().find(|l| &l.repo == repo_id) else {
+        // Only reconcile *issue* links. A task also linked to its own
+        // PR (via `task code push`) must not have its title/body/state
+        // synced from that PR — the PR's title is a commit subject, not
+        // the issue's.
+        let Some(link) = links
+            .iter()
+            .find(|l| &l.repo == repo_id && l.kind == git_config::LinkKind::Issue)
+        else {
             continue;
         };
         let number = link.number;
@@ -10751,14 +10759,20 @@ async fn sync_repo(
         .await
         .map_err(|e| eyre::eyre!("join: {e}"))??;
 
+        // Trim title/body on both sides: the task-note parser strips
+        // leading/trailing whitespace from the markdown body, so a
+        // freshly-pulled `t.details` is never byte-identical to the
+        // forge body (which often carries a leading newline). Comparing
+        // trimmed values keeps that cosmetic difference from looking
+        // like a real edit and churning the sync every run.
         let task_proj = git_config::SyncedFields {
-            title: t.title.clone(),
-            body: t.details.clone(),
+            title: t.title.trim().to_string(),
+            body: t.details.trim().to_string(),
             closed: t.status == "done",
         };
         let forge_proj = git_config::SyncedFields {
-            title: ext.title.clone(),
-            body: ext.body.clone(),
+            title: ext.title.trim().to_string(),
+            body: ext.body.trim().to_string(),
             closed: matches!(ext.state, git_proto::IssueState::Closed),
         };
         // Baseline: the recorded snapshot, or — on the first reconcile
@@ -10803,17 +10817,66 @@ async fn sync_repo(
             println!("  reconciled {} #{number}", short_uuid(&t.id));
         }
 
-        // Record the new baseline. The Task side now holds `merged`;
-        // the forge side still holds `forge_proj` (this pass doesn't
-        // push), so a task-won forge-owned field stays divergent but
-        // stable until the push subtask lands.
+        // Push the Task→forge half: any forge-owned field the Task won
+        // (a local edit the forge hadn't moved) is written back via
+        // `update_issue` so both sides converge. On success the forge
+        // baseline advances to *what the forge returned* (not what we
+        // sent), so any server-side normalization doesn't ping-pong;
+        // on failure we warn and leave the baseline at `forge_proj` so
+        // the next sync retries.
+        let fu = git_config::forge_update(&forge_proj, &merged);
+        let forge_base = if fu.is_empty() {
+            forge_proj
+        } else {
+            let repo_c = repo_id.clone();
+            let update = git_proto::issues::IssueUpdate {
+                title: fu.title,
+                body: fu.body,
+                state: fu.closed.map(|c| {
+                    if c {
+                        git_proto::IssueState::Closed
+                    } else {
+                        git_proto::IssueState::Open
+                    }
+                }),
+                labels: None,
+                assignees: None,
+                milestone: None,
+            };
+            let pushed = tokio::task::spawn_blocking(move || {
+                let backend = forge_backend_for(&repo_c)?;
+                backend
+                    .update_issue(&repo_c, git_proto::IssueId(number), update)
+                    .map_err(|e| eyre::eyre!("update_issue #{number}: {e:?}"))
+            })
+            .await
+            .map_err(|e| eyre::eyre!("join: {e}"))?;
+            match pushed {
+                Ok(issue) => {
+                    println!("  pushed {} -> #{number}", short_uuid(&t.id));
+                    git_config::SyncedFields {
+                        title: issue.title,
+                        body: issue.body,
+                        closed: matches!(issue.state, git_proto::IssueState::Closed),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  warn: push to #{number} failed: {e}");
+                    forge_proj
+                }
+            }
+        };
+
+        // Record the new baseline: Task holds `merged`, forge holds
+        // `forge_base` (== `merged` after a successful push, else its
+        // pre-push value pending a retry).
         store
             .set_issue_snapshot(
                 repo_id,
                 number,
                 git_config::IssueSnapshot {
                     task: merged,
-                    forge: forge_proj,
+                    forge: forge_base,
                 },
             )
             .map_err(|e| eyre::eyre!("snapshot: {e}"))?;

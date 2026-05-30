@@ -369,6 +369,40 @@ pub fn reconcile_synced(
     }
 }
 
+/// The forge-side write needed for the forge to match the reconciled
+/// (`merged`) values — the inverse of the pull. A field is `Some` only
+/// when it diverges from what the forge currently holds (i.e. the Task
+/// side won a forge-owned field and the local edit must be pushed
+/// back); `None` means already in agreement, leave it alone.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ForgeUpdate {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    /// `Some(true)` ⇒ close on the forge, `Some(false)` ⇒ reopen.
+    pub closed: Option<bool>,
+}
+
+impl ForgeUpdate {
+    /// `true` when nothing needs writing to the forge.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none() && self.body.is_none() && self.closed.is_none()
+    }
+}
+
+/// Compute the forge-side write that converges the forge with `merged`.
+/// Pairs with [`reconcile_synced`]: that resolves the merged values and
+/// applies the forge→Task half; this names the Task→forge half so the
+/// caller can issue an `update_issue`.
+#[must_use]
+pub fn forge_update(forge: &SyncedFields, merged: &SyncedFields) -> ForgeUpdate {
+    ForgeUpdate {
+        title: (merged.title != forge.title).then(|| merged.title.clone()),
+        body: (merged.body != forge.body).then(|| merged.body.clone()),
+        closed: (merged.closed != forge.closed).then_some(merged.closed),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,6 +640,45 @@ mod tests {
         let forge = sf("t", "b", true); // forge has it closed
         let merged = reconcile_synced(&task, &task, &task, &forge);
         assert!(merged.closed);
+    }
+
+    #[test]
+    fn forge_update_pushes_a_task_won_field() {
+        // Task renamed locally, forge unmoved → the merge kept the
+        // local title, and the forge now needs that title pushed.
+        let base = sf("old", "b", false);
+        let task = sf("local", "b", false);
+        let forge = sf("old", "b", false);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        let fu = forge_update(&forge, &merged);
+        assert_eq!(fu.title.as_deref(), Some("local"));
+        assert_eq!(fu.body, None);
+        assert_eq!(fu.closed, None);
+        assert!(!fu.is_empty());
+    }
+
+    #[test]
+    fn forge_update_is_empty_when_forge_won() {
+        // Forge renamed; the merge took the forge value, so there's
+        // nothing to push back.
+        let base = sf("old", "b", false);
+        let task = sf("old", "b", false);
+        let forge = sf("forge-rename", "b", false);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        let fu = forge_update(&forge, &merged);
+        assert!(fu.is_empty());
+    }
+
+    #[test]
+    fn forge_update_pushes_a_local_reopen() {
+        // Local reopened a done task while the forge still has it
+        // closed; the state push reopens it on the forge.
+        let base = sf("t", "b", true);
+        let task = sf("t", "b", false); // reopened locally
+        let forge = sf("t", "b", true);
+        let merged = reconcile_synced(&base, &base, &task, &forge);
+        let fu = forge_update(&forge, &merged);
+        assert_eq!(fu.closed, Some(false));
     }
 
     #[test]

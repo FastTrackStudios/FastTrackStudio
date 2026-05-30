@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod sync;
 pub use sync::{
-    Field, FieldProvenance, FieldSource, Resolution, SyncedFields, reconcile_synced,
-    resolve_conflict, resolve_field,
+    Field, FieldProvenance, FieldSource, ForgeUpdate, Resolution, SyncedFields, forge_update,
+    reconcile_synced, resolve_conflict, resolve_field,
 };
 
 /// Whether an `IssueLink` points at an issue or a pull request.
