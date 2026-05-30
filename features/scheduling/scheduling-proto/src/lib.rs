@@ -34,6 +34,7 @@
 //! the `scheduling` crate (sibling) owns the parse / write side.
 
 pub mod booking;
+pub mod cal_event;
 pub mod day_plan;
 pub mod error;
 pub mod event_type;
@@ -42,13 +43,14 @@ pub mod service;
 pub mod time_block;
 
 pub use booking::{Booking, BookingId, BookingStatus, NewBooking};
+pub use cal_event::CalEvent;
 pub use day_plan::{BlockAssignment, DayPlan, PlannedBlock};
 pub use error::SchedulingError;
 pub use event_type::{EventType, EventTypeId, EventTypeLocation};
 pub use schedule::{
     AvailabilityRule, AvailabilitySchedule, ScheduleId, SlotQuery, TimeSlot, Weekday,
 };
-pub use service::{Bookings, DayPlans, DayTemplates, EventTypes, Schedules, Slots};
+pub use service::{Bookings, CalendarEvents, DayPlans, DayTemplates, EventTypes, Schedules, Slots};
 pub use time_block::{
     BlockCategory, DayTemplate, DayTemplateId, TimeBlock, TimeBlockId, TimeOfDay,
 };
@@ -61,6 +63,11 @@ pub use service::{
     bookings::{
         BookingsClient, BookingsRpc, BookingsRpcDispatcher, Service as BookingsService,
         layer as bookings_layer, serve as bookings_serve,
+    },
+    calendar_events::{
+        CalendarEventsClient, CalendarEventsRpc, CalendarEventsRpcDispatcher,
+        Service as CalendarEventsService, layer as calendar_events_layer,
+        serve as calendar_events_serve,
     },
     day_plans::{
         DayPlansClient, DayPlansRpc, DayPlansRpcDispatcher, Service as DayPlansService,

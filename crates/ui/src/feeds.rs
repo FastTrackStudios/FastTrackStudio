@@ -109,6 +109,39 @@ pub async fn delete_day_plan(slug: &str, date: &str) -> Result<(), String> {
         .map_err(|e| format!("{slug}: delete day plan {date}: {e:?}"))
 }
 
+/// All persisted calendar events for the org.
+#[cfg(target_arch = "wasm32")]
+pub async fn list_events(slug: &str) -> Result<Vec<scheduling_proto::CalEvent>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
+    client
+        .list_events()
+        .await
+        .map_err(|e| format!("{slug}: list events: {e:?}"))
+}
+
+/// Save (replacing) one calendar event.
+#[cfg(target_arch = "wasm32")]
+pub async fn upsert_event(slug: &str, event: scheduling_proto::CalEvent) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
+    client
+        .upsert_event(event)
+        .await
+        .map_err(|e| format!("{slug}: save event: {e:?}"))
+}
+
+/// Delete one calendar event.
+#[cfg(target_arch = "wasm32")]
+pub async fn delete_event(slug: &str, id: &str) -> Result<(), String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::CalendarEventsClient>(slug).await?;
+    client
+        .delete_event(id.to_string())
+        .await
+        .map_err(|e| format!("{slug}: delete event: {e:?}"))
+}
+
 // ── Timer ─────────────────────────────────────────────────────────
 
 /// The currently-running session for `user_id` in this org, if any.
@@ -294,6 +327,21 @@ pub async fn save_day_plan(_slug: &str, _plan: scheduling_proto::DayPlan) -> Res
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn delete_day_plan(_slug: &str, _date: &str) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn list_events(_slug: &str) -> Result<Vec<scheduling_proto::CalEvent>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn upsert_event(_slug: &str, _event: scheduling_proto::CalEvent) -> Result<(), String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn delete_event(_slug: &str, _id: &str) -> Result<(), String> {
     Err("native client not wired yet".to_owned())
 }
 

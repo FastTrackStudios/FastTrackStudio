@@ -10,6 +10,7 @@
 pub enum FrontmatterKind {
     DayTemplate,
     DayPlan,
+    CalEvent,
     EventType,
     Schedule,
     Booking,
@@ -21,6 +22,7 @@ impl FrontmatterKind {
         match self {
             Self::DayTemplate => "scheduling-day-template",
             Self::DayPlan => "scheduling-day-plan",
+            Self::CalEvent => "scheduling-cal-event",
             Self::EventType => "scheduling-event-type",
             Self::Schedule => "scheduling-schedule",
             Self::Booking => "scheduling-booking",
@@ -34,6 +36,7 @@ pub fn frontmatter_kind(ty: &str) -> Option<FrontmatterKind> {
     Some(match ty {
         "scheduling-day-template" => FrontmatterKind::DayTemplate,
         "scheduling-day-plan" => FrontmatterKind::DayPlan,
+        "scheduling-cal-event" => FrontmatterKind::CalEvent,
         "scheduling-event-type" => FrontmatterKind::EventType,
         "scheduling-schedule" => FrontmatterKind::Schedule,
         "scheduling-booking" => FrontmatterKind::Booking,

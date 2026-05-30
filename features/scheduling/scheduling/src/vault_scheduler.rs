@@ -15,20 +15,21 @@ use architect::dispatch::TokioBlockingDispatcher;
 use thiserror::Error;
 
 use scheduling_proto::{
-    AvailabilitySchedule, Booking, BookingId, BookingStatus, Bookings, DayPlan, DayPlans,
-    DayTemplate, DayTemplateId, DayTemplates, EventType, EventTypeId, EventTypes, NewBooking,
-    ScheduleId, Schedules, SchedulingError, SlotQuery, Slots, TimeSlot,
+    AvailabilitySchedule, Booking, BookingId, BookingStatus, Bookings, CalEvent, CalendarEvents,
+    DayPlan, DayPlans, DayTemplate, DayTemplateId, DayTemplates, EventType, EventTypeId,
+    EventTypes, NewBooking, ScheduleId, Schedules, SchedulingError, SlotQuery, Slots, TimeSlot,
 };
 use store_proto::{KvStore, LogStore};
 
 use crate::parse::{
-    parse_booking, parse_day_plan, parse_day_template, parse_event_type, parse_schedule,
+    parse_booking, parse_cal_event, parse_day_plan, parse_day_template, parse_event_type,
+    parse_schedule,
 };
 use crate::scan::frontmatter_split;
 use crate::slots;
 use crate::write::{
-    serialize_booking, serialize_day_plan, serialize_day_template, serialize_event_type,
-    serialize_schedule,
+    serialize_booking, serialize_cal_event, serialize_day_plan, serialize_day_template,
+    serialize_event_type, serialize_schedule,
 };
 
 // Scheduling content lives split across the vault: config under
@@ -40,6 +41,8 @@ const SCHEDULES_DIR: &str = "Projects/Scheduling/schedules";
 const BOOKINGS_DIR: &str = "Records/bookings";
 // Per-date plans the user has edited — one file per `YYYY-MM-DD`.
 const DAYPLANS_DIR: &str = "Records/dayplans";
+// Concrete calendar events — one file per event id.
+const EVENTS_DIR: &str = "Records/events";
 
 /// Errors not covered by `SchedulingError` (mostly path
 /// composition + IO bubbling).
@@ -237,6 +240,22 @@ impl DayPlans for VaultScheduler {
 
     fn delete_day_plan(&self, date: &str) -> Result<(), SchedulingError> {
         self.delete_file(&format!("{DAYPLANS_DIR}/{}.md", sanitize(date)))
+    }
+}
+
+// ── CalendarEvents ───────────────────────────────────────────────
+impl CalendarEvents for VaultScheduler {
+    fn list_events(&self) -> Result<Vec<CalEvent>, SchedulingError> {
+        self.scan(EVENTS_DIR, parse_cal_event)
+    }
+
+    fn upsert_event(&self, event: &CalEvent) -> Result<(), SchedulingError> {
+        let body = serialize_cal_event(event).map_err(write_err)?;
+        self.write_file(&format!("{EVENTS_DIR}/{}.md", sanitize(&event.id)), &body)
+    }
+
+    fn delete_event(&self, id: &str) -> Result<(), SchedulingError> {
+        self.delete_file(&format!("{EVENTS_DIR}/{}.md", sanitize(id)))
     }
 }
 

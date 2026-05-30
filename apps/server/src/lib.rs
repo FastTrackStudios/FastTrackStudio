@@ -842,6 +842,10 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             scheduling_proto::service::day_plans::day_plans_rpc_service_descriptor(),
             scheduling_proto::service::day_plans::serve(org.scheduling.clone()),
+        )
+        .with(
+            scheduling_proto::service::calendar_events::calendar_events_rpc_service_descriptor(),
+            scheduling_proto::service::calendar_events::serve(org.scheduling.clone()),
         );
 
     // Wiki feature — 11 per-capability traits, one descriptor each.

@@ -12,14 +12,15 @@
 
 use std::collections::HashMap;
 
-use chrono::{Datelike, NaiveDate, Weekday};
+use chrono::{Datelike, NaiveDate, Utc, Weekday};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
 use scheduling_proto::{
-    BlockAssignment, BlockCategory, DayPlan, DayTemplate, PlannedBlock, TimeOfDay,
+    BlockAssignment, BlockCategory, CalEvent, DayPlan, DayTemplate, PlannedBlock, TimeOfDay,
 };
 use view_calendar::{
-    Calendar, CalendarState, ColorTag, TASK_DROP_MIME, TemplateBlock, ViewMode, apply,
+    Calendar, CalendarEvent, CalendarMutation, CalendarState, ColorTag, EventId, TASK_DROP_MIME,
+    TemplateBlock, ViewMode, apply,
 };
 
 use crate::orgs::{OrgMeta, OrgSelection};
@@ -77,8 +78,50 @@ pub fn ScheduleView() -> Element {
     let mut plans = use_signal(HashMap::<NaiveDate, DayPlan>::new);
     // Which (date, block_id) is being edited, if any.
     let mut editing = use_signal(|| None::<(NaiveDate, String)>);
-    // In-memory real events.
+    // Real events — loaded from + persisted to the CalendarEvents
+    // service.
     let mut state = use_signal(CalendarState::default);
+    let loaded_events = use_resource(move || async move {
+        match slug() {
+            Some(s) => crate::feeds::list_events(&s).await,
+            None => Ok(Vec::new()),
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(evs)) = &*loaded_events.read() {
+            let mut st = CalendarState::default();
+            for e in evs {
+                if let Some(ce) = from_proto(e) {
+                    st.events.insert(ce.id, ce);
+                }
+            }
+            state.set(st);
+        }
+    });
+
+    // Apply a mutation locally, then persist the affected event.
+    let mut on_event = move |mu: CalendarMutation| {
+        apply(&mut state.write(), &mu);
+        let Some(slug) = slug() else { return };
+        match &mu {
+            CalendarMutation::Remove { id } => {
+                let id = id.to_string();
+                spawn(async move {
+                    let _ = crate::feeds::delete_event(&slug, &id).await;
+                });
+            }
+            _ => {
+                if let Some(id) = affected_id(&mu) {
+                    if let Some(ev) = state.peek().events.get(&id).cloned() {
+                        let ce = to_proto(&ev);
+                        spawn(async move {
+                            let _ = crate::feeds::upsert_event(&slug, ce).await;
+                        });
+                    }
+                }
+            }
+        }
+    };
 
     // Load (or materialize) plans for every date in the visible range.
     use_effect(move || {
@@ -287,7 +330,7 @@ pub fn ScheduleView() -> Element {
                         )),
                     );
                 },
-                on_event: move |mu| apply(&mut state.write(), &mu),
+                on_event: move |mu| on_event(mu),
             }
         }
         if let Some((date, id, label, start_min, end_min, assignment)) = editor {
@@ -526,6 +569,73 @@ fn build_blocks(plans: &HashMap<NaiveDate, DayPlan>) -> Vec<TemplateBlock> {
         }
     }
     out
+}
+
+/// Which event a mutation touches (`None` for removal — handled
+/// separately).
+fn affected_id(mu: &CalendarMutation) -> Option<EventId> {
+    match mu {
+        CalendarMutation::Create { event } => Some(event.id),
+        CalendarMutation::Reschedule { id, .. }
+        | CalendarMutation::Rename { id, .. }
+        | CalendarMutation::Recolor { id, .. }
+        | CalendarMutation::SetAllDay { id, .. }
+        | CalendarMutation::SetDescription { id, .. }
+        | CalendarMutation::SetRecurrence { id, .. } => Some(*id),
+        CalendarMutation::Remove { .. } => None,
+    }
+}
+
+fn to_proto(e: &CalendarEvent) -> CalEvent {
+    CalEvent {
+        id: e.id.to_string(),
+        title: e.title.clone(),
+        start: e.start.to_rfc3339(),
+        end: e.end.to_rfc3339(),
+        all_day: e.all_day,
+        color: color_name(e.color).to_string(),
+        description: e.description.clone(),
+        recurrence: e.recurrence.clone(),
+    }
+}
+
+fn from_proto(e: &CalEvent) -> Option<CalendarEvent> {
+    Some(CalendarEvent {
+        id: uuid::Uuid::parse_str(&e.id).ok()?,
+        title: e.title.clone(),
+        start: chrono::DateTime::parse_from_rfc3339(&e.start)
+            .ok()?
+            .with_timezone(&Utc),
+        end: chrono::DateTime::parse_from_rfc3339(&e.end)
+            .ok()?
+            .with_timezone(&Utc),
+        all_day: e.all_day,
+        color: color_from_name(&e.color),
+        description: e.description.clone(),
+        recurrence: e.recurrence.clone(),
+    })
+}
+
+fn color_name(c: ColorTag) -> &'static str {
+    match c {
+        ColorTag::Neutral => "neutral",
+        ColorTag::Primary => "primary",
+        ColorTag::Success => "success",
+        ColorTag::Warning => "warning",
+        ColorTag::Danger => "danger",
+        ColorTag::Info => "info",
+    }
+}
+
+fn color_from_name(s: &str) -> ColorTag {
+    match s {
+        "neutral" => ColorTag::Neutral,
+        "success" => ColorTag::Success,
+        "warning" => ColorTag::Warning,
+        "danger" => ColorTag::Danger,
+        "info" => ColorTag::Info,
+        _ => ColorTag::Primary,
+    }
 }
 
 fn category_color(c: BlockCategory) -> ColorTag {

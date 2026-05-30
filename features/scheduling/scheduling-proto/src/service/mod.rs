@@ -18,6 +18,7 @@
 //! implements all five.
 
 pub mod bookings;
+pub mod calendar_events;
 pub mod day_plans;
 pub mod day_templates;
 pub mod event_types;
@@ -25,6 +26,7 @@ pub mod schedules;
 pub mod slots;
 
 pub use bookings::Bookings;
+pub use calendar_events::CalendarEvents;
 pub use day_plans::DayPlans;
 pub use day_templates::DayTemplates;
 pub use event_types::EventTypes;
