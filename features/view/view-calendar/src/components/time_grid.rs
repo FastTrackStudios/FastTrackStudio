@@ -18,7 +18,8 @@ use crate::types::{CalendarEvent, EventId, TemplateBlock};
 
 use super::all_day_strip::AllDayStrip;
 use super::drag::{
-    BlockDrag, DRAG_THRESHOLD_PX, DragKind, Ghost, use_block_drag_context, use_drag_context,
+    BlockDrag, BlockDragKind, DRAG_THRESHOLD_PX, DragKind, Ghost, use_block_drag_context,
+    use_drag_context,
 };
 use super::event_chip::EventChip;
 use super::now_line::NowLine;
@@ -43,7 +44,7 @@ pub struct TimeGridViewProps {
     pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     /// Fired with `(date, block_id, start_min, end_min)` on a block drag.
     #[props(default)]
-    pub on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
+    pub on_block_edit: Option<EventHandler<crate::types::BlockEdit>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -191,7 +192,7 @@ struct DayColumnProps {
     /// Fired with `(date, block_id, start_min, end_min)` after a block
     /// is dragged to a new time.
     #[props(default)]
-    on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
+    on_block_edit: Option<EventHandler<crate::types::BlockEdit>>,
     is_last: bool,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
@@ -274,14 +275,21 @@ fn DayColumn(props: DayColumnProps) -> Element {
     let on_block_drop = props.on_block_drop;
     let on_block_edit = props.on_block_edit;
     let mut block_ctx = use_block_drag_context();
-    // The block being dragged on this column, with its live snapped
-    // position (for the ghost + dimming the original).
+    // The drag whose *target* day is this column (drives the ghost).
     let active_block = block_ctx
         .drag
         .read()
         .as_ref()
         .filter(|d| d.date == date && d.committed)
         .cloned();
+    // The id of the block whose *origin* day is this column — dim it
+    // while a (possibly cross-day) drag of it is in flight.
+    let dragging_orig_id = block_ctx
+        .drag
+        .read()
+        .as_ref()
+        .filter(|d| d.orig_date == date && d.committed)
+        .map(|d| d.block_id.clone());
 
     rsx! {
         div {
@@ -291,7 +299,10 @@ fn DayColumn(props: DayColumnProps) -> Element {
             onpointermove: move |e: Event<PointerData>| {
                 let snap = block_ctx.drag.peek().clone();
                 let Some(mut bd) = snap else { return };
-                if bd.date != date {
+                // Resize stays on the block's own day; only a Move roams
+                // across columns.
+                let is_resize = !matches!(bd.kind, BlockDragKind::Move);
+                if is_resize && bd.orig_date != date {
                     return;
                 }
                 let page_y = e.data().page_coordinates().y;
@@ -303,11 +314,26 @@ fn DayColumn(props: DayColumnProps) -> Element {
                 }
                 let col_y = e.data().element_coordinates().y as i64;
                 let pointer_min = px_to_minutes(col_y);
-                let dur = bd.orig_end_min - bd.orig_start_min;
-                let s = snap_minutes(pointer_min - bd.grab_offset_min)
-                    .clamp(0, (1440 - dur).max(0));
-                bd.cur_start_min = s;
-                bd.cur_end_min = s + dur;
+                match bd.kind {
+                    BlockDragKind::Move => {
+                        bd.date = date; // follow the cursor's column
+                        let dur = bd.orig_end_min - bd.orig_start_min;
+                        let s = snap_minutes(pointer_min - bd.grab_offset_min)
+                            .clamp(0, (1440 - dur).max(0));
+                        bd.cur_start_min = s;
+                        bd.cur_end_min = s + dur;
+                    }
+                    BlockDragKind::ResizeEnd => {
+                        bd.cur_start_min = bd.orig_start_min;
+                        bd.cur_end_min =
+                            snap_minutes(pointer_min).clamp(bd.orig_start_min + SNAP_MINUTES, 1440);
+                    }
+                    BlockDragKind::ResizeStart => {
+                        bd.cur_start_min =
+                            snap_minutes(pointer_min).clamp(0, bd.orig_end_min - SNAP_MINUTES);
+                        bd.cur_end_min = bd.orig_end_min;
+                    }
+                }
                 block_ctx.drag.set(Some(bd));
             },
             // Hour grid lines (solid).
@@ -477,10 +503,12 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     let block_id = tp.id.clone();
                     let drop_id = tp.id.clone();
                     let down_id = tp.id.clone();
+                    let rs_id = tp.id.clone();
+                    let re_id = tp.id.clone();
                     let bstart = tp.start_min;
                     let bend = tp.end_min;
                     let draggable_block = on_block_edit.is_some();
-                    let being_dragged = active_block.as_ref().is_some_and(|d| d.block_id == tp.id);
+                    let being_dragged = dragging_orig_id.as_deref() == Some(tp.id.as_str());
                     let interactive = on_block_click.is_some() || on_block_drop.is_some() || draggable_block;
                     let cursor = if draggable_block {
                         "cursor-grab active:cursor-grabbing hover:brightness-125"
@@ -493,6 +521,20 @@ fn DayColumn(props: DayColumnProps) -> Element {
                     // pointer events fall through to the column handler.
                     let pe = if interactive && !being_dragged { "" } else { "pointer-events-none" };
                     let dim = if being_dragged { "opacity-30" } else { "" };
+                    // Build a drag for this block in `kind` mode.
+                    let mk_drag = move |kind: BlockDragKind, id: String, grab: i64, page_y: f64| BlockDrag {
+                        block_id: id,
+                        kind,
+                        orig_date: date,
+                        date,
+                        orig_start_min: bstart,
+                        orig_end_min: bend,
+                        grab_offset_min: grab,
+                        cur_start_min: bstart,
+                        cur_end_min: bend,
+                        start_page_y: page_y,
+                        committed: false,
+                    };
                     rsx! {
                         div {
                             key: "tpl-{tp.id}-{tp.top}",
@@ -504,17 +546,12 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                 }
                                 let elem_y = e.data().element_coordinates().y as i64;
                                 let page_y = e.data().page_coordinates().y;
-                                block_ctx.drag.set(Some(BlockDrag {
-                                    block_id: down_id.clone(),
-                                    date,
-                                    orig_start_min: bstart,
-                                    orig_end_min: bend,
-                                    grab_offset_min: px_to_minutes(elem_y),
-                                    cur_start_min: bstart,
-                                    cur_end_min: bend,
-                                    start_page_y: page_y,
-                                    committed: false,
-                                }));
+                                block_ctx.drag.set(Some(mk_drag(
+                                    BlockDragKind::Move,
+                                    down_id.clone(),
+                                    px_to_minutes(elem_y),
+                                    page_y,
+                                )));
                             },
                             onclick: move |_| {
                                 if let Some(cb) = on_block_click {
@@ -537,6 +574,35 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                     }
                                 }
                             },
+                            // Resize handles (top / bottom edges).
+                            if draggable_block {
+                                div {
+                                    class: "absolute inset-x-0 top-0 z-10 h-1.5 cursor-ns-resize",
+                                    onpointerdown: move |e: Event<PointerData>| {
+                                        e.stop_propagation();
+                                        let page_y = e.data().page_coordinates().y;
+                                        block_ctx.drag.set(Some(mk_drag(
+                                            BlockDragKind::ResizeStart,
+                                            rs_id.clone(),
+                                            0,
+                                            page_y,
+                                        )));
+                                    },
+                                }
+                                div {
+                                    class: "absolute inset-x-0 bottom-0 z-10 h-1.5 cursor-ns-resize",
+                                    onpointerdown: move |e: Event<PointerData>| {
+                                        e.stop_propagation();
+                                        let page_y = e.data().page_coordinates().y;
+                                        block_ctx.drag.set(Some(mk_drag(
+                                            BlockDragKind::ResizeEnd,
+                                            re_id.clone(),
+                                            0,
+                                            page_y,
+                                        )));
+                                    },
+                                }
+                            }
                             span {
                                 class: "block px-1.5 py-0.5 text-[10px] font-medium leading-tight truncate",
                                 "{tp.label}"

@@ -59,6 +59,11 @@ impl ColorTag {
     }
 }
 
+/// Payload of a plan-block grid drag: `(origin_date, target_date,
+/// block_id, start_min, end_min)`. The origin/target split lets a Move
+/// carry a block to a different day.
+pub type BlockEdit = (chrono::NaiveDate, chrono::NaiveDate, String, u16, u16);
+
 /// A day-plan block rendered behind real events as a placement guide
 /// — a faded outline (e.g. "Block 1: Work / Event / Free Time"
 /// 9:30–12:30) for one specific date. Clicking it emits `on_block_click`

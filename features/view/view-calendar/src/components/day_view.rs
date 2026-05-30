@@ -19,7 +19,7 @@ pub struct DayViewProps {
     #[props(default)]
     pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
     #[props(default)]
-    pub on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
+    pub on_block_edit: Option<EventHandler<crate::types::BlockEdit>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,

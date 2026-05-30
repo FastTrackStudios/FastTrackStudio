@@ -19,8 +19,8 @@ use scheduling_proto::{
     BlockAssignment, BlockCategory, CalEvent, DayPlan, DayTemplate, PlannedBlock, TimeOfDay,
 };
 use view_calendar::{
-    Calendar, CalendarEvent, CalendarMutation, CalendarState, ColorTag, EventId, TASK_DROP_MIME,
-    TemplateBlock, ViewMode, apply,
+    BlockEdit, Calendar, CalendarEvent, CalendarMutation, CalendarState, ColorTag, EventId,
+    TASK_DROP_MIME, TemplateBlock, ViewMode, apply,
 };
 
 use crate::orgs::{OrgMeta, OrgSelection};
@@ -230,25 +230,55 @@ pub fn ScheduleView() -> Element {
         });
     };
 
-    // Move a block to a new time (from a grid drag), then persist.
-    let mut move_block = move |date: NaiveDate, id: String, s: u16, e: u16| {
+    // Move/retime a block from a grid drag, possibly across days, then
+    // persist the affected day plan(s).
+    let mut move_block = move |orig: NaiveDate, target: NaiveDate, id: String, s: u16, e: u16| {
         let Some(slug) = slug() else { return };
-        let plan = {
+        let (start, end) = (
+            TimeOfDay {
+                minutes_since_midnight: s.min(1440),
+            },
+            TimeOfDay {
+                minutes_since_midnight: e.min(1440),
+            },
+        );
+        let to_save: Vec<DayPlan> = {
             let mut w = plans.write();
-            let Some(plan) = w.get_mut(&date) else { return };
-            if let Some(b) = plan.blocks.iter_mut().find(|b| b.id.0 == id) {
-                b.start = TimeOfDay {
-                    minutes_since_midnight: s.min(1440),
+            if orig == target {
+                let Some(plan) = w.get_mut(&orig) else { return };
+                if let Some(b) = plan.blocks.iter_mut().find(|b| b.id.0 == id) {
+                    b.start = start;
+                    b.end = end;
+                }
+                vec![plan.clone()]
+            } else {
+                // Pull the block out of its origin day…
+                let moved = w.get_mut(&orig).and_then(|src| {
+                    src.blocks
+                        .iter()
+                        .position(|b| b.id.0 == id)
+                        .map(|pos| src.blocks.remove(pos))
+                });
+                let Some(mut blk) = moved else { return };
+                blk.start = start;
+                blk.end = end;
+                // …and drop it onto the target day (must be loaded).
+                let Some(dst) = w.get_mut(&target) else {
+                    return;
                 };
-                b.end = TimeOfDay {
-                    minutes_since_midnight: e.min(1440),
-                };
+                dst.blocks.push(blk);
+                [w.get(&orig).cloned(), w.get(&target).cloned()]
+                    .into_iter()
+                    .flatten()
+                    .collect()
             }
-            plan.clone()
         };
-        spawn(async move {
-            let _ = crate::feeds::save_day_plan(&slug, plan).await;
-        });
+        for plan in to_save {
+            let slug = slug.clone();
+            spawn(async move {
+                let _ = crate::feeds::save_day_plan(&slug, plan).await;
+            });
+        }
     };
 
     // Revert a date to its template — drop the saved plan, re-materialize.
@@ -337,8 +367,8 @@ pub fn ScheduleView() -> Element {
                 initial_view: Some(ViewMode::Week),
                 on_range: move |(s, e)| range.set(Some((s, e))),
                 on_block_click: move |(date, id)| editing.set(Some((date, id))),
-                on_block_edit: move |(date, id, s, e): (NaiveDate, String, u16, u16)| {
-                    move_block(date, id, s, e);
+                on_block_edit: move |(orig, target, id, s, e): BlockEdit| {
+                    move_block(orig, target, id, s, e);
                 },
                 on_block_drop: move |(date, id, payload): (NaiveDate, String, String)| {
                     let (rid, title) = payload

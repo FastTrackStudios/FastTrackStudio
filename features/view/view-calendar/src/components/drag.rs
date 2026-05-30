@@ -81,14 +81,30 @@ pub fn use_drag_context() -> DragContext {
     use_context::<DragContext>()
 }
 
+/// Which edge (or the whole block) a plan-block drag moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockDragKind {
+    /// Whole block slides in time — can cross days.
+    Move,
+    /// Top edge moves (start changes), within the same day.
+    ResizeStart,
+    /// Bottom edge moves (end changes), within the same day.
+    ResizeEnd,
+}
+
 /// An in-flight drag of a *plan block* (the day-plan overlay), separate
-/// from event drags. Move-only for now: the whole block slides in time
-/// within its day. `cur_*` track the snapped live position; `committed`
+/// from event drags. `cur_*` track the snapped live position; `date` is
+/// the target day (a `Move` follows the cursor's column); `committed`
 /// flips once the pointer moves past the threshold so a plain click
 /// still opens the block editor.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockDrag {
     pub block_id: String,
+    pub kind: BlockDragKind,
+    /// The day the block started on.
+    pub orig_date: NaiveDate,
+    /// The current target day (= `orig_date` unless a `Move` has
+    /// crossed into another column).
     pub date: NaiveDate,
     pub orig_start_min: i64,
     pub orig_end_min: i64,

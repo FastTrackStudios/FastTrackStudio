@@ -42,7 +42,7 @@ pub struct CalendarProps {
     /// Fired with `(date, block_id, start_min, end_min)` when a plan
     /// block is dragged to a new time on the grid.
     #[props(default)]
-    pub on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
+    pub on_block_edit: Option<EventHandler<crate::types::BlockEdit>>,
     /// Fired with the visible `(first_date, last_date)` whenever the
     /// view range changes, so the consumer can load that range's plans.
     #[props(default)]
@@ -151,7 +151,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                 if let Some(cb) = on_block_edit {
                     let s = bd.cur_start_min.clamp(0, 1440) as u16;
                     let e = bd.cur_end_min.clamp(0, 1440) as u16;
-                    cb.call((bd.date, bd.block_id, s, e));
+                    cb.call((bd.orig_date, bd.date, bd.block_id, s, e));
                 }
                 return;
             }
