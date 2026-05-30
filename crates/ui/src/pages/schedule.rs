@@ -15,10 +15,19 @@ use std::collections::HashMap;
 use chrono::{Datelike, NaiveDate, Weekday};
 use dioxus::prelude::*;
 use fts_ui::prelude::*;
-use scheduling_proto::{BlockCategory, DayPlan, DayTemplate, PlannedBlock, TimeOfDay};
+use scheduling_proto::{
+    BlockAssignment, BlockCategory, DayPlan, DayTemplate, PlannedBlock, TimeOfDay,
+};
 use view_calendar::{Calendar, CalendarState, ColorTag, TemplateBlock, ViewMode, apply};
 
 use crate::orgs::{OrgMeta, OrgSelection};
+
+/// An assignment as the editor passes it back: `(kind, title, ref_id)`
+/// — `kind` is `"label"` / `"task"` / `"project"`.
+type Assign = (String, String, Option<String>);
+
+/// `(id, title)` options for the assignment pickers.
+type PickList = Vec<(String, String)>;
 
 #[component]
 pub fn ScheduleView() -> Element {
@@ -37,6 +46,27 @@ pub fn ScheduleView() -> Element {
             Some(s) => crate::feeds::fetch_day_templates(&s).await,
             None => Ok(Vec::new()),
         }
+    });
+
+    // Tasks + projects to assign into blocks (the pickers).
+    let pickers = use_resource(move || async move {
+        let Some(s) = slug() else {
+            return (PickList::new(), PickList::new());
+        };
+        let slugs = [s];
+        let tasks = crate::feeds::fetch_tasks_tagged(&slugs)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, t)| (t.id.to_string(), t.title))
+            .collect::<PickList>();
+        let projects = crate::feeds::fetch_projects(&slugs)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| (p.id.to_string(), p.title))
+            .collect::<PickList>();
+        (tasks, projects)
     });
 
     // Visible date range (from the calendar) + the per-date plans we've
@@ -89,16 +119,26 @@ pub fn ScheduleView() -> Element {
         let p = plans.read();
         let plan = p.get(&date)?;
         let b = plan.blocks.iter().find(|b| b.id.0 == id)?;
+        let assignment = b
+            .assignment
+            .as_ref()
+            .map(|a| (a.kind.clone(), a.title.clone(), a.ref_id.clone()));
         Some((
             date,
             id,
             b.label.clone(),
             b.start.minutes_since_midnight,
             b.end.minutes_since_midnight,
+            assignment,
         ))
     });
+    let (tasks, projects) = pickers().unwrap_or_default();
 
-    let mut save_block = move |(date, id): (NaiveDate, String), label: String, s: u16, e: u16| {
+    let mut save_block = move |(date, id): (NaiveDate, String),
+                               label: String,
+                               s: u16,
+                               e: u16,
+                               assign: Option<Assign>| {
         let Some(slug) = slug() else { return };
         let plan = {
             let mut w = plans.write();
@@ -111,6 +151,11 @@ pub fn ScheduleView() -> Element {
                 b.end = TimeOfDay {
                     minutes_since_midnight: e.min(1440),
                 };
+                b.assignment = assign.map(|(kind, title, ref_id)| BlockAssignment {
+                    kind,
+                    title,
+                    ref_id,
+                });
             }
             plan.clone()
         };
@@ -137,14 +182,17 @@ pub fn ScheduleView() -> Element {
                 on_event: move |mu| apply(&mut state.write(), &mu),
             }
         }
-        if let Some((date, id, label, start_min, end_min)) = editor {
+        if let Some((date, id, label, start_min, end_min, assignment)) = editor {
             BlockEditor {
                 key: "{date}-{id}",
                 label,
                 start_min,
                 end_min,
-                on_save: move |(l, s, e): (String, u16, u16)| {
-                    save_block((date, id.clone()), l, s, e);
+                assignment,
+                tasks,
+                projects,
+                on_save: move |(l, s, e, a): (String, u16, u16, Option<Assign>)| {
+                    save_block((date, id.clone()), l, s, e, a);
                 },
                 on_cancel: move |()| editing.set(None),
             }
@@ -152,19 +200,31 @@ pub fn ScheduleView() -> Element {
     }
 }
 
-/// Modal to move / relabel a plan block. Holds its own working values
-/// so typing doesn't churn the page; commits on Save.
+/// Modal to move / relabel / assign a plan block. Holds its own working
+/// values so typing doesn't churn the page; commits on Save.
 #[component]
 fn BlockEditor(
     label: String,
     start_min: u16,
     end_min: u16,
-    on_save: EventHandler<(String, u16, u16)>,
+    assignment: Option<Assign>,
+    tasks: PickList,
+    projects: PickList,
+    on_save: EventHandler<(String, u16, u16, Option<Assign>)>,
     on_cancel: EventHandler<()>,
 ) -> Element {
     let mut lbl = use_signal(|| label.clone());
     let mut start = use_signal(|| start_min);
     let mut end = use_signal(|| end_min);
+    let mut assign = use_signal(|| assignment.clone());
+
+    let assign_title = assign().map(|a| a.1).unwrap_or_default();
+    // Clones for the picker's change handler (the lists are also
+    // borrowed by the `for` loops below).
+    let pick_tasks = tasks.clone();
+    let pick_projects = projects.clone();
+
+    let input_cls = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40";
 
     rsx! {
         div {
@@ -177,7 +237,7 @@ fn BlockEditor(
                 label { class: "flex flex-col gap-1 text-xs text-muted-foreground",
                     "Label"
                     input {
-                        class: "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40",
+                        class: "{input_cls}",
                         value: "{lbl}",
                         oninput: move |e| lbl.set(e.value()),
                     }
@@ -186,7 +246,7 @@ fn BlockEditor(
                     label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
                         "Start"
                         input {
-                            class: "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40",
+                            class: "{input_cls}",
                             r#type: "time",
                             value: "{fmt_time(start())}",
                             oninput: move |e| {
@@ -199,7 +259,7 @@ fn BlockEditor(
                     label { class: "flex flex-1 flex-col gap-1 text-xs text-muted-foreground",
                         "End"
                         input {
-                            class: "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/40",
+                            class: "{input_cls}",
                             r#type: "time",
                             value: "{fmt_time(end())}",
                             oninput: move |e| {
@@ -207,6 +267,56 @@ fn BlockEditor(
                                     end.set(m);
                                 }
                             },
+                        }
+                    }
+                }
+                // Assignment — a free label, or pick a task / project.
+                div { class: "flex flex-col gap-1 text-xs text-muted-foreground",
+                    "Assignment"
+                    input {
+                        class: "{input_cls}",
+                        placeholder: "Type a label, or pick below",
+                        value: "{assign_title}",
+                        oninput: move |e| {
+                            let v = e.value();
+                            assign.set(if v.trim().is_empty() {
+                                None
+                            } else {
+                                Some(("label".into(), v, None))
+                            });
+                        },
+                    }
+                    select {
+                        class: "{input_cls}",
+                        onchange: move |e| {
+                            let v = e.value();
+                            if let Some(id) = v.strip_prefix("task:") {
+                                if let Some((_, t)) = pick_tasks.iter().find(|(i, _)| i == id) {
+                                    assign.set(Some(("task".into(), t.clone(), Some(id.to_string()))));
+                                }
+                            } else if let Some(id) = v.strip_prefix("project:") {
+                                if let Some((_, t)) = pick_projects.iter().find(|(i, _)| i == id) {
+                                    assign.set(Some(("project".into(), t.clone(), Some(id.to_string()))));
+                                }
+                            } else if v == "__clear" {
+                                assign.set(None);
+                            }
+                        },
+                        option { value: "", "— pick task / project —" }
+                        option { value: "__clear", "— clear —" }
+                        if !tasks.is_empty() {
+                            optgroup { label: "Tasks",
+                                for (id, title) in tasks.iter() {
+                                    option { key: "t-{id}", value: "task:{id}", "{title}" }
+                                }
+                            }
+                        }
+                        if !projects.is_empty() {
+                            optgroup { label: "Projects",
+                                for (id, title) in projects.iter() {
+                                    option { key: "p-{id}", value: "project:{id}", "{title}" }
+                                }
+                            }
                         }
                     }
                 }
@@ -220,7 +330,7 @@ fn BlockEditor(
                     Button {
                         variant: ButtonVariant::Primary,
                         size: ButtonSize::Small,
-                        on_click: move |_| on_save.call((lbl(), start(), end())),
+                        on_click: move |_| on_save.call((lbl(), start(), end(), assign())),
                         "Save"
                     }
                 }
