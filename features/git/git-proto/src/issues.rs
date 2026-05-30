@@ -17,6 +17,14 @@ pub struct Issue {
     pub labels: Vec<Label>,
     pub assignees: Vec<User>,
     pub milestone: Option<Milestone>,
+    /// Forge-reported last-update time, RFC-3339. `None` when the
+    /// backend doesn't surface it. Carried as a string (not a
+    /// `chrono` type) to keep the DTO `Facet`-encodable; consumers
+    /// that need ordering parse it. Drives the sync fast-path — an
+    /// issue whose `updated_at` hasn't advanced since the last
+    /// reconcile couldn't have changed on the forge.
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Facet, Serialize, Deserialize)]

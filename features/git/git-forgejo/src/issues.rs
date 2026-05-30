@@ -27,6 +27,9 @@ struct RawIssue {
     #[serde(default)]
     assignees: Option<Vec<RawUser>>,
     milestone: Option<RawMilestone>,
+    /// Gitea/Forgejo RFC-3339 last-update timestamp.
+    #[serde(default)]
+    updated_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,6 +318,7 @@ fn translate_issue(repo: &RepoId, raw: RawIssue) -> Issue {
             title: m.title,
             number: m.id,
         }),
+        updated_at: raw.updated_at,
     }
 }
 

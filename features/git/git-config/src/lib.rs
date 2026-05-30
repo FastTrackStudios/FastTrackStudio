@@ -64,6 +64,12 @@ pub struct IssueSnapshot {
     pub task: SyncedFields,
     /// Values the forge side held at the last reconcile.
     pub forge: SyncedFields,
+    /// The forge issue's `updated_at` at the last reconcile, if the
+    /// backend surfaced one. Lets the sync fast-path skip an issue
+    /// whose forge timestamp hasn't advanced. `#[serde(default)]` so
+    /// snapshots written before this field round-trip as `None`.
+    #[serde(default)]
+    pub forge_updated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -580,6 +586,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("links.json");
         let r = repo("git.example.org", "acme", "widgets");
+        let ts = chrono::DateTime::parse_from_rfc3339("2026-05-29T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         let snap = |t: &str| IssueSnapshot {
             task: SyncedFields {
                 title: t.into(),
@@ -591,6 +600,7 @@ mod tests {
                 body: "b".into(),
                 closed: false,
             },
+            forge_updated_at: Some(ts),
         };
 
         {
@@ -603,6 +613,7 @@ mod tests {
 
         let s = FileStore::open(&path).unwrap();
         let got = s.get_issue_snapshot(&r, 7).unwrap().unwrap();
+        assert_eq!(got.forge_updated_at, Some(ts));
         assert_eq!(got.task.title, "second");
         // Distinct key is independent.
         assert!(s.get_issue_snapshot(&r, 8).unwrap().is_none());

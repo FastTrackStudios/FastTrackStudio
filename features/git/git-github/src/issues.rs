@@ -220,5 +220,6 @@ fn translate_issue(repo: &RepoId, raw: octocrab::models::issues::Issue) -> Issue
             title: m.title,
             number: m.number as u64,
         }),
+        updated_at: Some(raw.updated_at.to_rfc3339()),
     }
 }

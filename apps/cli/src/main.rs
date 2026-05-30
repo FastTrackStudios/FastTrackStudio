@@ -10775,6 +10775,26 @@ async fn sync_repo(
             body: ext.body.trim().to_string(),
             closed: matches!(ext.state, git_proto::IssueState::Closed),
         };
+        // The forge issue's last-update time (parsed from the DTO's
+        // RFC-3339 string) and the recorded snapshot.
+        let forge_ts = ext
+            .updated_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.with_timezone(&chrono::Utc));
+        let snap = store
+            .get_issue_snapshot(repo_id, number)
+            .map_err(|e| eyre::eyre!("snapshot: {e}"))?;
+
+        // Fast-path: when the forge's `updated_at` hasn't advanced past
+        // the snapshot and the Task projection is unchanged, neither
+        // side moved — skip the diff + writes for this issue entirely.
+        if let (Some(s), Some(cur)) = (snap.as_ref(), forge_ts) {
+            if s.forge_updated_at == Some(cur) && s.task == task_proj {
+                continue;
+            }
+        }
+
         // Baseline: the recorded snapshot, or — on the first reconcile
         // of this link — the *task* projection on both sides. That way
         // a field the forge disagrees on registers as a forge-side
@@ -10783,11 +10803,8 @@ async fn sync_repo(
         // "forge wins for state" behaviour; a freshly-pulled task
         // already equals the forge, so this is a no-op that just seeds
         // the snapshot.
-        let (base_task, base_forge) = match store
-            .get_issue_snapshot(repo_id, number)
-            .map_err(|e| eyre::eyre!("snapshot: {e}"))?
-        {
-            Some(s) => (s.task, s.forge),
+        let (base_task, base_forge) = match &snap {
+            Some(s) => (s.task.clone(), s.forge.clone()),
             None => (task_proj.clone(), task_proj.clone()),
         };
         let merged = git_config::reconcile_synced(&base_task, &base_forge, &task_proj, &forge_proj);
@@ -10825,8 +10842,8 @@ async fn sync_repo(
         // on failure we warn and leave the baseline at `forge_proj` so
         // the next sync retries.
         let fu = git_config::forge_update(&forge_proj, &merged);
-        let forge_base = if fu.is_empty() {
-            forge_proj
+        let (forge_base, forge_ts_after) = if fu.is_empty() {
+            (forge_proj, forge_ts)
         } else {
             let repo_c = repo_id.clone();
             let update = git_proto::issues::IssueUpdate {
@@ -10854,22 +10871,32 @@ async fn sync_repo(
             match pushed {
                 Ok(issue) => {
                     println!("  pushed {} -> #{number}", short_uuid(&t.id));
-                    git_config::SyncedFields {
+                    // The forge bumped its `updated_at` on this write —
+                    // record what it returned so the next sync's
+                    // fast-path sees the new baseline, not a stale one.
+                    let ts = issue
+                        .updated_at
+                        .as_deref()
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|d| d.with_timezone(&chrono::Utc));
+                    let fields = git_config::SyncedFields {
                         title: issue.title,
                         body: issue.body,
                         closed: matches!(issue.state, git_proto::IssueState::Closed),
-                    }
+                    };
+                    (fields, ts)
                 }
                 Err(e) => {
                     eprintln!("  warn: push to #{number} failed: {e}");
-                    forge_proj
+                    (forge_proj, forge_ts)
                 }
             }
         };
 
         // Record the new baseline: Task holds `merged`, forge holds
         // `forge_base` (== `merged` after a successful push, else its
-        // pre-push value pending a retry).
+        // pre-push value pending a retry), with the forge's
+        // `updated_at` so the next run's fast-path can short-circuit.
         store
             .set_issue_snapshot(
                 repo_id,
@@ -10877,6 +10904,7 @@ async fn sync_repo(
                 git_config::IssueSnapshot {
                     task: merged,
                     forge: forge_base,
+                    forge_updated_at: forge_ts_after,
                 },
             )
             .map_err(|e| eyre::eyre!("snapshot: {e}"))?;
