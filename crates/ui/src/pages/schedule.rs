@@ -230,6 +230,27 @@ pub fn ScheduleView() -> Element {
         });
     };
 
+    // Move a block to a new time (from a grid drag), then persist.
+    let mut move_block = move |date: NaiveDate, id: String, s: u16, e: u16| {
+        let Some(slug) = slug() else { return };
+        let plan = {
+            let mut w = plans.write();
+            let Some(plan) = w.get_mut(&date) else { return };
+            if let Some(b) = plan.blocks.iter_mut().find(|b| b.id.0 == id) {
+                b.start = TimeOfDay {
+                    minutes_since_midnight: s.min(1440),
+                };
+                b.end = TimeOfDay {
+                    minutes_since_midnight: e.min(1440),
+                };
+            }
+            plan.clone()
+        };
+        spawn(async move {
+            let _ = crate::feeds::save_day_plan(&slug, plan).await;
+        });
+    };
+
     // Revert a date to its template — drop the saved plan, re-materialize.
     let mut reset_day = move |date: NaiveDate| {
         let Some(slug) = slug() else { return };
@@ -316,6 +337,9 @@ pub fn ScheduleView() -> Element {
                 initial_view: Some(ViewMode::Week),
                 on_range: move |(s, e)| range.set(Some((s, e))),
                 on_block_click: move |(date, id)| editing.set(Some((date, id))),
+                on_block_edit: move |(date, id, s, e): (NaiveDate, String, u16, u16)| {
+                    move_block(date, id, s, e);
+                },
                 on_block_drop: move |(date, id, payload): (NaiveDate, String, String)| {
                     let (rid, title) = payload
                         .split_once('|')

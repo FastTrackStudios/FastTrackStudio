@@ -81,6 +81,35 @@ pub fn use_drag_context() -> DragContext {
     use_context::<DragContext>()
 }
 
+/// An in-flight drag of a *plan block* (the day-plan overlay), separate
+/// from event drags. Move-only for now: the whole block slides in time
+/// within its day. `cur_*` track the snapped live position; `committed`
+/// flips once the pointer moves past the threshold so a plain click
+/// still opens the block editor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockDrag {
+    pub block_id: String,
+    pub date: NaiveDate,
+    pub orig_start_min: i64,
+    pub orig_end_min: i64,
+    /// Minutes between the block's start and where the user grabbed it,
+    /// so the block doesn't jump to align its top with the cursor.
+    pub grab_offset_min: i64,
+    pub cur_start_min: i64,
+    pub cur_end_min: i64,
+    pub start_page_y: f64,
+    pub committed: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct BlockDragContext {
+    pub drag: Signal<Option<BlockDrag>>,
+}
+
+pub fn use_block_drag_context() -> BlockDragContext {
+    use_context::<BlockDragContext>()
+}
+
 /// MIME used by HTML5 `DataTransfer` for cross-view drag carrying
 /// the event id. Same pattern as `view-kanban`.
 pub(crate) const DT_MIME: &str = "text/x-calendar-event-id";

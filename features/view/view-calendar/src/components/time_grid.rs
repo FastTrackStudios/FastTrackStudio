@@ -17,7 +17,9 @@ use crate::time::{day_start_utc, hour_labels};
 use crate::types::{CalendarEvent, EventId, TemplateBlock};
 
 use super::all_day_strip::AllDayStrip;
-use super::drag::{DragKind, Ghost, use_drag_context};
+use super::drag::{
+    BlockDrag, DRAG_THRESHOLD_PX, DragKind, Ghost, use_block_drag_context, use_drag_context,
+};
 use super::event_chip::EventChip;
 use super::now_line::NowLine;
 use super::style::{chip_palette, template_palette};
@@ -39,6 +41,9 @@ pub struct TimeGridViewProps {
     /// Fired with `(date, block_id, payload)` on a drop onto a block.
     #[props(default)]
     pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
+    /// Fired with `(date, block_id, start_min, end_min)` on a block drag.
+    #[props(default)]
+    pub on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -127,6 +132,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
                             on_block_drop: props.on_block_drop,
+                            on_block_edit: props.on_block_edit,
                             is_last: idx == props.days.len() - 1,
                             readonly: props.readonly,
                             on_event: props.on_event,
@@ -182,6 +188,10 @@ struct DayColumnProps {
     /// [`TASK_DROP_MIME`] data (`"id|title"`).
     #[props(default)]
     on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
+    /// Fired with `(date, block_id, start_min, end_min)` after a block
+    /// is dragged to a new time.
+    #[props(default)]
+    on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
     is_last: bool,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
@@ -237,6 +247,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
     // geometry. Faded, clickable placement guides.
     struct TplPlacement {
         id: String,
+        start_min: i64,
+        end_min: i64,
         top: i64,
         h: i64,
         pal: &'static str,
@@ -249,6 +261,8 @@ fn DayColumn(props: DayColumnProps) -> Element {
         .filter(|tb| tb.date == date && tb.end_min > tb.start_min)
         .map(|tb| TplPlacement {
             id: tb.id.clone(),
+            start_min: i64::from(tb.start_min),
+            end_min: i64::from(tb.end_min),
             top: i64::from(tb.start_min) * PX_PER_HOUR / 60,
             h: i64::from(tb.end_min - tb.start_min) * PX_PER_HOUR / 60,
             pal: template_palette(tb.color),
@@ -258,10 +272,44 @@ fn DayColumn(props: DayColumnProps) -> Element {
         .collect();
     let on_block_click = props.on_block_click;
     let on_block_drop = props.on_block_drop;
+    let on_block_edit = props.on_block_edit;
+    let mut block_ctx = use_block_drag_context();
+    // The block being dragged on this column, with its live snapped
+    // position (for the ghost + dimming the original).
+    let active_block = block_ctx
+        .drag
+        .read()
+        .as_ref()
+        .filter(|d| d.date == date && d.committed)
+        .cloned();
 
     rsx! {
         div {
             class: "relative border-border/40 {border_r} {column_bg}",
+            // Plan-block drag — handled at the column level so moves
+            // bubble here regardless of which child the pointer is over.
+            onpointermove: move |e: Event<PointerData>| {
+                let snap = block_ctx.drag.peek().clone();
+                let Some(mut bd) = snap else { return };
+                if bd.date != date {
+                    return;
+                }
+                let page_y = e.data().page_coordinates().y;
+                if !bd.committed {
+                    if (page_y - bd.start_page_y).abs() < DRAG_THRESHOLD_PX as f64 {
+                        return;
+                    }
+                    bd.committed = true;
+                }
+                let col_y = e.data().element_coordinates().y as i64;
+                let pointer_min = px_to_minutes(col_y);
+                let dur = bd.orig_end_min - bd.orig_start_min;
+                let s = snap_minutes(pointer_min - bd.grab_offset_min)
+                    .clamp(0, (1440 - dur).max(0));
+                bd.cur_start_min = s;
+                bd.cur_end_min = s + dur;
+                block_ctx.drag.set(Some(bd));
+            },
             // Hour grid lines (solid).
             for h in 1..24u32 {
                 div {
@@ -428,14 +476,46 @@ fn DayColumn(props: DayColumnProps) -> Element {
                 {
                     let block_id = tp.id.clone();
                     let drop_id = tp.id.clone();
-                    let interactive = on_block_click.is_some() || on_block_drop.is_some();
-                    let cursor = if on_block_click.is_some() { "cursor-pointer hover:brightness-125" } else { "" };
-                    let pe = if interactive { "" } else { "pointer-events-none" };
+                    let down_id = tp.id.clone();
+                    let bstart = tp.start_min;
+                    let bend = tp.end_min;
+                    let draggable_block = on_block_edit.is_some();
+                    let being_dragged = active_block.as_ref().is_some_and(|d| d.block_id == tp.id);
+                    let interactive = on_block_click.is_some() || on_block_drop.is_some() || draggable_block;
+                    let cursor = if draggable_block {
+                        "cursor-grab active:cursor-grabbing hover:brightness-125"
+                    } else if on_block_click.is_some() {
+                        "cursor-pointer hover:brightness-125"
+                    } else {
+                        ""
+                    };
+                    // While this block is being dragged, dim it + let
+                    // pointer events fall through to the column handler.
+                    let pe = if interactive && !being_dragged { "" } else { "pointer-events-none" };
+                    let dim = if being_dragged { "opacity-30" } else { "" };
                     rsx! {
                         div {
                             key: "tpl-{tp.id}-{tp.top}",
-                            class: "absolute left-0.5 right-0.5 rounded-md border border-dashed overflow-hidden transition {cursor} {pe} {tp.pal}",
+                            class: "absolute left-0.5 right-0.5 rounded-md border border-dashed overflow-hidden transition {cursor} {pe} {dim} {tp.pal}",
                             style: "top: {tp.top}px; height: {tp.h}px;",
+                            onpointerdown: move |e: Event<PointerData>| {
+                                if !draggable_block {
+                                    return;
+                                }
+                                let elem_y = e.data().element_coordinates().y as i64;
+                                let page_y = e.data().page_coordinates().y;
+                                block_ctx.drag.set(Some(BlockDrag {
+                                    block_id: down_id.clone(),
+                                    date,
+                                    orig_start_min: bstart,
+                                    orig_end_min: bend,
+                                    grab_offset_min: px_to_minutes(elem_y),
+                                    cur_start_min: bstart,
+                                    cur_end_min: bend,
+                                    start_page_y: page_y,
+                                    committed: false,
+                                }));
+                            },
                             onclick: move |_| {
                                 if let Some(cb) = on_block_click {
                                     cb.call((date, block_id.clone()));
@@ -467,6 +547,19 @@ fn DayColumn(props: DayColumnProps) -> Element {
                                     "{a}"
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            // Live snapped ghost of the block being dragged.
+            if let Some(bd) = active_block.as_ref() {
+                {
+                    let top = minutes_to_px(bd.cur_start_min);
+                    let h = minutes_to_px(bd.cur_end_min - bd.cur_start_min).max(2);
+                    rsx! {
+                        div {
+                            class: "absolute left-0.5 right-0.5 z-20 rounded-md border-2 border-primary/70 bg-primary/15 pointer-events-none",
+                            style: "top: {top}px; height: {h}px;",
                         }
                     }
                 }

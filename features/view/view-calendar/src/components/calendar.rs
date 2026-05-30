@@ -39,6 +39,10 @@ pub struct CalendarProps {
     /// dropped onto a plan block (`payload` = `"id|title"`).
     #[props(default)]
     pub on_block_drop: Option<EventHandler<(NaiveDate, String, String)>>,
+    /// Fired with `(date, block_id, start_min, end_min)` when a plan
+    /// block is dragged to a new time on the grid.
+    #[props(default)]
+    pub on_block_edit: Option<EventHandler<(NaiveDate, String, u16, u16)>>,
     /// Fired with the visible `(first_date, last_date)` whenever the
     /// view range changes, so the consumer can load that range's plans.
     #[props(default)]
@@ -58,6 +62,9 @@ pub fn Calendar(props: CalendarProps) -> Element {
     use_context_provider(|| DragContext {
         state: Signal::new(None),
         ghost: Signal::new(None),
+    });
+    use_context_provider(|| super::drag::BlockDragContext {
+        drag: Signal::new(None),
     });
     use_hook(super::drag::install_drag_image_suppressor);
 
@@ -131,8 +138,24 @@ pub fn Calendar(props: CalendarProps) -> Element {
     // commits a single `Reschedule`. Avoids the dead-zone bug where
     // pointerup outside the column never fired.
     let drag_ctx = super::drag::use_drag_context();
+    let mut block_ctx = super::drag::use_block_drag_context();
+    let on_block_edit = props.on_block_edit;
     let on_event_up = on_event;
     let on_pointer_up = move |_: Event<PointerData>| {
+        // Plan-block drag commit takes priority — it's a separate
+        // gesture from event drags.
+        let block_snap = block_ctx.drag.peek().clone();
+        if let Some(bd) = block_snap {
+            block_ctx.drag.set(None);
+            if bd.committed {
+                if let Some(cb) = on_block_edit {
+                    let s = bd.cur_start_min.clamp(0, 1440) as u16;
+                    let e = bd.cur_end_min.clamp(0, 1440) as u16;
+                    cb.call((bd.date, bd.block_id, s, e));
+                }
+                return;
+            }
+        }
         let drag_snap = drag_ctx.state.peek().clone();
         let Some(ds) = drag_snap else { return };
         // Click without movement — leave the event alone so the
@@ -203,6 +226,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
                             on_block_drop: props.on_block_drop,
+                            on_block_edit: props.on_block_edit,
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
@@ -215,6 +239,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                             template_blocks: props.template_blocks.clone(),
                             on_block_click: props.on_block_click,
                             on_block_drop: props.on_block_drop,
+                            on_block_edit: props.on_block_edit,
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
