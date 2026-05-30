@@ -35,4 +35,4 @@ pub mod types;
 
 pub use components::{Calendar, CalendarProps};
 pub use store::{CalendarMutation, CalendarState, apply};
-pub use types::{CalendarEvent, ColorTag, EventId, ViewMode};
+pub use types::{CalendarEvent, ColorTag, EventId, TemplateBlock, ViewMode};

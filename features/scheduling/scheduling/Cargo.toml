@@ -12,7 +12,14 @@ repository.workspace = true
 # use scheduling-proto + scheduling-ui directly.
 
 [dependencies]
-scheduling-proto = { workspace = true, default-features = false }
+# `vox` pulls in the architect-emitted dispatcher so the server can
+# mount `VaultScheduler` as a `DayTemplates` vox service (mirrors how
+# `timer` enables `timer-proto`'s vox feature).
+scheduling-proto = { workspace = true, features = ["vox"] }
+# `DayTemplates` is a *sync* rpc trait, so its backend must provide a
+# `HasDispatcher` impl. `dispatch-tokio` gives the `spawn_blocking`
+# dispatcher the server uses (same as `task` / `project` backends).
+architect = { workspace = true, features = ["dispatch-tokio"] }
 store-proto = { workspace = true, default-features = false }
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 serde = { workspace = true, features = ["derive"] }

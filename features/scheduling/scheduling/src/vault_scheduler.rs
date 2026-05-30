@@ -7,7 +7,10 @@
 //! the same way.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use architect::HasDispatcher;
+use architect::dispatch::TokioBlockingDispatcher;
 
 use thiserror::Error;
 
@@ -47,14 +50,19 @@ pub enum VaultSchedulerError {
 /// pair of trait-object stores for app state. Methods serialize
 /// against a coarse `Mutex` so concurrent UI callers don't race
 /// on a single file write.
+///
+/// `Clone` is cheap — every field is shared behind an `Arc` — so the
+/// server can hand a clone to each vox service descriptor it mounts.
+#[derive(Clone)]
 pub struct VaultScheduler {
     root: PathBuf,
     /// `Mutex` guards writes; reads grab the lock just to make
     /// sure we never see a torn write in-flight. Coarse but
-    /// fine for the desktop use case.
-    write_lock: Mutex<()>,
-    kv: Box<dyn KvStore + Send + Sync>,
-    log: Box<dyn LogStore + Send + Sync>,
+    /// fine for the desktop use case. `Arc`'d so clones share one
+    /// lock (and thus one serialization point).
+    write_lock: Arc<Mutex<()>>,
+    kv: Arc<dyn KvStore + Send + Sync>,
+    log: Arc<dyn LogStore + Send + Sync>,
 }
 
 impl VaultScheduler {
@@ -74,9 +82,9 @@ impl VaultScheduler {
         }
         Ok(Self {
             root,
-            write_lock: Mutex::new(()),
-            kv,
-            log,
+            write_lock: Arc::new(Mutex::new(())),
+            kv: Arc::from(kv),
+            log: Arc::from(log),
         })
     }
 
@@ -154,6 +162,18 @@ impl VaultScheduler {
             std::fs::remove_file(&abs).map_err(io)?;
         }
         Ok(())
+    }
+}
+
+// The vault scheduler's rpc traits are *sync* (`fn list_day_templates`
+// etc.), so a mounted backend must name a dispatcher that marshals
+// those blocking calls off the async transport thread. `spawn_blocking`
+// is the right choice on the tokio server — same as the task/project
+// vault backends.
+impl HasDispatcher for VaultScheduler {
+    type Dispatcher = TokioBlockingDispatcher;
+    fn dispatcher(&self) -> Self::Dispatcher {
+        TokioBlockingDispatcher
     }
 }
 

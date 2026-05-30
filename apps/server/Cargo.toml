@@ -71,6 +71,12 @@ intake = { workspace = true, features = ["vox"] }
 org-proto = { workspace = true }
 timer-proto = { workspace = true, features = ["server", "vox"] }
 timer = { workspace = true }
+# Scheduling: day-template service mounted over vox so the app can
+# overlay the daily plan on the calendar. Read-mostly; bookings/slots
+# use in-memory stores until they're surfaced.
+scheduling-proto = { workspace = true, features = ["vox"] }
+scheduling = { workspace = true }
+store-proto = { workspace = true }
 # Finance: SQLite + migrations only at this slice; service
 # traits (Invoicing / Ledger) get mounted in a follow-up
 # once their SeaORM-backed impls land.

@@ -114,6 +114,10 @@ pub struct OrgAppState {
     pub agent_tasks: agent_tasks::Store,
     pub agent_dispatch_vault_root: PathBuf,
     pub timer: timer::Store,
+    /// Scheduling backend — day templates / availability under
+    /// `vault/Projects/Scheduling/`. Mounted for `DayTemplates` so
+    /// the app can overlay the daily plan on the calendar.
+    pub scheduling: scheduling::VaultScheduler,
     pub finance_conn: sea_orm::DatabaseConnection,
 }
 
@@ -452,6 +456,17 @@ pub(crate) async fn build_org_state(
         });
         let timer = timer::Store::new(timer_conn, timer_defaults);
 
+        // Scheduling backend rooted at the same vault. Day templates
+        // live under `Projects/Scheduling/templates/`; the kv/log
+        // stores back bookings + slot caches we don't surface yet, so
+        // an in-memory pair suffices for the mounted `DayTemplates`.
+        let scheduling = scheduling::VaultScheduler::new(
+            vault_root.clone(),
+            Box::new(store_proto::mem::MemStore::new()),
+            Box::new(store_proto::mem::MemStore::new()),
+        )
+        .map_err(|e| eyre::eyre!("scheduling backend: {e}"))?;
+
         // Finance store. SQLite at
         // `<data_root>/orgs/<slug>/finance.sqlite`
         // (override via `TASK_SERVER_FINANCE_URL`). Services
@@ -552,6 +567,7 @@ pub(crate) async fn build_org_state(
             agent_tasks,
             agent_dispatch_vault_root: vault_root,
             timer,
+            scheduling,
             finance_conn,
         })
     }
@@ -815,6 +831,11 @@ pub fn org_layer_router(org: &OrgAppState) -> architect::LayerRouter {
         .with(
             timer_proto::service::timer_service_rpc_service_descriptor(),
             timer_proto::service::serve(org.timer.clone()),
+        )
+        // Scheduling — day templates (drives the calendar overlay).
+        .with(
+            scheduling_proto::service::day_templates::day_templates_rpc_service_descriptor(),
+            scheduling_proto::service::day_templates::serve(org.scheduling.clone()),
         );
 
     // Wiki feature — 11 per-capability traits, one descriptor each.

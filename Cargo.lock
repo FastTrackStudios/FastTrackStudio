@@ -13308,6 +13308,7 @@ dependencies = [
 name = "scheduling"
 version = "0.1.0"
 dependencies = [
+ "architect 0.1.0",
  "chrono",
  "indexmap 2.14.0",
  "scheduling-proto",
@@ -15058,12 +15059,15 @@ dependencies = [
  "project",
  "rand 0.8.6",
  "reqwest 0.12.28",
+ "scheduling",
+ "scheduling-proto",
  "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
+ "store-proto",
  "task",
  "tempfile",
  "thiserror 2.0.18",

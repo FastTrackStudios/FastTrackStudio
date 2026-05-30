@@ -60,6 +60,18 @@ pub async fn fetch_tasks_tagged(slugs: &[String]) -> Result<Vec<(String, DbTask)
     collect(futures_util::future::join_all(futs).await)
 }
 
+/// Fetch one org's day-plan templates (drives the calendar schedule
+/// overlay), in the order the backend lists them.
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_day_templates(slug: &str) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
+    let client =
+        crate::vox_clients::establish_for::<scheduling_proto::DayTemplatesClient>(slug).await?;
+    client
+        .list_day_templates()
+        .await
+        .map_err(|e| format!("{slug}: day templates: {e:?}"))
+}
+
 /// Fetch one org's vault markdown as `WikiFile`s for the knowledge
 /// graph: pull the manifest, then read every `.md` file concurrently
 /// over the one socket. Pure graph-building happens caller-side.
@@ -160,6 +172,13 @@ pub async fn fetch_tasks(_slugs: &[String]) -> Result<Vec<task::TaskInfo>, Strin
 pub async fn fetch_tasks_tagged(
     _slugs: &[String],
 ) -> Result<Vec<(String, task::TaskInfo)>, String> {
+    Err("native client not wired yet".to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn fetch_day_templates(
+    _slug: &str,
+) -> Result<Vec<scheduling_proto::DayTemplate>, String> {
     Err("native client not wired yet".to_owned())
 }
 

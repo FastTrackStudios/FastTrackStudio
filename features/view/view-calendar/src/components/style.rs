@@ -51,3 +51,19 @@ pub fn chip_palette(color: ColorTag) -> ChipPalette {
         },
     }
 }
+
+/// Faint dashed-outline class set for a day-plan template "ghost"
+/// block — a dim placement guide that sits behind real events. Same
+/// literal-class requirement as [`chip_palette`]: every variant is
+/// spelled out so Tailwind keeps the rules.
+#[must_use]
+pub fn template_palette(color: ColorTag) -> &'static str {
+    match color {
+        ColorTag::Neutral => "border-slate-400/40 bg-slate-400/[0.07] text-slate-300/80",
+        ColorTag::Primary => "border-violet-400/40 bg-violet-400/[0.07] text-violet-200/80",
+        ColorTag::Success => "border-emerald-400/40 bg-emerald-400/[0.07] text-emerald-200/80",
+        ColorTag::Warning => "border-amber-400/40 bg-amber-400/[0.08] text-amber-100/80",
+        ColorTag::Danger => "border-rose-400/40 bg-rose-400/[0.07] text-rose-200/80",
+        ColorTag::Info => "border-sky-400/40 bg-sky-400/[0.07] text-sky-200/80",
+    }
+}

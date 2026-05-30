@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use dioxus::prelude::*;
 
 use crate::store::CalendarMutation;
-use crate::types::{CalendarEvent, EventId};
+use crate::types::{CalendarEvent, EventId, TemplateBlock};
 
 use super::time_grid::TimeGridView;
 
@@ -12,6 +12,8 @@ use super::time_grid::TimeGridView;
 pub struct DayViewProps {
     pub anchor: NaiveDate,
     pub events: Vec<CalendarEvent>,
+    #[props(default)]
+    pub template_blocks: Vec<TemplateBlock>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -24,6 +26,7 @@ pub fn DayView(props: DayViewProps) -> Element {
         TimeGridView {
             days: vec![props.anchor],
             events: props.events,
+            template_blocks: props.template_blocks,
             readonly: props.readonly,
             on_event: props.on_event,
             on_open_editor: props.on_open_editor,

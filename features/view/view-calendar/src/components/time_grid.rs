@@ -14,13 +14,13 @@ use dioxus::prelude::*;
 use crate::layout::{TimeBlockPlacement, day_overlap_layout};
 use crate::store::CalendarMutation;
 use crate::time::{day_start_utc, hour_labels};
-use crate::types::{CalendarEvent, EventId};
+use crate::types::{CalendarEvent, EventId, TemplateBlock};
 
 use super::all_day_strip::AllDayStrip;
 use super::drag::{DragKind, Ghost, use_drag_context};
 use super::event_chip::EventChip;
 use super::now_line::NowLine;
-use super::style::chip_palette;
+use super::style::{chip_palette, template_palette};
 
 const PX_PER_HOUR: i64 = 48;
 const COL_HEIGHT_PX: i64 = PX_PER_HOUR * 24;
@@ -30,6 +30,9 @@ const SNAP_MINUTES: i64 = 15;
 pub struct TimeGridViewProps {
     pub days: Vec<NaiveDate>,
     pub events: Vec<CalendarEvent>,
+    /// Faded day-plan template outlines drawn behind real events.
+    #[props(default)]
+    pub template_blocks: Vec<TemplateBlock>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -115,6 +118,7 @@ pub fn TimeGridView(props: TimeGridViewProps) -> Element {
                             key: "{date}",
                             date: *date,
                             placements: day_overlap_layout(*date, &timed_events),
+                            template_blocks: props.template_blocks.clone(),
                             is_last: idx == props.days.len() - 1,
                             readonly: props.readonly,
                             on_event: props.on_event,
@@ -160,6 +164,8 @@ fn HourAxis() -> Element {
 struct DayColumnProps {
     date: NaiveDate,
     placements: Vec<TimeBlockPlacement>,
+    #[props(default)]
+    template_blocks: Vec<TemplateBlock>,
     is_last: bool,
     readonly: bool,
     on_event: EventHandler<CalendarMutation>,
@@ -207,9 +213,36 @@ fn DayColumn(props: DayColumnProps) -> Element {
     };
     let mut sweep: Signal<Option<Sweep>> = use_signal(|| None);
 
+    // Day-plan template outlines that apply to this column's weekday,
+    // pre-resolved to pixel geometry. Faded, non-interactive guides.
+    let template_placements: Vec<(usize, i64, i64, &'static str, String)> = props
+        .template_blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, tb)| tb.applies_on(date) && tb.end_min > tb.start_min)
+        .map(|(i, tb)| {
+            let top = i64::from(tb.start_min) * PX_PER_HOUR / 60;
+            let h = i64::from(tb.end_min - tb.start_min) * PX_PER_HOUR / 60;
+            (i, top, h, template_palette(tb.color), tb.label.clone())
+        })
+        .collect();
+
     rsx! {
         div {
             class: "relative border-border/40 {border_r} {column_bg}",
+            // Day-plan template ghost outlines — behind the input
+            // surface and real events, never interactive.
+            for (i, top, h, pal, label) in template_placements.iter() {
+                div {
+                    key: "tpl-{i}",
+                    class: "absolute left-0.5 right-0.5 rounded-md border border-dashed pointer-events-none overflow-hidden {pal}",
+                    style: "top: {top}px; height: {h}px;",
+                    span {
+                        class: "block px-1.5 py-0.5 text-[10px] font-medium leading-tight truncate",
+                        "{label}"
+                    }
+                }
+            }
             // Hour grid lines (solid).
             for h in 1..24u32 {
                 div {

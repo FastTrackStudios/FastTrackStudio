@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use crate::recurrence::expand_all;
 use crate::store::CalendarMutation;
 use crate::time::{day_start_utc, month_grid, week_days, week_start};
-use crate::types::{CalendarEvent, EventId, ViewMode};
+use crate::types::{CalendarEvent, EventId, TemplateBlock, ViewMode};
 
 use super::day_view::DayView;
 use super::drag::DragContext;
@@ -26,6 +26,11 @@ pub struct CalendarProps {
     /// Defaults to `ViewMode::Week`.
     #[props(default)]
     pub initial_view: Option<ViewMode>,
+    /// Faded day-plan template outlines drawn behind real events in
+    /// the week/day time grid (a recurring placement guide). Empty =
+    /// no overlay. Not shown in month view.
+    #[props(default)]
+    pub template_blocks: Vec<TemplateBlock>,
     #[props(default = false)]
     pub readonly: bool,
     pub on_event: EventHandler<CalendarMutation>,
@@ -173,6 +178,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                         WeekView {
                             anchor: *anchor.read(),
                             events: events_for_view,
+                            template_blocks: props.template_blocks.clone(),
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),
@@ -182,6 +188,7 @@ pub fn Calendar(props: CalendarProps) -> Element {
                         DayView {
                             anchor: *anchor.read(),
                             events: events_for_view,
+                            template_blocks: props.template_blocks.clone(),
                             readonly: props.readonly,
                             on_event,
                             on_open_editor: move |id| editing.set(Some(id)),

@@ -59,6 +59,33 @@ impl ColorTag {
     }
 }
 
+/// A faded, read-only background block from a day-plan template — a
+/// recurring daily-routine slot (e.g. "Block 1: Work / Event / Free
+/// Time" 9:30–12:30) rendered behind real events as a placement
+/// guide. The user drops actual [`CalendarEvent`]s onto these
+/// outlines; the blocks themselves never move or fire mutations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateBlock {
+    pub label: String,
+    /// Minutes since local midnight, `[0, 1440]`. `end_min` is
+    /// exclusive. A block crossing midnight should be split by the
+    /// producer into two same-day blocks.
+    pub start_min: u16,
+    pub end_min: u16,
+    pub color: ColorTag,
+    /// Weekdays this block recurs on. Empty = every day.
+    pub weekdays: Vec<chrono::Weekday>,
+}
+
+impl TemplateBlock {
+    /// Does this block apply on `date`'s weekday?
+    #[must_use]
+    pub fn applies_on(&self, date: chrono::NaiveDate) -> bool {
+        use chrono::Datelike;
+        self.weekdays.is_empty() || self.weekdays.contains(&date.weekday())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CalendarEvent {
     pub id: EventId,
