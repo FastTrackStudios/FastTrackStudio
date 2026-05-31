@@ -23,8 +23,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use editor_state::{DecoratedRange, Decoration, EditorState, HoverTooltip};
 use keyflow_text::highlighting::{Highlighter, Renderer, Theme};
 use keyflow_text::ide::{self, Severity};
-use keyflow_text::key::Key;
-use keyflow_text::primitives::RootNotation;
 
 /// Re-export so callers can pick a palette for [`highlight_css`] without taking
 /// a direct `keyflow-text` dependency:
@@ -91,46 +89,25 @@ pub fn keyflow_decorations(state: &EditorState) -> Vec<DecoratedRange> {
     //
     // Gated by `SHOW_OVERLAYS` so the app can toggle it (the `fn` source can't
     // carry the flag itself).
+    // `chord_doc_spans` gives DOC-ABSOLUTE spans (the parser's per-chord
+    // `source_span` is line-relative and would mis-place the badges).
     if overlays_enabled() {
-        for section in &analysis.chart.sections {
-            for measure in section.measures() {
-                for ci in &measure.chords {
-                    let Some(span) = ci.source_span else { continue };
-                    let Some(key) = analysis.chart.key_at_position(&ci.position) else {
-                        continue;
-                    };
-                    let at = span.end().min(len);
-                    if let Some(label) = resolved_chord_label(ci, key) {
-                        out.push(Decoration::widget(
-                            at,
-                            format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
-                        ));
-                    }
-                }
+        for (span, ci) in ide::chord_doc_spans(&text, &analysis.chart) {
+            let Some(key) = analysis.chart.key_at_position(&ci.position) else {
+                continue;
+            };
+            if let Some(label) = ci.resolved_symbol(key) {
+                let at = span.end().min(len);
+                out.push(Decoration::widget(
+                    at,
+                    format!("<span class=\"kf-inlay\">{}</span>", escape_html(&label)),
+                ));
             }
         }
     }
 
     out.sort_by_key(|d| d.from);
     out
-}
-
-/// Resolve a chord instance written in a key-relative system to its absolute
-/// letter-name display. Returns `None` for chords already written as note
-/// names (nothing to add) or that don't resolve against `key`.
-///
-/// Reuses keyflow's own resolution: [`RootNotation::resolve`] gives the
-/// absolute root note; swapping the chord's root for that note and rendering
-/// via `Chord`'s `Display` keeps the original quality/extensions/bass intact
-/// (e.g. `5maj7` → `Gmaj7`).
-fn resolved_chord_label(ci: &keyflow_text::chart::ChordInstance, key: &Key) -> Option<String> {
-    if !ci.root.is_key_relative() {
-        return None;
-    }
-    let resolved_root = ci.parsed.root.resolve(Some(key))?;
-    let mut absolute = ci.parsed.clone();
-    absolute.root = RootNotation::from_note_name(resolved_root);
-    Some(absolute.to_string())
 }
 
 /// Process-global toggle for the resolved-chord overlays. Default on.
@@ -469,6 +446,19 @@ mod tests {
         assert!(
             widgets.iter().any(|h| h.contains("kf-inlay") && h.contains('G')),
             "expected a 'G' inlay badge for degree 5 in C; widgets = {widgets:?}"
+        );
+        // Doc-absolute placement: the badge sits right after the source `5`
+        // (offset 15 in this chart), NOT at a line-relative offset near 0.
+        let five_at = "4/4 120bpm #C\n\n5 | 1\n".find('5').unwrap();
+        assert!(
+            on.iter().any(|d| {
+                matches!(d.kind, editor_state::DecorationKind::Widget { .. }) && d.from >= five_at
+            }),
+            "overlay widgets must use doc-absolute offsets (≥{five_at}); got {:?}",
+            on.iter()
+                .filter(|d| matches!(d.kind, editor_state::DecorationKind::Widget { .. }))
+                .map(|d| d.from)
+                .collect::<Vec<_>>()
         );
 
         set_overlays_enabled(false);
