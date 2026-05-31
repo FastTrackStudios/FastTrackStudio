@@ -22,12 +22,10 @@ actions-reaper = { path = "crates/actions-reaper" }
 input = { path = "crates/input" }
 input-dioxus = { path = "crates/input-dioxus" }
 
-# Roam RPC framework. Aligned to the bearcove upstream (v0.8.2 line) that
-# the rest of the FTS stack (daw, architect, Task) uses, so a single vox
-# compiles across the graph instead of an older 0.5.0 fork colliding with
-# 0.8.2. Downstream workspaces that vendor a local vox checkout redirect
-# this `github.com/bearcove/vox` source via `[patch]`.
-vox = { git = "https://github.com/bearcove/vox", rev = "27eef573efd388bddaad0befdd59143a7e98b830", default-features = false, features = ["runtime"] }
+# Roam RPC framework. Pinned to the FastTrackStudios vox fork @ f31f1040
+# (vox 0.8.2, latest) — a single vox across the graph. `runtime` (no default
+# tokio-net transport) keeps the wasm build mio-free.
+vox = { git = "https://git.starcommand.live/FastTrackStudios/vox", rev = "f31f10400c245740a072fa61bb96ef3a3fc2bd93", default-features = false, features = ["runtime"] }
 
 # Facet reflection — align the whole stack to the current 0.46 line.
 facet = { version = "0.46" }
